@@ -465,8 +465,10 @@ pub(crate) fn placed_of(
     piece
         .layers()
         .into_iter()
-        .map(|(l, _)| {
-            let placed: Vec<Placed> = l.placed().iter().map(|p| p.after(k)).collect();
+        .zip(piece.smooths())
+        .map(|((l, _), smooth)| {
+            let mixed = smooth.and_then(vidcut_core::render::Smooth::placed);
+            let placed: Vec<Placed> = l.placed().iter().map(|p| p.after(k)).chain(mixed).collect();
             previewed(&placed, preview)
         })
         .collect()

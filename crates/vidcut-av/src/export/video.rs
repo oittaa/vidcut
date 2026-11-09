@@ -2791,6 +2791,11 @@ impl VideoFrames {
         last.alpha_use = AlphaUse::Shown;
         last.matte = None;
         last.lut = None;
+        if smooth.mode.is_some()
+            && let [.., outgoing, _] = made
+        {
+            outgoing.weight = Some(0);
+        }
         Ok(())
     }
 

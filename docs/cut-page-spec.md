@@ -1124,6 +1124,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It morphs two pictures that each cover the frame alone, with the usual Inspector values. It plays as a Cross Dissolve in these cases:
     - A side is a gap, a clip in a compound clip, or a clip over other tracks that does not fill the frame.
     - A side has other Inspector values, or plays backward.
+  - A composite mode does not stop the morph (measured in Resolve Studio 21.2.0):
+    - The composite mode of the outgoing clip mixes the morph with the tracks below.
+    - The composite mode of the incoming clip has no effect during the transition.
+    - A Multiply clip with no track below is black during the transition.
   - Resolve's measured values are in [gotchas](gotchas.md#resolves-otio-files).
   - A request makes one: `{"type": "smooth_cut", "mode": "faster", "process": "frame_blend"}`.
   - An OTIO file holds it as Resolve's Smooth Cut, with its values.
