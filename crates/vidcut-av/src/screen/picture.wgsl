@@ -732,14 +732,6 @@ fn fs_mode(in: Out) -> @location(0) vec4<f32> {
 }
 
 @fragment
-fn fs_paired(in: Out) -> @location(0) vec4<f32> {
-    let px = vec2<i32>(in.position.xy);
-    let top = textureLoad(letters, px, 0);
-    let under = textureLoad(below, px, 0);
-    return top + under * (1.0 - top.a);
-}
-
-@fragment
 fn fs(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     if p.placed.x > 0.5 {
@@ -861,7 +853,6 @@ struct Motion {
     color: vec4<f32>,
     flags: vec4<u32>,
     gaps: vec4<u32>,
-    mode: vec4<u32>,
 };
 
 @group(0) @binding(11) var<uniform> motion: Motion;
@@ -967,17 +958,6 @@ fn tap(q: vec2<f32>) -> Tap {
 @fragment
 fn fs_motion(in: Out) -> @location(0) vec4<f32> {
     return moved(floor(in.position.xy));
-}
-
-@fragment
-fn fs_motion_mode(in: Out) -> @location(0) vec4<f32> {
-    let top = moved(floor(in.position.xy));
-    let under = textureLoad(below, vec2<i32>(in.position.xy), 0);
-    if top.a <= 0.0 {
-        return under;
-    }
-    let m = mode_mixed(motion.mode.x, top.rgb / top.a, under);
-    return vec4<f32>(m * top.a + under.rgb * (1.0 - top.a), top.a + under.a * (1.0 - top.a));
 }
 
 fn moved(q: vec2<f32>) -> vec4<f32> {

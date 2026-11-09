@@ -205,7 +205,6 @@ pub struct Over {
     pub picture: Arc<Picture>,
     pub weight: u32,
     pub wipe: Option<vidcut_core::render::Wipe>,
-    pub moving: Option<vidcut_core::render::Moving>,
 }
 
 impl Over {
@@ -422,7 +421,6 @@ impl Picture {
                     picture: Arc::new(o.picture.copied_down()?),
                     weight: o.weight,
                     wipe: o.wipe,
-                    moving: o.moving,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -554,7 +552,6 @@ pub struct Shown {
     pub exact: bool,
     pub titles: Vec<TitleOver>,
     pub placed: Vec<Vec<vidcut_core::render::Placed>>,
-    pub crosses: Vec<bool>,
     pub scales: Vec<Option<vidcut_core::model::Sharpness>>,
     pub colors: Option<vidcut_core::model::Hdr>,
     pub output_lut: Option<crate::screen::Lut>,

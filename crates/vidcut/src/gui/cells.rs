@@ -215,7 +215,7 @@ impl Screens {
             &self.gpu,
             Some(picture),
             &[],
-            (&[], &[], &[], None),
+            (&[], &[], None),
             size[0],
             size[1],
         );

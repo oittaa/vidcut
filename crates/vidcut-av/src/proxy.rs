@@ -1036,7 +1036,7 @@ fn encode_into(
             let out = drawer.frame(
                 &picture,
                 &[],
-                (&[], &[], &[], target),
+                (&[], &[], target),
                 size,
                 (pixel, (target, target)),
             )?;

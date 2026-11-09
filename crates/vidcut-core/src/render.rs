@@ -421,24 +421,13 @@ impl ShownTitle {
     }
 }
 
-/// A picture over the others of a [`VideoPiece::Mix`]: a dissolve's, at
-/// the level its ramp gives each frame, a side of a Push or a Slide, or one
-/// placed over the frame.
+/// A picture over the others of a [`VideoPiece::Mix`]: at the level its
+/// ramp gives each frame, or placed over the frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Over {
     pub piece: VideoPiece,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ramp: Option<Ramp>,
-    /// With the picture before it, the two sides of one dissolve with a
-    /// placed picture: they mix into each other, then go over what is
-    /// below them together.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub cross: bool,
-    /// A side of a Push or a Slide. The outgoing side and the incoming
-    /// side after it move over each other, then go over what is below them
-    /// together.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub motion: Option<Move>,
     /// The incoming side of a Smooth Cut. Each frame is made from the
     /// picture before it and this one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -751,10 +740,6 @@ pub struct Move {
     /// The progress of the move, from 0 to 1, at frames from the start of
     /// the transition.
     pub keys: Vec<Keyframe>,
-    /// This side is a gap: it shows nothing, and the tracks below show
-    /// through it.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub gap: bool,
 }
 
 fn zero_f64(n: &f64) -> bool {
@@ -783,7 +768,6 @@ impl Move {
             color: motion.color,
             blur: motion.motion_blur.clamp(0.0, 1.0),
             keys,
-            gap: false,
         })
     }
 
@@ -798,7 +782,6 @@ impl Move {
             feather: self.feather,
             color: self.color,
             blur: self.blur,
-            gap: self.gap,
         }
     }
 }
@@ -813,10 +796,7 @@ pub struct Moving {
     pub feather: bool,
     pub color: [u8; 3],
     pub blur: f64,
-    pub gap: bool,
 }
-
-pub type MovingKey = (Way, [u64; 4], [bool; 2], [u8; 3]);
 
 /// Where the two pictures of a [`Moving`] are, in pixels of the frame.
 /// The upper picture carries the band on the edges that face the lower
@@ -858,11 +838,6 @@ fn slide_sign(preset: SlidePreset) -> [f64; 2] {
 }
 
 impl Moving {
-    pub fn key(&self) -> MovingKey {
-        let bits = [self.progress, self.step, self.border, self.blur].map(f64::to_bits);
-        (self.way, bits, [self.feather, self.gap], self.color)
-    }
-
     pub fn shift(&self, (w, h): (u32, u32)) -> Shift {
         let size = [f64::from(w), f64::from(h)];
         let b = self.border * size[0].min(size[1]);
@@ -1170,18 +1145,6 @@ impl VideoPiece {
             .collect()
     }
 
-    pub fn motions(&self) -> Vec<Option<&Move>> {
-        match self {
-            Self::Mix { under, over } => under
-                .motions()
-                .into_iter()
-                .chain(over.iter().map(|o| o.motion.as_ref()))
-                .collect(),
-            Self::Titled { under, .. } => under.motions(),
-            _ => vec![None],
-        }
-    }
-
     pub fn smooths(&self) -> Vec<Option<&Smooth>> {
         match self {
             Self::Mix { under, over } => under
@@ -1219,18 +1182,6 @@ impl VideoPiece {
             })
             .chain(self.smooths().into_iter().flatten().map(|s| s.retime))
             .collect()
-    }
-
-    pub fn crosses(&self) -> Vec<bool> {
-        match self {
-            Self::Mix { under, over } => under
-                .crosses()
-                .into_iter()
-                .chain(over.iter().map(|o| o.cross))
-                .collect(),
-            Self::Titled { under, .. } => under.crosses(),
-            _ => vec![false],
-        }
     }
 
     pub fn titles(&self) -> Vec<(usize, &ShownTitle)> {
@@ -1349,8 +1300,6 @@ impl VideoPiece {
                     .map(|o| Over {
                         piece: o.piece.part(k, frames),
                         ramp: o.ramp.map(|r| r.after(k)),
-                        cross: o.cross,
-                        motion: o.motion.clone(),
                         smooth: o.smooth.clone(),
                     })
                     .collect(),
@@ -1443,8 +1392,6 @@ impl VideoPiece {
                     && over.len() == o2.len()
                     && over.iter().zip(o2).all(|(a, b)| {
                         a.ramp.map(|r| r.after(k)) == b.ramp
-                            && a.cross == b.cross
-                            && a.motion == b.motion
                             && a.smooth == b.smooth
                             && a.piece.goes_on_as(&b.piece)
                     })
@@ -1980,14 +1927,17 @@ impl Around {
             held: self.held.is_some(),
             moved: e.crossing.as_ref().is_some_and(|c| c.moving.is_some()),
         });
-        let crossing = edge.and_then(|e| e.crossing.clone()).map(|c| Placed {
-            ramp: own.ramp.filter(|r| r.moved).map(|r| Ramp {
-                falling: false,
-                ..r
-            }),
-            ..c
+        let crossing = edge.and_then(|e| {
+            let c = e.crossing.as_ref()?.after(x - e.frames.0);
+            Some(Placed {
+                ramp: own.ramp.filter(|r| r.moved).map(|r| Ramp {
+                    falling: false,
+                    ..r
+                }),
+                ..c
+            })
         });
-        if crossing.as_ref().is_some_and(|c| c.moving.is_none()) {
+        if crossing.is_some() {
             own.picture.composite_mode = None;
         }
         std::iter::once(own).chain(crossing).collect()
@@ -2068,15 +2018,7 @@ fn without_mode(c: &Clip) -> Option<Clip> {
     })
 }
 
-fn sides_moded(d: &transitions::Playing) -> bool {
-    [d.before, d.after]
-        .into_iter()
-        .flatten()
-        .any(|c| mode_of(c) != CompositeMode::Normal)
-}
-
 fn crossing(d: &transitions::Playing) -> Option<Placed> {
-    let compound = |c: Option<&Clip>| c.is_some_and(|c| c.compound.is_some());
     let moving = Move::of(d);
     let picture = Picture {
         composite_mode: d
@@ -2085,14 +2027,8 @@ fn crossing(d: &transitions::Playing) -> Option<Placed> {
             .filter(|m| *m != CompositeMode::Normal),
         ..Picture::default()
     };
-    let joins = match moving {
-        Some(_) => compound(d.before) || compound(d.after),
-        None => {
-            let (from, to) = (d.before?, d.after?);
-            (from.compound.is_some() || to.compound.is_some() || sides_moded(d))
-                && transitions::dip_of(d.transition).is_none()
-        }
-    };
+    let joins = moving.is_some()
+        || (d.before.is_some() && d.after.is_some() && transitions::dip_of(d.transition).is_none());
     joins.then(|| Placed {
         clip: d.transition.id.clone(),
         picture,
@@ -2589,10 +2525,7 @@ fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, crossed: &[Placed], x: i
         return Vec::new();
     }
     let run = run_of(c, nest.and_then(|n| n.run)).after(x);
-    let mut own = Placed::at(c, own.unwrap_or_default(), run, x);
-    if crossed.iter().any(|p| p.crossing && p.moving.is_none()) {
-        own.picture.composite_mode = None;
-    }
+    let own = Placed::at(c, own.unwrap_or_default(), run, x);
     std::iter::once(own)
         .chain(crossed.iter().cloned())
         .chain(outer)
@@ -2876,8 +2809,6 @@ fn composed_from(own: &crate::model::Speed, u0: f64, v: f64) -> Vec<Section> {
 enum Layer {
     Picture(VideoPiece, Option<Ramp>),
     Placed(VideoPiece, Option<Ramp>),
-    Crossing(VideoPiece, Option<Ramp>),
-    Moved(VideoPiece, Ramp, Move, bool),
     Smoothed(VideoPiece, Ramp, Smooth),
     Title(Box<ShownTitle>),
 }
@@ -2885,7 +2816,7 @@ enum Layer {
 impl Layer {
     fn inside(&self, outer: &[Placed]) -> bool {
         match self {
-            Layer::Placed(piece, _) | Layer::Crossing(piece, _) | Layer::Moved(piece, ..) => {
+            Layer::Placed(piece, _) => {
                 let placed = piece.placed();
                 placed.len() > outer.len() && placed.ends_with(outer)
             }
@@ -3070,12 +3001,12 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     true => Layer::Picture(piece, ramp),
                 })
             };
-            let joined = |c: &Clip, ramp: Option<Ramp>, below: bool, crossed: &[Placed]| {
-                laid(c, nest_of(c), ramp, below, crossed)
-            };
-            let shown = |c: &Clip, ramp: Option<Ramp>, below: bool| joined(c, ramp, below, &[]);
+            let shown =
+                |c: &Clip, ramp: Option<Ramp>, below: bool| laid(c, nest_of(c), ramp, below, &[]);
             let moved_chain = |d: &transitions::Playing, falling: bool| -> Option<[Placed; 2]> {
-                let across = crossing(d).filter(|c| c.moving.is_some())?;
+                let across = crossing(d)
+                    .filter(|c| c.moving.is_some())?
+                    .after(x - d.frames.0);
                 let ramp = Ramp {
                     moved: true,
                     ..ramp_of(d, falling, None)
@@ -3097,6 +3028,17 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     },
                 ])
             };
+            let sided =
+                |d: &transitions::Playing, falling: bool, wipe| match moved_chain(d, falling) {
+                    Some(chain) => (None, chain.to_vec()),
+                    None => (
+                        Some(ramp_of(d, falling, wipe)),
+                        crossing(d)
+                            .map(|c| c.after(x - d.frames.0))
+                            .into_iter()
+                            .collect::<Vec<_>>(),
+                    ),
+                };
             let flat = |c: &Clip,
                         whole: &Clip,
                         (at, mode): (i64, SmoothMode),
@@ -3214,38 +3156,6 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         .chain(picture)
                         .collect();
                 }
-                Some(d) if moved_chain(d, true).is_some() => {
-                    let below = !stack.is_empty();
-                    for (side, falling) in [(d.before, true), (d.after, false)] {
-                        if let (Some(c), Some(chain)) =
-                            (side.filter(shows), moved_chain(d, falling))
-                        {
-                            stack.push(joined(c, None, below, &chain)?);
-                        }
-                    }
-                }
-                Some(d) if let Some(m) = Move::of(d) => {
-                    let ramp = |falling| ramp_of(d, falling, None);
-                    let below = !stack.is_empty();
-                    let side = |c: Option<&Clip>| -> Result<(VideoPiece, bool, bool)> {
-                        Ok(match c.filter(shows) {
-                            Some(c) => match shown(c, None, below)? {
-                                Layer::Picture(p, _) => (p, true, false),
-                                Layer::Placed(p, _) => (p, false, false),
-                                _ => unreachable!("a clip shows as a picture"),
-                            },
-                            None => (black(BLACK), false, true),
-                        })
-                    };
-                    let ((f, whole_f, gap_f), (g, whole_g, gap_g)) =
-                        (side(d.before)?, side(d.after)?);
-                    if whole_f && whole_g {
-                        stack.clear();
-                    }
-                    let moved = |gap| Move { gap, ..m.clone() };
-                    stack.push(Layer::Moved(f, ramp(true), moved(gap_f), false));
-                    stack.push(Layer::Moved(g, ramp(false), moved(gap_g), true));
-                }
                 Some(d) if let Some((f, g, smooth)) = smoothed(d, !stack.is_empty())? => {
                     let ramp = ramp_of(d, false, None);
                     flattened.extend(
@@ -3265,39 +3175,24 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     stack.extend([outgoing, Layer::Smoothed(g, ramp, smooth)]);
                 }
                 Some(d) => {
-                    let wipe = transitions::wipe_of(d.transition);
-                    let ramp = |falling| ramp_of(d, falling, wipe);
                     let below = !stack.is_empty();
-                    let crossed = crossing(d);
-                    match (d.before.filter(shows), d.after.filter(shows)) {
-                        (Some(f), Some(g)) if sides_moded(d) && crossed.is_some() => {
-                            stack.push(joined(f, Some(ramp(true)), below, crossed.as_slice())?);
-                            stack.push(joined(g, Some(ramp(false)), below, crossed.as_slice())?);
-                        }
-                        (Some(f), Some(g)) => {
-                            let (f, g) =
-                                (shown(f, None, below)?, shown(g, Some(ramp(false)), below)?);
-                            match (f, g) {
-                                (Layer::Picture(f, _), g @ Layer::Picture(..)) => {
-                                    stack = vec![Layer::Picture(f, None), g];
-                                }
-                                (
-                                    Layer::Picture(f, _) | Layer::Placed(f, _),
-                                    Layer::Picture(g, r) | Layer::Placed(g, r),
-                                ) => {
-                                    stack.push(Layer::Placed(f, Some(ramp(true))));
-                                    stack.push(Layer::Crossing(g, r));
-                                }
-                                _ => {}
-                            }
-                        }
-                        (Some(f), None) => {
-                            stack.push(joined(f, Some(ramp(true)), below, crossed.as_slice())?);
-                        }
-                        (None, Some(g)) => {
-                            stack.push(joined(g, Some(ramp(false)), below, crossed.as_slice())?);
-                        }
-                        (None, None) => {}
+                    let sides = [(d.before, true), (d.after, false)];
+                    if sides
+                        .iter()
+                        .all(|(c, _)| c.filter(shows).is_some_and(fills))
+                    {
+                        let outer = outer_at(d.before.and_then(nest_of), x);
+                        stack.retain(|l| !outer.is_empty() && !l.inside(&outer));
+                    }
+                    let wipe = transitions::wipe_of(d.transition);
+                    for (c, falling) in sides {
+                        let Some(c) = c.filter(shows) else {
+                            continue;
+                        };
+                        let (ramp, chain) = sided(d, falling, wipe);
+                        let bare = without_mode(c).filter(|_| !chain.is_empty());
+                        let drawn = bare.as_ref().unwrap_or(c);
+                        stack.push(laid(drawn, nest_of(c), ramp, below, &chain)?);
                     }
                 }
                 None => {
@@ -3337,12 +3232,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 .find(|d| d.frames.0 <= now && now < d.frames.1)
             {
                 Some(d) => {
-                    let ramp = |falling| ramp_of(d, falling, None);
                     for (c, falling) in [(d.before, true), (d.after, false)] {
-                        let (fade, crossed) = match moved_chain(d, falling) {
-                            Some(chain) => (None, chain.to_vec()),
-                            None => (Some(ramp(falling)), crossing(d).into_iter().collect()),
-                        };
+                        let (fade, crossed) = sided(d, falling, None);
                         if let Some(s) = c
                             .filter(|c| titled(t, c))
                             .and_then(|c| lettered(c, fade, crossed))
@@ -3370,29 +3261,11 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 Layer::Picture(shown, ramp) | Layer::Placed(shown, ramp) => piece.with_over(Over {
                     piece: shown,
                     ramp,
-                    cross: false,
-                    motion: None,
-                    smooth: None,
-                }),
-                Layer::Crossing(shown, ramp) => piece.with_over(Over {
-                    piece: shown,
-                    ramp,
-                    cross: true,
-                    motion: None,
-                    smooth: None,
-                }),
-                Layer::Moved(shown, ramp, m, cross) => piece.with_over(Over {
-                    piece: shown,
-                    ramp: Some(ramp),
-                    cross,
-                    motion: Some(m),
                     smooth: None,
                 }),
                 Layer::Smoothed(shown, ramp, smooth) => piece.with_over(Over {
                     piece: shown,
                     ramp: Some(ramp),
-                    cross: false,
-                    motion: None,
                     smooth: Some(smooth),
                 }),
                 Layer::Title(t) => piece.with_title(*t),
@@ -4516,12 +4389,13 @@ mod tests {
             .video
             .iter()
             .find_map(|p| match p {
-                VideoPiece::Mix { over, .. } => over.iter().find_map(|o| o.ramp),
+                VideoPiece::Mix { over, .. } => {
+                    over.iter().find_map(|o| o.ramp.filter(|r| !r.falling))
+                }
                 _ => None,
             })
             .unwrap();
         assert_eq!(ramp.wipe, Some(WipeDirection::Left));
-        assert!(!ramp.falling);
     }
 
     #[test]
@@ -4597,7 +4471,11 @@ mod tests {
         let plan = flatten(&p, 0, 100).unwrap();
         assert_eq!(
             shown(&plan),
-            ["m1@0+45", "m2@5+10 at 0/10 over m1@45+10", "m2@15+45"]
+            [
+                "m1@0+45",
+                "m1@45+10 at 0/10 falling, m2@5+10 at 0/10 over black+10",
+                "m2@15+45"
+            ]
         );
     }
 
@@ -4608,7 +4486,10 @@ mod tests {
         f.append("m2", 10, 60);
         let p = dissolve(&f, Some("c1"), Some("c2"), 5, 5);
         let plan = flatten(&p, 48, 52).unwrap();
-        assert_eq!(shown(&plan), ["m2@8+4 at 3/10 over m1@48+4"]);
+        assert_eq!(
+            shown(&plan),
+            ["m1@48+4 at 3/10 falling, m2@8+4 at 3/10 over black+4"]
+        );
     }
 
     #[test]

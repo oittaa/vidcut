@@ -142,7 +142,6 @@ flowchart TD
 - Placed pictures ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`. Their placement is not in the kept pictures.
   - `Player::present` hands the `Placed` pictures of each layer with the frame (`Shown`, `Plan::placed_at`). Thus a move or a zoom keeps the frames decoded.
   - For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame.
-  - `Shown::crosses` marks the side of a dissolve that mixes with the side before it (`Over::cross`).
 - While pictures are dragged, `Player::preview_pictures` puts each dragged picture in place of the picture of its clip.
   - The live core then plans the timeline again with them (`Msg::PreviewPictures`), at most once each `RELOAD_EVERY`. Why: a picture that stops filling the frame needs the tracks below it decoded.
 
@@ -295,12 +294,12 @@ The audio device:
   - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
   - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).
   - The tracks of a compound clip with two or more pictures in the frame can mix first, in a picture of their own ([export](export.md#placed-pictures)).
-  - The two sides of a dissolve with a placed picture add into a picture of their own (`Mixing`). `fs_paired` lays it over the copy of the canvas. Thus a mix below 0 is not clipped before it goes over.
+  - The two sides of a transition add into a picture of their own (`place::Mix`). Thus a mix below 0 is not clipped before it goes over.
   - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
   - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
   - The two sides of a Push or a Slide draw into two pictures of their own (`Moves`), each over transparent.
     - `fs_motion` then lays them over the canvas, premultiplied. `Moving::shift` gives where each side is, in pixels of the frame.
-    - The sides draw without their composite modes. When the outgoing clip has a mode, `fs_motion_mode` mixes the moved result with the copy of the canvas (`Below`, `mixed`).
+    - The sides draw without their composite modes. The mode of the outgoing clip mixes the moved result with the canvas, as for any `place::Mix`.
     - Why: thus the tracks below do not move, and the motion blur does not blur them, as in Resolve ([gotchas](../gotchas.md#resolves-otio-files)).
     - Each side moves by whole pixels. The band comes from the exact edges, on top.
     - A feather fades the upper side linearly across the band. In a corner, the smaller of the two fades applies.
