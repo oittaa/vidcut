@@ -1097,6 +1097,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - In a Push, the incoming picture pushes the outgoing picture out of the frame.
   - The Preset of a Push is Push Left, Push Right, Push Up or Push Down. Push Left moves the pictures right, so the incoming picture comes in from the left.
   - In a Slide with the Direction In, the incoming picture slides in over the outgoing picture. With Out, the outgoing picture slides out over the incoming picture.
+  - The picture on top hides the other picture across its whole frame. Its clear parts show the tracks below (measured in Resolve Studio 21.2.0).
   - The Preset of a Slide is the edge or the corner that it comes in from: Left-Right, Right-Left, Bottom-Up, Top-Down, Top-Left or Bottom-Right.
   - Border puts a band of Color on the moving edge. Its width is a part of the shorter side of the frame.
   - Feather fades one picture into the other across the band. The band then shows no color.

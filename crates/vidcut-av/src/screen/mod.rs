@@ -1119,9 +1119,9 @@ impl Moves {
     }
 }
 
-const MOVING: usize = 8 * 16;
+const MOVING: usize = 7 * 16;
 
-fn motion_bytes(m: &Moving, gaps: [bool; 2], size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
+fn motion_bytes(m: &Moving, size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
     let Shift {
         upper_in,
         upper,
@@ -1146,12 +1146,11 @@ fn motion_bytes(m: &Moving, gaps: [bool; 2], size: (u32, u32), colors: Option<Hd
         [r, g, b, transfer_of(colors)],
     ];
     let flags = [upper_in, feather, mixes_blur, still].map(u32::from);
-    let gaps = [gaps[0], gaps[1], false, false].map(u32::from);
     floats
         .iter()
         .flatten()
         .flat_map(|v| (*v as f32).to_le_bytes())
-        .chain(flags.iter().chain(&gaps).flat_map(|v| v.to_le_bytes()))
+        .chain(flags.iter().flat_map(|v| v.to_le_bytes()))
         .collect()
 }
 
@@ -1273,11 +1272,10 @@ impl MixDraw<'_, '_> {
             pass.set_bind_group(0, &bind, &[]);
             pass.draw(0..3, 0..1);
         }
-        let gaps = sides.map(|s| s.is_none());
         self.gpu.queue.write_buffer(
             &moves.params,
             0,
-            &motion_bytes(moving, gaps, self.size, self.colors),
+            &motion_bytes(moving, self.size, self.colors),
         );
         let canvas = &self.canvases[depth].view;
         let mut pass = begin(encoder, canvas, Some(wgpu::Color::TRANSPARENT));

@@ -841,7 +841,6 @@ struct Motion {
     blur: vec4<f32>,
     color: vec4<f32>,
     flags: vec4<u32>,
-    gaps: vec4<u32>,
 };
 
 @group(0) @binding(11) var<uniform> motion: Motion;
@@ -862,11 +861,6 @@ fn incoming_at(q: vec2<f32>) -> vec4<f32> {
         return vec4<f32>(0.0);
     }
     return textureLoad(incoming, vec2<i32>(q), 0);
-}
-
-fn covers(q: vec2<f32>) -> f32 {
-    let size = vec2<f32>(textureDimensions(outgoing));
-    return select(1.0, 0.0, any(q < vec2<f32>(0.0)) || any(q >= size));
 }
 
 fn inside(c: vec2<f32>, r: vec4<f32>) -> bool {
@@ -910,21 +904,16 @@ fn tap(q: vec2<f32>) -> Tap {
     let l = q - motion.offsets.zw;
     var upper: vec4<f32>;
     var lower: vec4<f32>;
-    var upper_gap: bool;
     if upper_in {
         upper = incoming_at(u);
         lower = outgoing_at(l);
-        upper_gap = motion.gaps.y == 1u;
     } else {
         upper = outgoing_at(u);
         lower = incoming_at(l);
-        upper_gap = motion.gaps.x == 1u;
-    }
-    var block = upper.a;
-    if upper_gap {
-        block = covers(u);
     }
     let c = q + vec2<f32>(0.5);
+    let whole = vec4<f32>(ceil(motion.picture.xy), floor(motion.picture.zw));
+    var block = max(upper.a, select(0.0, 1.0, inside(c, whole)));
     if motion.flags.y == 1u {
         let f = feathered(q);
         upper *= f;
