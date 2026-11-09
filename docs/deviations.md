@@ -2845,6 +2845,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The scripting API takes a Pan outside −100 to 100, and sets the nearest limit.
 - **vidcut:**
   - A track has no channel type. Each clip uses the law of a stereo track.
+  - A source of one channel plays at its full level on each side of a mix of two channels.
   - A mix of one channel has no sides. The Pan does not change it.
   - A mix of three channels or more applies the Pan to its first two channels.
   - The Audio section has no switch for the Pan. Pan 0 gives the same sound.

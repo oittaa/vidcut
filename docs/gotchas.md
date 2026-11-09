@@ -108,6 +108,10 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 - **FFmpeg's resampler refuses a layout with top front left and no top front right.**
   - The first 13 channels of the 22.2 layout have this form. The export then fails with `cannot convert audio`.
   - Thus `channel_layout` uses top front center in place of top front left at 13 channels.
+- **FFmpeg's resampler puts a mono input on each side of a stereo output at −3 dB** (9.0.1, `swr_build_matrix2`).
+  - The coefficient is a fixed 0.7071. The center mix level does not change it.
+  - Thus `Resampler::new` sets a matrix of 1 for each side (`swr_set_matrix`).
+  - A mix of three channels or more keeps the default matrix.
 - **FFmpeg's `buffer` source takes the frame it is given** (`av_buffersrc_add_frame`, which ffmpeg-next's `Source::add` calls).
   - It moves the buffers out of the frame, and leaves the frame empty.
   - Thus `hw::run_graph` gives the graph of a turn a reference of its own (`av_frame_ref`).

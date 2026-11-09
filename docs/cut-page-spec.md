@@ -2220,6 +2220,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - An OTIO import sets the Pan from it.
   - vidcut: the Pan row of the Audio section (X70) and `clip.set` set `pan`.
   - vidcut: a clip pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: a source of one channel plays at its full level on each side of a stereo mix.
   - vidcut: `clip.set` refuses a Pan outside the range ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
 - **Clip equalizer** (pp. 743, 745–746, 3950–3952):
   - The Equalizer of a clip has six bands, a switch for all the bands and a reset button (p. 745).
