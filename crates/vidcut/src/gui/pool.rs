@@ -706,7 +706,14 @@ impl Workspace {
         ui.horizontal_wrapped(|ui| {
             for k in shown {
                 let length = p.settings.length_timecode(k.frames());
-                let r = ui.button(format!("{}  {length}", k.name));
+                let r = ui
+                    .button(format!("{}  {length}", k.name))
+                    .interact(Sense::drag());
+                if r.drag_started()
+                    && let Some(press) = r.ctx.input(|i| i.pointer.press_origin())
+                {
+                    self.start_compound_drag(&k.id, &k.name, k.frames(), press);
+                }
                 r.context_menu(|ui| {
                     if ui.button("Append to Timeline").clicked() {
                         self.send("edit.place_compound", json!({ "compound": k.id }));

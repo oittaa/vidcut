@@ -41,7 +41,6 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
-- a drag of a compound clip from the Media Pool ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
 - Mixer FX other than the Ducker, Paste Attributes, guides
@@ -2125,6 +2124,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
 - **A compound clip of the Media Pool** on a timeline:
   - An append gives a linked picture on V1 and sound on A1.
   - A range of it trims these two, as a clip of a file.
+  - A drag follows [§7.3](#73-drag-and-drop-from-the-pool-or-viewer-pp-648-679-694695), as a drag of a file does.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.

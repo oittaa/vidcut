@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use super::follow::{self, Before, Edit};
 use super::{
-    block_clip, clear_range, ensure_track, fix_audio, linked, locate, split_at, tracks, unlocked,
+    block_clip, clear_range, ensure_track, fix_audio, linked, locate, main_index, shift_from,
+    split_at, tracks, unlocked,
 };
 use crate::error::{Error, Result};
 use crate::model::{Clip, Compound, Kept, PooledCompound, Project, Track, TrackKind};
@@ -277,33 +279,123 @@ pub fn remove_pooled(p: &mut Project, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn place_pooled(p: &mut Project, id: &str, at: Option<i64>) -> Result<Nested> {
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Place {
+    /// Write over what is there; nothing else moves.
+    #[default]
+    Overwrite,
+    /// On V1: open the timeline at `at`; later clips move right.
+    Insert,
+    /// On V1: take the place of the clip under `at`; later clips follow.
+    Replace,
+}
+
+struct Host<'a> {
+    number: &'a str,
+    name: &'a str,
+    span: (i64, i64),
+}
+
+fn put_host(
+    p: &mut Project,
+    host: &Host,
+    (kind, part): (TrackKind, Compound),
+    clips: &mut Vec<String>,
+) -> Result<()> {
+    let ti = ensure_track(p, &format!("{}{}", tracks::prefix(kind), host.number))?;
+    unlocked(p, ti)?;
+    let (a, b) = host.span;
+    clear_range(p, ti, a, b);
+    fix_audio(p, ti);
+    let mut c = block_clip(p.alloc_clip_id(), (a, b - a), None, None);
+    c.video = kind == TrackKind::Video;
+    c.name = Some(host.name.to_string());
+    c.compound = Some(part);
+    clips.push(c.id.clone());
+    p.tracks[ti].clips.push(c);
+    p.tracks[ti].sort();
+    Ok(())
+}
+
+fn make_room(p: &mut Project, how: Place, at: i64, frames: i64) -> Result<i64> {
+    let ti = main_index(p);
+    unlocked(p, ti)?;
+    if how == Place::Insert {
+        let at = if p.settings.ripple_on {
+            at.min(p.tracks[ti].end())
+        } else {
+            at
+        };
+        split_at(p, ti, at);
+        shift_from(p, ti, at, frames);
+        return Ok(at);
+    }
+    let t = &p.tracks[ti];
+    let ci = t
+        .clip_at(at)
+        .ok_or_else(|| Error::invalid(format!("no clip on {} to replace", t.id)))?;
+    let (a, b) = (t.clips[ci].start, t.clips[ci].end());
+    clear_range(p, ti, a, b);
+    shift_from(p, ti, b, frames - (b - a));
+    Ok(a)
+}
+
+pub fn place_pooled(
+    p: &mut Project,
+    id: &str,
+    at: Option<i64>,
+    track: Option<&str>,
+    how: Place,
+) -> Result<Nested> {
     let item = p
         .compounds
         .iter()
         .find(|x| x.id == id)
         .cloned()
         .ok_or_else(|| Error::not_found(format!("no compound clip {id}")))?;
-    let at = at.unwrap_or_else(|| p.end());
-    let span = (at, at + item.frames());
+    let frames = item.frames();
+    let mut at = at.unwrap_or_else(|| p.end());
+    let number = track.and_then(|t| t.get(1..)).unwrap_or("1");
+    let ripples = number == "1" && how != Place::Overwrite;
+    if ripples && how == Place::Insert {
+        linked::split_main(p, at, &[]);
+    }
+    let before = Before::of(p);
+    if ripples {
+        at = make_room(p, how, at, frames)?;
+    }
+    let host = Host {
+        number,
+        name: &item.name,
+        span: (at, at + frames),
+    };
     let mut clips = Vec::new();
-    for (kind, video, part) in [
-        (TrackKind::Video, true, item.picture),
-        (TrackKind::Audio, false, item.sound),
-    ] {
-        let Some(k) = part else { continue };
-        let name = tracks::prefix(kind).to_string() + "1";
-        let ti = ensure_track(p, &name)?;
-        unlocked(p, ti)?;
-        clear_range(p, ti, span.0, span.1);
-        fix_audio(p, ti);
-        let mut host = block_clip(p.alloc_clip_id(), (span.0, span.1 - span.0), None, None);
-        host.video = video;
-        host.name = Some(item.name.clone());
-        host.compound = Some(k);
-        clips.push(host.id.clone());
-        p.tracks[ti].clips.push(host);
-        p.tracks[ti].sort();
+    if let Some(k) = item.picture.clone() {
+        put_host(p, &host, (TrackKind::Video, k), &mut clips)?;
+    }
+    if ripples {
+        follow::follow(
+            p,
+            &before,
+            &Edit {
+                created: &clips,
+                ..Edit::default()
+            },
+        );
+    }
+    if let Some(k) = item.sound.clone() {
+        put_host(p, &host, (TrackKind::Audio, k), &mut clips)?;
     }
     let mut warnings = Vec::new();
     let dropped = otio::transitions::prune(p);
@@ -594,6 +686,18 @@ mod tests {
         f.ok(req("media.compound", json!({"range": "10f..40f"})));
         assert_eq!(f.editor.project().tracks, before);
         assert_eq!(f.editor.project().compounds[0].frames(), 30);
+    }
+
+    #[test]
+    fn a_pooled_compound_clip_inserts_at_an_edit_and_moves_the_clips_after_it() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let _ = f.append("m1", 0, 30);
+        let after = f.append("m1", 30, 60);
+        f.ok(req("media.compound", json!({"range": "0f..12f"})));
+        let id = f.editor.project().compounds[0].id.clone();
+        let place = json!({"compound": id, "at": "30f", "how": "insert"});
+        f.ok(req("edit.place_compound", place));
+        assert_eq!(f.editor.project().clip(&after).unwrap().start, 42);
     }
 
     #[test]
