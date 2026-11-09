@@ -964,6 +964,12 @@ mod tests {
         a
     }
 
+    fn opacity_keys(f: &Fixture, id: &str) -> Vec<(i64, f64)> {
+        let c = f.editor.project().clip(id).unwrap();
+        let keys = &c.picture.as_ref().unwrap().opacity_keys;
+        keys.iter().map(|k| (k.frame, k.value)).collect()
+    }
+
     fn opacity_key_frames(f: &Fixture, id: &str) -> Vec<i64> {
         let c = f.editor.project().clip(id).unwrap();
         let keys = &c.picture.as_ref().unwrap().opacity_keys;
@@ -1006,7 +1012,21 @@ mod tests {
         let fast = json!({"clips": [hosts[0]], "at": "0f", "speed": 2.0});
         f.ok(req("speed.set", fast));
         f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
-        assert_eq!(opacity_key_frames(&f, &a), vec![5, 20]);
+        assert_eq!(opacity_keys(&f, &a), vec![(5, 0.0), (10, 0.5), (20, 1.0)]);
+    }
+
+    #[test]
+    fn a_freeze_inside_a_compound_clip_holds_the_value_of_its_frame() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = keyed_clip(&mut f);
+        let hosts = nest(&mut f, &[&a]);
+        f.ok(req(
+            "speed.freeze",
+            json!({"clips": [hosts[0]], "at": "20f"}),
+        ));
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        let held = vec![(10, 0.0), (20, 0.5), (70, 0.5), (80, 1.0)];
+        assert_eq!(opacity_keys(&f, &a), held);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::keyframes::{ease_mark, reshape, retimed, scaled_by, value_at};
+use crate::keyframes::{ease_mark, hold, reshape, retimed, scaled_by, split_inside, value_at};
 use crate::model::{
     Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FilmGrain, GaussianBlur, Glow,
     Keyframe, MosaicBlur, Sharpen, Vignette,
@@ -460,6 +460,18 @@ impl Effect {
     pub fn ease_keys(&mut self, frame: i64, ease: Ease) {
         for k in &mut self.keys {
             ease_mark(&mut k.keys, frame, ease);
+        }
+    }
+
+    pub fn split_keys(&mut self, frame: i64) {
+        for k in &mut self.keys {
+            split_inside(&mut k.keys, frame);
+        }
+    }
+
+    pub fn hold_keys(&mut self, at: i64, until: i64) {
+        for k in &mut self.keys {
+            hold(&mut k.keys, at, until);
         }
     }
 
