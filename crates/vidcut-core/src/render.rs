@@ -2353,44 +2353,91 @@ pub(crate) fn inside(x: &Clip, c: &Clip) -> Option<(Clip, Run)> {
     seen(x, c, (x.start, x.end()))
 }
 
+struct PaceStep {
+    at: i64,
+    end: i64,
+    source: i64,
+    rate: f64,
+}
+
 fn paced_keys(y: &mut Clip, c: &Clip, k0: i64, first_key: i64) {
     let pace = c.pace();
-    let moving: Vec<(i64, i64, f64)> = c
+    let steps: Vec<PaceStep> = c
         .runs(c.start, c.end())
         .into_iter()
-        .map(|(a, _)| (a - c.start, c.source_at(a), pace.rate(a - c.start)))
-        .filter(|&(_, _, v)| v != 0.0)
+        .map(|(a, b)| PaceStep {
+            at: a - c.start,
+            end: b - c.start,
+            source: c.source_at(a),
+            rate: pace.rate(a - c.start),
+        })
         .collect();
-    let Some(&(_, _, way)) = moving.first() else {
+    let moving: Vec<&PaceStep> = steps.iter().filter(|s| s.rate != 0.0).collect();
+    let (Some(first), Some(last)) = (moving.first(), moving.last()) else {
         let held = first_key as f64;
         y.picture = y.picture.take().map(|p| p.sampled(held));
         y.title = y.title.take().map(|t| t.sampled(held));
         return;
     };
+    let forward = first.rate > 0.0;
+    let tail = c.duration - last.end;
     let from = c.source_at(c.start + k0) - first_key;
     let to = y.content_at(y.start) - k0;
-    let run = |q: i64| {
-        let past = moving.partition_point(|&(_, s, _)| if way > 0.0 { s <= q } else { s >= q });
-        moving[past.saturating_sub(1)]
+    let past = |q: i64| {
+        moving.partition_point(|s| {
+            if forward {
+                s.source <= q
+            } else {
+                s.source >= q
+            }
+        })
     };
+    let section = |q: i64| moving[past(q).saturating_sub(1)];
     let conv = |k: i64| {
-        let (at, s, v) = run(from + k);
-        to + at + ((from + k - s) as f64 / v).round() as i64
+        let q = from + k;
+        if let Some(s) = steps.iter().find(|s| s.source == q) {
+            return to + s.at;
+        }
+        let s = section(q);
+        let at = if past(q) == 0 { 0 } else { s.at };
+        let t = at + ((q - s.source) as f64 / s.rate).round() as i64;
+        to + if t > last.end { t + tail } else { t }
     };
-    let ratio = |k: i64| 1.0 / run(from + k).2;
-    if let Some(picture) = y.picture.as_mut() {
+    let ratio = |k: i64| 1.0 / section(from + k).rate;
+    let splits: Vec<i64> = steps[1..].iter().map(|s| s.source - from).collect();
+    let holds: Vec<(i64, i64)> = steps
+        .iter()
+        .filter(|s| s.rate == 0.0)
+        .map(|s| (to + s.at, to + s.end))
+        .collect();
+    let pace_picture = |picture: &mut Picture| {
+        for &k in &splits {
+            picture.split_keys(k);
+        }
         picture.scale_times(&conv, &ratio);
+        for &(at, until) in &holds {
+            picture.hold_keys(at, until);
+        }
+    };
+    if let Some(picture) = y.picture.as_mut() {
+        pace_picture(picture);
     }
     if let Some(title) = y.title.as_mut().filter(|t| t.is_keyed()) {
         title.each_line(|line| {
             let mut picture = line.as_picture();
-            picture.scale_times(&conv, &ratio);
+            pace_picture(&mut picture);
             line.move_handles(conv);
             line.take_picture(&picture);
         });
     }
     if let Some(a) = y.audio.as_mut() {
+        for &k in &splits {
+            crate::keyframes::split_inside(&mut a.gain_keys, k);
+        }
         a.gain_keys = crate::keyframes::scaled_by(&a.gain_keys, conv, &ratio);
+        for &(at, until) in &holds {
+            crate::keyframes::hold(&mut a.gain_keys, at, until);
+        }
     }
 }
 

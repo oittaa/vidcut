@@ -325,13 +325,38 @@ pub fn retimed(keys: &[Keyframe], old: &Clip, new: &Clip) -> Vec<Keyframe> {
     out
 }
 
-fn scale_handles(k: &mut Keyframe, ratio: f64) {
-    for h in [&mut k.in_handle, &mut k.out_handle].into_iter().flatten() {
-        h.frames *= ratio;
+fn scale_handles(k: &mut Keyframe, was: i64, ratio: &impl Fn(i64) -> f64) {
+    let (before, after) = (ratio(was - 1), ratio(was + 1));
+    if let Some(h) = &mut k.in_handle {
+        h.frames *= before;
     }
-    if ratio < 0.0 {
+    if let Some(h) = &mut k.out_handle {
+        h.frames *= after;
+    }
+    if before < 0.0 {
         std::mem::swap(&mut k.in_handle, &mut k.out_handle);
     }
+}
+
+pub fn split_inside(keys: &mut Vec<Keyframe>, frame: i64) -> Option<usize> {
+    let (first, last) = (keys.first()?.frame, keys.last()?.frame);
+    let known = keys.iter().any(|k| k.frame == frame);
+    (first < frame && frame < last && !known).then(|| split(keys, frame))
+}
+
+pub fn hold(keys: &mut Vec<Keyframe>, at: i64, until: i64) -> Option<usize> {
+    let i = keys.iter().position(|k| k.frame == at)?;
+    if keys.get(i + 1).is_some_and(|k| k.frame <= until) {
+        return None;
+    }
+    let held = Keyframe {
+        frame: until,
+        in_handle: None,
+        ..keys[i]
+    };
+    keys[i].out_handle = None;
+    keys.insert(i + 1, held);
+    Some(i + 1)
 }
 
 pub fn scaled(keys: &[Keyframe], frame: impl Fn(i64) -> i64, ratio: f64) -> Vec<Keyframe> {
@@ -351,7 +376,7 @@ pub fn scaled_by(
                 frame: frame(was),
                 ..*k
             };
-            scale_handles(&mut k, ratio(was));
+            scale_handles(&mut k, was, ratio);
             k
         })
         .collect();
@@ -824,6 +849,24 @@ impl Picture {
         p
     }
 
+    pub fn split_keys(&mut self, frame: i64) {
+        for v in PictureValue::ALL {
+            split_channel(self, v, frame);
+        }
+        for e in &mut self.effects {
+            e.split_keys(frame);
+        }
+    }
+
+    pub fn hold_keys(&mut self, at: i64, until: i64) {
+        for v in PictureValue::ALL {
+            hold_channel(self, v, at, until);
+        }
+        for e in &mut self.effects {
+            e.hold_keys(at, until);
+        }
+    }
+
     pub fn scale_times(&mut self, conv: &impl Fn(i64) -> i64, ratio: &impl Fn(i64) -> f64) {
         for v in PictureValue::ALL {
             scale_channel(self, v, &conv, ratio);
@@ -1092,6 +1135,24 @@ impl Title {
     }
 }
 
+fn split_channel(p: &mut Picture, v: PictureValue, frame: i64) {
+    let (keys, y) = parts_mut(p, v);
+    let paired = y
+        .as_deref()
+        .and_then(|y| value_paired(keys, frame as f64, |i| y.get(i).copied().unwrap_or(0.0)));
+    if let (Some(i), Some(y), Some(value)) = (split_inside(keys, frame), y, paired) {
+        y.insert(i.min(y.len()), value);
+    }
+}
+
+fn hold_channel(p: &mut Picture, v: PictureValue, at: i64, until: i64) {
+    let (keys, y) = parts_mut(p, v);
+    if let (Some(i), Some(y)) = (hold(keys, at, until), y) {
+        let value = y.get(i - 1).copied().unwrap_or(0.0);
+        y.insert(i.min(y.len()), value);
+    }
+}
+
 fn scale_channel(
     p: &mut Picture,
     v: PictureValue,
@@ -1107,7 +1168,7 @@ fn scale_channel(
             let mut k = *k;
             let was = k.frame;
             k.frame = conv(was);
-            scale_handles(&mut k, ratio(was));
+            scale_handles(&mut k, was, ratio);
             (k, y_was.get(i).copied().unwrap_or(0.0))
         })
         .collect();

@@ -163,7 +163,8 @@ Speeds ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
   - A sound track has one stretch for each direction. Thus the sound stays one lane through a change of speed.
   - `render::paced` gives an inner clip the sections of the compound clip. `composed_over` multiplies them with the speed of the inner clip.
   - `paced_keys` moves the keyframes of an inner clip through the sections. Each keyframe stays on its frame of the inner timeline.
-  - `paced_keys` adds no keyframe where a section ends. Thus, in a sound stretch and after Decompose in Place, the value between two keyframes does not follow a change of speed.
+  - It adds a keyframe where a section ends, between two keyframes (`Picture::split_keys`). Thus the value follows each change of speed.
+  - A freeze section gets a keyframe at each end with the same value (`Picture::hold_keys`).
   - A stretch with no motion keeps the value of its frame.
 
 Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
