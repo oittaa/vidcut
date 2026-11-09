@@ -1090,7 +1090,7 @@ pub enum Request {
     /// (default V1) nearest `at` (default: the playhead). The length stays.
     /// Any type can become any other: a cross dissolve, a dip to color, a
     /// wipe, a smooth cut, a push or a slide. An edge of a compound clip
-    /// takes only a cross dissolve or a dip to color.
+    /// does not take a smooth cut.
     #[serde(rename = "edit.transition")]
     EditTransition {
         #[serde(default)]

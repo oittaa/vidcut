@@ -1867,6 +1867,7 @@ struct Edge {
 struct Around {
     placed: Placed,
     always: bool,
+    held: bool,
     edges: Vec<Edge>,
 }
 
@@ -1885,7 +1886,7 @@ impl Around {
             of: e.frames.1 - e.frames.0,
             falling: e.falling,
             wipe: e.wipe,
-            held: false,
+            held: self.held,
             moved: e.crossing.as_ref().is_some_and(|c| c.moving.is_some()),
         });
         let crossing = edge.and_then(|e| e.crossing.clone()).map(|c| Placed {
@@ -2150,6 +2151,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     .then(|| Around {
                         placed: Placed::of(c, own, run_of(c, nest.run)),
                         always,
+                        held: nest.run.is_some_and(|r| r.held),
                         edges,
                     })
                     .into_iter()
