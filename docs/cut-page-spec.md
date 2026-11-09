@@ -1121,9 +1121,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Ease and Transition Curve are as for a Push. Frame f of n frames shows the morph at curve(f) + 0.5 / n, at most 1.
   - The morph takes the nearest source frame of each clip. A clip with a speed change shows no frames between its source frames.
   - A Solid Color side acts as a still side. Measured in Resolve Studio 21.1.2: two Solid Colors give the same picture as two stills of those colors.
-  - It morphs two pictures that each cover the frame alone, with the usual Inspector values. It plays as a Cross Dissolve in these cases:
+  - It morphs two pictures that each cover the frame alone, with the usual Inspector values or only a composite mode. It plays as a Cross Dissolve in these cases:
     - A side is a gap, a clip in a compound clip, or a clip over other tracks that does not fill the frame.
-    - A side has other Inspector values, or plays backward.
+    - A side has Inspector values other than a composite mode, or plays backward.
+  - A composite mode does not stop the morph (measured in Resolve Studio 21.2.0):
+    - The composite mode of the outgoing clip mixes the morph with the tracks below.
+    - The composite mode of the incoming clip has no effect during the transition.
+    - A Multiply clip with no track below is black during the transition.
   - Resolve's measured values are in [gotchas](gotchas.md#resolves-otio-files).
   - A request makes one: `{"type": "smooth_cut", "mode": "faster", "process": "frame_blend"}`.
   - An OTIO file holds it as Resolve's Smooth Cut, with its values.
