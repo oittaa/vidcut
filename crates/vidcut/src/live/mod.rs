@@ -5185,7 +5185,7 @@ fn no_project() -> Error {
 fn shown(mut plan: RenderPlan, super_scale: bool) -> RenderPlan {
     if !super_scale {
         for piece in &mut plan.video {
-            for layer in piece.layers_mut() {
+            for layer in piece.flat_layers_mut() {
                 if let render::VideoPiece::Source { super_scale, .. } = layer {
                     *super_scale = Default::default();
                 }
