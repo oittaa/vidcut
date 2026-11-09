@@ -69,6 +69,7 @@ pub struct SilenceDialog {
     download: bool,
     cross_fade: bool,
     rev: Option<u64>,
+    reads: Option<Value>,
 }
 
 impl SilenceDialog {
@@ -97,6 +98,7 @@ impl SilenceDialog {
             download: false,
             cross_fade: false,
             rev: None,
+            reads: None,
         }
     }
 
@@ -599,6 +601,14 @@ pub fn dynamic_preview(
     }
 }
 
+fn silence_reads(p: &Project, clips: &[String]) -> Value {
+    let read = clips.iter().filter_map(|id| p.clip(id)).map(|c| {
+        let media = p.media(&c.media).map(|m| (&m.path, &m.info));
+        json!([c.start, c.duration, c.source_in, c.speed, c.audio, media])
+    });
+    json!([p.settings.fps, read.collect::<Vec<_>>()])
+}
+
 impl Workspace {
     pub(crate) fn open_silence(&mut self, clips: Vec<String>) {
         if clips.is_empty() {
@@ -614,7 +624,11 @@ impl Workspace {
         let bindings = self.snap.bindings.clone();
         let rev = self.project().map(|p| p.rev);
         if std::mem::replace(&mut d.rev, rev) != rev {
-            d.forget_found();
+            let reads = self.project().map(|p| silence_reads(p, &d.clips));
+            if d.reads != reads {
+                d.reads = reads;
+                d.forget_found();
+            }
         }
         if let Some((params, ask)) = &d.asked
             && let Some(result) = ask.take()

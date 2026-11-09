@@ -436,7 +436,10 @@ The bar and the Jobs button:
 **Silence stripes** ([deviation X48](../deviations.md#x48-ripple-delete-silences-stripes-can-be-edited-before-remove)).
 
 - `SilenceDialog` keeps the dry run of Ripple Delete Silence as `Stripe`s, and the user's edits to them (`stripe_press`, `stripe_drag`, `silence_keys`).
-- A changed setting runs the dry run again, and replaces the stripes and their edits. A new revision of the project does the same (`SilenceDialog::forget_found`), because the stripes hold timeline frames.
+- A changed setting runs the dry run again, and replaces the stripes and their edits.
+- A change to what the dry run reads does the same (`SilenceDialog::forget_found`), because the stripes hold timeline frames.
+  - `silence_reads` tells what it reads: the place, speed and sound of the dialog's clips, their media and the frame rate.
+  - Other edits keep the stripes, their edits and their undo list.
 - Each change keeps the state before it (`Shot`). Ctrl+Z and Ctrl+Shift+Z step through these states (`SilenceDialog::undo`). The project's history stays as it is until Remove.
 - The dialog keeps the newest states (`SHOTS_KEPT`). Why: each state holds a copy of the stripes.
 - While the dialog is open, `Handle::skip` hands the stripes to the session. The session plays the timeline as Remove would leave it.
