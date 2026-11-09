@@ -2137,7 +2137,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A Cross Dissolve, a wipe, a Push, a Slide and a sound fade at an edge act as on a plain clip.
   - The dissolve uses the frames that a trim hides in the compound clip.
   - The compound clip mixes as one picture with the clip on the other side. A compound clip with clear parts shows the tracks below through them, as a placed clip does.
-  - vidcut fades a side with a composite mode over the other side, as a placed clip does.
+  - A side with a composite mode also acts as on a plain clip.
   - A compound clip with no hidden frames follows [X27](deviations.md#x27-a-dissolve-short-of-media-is-shortened).
   - The sound fade of a picture edit also fades the sound of the compound clip on its audio track.
   - A Smooth Cut acts as on a plain clip too. The compound clip is one picture of the frame size.
@@ -3804,6 +3804,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Its edges are smoothed over a pixel.
     - The two sides of a dissolve mix into each other first, and then go over the tracks below.
     - Thus the tracks below do not show through where both sides cover the frame (D50).
+    - In a dissolve and in a wipe, the composite mode of the outgoing clip then mixes the two sides with the tracks below.
+    - The composite mode of the incoming clip has no effect during the transition (measured in Resolve Studio 21.2.0).
   - **Soft edges and opacity** (measured in Resolve Studio 21.1.1, with 16-bit renders):
     - Opacity mixes the clip with what is below it: below + (clip − below) × opacity.
     - The fade of Softness is |Softness| × the width of the fitted picture / 400 pixels, rounded down. The zoom scales it with the picture.

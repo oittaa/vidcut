@@ -1896,6 +1896,9 @@ impl Around {
             }),
             ..c
         });
+        if crossing.as_ref().is_some_and(|c| c.moving.is_none()) {
+            own.picture.composite_mode = None;
+        }
         std::iter::once(own).chain(crossing).collect()
     }
 }
@@ -1947,29 +1950,35 @@ pub const NESTED: usize = 8;
 
 type Nesting<'a> = (Option<&'a Nest>, bool, &'a [Placed]);
 
+fn mode_of(c: &Clip) -> CompositeMode {
+    c.picture
+        .as_ref()
+        .map_or(CompositeMode::Normal, |x| x.mode())
+}
+
+fn sides_moded(d: &transitions::Playing) -> bool {
+    [d.before, d.after]
+        .into_iter()
+        .flatten()
+        .any(|c| mode_of(c) != CompositeMode::Normal)
+}
+
 fn crossing(d: &transitions::Playing) -> Option<Placed> {
-    let mode_of = |c: &Clip| {
-        c.picture
-            .as_ref()
-            .map_or(CompositeMode::Normal, |x| x.mode())
-    };
     let compound = |c: Option<&Clip>| c.is_some_and(|c| c.compound.is_some());
     let moving = Move::of(d);
-    let mut picture = Picture::default();
+    let picture = Picture {
+        composite_mode: d
+            .before
+            .map(mode_of)
+            .filter(|m| *m != CompositeMode::Normal),
+        ..Picture::default()
+    };
     let joins = match moving {
-        Some(_) => {
-            picture.composite_mode = d
-                .before
-                .map(mode_of)
-                .filter(|m| *m != CompositeMode::Normal);
-            compound(d.before) || compound(d.after)
-        }
+        Some(_) => compound(d.before) || compound(d.after),
         None => {
             let (from, to) = (d.before?, d.after?);
-            (from.compound.is_some() || to.compound.is_some())
+            (from.compound.is_some() || to.compound.is_some() || sides_moded(d))
                 && transitions::dip_of(d.transition).is_none()
-                && mode_of(from) == CompositeMode::Normal
-                && mode_of(to) == CompositeMode::Normal
         }
     };
     joins.then(|| Placed {
@@ -2379,7 +2388,10 @@ fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, crossed: &[Placed], x: i
         return Vec::new();
     }
     let run = run_of(c, nest.and_then(|n| n.run)).after(x);
-    let own = Placed::at(c, own.unwrap_or_default(), run, x);
+    let mut own = Placed::at(c, own.unwrap_or_default(), run, x);
+    if crossed.iter().any(|p| p.crossing && p.moving.is_none()) {
+        own.picture.composite_mode = None;
+    }
     std::iter::once(own)
         .chain(crossed.iter().cloned())
         .chain(outer)
@@ -2974,7 +2986,12 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     let wipe = transitions::wipe_of(d.transition);
                     let ramp = |falling| ramp_of(d, falling, wipe);
                     let below = !stack.is_empty();
+                    let crossed = crossing(d);
                     match (d.before.filter(shows), d.after.filter(shows)) {
+                        (Some(f), Some(g)) if sides_moded(d) && crossed.is_some() => {
+                            stack.push(joined(f, Some(ramp(true)), below, crossed.as_slice())?);
+                            stack.push(joined(g, Some(ramp(false)), below, crossed.as_slice())?);
+                        }
                         (Some(f), Some(g)) => {
                             let (f, g) =
                                 (shown(f, None, below)?, shown(g, Some(ramp(false)), below)?);
@@ -2993,11 +3010,9 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                             }
                         }
                         (Some(f), None) => {
-                            let crossed = crossing(d);
                             stack.push(joined(f, Some(ramp(true)), below, crossed.as_slice())?);
                         }
                         (None, Some(g)) => {
-                            let crossed = crossing(d);
                             stack.push(joined(g, Some(ramp(false)), below, crossed.as_slice())?);
                         }
                         (None, None) => {}

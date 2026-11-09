@@ -1450,6 +1450,10 @@ impl MixDraw<'_, '_> {
         if shown.is_some_and(|p| p.2 == 0 || p.3 == 0) {
             return;
         }
+        let mode = match added {
+            true => 0,
+            false => mode,
+        };
         let canvas = &self.canvases[depth];
         if mode != 0 {
             let below = self.below.expect("made for a composite mode");
