@@ -259,6 +259,7 @@ pub(crate) enum Msg {
         result: Result<()>,
         encode: Option<String>,
         project: Option<PathBuf>,
+        playhead: Option<i64>,
     },
     DuckHeard {
         measured: Vec<Unmeasured>,
@@ -1123,6 +1124,7 @@ impl Live {
                 result,
                 encode,
                 project,
+                playhead,
             } => {
                 let open = self.open_path();
                 let (job, result) = match result.and(still_open(project, open)) {
@@ -1130,7 +1132,8 @@ impl Live {
                     Ok(()) => {
                         let rev = self.project.as_ref().map(|p| p.project().rev);
                         let job = Job { rev, ..job };
-                        let result = self.edit(envelope, job.origin);
+                        let at = playhead.unwrap_or_else(|| self.player.position(TIMELINE));
+                        let result = self.edit_at(envelope, job.origin, at);
                         (job, result)
                     }
                 };
@@ -1724,7 +1727,7 @@ impl Live {
                     });
                 });
             }
-            Step::Measure(measure, then) => {
+            Step::Measure(measure, then, playhead) => {
                 let tx = self.tx.clone();
                 let project = self.open_path();
                 let cancel = job
@@ -1741,6 +1744,7 @@ impl Live {
                         result,
                         encode: None,
                         project,
+                        playhead,
                     });
                 });
             }
@@ -2132,6 +2136,7 @@ impl Live {
                 result,
                 encode: Some(id),
                 project,
+                playhead: None,
             });
         });
     }
@@ -3205,7 +3210,7 @@ impl Live {
             } if !envelope.dry_run => {
                 self.duck_failed.clear();
                 match self.duck_measure(&envelope) {
-                    Some(measure) => Step::Measure(measure, Box::new(envelope)),
+                    Some(measure) => Step::Measure(measure, Box::new(envelope), None),
                     None => Step::Now(self.edit(envelope, job.origin)),
                 }
             }
@@ -3235,7 +3240,7 @@ impl Live {
                     }
                     Ok(())
                 };
-                Step::Measure(Box::new(fetch), Box::new(envelope))
+                Step::Measure(Box::new(fetch), Box::new(envelope), None)
             }
             _ if fetches(&envelope.request)
                 && !envelope.dry_run
@@ -3255,7 +3260,24 @@ impl Live {
                     }
                     Ok(())
                 };
-                Step::Measure(Box::new(fetch), Box::new(envelope))
+                Step::Measure(Box::new(fetch), Box::new(envelope), None)
+            }
+            Request::Apply { commands, .. }
+                if !envelope.dry_run && commands.iter().any(runs_long) =>
+            {
+                let Some(open) = &self.project else {
+                    return Step::Now(Err(no_project()));
+                };
+                let (project, path) = (open.project().clone(), open.store.path().to_path_buf());
+                let playhead = Some(self.player.position(TIMELINE));
+                let copy = envelope.clone();
+                let measure = move || {
+                    let env = AvEnv::for_project(&path);
+                    vidcut_core::Editor::new(project, Default::default())
+                        .apply(copy, &env, playhead)
+                        .map(drop)
+                };
+                Step::Measure(Box::new(measure), Box::new(envelope), playhead)
             }
             Request::ClipSet {
                 voice_isolation,
@@ -3277,17 +3299,17 @@ impl Live {
                         crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
                     })
                 };
-                Step::Measure(Box::new(fetch), Box::new(envelope))
+                Step::Measure(Box::new(fetch), Box::new(envelope), None)
             }
             Request::ClipNormalize { .. } => match self.loudness_measure(&envelope) {
-                Some(measure) => Step::Measure(measure, Box::new(envelope)),
+                Some(measure) => Step::Measure(measure, Box::new(envelope), None),
                 None => Step::Now(self.edit(envelope, job.origin)),
             },
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
             | Request::EditRippleDeleteWords { quiet: true, .. } => {
                 match self.measuring(&envelope) {
-                    Some(measure) => Step::Measure(measure, Box::new(envelope)),
+                    Some(measure) => Step::Measure(measure, Box::new(envelope), None),
                     None => Step::Now(self.edit(envelope, job.origin)),
                 }
             }
@@ -3378,7 +3400,7 @@ impl Live {
                         "Sync by Sound".into(),
                         "sync",
                     ),
-                    _ => Step::Measure(Box::new(hear), Box::new(envelope)),
+                    _ => Step::Measure(Box::new(hear), Box::new(envelope), None),
                 }
             }
             Request::TimelineImport {
@@ -3392,7 +3414,7 @@ impl Live {
                         .open_timeline(&path, unpack.as_deref(), true)
                         .map(drop)
                 };
-                Step::Measure(Box::new(unpack_bundle), Box::new(envelope))
+                Step::Measure(Box::new(unpack_bundle), Box::new(envelope), None)
             }
             Request::MediaTranscriptsRemove { .. } => {
                 let result = self.edit(envelope, job.origin);
@@ -3467,8 +3489,17 @@ impl Live {
         )
     }
 
-    fn edit(&mut self, mut envelope: Envelope, origin: Origin) -> Result<Response> {
+    fn edit(&mut self, envelope: Envelope, origin: Origin) -> Result<Response> {
         let playhead = self.player.position(TIMELINE);
+        self.edit_at(envelope, origin, playhead)
+    }
+
+    fn edit_at(
+        &mut self,
+        mut envelope: Envelope,
+        origin: Origin,
+        playhead: i64,
+    ) -> Result<Response> {
         match &mut envelope.request {
             Request::EditPaste { clips, .. } if clips.is_none() => {
                 if self.clipboard.is_empty() {
@@ -4961,7 +4992,7 @@ enum Step {
     Wait(Until),
     Task(Work, Task),
     Make(Make),
-    Measure(Measure, Box<Envelope>),
+    Measure(Measure, Box<Envelope>, Option<i64>),
     Encode(Measure, Box<Envelope>, String, &'static str),
 }
 
@@ -5075,6 +5106,36 @@ fn scroll_by(piece: &mut render::VideoPiece, clip: &str, off: i64) {
             }
         }
         _ => {}
+    }
+}
+
+fn runs_long(r: &Request) -> bool {
+    use vidcut_core::model::AngleSync;
+    match r {
+        Request::ProxyGenerate { .. }
+        | Request::SubtitlesTranscribe { .. }
+        | Request::AnalyzeWords { .. }
+        | Request::MediaTranscribe { .. }
+        | Request::SubtitlesRetime { .. }
+        | Request::SubtitlesTimeWords { .. }
+        | Request::ClipNormalize { .. }
+        | Request::EditDetectSceneCuts { .. }
+        | Request::EditRippleDeleteWords { quiet: true, .. }
+        | Request::TrackSet {
+            duck: Some(Some(_)),
+            ..
+        }
+        | Request::MulticamCreate {
+            sync: AngleSync::Sound,
+            rows: None,
+            ..
+        }
+        | Request::MulticamLayout {
+            sync: AngleSync::Sound,
+            ..
+        } => true,
+        Request::EditRippleDeleteSilence { parts, .. } => parts.is_none(),
+        _ => false,
     }
 }
 
@@ -5425,5 +5486,22 @@ mod tests {
              /shoot/notes.txt: not a media file\n\
              /shoot/Docs/readme.txt: not a media file"
         );
+    }
+
+    fn request(method: &str, params: Value) -> Request {
+        let call = json!({"method": method, "params": params});
+        Envelope::from_json(call).unwrap().request
+    }
+
+    #[test]
+    fn finding_scene_cuts_runs_long() {
+        let r = request("edit.detect_scene_cuts", json!({"clips": "c1"}));
+        assert!(runs_long(&r));
+    }
+
+    #[test]
+    fn a_split_does_not_run_long() {
+        let r = request("edit.split", json!({"at": "10f"}));
+        assert!(!runs_long(&r));
     }
 }
