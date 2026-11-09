@@ -5072,8 +5072,9 @@ pub struct NoiseReductionSet {
 
 /// A change to a clip's equalizer: each field given replaces its own, and
 /// the rest stay as they are. A new one is on and flat. Band 1 is a
-/// `hi_pass` at 80 Hz and band 6 a `lo_pass` at 16000 Hz, both off. Bands 2
-/// to 5 are `bell` filters at 200, 800, 2500 and 8000 Hz.
+/// `hi_pass` at 97 Hz and band 6 a `lo_pass` at 19000 Hz, both off. Band 2 is
+/// a `lo_shelf` at 117 Hz, bands 3 and 4 are `bell` filters at 239 and
+/// 1200 Hz, and band 5 is a `hi_shelf` at 6000 Hz.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EqualizerSet {
@@ -5100,14 +5101,14 @@ pub struct EqBandSet {
     /// `hi_shelf`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<crate::model::EqKind>,
-    /// Its frequency in Hz, from 20 to 20000.
+    /// Its frequency in Hz, from 20 to 22000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub freq: Option<f64>,
-    /// Its gain in dB, from -20 to 20. Only `bell`, `lo_shelf` and
+    /// Its gain in dB, from -70 to 24. Only `bell`, `lo_shelf` and
     /// `hi_shelf` use it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain: Option<f64>,
-    /// Its width, from 0.3 to 10.3. Only `bell` uses it.
+    /// Its width, from 0.3 to 100. Only `bell` uses it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub q: Option<f64>,
 }

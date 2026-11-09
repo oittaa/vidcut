@@ -5139,12 +5139,12 @@ pub struct EqBand {
     pub on: bool,
     /// Its filter.
     pub kind: EqKind,
-    /// Its frequency in Hz, from 20 to 20000.
+    /// Its frequency in Hz, from 20 to 22000.
     pub freq: f64,
-    /// Its gain in dB, from -20 to 20. Only `bell`, `lo_shelf` and
+    /// Its gain in dB, from -70 to 24. Only `bell`, `lo_shelf` and
     /// `hi_shelf` use it.
     pub gain: f64,
-    /// Its width, from 0.3 to 10.3. Only `bell` uses it.
+    /// Its width, from 0.3 to 100. Only `bell` uses it.
     pub q: f64,
 }
 

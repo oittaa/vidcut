@@ -13,11 +13,6 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
 1. **Measure the effects:**
    - Measure each new effect in Resolve first: its values, their ranges and defaults, and its math.
-   - **Equalizer, measure these in the Inspector.** Resolve's scripts cannot set it. vidcut's choices are in [X154](../deviations.md#x154-the-equalizer-is-a-window-with-chosen-curves):
-     - The range and the default of each frequency.
-     - The curve of each filter, from renders of a sweep or of tones.
-     - The width of a Notch filter and the slope of the pass filters.
-     - The effect that an OTIO export writes.
    - **Glow, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - Opacity below 1 on a picture with alpha, on the Edit page.
      - The size of the Atmosphere noise on other timeline sizes, with Threshold 0.25 and Spread 0 on a gray picture.
@@ -53,6 +48,7 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
    - Measure effects other than Gaussian Blur, Mosaic Blur, Glow and Film Grain on a compound clip ([todo](compound-opacity.md)).
    - Measure the Gaussian Blur with Use Alpha off on a clip that is partly clear, for example with Crop Softness. vidcut blurs its colors without their alpha.
    - Audio effects: reverb.
+   - Write the Equalizer as the effects of the [spec](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) in an OTIO export, and read them. vidcut keeps it in its own metadata now.
    - Hover Scrub Preview of transitions, effects and generators (pp. 759, 765, 766).
    - Onscreen controls of effects in the viewer (p. 766).
    - Favorites (p. 760).

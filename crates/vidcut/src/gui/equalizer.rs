@@ -65,7 +65,11 @@ fn graph(ui: &mut egui::Ui, eq: &mut Equalizer, rate: u32) {
     for (i, band) in eq.bands.iter_mut().enumerate().filter(|(_, b)| b.on) {
         let lifts = equalizer::takes_gain(band.kind);
         let place = |b: &EqBand| {
-            let db = if lifts { b.gain } else { 0.0 };
+            let db = if lifts {
+                b.gain.clamp(-GRAPH_DB, GRAPH_DB)
+            } else {
+                0.0
+            };
             pos2(rect.left() + across(b.freq) * rect.width(), height_of(db))
         };
         let hit = Rect::from_center_size(place(band), vec2(HANDLE, HANDLE) * 2.0);
