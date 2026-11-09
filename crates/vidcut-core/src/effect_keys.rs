@@ -1,4 +1,4 @@
-use crate::keyframes::{ease_mark, reshape, retimed, scaled, value_at};
+use crate::keyframes::{ease_mark, reshape, retimed, scaled_by, value_at};
 use crate::model::{
     Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FilmGrain, GaussianBlur, Glow,
     Keyframe, MosaicBlur, Sharpen, Vignette,
@@ -463,9 +463,9 @@ impl Effect {
         }
     }
 
-    pub fn scale_key_times(&mut self, conv: &impl Fn(i64) -> i64, ratio: f64) {
+    pub fn scale_key_times(&mut self, conv: &impl Fn(i64) -> i64, ratio: &impl Fn(i64) -> f64) {
         for k in &mut self.keys {
-            k.keys = scaled(&k.keys, conv, ratio);
+            k.keys = scaled_by(&k.keys, conv, ratio);
         }
     }
 

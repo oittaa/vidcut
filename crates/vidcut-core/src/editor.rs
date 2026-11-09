@@ -5448,12 +5448,12 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         if from != to {
             c.gain_keys = crate::keyframes::scaled(&c.gain_keys, conv, ratio);
             if let Some(picture) = c.picture.as_mut() {
-                picture.scale_times(&conv, ratio);
+                picture.scale_times(&conv, &|_| ratio);
             }
             if let Some(title) = c.title.as_mut().filter(|t| t.is_keyed()) {
                 title.each_line(|line| {
                     let mut picture = line.as_picture();
-                    picture.scale_times(&conv, ratio);
+                    picture.scale_times(&conv, &|_| ratio);
                     line.move_handles(conv);
                     line.take_picture(&picture);
                 });

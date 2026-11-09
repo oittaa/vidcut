@@ -997,6 +997,32 @@ mod tests {
     }
 
     #[test]
+    fn a_ramped_compound_clip_moves_each_keyframe_by_the_speed_of_its_section() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = keyed_clip(&mut f);
+        let hosts = nest(&mut f, &[&a]);
+        let key = json!({"clips": [hosts[0]], "param": "speed", "at": "20f"});
+        f.ok(req("keyframes.add", key));
+        let fast = json!({"clips": [hosts[0]], "at": "0f", "speed": 2.0});
+        f.ok(req("speed.set", fast));
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        assert_eq!(opacity_key_frames(&f, &a), vec![5, 20]);
+    }
+
+    #[test]
+    fn a_freeze_at_the_head_of_a_compound_clip_keeps_the_keyframes_in_it() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = keyed_clip(&mut f);
+        let hosts = nest(&mut f, &[&a]);
+        f.ok(req(
+            "speed.freeze",
+            json!({"clips": [hosts[0]], "at": "0f"}),
+        ));
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        assert_eq!(opacity_key_frames(&f, &a), vec![60, 80]);
+    }
+
+    #[test]
     fn a_frozen_compound_clip_holds_the_value_of_the_keyframes_in_it() {
         let mut f = Fixture::new(&[(4.0, true)]);
         let a = keyed_clip(&mut f);

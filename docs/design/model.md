@@ -162,6 +162,9 @@ Speeds ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
   - A picture track has one stretch for each run of one speed. Thus each stretch is at one speed, and a title and a Dynamic Zoom follow it.
   - A sound track has one stretch for each direction. Thus the sound stays one lane through a change of speed.
   - `render::paced` gives an inner clip the sections of the compound clip. `composed_over` multiplies them with the speed of the inner clip.
+  - `paced_keys` moves the keyframes of an inner clip through the sections. Each keyframe stays on its frame of the inner timeline.
+  - `paced_keys` adds no keyframe where a section ends. Thus, in a sound stretch and after Decompose in Place, the value between two keyframes does not follow a change of speed.
+  - A stretch with no motion keeps the value of its frame.
 
 Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 
