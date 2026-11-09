@@ -149,6 +149,10 @@ The history file:
 - The history is a `.jsonl` file in the `history` folder of the state dir. A digest of the path of the project names it (`HistoryFile`).
 - Each save appends lines. They end with a hash of the project text that the save wrote.
 - On load (`Store::load_text`), a project file that does not match that hash was changed by something else. Then `Editor::record_external` makes the difference from the last saved state one undoable step, by `file`.
+- When a GUI cannot write the project file, the edit stays in memory (`OpenProject::apply`).
+  - The request succeeds, with a warning. The next edit writes the file again.
+  - If no later write succeeds, the project loads without that edit. One undo brings it back, because the history has the edit.
+  - Without a GUI, the request fails. The CLI process keeps nothing in memory.
 - vidcut never writes over a history file that it cannot read. Examples: `HistoryFile::read_tail` fails, or the last saved project cannot be rebuilt.
   - Then the editor keeps the steps of the session in memory and tells why (`Editor::history_trouble`: a GUI notice, the warnings of `history.get`).
   - It appends these steps when the file reads again where it left off (`Store::save`, `Store::recover`).
