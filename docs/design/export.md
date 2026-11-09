@@ -346,6 +346,8 @@ The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-7
 - A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` holds only the fader of the track.
   - `AudioMix` multiplies each sample by `Keyed::gain` at the place of the sample on the keyframes' frames (`Keyed::at`).
   - Thus the player and the export play the same curve ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `Resampler::new` converts each source to the layout of the mix. The export and the player get this conversion through `AudioMix`.
+  - A source of one channel goes to each side of a mix of two channels at its full level (`swr_set_matrix`).
 - A piece has the Pan of its clip (`pan` of an `AudioPiece`). `render::pan_gains` gives the gain of each side.
   - `AudioMix` multiplies the first two channels of a mix of two channels or more by those gains.
 - A piece has the `noise_reduction` of its clip when it changes the sound.

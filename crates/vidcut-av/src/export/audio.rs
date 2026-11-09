@@ -44,6 +44,8 @@ pub(crate) fn channel_layout(channels: u16) -> ffmpeg::ChannelLayout {
     }
 }
 
+const MONO_TO_STEREO: [f64; 2] = [1.0, 1.0];
+
 pub(crate) struct Resampler {
     swr: *mut ffi::SwrContext,
     channels: usize,
@@ -90,6 +92,11 @@ impl Resampler {
                 0,
                 std::ptr::null_mut(),
             );
+            let ret = if ret >= 0 && in_layout.nb_channels == 1 && channels == 2 {
+                ffi::swr_set_matrix(swr, MONO_TO_STEREO.as_ptr(), 1)
+            } else {
+                ret
+            };
             ffi::av_channel_layout_uninit(&mut in_layout);
             ffi::av_channel_layout_uninit(&mut out_layout);
             if ret < 0 || ffi::swr_init(swr) < 0 {
