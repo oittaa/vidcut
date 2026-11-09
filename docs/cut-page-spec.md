@@ -2251,6 +2251,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - The corner of a shelf is 10^(|gain| / 80) times away from the given frequency. A Lo-Shelf moves down and a Hi-Shelf moves up.
     - Thus a Hi-Shelf of 12 dB at 1000 Hz has about 2.5 dB at 1000 Hz.
     - A Hi-Pass or Lo-Pass filter has 12 dB per octave and a fixed Q of 1. It has 0 dB at its frequency.
+    - Thus the curve has a peak of 1.25 dB beside the frequency. A Hi-Pass at 1000 Hz has it at 1414 Hz, and a Lo-Pass at 1000 Hz has it at 707 Hz.
     - The curve in the Inspector shows a Notch filter, but a render does not change the sound.
   - An OTIO export writes the effect `Fairlight Clip Equaliser`, `Type` 64, and six effects `Fairlight Equaliser Band`, `Type` 63 (measured):
     - The `Enabled` of the first effect is the switch of the equalizer. The `Enabled` of a band is the switch of that band.
