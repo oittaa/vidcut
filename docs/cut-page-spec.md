@@ -1172,6 +1172,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Change Transition Type, Set as Default Transition
   - cutting, copying and pasting transitions
 
+- **A title in a transition** (measured in Resolve Studio 21.2.0):
+  - A title acts as a picture with clear parts.
+  - A Cross Dissolve fades it.
+  - A Push moves it with its side.
+  - In a Slide it stays, and the incoming clip covers it.
+
 ### 8.12 Subtitles (pp. 645–646, 702, 1227–1248)
 - **Subtitle tracks** (pp. 646, 702, 1228, 1232, 1245):
   - Add Subtitle Track adds a subtitle track above the video tracks. It is in Timeline Actions, and in the right-click menu of a track header.
