@@ -577,6 +577,7 @@ pub struct TitleOver {
     pub dy: i32,
     pub turn: [f32; 4],
     pub alpha: f32,
+    pub wipe: Option<vidcut_core::render::Wipe>,
     pub placed: Vec<vidcut_core::render::Placed>,
     pub nth: usize,
 }

@@ -1050,7 +1050,7 @@ mod tests {
             moving: None,
         };
         let fitted = [240.0, 0.0, 1440.0, 1080.0];
-        let level = Placing::new(&[placed], (1920.0, 1080.0), fitted, (1440.0, 1080.0)).levels[0];
+        let level = Placing::new(&[placed], (1920.0, 1080.0), fitted, (1440.0, 1080.0)).level;
         let middle = level
             .forward([0.5, 0.5])
             .map(|v| (v * 100.0).round() / 100.0);

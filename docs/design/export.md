@@ -488,14 +488,15 @@ Cancel:
 - Each title in the plan carries its clip, and where the piece is in that clip (`ShownTitle`, its `Run`). `Run::top` places a scrolling title on each frame.
 - `titles_of` gives a title with keyframes the values of its frame (`ShownTitle::sampled`). Thus the viewer and the export get plain values.
 - A title in a dissolve at the edge of its clip fades by the `Ramp` of the dissolve (`fade`), on both sides of the edge. `ShownTitle::alpha` gives its level, with its opacity.
+- A title in a wipe has no level. `TitleOver` holds the edge of the wipe, and the draw shows the title only in its own part of the frame.
 - The player's `Titles` draws a title once for the size of the output, and keeps it while it shows. The shader moves and fades it.
   - Each new zoom of a title with zoom keyframes draws it again. The viewer scales the last drawing until the new one is ready.
 - Titles draw in each export and in `frame.render`, whatever the subtitle settings are.
 
-Titles in a placed compound clip:
+Titles in a compound clip:
 
-- `render::flatten_lanes` gives a title the pictures of the compound clips that it plays inside (`ShownTitle::placed`).
-- The shader maps each pixel of the frame back to the drawing with one affine map. The map goes through the compound clips (`Placing::inner`), then through the scroll, turn and zoom of the title (`place::lettered`).
+- `render::flatten_lanes` gives a title the pictures of the compound clips that it plays inside (`ShownTitle::placed`). `place::Mixes` thus makes the title a part of each of them.
+- The shader maps each pixel of the picture of the compound clip back to the drawing with one affine map. The map goes through the scroll, turn and zoom of the title (`place::lettered`).
 
 ## Placed pictures
 
@@ -511,12 +512,9 @@ The plan:
 The pictures:
 
 - `VideoFrames` decodes a placed layer as the player does. The shader places it at the size that it shows.
-- `place::Placing` maps each pixel of the frame back to the picture. The shader takes the map of each level (`chain`).
-- The coverage of a pixel is the product of the levels: smoothed edges, soft crop edges and opacity (`place::Placing::at`).
-- A level of a clip in a compound clip is left out where the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
+- `place::Placing` maps each pixel of its frame back to the picture (`Placing::level`).
+- The coverage of a pixel is the product of the smoothed edges, the soft crop edges and the opacity (`place::Placing::at`).
 - A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
-  - `place::Placing` takes the outermost mode other than Normal, from the compound clips in to the picture. Thus the mode of a compound clip replaces the mode of a picture inside it.
-  - It leaves out the compound clips that mix first (`Placing::inside`).
 - A transition with two sides is one `place::Mix`. `crossing` makes one `Placed` that both sides share.
   - The two sides add up. Neither side has its own composite mode.
   - The `Placed` holds the mode of the outgoing side. That mode mixes the `place::Mix` with the layers below.
@@ -526,20 +524,17 @@ The pictures:
 
 A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 
-- `render::expanded` puts a compound clip at its usual values in the `Placed` list only when a clip inside it has a composite mode (`holds_mode`). A compound clip without either draws as its tracks do.
-- `place::Mixes` finds, for each frame, the compound clips that mix first. Each one is a `place::Mix`.
-  - Two or more parts in the frame make a `place::Mix`, unless the compound clip is at its usual values and no part has a mode. Normal over Normal gives the same picture in each order.
-  - A picture alone makes none. `place::Placing` takes the levels, the mode and the effects of its compound clips, as for a plain clip.
-  - A title alone makes one only for a mode or an effect. Why: a title draws neither by itself.
-  - A compound clip with one `place::Mix` as its only part adds its level to that `place::Mix` (`Mix.placing`).
-- `Placing::inside` draws a part of a `place::Mix`. It opens the levels of the compound clips that mix first (`Level::open`) and takes no opacity, mode or effects from them.
-  - The maps of these levels stay. Thus the parts are at their places on the frame, in a picture as large as the frame.
-- `MixDraw` draws the parts of a `place::Mix` over transparent, in a picture of its own.
+- A compound clip is one picture of the frame size. `render::expanded` puts the compound clip in the `Placed` list of each clip inside it.
+- `place::Mixes` makes one `place::Mix` for each compound clip in the frame.
+- `MixDraw` draws the parts of a `place::Mix` over transparent, in a picture of its own. `place::Placing` draws each part by its own `Placed` only.
 - A part with a composite mode reads `Below`. It holds a copy of that picture only (`IN_MIX`). `fs_mode` mixes by the alpha below, and thus a part with nothing below it stays as it is.
-- `MixDraw::finished` then shows that picture as one layer:
-  - `blur::canvas_bind` covers it by the levels of `Mix.placing`: edges, soft edges and opacity. The shader reads it as `made` 6.
-  - With effects, `blur::Blurred::canvas_effects` covers it with no opacity (`bared`), then runs the effects. The grid pictures of a Glow come from the same `Spare`. `blur::shown_bind` then shows it with the opacity.
+- `MixDraw::finished` then places that picture as one layer:
+  - `blur::canvas_bind` maps it and covers it by `Mix.placing`: transform, edges, soft edges and opacity. The shader reads it as `made` 6.
+  - With effects, `blur::Blurred::canvas_effects` places it with no opacity (`bared`), then runs the effects. The grid pictures of a Glow come from the same `Spare`. `blur::shown_bind` then shows it with the opacity.
   - The outer pass mixes it with the tracks below, by the mode of `Mix.placing`.
+- One part alone gives its composite mode to the `place::Mix` (`parts_of`). A mode on the compound clip replaces it.
+- A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded.
+- A transition at an edge of a compound clip takes the mode of the picture that the outgoing side shows (`mode_at`).
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
 A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120)):

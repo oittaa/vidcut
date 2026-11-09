@@ -966,40 +966,6 @@ mod tests {
         assert_eq!((sound.start, sound.duration, sound.source_in), (0, 55, 10));
     }
 
-    #[test]
-    fn a_dissolve_plays_the_same_inside_a_compound_clip() {
-        let mut f = Fixture::new(&[(4.0, true)]);
-        let a = f.append("m1", 10, 50);
-        let b = f.append("m1", 50, 90);
-        f.ok(req("edit.dissolve", json!({"at": 40})));
-        let plan = |f: &Fixture| {
-            crate::render::flatten(f.editor.project(), 0, 80)
-                .unwrap()
-                .video
-        };
-        let before = plan(&f);
-        nest(&mut f, &[&a, &b]);
-        assert_eq!(plan(&f), before);
-    }
-
-    #[test]
-    fn a_compound_clip_cut_through_a_dissolve_shows_that_part_of_it() {
-        let mut f = Fixture::new(&[(4.0, true)]);
-        let a = f.append("m1", 10, 50);
-        let b = f.append("m1", 50, 90);
-        f.ok(req("edit.dissolve", json!({"at": 40})));
-        let plan = |f: &Fixture| {
-            crate::render::flatten(f.editor.project(), 0, 35)
-                .unwrap()
-                .video
-        };
-        let before = plan(&f);
-        let host = nest(&mut f, &[&a, &b]).remove(0);
-        let trim = json!({"clip": host, "edge": "tail", "to": "35f", "ripple": false});
-        f.ok(req("edit.trim", trim));
-        assert_eq!(plan(&f), before);
-    }
-
     fn keyed_clip(f: &mut Fixture) -> String {
         let a = f.append("m1", 20, 70);
         for (at, value) in [("10f", 0.0), ("30f", 1.0)] {

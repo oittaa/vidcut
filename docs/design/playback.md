@@ -291,9 +291,9 @@ The audio device:
     - Why: each pixel has the same work at any shrink. A kernel that widens without a limit puts all the work of a small picture on few GPU threads.
   - Why: the viewer must be fast, and an export must have the same picture as the spec.
   - The layers of a dissolve are more draws in the pass.
-  - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
+  - A placed layer maps each pixel back through its `place::Placing` level, with its soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
   - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).
-  - The tracks of a compound clip with two or more pictures in the frame can mix first, in a picture of their own ([export](export.md#placed-pictures)).
+  - A compound clip mixes its tracks first, in a picture of its own ([export](export.md#placed-pictures)).
   - The two sides of a transition add into a picture of their own (`place::Mix`). Thus a mix below 0 is not clipped before it goes over.
   - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
   - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
