@@ -2402,8 +2402,13 @@ fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
     };
     let wide = (head > 0 || tail > 0).then(|| {
         let mut wide = c.clone();
-        if n.kind == TrackKind::Video && (1..=head).any(|k| pace.speed_at(-k) == 0.0) {
-            back_at_own_speed(&mut wide);
+        if n.kind == TrackKind::Video {
+            let frozen = |k: i64| pace.speed_at(k) == 0.0;
+            at_own_speed(
+                &mut wide,
+                (1..=head).any(|k| frozen(-k)),
+                (0..tail).any(|k| frozen(c.duration + k)),
+            );
         }
         wide.move_head(-head);
         wide.duration += tail;
@@ -2438,9 +2443,9 @@ fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
     }
 }
 
-fn back_at_own_speed(c: &mut Clip) {
+fn at_own_speed(c: &mut Clip, back: bool, on: bool) {
     let pace = c.pace();
-    let Some(s) = c.speed.as_mut() else {
+    let Some(s) = c.speed.as_mut().filter(|_| back || on) else {
         return;
     };
     let own = Section {
@@ -2449,8 +2454,9 @@ fn back_at_own_speed(c: &mut Clip) {
         speed: pace.rate(0),
         ease: None,
     };
-    let later = s.sections.iter().filter(|x| x.at > own.at).copied();
-    let mut sections: Vec<Section> = std::iter::once(own).chain(later).collect();
+    let earlier = s.sections.iter().filter(|x| !back && x.at < own.at);
+    let later = s.sections.iter().filter(|x| !on && x.at > own.at);
+    let mut sections: Vec<Section> = earlier.chain([&own]).chain(later).copied().collect();
     if let [one] = sections.as_mut_slice()
         && one.speed < 0.0
     {
