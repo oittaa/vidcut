@@ -64,7 +64,9 @@ pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
 pub fn compound_takes(kind: &PictureTransition) -> bool {
     matches!(
         kind,
-        PictureTransition::Dissolve | PictureTransition::DipToColor { .. }
+        PictureTransition::Dissolve
+            | PictureTransition::DipToColor { .. }
+            | PictureTransition::Wipe { .. }
     )
 }
 

@@ -538,6 +538,7 @@ A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#81
 - `edges_on` gives the compound clip its edges. A dissolve gives its frames, and a dip to color the half of its side.
 - `expanded` widens the compound clip to reach those frames. Thus the hidden frames play (`inner_layout`).
 - `Around::at` gives the picture of the compound clip for a frame. `Placed::ramp` is the level of the dissolve. `place::level` multiplies it with the opacity.
+- A wipe has no level. `Mix::wipe` is its edge, and `MixDraw::lay` draws the side only in its own part of the frame. A layer of a mix has its edge in `MixDraw::wipes`.
 - `crossing` makes one `Placed` that both sides share. It is no picture. `place::parts_of` makes a `place::Mix` of the two sides, with `added` set.
 - `MixDraw::lay` adds the parts of such a `place::Mix` (`Gpu::adding`). Thus the two sides add up, then go over the layers below, as a crossing pair does.
 - A side with a composite mode does not cross. It fades over the other side.

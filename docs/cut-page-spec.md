@@ -2134,13 +2134,14 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - Where a clip is in the way, a new track goes in at the target. The clip in the way and all higher tracks move up.
   - This is the same on video tracks and on audio tracks.
 - **A transition at an edge of a compound clip** (measured in Resolve Studio 21.2.0):
-  - A Cross Dissolve and a sound fade at an edge act as on a plain clip.
+  - A Cross Dissolve, a wipe and a sound fade at an edge act as on a plain clip.
   - The dissolve uses the frames that a trim hides in the compound clip.
   - The compound clip mixes as one picture with the clip on the other side. A compound clip with clear parts shows the tracks below through them, as a placed clip does.
   - vidcut fades a side with a composite mode over the other side, as a placed clip does.
   - A compound clip with no hidden frames follows [X27](deviations.md#x27-a-dissolve-short-of-media-is-shortened).
   - The sound fade of a picture edit also fades the sound of the compound clip on its audio track.
-  - vidcut also takes a dip to color at an edge. It refuses a wipe, a push, a slide and a smooth cut there ([todo](todo/compound-clips.md)).
+  - A Push, a Slide and a Smooth Cut act as on a plain clip too. The compound clip is one picture of the frame size.
+  - vidcut also takes a dip to color at an edge. It refuses a push, a slide and a smooth cut there ([todo](todo/compound-clips.md)).
 - **Speed keyframes on a compound clip** (measured in Resolve Studio 21.2.0):
   - Each section plays at its own speed, in its picture and in its sound, as on a plain clip.
   - vidcut gives an edit to the picture and to the sound of the compound clip.

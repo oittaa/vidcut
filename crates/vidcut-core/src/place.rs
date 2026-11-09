@@ -2,7 +2,7 @@ use crate::model::{
     Border, CellShape, CompositeMode, Effect, EffectKind, FilmGrain, Glow, GlowAlpha, GlowFraming,
     GlowOutput, Media, MosaicBlur, Picture, Sharpen, Vignette, VignetteMode, VignetteShape,
 };
-use crate::render::Placed;
+use crate::render::{Placed, Wipe};
 
 const LEAST_ZOOM: f64 = 1e-9;
 const LEAST_BAR: f64 = 0.2;
@@ -630,7 +630,10 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], (pw, ph): (f64, f
         soft,
         opacity: match gone {
             true => 0.0,
-            false => p.opaque() * placed.ramp.map_or(1.0, |r| r.level(0)),
+            false => {
+                let dissolve = placed.ramp.filter(|r| r.wipe.is_none());
+                p.opaque() * dissolve.map_or(1.0, |r| r.level(0))
+            }
         },
     }
 }
@@ -949,6 +952,7 @@ pub struct Mix {
     pub parts: Vec<MixPart>,
     pub placing: Placing,
     pub added: bool,
+    pub wipe: Option<Wipe>,
     around: usize,
 }
 
@@ -1015,17 +1019,20 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixP
             .count();
         let (run, after) = rest.split_at(n);
         let inner = parts_of(run, depth + 1, frame);
-        let (held, around, added) = match <[MixPart; 1]>::try_from(inner) {
-            Ok([MixPart::Mix(one)]) => (one.parts, one.around, Some(one.added)),
-            Ok([lone]) => (vec![lone], depth + 1, None),
-            Err(many) => (many, depth + 1, None),
+        let wipe = outer.ramp.and_then(|r| r.mask(0));
+        let (held, around, added, wipe) = match <[MixPart; 1]>::try_from(inner) {
+            Ok([MixPart::Mix(one)]) if wipe.is_none() || one.wipe.is_none() => {
+                (one.parts, one.around, Some(one.added), wipe.or(one.wipe))
+            }
+            Ok([lone]) => (vec![lone], depth + 1, None, wipe),
+            Err(many) => (many, depth + 1, None, wipe),
         };
         let grows = added.is_some();
         let chain = first.chain();
         let placing = Placing::whole_inside(&chain[chain.len() - around..], frame, depth);
         let mixes = grows
             || match held.as_slice() {
-                [MixPart::Layer(_)] => false,
+                [MixPart::Layer(_)] => wipe.is_some(),
                 [MixPart::Title(_)] => {
                     placing.mode != CompositeMode::Normal
                         || !placing.effects.is_empty()
@@ -1043,6 +1050,7 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixP
                 parts: held,
                 placing,
                 added: added.unwrap_or(outer.crossing),
+                wipe,
                 around,
             }));
         } else {

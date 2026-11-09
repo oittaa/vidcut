@@ -1333,9 +1333,15 @@ struct MixDraw<'a> {
     below: Option<&'a Below>,
     letters: &'a [Letters],
     titles: &'a [TitleOver],
+    wipes: &'a [Option<Wipe>],
+    size: (u32, u32),
 }
 
 impl MixDraw<'_> {
+    fn part(&self, wipe: Option<Wipe>) -> Option<(u32, u32, u32, u32)> {
+        wipe.map(|w| shown_part(w, self.size))
+    }
+
     fn mix(&mut self, encoder: &mut wgpu::CommandEncoder, mix: &Mix, depth: usize) {
         let canvases = self.canvases;
         let canvas = &canvases[depth].view;
@@ -1344,7 +1350,8 @@ impl MixDraw<'_> {
             match part {
                 MixPart::Layer(i) => {
                     let (bind, _, _, mode) = &self.binds[*i];
-                    self.lay(encoder, depth, bind, (*mode, mix.added));
+                    let shown = self.part(self.wipes[*i]);
+                    self.lay(encoder, depth, bind, (*mode, mix.added), shown);
                 }
                 MixPart::Title(j) => {
                     let mut pass = begin(encoder, canvas, None);
@@ -1355,7 +1362,7 @@ impl MixDraw<'_> {
                     self.mix(encoder, inner, depth + 1);
                     let bind = self.finished(encoder, inner, depth + 1, IN_MIX);
                     let how = (inner.placing.mode.code(), mix.added);
-                    self.lay(encoder, depth, &bind, how);
+                    self.lay(encoder, depth, &bind, how, self.part(inner.wipe));
                 }
             }
         }
@@ -1392,7 +1399,11 @@ impl MixDraw<'_> {
         depth: usize,
         bind: &wgpu::BindGroup,
         (mode, added): (u32, bool),
+        shown: Option<(u32, u32, u32, u32)>,
     ) {
+        if shown.is_some_and(|p| p.2 == 0 || p.3 == 0) {
+            return;
+        }
         let canvas = &self.canvases[depth];
         if mode != 0 {
             let below = self.below.expect("made for a composite mode");
@@ -1403,6 +1414,9 @@ impl MixDraw<'_> {
             );
         }
         let mut pass = begin(encoder, &canvas.view, None);
+        if let Some((x, y, w, h)) = shown {
+            pass.set_scissor_rect(x, y, w, h);
+        }
         match self.below.filter(|_| mode != 0) {
             Some(below) => {
                 pass.set_pipeline(&self.gpu.placed_mode);
@@ -1765,7 +1779,8 @@ impl Screen {
                 Mixes::of(&chains, &over, frame)
             }
         };
-        let wipe_of = |i: usize| layers.get(i).and_then(|l| l.2);
+        let wipes: Vec<Option<Wipe>> = layers.iter().map(|l| l.2).collect();
+        let wipe_of = |i: usize| wipes.get(i).copied().flatten();
         let moving_of = |i: usize| layers.get(i).and_then(|l| l.3);
         let crossed = |i: usize| crosses.get(i).copied().unwrap_or(false);
         let crossed_wipe = |i: usize| wipe_of(i).is_some() && crossed(i);
@@ -1978,6 +1993,8 @@ impl Screen {
                     below,
                     letters: &self.letters,
                     titles,
+                    wipes: &wipes,
+                    size,
                 };
                 mixing.mix(&mut encoder, &outer.mix, 0);
                 let bind = mixing.finished(&mut encoder, &outer.mix, 0, OVER_ALL);
@@ -1998,7 +2015,16 @@ impl Screen {
                     None => pass.set_pipeline(&drawing.placed),
                 }
                 pass.set_bind_group(0, &bind, &[]);
-                pass.draw(0..3, 0..1);
+                let shown = outer.mix.wipe.map(|w| shown_part(w, size));
+                if shown.is_none_or(|p| p.2 > 0 && p.3 > 0) {
+                    if let Some((x, y, w, h)) = shown {
+                        pass.set_scissor_rect(x, y, w, h);
+                    }
+                    pass.draw(0..3, 0..1);
+                    if shown.is_some() {
+                        pass.set_scissor_rect(0, 0, size.0, size.1);
+                    }
+                }
                 for (t, _) in titles
                     .iter()
                     .zip(&nests.follows)

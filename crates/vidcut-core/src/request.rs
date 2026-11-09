@@ -1047,7 +1047,7 @@ pub enum Request {
     /// Dissolve to All Edits). Transitions on those edits go. A transition
     /// that is the same as the one it replaces but for its length keeps its
     /// curve, with the frames of the keys scaled to the new length. An edge
-    /// of a compound clip takes only a cross dissolve or a dip to color.
+    /// of a compound clip takes only a cross dissolve, a dip to color or a wipe.
     #[serde(rename = "edit.dissolve")]
     EditDissolve {
         #[serde(default)]

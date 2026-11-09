@@ -519,7 +519,7 @@ pub fn dissolve_clips(
 
 fn compound_error(c: &str) -> Error {
     Error::invalid(format!(
-        "{c} is a compound clip, and its edges take only a dissolve or a dip to color"
+        "{c} is a compound clip, and its edges take only a dissolve, a dip to color or a wipe"
     ))
 }
 
@@ -1013,7 +1013,7 @@ mod tests {
     }
 
     #[test]
-    fn a_compound_clips_edge_refuses_a_wipe() {
+    fn a_compound_clips_edge_refuses_a_smooth_cut() {
         let mut p = c2_compound();
         let e = super::dissolve_clips(
             &mut p,
@@ -1021,14 +1021,16 @@ mod tests {
             super::Shape::Length(25, super::Align::Center),
             true,
             false,
-            &crate::model::PictureTransition::Wipe {
-                direction: crate::model::WipeDirection::Left,
+            &crate::model::PictureTransition::SmoothCut {
+                mode: Default::default(),
+                process: Default::default(),
+                course: Default::default(),
             },
         )
         .unwrap_err();
         assert_eq!(
             e.to_string(),
-            "c2 is a compound clip, and its edges take only a dissolve or a dip to color"
+            "c2 is a compound clip, and its edges take only a dissolve, a dip to color or a wipe"
         );
     }
 
