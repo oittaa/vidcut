@@ -502,7 +502,7 @@ Titles in a placed compound clip:
 The plan:
 
 - A placed clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) is a source piece with `placed` pictures (`render::Placed`). They are the picture of its clip, then the pictures of the compound clips around it.
-- `render::flatten_lanes` lays it over the tracks below, as an `Over` of a `VideoPiece::Mix` without a ramp. In a dissolve with a placed side, the incoming side is marked `cross`.
+- `render::flatten_lanes` lays it over the tracks below, as an `Over` of a `VideoPiece::Mix` without a ramp.
 - A clip at its usual values goes over the same way where its fitted picture leaves bars and something is below it. A bar can be a part of a pixel ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)).
 - Where its fitted picture leaves no bar ([spec §13](../cut-page-spec.md#the-limit-for-a-thin-bar)), it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
 - A picture with an alpha channel (`VideoInfo::alpha`) fills the frame only with the Alpha Mode None (`Media::opaque`). Otherwise it goes over the layers below by its Alpha Mode ([playback](playback.md#gpu-pictures)).
@@ -517,10 +517,10 @@ The pictures:
 - A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
   - `place::Placing` takes the outermost mode other than Normal, from the compound clips in to the picture. Thus the mode of a compound clip replaces the mode of a picture inside it.
   - It leaves out the compound clips that mix first (`Placing::inside`).
-- A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once.
-- A dissolve or a wipe with a composite mode on a side does not use a crossing pair.
-  - `crossing` makes one `Placed` that holds the mode of the outgoing side. The two sides add up in a `place::Mix`.
-  - That mode then mixes the `place::Mix` with the layers below. `placed_of` and `Around::at` take the mode off each side.
+- A transition with two sides is one `place::Mix`. `crossing` makes one `Placed` that both sides share.
+  - The two sides add up. Neither side has its own composite mode.
+  - The `Placed` holds the mode of the outgoing side. That mode mixes the `place::Mix` with the layers below.
+  - Where both sides fill the frame, the plan leaves out the layers below. Nothing of them shows.
 - A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
 - A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
 
@@ -554,7 +554,7 @@ A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#81
 - The outgoing side's composite mode goes on the mix. `Ramp::moved` keeps the level of a side at 1.
 - A Smooth Cut needs each side as one picture ([Smooth Cuts](#smooth-cuts)). `Nest::flat` holds the widened compound clip for it. A side that cannot morph plays as a dissolve.
 - `crossing` makes one `Placed` that both sides share. It is no picture. `place::parts_of` makes a `place::Mix` of the two sides, with `added` set.
-- `MixDraw::lay` adds the parts of such a `place::Mix` (`Gpu::adding`). Thus the two sides add up, then go over the layers below, as a crossing pair does.
+- `MixDraw::lay` adds the parts of such a `place::Mix` (`Gpu::adding`). Thus the two sides add up, then go over the layers below.
 - The sides of such a `place::Mix` take no composite mode (`MixDraw::lay`).
 - `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`otio::tied`).
 - `AudioPiece::Source` holds them in `edges`. The mix multiplies them with the gain.

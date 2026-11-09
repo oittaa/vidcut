@@ -365,7 +365,6 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             shown.as_ref().map_or(&[][..], |s| &s.titles),
             (
                 shown.as_ref().map_or(&[][..], |s| &s.placed),
-                shown.as_ref().map_or(&[][..], |s| &s.crosses),
                 &kernels,
                 shown.as_ref().and_then(|s| s.colors),
             ),

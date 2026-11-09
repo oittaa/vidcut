@@ -9,7 +9,7 @@ use vidcut_core::generators::Pattern;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{AlphaMode, ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
-use vidcut_core::render::{Image, Moving, Placed, Ramp, Shape, Smooth, VideoPiece, WHOLE, Wipe};
+use vidcut_core::render::{Image, Placed, Ramp, Shape, Smooth, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -841,7 +841,6 @@ pub(crate) struct Layer {
     pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
     pub(crate) went: Option<crate::route::Went>,
     pub(crate) wipe: Option<Wipe>,
-    pub(crate) moving: Option<Moving>,
     pub(crate) share: f64,
     pub(crate) woven: Option<Weave>,
     pub(crate) origin: Option<Origin>,
@@ -2045,7 +2044,7 @@ impl Single {
             .with_sampling(Sampling::Rounded)
             .with_alpha_mode(alpha);
         let picture = std::sync::Arc::new(picture);
-        let layers = (&[][..], &[][..], &[][..], None);
+        let layers = (&[][..], &[][..], None);
         self.drawer
             .frame(&picture, &[], layers, size, (pixel, (None, None)))
     }
@@ -2164,7 +2163,7 @@ impl Single {
             gpu,
             Some(&picture),
             &[],
-            (placed, &[], &[look.kernel], form.1),
+            (placed, &[look.kernel], form.1),
             w,
             h,
         );
@@ -2483,7 +2482,6 @@ impl VideoFrames {
             .filter(|_| !self.colors)
             .map(|p| crate::player::placed_of(p, k, &[]))
             .unwrap_or_default();
-        let crosses = piece.as_ref().map(VideoPiece::crosses).unwrap_or_default();
         let kernels: Vec<u32> = piece
             .as_ref()
             .map(crate::player::scales_of)
@@ -2495,7 +2493,7 @@ impl VideoFrames {
         let mut out = drawer.frame(
             picture,
             &titles,
-            (&placed, &crosses, &kernels, self.timeline),
+            (&placed, &kernels, self.timeline),
             (w, h),
             (self.out.0, (self.timeline, self.out.1)),
         )?;
@@ -2583,14 +2581,12 @@ impl VideoFrames {
                 self.open_next();
             }
             let placed = crate::player::placed_of(&piece, k, &[]);
-            let motions = piece.motions();
             let smooths = piece.smooths();
             let mut made = Vec::with_capacity(layers.len());
             for (i, (layer, ramp)) in layers.into_iter().enumerate() {
                 let started = Instant::now();
                 let weight = ramp.map(|r| r.weight(k));
                 let wipe = mask_of(ramp, k);
-                let moving = motions[i].zip(ramp).map(|(m, r)| m.at(&r, k));
                 let smooth = smooths[i].zip(ramp).map(|(s, r)| (s, s.at(&r, k)));
                 let VideoPiece::Source {
                     image,
@@ -2634,7 +2630,6 @@ impl VideoFrames {
                             decoding: None,
                             went: None,
                             wipe,
-                            moving,
                             share: 1.0,
                             woven: None,
                             lut: None,
@@ -2728,7 +2723,6 @@ impl VideoFrames {
                     decoding: Some(decoding),
                     went: self.open[s].fitting.went(),
                     wipe,
-                    moving,
                     share: self.share_of(s, rotation, placed.get(i)),
                     woven,
                     lut: match self.open[s].lut_in {
@@ -2784,7 +2778,6 @@ impl VideoFrames {
         last.rotation = 0;
         last.sampling = Sampling::Own;
         last.wipe = None;
-        last.moving = None;
         last.share = 1.0;
         last.woven = None;
         last.alpha_mode = AlphaMode::Straight;

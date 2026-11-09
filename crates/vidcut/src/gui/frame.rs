@@ -103,7 +103,7 @@ impl Frame {
             &self.offscreen.gpu,
             Some(&shown.picture),
             &shown.titles,
-            (&shown.placed, &shown.crosses, &kernels, shown.colors),
+            (&shown.placed, &kernels, shown.colors),
             width,
             height,
         );

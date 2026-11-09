@@ -395,10 +395,10 @@ fn composited(placed: &[Placed]) -> bool {
 fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<Vec<Reason>> {
     let mut out = Vec::new();
     let layers = piece.layers();
-    let motions = piece.motions();
     let smooths = piece.smooths();
     for (i, (layer, ramp)) in layers.iter().enumerate() {
-        let moved = i > 0 && (ramp.is_some() || motions[i].is_some() || smooths[i].is_some());
+        let crossed = layer.placed().iter().any(|p| p.crossing);
+        let moved = i > 0 && (ramp.is_some() || crossed || smooths[i].is_some());
         let VideoPiece::Source {
             media,
             image,

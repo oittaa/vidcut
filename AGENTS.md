@@ -8,7 +8,10 @@ vidcut is a video cutting tool in Rust. Its model is the Cut page of DaVinci Res
 
 1. **The Cut page is the spec.** The default behavior is the behavior of Resolve's Cut page. See [docs/cut-page-spec.md](docs/cut-page-spec.md), with the manual's page numbers.
    - The same applies to the order in which a picture is processed: [spec §13](docs/cut-page-spec.md#13-order-of-operations-pp-287296-3407).
-   - Make a different behavior only when it is clearly better.
+   - The picture path is a pipeline ([spec §13](docs/cut-page-spec.md#13-order-of-operations-pp-287296-3407), Chapter 144 of the manual). Each stage takes the output of the stage before it.
+   - A stage does not branch on the kind of its input: compound or plain, placed or whole, with a composite mode or without.
+   - A difference from a measurement shows a fault in a stage. Fix that stage. Do not add a case for the input that failed.
+   - Only the owner adds a deviation. Ask first. Tell the owner what Resolve does and what a match costs.
    - Record each difference in [docs/deviations.md](docs/deviations.md): Resolve's behavior and page, our behavior, and the reason.
 2. **The code does not name DaVinci Resolve, and it has no comments.**
    - Nothing in `crates/` names Resolve or the pages of its manual.

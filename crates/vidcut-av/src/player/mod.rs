@@ -1062,7 +1062,6 @@ impl Player {
         };
         let placing = lock(&self.shared.placing).clone();
         let placed = plan.placed_at(pos, &placing);
-        let crosses = plan.crosses_at(pos);
         let scales = plan.scales_at(pos);
         let colors = plan.plan.colors;
         let size = plan.size();
@@ -1095,7 +1094,6 @@ impl Player {
                     exact: drawn,
                     titles,
                     placed,
-                    crosses,
                     scales,
                     colors,
                     output_lut,
@@ -1119,7 +1117,6 @@ impl Player {
                         exact: false,
                         titles: titles.clone(),
                         placed: placed.clone(),
-                        crosses: crosses.clone(),
                         scales: scales.clone(),
                         colors,
                         output_lut: output_lut.clone(),
@@ -1131,7 +1128,6 @@ impl Player {
                     exact: false,
                     titles,
                     placed,
-                    crosses,
                     scales,
                     colors,
                     output_lut,

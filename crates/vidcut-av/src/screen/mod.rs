@@ -44,18 +44,13 @@ pub struct Gpu {
     screen_drawing: Drawing,
     wide_drawing: Drawing,
     adding: wgpu::RenderPipeline,
-    adding_scaled: wgpu::RenderPipeline,
-    adding_mode: wgpu::RenderPipeline,
     placed_mode: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     below_layout: wgpu::BindGroupLayout,
     lettering: wgpu::RenderPipeline,
     lettering_wide: wgpu::RenderPipeline,
     lettering_layout: wgpu::BindGroupLayout,
-    paired: wgpu::RenderPipeline,
-    paired_wide: wgpu::RenderPipeline,
     moving: wgpu::RenderPipeline,
-    moving_mode: wgpu::RenderPipeline,
     moving_layout: wgpu::BindGroupLayout,
     screen: wgpu::RenderPipeline,
     screen_layout: wgpu::BindGroupLayout,
@@ -459,22 +454,6 @@ impl Gpu {
             }),
             MIXING,
         );
-        let adding_scaled = pipeline_in(
-            Some(wgpu::BlendState {
-                color: add(wgpu::BlendFactor::Constant),
-                alpha: add(wgpu::BlendFactor::Constant),
-            }),
-            MIXING,
-        );
-        let adding_mode = made(
-            &mode_layout,
-            "fs_mode",
-            Some(wgpu::BlendState {
-                color: add(wgpu::BlendFactor::One),
-                alpha: add(wgpu::BlendFactor::One),
-            }),
-            MIXING,
-        );
         let placed_mode = made(
             &mode_layout,
             "fs_mode",
@@ -544,13 +523,6 @@ impl Gpu {
         };
         let lettering = lettering_in(TARGET);
         let lettering_wide = lettering_in(MIXING);
-        let paired_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("vidcut dissolve"),
-            bind_group_layouts: &[Some(&lettering_layout), Some(&below_layout)],
-            immediate_size: 0,
-        });
-        let paired = made(&paired_layout, "fs_paired", None, TARGET);
-        let paired_wide = made(&paired_layout, "fs_paired", None, MIXING);
         let moving_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut move"),
             entries: &[
@@ -583,12 +555,6 @@ impl Gpu {
             }),
             MIXING,
         );
-        let moving_mode_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("vidcut move"),
-            bind_group_layouts: &[Some(&moving_layout), Some(&below_layout)],
-            immediate_size: 0,
-        });
-        let moving_mode = made(&moving_mode_layout, "fs_motion_mode", None, MIXING);
         let screen_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut screen"),
             entries: &[
@@ -672,18 +638,13 @@ impl Gpu {
             screen_drawing,
             wide_drawing,
             adding,
-            adding_scaled,
-            adding_mode,
             placed_mode,
             layout,
             below_layout,
             lettering,
             lettering_wide,
             lettering_layout,
-            paired,
-            paired_wide,
             moving,
-            moving_mode,
             moving_layout,
             screen,
             screen_layout,
@@ -1053,11 +1014,9 @@ pub struct Screen {
     target: Option<Target>,
     wide: Option<Wide>,
     drawn_colors: Option<Hdr>,
-    mixing: Option<Mixing>,
     moves: Vec<Moves>,
     below: Option<Below>,
     canvases: Vec<blur::Texture>,
-    drawn_crosses: Vec<bool>,
     drawn_kernels: Vec<u32>,
     drawn: Option<Option<Arc<Picture>>>,
     drawn_titles: Vec<TitleOver>,
@@ -1094,61 +1053,6 @@ struct LetterTile {
     size: (u32, u32),
     params: wgpu::Buffer,
     bind: wgpu::BindGroup,
-}
-
-struct Mixing {
-    size: (u32, u32),
-    view: wgpu::TextureView,
-    bind: wgpu::BindGroup,
-}
-
-impl Mixing {
-    fn new(gpu: &Gpu, size: (u32, u32)) -> Self {
-        let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("vidcut dissolve"),
-            size: wgpu::Extent3d {
-                width: size.0,
-                height: size.1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: MIXING,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&Default::default());
-        let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vidcut dissolve"),
-            size: LETTERING as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let (w, h) = (f64::from(size.0), f64::from(size.1));
-        let whole = [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0];
-        gpu.queue
-            .write_buffer(&params, 0, &lettering_of(whole, KEEP_ALL, 1.0, None, None));
-        let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("vidcut dissolve"),
-            layout: &gpu.lettering_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&gpu.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: params.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-            ],
-        });
-        Self { size, view, bind }
-    }
 }
 
 struct Moves {
@@ -1215,15 +1119,9 @@ impl Moves {
     }
 }
 
-const MOVING: usize = 9 * 16;
+const MOVING: usize = 8 * 16;
 
-fn motion_bytes(
-    m: &Moving,
-    gaps: [bool; 2],
-    mode: u32,
-    size: (u32, u32),
-    colors: Option<Hdr>,
-) -> Vec<u8> {
+fn motion_bytes(m: &Moving, gaps: [bool; 2], size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
     let Shift {
         upper_in,
         upper,
@@ -1249,18 +1147,11 @@ fn motion_bytes(
     ];
     let flags = [upper_in, feather, mixes_blur, still].map(u32::from);
     let gaps = [gaps[0], gaps[1], false, false].map(u32::from);
-    let mode = [mode, 0, 0, 0];
     floats
         .iter()
         .flatten()
         .flat_map(|v| (*v as f32).to_le_bytes())
-        .chain(
-            flags
-                .iter()
-                .chain(&gaps)
-                .chain(&mode)
-                .flat_map(|v| v.to_le_bytes()),
-        )
+        .chain(flags.iter().chain(&gaps).flat_map(|v| v.to_le_bytes()))
         .collect()
 }
 
@@ -1322,7 +1213,6 @@ fn lettered_over(
 type Bound = (wgpu::BindGroup, Option<f64>, bool, u32);
 
 const OVER_ALL: f64 = 0.0;
-const ADDED: f64 = 1.0;
 const IN_MIX: f64 = 2.0;
 
 struct MixDraw<'a, 'm> {
@@ -1375,7 +1265,7 @@ impl MixDraw<'_, '_> {
         self.gpu.queue.write_buffer(
             &moves.params,
             0,
-            &motion_bytes(moving, gaps, 0, self.size, self.colors),
+            &motion_bytes(moving, gaps, self.size, self.colors),
         );
         let canvas = &self.canvases[depth].view;
         let mut pass = begin(encoder, canvas, Some(wgpu::Color::TRANSPARENT));
@@ -1699,7 +1589,7 @@ type D3d11Formats = (
     wgpu::TextureFormat,
 );
 
-pub type Layers<'a> = (&'a [Vec<Placed>], &'a [bool], &'a [u32], Option<Hdr>);
+pub type Layers<'a> = (&'a [Vec<Placed>], &'a [u32], Option<Hdr>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Drawn {
@@ -1745,7 +1635,7 @@ impl Screen {
         gpu: &Gpu,
         picture: Option<&Arc<Picture>>,
         titles: &[TitleOver],
-        (placed, crosses, kernels, colors): Layers<'_>,
+        (placed, kernels, colors): Layers<'_>,
         width: u32,
         height: u32,
     ) -> Drawn {
@@ -1764,7 +1654,6 @@ impl Screen {
                 _ => false,
             } && same_titles(&self.drawn_titles, titles)
                 && self.drawn_placed == placed
-                && self.drawn_crosses == crosses
                 && self.drawn_kernels == kernels
                 && self.drawn_colors == colors
                 && self.drawn_output_lut == self.output_lut
@@ -1776,18 +1665,17 @@ impl Screen {
         let limit = gpu.device.limits().max_texture_dimension_2d;
         let fits = |p: &Arc<Picture>| p.width() <= limit && p.height() <= limit;
         let picture = picture.filter(|p| fits(p));
-        type Shown<'a> = (&'a Arc<Picture>, Option<f64>, Option<Wipe>, Option<Moving>);
+        type Shown<'a> = (&'a Arc<Picture>, Option<f64>, Option<Wipe>);
         let layers: Vec<Shown> = picture
             .into_iter()
-            .map(|p| (p, None, None, None))
+            .map(|p| (p, None, None))
             .chain(picture.into_iter().flat_map(|p| {
                 p.over()
                     .iter()
                     .filter(|o| fits(&o.picture))
-                    .map(|o| match (o.wipe, o.moving) {
-                        (_, Some(m)) => (&o.picture, None, None, Some(m)),
-                        (Some(w), None) => (&o.picture, None, Some(w), None),
-                        (None, None) => (&o.picture, Some(f64::from(o.level())), None, None),
+                    .map(|o| match o.wipe {
+                        Some(w) => (&o.picture, None, Some(w)),
+                        None => (&o.picture, Some(f64::from(o.level())), None),
                     })
             }))
             .collect();
@@ -1830,28 +1718,7 @@ impl Screen {
             }
         };
         let wipes: Vec<Option<Wipe>> = layers.iter().map(|l| l.2).collect();
-        let wipe_of = |i: usize| wipes.get(i).copied().flatten();
-        let moving_of = |i: usize| layers.get(i).and_then(|l| l.3);
-        let crossed = |i: usize| crosses.get(i).copied().unwrap_or(false);
-        let crossed_wipe = |i: usize| wipe_of(i).is_some() && crossed(i);
-        let holds = |i: usize| i + 1 < n && crossed_wipe(i + 1);
-        let part = |i: usize| match wipe_of(i) {
-            Some(w) if !holds(i) => Some(shown_part(w, size)),
-            _ => None,
-        };
-        let pair_at = |i: usize| i + 1 < n && crossed(i + 1) && wipe_of(i + 1).is_none();
-        let mut paired = vec![false; n];
-        let mut moved = 0;
-        let mut i = 0;
-        while i < n {
-            if pair_at(i) {
-                paired[i..i + 2].fill(true);
-                moved += usize::from(moving_of(i + 1).is_some());
-                i += 2;
-            } else {
-                i += 1;
-            }
-        }
+        let part = |i: usize| wipes.get(i).copied().flatten().map(|w| shown_part(w, size));
         let exported = self.exported;
         let alpha = self.alpha;
         let clock = std::time::Instant::now();
@@ -1899,10 +1766,9 @@ impl Screen {
                 } | if alpha { ALPHA } else { 0 };
                 let made = made_with.filter(|_| blurs).and(placing.as_ref());
                 let open = made.map(|(p, l)| (blur::opened(p), *l));
-                let adds = match (around > 0, paired[i]) {
-                    (true, _) => IN_MIX,
-                    (false, true) => ADDED,
-                    (false, false) => OVER_ALL,
+                let adds = match around > 0 {
+                    true => IN_MIX,
+                    false => OVER_ALL,
                 };
                 let how = (open.as_ref().or(placing.as_ref()), kernel, colors, adds);
                 let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
@@ -1949,12 +1815,8 @@ impl Screen {
                 .collect::<Vec<_>>()
                 .into(),
         };
-        let mixes = |i: usize| pair_at(i) && moving_of(i + 1).is_none();
-        if (0..n).any(mixes) && self.mixing.as_ref().is_none_or(|m| m.size != size) {
-            self.mixing = Some(Mixing::new(gpu, size));
-        }
         self.moves.retain(|m| m.size == size);
-        while self.moves.len() < moved + nests.moved {
+        while self.moves.len() < nests.moved {
             self.moves.push(Moves::new(gpu, size));
         }
         let mut moves = self.moves.iter();
@@ -1976,7 +1838,7 @@ impl Screen {
             self.wide = Some(Wide::new(gpu, size, colors));
         }
         let format = if floats { MIXING } else { TARGET };
-        if (blending || (0..n).any(holds))
+        if blending
             && self
                 .below
                 .as_ref()
@@ -2003,9 +1865,9 @@ impl Screen {
         let canvas = wide.map_or(&target.view, |w| &w.view);
         let canvas_texture = wide.map_or(&target.texture, |w| &w.texture);
         let blends = |i: usize| binds.get(i).is_some_and(|b| b.3 != 0);
-        let (drawing, lettering, paired) = match wide {
-            Some(_) => (&gpu.wide_drawing, &gpu.lettering_wide, &gpu.paired_wide),
-            None => (&gpu.screen_drawing, &gpu.lettering, &gpu.paired),
+        let (drawing, lettering) = match wide {
+            Some(_) => (&gpu.wide_drawing, &gpu.lettering_wide),
+            None => (&gpu.screen_drawing, &gpu.lettering),
         };
         let mut clear = Some(match alpha {
             true => wgpu::Color::TRANSPARENT,
@@ -2026,7 +1888,7 @@ impl Screen {
             height: size.1,
             depth_or_array_layers: 1,
         };
-        let starts = |i: usize| blends(i) || crossed_wipe(i) || holds(i) || nests.starts_at(i);
+        let starts = |i: usize| blends(i) || nests.starts_at(i);
         let mut i = 0;
         let mut next_mix = 0;
         loop {
@@ -2090,38 +1952,7 @@ impl Screen {
             if i >= n {
                 break;
             }
-            if crossed_wipe(i) || holds(i) {
-                if clear.is_some() {
-                    drop(begin(&mut encoder, canvas, clear.take()));
-                }
-                let below = self.below.as_ref().expect("made for a wipe");
-                if let Some((x, y, w, h)) = part(i).filter(|p| p.2 > 0 && p.3 > 0) {
-                    let at = wgpu::Origin3d { x, y, z: 0 };
-                    encoder.copy_texture_to_texture(
-                        wgpu::TexelCopyTextureInfo {
-                            origin: at,
-                            ..below.texture.as_image_copy()
-                        },
-                        wgpu::TexelCopyTextureInfo {
-                            origin: at,
-                            ..canvas_texture.as_image_copy()
-                        },
-                        wgpu::Extent3d {
-                            width: w,
-                            height: h,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                }
-                if holds(i) {
-                    encoder.copy_texture_to_texture(
-                        canvas_texture.as_image_copy(),
-                        below.texture.as_image_copy(),
-                        whole,
-                    );
-                }
-            }
-            if (blends(i) || (mixes(i) && blends(i + 1))) && !holds(i) {
+            if blends(i) {
                 if clear.is_some() {
                     drop(begin(&mut encoder, canvas, clear.take()));
                 }
@@ -2136,88 +1967,9 @@ impl Screen {
                     },
                 );
             }
-            if pair_at(i)
-                && let Some(m) = moving_of(i + 1)
-            {
-                let moves = moves.next().expect("made for each move");
-                let gaps = [i, i + 1].map(|k| moving_of(k).is_some_and(|m| m.gap));
-                for (gap, (view, (bind, level, placed, _))) in gaps.into_iter().zip(
-                    [&moves.outgoing, &moves.incoming]
-                        .into_iter()
-                        .zip(&binds[i..i + 2]),
-                ) {
-                    let mut pass = begin(&mut encoder, view, Some(wgpu::Color::TRANSPARENT));
-                    if gap {
-                        continue;
-                    }
-                    if *placed {
-                        pass.set_pipeline(&gpu.adding);
-                    } else {
-                        pass.set_pipeline(&gpu.adding_scaled);
-                        pass.set_blend_constant(level_of(level.unwrap_or(1.0)));
-                    }
-                    pass.set_bind_group(0, bind, &[]);
-                    pass.draw(0..3, 0..1);
-                }
-                let mode = binds[i].3;
-                gpu.queue.write_buffer(
-                    &moves.params,
-                    0,
-                    &motion_bytes(&m, gaps, mode, size, colors),
-                );
-                let mut pass = begin(&mut encoder, canvas, clear.take());
-                if mode != 0 {
-                    let below = self.below.as_ref().expect("made for a composite mode");
-                    pass.set_pipeline(&gpu.moving_mode);
-                    pass.set_bind_group(1, &below.bind, &[]);
-                } else {
-                    pass.set_pipeline(&gpu.moving);
-                }
-                pass.set_bind_group(0, &moves.bind, &[]);
-                pass.draw(0..3, 0..1);
-                letter(&mut pass, lettering, &self.letters, &free, i + 1, n);
-                letter(&mut pass, lettering, &self.letters, &free, i + 2, n);
-                i += 2;
-                continue;
-            }
-            if pair_at(i) {
-                let mixing = self.mixing.as_ref().expect("made for a dissolve");
-                {
-                    let mut pass =
-                        begin(&mut encoder, &mixing.view, Some(wgpu::Color::TRANSPARENT));
-                    for (bind, level, placed, mode) in &binds[i..i + 2] {
-                        if *mode != 0 {
-                            let below = self.below.as_ref().expect("made for a composite mode");
-                            pass.set_pipeline(&gpu.adding_mode);
-                            pass.set_bind_group(1, &below.bind, &[]);
-                        } else if *placed {
-                            pass.set_pipeline(&gpu.adding);
-                        } else {
-                            pass.set_pipeline(&gpu.adding_scaled);
-                            pass.set_blend_constant(level_of(level.unwrap_or(1.0)));
-                        }
-                        pass.set_bind_group(0, bind, &[]);
-                        pass.draw(0..3, 0..1);
-                    }
-                }
-                let mut pass = begin(&mut encoder, canvas, clear.take());
-                if blends(i) || blends(i + 1) {
-                    let below = self.below.as_ref().expect("made for a composite mode");
-                    pass.set_pipeline(paired);
-                    pass.set_bind_group(1, &below.bind, &[]);
-                } else {
-                    pass.set_pipeline(lettering);
-                }
-                pass.set_bind_group(0, &mixing.bind, &[]);
-                pass.draw(0..3, 0..1);
-                letter(&mut pass, lettering, &self.letters, &free, i + 1, n);
-                letter(&mut pass, lettering, &self.letters, &free, i + 2, n);
-                i += 2;
-                continue;
-            }
             let mut pass = begin(&mut encoder, canvas, clear.take());
             let first = i;
-            while i < n && !pair_at(i) && (i == first || !starts(i)) {
+            while i < n && (i == first || !starts(i)) {
                 let (bind, level, placed, mode) = &binds[i];
                 let shown = part(i);
                 if shown.is_none_or(|p| p.2 > 0 && p.3 > 0) {
@@ -2301,7 +2053,6 @@ impl Screen {
         self.drawn = Some(picture.cloned());
         self.drawn_titles = titles.to_vec();
         self.drawn_placed = placed.to_vec();
-        self.drawn_crosses = crosses.to_vec();
         self.drawn_kernels = kernels.to_vec();
         self.drawn_colors = colors;
         self.drawn_output_lut = self.output_lut.clone();

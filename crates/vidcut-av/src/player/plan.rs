@@ -1,7 +1,7 @@
 use std::sync::{Arc, OnceLock};
 
 use vidcut_core::model::{Retime, WipeDirection};
-use vidcut_core::render::{Image, MovingKey, Placed, RenderPlan, Run, ShownTitle, VideoPiece};
+use vidcut_core::render::{Image, Placed, RenderPlan, Run, ShownTitle, VideoPiece};
 use vidcut_core::time::Rational;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -20,7 +20,6 @@ type Layer = (
     Pos,
     u32,
     Option<WipeDirection>,
-    Option<MovingKey>,
     Option<(u64, Retime)>,
 );
 
@@ -186,20 +185,17 @@ impl Plan {
         };
         let keys = &self.sources[i];
         let layers = piece.layers();
-        let motions = piece.motions();
         let smooths = piece.smooths();
         let over: Vec<Layer> = layers[1..]
             .iter()
-            .zip(&motions[1..])
             .zip(&smooths[1..])
             .zip(&keys[1..])
-            .map(|((((l, ramp), motion), smooth), key)| {
+            .map(|(((l, ramp), smooth), key)| {
                 let (weight, wipe) = ramp.map_or((0, None), |r| (r.weight(k), r.wipe));
-                let moving = motion.zip(*ramp).map(|(m, r)| m.at(&r, k).key());
                 let smoothed = smooth
                     .zip(*ramp)
                     .map(|(s, r)| (s.at(&r, k).to_bits(), s.retime));
-                (key.clone(), pos(l), weight, wipe, moving, smoothed)
+                (key.clone(), pos(l), weight, wipe, smoothed)
             })
             .collect();
         Id {
@@ -274,15 +270,6 @@ impl Plan {
                     },
                 )
         })
-    }
-
-    pub(crate) fn crosses_at(&self, t: i64) -> Vec<bool> {
-        let (i, _) = self.locate(t);
-        self.plan
-            .video
-            .get(i)
-            .map(VideoPiece::crosses)
-            .unwrap_or_default()
     }
 
     pub(crate) fn size(&self) -> (u32, u32) {
@@ -562,8 +549,6 @@ mod tests {
                     held: false,
                     moved: false,
                 }),
-                cross: false,
-                motion: None,
                 smooth: None,
             }],
         };
