@@ -1126,8 +1126,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - If the scale or the conversion puts two keys on one frame, vidcut keeps the first of them. Resolve keeps the first key when it scales.
   - At a gap, the missing side shows the tracks below. Where it covers the other picture, that picture does not show.
   - The pictures move and blur first. Then the composite mode of the outgoing clip mixes them with the tracks below. The tracks below do not move.
-  - With no outgoing clip, the composite mode of the incoming clip mixes them (measured in Resolve Studio 21.2.0).
     - The composite mode of the incoming clip has no effect during the transition.
+  - With no outgoing clip, the composite mode of the incoming clip mixes them (measured in Resolve Studio 21.2.0).
   - Resolve's measured geometry, blur and ease are in [gotchas](gotchas.md#resolves-otio-files).
   - A request makes one: `{"type": "push", "preset": "up", "border": 0.02}`, or `{"type": "slide", "preset": "top_left", "out": true}`.
   - An OTIO file holds them as Resolve's Push and Slide, with their values.
