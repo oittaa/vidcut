@@ -137,7 +137,7 @@ The plan:
   - ProRes 4444 and 4444 XQ: `YUVA444P10LE` on the CPU and `AYUV64LE` on VideoToolbox.
   - TIFF: `RGBA` or `RGBA64LE`.
   - OpenEXR: `GBRAPF32LE`.
-- A black piece is then a picture with an alpha of 0 (`VideoFrames::clear`). Thus a gap and a dip to black are transparent.
+- A black piece is then a picture with an alpha of 0 (`VideoFrames::clear`). Thus a gap is transparent.
 - The canvas holds premultiplied colors. `pixel_at` in `picture.wgsl` takes the alpha out before it converts the colors of the output. Why: a transfer curve gives another color for a premultiplied color.
   - `AlphaOut::Straight` writes that color.
   - `AlphaOut::Premultiplied` multiplies it by the alpha again.
