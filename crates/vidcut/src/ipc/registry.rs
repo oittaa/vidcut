@@ -39,9 +39,15 @@ pub fn register(instance: &Instance) -> std::io::Result<()> {
     vidcut_core::temp::write(&path, json.as_bytes())
 }
 
-pub fn unregister(pid: u32) {
-    let _ = std::fs::remove_file(entry_path(pid));
-    let _ = std::fs::remove_file(socket_path(pid));
+pub fn unregister(instance: &Instance) {
+    let _ = std::fs::remove_file(entry_path(instance.pid));
+    remove_socket(&instance.socket, &dir());
+}
+
+fn remove_socket(socket: &Path, dir: &Path) {
+    if socket.parent() == Some(dir) {
+        let _ = std::fs::remove_file(socket);
+    }
 }
 
 #[cfg(unix)]
@@ -91,10 +97,33 @@ pub fn list() -> Vec<Instance> {
         }
         match read(&path) {
             Some(i) if alive(i.pid) && super::transport::exists(&i.socket) => out.push(i),
-            Some(i) if !alive(i.pid) => unregister(i.pid),
+            Some(i) if !alive(i.pid) => unregister(&i),
             _ => {}
         }
     }
     out.sort_by_key(|i| i.pid);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remove_socket;
+
+    #[test]
+    fn a_socket_in_the_folder_goes() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("1234-salted.sock");
+        std::fs::write(&socket, b"").unwrap();
+        remove_socket(&socket, dir.path());
+        assert!(!socket.exists());
+    }
+
+    #[test]
+    fn a_file_outside_the_folder_stays() {
+        let (dir, other) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let file = other.path().join("notes.txt");
+        std::fs::write(&file, b"").unwrap();
+        remove_socket(&file, dir.path());
+        assert!(file.exists());
+    }
 }
