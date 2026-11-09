@@ -546,14 +546,14 @@ impl Blurred {
         &mut self,
         gpu: &Gpu,
         canvas: &Texture,
-        (placing, effects): (&Placing, &[Working]),
+        (placing, effects, kernel): (&Placing, &[Working], u32),
         encoder: &mut wgpu::CommandEncoder,
     ) {
         let scratch = self
             .scratch
             .as_ref()
             .expect("made for the effects of a mix");
-        let cut = canvas_bind(gpu, &canvas.view, placing, (0.0, 0.0));
+        let cut = canvas_bind(gpu, canvas, placing, (0.0, 0.0), kernel);
         add(gpu, &scratch[0].view, &cut, encoder);
         encoder.copy_texture_to_texture(
             scratch[0].texture.as_image_copy(),
@@ -1002,9 +1002,7 @@ fn effects_into(
 
 pub(super) fn opened(placing: &Placing) -> Placing {
     let mut out = placing.clone();
-    for l in &mut out.levels {
-        l.open();
-    }
+    out.level.open();
     out
 }
 
@@ -1013,26 +1011,43 @@ fn levels_bind(
     view: &wgpu::TextureView,
     placing: &Placing,
     [opacity, mode, adds, made]: [f64; 4],
+    (size, kernel): (wgpu::Extent3d, u32),
 ) -> wgpu::BindGroup {
-    let inner = super::innermost(Some(placing));
-    let levels = super::level_floats(inner);
+    let levels = super::level_floats(Some(&placing.level));
     let mut floats = vec![0.0_f64; super::PARAMS / 4 - levels.len()];
-    floats[40..45].copy_from_slice(&[inner.len() as f64, opacity, mode, adds, made]);
+    floats[4..6].copy_from_slice(&[f64::from(size.width), f64::from(size.height)]);
+    floats[40..45].copy_from_slice(&[1.0, opacity, mode, adds, made]);
     floats.extend(levels);
-    picture_bind(gpu, &floats, (view, view))
+    let mut bytes = float_bytes(&floats);
+    bytes[KERNEL * 4..(KERNEL + 1) * 4].copy_from_slice(&kernel.to_le_bytes());
+    bytes_bind(gpu, &bytes, (view, view))
 }
 
 fn mask_bind(gpu: &Gpu, view: &wgpu::TextureView, placing: &Placing) -> wgpu::BindGroup {
-    levels_bind(gpu, view, placing, [1.0, 0.0, 0.0, 4.0])
+    levels_bind(
+        gpu,
+        view,
+        placing,
+        [1.0, 0.0, 0.0, 4.0],
+        (wgpu::Extent3d::default(), 0),
+    )
 }
 
 pub(super) fn canvas_bind(
     gpu: &Gpu,
-    view: &wgpu::TextureView,
+    canvas: &Texture,
     placing: &Placing,
     (mode, adds): (f64, f64),
+    kernel: u32,
 ) -> wgpu::BindGroup {
-    levels_bind(gpu, view, placing, [1.0, mode, adds, 6.0])
+    let made = [1.0, mode, adds, 6.0];
+    levels_bind(
+        gpu,
+        &canvas.view,
+        placing,
+        made,
+        (canvas.texture.size(), kernel),
+    )
 }
 
 pub(super) fn shown_bind(
@@ -1054,7 +1069,7 @@ pub(super) fn whole_bind(
     level: Level,
     kernel: u32,
 ) -> wgpu::BindGroup {
-    let levels = super::level_floats(&[level]);
+    let levels = super::level_floats(Some(&level));
     let mut floats = vec![0.0_f64; super::PARAMS / 4 - levels.len()];
     floats[4..6].copy_from_slice(&[f64::from(w), f64::from(h)]);
     floats[40..42].copy_from_slice(&[1.0, 1.0]);

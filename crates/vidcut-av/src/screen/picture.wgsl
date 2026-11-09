@@ -14,7 +14,7 @@ struct Params {
     part: vec4<f32>,
     site: vec4<f32>,
     shrunk: vec4<f32>,
-    levels: array<vec4<f32>, 5u * LEVELS>,
+    levels: array<vec4<f32>, 5u>,
 };
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -148,7 +148,7 @@ fn resize_weight(x: f32, shrink: f32) -> f32 {
     return mix(tapered(k * 0.5, shrink), tapered((k + 1.0) * 0.5, shrink), a - k);
 }
 
-fn resized(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
+fn resized(u: vec2<f32>, spans: vec2<f32>) -> vec4<f32> {
     let level = clamp(ceil(log2(max(spans.x, spans.y) / 8.0)), 0.0, p.shrunk.x);
     let scale = exp2(level);
     let size = p.upright.xy / scale;
@@ -163,7 +163,7 @@ fn resized(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
         across[i] = resize_weight(f32(i - 7) - f.x, shrink.x);
         total_across += across[i];
     }
-    var sum = vec3<f32>(0.0);
+    var sum = vec4<f32>(0.0);
     var total_down = 0.0;
     for (var j = 0; j < 16; j++) {
         let wy = resize_weight(f32(j - 7) - f.y, shrink.y);
@@ -201,17 +201,17 @@ fn resamples(u: vec2<f32>, spans: vec2<f32>) -> bool {
     return max(spans.x, spans.y) < 1.0;
 }
 
-fn sample_at(q: vec2<f32>, level: f32) -> vec3<f32> {
+fn sample_at(q: vec2<f32>, level: f32) -> vec4<f32> {
     let i = u32(level);
     let texels = vec2<f32>(textureDimensions(halved, i));
     let s = stored(q) * stored_size() / (exp2(level) * texels);
-    return textureSampleLevel(halved, bilinear, s, level).rgb;
+    return textureSampleLevel(halved, bilinear, s, level);
 }
 
 fn sharp(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
     let kind = p.flags.w & 7u;
     if kind == 4u {
-        return resized(u, spans);
+        return resized(u, spans).rgb;
     }
     let level = clamp(ceil(log2(max(spans.x, spans.y) / 4.0)), 0.0, p.shrunk.x);
     let scale = exp2(level);
@@ -230,7 +230,7 @@ fn sharp(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
         for (var i = 1 - reach.x; i <= reach.x; i++) {
             let w = weight((f32(i) - f.x) / wide.x, kind) * wy;
             let q = (base + vec2<f32>(f32(i), f32(j)) + 0.5) / size;
-            sum += sample_at(clamp(q, half, vec2<f32>(1.0) - half), level) * w;
+            sum += sample_at(clamp(q, half, vec2<f32>(1.0) - half), level).rgb * w;
             total += w;
         }
     }
@@ -349,28 +349,27 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
         }
         return vec4<f32>(textureLoad(luma, vec2<i32>(px), 0).rgb, a * p.placed.y);
     }
-    let n = u32(p.placed.x);
-    var cover = 1.0;
-    var uv = vec2<f32>(0.0);
+    let row0 = p.levels[0];
+    let row1 = p.levels[1];
+    let edge = cut(row0, row1, p.levels[2], px);
+    let uv = edge.xy;
+    let cover = edge.z * faded(p.levels[3], p.levels[4], edge.xy);
+    let tilt = dot(vec3<f32>(px, 1.0), vec3<f32>(row0.w, row1.w, 1.0));
     var across = vec2<f32>(0.0);
     var down = vec2<f32>(0.0);
-    for (var i = 0u; i < n; i++) {
-        let a = p.levels[i * 5u];
-        let b = p.levels[i * 5u + 1u];
-        let c = cut(a, b, p.levels[i * 5u + 2u], px);
-        uv = c.xy;
-        cover *= c.z * faded(p.levels[i * 5u + 3u], p.levels[i * 5u + 4u], c.xy);
-        let w = dot(vec3<f32>(px, 1.0), vec3<f32>(a.w, b.w, 1.0));
-        if abs(w) >= 1e-6 {
-            across = vec2<f32>(a.x - uv.x * a.w, b.x - uv.y * a.w) / w;
-            down = vec2<f32>(a.y - uv.x * b.w, b.y - uv.y * b.w) / w;
-        }
+    if abs(tilt) >= 1e-6 {
+        across = vec2<f32>(row0.x - uv.x * row0.w, row1.x - uv.y * row0.w) / tilt;
+        down = vec2<f32>(row0.y - uv.x * row1.w, row1.y - uv.y * row1.w) / tilt;
     }
     if cover <= 0.0 {
         discard;
     }
     if p.made.x > 5.5 {
-        let c = textureLoad(halved, vec2<i32>(px), 0);
+        let spans = vec2<f32>(length(across * p.upright.xy), length(down * p.upright.xy));
+        var c = textureSampleLevel(halved, bilinear, uv, 0.0);
+        if resamples(uv, spans) {
+            c = resized(uv, spans);
+        }
         if c.a <= 0.0 {
             discard;
         }
@@ -779,7 +778,6 @@ struct Lettering {
     down: vec4<f32>,
     tilt: vec4<f32>,
     keep: vec4<f32>,
-    levels: array<vec4<f32>, 5u * LEVELS>,
 };
 
 @group(0) @binding(5) var<uniform> lettering: Lettering;
@@ -802,15 +800,6 @@ fn fs_title(in: Out) -> @location(0) vec4<f32> {
     if any(at + reach <= vec2<f32>(0.0)) || any(at - reach >= vec2<f32>(1.0)) {
         discard;
     }
-    var cover = 1.0;
-    let n = u32(k.w);
-    for (var i = 0u; i < n; i++) {
-        let c = cut(lettering.levels[i * 5u], lettering.levels[i * 5u + 1u], lettering.levels[i * 5u + 2u], px);
-        cover *= c.z * faded(lettering.levels[i * 5u + 3u], lettering.levels[i * 5u + 4u], c.xy);
-    }
-    if cover <= 0.0 {
-        discard;
-    }
     let spans = vec2<f32>(length(across * size), length(down * size));
     let taps = box_taps(spans);
     var sum = vec4<f32>(0.0);
@@ -830,7 +819,7 @@ fn fs_title(in: Out) -> @location(0) vec4<f32> {
     if transfer != 0u && shown.a > 0.0 {
         shown = vec4<f32>(widened(shown.rgb / shown.a, transfer) * shown.a, shown.a);
     }
-    return shown * (cover * m.w);
+    return shown * m.w;
 }
 
 fn widened(rgb: vec3<f32>, transfer: u32) -> vec3<f32> {

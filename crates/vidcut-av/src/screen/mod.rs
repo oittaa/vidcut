@@ -1183,14 +1183,14 @@ fn letter(
     lettering: &wgpu::RenderPipeline,
     letters: &[Letters],
     titles: &[TitleOver],
-    after: usize,
-    layers: usize,
+    (after, layers): (usize, usize),
+    size: (u32, u32),
 ) {
     for t in titles
         .iter()
         .filter(|t| t.above == after || (after == layers && t.above > after))
     {
-        lettered_over(pass, lettering, letters, t);
+        lettered_over(pass, lettering, letters, t, size);
     }
 }
 
@@ -1199,14 +1199,25 @@ fn lettered_over(
     lettering: &wgpu::RenderPipeline,
     letters: &[Letters],
     t: &TitleOver,
+    size: (u32, u32),
 ) {
     let Some(l) = letters.iter().find(|l| l.shows(t)) else {
         return;
     };
+    let shown = t.wipe.map(|w| shown_part(w, size));
+    if shown.is_some_and(|p| p.2 == 0 || p.3 == 0) {
+        return;
+    }
+    if let Some((x, y, w, h)) = shown {
+        pass.set_scissor_rect(x, y, w, h);
+    }
     pass.set_pipeline(lettering);
     for tile in &l.tiles {
         pass.set_bind_group(0, &tile.bind, &[]);
         pass.draw(0..3, 0..1);
+    }
+    if shown.is_some() {
+        pass.set_scissor_rect(0, 0, size.0, size.1);
     }
 }
 
@@ -1227,6 +1238,7 @@ struct MixDraw<'a, 'm> {
     size: (u32, u32),
     moves: &'a mut std::slice::Iter<'m, Moves>,
     colors: Option<Hdr>,
+    kernel: u32,
 }
 
 impl MixDraw<'_, '_> {
@@ -1292,7 +1304,13 @@ impl MixDraw<'_, '_> {
                 MixPart::Title(j) => {
                     let mut pass = begin(encoder, canvas, None);
                     let lettering = &self.gpu.lettering_wide;
-                    lettered_over(&mut pass, lettering, self.letters, &self.titles[*j]);
+                    lettered_over(
+                        &mut pass,
+                        lettering,
+                        self.letters,
+                        &self.titles[*j],
+                        self.size,
+                    );
                 }
                 MixPart::Mix(inner) => {
                     self.mix(encoder, inner, depth + 1);
@@ -1317,9 +1335,9 @@ impl MixDraw<'_, '_> {
         let (effects, factor) = bared(&mut placing, &mut 1.0);
         let mode = f64::from(placing.mode.code());
         if effects.is_empty() {
-            return blur::canvas_bind(self.gpu, &canvas.view, &placing, (mode, adds));
+            return blur::canvas_bind(self.gpu, canvas, &placing, (mode, adds), self.kernel);
         }
-        let how = (&placing, &effects[..]);
+        let how = (&placing, &effects[..], self.kernel);
         self.blurred.canvas_effects(self.gpu, canvas, how, encoder);
         blur::shown_bind(
             self.gpu,
@@ -1392,19 +1410,10 @@ impl Letters {
         }
     }
 
-    fn place(
-        &self,
-        gpu: &Gpu,
-        size: (u32, u32),
-        (t, around): (&TitleOver, usize),
-        colors: Option<Hdr>,
-    ) {
+    fn place(&self, gpu: &Gpu, size: (u32, u32), t: &TitleOver, colors: Option<Hdr>) {
         let p = &self.picture;
         let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
         let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
-        let frame = (f64::from(size.0), f64::from(size.1));
-        let placing =
-            (!t.placed.is_empty()).then(|| Placing::whole_inside(&t.placed, frame, around));
         for tile in &self.tiles {
             let (pw, ph) = (f64::from(tile.size.0), f64::from(tile.size.1));
             let (left, top) = (
@@ -1430,15 +1439,12 @@ impl Letters {
                     0.0,
                 ],
             );
-            let map = placing
-                .as_ref()
-                .map_or(own, |l| chain(&l.inner(frame), &own));
             let keep = if t.turn[3] == 0.0 {
                 KEEP_ALL
             } else {
                 [-left / pw, -top / ph, (fw - left) / pw, (fh - top) / ph]
             };
-            let bytes = lettering_of(map, keep, f64::from(t.alpha), placing.as_ref(), colors);
+            let bytes = lettering_of(own, keep, f64::from(t.alpha), colors);
             gpu.queue.write_buffer(&tile.params, 0, &bytes);
         }
     }
@@ -1734,11 +1740,9 @@ impl Screen {
                     _ => None,
                 };
                 let full = placed.get(i).map(Vec::as_slice);
-                let around = nests.around_layer(i);
                 let mut placing = made_with.or(full).filter(|p| !p.is_empty()).map(|p| {
                     let (frame, fitted, pixels) = picture.placed_in(size);
-                    let placing = Placing::inside(p, frame, (fitted, pixels), around);
-                    (placing, level.unwrap_or(1.0))
+                    (Placing::new(p, frame, fitted, pixels), level.unwrap_or(1.0))
                 });
                 let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
                 let (effects, factor) = placing
@@ -1747,7 +1751,7 @@ impl Screen {
                 let live = match (made_with, full) {
                     (Some(_), Some(full)) if placing.is_some() => {
                         let (frame, fitted, pixels) = picture.placed_in(size);
-                        let all = Placing::inside(full, frame, (fitted, pixels), around).effects;
+                        let all = Placing::new(full, frame, fitted, pixels).effects;
                         all.get(effects.len()..)
                             .map(<[_]>::to_vec)
                             .unwrap_or_default()
@@ -1766,7 +1770,7 @@ impl Screen {
                 } | if alpha { ALPHA } else { 0 };
                 let made = made_with.filter(|_| blurs).and(placing.as_ref());
                 let open = made.map(|(p, l)| (blur::opened(p), *l));
-                let adds = match around > 0 {
+                let adds = match nests.layer_in_mix(i) {
                     true => IN_MIX,
                     false => OVER_ALL,
                 };
@@ -1800,9 +1804,8 @@ impl Screen {
             }
         }
         for l in &self.letters {
-            let found = titles.iter().enumerate().find(|(_, t)| l.shows(t));
-            if let Some((j, t)) = found {
-                l.place(gpu, size, (t, nests.around_title(j)), colors);
+            if let Some(t) = titles.iter().find(|t| l.shows(t)) {
+                l.place(gpu, size, t, colors);
             }
         }
         let free: std::borrow::Cow<'_, [TitleOver]> = match nests.outer.is_empty() {
@@ -1810,7 +1813,7 @@ impl Screen {
             false => titles
                 .iter()
                 .enumerate()
-                .filter(|(j, _)| nests.around_title(*j) == 0 && nests.follows[*j].is_none())
+                .filter(|(j, _)| !nests.title_in_mix(*j) && nests.follows[*j].is_none())
                 .map(|(_, t)| t.clone())
                 .collect::<Vec<_>>()
                 .into(),
@@ -1909,6 +1912,7 @@ impl Screen {
                     size,
                     moves: &mut moves,
                     colors,
+                    kernel: if exported { RESIZE | WIDENS } else { 0 },
                 };
                 mixing.mix(&mut encoder, &outer.mix, 0);
                 let bind = mixing.finished(&mut encoder, &outer.mix, 0, OVER_ALL);
@@ -1944,7 +1948,7 @@ impl Screen {
                     .zip(&nests.follows)
                     .filter(|(_, follows)| **follows == Some(next_mix))
                 {
-                    lettered_over(&mut pass, lettering, &self.letters, t);
+                    lettered_over(&mut pass, lettering, &self.letters, t, size);
                 }
                 i = i.max(outer.layers.1);
                 next_mix += 1;
@@ -1995,7 +1999,7 @@ impl Screen {
                         pass.set_scissor_rect(0, 0, size.0, size.1);
                     }
                 }
-                letter(&mut pass, lettering, &self.letters, &free, i + 1, n);
+                letter(&mut pass, lettering, &self.letters, &free, (i + 1, n), size);
                 i += 1;
             }
         }
@@ -3608,20 +3612,15 @@ fn write_plane(
     );
 }
 
-const LEVELS: usize = vidcut_core::render::NESTED + 1;
-
-fn shader() -> String {
-    format!(
-        "const LEVELS: u32 = {LEVELS}u;\n{}",
-        include_str!("picture.wgsl")
-    )
+fn shader() -> &'static str {
+    include_str!("picture.wgsl")
 }
 
 const PER_LEVEL: usize = 5;
 
-const PARAMS: usize = (15 + PER_LEVEL * LEVELS) * 16;
+const PARAMS: usize = (15 + PER_LEVEL) * 16;
 
-const LETTERING: usize = (4 + PER_LEVEL * LEVELS) * 16;
+const LETTERING: usize = 4 * 16;
 const KEEP_ALL: [f64; 4] = [-1e6, -1e6, 1e6, 1e6];
 
 fn halvings(
@@ -3644,7 +3643,7 @@ fn halvings(
     } else {
         (sw, sh)
     };
-    let most = match innermost(placing.map(|(p, _)| p)).last() {
+    let most = match placing.map(|(p, _)| &p.level) {
         None => {
             let [_, _, w, h] = picture.placement(size.0, size.1);
             f64::max(upright.0 / w, upright.1 / h)
@@ -3685,60 +3684,30 @@ fn bared(placing: &mut Placing, level: &mut f64) -> (Vec<Working>, f64) {
     if effects.is_empty() {
         return (effects, 1.0);
     }
-    let opacity: f64 = innermost(Some(placing)).iter().map(|l| l.opacity).product();
-    let factor = *level * opacity;
-    for l in &mut placing.levels {
-        l.opacity = 1.0;
-    }
+    let factor = *level * placing.level.opacity;
+    placing.level.opacity = 1.0;
     *level = 1.0;
     (effects, factor)
 }
 
-fn innermost(placing: Option<&Placing>) -> &[Level] {
-    placing.map_or(&[][..], |p| {
-        &p.levels[p.levels.len().saturating_sub(LEVELS)..]
-    })
-}
-
-fn level_floats(levels: &[Level]) -> Vec<f64> {
-    let mut floats = Vec::with_capacity(4 * PER_LEVEL * LEVELS);
-    for l in levels {
+fn level_floats(level: Option<&Level>) -> Vec<f64> {
+    let mut floats = Vec::with_capacity(4 * PER_LEVEL);
+    if let Some(l) = level {
         let [a, b, e, c, d, f, g, h] = l.back;
         floats.extend([a, b, e, g, c, d, f, h]);
         floats.extend(l.edge);
         floats.extend(l.soft.inner);
         floats.extend([l.soft.reach[0], l.soft.reach[1], l.opacity, 0.0]);
     }
-    floats.resize(4 * PER_LEVEL * LEVELS, 0.0);
+    floats.resize(4 * PER_LEVEL, 0.0);
     floats
 }
 
-fn lettering_of(
-    map: [f64; 8],
-    keep: [f64; 4],
-    alpha: f64,
-    placing: Option<&Placing>,
-    colors: Option<Hdr>,
-) -> Vec<u8> {
+fn lettering_of(map: [f64; 8], keep: [f64; 4], alpha: f64, colors: Option<Hdr>) -> Vec<u8> {
     let [a, b, e, c, d, f, g, h] = map;
-    let levels = innermost(placing);
     let transfer = transfer_of(colors);
-    let mut floats = vec![
-        a,
-        b,
-        e,
-        alpha,
-        c,
-        d,
-        f,
-        levels.len() as f64,
-        g,
-        h,
-        transfer,
-        0.0,
-    ];
+    let mut floats = vec![a, b, e, alpha, c, d, f, 0.0, g, h, transfer, 0.0];
     floats.extend(keep);
-    floats.extend(level_floats(levels));
     floats
         .into_iter()
         .flat_map(|v| (v as f32).to_le_bytes())
@@ -3951,9 +3920,9 @@ fn params_of(
     for v in [hdr, turns, uv, kernel, across, down, mixes_in, alpha] {
         out.extend_from_slice(&v.to_le_bytes());
     }
-    let levels = innermost(placing.map(|(p, _)| p));
+    let level = placing.map(|(p, _)| &p.level);
     let mut floats = vec![
-        levels.len() as f64,
+        f64::from(u8::from(level.is_some())),
         placing.map_or(0.0, |(_, l)| *l),
         placing.map_or(0.0, |(p, _)| f64::from(p.mode.code())),
         adds,
@@ -3996,7 +3965,7 @@ fn params_of(
         woven[1],
         f64::from(u8::from(bare)),
     ]);
-    floats.extend(level_floats(levels));
+    floats.extend(level_floats(level));
     for v in floats {
         out.extend_from_slice(&(v as f32).to_le_bytes());
     }
@@ -4031,6 +4000,7 @@ mod tests {
             dy: 0,
             turn: [0.0, 0.0, 1.0, 0.0],
             alpha: 1.0,
+            wipe: None,
             placed: Vec::new(),
             nth: 0,
         }
@@ -4092,7 +4062,7 @@ mod tests {
 
     #[test]
     fn the_shader_compiles() {
-        let module = naga::front::wgsl::parse_str(&super::shader()).unwrap();
+        let module = naga::front::wgsl::parse_str(super::shader()).unwrap();
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),

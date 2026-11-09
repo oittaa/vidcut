@@ -1172,6 +1172,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Change Transition Type, Set as Default Transition
   - cutting, copying and pasting transitions
 
+- **A title in a transition** (measured in Resolve Studio 21.2.0):
+  - A title acts as a picture with clear parts.
+  - A Cross Dissolve fades it. A wipe shows a part of it.
+  - A Push moves it with its side.
+  - In a Slide it stays, and the incoming clip covers it.
+
 ### 8.12 Subtitles (pp. 645–646, 702, 1227–1248)
 - **Subtitle tracks** (pp. 646, 702, 1228, 1232, 1245):
   - Add Subtitle Track adds a subtitle track above the video tracks. It is in Timeline Actions, and in the right-click menu of a track header.
@@ -2143,9 +2149,14 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - The compound clip mixes as one picture with the clip on the other side. A compound clip with clear parts shows the tracks below through them, as a placed clip does.
   - A side with a composite mode also acts as on a plain clip.
   - A compound clip with no hidden frames follows [X27](deviations.md#x27-a-dissolve-short-of-media-is-shortened).
+  - A clip with a composite mode alone inside a compound clip acts as a plain clip with that mode.
   - The sound fade of a picture edit also fades the sound of the compound clip on its audio track.
   - A Smooth Cut acts as on a plain clip too. The compound clip is one picture of the frame size.
   - vidcut also takes a dip to color at an edge.
+- **A speed on a compound clip** (measured in Resolve Studio 21.2.0):
+  - Its tracks play at that speed. At 50%, a dissolve inside it takes twice as many frames, with a new level on each frame.
+  - The Retime Process of the compound clip does nothing. With Frame Blend, a hard cut inside it stays a hard cut.
+  - The Retime Process of a clip inside it acts on that clip.
 - **Speed keyframes on a compound clip** (measured in Resolve Studio 21.2.0):
   - Each section plays at its own speed, in its picture and in its sound, as on a plain clip.
   - vidcut gives an edit to the picture and to the sound of the compound clip.
@@ -3902,6 +3913,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
+    - That picture has the size of the frame, and it is made first. These facts follow (measured in Resolve Studio 21.2.0):
+      - A clip at Zoom 0.5 in a compound clip at Zoom 2 is softer than a clip at Zoom 1. One picture and two pictures inside give the same softness.
+      - An effect on a clip inside works before the crop of the compound clip. Thus the cut edge stays hard.
     - The pictures of the compound clip in the frame set how they mix (measured in Resolve Studio 21.1.2). This rule is for each frame.
     - **One picture in the frame:** it acts as if it were on the timeline ([X164](deviations.md#x164-a-mode-inside-a-compound-clip-always-mixes-with-the-tracks-below)).
       - Its composite mode mixes with the tracks below the compound clip.

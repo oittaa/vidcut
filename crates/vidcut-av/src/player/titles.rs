@@ -35,7 +35,7 @@ fn steady(t: &Title, size: (u32, u32)) -> Title {
 }
 
 fn level(t: &Title, s: &ShownTitle) -> f64 {
-    t.opaque() * s.fade.map_or(1.0, |r| r.level(0))
+    t.opaque() * s.fade.map_or(1.0, |r| r.shown(0))
 }
 
 fn key_of(t: &Title, s: &ShownTitle, size: (u32, u32), timeline: u32) -> Key {
@@ -122,6 +122,7 @@ impl Titles {
                 }
             };
             let alpha = level(&to, shown) as f32;
+            let wipe = shown.fade.and_then(|r| r.mask(0));
             if key.3 {
                 out.extend(pictures.iter().flatten().map(|p| TitleOver {
                     above: *above,
@@ -130,6 +131,7 @@ impl Titles {
                     dy: 0,
                     turn: [0.0, 0.0, 1.0, 0.0],
                     alpha,
+                    wipe,
                     placed: super::plan::previewed(&shown.placed, placing),
                     nth: 0,
                 }));
@@ -169,6 +171,7 @@ impl Titles {
                         (now.turn - from.turn).to_radians() as f32,
                     ],
                     alpha,
+                    wipe,
                     placed: super::plan::previewed(&shown.placed, placing),
                     nth: 0,
                 });

@@ -370,20 +370,17 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
     };
     let fit = content(p, c, (w, h));
     let pixels = pixels_of(p, c, (w, h));
-    let level_of = |x: Picture| {
-        Placing::new(&[Placed::at(c, x, run, at)], (w, h), fit, pixels)
-            .levels
-            .pop()
-    };
+    let level_of =
+        |x: Picture| Placing::new(&[Placed::at(c, x, run, at)], (w, h), fit, pixels).level;
     let placed = [Placed::at(c, shown.clone(), run, at)];
     let middle = placed[0]
         .zoomed()
         .map_or(Picture::MIDDLE, |b| flipped(&shown, b.center));
-    let level = Placing::new(&placed, (w, h), fit, pixels).levels.pop()?;
+    let level = Placing::new(&placed, (w, h), fit, pixels).level;
     let plain = level_of(Picture {
         dynamic_zoom: None,
         ..shown.clone()
-    })?;
+    });
     let z = shown.dynamic_zoom.unwrap_or_default();
     let scale = vec2(picture.width() / w as f32, picture.height() / h as f32);
     let whole = (fit[2] * f64::from(scale.x)).hypot(fit[3] * f64::from(scale.y)) / 2.0;
@@ -395,7 +392,7 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
         }),
         ..shown.clone()
     };
-    let ends = [level_of(fixed(z.start))?, level_of(fixed(z.end))?];
+    let ends = [level_of(fixed(z.start)), level_of(fixed(z.end))];
     Some(Shown {
         clip: c.id.clone(),
         anchor: anchored(&shown.sampled(c.content_at(at) as f64), (w, h), fit),
