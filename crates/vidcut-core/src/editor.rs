@@ -7035,7 +7035,9 @@ pub fn query(
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             let mut v = media_json(p, m, env, &env.proxy_dir());
             v["info"] = serde_json::to_value(&m.info).unwrap_or_default();
-            v["used_by"] = json!(p.clips_using(media).map(|c| &c.id).collect::<Vec<_>>());
+            let pooled = p.compounds.iter().filter(|k| k.holds(media));
+            let users = p.clips_using(media).map(|c| &c.id);
+            v["used_by"] = json!(users.chain(pooled.map(|k| &k.id)).collect::<Vec<_>>());
             v
         }
         Request::Probe { path } => {
