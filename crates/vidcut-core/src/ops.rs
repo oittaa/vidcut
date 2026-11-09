@@ -66,6 +66,28 @@ pub enum MoveMode {
     Overwrite,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Place {
+    /// Write over what is there; nothing else moves.
+    #[default]
+    Overwrite,
+    /// On V1: open the timeline at `at`; later clips move right.
+    Insert,
+    /// On V1: take the place of the clip under `at`; later clips follow.
+    Replace,
+}
+
 fn main_index(p: &Project) -> usize {
     p.track_index(MAIN).expect("every project has V1")
 }

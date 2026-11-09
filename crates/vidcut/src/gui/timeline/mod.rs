@@ -2176,6 +2176,7 @@ impl Workspace {
         if matches!(
             d.drag.gesture,
             Gesture::Media { .. }
+                | Gesture::Compound { .. }
                 | Gesture::Title { .. }
                 | Gesture::Generator { .. }
                 | Gesture::Transition { .. }
@@ -3037,6 +3038,28 @@ impl Workspace {
         });
     }
 
+    pub(crate) fn start_compound_drag(
+        &mut self,
+        compound: &str,
+        name: &str,
+        len: i64,
+        press: Pos2,
+    ) {
+        self.timeline.snap_flipped = false;
+        self.timeline.drag = Some(ActiveDrag {
+            drag: Drag::new(
+                Gesture::Compound {
+                    compound: compound.to_string(),
+                    name: name.to_string(),
+                    len,
+                },
+                press,
+            ),
+            upper: false,
+            preview: Preview::default(),
+        });
+    }
+
     pub(crate) fn start_subtitle_drag(&mut self, media: &str, press: Pos2) {
         let Some(p) = self.project_shared() else {
             return;
@@ -3185,6 +3208,7 @@ impl Workspace {
                     .map_or(media.clone(), |m| m.name.clone()),
                 Some((0, cues.iter().map(|c| c.1).max().unwrap_or(0))),
             ),
+            Gesture::Compound { name, len, .. } => (name.clone(), Some((0, *len))),
             Gesture::Title { template, len } => (template.label.clone(), Some((0, *len))),
             Gesture::Generator { label, len, .. } => (label.clone(), Some((0, *len))),
             Gesture::Transition { label, kind } => (
