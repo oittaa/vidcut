@@ -6295,7 +6295,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         p.markers.clear();
         p.marks = Default::default();
     }
-    let empty = p.compounds.is_empty() && p.tracks.iter().all(|t| t.clips.is_empty());
+    let empty = p.tracks.iter().all(|t| t.clips.is_empty());
     if empty {
         if p.settings.auto_format
             && let Some(v) = t
@@ -6317,7 +6317,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             p.settings.drop_frame = true;
         }
         p.settings.start_tc = t.start_tc;
-        if !adopt_rate {
+        if !adopt_rate || !p.compounds.is_empty() {
             p.settings.set_fps(rate);
         }
         groups_to_rate(p, rate);
