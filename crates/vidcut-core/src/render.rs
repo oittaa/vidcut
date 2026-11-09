@@ -1564,8 +1564,10 @@ impl Default for Pace {
     }
 }
 
+const FRAME_SLACK: f64 = 0.002;
+
 pub fn source_frame(x: f64) -> i64 {
-    (x + 0.002).floor() as i64
+    (x + FRAME_SLACK).floor() as i64
 }
 
 impl Pace {
@@ -2441,14 +2443,28 @@ fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
     let (lo, hi) = reached.iter().fold((first, last), |(lo, hi), (t, cut)| {
         (lo.min(cut - t.before), hi.max(cut + t.after))
     });
-    let room = |frames: i64, rate: Option<&f64>| match rate.copied().unwrap_or(speed) {
-        0.0 => 0,
-        v => (frames as f64 / v.abs()).ceil() as i64,
-    };
+    let room =
+        |frames: i64, part: f64, rate: Option<&f64>| match (frames, rate.copied().unwrap_or(speed))
+        {
+            (0, _) | (_, 0.0) => 0,
+            (n, v) => ((n as f64 + part) / v.abs()).ceil() as i64,
+        };
     let (early, late) = (rates.first(), rates.last());
+    let (near, far) = match n.kind {
+        TrackKind::Video if speed > 0.0 => {
+            let past = |k: i64| {
+                let u = pace.skip + k;
+                let rest = pace.position(u as f64) - pace.frame(u) as f64;
+                if rest > FRAME_SLACK { rest } else { 0.0 }
+            };
+            let step = late.copied().unwrap_or(speed);
+            (past(0), (1.0 - past(c.duration - 1) - step).max(0.0))
+        }
+        _ => (0.0, 0.0),
+    };
     let (head, tail) = match speed > 0.0 {
-        true => (room(first - lo, early), room(hi - last, late)),
-        false => (room(hi - last, early), room(first - lo, late)),
+        true => (room(first - lo, near, early), room(hi - last, far, late)),
+        false => (room(hi - last, 0.0, early), room(first - lo, 0.0, late)),
     };
     let wide = (head > 0 || tail > 0).then(|| {
         let mut wide = c.clone();
