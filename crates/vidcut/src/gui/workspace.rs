@@ -1978,6 +1978,10 @@ impl Workspace {
             theme::apply(&ctx, &self.snap.theme);
             self.theme = Some(self.snap.theme.clone());
         }
+        if self.snap.project.as_ref().map(|p| &p.path) != self.timeline.project.as_ref() {
+            let path = self.snap.project.as_ref().map(|p| p.path.clone());
+            self.timeline.switch_project(path);
+        }
         let tracks = self.project().map_or(0, |p| p.tracks.len());
         if tracks < self.timeline.tracks {
             self.timeline.set_edit(None);

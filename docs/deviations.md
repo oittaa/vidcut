@@ -3039,7 +3039,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - The window has only a name. `edit.compound` takes `clips` and an optional `name`.
   - A compound clip in the Media Pool does not open. Its menu has Append to Timeline, Place at Playhead and Delete.
-  - `edit.place_compound` puts it on V1 and A1, and a drag does not.
+  - `edit.place_compound` puts it on V1 and A1, or on the tracks that `track` names. A drag uses that request.
   - A clip goes in with its picture and its sound.
   - A clip on a locked track refuses the request.
   - `edit.compound_range` is Convert In and Out to Compound Clip. A clip in the range on a locked track refuses it too.

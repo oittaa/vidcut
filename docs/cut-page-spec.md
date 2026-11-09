@@ -41,7 +41,6 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
-- a drag of a compound clip from the Media Pool ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
 - Mixer FX other than the Ducker, Paste Attributes, guides
@@ -2125,6 +2124,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
 - **A compound clip of the Media Pool** on a timeline:
   - An append gives a linked picture on V1 and sound on A1.
   - A range of it trims these two, as a clip of a file.
+  - A drag follows [§7.3](#73-drag-and-drop-from-the-pool-or-viewer-pp-648-679-694695), as a drag of a file does.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.
@@ -2137,10 +2137,14 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A Cross Dissolve and a sound fade at an edge act as on a plain clip.
   - The dissolve uses the frames that a trim hides in the compound clip.
   - The compound clip mixes as one picture with the clip on the other side. A compound clip with clear parts shows the tracks below through them, as a placed clip does.
-  - A side with a composite mode fades over the other side, as a placed clip does.
+  - vidcut fades a side with a composite mode over the other side, as a placed clip does.
   - A compound clip with no hidden frames follows [X27](deviations.md#x27-a-dissolve-short-of-media-is-shortened).
   - The sound fade of a picture edit also fades the sound of the compound clip on its audio track.
   - vidcut also takes a dip to color at an edge. It refuses a wipe, a push, a slide and a smooth cut there ([todo](todo/compound-clips.md)).
+- **Speed keyframes on a compound clip** (measured in Resolve Studio 21.2.0):
+  - Each section plays at its own speed, in its picture and in its sound, as on a plain clip.
+  - vidcut gives an edit to the picture and to the sound of the compound clip.
+  - An OTIO file holds them as a `TimeEffect` on the `Stack`, as on a clip. Its source positions count from the start of the compound clip.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

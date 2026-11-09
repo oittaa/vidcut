@@ -194,6 +194,7 @@ flowchart TD
   - For a turned title, the shader first cuts the picture at the edges of the frame (`Lettering`).
   - its level, from a fade or its opacity (`Lettering`)
   - the pictures of the compound clips around it (`ShownTitle::placed`)
+- Titles with the same drawing share one `TitlePicture`. The screen keeps one `Letters` for each use (`TitleOver::nth`), because each use has its own place and level.
 - Until a title is drawn, the newest drawing of its clip shows, moved to its place. Thus a drag, a new color or new text does not blink. The frame is not exact until then.
 - `Player::set_subtitles` takes the shown track (`SubtitleView`), each cue with its color set (`Speakers::color_of`).
 - `player::subtitles` draws what shows at a frame with `burn::draw`, at the times when titles draw. It keeps the drawings by what they show (`subtitles::shown`), in the store of the titles.

@@ -4747,12 +4747,17 @@ fn mutate(
             ops::compound::remove_pooled(p, compound)?;
             json!({ "removed": compound })
         }
-        Request::EditPlaceCompound { compound, at } => {
+        Request::EditPlaceCompound {
+            compound,
+            at,
+            track,
+            how,
+        } => {
             let at = at
                 .as_ref()
                 .map(|t| ctx(p, playhead).resolve(t))
                 .transpose()?;
-            let nested = ops::compound::place_pooled(p, compound, at)?;
+            let nested = ops::compound::place_pooled(p, compound, at, track.as_deref(), *how)?;
             json!({ "clips": nested.clips, "warnings": nested.warnings })
         }
         Request::EditDecompose { clips } => {

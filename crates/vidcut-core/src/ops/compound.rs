@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use super::follow::{self, Before, Edit};
 use super::{
-    block_clip, clear_range, ensure_track, fix_audio, linked, locate, split_at, tracks, unlocked,
+    Place, block_clip, clear_range, ensure_track, fix_audio, linked, locate, main_index,
+    shift_from, split_at, tracks, unlocked,
 };
 use crate::error::{Error, Result};
 use crate::model::{Clip, Compound, Kept, PooledCompound, Project, Track, TrackKind};
@@ -277,33 +279,121 @@ pub fn remove_pooled(p: &mut Project, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn place_pooled(p: &mut Project, id: &str, at: Option<i64>) -> Result<Nested> {
+struct Host<'a> {
+    number: &'a str,
+    name: &'a str,
+    span: (i64, i64),
+}
+
+fn put_host(
+    p: &mut Project,
+    host: &Host,
+    (kind, part): (TrackKind, Compound),
+    clips: &mut Vec<String>,
+) -> Result<()> {
+    let ti = ensure_track(p, &format!("{}{}", tracks::prefix(kind), host.number))?;
+    unlocked(p, ti)?;
+    let (a, b) = host.span;
+    clear_range(p, ti, a, b);
+    fix_audio(p, ti);
+    let mut c = block_clip(p.alloc_clip_id(), (a, b - a), None, None);
+    c.video = kind == TrackKind::Video;
+    c.name = Some(host.name.to_string());
+    c.compound = Some(part);
+    clips.push(c.id.clone());
+    p.tracks[ti].clips.push(c);
+    p.tracks[ti].sort();
+    Ok(())
+}
+
+fn make_room(
+    p: &mut Project,
+    how: Place,
+    at: i64,
+    frames: i64,
+) -> Result<(i64, Option<(i64, i64)>)> {
+    let ti = main_index(p);
+    unlocked(p, ti)?;
+    if how == Place::Insert {
+        let at = if p.settings.ripple_on {
+            at.min(p.tracks[ti].end())
+        } else {
+            at
+        };
+        split_at(p, ti, at);
+        shift_from(p, ti, at, frames);
+        return Ok((at, None));
+    }
+    let t = &p.tracks[ti];
+    let ci = t
+        .clip_at(at)
+        .ok_or_else(|| Error::invalid(format!("no clip on {} to replace", t.id)))?;
+    let (a, b) = (t.clips[ci].start, t.clips[ci].end());
+    let others = linked::tied_to(p, &t.clips[ci].id);
+    for (id, _) in &others {
+        unlocked(p, locate(p, id)?.0)?;
+    }
+    linked::take(p, &others)?;
+    clear_range(p, ti, a, b);
+    shift_from(p, ti, b, frames - (b - a));
+    Ok((a, Some((a, b))))
+}
+
+pub fn place_pooled(
+    p: &mut Project,
+    id: &str,
+    at: Option<i64>,
+    track: Option<&str>,
+    how: Place,
+) -> Result<Nested> {
     let item = p
         .compounds
         .iter()
         .find(|x| x.id == id)
         .cloned()
         .ok_or_else(|| Error::not_found(format!("no compound clip {id}")))?;
-    let at = at.unwrap_or_else(|| p.end());
-    let span = (at, at + item.frames());
+    if let Some(t) = track {
+        ensure_track(p, t)?;
+    }
+    let frames = item.frames();
+    let mut at = at.unwrap_or_else(|| p.end());
+    let number = track.and_then(|t| t.get(1..)).unwrap_or("1");
+    let ripples = number == "1" && how != Place::Overwrite;
+    if ripples && how == Place::Insert {
+        linked::split_main(p, at, &[]);
+    }
+    let before = Before::of(p);
+    let mut old = None;
+    if ripples {
+        (at, old) = make_room(p, how, at, frames)?;
+    }
+    let host = Host {
+        number,
+        name: &item.name,
+        span: (at, at + frames),
+    };
     let mut clips = Vec::new();
-    for (kind, video, part) in [
-        (TrackKind::Video, true, item.picture),
-        (TrackKind::Audio, false, item.sound),
-    ] {
-        let Some(k) = part else { continue };
-        let name = tracks::prefix(kind).to_string() + "1";
-        let ti = ensure_track(p, &name)?;
-        unlocked(p, ti)?;
-        clear_range(p, ti, span.0, span.1);
-        fix_audio(p, ti);
-        let mut host = block_clip(p.alloc_clip_id(), (span.0, span.1 - span.0), None, None);
-        host.video = video;
-        host.name = Some(item.name.clone());
-        host.compound = Some(k);
-        clips.push(host.id.clone());
-        p.tracks[ti].clips.push(host);
-        p.tracks[ti].sort();
+    if let Some(k) = item.picture.clone() {
+        put_host(p, &host, (TrackKind::Video, k), &mut clips)?;
+    }
+    if ripples {
+        let kept: Vec<(i64, i64)> = old
+            .iter()
+            .map(|&(a, b)| (a, a + frames.min(b - a)))
+            .collect();
+        follow::follow(
+            p,
+            &before,
+            &Edit {
+                created: &clips,
+                kept: &kept,
+                replaced: old.map(|(a, b)| (a + frames, b)),
+                ..Edit::default()
+            },
+        );
+    }
+    if let Some(k) = item.sound.clone() {
+        put_host(p, &host, (TrackKind::Audio, k), &mut clips)?;
     }
     let mut warnings = Vec::new();
     let dropped = otio::transitions::prune(p);
@@ -468,8 +558,18 @@ pub(crate) fn target(
 
 fn put_back(p: &mut Project, ti: usize, inner: &Track, block: &Clip, made: &mut Vec<String>) {
     let mut renamed = HashMap::new();
-    for x in &inner.clips {
-        let Some((mut y, _)) = crate::render::inside(x, block) else {
+    let cut = crate::render::stretches(block, TrackKind::Audio);
+    let parts = if cut.is_empty() {
+        std::slice::from_ref(block)
+    } else {
+        cut.as_slice()
+    };
+    for (x, part) in inner
+        .clips
+        .iter()
+        .flat_map(|x| parts.iter().map(move |part| (x, part)))
+    {
+        let Some((mut y, _)) = crate::render::inside(x, part) else {
             continue;
         };
         if p.clip(&y.id).is_some() {
@@ -496,6 +596,34 @@ fn put_back(p: &mut Project, ti: usize, inner: &Track, block: &Clip, made: &mut 
             x.id = p.alloc_transition_id();
         }
         p.tracks[ti].transitions.push(x);
+    }
+}
+
+fn fit_sound(p: &mut Project, ti: usize, made: &[String]) {
+    let clips = &mut p.tracks[ti].clips;
+    let stayed = |c: &&Clip| !made.contains(&c.id);
+    for i in 0..clips.len() {
+        if !made.contains(&clips[i].id) {
+            continue;
+        }
+        let before = clips[..i]
+            .iter()
+            .rev()
+            .filter(stayed)
+            .find_map(Clip::audio_range);
+        let after = clips[i + 1..]
+            .iter()
+            .filter(stayed)
+            .find_map(Clip::audio_range);
+        let (start, end) = (clips[i].start, clips[i].end());
+        if let Some(a) = clips[i].audio.as_mut() {
+            if let Some((_, reach)) = before {
+                a.head = a.head.max(reach - start);
+            }
+            if let Some((reach, _)) = after {
+                a.tail = a.tail.min(reach - end);
+            }
+        }
     }
 }
 
@@ -532,6 +660,8 @@ pub(crate) fn unnest(
         };
         let ti = target(p, inner.kind, base, number(inner) - 1, span);
         put_back(p, ti, inner, &block, &mut made);
+        fit_sound(p, ti, &made);
+        fix_audio(p, ti);
     }
     let dropped = otio::transitions::prune(p);
     if dropped > 0 {
@@ -564,6 +694,36 @@ mod tests {
     }
 
     #[test]
+    fn a_decompose_ends_an_l_cut_at_the_trimmed_end_of_the_compound_clip() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        l_cut(&mut f, &a, 10);
+        let hosts = nest(&mut f, &[&a]);
+        let trim = json!({"clip": hosts[0], "edge": "tail", "to": "55f", "ripple": false});
+        f.ok(req("edit.trim", trim));
+        f.append("m1", 0, 15);
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        let range = f.editor.project().clip(&a).unwrap().audio_range();
+        assert_eq!(range, Some((0, 55)));
+    }
+
+    #[test]
+    fn a_decompose_keeps_the_l_cut_of_the_clip_before_it() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        let b = f.append("m1", 50, 100);
+        let hosts = nest(&mut f, &[&b]);
+        l_cut(&mut f, &a, 10);
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        let p = f.editor.project();
+        let ranges = (
+            p.clip(&a).unwrap().audio_range(),
+            p.clip(&b).unwrap().audio_range(),
+        );
+        assert_eq!(ranges, (Some((0, 60)), Some((60, 100))));
+    }
+
+    #[test]
     fn a_range_cuts_each_track_at_the_marks_and_nests_what_is_between() {
         let mut f = Fixture::new(&[(4.0, true)]);
         f.append("m1", 0, 60);
@@ -584,6 +744,67 @@ mod tests {
         f.ok(req("media.compound", json!({"range": "10f..40f"})));
         assert_eq!(f.editor.project().tracks, before);
         assert_eq!(f.editor.project().compounds[0].frames(), 30);
+    }
+
+    #[test]
+    fn a_replace_by_a_pooled_compound_clip_leaves_the_clip_above_where_it_is() {
+        let mut f = Fixture::new(&[(8.0, true)]);
+        let _ = f.append("m1", 0, 40);
+        let _ = f.append("m1", 0, 40);
+        let _ = f.append("m1", 0, 30);
+        let above = f.append("m1", 0, 20);
+        let moved = json!({"clips": [above], "to": 50, "mode": "overwrite", "track": "V2"});
+        f.ok(req("edit.move", moved));
+        f.ok(req("media.compound", json!({"range": "0f..12f"})));
+        let id = f.editor.project().compounds[0].id.clone();
+        let place = json!({"compound": id, "at": "45f", "how": "replace"});
+        f.ok(req("edit.place_compound", place));
+        assert_eq!(f.editor.project().clip(&above).unwrap().start, 50);
+    }
+
+    #[test]
+    fn a_pooled_compound_clip_inserts_at_an_edit_and_moves_the_clips_after_it() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let _ = f.append("m1", 0, 30);
+        let after = f.append("m1", 30, 60);
+        f.ok(req("media.compound", json!({"range": "0f..12f"})));
+        let id = f.editor.project().compounds[0].id.clone();
+        let place = json!({"compound": id, "at": "30f", "how": "insert"});
+        f.ok(req("edit.place_compound", place));
+        assert_eq!(f.editor.project().clip(&after).unwrap().start, 42);
+    }
+
+    #[test]
+    fn a_longer_speed_edit_moves_the_sound_of_the_next_compound_clip() {
+        let mut f = Fixture::new(&[(8.0, true)]);
+        let a = f.append("m1", 0, 60);
+        let b = f.append("m1", 60, 100);
+        let first = nest(&mut f, &[&a]);
+        let second = nest(&mut f, &[&b]);
+        let slower = json!({"clips": [first[0]], "speed": 0.5});
+        f.ok(req("edit.change_speed", slower));
+        let start = |id: &str| f.editor.project().clip(id).map(|c| c.start);
+        assert_eq!(
+            (start(&second[0]), start(&second[1])),
+            (Some(120), Some(120))
+        );
+    }
+
+    #[test]
+    fn a_speed_keyframe_goes_on_both_blocks_of_a_compound_clip() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 60);
+        let parts = nest(&mut f, &[&a]);
+        let key = json!({"clips": [parts[0]], "param": "speed", "at": "30f"});
+        f.ok(req("keyframes.add", key));
+        let sections = |id: &str| {
+            let c = f.editor.project().clip(id).unwrap().clone();
+            c.speed.map(|s| s.sections.len())
+        };
+        assert_eq!(
+            (sections(&parts[0]), sections(&parts[1])),
+            (Some(2), Some(2))
+        );
     }
 
     #[test]
