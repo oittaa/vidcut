@@ -2452,6 +2452,14 @@ fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
     };
     let wide = (head > 0 || tail > 0).then(|| {
         let mut wide = c.clone();
+        if n.kind == TrackKind::Video {
+            let frozen = |k: i64| pace.speed_at(k) == 0.0;
+            at_own_speed(
+                &mut wide,
+                (1..=head).any(|k| frozen(-k)),
+                (0..tail).any(|k| frozen(c.duration + k)),
+            );
+        }
         wide.move_head(-head);
         wide.duration += tail;
         wide
@@ -2483,6 +2491,28 @@ fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
             .collect(),
         held: false,
     }
+}
+
+fn at_own_speed(c: &mut Clip, back: bool, on: bool) {
+    let pace = c.pace();
+    let Some(s) = c.speed.as_mut().filter(|_| back || on) else {
+        return;
+    };
+    let own = Section {
+        at: s.skip,
+        from: pace.position(s.skip as f64),
+        speed: pace.rate(0),
+        ease: None,
+    };
+    let earlier = s.sections.iter().filter(|x| !back && x.at < own.at);
+    let later = s.sections.iter().filter(|x| !on && x.at > own.at);
+    let mut sections: Vec<Section> = earlier.chain([&own]).chain(later).copied().collect();
+    if let [one] = sections.as_mut_slice()
+        && one.speed < 0.0
+    {
+        one.from -= one.speed;
+    }
+    s.sections = sections.into();
 }
 
 fn held_on(n: &Track, c: &Clip, t: &Transition, cut: i64) -> Laid {

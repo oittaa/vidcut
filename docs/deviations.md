@@ -3078,5 +3078,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A title alone does not act in this way. Its mode mixes with the tracks below.
 - **vidcut:**
   - The mode of one picture always mixes with the tracks below.
+  - A dissolve or a wipe at the edge of a compound clip is an exception.
+    - The compound clip has its usual values, and one clip with a mode is alone inside it.
+    - The clip plays without its mode for the length of the transition.
+    - Thus the picture steps at both ends of the transition.
 - **Why:**
   - A move of 1 pixel must not change a black frame to the correct picture. This behavior of Resolve is a fault.
