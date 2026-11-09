@@ -1040,7 +1040,7 @@ impl Live {
             let _ = r.tx.send(ReplyEvent::Done(result));
         }
         if let Some(i) = &self.instance {
-            ipc::registry::unregister(i.pid);
+            ipc::registry::unregister(i);
         }
     }
 

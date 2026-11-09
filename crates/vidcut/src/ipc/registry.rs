@@ -39,9 +39,9 @@ pub fn register(instance: &Instance) -> std::io::Result<()> {
     vidcut_core::temp::write(&path, json.as_bytes())
 }
 
-pub fn unregister(pid: u32) {
-    let _ = std::fs::remove_file(entry_path(pid));
-    let _ = std::fs::remove_file(socket_path(pid));
+pub fn unregister(instance: &Instance) {
+    let _ = std::fs::remove_file(entry_path(instance.pid));
+    let _ = std::fs::remove_file(&instance.socket);
 }
 
 #[cfg(unix)]
@@ -91,10 +91,29 @@ pub fn list() -> Vec<Instance> {
         }
         match read(&path) {
             Some(i) if alive(i.pid) && super::transport::exists(&i.socket) => out.push(i),
-            Some(i) if !alive(i.pid) => unregister(i.pid),
+            Some(i) if !alive(i.pid) => unregister(&i),
             _ => {}
         }
     }
     out.sort_by_key(|i| i.pid);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Instance, unregister};
+
+    #[test]
+    fn unregister_removes_the_socket_the_instance_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("1234-salted.sock");
+        std::fs::write(&socket, b"").unwrap();
+        unregister(&Instance {
+            pid: u32::MAX,
+            socket: socket.clone(),
+            project: None,
+            version: String::new(),
+        });
+        assert!(!socket.exists());
+    }
 }
