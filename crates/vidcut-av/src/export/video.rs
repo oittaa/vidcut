@@ -2939,6 +2939,7 @@ impl VideoFrames {
                     !taken[s]
                         && self.open[s].reader.input() == &input
                         && self.open[s].scale == *super_scale
+                        && self.open[s].reader.color_space() == *color_space
                 })
                 .collect();
             let reads_on = free
@@ -2947,7 +2948,6 @@ impl VideoFrames {
                 .find(|&s| self.open[s].reads_on(target));
             let s = match reads_on.or(free.first().copied()) {
                 Some(s) => {
-                    self.open[s].reader.set_color_space(*color_space);
                     if let Err(e) = self.open[s].reposition(*origin, from, target) {
                         self.open[s].current = None;
                         self.open[s].normalized = None;
@@ -2960,11 +2960,12 @@ impl VideoFrames {
                         .ahead
                         .reclaim(|k| k.0 == input)
                         .transpose()?
-                        .filter(|s| s.scale == *super_scale);
+                        .filter(|s| {
+                            s.scale == *super_scale && s.reader.color_space() == *color_space
+                        });
                     let opened = match reclaimed {
                         Some(mut source) => {
                             source.back();
-                            source.reader.set_color_space(*color_space);
                             source.reposition(*origin, from, target)?;
                             source
                         }
@@ -3079,6 +3080,7 @@ impl VideoFrames {
                 !used[*s]
                     && self.open[*s].reader.input() == &input
                     && self.open[*s].scale == super_scale
+                    && self.open[*s].reader.color_space() == color_space
             };
             let read = (0..self.open.len()).find(|s| free(s) && self.open[*s].left.is_none());
             let left = (0..self.open.len()).find(free);
@@ -3101,7 +3103,6 @@ impl VideoFrames {
             if let Some(s) = left {
                 let mut source = self.take_out(s);
                 self.ahead.start(slot(j, i), key, move || {
-                    source.reader.set_color_space(color_space);
                     source.resume(origin, from, target)?;
                     Ok(source)
                 });

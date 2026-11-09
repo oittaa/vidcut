@@ -2123,7 +2123,17 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 });
                 let wide = wide.as_ref().unwrap_or(c);
                 let k = c.compound.as_ref().expect("plays inside");
-                for n in k.tracks.iter().filter(|n| n.kind == t.kind) {
+                let cut = stretches(wide, t.kind);
+                let parts = if cut.is_empty() {
+                    std::slice::from_ref(wide)
+                } else {
+                    cut.as_slice()
+                };
+                let inner_tracks = k.tracks.iter().filter(|n| n.kind == t.kind);
+                let playing = parts
+                    .iter()
+                    .flat_map(|part| inner_tracks.clone().map(move |n| (part, n)));
+                for (part, n) in playing {
                     let mut v = n.clone();
                     v.id = t.id.clone();
                     v.duck = None;
@@ -2132,7 +2142,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     v.volume_db = t.volume_db;
                     v.video_enabled &= t.video_enabled;
                     v.render_cache &= t.render_cache;
-                    let laid = inner_layout(p, n, wide);
+                    let laid = inner_layout(p, n, part);
                     v.transitions = laid.transitions;
                     let mut clips: Vec<(Clip, Nest)> = laid
                         .clips
@@ -2149,8 +2159,8 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     let (clips, nests) = clips.into_iter().unzip();
                     v.clips = clips;
                     let shown = Shown {
-                        from: w.shown.from.max(from),
-                        to: w.shown.to.min(to),
+                        from: w.shown.from.max(from).max(part.start),
+                        to: w.shown.to.min(to).min(part.end()),
                         held: laid.held,
                     };
                     let fades: Vec<Fading> = w.fades.iter().chain(&fading).copied().collect();
@@ -2181,6 +2191,37 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
     Some((out, within))
 }
 
+pub(crate) fn stretches(c: &Clip, kind: TrackKind) -> Vec<Clip> {
+    if c.constant_speed().is_some() {
+        return Vec::new();
+    }
+    let pace = c.pace();
+    let mut spans: Vec<(i64, i64)> = Vec::new();
+    let mut way = 0.0;
+    for (a, b) in c.runs(c.start, c.end()) {
+        let v = pace.rate(a - c.start);
+        match spans.last_mut() {
+            Some((_, end)) if kind == TrackKind::Audio && v * way >= 0.0 => *end = b,
+            _ => {
+                spans.push((a, b));
+                way = 0.0;
+            }
+        }
+        if v != 0.0 {
+            way = v;
+        }
+    }
+    spans
+        .into_iter()
+        .map(|(a, b)| {
+            let mut part = c.clone();
+            part.move_head(a - c.start);
+            part.duration = b - a;
+            part
+        })
+        .collect()
+}
+
 struct Laid {
     clips: Vec<(Clip, Run)>,
     transitions: Vec<Transition>,
@@ -2196,7 +2237,13 @@ fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
         .filter_map(|t| Some((t, cuts.place(p, t)?)))
         .filter(|(t, cut)| cut - t.before < last && cut + t.after > first)
         .collect();
-    let speed = c.pace().speed();
+    let pace = c.pace();
+    let rates: Vec<f64> = c
+        .runs(c.start, c.end())
+        .iter()
+        .map(|(a, _)| pace.rate(a - c.start))
+        .collect();
+    let speed = rates.iter().copied().find(|v| *v != 0.0).unwrap_or(0.0);
     if speed == 0.0 {
         return match reached.first().filter(|_| n.kind == TrackKind::Video) {
             Some(&(t, cut)) => held_on(n, c, t, cut),
@@ -2210,10 +2257,14 @@ fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
     let (lo, hi) = reached.iter().fold((first, last), |(lo, hi), (t, cut)| {
         (lo.min(cut - t.before), hi.max(cut + t.after))
     });
-    let room = |frames: i64| (frames as f64 / speed.abs()).ceil() as i64;
+    let room = |frames: i64, rate: Option<&f64>| match rate.copied().unwrap_or(speed) {
+        0.0 => 0,
+        v => (frames as f64 / v.abs()).ceil() as i64,
+    };
+    let (early, late) = (rates.first(), rates.last());
     let (head, tail) = match speed > 0.0 {
-        true => (room(first - lo), room(hi - last)),
-        false => (room(hi - last), room(first - lo)),
+        true => (room(first - lo, early), room(hi - last, late)),
+        false => (room(hi - last, early), room(first - lo, late)),
     };
     let wide = (head > 0 || tail > 0).then(|| {
         let mut wide = c.clone();
@@ -2223,13 +2274,22 @@ fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
     });
     let wide = wide.as_ref().unwrap_or(c);
     let shown = |frames: i64| (frames as f64 / speed.abs()).floor() as i64;
+    let seen_in = |a: i64, b: i64| {
+        (0..wide.duration)
+            .filter(|&k| (a..b).contains(&wide.source_at(wide.start + k)))
+            .count() as i64
+    };
     Laid {
         clips: n.clips.iter().filter_map(|x| inside(x, wide)).collect(),
         transitions: reached
             .into_iter()
-            .map(|(t, _)| {
+            .map(|(t, cut)| {
                 let mut t = t.clone();
-                (t.before, t.after) = (shown(t.before), shown(t.after));
+                (t.before, t.after) = if rates.len() > 1 {
+                    (seen_in(cut - t.before, cut), seen_in(cut, cut + t.after))
+                } else {
+                    (shown(t.before), shown(t.after))
+                };
                 if speed < 0.0 {
                     std::mem::swap(&mut t.from, &mut t.to);
                     std::mem::swap(&mut t.before, &mut t.after);
@@ -2321,7 +2381,7 @@ fn paced_keys(y: &mut Clip, first_key: i64, speed: f64) {
 
 fn seen(x: &Clip, c: &Clip, (lo, hi): (i64, i64)) -> Option<(Clip, Run)> {
     if c.speed.is_some() {
-        let speed = c.pace().speed();
+        let speed = c.pace().rate(0);
         let (k0, k1) = shown_between(c, lo, hi)?;
         let mut y = x.clone();
         let walked = c.source_at(c.start + k0) - x.start;
@@ -2360,11 +2420,14 @@ fn seen(x: &Clip, c: &Clip, (lo, hi): (i64, i64)) -> Option<(Clip, Run)> {
     y.walk(s - x.start);
     y.start = c.start + s - first;
     y.duration = e - s;
-    if let Some(a) = y.audio.as_mut()
-        && (s > x.start || e < x.end())
-    {
-        a.head = 0;
-        a.tail = 0;
+    if let Some(a) = y.audio.as_mut() {
+        if s > x.start || e < x.end() {
+            a.head = 0;
+            a.tail = 0;
+        } else {
+            a.head = a.head.max(first - x.start);
+            a.tail = a.tail.min(last - x.end());
+        }
     }
     let run = Run {
         at: s - x.start - y.start,
@@ -2386,6 +2449,16 @@ pub(crate) fn paced(
     own: Option<&crate::model::Speed>,
     k: i64,
 ) -> Option<crate::model::Speed> {
+    if let Some(s) = c.speed.as_ref().filter(|s| s.scalar().is_none()) {
+        return Some(match own {
+            Some(own) => composed_over(own, c, k),
+            None => crate::model::Speed {
+                sections: s.sections.clone(),
+                skip: c.pace().after(k).skip,
+                effect: None,
+            },
+        });
+    }
     let outer = c.pace().speed();
     if let Some(s) = own.filter(|s| s.scalar().is_none() && outer != 0.0) {
         return Some(composed(s, outer));
@@ -2403,13 +2476,58 @@ pub(crate) fn paced(
 }
 
 fn composed(own: &crate::model::Speed, v: f64) -> crate::model::Speed {
+    crate::model::Speed {
+        sections: composed_from(own, own.skip as f64, v).into(),
+        skip: 0,
+        effect: None,
+    }
+}
+
+fn composed_over(own: &crate::model::Speed, c: &Clip, k: i64) -> crate::model::Speed {
+    let pace = c.pace();
+    let on = |at: i64| own.skip as f64 + pace.exact(at) - pace.exact(k);
+    let origin = position_in(&own.sections, on(k));
+    let mut sections = Vec::new();
+    for (a, b) in c.runs(c.start + k, c.end()) {
+        let at = a - c.start;
+        let v = pace.rate(at);
+        let from = position_in(&own.sections, on(at)) - origin;
+        if v == 0.0 {
+            sections.push(Section {
+                at: at - k,
+                from,
+                speed: 0.0,
+                ease: None,
+            });
+            continue;
+        }
+        sections.extend(
+            composed_from(own, on(at), v)
+                .into_iter()
+                .filter(|s| s.at < b - a)
+                .map(|s| Section {
+                    at: s.at + at - k,
+                    from: s.from + from,
+                    ..s
+                }),
+        );
+    }
+    crate::model::Speed {
+        sections: sections.into(),
+        skip: 0,
+        effect: None,
+    }
+}
+
+fn position_in(map: &[Section], u: f64) -> f64 {
+    let s = &map[map.partition_point(|s| s.at as f64 <= u).saturating_sub(1)];
+    s.from + (u - s.at as f64) * s.speed
+}
+
+fn composed_from(own: &crate::model::Speed, u0: f64, v: f64) -> Vec<Section> {
     let map = &own.sections;
     let index = |u: f64| map.partition_point(|s| s.at as f64 <= u).saturating_sub(1);
-    let pos = |u: f64| {
-        let s = &map[index(u)];
-        s.from + (u - s.at as f64) * s.speed
-    };
-    let u0 = own.skip as f64;
+    let pos = |u: f64| position_in(map, u);
     let i0 = index(u0);
     let mut bounds = vec![(0, i0)];
     if v > 0.0 {
@@ -2429,7 +2547,7 @@ fn composed(own: &crate::model::Speed, v: f64) -> crate::model::Speed {
         }
         same
     });
-    let sections: Vec<Section> = bounds
+    bounds
         .into_iter()
         .map(|(j, i)| Section {
             at: j,
@@ -2440,12 +2558,7 @@ fn composed(own: &crate::model::Speed, v: f64) -> crate::model::Speed {
                 .filter(|_| v > 0.0 && j > 0)
                 .map(|e| e.map(|x| x / v)),
         })
-        .collect();
-    crate::model::Speed {
-        sections: sections.into(),
-        skip: 0,
-        effect: None,
-    }
+        .collect()
 }
 
 enum Layer {
@@ -3493,6 +3606,36 @@ mod tests {
 
     fn fixture() -> Fixture {
         Fixture::new(&[(10.0, true), (4.0, true), (8.0, false)])
+    }
+
+    #[test]
+    fn sections_of_an_inner_clip_end_with_the_run_of_the_compound_clip() {
+        let speed = |list: &[(i64, f64, f64)]| crate::model::Speed {
+            sections: list
+                .iter()
+                .map(|&(at, from, speed)| Section {
+                    at,
+                    from,
+                    speed,
+                    ease: None,
+                })
+                .collect::<Vec<_>>()
+                .into(),
+            skip: 0,
+            effect: None,
+        };
+        let mut f = fixture();
+        let id = f.append("m1", 0, 70);
+        let mut c = f.editor.project().clip(&id).unwrap().clone();
+        c.speed = Some(speed(&[(0, 0.0, 2.0), (10, 20.0, 1.0)]));
+        let own = speed(&[(0, 0.0, 1.0), (20, 20.0, 2.0), (40, 60.0, 1.0)]);
+        let made = composed_over(&own, &c, 0);
+        let got: Vec<_> = made
+            .sections
+            .iter()
+            .map(|s| (s.at, s.from, s.speed))
+            .collect();
+        assert_eq!(got, [(0, 0.0, 2.0), (10, 20.0, 2.0), (30, 60.0, 1.0)]);
     }
 
     fn req(f: &mut Fixture, method: &str, params: serde_json::Value) {

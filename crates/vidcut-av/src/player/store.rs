@@ -608,7 +608,7 @@ impl Inner {
         down
     }
 
-    fn let_pool_go(&mut self, pool: usize, keep: Option<&Id>) -> Option<(Id, Arc<Picture>)> {
+    fn let_pool_go(&mut self, pool: usize, keep: Option<&Id>) -> Vec<(Id, Arc<Picture>)> {
         let ids: Vec<Id> = self
             .pools
             .get(&pool)
@@ -617,7 +617,7 @@ impl Inner {
             .filter(|id| Some(*id) != keep)
             .cloned()
             .collect();
-        let mut down = None;
+        let mut down = Vec::new();
         for id in ids {
             if !self.is_held(&id) {
                 self.remove(&id);
@@ -632,7 +632,7 @@ impl Inner {
                 .any(|(i, p)| *i == id && Arc::ptr_eq(p, &picture));
             if !on_its_way {
                 self.coming_down.push((id.clone(), picture.clone()));
-                down = Some((id, picture));
+                down.push((id, picture));
             }
         }
         down
@@ -725,6 +725,18 @@ mod tests {
         }
         let bytes = [Kind::Memory, Kind::Video].map(|k| store.bytes(k));
         assert_eq!(bytes, [6, 6]);
+    }
+
+    #[test]
+    fn each_picture_held_comes_down_when_their_pool_goes() {
+        let store = coming_down_to_memory(18, 18);
+        store.hold(0, Some(Id::at("clip", 0)));
+        store.hold(1, Some(Id::at("clip", 1)));
+        for (pos, pool) in [(0, 1), (1, 1), (2, 1), (3, 2)] {
+            store.put(Id::at("clip", pos), of_pool(pool));
+        }
+        let bytes = [Kind::Memory, Kind::Video].map(|k| store.bytes(k));
+        assert_eq!(bytes, [12, 6]);
     }
 
     #[test]

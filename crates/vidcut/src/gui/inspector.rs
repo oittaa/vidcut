@@ -2696,7 +2696,8 @@ fn speed_section(
     let (speed, length) = paced[0].shown;
     let rate = paced[0].rate;
     let frozen = speed == 0.0;
-    let count = paced.len();
+    let ids: Vec<String> = paced.iter().map(|c| c.id.clone()).collect();
+    let count = vidcut_core::ops::linked::leads(p, &ids).len();
     let turned = paced.iter().any(|c| c.shown.0 <= 0.0);
     let sped = paced
         .iter()
@@ -2704,13 +2705,10 @@ fn speed_section(
     let ramped = paced.iter().any(|c| c.ramped);
     let stuck = paced.iter().any(|c| c.ramped && c.shown.0 == 0.0);
     let back = paced.iter().any(|c| c.ramped && c.shown.0 < 0.0);
-    let keys = p
-        .clip(&paced[0].id)
-        .filter(|c| count == 1 && c.compound.is_none())
-        .map(|c| {
-            let keys = c.speed.as_ref().map(Speed::keyframes).unwrap_or_default();
-            (speed_mark(c, &keys, at), c.start < at && at < c.end())
-        });
+    let keys = p.clip(&paced[0].id).filter(|_| count == 1).map(|c| {
+        let keys = c.speed.as_ref().map(Speed::keyframes).unwrap_or_default();
+        (speed_mark(c, &keys, at), c.start < at && at < c.end())
+    });
     let header = |ui: &mut egui::Ui| {
         let mut act = keys.and_then(|k| speed_keys(ui, k));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2744,7 +2742,6 @@ fn speed_section(
         ui.end_row();
         let eases = p
             .clip(&paced[0].id)
-            .filter(|c| c.compound.is_none())
             .and_then(|c| vidcut_core::ops::speed::section_eases(c, paced[0].at));
         if let Some((now, options)) = eases {
             label(ui, "Ease", !now.is_linear());

@@ -1230,13 +1230,20 @@ pub enum Request {
     /// stay.
     #[serde(rename = "media.compound_remove")]
     MediaCompoundRemove { compound: String },
-    /// Put a compound clip of the Media Pool on V1 and A1, over what is
-    /// there, at `at`. Default: the end of the timeline. Returns its clips.
+    /// Put a compound clip of the Media Pool on the video track `track` and
+    /// on the audio track of its number, at `at`. Defaults: V1 and A1, the
+    /// end of the timeline, and `overwrite`. On V1, `insert` opens the
+    /// timeline at `at`, and `replace` takes the place of the clip under
+    /// `at`. On other tracks `how` is `overwrite`. Returns its clips.
     #[serde(rename = "edit.place_compound")]
     EditPlaceCompound {
         compound: String,
         #[serde(default)]
         at: Option<TimeSpec>,
+        #[serde(default)]
+        track: Option<String>,
+        #[serde(default)]
+        how: crate::ops::Place,
     },
     /// Decompose in Place: a compound clip becomes the clips it holds, at
     /// their times, trimmed to the part it shows. Inner track n goes on the

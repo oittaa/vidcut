@@ -283,6 +283,7 @@ pub struct TimelineView {
     pub(super) files: Option<crate::gui::subtitles::Files>,
     pub(super) retime: Option<crate::gui::retime::Retime>,
     pub(crate) subtitles_sent: Option<crate::gui::subtitles::SubtitlesKey>,
+    pub project: Option<std::path::PathBuf>,
 }
 
 impl Default for TimelineView {
@@ -345,11 +346,24 @@ impl Default for TimelineView {
             files: None,
             retime: None,
             subtitles_sent: None,
+            project: None,
         }
     }
 }
 
 impl TimelineView {
+    pub fn switch_project(&mut self, project: Option<std::path::PathBuf>) {
+        *self = Self {
+            options: std::mem::take(&mut self.options),
+            snap_flipped: self.snap_flipped,
+            fade_in_frames: self.fade_in_frames,
+            normalize_last: self.normalize_last.take(),
+            heard: self.heard,
+            project,
+            ..Self::default()
+        };
+    }
+
     pub fn set_edit(&mut self, e: Option<EditSel>) {
         self.edit = e;
         self.edits.clear();
@@ -2176,6 +2190,7 @@ impl Workspace {
         if matches!(
             d.drag.gesture,
             Gesture::Media { .. }
+                | Gesture::Compound { .. }
                 | Gesture::Title { .. }
                 | Gesture::Generator { .. }
                 | Gesture::Transition { .. }
@@ -3037,6 +3052,28 @@ impl Workspace {
         });
     }
 
+    pub(crate) fn start_compound_drag(
+        &mut self,
+        compound: &str,
+        name: &str,
+        len: i64,
+        press: Pos2,
+    ) {
+        self.timeline.snap_flipped = false;
+        self.timeline.drag = Some(ActiveDrag {
+            drag: Drag::new(
+                Gesture::Compound {
+                    compound: compound.to_string(),
+                    name: name.to_string(),
+                    len,
+                },
+                press,
+            ),
+            upper: false,
+            preview: Preview::default(),
+        });
+    }
+
     pub(crate) fn start_subtitle_drag(&mut self, media: &str, press: Pos2) {
         let Some(p) = self.project_shared() else {
             return;
@@ -3185,6 +3222,7 @@ impl Workspace {
                     .map_or(media.clone(), |m| m.name.clone()),
                 Some((0, cues.iter().map(|c| c.1).max().unwrap_or(0))),
             ),
+            Gesture::Compound { name, len, .. } => (name.clone(), Some((0, *len))),
             Gesture::Title { template, len } => (template.label.clone(), Some((0, *len))),
             Gesture::Generator { label, len, .. } => (label.clone(), Some((0, *len))),
             Gesture::Transition { label, kind } => (
@@ -4115,6 +4153,27 @@ mod tests {
     use vidcut_core::model::{Clip, ClipAudio, TrackKind};
 
     use super::*;
+
+    #[test]
+    fn another_project_clears_what_the_timeline_held() {
+        let mut t = TimelineView {
+            scroll: 5.0,
+            silence: Some(tools::SilenceDialog::new(vec!["c1".into()])),
+            ..TimelineView::default()
+        };
+        t.switch_project(Some("b.vidcut".into()));
+        assert_eq!((t.scroll, t.silence.is_none()), (0.0, true));
+    }
+
+    #[test]
+    fn another_project_keeps_the_way_the_timeline_works() {
+        let mut t = TimelineView {
+            fade_in_frames: true,
+            ..TimelineView::default()
+        };
+        t.switch_project(Some("b.vidcut".into()));
+        assert!(t.fade_in_frames);
+    }
 
     #[test]
     fn a_repaint_in_16_ms_comes_in_16_ms() {

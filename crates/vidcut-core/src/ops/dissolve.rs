@@ -249,9 +249,14 @@ fn room(
         .filter(|&a| a >= e)
         .min()
         .map_or(i64::MAX / 4, |a| a - e);
+    let moved = |c: &Clip, tail: bool| match c.audio.as_ref().filter(|_| sound) {
+        Some(a) if tail => -a.tail,
+        Some(a) => a.head,
+        None => 0,
+    };
     let media = |c: &Clip, tail: bool| match p.source_range(c) {
         _ if c.is_generator() => i64::MAX / 4,
-        Some(have) => c.room(tail, have),
+        Some(have) => c.room(tail, have) + moved(c, tail),
         None => 0,
     };
     let before = match f {
@@ -1144,6 +1149,22 @@ mod tests {
                 crate::otio::transitions::wipe_of(t)
             ),
             (before, after, true, None)
+        );
+    }
+
+    #[test]
+    fn a_sound_dissolve_at_an_l_cut_has_the_frames_of_the_moved_sound() {
+        let mut f = crate::test_support::Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 40, 90);
+        f.append("m1", 0, 40);
+        let roll = serde_json::json!({"clip": a, "edge": "tail", "by": 10});
+        f.ok(serde_json::json!({"method": "edit.audio_roll", "params": roll}));
+        let at = serde_json::json!({"at": "60f", "picture": false});
+        f.ok(serde_json::json!({"method": "edit.dissolve", "params": at}));
+        let t = &f.editor.project().tracks[0].transitions;
+        assert_eq!(
+            (t.len(), t[0].sound, t[0].before, t[0].after),
+            (1, true, 10, 0)
         );
     }
 }
