@@ -181,6 +181,23 @@ fn clear_range(p: &mut Project, ti: usize, a: i64, b: i64) {
     p.tracks[ti].clips.retain(|c| c.end() <= a || c.start >= b);
 }
 
+fn clear_tied(p: &mut Project, ti: usize, a: i64, b: i64) -> Result<()> {
+    let hit: Vec<(String, i64, i64)> = p.tracks[ti]
+        .clips
+        .iter()
+        .filter(|c| c.start < b && a < c.end())
+        .map(|c| (c.id.clone(), c.start, c.end()))
+        .collect();
+    for (id, start, end) in hit {
+        for (other, _) in linked::tied_to(p, &id) {
+            let tied = locate(p, &other)?.0;
+            unlocked(p, tied)?;
+            clear_range(p, tied, a.max(start), b.min(end));
+        }
+    }
+    Ok(())
+}
+
 fn shift_from(p: &mut Project, ti: usize, from: i64, d: i64) {
     for c in &mut p.tracks[ti].clips {
         if c.start >= from {
@@ -638,6 +655,7 @@ pub fn ripple_overwrite_block(
     };
     let len = block_len(&clips);
     if !is_main(p, ti) {
+        clear_tied(p, ti, a, b.max(a + lead + len))?;
         clear_range(p, ti, a, b.max(a + lead + len));
         let ids = place_block(p, ti, clips, a + lead);
         fix_audio(p, ti);
@@ -650,6 +668,7 @@ pub fn ripple_overwrite_block(
         (a, b)
     };
     let before = Before::of(p);
+    clear_tied(p, ti, a, b)?;
     clear_range(p, ti, a, b);
     shift_from(p, ti, b, lead + len - (b - a));
     let ids = place_block(p, ti, clips, a + lead);

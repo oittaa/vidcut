@@ -616,6 +616,12 @@ fn fit_sound(p: &mut Project, ti: usize, made: &[String]) {
             .filter(stayed)
             .find_map(Clip::audio_range);
         let (start, end) = (clips[i].start, clips[i].end());
+        let covered = before.is_some_and(|(_, reach)| reach >= end)
+            || after.is_some_and(|(reach, _)| reach <= start);
+        if covered {
+            clips[i].audio = None;
+            continue;
+        }
         if let Some(a) = clips[i].audio.as_mut() {
             if let Some((_, reach)) = before {
                 a.head = a.head.max(reach - start);
@@ -705,6 +711,29 @@ mod tests {
         f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
         let range = f.editor.project().clip(&a).unwrap().audio_range();
         assert_eq!(range, Some((0, 55)));
+    }
+
+    #[test]
+    fn a_decompose_keeps_an_l_cut_longer_than_the_first_clip_back() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        let short = f.append("m1", 50, 55);
+        let long = f.append("m1", 55, 100);
+        let hosts = nest(&mut f, &[&short, &long]);
+        l_cut(&mut f, &a, 10);
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        let range = f.editor.project().clip(&a).unwrap().audio_range();
+        assert_eq!(range, Some((0, 60)));
+    }
+
+    #[test]
+    fn a_media_replace_takes_the_sound_of_the_compound_clip() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 30);
+        nest(&mut f, &[&a]);
+        let replace = json!({"media": "m1", "range": "0f..10f", "at": 5});
+        f.ok(req("edit.ripple_overwrite", replace));
+        assert_eq!(f.track("A1"), vec![]);
     }
 
     #[test]
@@ -1120,7 +1149,8 @@ mod tests {
         let a = f.append("m1", 0, 50);
         let hosts = nest(&mut f, &[&a]);
         let r = f.ok(req("media.get", json!({"media": "m1"})));
-        assert_eq!(r.result["used_by"], json!(hosts));
+        let pooled = f.editor.project().compounds[0].id.clone();
+        assert_eq!(r.result["used_by"], json!([hosts[0], hosts[1], pooled]));
     }
 
     #[test]

@@ -3047,12 +3047,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A J or L cut that reaches a mark is undone at its picture cut, as at a blade.
   - A dissolve goes inside when its clips go inside. It plays there, and `edit.decompose` brings it back.
   - `edit.decompose` acts as Using Clips Only.
+  - After `edit.decompose` beside a J or L cut, the cut stays. A sound that comes back starts after that cut. A clip that the cut covers has no sound.
   - The sound of a clip on a video track goes on the lowest selected audio track, else on A1 or the first free track above.
 - **Why:**
   - A timeline starts at 00:00:00:00 ([X7](#x7-timelines-start-at-00000000)). Thus a compound clip has no start timecode.
   - A project has one timeline (X2). Thus a pool item has no timeline to open.
   - A clip holds its picture and sound as one. Half of a clip is not a thing that vidcut can select.
   - A sound that runs past a mark cannot stay on the timeline without its picture.
+  - The main track plays one sound at a time. Thus a sound that comes back cannot play under a J or L cut.
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
   - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
   - Preserving Audio Data was dimmed in the measurement. Thus its behavior is not known.
