@@ -623,6 +623,7 @@ Import:
   - `Compound::tracks` holds what plays. The picture block has the pictures. The sound block has the sounds (`sound_tracks`), each at the length of its own sound.
   - Each block keeps the dissolves of its tracks. `render::expanded` plays them (`inner_layout`).
   - `inner_layout` widens the compound clip to reach each dissolve that it shows a part of. `Shown` limits the track to the frames of the compound clip.
+    - A stretch widens at its own speed (`at_own_speed`). Thus each stretch has both sides of a dissolve that crosses a speed change.
   - `expanded` also widens it to reach a transition at its edge ([export](export.md#placed-pictures)).
   - A frozen compound clip on a frame of a transition holds the level of that frame (`held_on`).
     - `Shown::held` is the frame of the layout that each frame of the clip shows.
