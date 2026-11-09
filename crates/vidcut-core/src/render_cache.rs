@@ -415,6 +415,7 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
                 layer,
                 VideoPiece::Black { excluded: true, .. }
                     | VideoPiece::Generated { excluded: true, .. }
+                    | VideoPiece::Flat { excluded: true, .. }
             );
             let mixed = !(user && excluded);
             let placed = layer.placed();
@@ -497,6 +498,14 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
         } => {
             *excluded = false;
             placed.iter_mut().for_each(plain_placed);
+        }
+        VideoPiece::Flat {
+            pieces, excluded, ..
+        } => {
+            *excluded = false;
+            let mut inner = pieces.to_vec();
+            inner.iter_mut().for_each(|p| plain(p, name));
+            *pieces = inner.into();
         }
         VideoPiece::Mix { under, over } => {
             plain(under, name);

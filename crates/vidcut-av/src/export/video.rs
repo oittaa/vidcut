@@ -1736,6 +1736,48 @@ fn heaviest(layers: &[Layer]) -> usize {
 enum Side {
     File(usize),
     Made(Pattern),
+    Flat(u64, i64),
+}
+
+const FLATS_KEPT: usize = 2;
+
+struct FlatSide {
+    pieces: std::sync::Arc<[VideoPiece]>,
+    reader: VideoFrames,
+    next: i64,
+    last: Option<(i64, frame::Video)>,
+}
+
+impl FlatSide {
+    fn on_offscreen(&self) -> bool {
+        self.reader.drawer.as_ref().is_none_or(|d| {
+            crate::screen::offscreen().is_ok_and(|o| std::sync::Arc::ptr_eq(&d.on, &o))
+        })
+    }
+
+    fn frame(&mut self, at: i64, colors: Option<Hdr>) -> Result<frame::Video> {
+        if let Some((_, f)) = self.last.as_ref().filter(|(k, _)| *k == at) {
+            return frame_ref(f);
+        }
+        if at < self.next {
+            self.reader.read_pieces(&self.pieces);
+            self.reader.forget_position();
+            self.next = 0;
+        }
+        while self.next < at {
+            self.reader.skip_frame()?;
+            self.next += 1;
+        }
+        let mut made = self
+            .reader
+            .next_frame()?
+            .ok_or_else(|| Error::Invalid("a compound clip has no frame to show".into()))?;
+        self.next += 1;
+        crate::screen::held::tag(&mut made, colors);
+        let out = frame_ref(&made)?;
+        self.last = Some((at, made));
+        Ok(out)
+    }
 }
 
 struct ColorSides {
@@ -1755,6 +1797,24 @@ impl ColorSides {
         }
     }
 
+    fn on_this_gpu(&mut self) {
+        if self.drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
+            self.drawn = None;
+            self.rgb.clear();
+            self.framed.clear();
+        }
+    }
+
+    fn flat(&mut self, f: &frame::Video, look: &Look, frames: bool) -> Result<frame::Video> {
+        self.on_this_gpu();
+        let drawn = &mut self.drawn;
+        let path = Path::new("");
+        match frames {
+            true => shown_frame(drawn, (f, (None, None)), (0, look), Reading::Frames, path),
+            false => shown_rgb(drawn, (f, (None, None)), 0, look, Reading::Frames, path),
+        }
+    }
+
     fn picture(
         &mut self,
         pattern: Pattern,
@@ -1762,11 +1822,7 @@ impl ColorSides {
         look: &Look,
         frames: bool,
     ) -> Result<frame::Video> {
-        if self.drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
-            self.drawn = None;
-            self.rgb.clear();
-            self.framed.clear();
-        }
+        self.on_this_gpu();
         let mut hash = std::hash::DefaultHasher::new();
         pattern.hash(&mut hash);
         let key = Some(hash.finish() as i64);
@@ -1799,6 +1855,7 @@ pub struct VideoFrames {
     colored: Option<([u8; 3], frame::Video)>,
     generated: Lru<Pattern, frame::Video, GENERATED_KEPT>,
     color_sides: ColorSides,
+    flats: Lru<usize, FlatSide, FLATS_KEPT>,
     decoder: Option<crate::hw::GpuDecoder>,
     maker: Maker,
     gpu_made: i64,
@@ -2137,6 +2194,7 @@ impl VideoFrames {
             colored: None,
             generated: Lru::new(),
             color_sides: ColorSides::new(),
+            flats: Lru::new(),
             decoder: None,
             maker: Maker::new(
                 (width, height, format::Pixel::YUV420P),
@@ -2556,6 +2614,11 @@ impl VideoFrames {
                             }
                             VideoPiece::Black { color, .. } => {
                                 (self.solid_frame(*color)?, Made::Solid(*color))
+                            }
+                            VideoPiece::Flat { pieces, .. } => {
+                                let mut made = self.flat_picture(pieces, layer.position(k))?;
+                                self.black_metadata(&mut made)?;
+                                (made, Made::Generated)
                             }
                             _ => {
                                 let black = vidcut_core::render::BLACK;
@@ -3554,13 +3617,60 @@ impl VideoFrames {
     }
 
     fn side_of(&self, piece: &VideoPiece, i: usize) -> Option<Side> {
-        match piece.layers().get(i)?.0 {
+        let layer = piece.layers().get(i)?.0;
+        let k = (self.k - 1).max(0);
+        match layer {
             VideoPiece::Source { .. } => self.reading.get(i).copied().flatten().map(Side::File),
-            VideoPiece::Generated { picture, .. } => {
-                Some(Side::Made(picture.at((self.k - 1).max(0))))
+            VideoPiece::Generated { picture, .. } => Some(Side::Made(picture.at(k))),
+            VideoPiece::Flat { pieces, .. } => {
+                let mut hash = std::hash::DefaultHasher::new();
+                format!("{pieces:?}").hash(&mut hash);
+                Some(Side::Flat(hash.finish(), layer.position(k)))
             }
             _ => None,
         }
+    }
+
+    fn flat_picture(
+        &mut self,
+        pieces: &std::sync::Arc<[VideoPiece]>,
+        at: i64,
+    ) -> Result<frame::Video> {
+        let key = std::sync::Arc::as_ptr(pieces).cast::<()>() as usize;
+        if self.flats.peek(&key).is_some_and(|f| !f.on_offscreen()) {
+            self.flats.remove(&key);
+        }
+        if !self.flats.contains(&key) {
+            let (w, h, _) = self.maker.out();
+            let pixel = format::Pixel::GBRPF32LE;
+            let mut reader = VideoFrames::new(pieces, self.fps, w, h, pixel, self.timeline);
+            reader.timeline = self.timeline;
+            reader.drawn_in = self.drawn_in;
+            reader.decoder = self.decoder.clone();
+            let side = FlatSide {
+                pieces: pieces.clone(),
+                reader,
+                next: 0,
+                last: None,
+            };
+            self.flats.insert(key, side);
+        }
+        let colors = self.timeline;
+        self.flats
+            .get_mut(&key)
+            .expect("just set")
+            .frame(at, colors)
+    }
+
+    fn flat_of(&mut self, piece: &VideoPiece, j: usize) -> Result<Option<frame::Video>> {
+        let Some(layer) = piece.layers().get(j).map(|l| l.0) else {
+            return Ok(None);
+        };
+        let VideoPiece::Flat { pieces, .. } = layer else {
+            return Ok(None);
+        };
+        let k = (self.k - 1).max(0);
+        self.flat_picture(pieces, layer.position(k)).map(Some)
     }
 
     fn smooth_frame(
@@ -3576,11 +3686,12 @@ impl VideoFrames {
         };
         let no_frame = |side: Side| match side {
             Side::File(s) => self.open[s].current.is_none(),
-            Side::Made(_) => false,
+            Side::Made(_) | Side::Flat(..) => false,
         };
         if no_frame(sa) || no_frame(sb) {
             return Ok(None);
         }
+        let (fa, fb) = (self.flat_of(piece, i - 1)?, self.flat_of(piece, i)?);
         let retime = smooth.retime;
         if self.smoother.as_ref().is_none_or(|(r, _)| *r != retime) {
             self.smoother = crate::interpolate::User::of(retime).map(|u| (retime, u));
@@ -3591,30 +3702,35 @@ impl VideoFrames {
         let frames = retime == Retime::Macos;
         let made_reading = self.maker.reading();
         let colors = self.drawn_in;
-        let mut picture = |side: Side| -> Result<(frame::Video, Option<i64>, u64)> {
-            let s = match side {
-                Side::File(s) => s,
-                Side::Made(pattern) => {
-                    let made = self.color_sides.picture(pattern, colors, &look, frames)?;
-                    return Ok((made, None, 0));
-                }
+        let mut picture =
+            |side: Side, flat: Option<&frame::Video>| -> Result<(frame::Video, Option<i64>, u64)> {
+                let s = match side {
+                    Side::File(s) => s,
+                    Side::Made(pattern) => {
+                        let made = self.color_sides.picture(pattern, colors, &look, frames)?;
+                        return Ok((made, None, 0));
+                    }
+                    Side::Flat(_, at) => {
+                        let f = flat.expect("made above");
+                        return Ok((self.color_sides.flat(f, &look, frames)?, Some(at), 0));
+                    }
+                };
+                let src = &mut self.open[s];
+                let reading = src.pictures.reading(made_reading);
+                let rotation = src.reader.rotation();
+                let f = frame_ref(&src.current.as_ref().expect("a frame").0)?;
+                let look = look.clone().with_lut(src.lut.clone());
+                let made = match frames {
+                    true => src.frame_from((&f, (None, None)), rotation, &look, reading)?,
+                    false => src.rgb_from((&f, (None, None)), rotation, &look, reading)?,
+                };
+                Ok((made, f.pts(), src.look_id(&look)))
             };
-            let src = &mut self.open[s];
-            let reading = src.pictures.reading(made_reading);
-            let rotation = src.reader.rotation();
-            let f = frame_ref(&src.current.as_ref().expect("a frame").0)?;
-            let look = look.clone().with_lut(src.lut.clone());
-            let made = match frames {
-                true => src.frame_from((&f, (None, None)), rotation, &look, reading)?,
-                false => src.rgb_from((&f, (None, None)), rotation, &look, reading)?,
-            };
-            Ok((made, f.pts(), src.look_id(&look)))
-        };
-        let (a, pa, la) = picture(sa)?;
-        let (b, pb, lb) = picture(sb)?;
+        let (a, pa, la) = picture(sa, fa.as_ref())?;
+        let (b, pb, lb) = picture(sb, fb.as_ref())?;
         let path_of = |side: Side| match side {
             Side::File(s) => self.open[s].reader.path(),
-            Side::Made(_) => Path::new(""),
+            Side::Made(_) | Side::Flat(..) => Path::new(""),
         };
         let mut pair = std::hash::DefaultHasher::new();
         (path_of(sb), pb, la, lb, size, sa, sb).hash(&mut pair);
@@ -3645,7 +3761,7 @@ impl VideoFrames {
                 src.normalized = None;
                 self.finished_layer(s, made)?
             }
-            Side::Made(_) => {
+            Side::Made(_) | Side::Flat(..) => {
                 let mut made = self.maker.make_layer(
                     i,
                     &mut self.color_sides.fitting,
