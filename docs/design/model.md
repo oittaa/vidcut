@@ -157,6 +157,7 @@ Speeds ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
 - `freeze_from` makes the freeze frame of a speed under `Speed::RANGE`. `ops::split_clip` cuts the clip, and `ops::change_speed` freezes the right part.
   - Why two clips: the spec gives two clips, one after the other. `speed.freeze` gives one clip with a freeze section.
 - A compound clip takes speed keyframes as a plain clip does. `linked::with_ties` gives the edit to its picture block and its sound block.
+  - A speed edit gives each block its new speed first. Then `ops::trim` changes both lengths once, through the block on the main track. Thus the clips after it move once.
   - `render::stretches` cuts the compound clip for `render::expanded`, and each stretch plays its inner tracks.
   - A picture track has one stretch for each run of one speed. Thus each stretch is at one speed, and a title and a Dynamic Zoom follow it.
   - A sound track has one stretch for each direction. Thus the sound stays one lane through a change of speed.
