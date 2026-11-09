@@ -6,8 +6,8 @@
 
 **Why:**
 
-- vidcut refuses a wipe, a push, a slide and a smooth cut at an edge of a compound clip. Each of them needs the compound clip as one picture.
+- vidcut refuses a push, a slide and a smooth cut at an edge of a compound clip. Each of them needs the compound clip as one picture.
 
 **To do:**
 
-- Let an edge of a compound clip take a wipe, a push, a slide and a smooth cut.
+- Let an edge of a compound clip take a push, a slide and a smooth cut.

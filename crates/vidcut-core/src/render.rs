@@ -497,10 +497,11 @@ pub struct Placed {
     /// Set once `after` has placed this picture on a timeline frame.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ready: bool,
-    /// The level of a dissolve at an edge of this compound clip.
+    /// The level of a dissolve or the edge of a wipe, at an edge of this
+    /// compound clip.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ramp: Option<Ramp>,
-    /// This is no picture. It joins the two sides of a dissolve at an edge
+    /// This is no picture. It joins the two sides of a transition at an edge
     /// of a compound clip: they add up, then go over the layers below.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub crossing: bool,
@@ -624,6 +625,14 @@ impl Ramp {
             at: self.frame(k),
             ..*self
         }
+    }
+
+    pub fn mask(&self, k: i64) -> Option<Wipe> {
+        self.wipe.map(|direction| Wipe {
+            direction,
+            along: self.rising(k),
+            falling: self.falling,
+        })
     }
 }
 
@@ -1841,6 +1850,7 @@ fn holds_mode(c: &Clip) -> bool {
 struct Edge {
     frames: (i64, i64),
     falling: bool,
+    wipe: Option<WipeDirection>,
     crossing: Option<Placed>,
 }
 
@@ -1865,7 +1875,7 @@ impl Around {
             at: x - e.frames.0,
             of: e.frames.1 - e.frames.0,
             falling: e.falling,
-            wipe: None,
+            wipe: e.wipe,
             held: false,
         });
         std::iter::once(own)
@@ -1965,6 +1975,7 @@ fn edges_on(p: &Project, t: &Track) -> HashMap<String, Vec<Edge>> {
             edges.entry(c.id.clone()).or_default().push(Edge {
                 frames,
                 falling,
+                wipe: transitions::wipe_of(d.transition),
                 crossing: crossing(&d),
             });
         }

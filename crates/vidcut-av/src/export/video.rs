@@ -852,13 +852,7 @@ pub(crate) struct Layer {
 }
 
 fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
-    ramp.and_then(|r| {
-        r.wipe.map(|direction| Wipe {
-            direction,
-            along: r.rising(k),
-            falling: r.falling,
-        })
-    })
+    ramp.and_then(|r| r.mask(k))
 }
 
 const PLACED_MOST: f64 = 16384.0;
