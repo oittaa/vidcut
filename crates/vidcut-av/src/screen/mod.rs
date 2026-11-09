@@ -1325,7 +1325,7 @@ const OVER_ALL: f64 = 0.0;
 const ADDED: f64 = 1.0;
 const IN_MIX: f64 = 2.0;
 
-struct MixDraw<'a> {
+struct MixDraw<'a, 'm> {
     gpu: &'a Gpu,
     binds: &'a [Bound],
     canvases: &'a [blur::Texture],
@@ -1335,14 +1335,60 @@ struct MixDraw<'a> {
     titles: &'a [TitleOver],
     wipes: &'a [Option<Wipe>],
     size: (u32, u32),
+    moves: &'a mut std::slice::Iter<'m, Moves>,
+    colors: Option<Hdr>,
 }
 
-impl MixDraw<'_> {
+impl MixDraw<'_, '_> {
     fn part(&self, wipe: Option<Wipe>) -> Option<(u32, u32, u32, u32)> {
         wipe.map(|w| shown_part(w, self.size))
     }
 
+    fn moved(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        mix: &Mix,
+        moving: &Moving,
+        depth: usize,
+    ) {
+        let moves = self.moves.next().expect("made for each move");
+        let views = [&moves.outgoing, &moves.incoming];
+        let sides = [true, false].map(|going| {
+            mix.parts.iter().find_map(|p| match p {
+                MixPart::Mix(m) if m.outgoing == Some(going) => Some(m),
+                _ => None,
+            })
+        });
+        for (view, side) in views.into_iter().zip(sides) {
+            let Some(side) = side else {
+                drop(begin(encoder, view, Some(wgpu::Color::TRANSPARENT)));
+                continue;
+            };
+            self.mix(encoder, side, depth + 1);
+            let bind = self.finished(encoder, side, depth + 1, IN_MIX);
+            let mut pass = begin(encoder, view, Some(wgpu::Color::TRANSPARENT));
+            pass.set_pipeline(&self.gpu.adding);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        let gaps = sides.map(|s| s.is_none());
+        self.gpu.queue.write_buffer(
+            &moves.params,
+            0,
+            &motion_bytes(moving, gaps, 0, self.size, self.colors),
+        );
+        let canvas = &self.canvases[depth].view;
+        let mut pass = begin(encoder, canvas, Some(wgpu::Color::TRANSPARENT));
+        pass.set_pipeline(&self.gpu.moving);
+        pass.set_bind_group(0, &moves.bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
     fn mix(&mut self, encoder: &mut wgpu::CommandEncoder, mix: &Mix, depth: usize) {
+        if let Some(moving) = &mix.moving {
+            self.moved(encoder, mix, moving, depth);
+            return;
+        }
         let canvases = self.canvases;
         let canvas = &canvases[depth].view;
         drop(begin(encoder, canvas, Some(wgpu::Color::TRANSPARENT)));
@@ -1904,7 +1950,7 @@ impl Screen {
             self.mixing = Some(Mixing::new(gpu, size));
         }
         self.moves.retain(|m| m.size == size);
-        while self.moves.len() < moved {
+        while self.moves.len() < moved + nests.moved {
             self.moves.push(Moves::new(gpu, size));
         }
         let mut moves = self.moves.iter();
@@ -1995,6 +2041,8 @@ impl Screen {
                     titles,
                     wipes: &wipes,
                     size,
+                    moves: &mut moves,
+                    colors,
                 };
                 mixing.mix(&mut encoder, &outer.mix, 0);
                 let bind = mixing.finished(&mut encoder, &outer.mix, 0, OVER_ALL);

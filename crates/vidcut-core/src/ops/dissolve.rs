@@ -519,7 +519,7 @@ pub fn dissolve_clips(
 
 fn compound_error(c: &str) -> Error {
     Error::invalid(format!(
-        "{c} is a compound clip, and its edges take only a dissolve, a dip to color or a wipe"
+        "{c} is a compound clip, and its edges do not take a smooth cut"
     ))
 }
 
@@ -1030,7 +1030,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             e.to_string(),
-            "c2 is a compound clip, and its edges take only a dissolve, a dip to color or a wipe"
+            "c2 is a compound clip, and its edges do not take a smooth cut"
         );
     }
 

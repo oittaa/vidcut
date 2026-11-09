@@ -539,9 +539,12 @@ A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#81
 - `expanded` widens the compound clip to reach those frames. Thus the hidden frames play (`inner_layout`).
 - `Around::at` gives the picture of the compound clip for a frame. `Placed::ramp` is the level of the dissolve. `place::level` multiplies it with the opacity.
 - A wipe has no level. `Mix::wipe` is its edge, and `MixDraw::lay` draws the side only in its own part of the frame. A layer of a mix has its edge in `MixDraw::wipes`.
+- A Push or a Slide has `Mix::moving`. Each part of that mix is one side, and `Mix::outgoing` tells which side.
+- `MixDraw::moved` draws each side into `Moves` and moves the two sides onto the canvas. A side that is missing is a gap.
+- The outgoing side's composite mode goes on the mix. `Ramp::moved` keeps the level of a side at 1.
 - `crossing` makes one `Placed` that both sides share. It is no picture. `place::parts_of` makes a `place::Mix` of the two sides, with `added` set.
 - `MixDraw::lay` adds the parts of such a `place::Mix` (`Gpu::adding`). Thus the two sides add up, then go over the layers below, as a crossing pair does.
-- A side with a composite mode does not cross. It fades over the other side.
+- In a dissolve, a side with a composite mode does not cross. It fades over the other side.
 - `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`otio::tied`).
 - `AudioPiece::Source` holds them in `edges`. The mix multiplies them with the gain.
 
