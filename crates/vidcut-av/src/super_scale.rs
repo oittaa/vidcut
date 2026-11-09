@@ -429,7 +429,12 @@ struct Enlarging<'a> {
 fn enlarging<'a>(p: &'a Project, plans: &[&RenderPlan]) -> Vec<Enlarging<'a>> {
     let mut work = Vec::new();
     for plan in plans {
-        for (layer, _) in plan.video.iter().flat_map(|piece| piece.layers()) {
+        for (layer, _) in plan
+            .video
+            .iter()
+            .flat_map(VideoPiece::with_flat_pieces)
+            .flat_map(VideoPiece::layers)
+        {
             let VideoPiece::Source {
                 media,
                 super_scale,

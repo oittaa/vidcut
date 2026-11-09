@@ -13,7 +13,7 @@ pub fn apply_proxies(
     if !project.settings.use_proxies {
         return;
     }
-    for piece in plan.video.iter_mut().flat_map(VideoPiece::layers_mut) {
+    for piece in plan.video.iter_mut().flat_map(VideoPiece::flat_layers_mut) {
         let VideoPiece::Source {
             media,
             path,

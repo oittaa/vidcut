@@ -120,7 +120,7 @@ pub fn check<'a>(
     let mut used: Vec<(Retime, String)> = Vec::new();
     let mut smooth: Vec<Retime> = Vec::new();
     for plan in plans {
-        for piece in &plan.video {
+        for piece in plan.video.iter().flat_map(VideoPiece::with_flat_pieces) {
             for (layer, _) in piece.layers() {
                 if let VideoPiece::Source { media, retime, .. } = layer
                     && !retime.is_nearest()

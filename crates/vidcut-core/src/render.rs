@@ -1115,6 +1115,30 @@ impl VideoPiece {
         }
     }
 
+    pub fn with_flat_pieces(&self) -> Vec<&VideoPiece> {
+        std::iter::once(self)
+            .chain(self.layers().into_iter().flat_map(|(l, _)| match l {
+                Self::Flat { pieces, .. } => {
+                    pieces.iter().flat_map(Self::with_flat_pieces).collect()
+                }
+                _ => Vec::new(),
+            }))
+            .collect()
+    }
+
+    pub fn flat_layers_mut(&mut self) -> Vec<&mut VideoPiece> {
+        self.layers_mut()
+            .into_iter()
+            .flat_map(|l| match l {
+                Self::Flat { pieces, .. } => Arc::make_mut(pieces)
+                    .iter_mut()
+                    .flat_map(Self::flat_layers_mut)
+                    .collect(),
+                _ => vec![l],
+            })
+            .collect()
+    }
+
     pub fn motions(&self) -> Vec<Option<&Move>> {
         match self {
             Self::Mix { under, over } => under
@@ -1901,6 +1925,7 @@ struct Around {
     always: bool,
     held: Option<i64>,
     edges: Vec<Edge>,
+    opened: usize,
 }
 
 impl Around {
@@ -1945,6 +1970,7 @@ struct Nest {
     outer: Vec<Around>,
     run: Option<Run>,
     flat: Option<Box<Clip>>,
+    opened: usize,
 }
 
 fn run_of(c: &Clip, run: Option<Run>) -> Run {
@@ -2150,6 +2176,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             fades: Vec::new(),
         })
         .collect();
+    let mut opened = 0;
     for _ in 0..NESTED {
         if !holds(&out) {
             break;
@@ -2173,6 +2200,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     continue;
                 }
                 host.clips.push(hollow(c));
+                opened += 1;
                 let own = c.picture.clone().unwrap_or_default();
                 let always = !own.is_usual() || holds_mode(c);
                 let edges = edges.get(&c.id).cloned().unwrap_or_default();
@@ -2191,6 +2219,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                         always,
                         held: w.shown.held,
                         edges,
+                        opened,
                     })
                     .into_iter()
                     .chain(nest.outer.iter().cloned())
@@ -2208,6 +2237,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                         outer: nest.outer.clone(),
                         run: nest.run,
                         flat: Some(Box::new(wide.clone())),
+                        opened,
                     },
                     false => Nest::default(),
                 });
@@ -2241,6 +2271,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                                 outer: chain.clone(),
                                 run: Some(run),
                                 flat: None,
+                                opened: 0,
                             };
                             (y, nest)
                         })
@@ -2873,7 +2904,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     for w in cuts.windows(2) {
         let (x, y) = (w[0], w[1]);
         let mut stack: Vec<Layer> = Vec::new();
-        let mut flattened: Vec<&str> = Vec::new();
+        let mut flattened: Vec<usize> = Vec::new();
         for ((t, played), inner) in tracks.iter().zip(&dissolves).zip(&inside) {
             let window = inner.map_or(EVERY_FRAME, |i| i.shown);
             if x < window.from || x >= window.to {
@@ -2883,7 +2914,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 i.nests
                     .iter()
                     .flat_map(|n| &n.outer)
-                    .any(|a| flattened.contains(&a.placed.clip.as_str()))
+                    .any(|a| flattened.contains(&a.opened))
             };
             if inner.is_some_and(drawn_flat) {
                 continue;
@@ -3096,8 +3127,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         [d.before, d.after]
                             .into_iter()
                             .flatten()
-                            .filter(|c| nest_of(c).is_some_and(|n| n.flat.is_some()))
-                            .map(|c| c.id.as_str()),
+                            .filter_map(|c| nest_of(c).filter(|n| n.flat.is_some()))
+                            .map(|n| n.opened),
                     );
                     stack = vec![Layer::Picture(f, None), Layer::Smoothed(g, ramp, smooth)];
                 }
