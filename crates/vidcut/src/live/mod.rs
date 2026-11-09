@@ -3250,6 +3250,23 @@ impl Live {
                 };
                 Step::Measure(Box::new(fetch), Box::new(envelope))
             }
+            Request::Apply { commands, .. }
+                if !envelope.dry_run && commands.iter().any(runs_long) =>
+            {
+                let Some(open) = &self.project else {
+                    return Step::Now(Err(no_project()));
+                };
+                let (project, path) = (open.project().clone(), open.store.path().to_path_buf());
+                let playhead = Some(self.player.position(TIMELINE));
+                let copy = envelope.clone();
+                let measure = move || {
+                    let env = AvEnv::for_project(&path);
+                    vidcut_core::Editor::new(project, Default::default())
+                        .apply(copy, &env, playhead)
+                        .map(drop)
+                };
+                Step::Measure(Box::new(measure), Box::new(envelope))
+            }
             Request::ClipSet {
                 voice_isolation,
                 voice_isolation_on,
@@ -5064,6 +5081,36 @@ fn scroll_by(piece: &mut render::VideoPiece, clip: &str, off: i64) {
     }
 }
 
+fn runs_long(r: &Request) -> bool {
+    use vidcut_core::model::AngleSync;
+    match r {
+        Request::ProxyGenerate { .. }
+        | Request::SubtitlesTranscribe { .. }
+        | Request::AnalyzeWords { .. }
+        | Request::MediaTranscribe { .. }
+        | Request::SubtitlesRetime { .. }
+        | Request::SubtitlesTimeWords { .. }
+        | Request::ClipNormalize { .. }
+        | Request::EditDetectSceneCuts { .. }
+        | Request::EditRippleDeleteWords { quiet: true, .. }
+        | Request::TrackSet {
+            duck: Some(Some(_)),
+            ..
+        }
+        | Request::MulticamCreate {
+            sync: AngleSync::Sound,
+            rows: None,
+            ..
+        }
+        | Request::MulticamLayout {
+            sync: AngleSync::Sound,
+            ..
+        } => true,
+        Request::EditRippleDeleteSilence { parts, .. } => parts.is_none(),
+        _ => false,
+    }
+}
+
 fn fetches(r: &Request) -> bool {
     match r {
         Request::ClipSet {
@@ -5387,5 +5434,22 @@ mod tests {
              /shoot/notes.txt: not a media file\n\
              /shoot/Docs/readme.txt: not a media file"
         );
+    }
+
+    fn request(method: &str, params: Value) -> Request {
+        let call = json!({"method": method, "params": params});
+        Envelope::from_json(call).unwrap().request
+    }
+
+    #[test]
+    fn finding_scene_cuts_runs_long() {
+        let r = request("edit.detect_scene_cuts", json!({"clips": "c1"}));
+        assert!(runs_long(&r));
+    }
+
+    #[test]
+    fn a_split_does_not_run_long() {
+        let r = request("edit.split", json!({"at": "10f"}));
+        assert!(!runs_long(&r));
     }
 }
