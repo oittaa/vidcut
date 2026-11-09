@@ -1085,6 +1085,7 @@ pub struct Screen {
 
 struct Letters {
     picture: Arc<TitlePicture>,
+    nth: usize,
     tiles: Vec<LetterTile>,
 }
 
@@ -1308,7 +1309,7 @@ fn lettered_over(
     letters: &[Letters],
     t: &TitleOver,
 ) {
-    let Some(l) = letters.iter().find(|l| Arc::ptr_eq(&l.picture, &t.picture)) else {
+    let Some(l) = letters.iter().find(|l| l.shows(t)) else {
         return;
     };
     pass.set_pipeline(lettering);
@@ -1416,7 +1417,11 @@ impl MixDraw<'_> {
 }
 
 impl Letters {
-    fn new(gpu: &Gpu, picture: &Arc<TitlePicture>) -> Self {
+    fn shows(&self, t: &TitleOver) -> bool {
+        self.nth == t.nth && Arc::ptr_eq(&self.picture, &t.picture)
+    }
+
+    fn new(gpu: &Gpu, picture: &Arc<TitlePicture>, nth: usize) -> Self {
         let (width, height) = (picture.width.max(1), picture.height.max(1));
         let most = gpu.device.limits().max_texture_dimension_2d;
         let mut tiles = Vec::new();
@@ -1428,6 +1433,7 @@ impl Letters {
         }
         Self {
             picture: picture.clone(),
+            nth,
             tiles,
         }
     }
@@ -1553,6 +1559,15 @@ impl LetterTile {
     }
 }
 
+fn numbered(titles: &[TitleOver]) -> Vec<TitleOver> {
+    let mut out = titles.to_vec();
+    for (j, t) in out.iter_mut().enumerate() {
+        let same = |o: &&TitleOver| Arc::ptr_eq(&o.picture, &t.picture);
+        t.nth = titles[..j].iter().filter(same).count();
+    }
+    out
+}
+
 fn same_titles(a: &[TitleOver], b: &[TitleOver]) -> bool {
     a.len() == b.len()
         && a.iter().zip(b).all(|(x, y)| {
@@ -1670,6 +1685,8 @@ impl Screen {
         width: u32,
         height: u32,
     ) -> Drawn {
+        let titles = numbered(titles);
+        let titles = titles.as_slice();
         let max = gpu.device.limits().max_texture_dimension_2d;
         let size = (width.clamp(2, max), height.clamp(2, max));
         let mut drawn = Drawn::Picture;
@@ -1845,22 +1862,14 @@ impl Screen {
             })
             .collect();
         self.spent.0 += clock.elapsed();
-        self.letters
-            .retain(|l| titles.iter().any(|t| Arc::ptr_eq(&t.picture, &l.picture)));
+        self.letters.retain(|l| titles.iter().any(|t| l.shows(t)));
         for t in titles {
-            if !self
-                .letters
-                .iter()
-                .any(|l| Arc::ptr_eq(&l.picture, &t.picture))
-            {
-                self.letters.push(Letters::new(gpu, &t.picture));
+            if !self.letters.iter().any(|l| l.shows(t)) {
+                self.letters.push(Letters::new(gpu, &t.picture, t.nth));
             }
         }
         for l in &self.letters {
-            let found = titles
-                .iter()
-                .enumerate()
-                .find(|(_, t)| Arc::ptr_eq(&t.picture, &l.picture));
+            let found = titles.iter().enumerate().find(|(_, t)| l.shows(t));
             if let Some((j, t)) = found {
                 l.place(gpu, size, (t, nests.around_title(j)), colors);
             }
@@ -4167,7 +4176,44 @@ fn params_of(
 
 #[cfg(test)]
 mod tests {
-    use super::{Kind, Takes, shown_from_gpu};
+    use std::sync::Arc;
+
+    use super::{Kind, Takes, numbered, shown_from_gpu};
+    use crate::player::{TitleOver, TitlePicture};
+
+    fn drawing() -> Arc<TitlePicture> {
+        Arc::new(TitlePicture {
+            left: 0,
+            top: 0,
+            width: 1,
+            height: 1,
+            lift: 0.0,
+            frame: (1, 1),
+            float: false,
+            rgba: vec![0; 4],
+        })
+    }
+
+    fn over(picture: &Arc<TitlePicture>) -> TitleOver {
+        TitleOver {
+            above: 0,
+            picture: picture.clone(),
+            dx: 0,
+            dy: 0,
+            turn: [0.0, 0.0, 1.0, 0.0],
+            alpha: 1.0,
+            placed: Vec::new(),
+            nth: 0,
+        }
+    }
+
+    #[test]
+    fn titles_with_one_drawing_each_get_their_own_number() {
+        let (a, b) = (drawing(), drawing());
+        let titles = [over(&a), over(&b), over(&a)];
+        let got: Vec<usize> = numbered(&titles).iter().map(|t| t.nth).collect();
+        assert_eq!(got, [0, 0, 1]);
+    }
 
     #[test]
     fn a_busy_picture_buffer_stays_when_the_next_picture_is_larger() {

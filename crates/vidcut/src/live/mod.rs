@@ -258,6 +258,7 @@ pub(crate) enum Msg {
         envelope: Envelope,
         result: Result<()>,
         encode: Option<String>,
+        project: Option<PathBuf>,
     },
     DuckHeard {
         measured: Vec<Unmeasured>,
@@ -1121,8 +1122,10 @@ impl Live {
                 envelope,
                 result,
                 encode,
+                project,
             } => {
-                let (job, result) = match result {
+                let open = self.open_path();
+                let (job, result) = match result.and(still_open(project, open)) {
                     Err(e) => (job, Err(e)),
                     Ok(()) => {
                         let rev = self.project.as_ref().map(|p| p.project().rev);
@@ -1621,7 +1624,7 @@ impl Live {
     fn register(&self) {
         if let Some(i) = &self.instance {
             let mut i = i.clone();
-            i.project = self.project.as_ref().map(|p| p.store.path().to_path_buf());
+            i.project = self.open_path();
             if let Err(e) = ipc::registry::register(&i) {
                 eprintln!("vidcut: can't register this instance: {e}");
             }
@@ -1723,6 +1726,7 @@ impl Live {
             }
             Step::Measure(measure, then) => {
                 let tx = self.tx.clone();
+                let project = self.open_path();
                 let cancel = job
                     .reply
                     .as_ref()
@@ -1736,6 +1740,7 @@ impl Live {
                         envelope: *then,
                         result,
                         encode: None,
+                        project,
                     });
                 });
             }
@@ -2075,6 +2080,7 @@ impl Live {
         self.add_job(info, cancel.clone());
         let gate = self.take_turn(&id, false, &title, progress.as_ref());
         let tx = self.tx.clone();
+        let project = self.open_path();
         let _ = crate::threads::spawn(format!("vidcut-{id}"), Work::Job, move || {
             let _ = gate.recv();
             let stopped = cancel.load(Ordering::Relaxed);
@@ -2125,6 +2131,7 @@ impl Live {
                 envelope: then,
                 result,
                 encode: Some(id),
+                project,
             });
         });
     }
@@ -3544,8 +3551,7 @@ impl Live {
         {
             self.multi_alone = false;
         }
-        if let Some(e) = open.history_error.take() {
-            let warning = crate::session::history_unsaved(&e);
+        if let Some(warning) = open.unsaved.take() {
             self.notice(warning.clone(), true);
             if let Ok(r) = result.as_mut() {
                 r.warnings.push(warning);
@@ -3595,6 +3601,10 @@ impl Live {
         result
     }
 
+    fn open_path(&self) -> Option<PathBuf> {
+        self.project.as_ref().map(|p| p.store.path().to_path_buf())
+    }
+
     fn open_project(&mut self, path: &Path, create: Option<project::New>) -> Result<()> {
         let open = OpenProject::open(path, create, self.tx.clone())?;
         self.render.open(open.store.path());
@@ -3619,6 +3629,10 @@ impl Live {
         self.tape_position = 0;
         self.player.unload(SOURCE);
         self.player.unload(TIMELINE);
+        self.skipping = None;
+        self.player.end_audition();
+        self.free_title = None;
+        self.free_pictures.clear();
         self.thumbs = Arc::new(HashSet::new());
         self.thumbs_wanted.clear();
         self.waveforms = Arc::new(HashMap::new());
@@ -5128,6 +5142,15 @@ fn fetches(r: &Request) -> bool {
     }
 }
 
+fn still_open(asked: Option<PathBuf>, open: Option<PathBuf>) -> Result<()> {
+    if asked == open {
+        return Ok(());
+    }
+    Err(Error::conflict(
+        "another project opened while this ran; nothing changed",
+    ))
+}
+
 fn no_project() -> Error {
     Error::usage("no project is open in this vidcut GUI (project.open opens one)")
 }
@@ -5340,6 +5363,21 @@ mod tests {
     use std::collections::{HashMap, HashSet};
 
     use super::*;
+
+    #[test]
+    fn a_measured_edit_goes_on_to_the_project_it_was_asked_of() {
+        let open = Some(PathBuf::from("a.vidcut"));
+        assert!(still_open(open.clone(), open).is_ok());
+    }
+
+    #[test]
+    fn a_measured_edit_stops_when_another_project_opened() {
+        let got = still_open(
+            Some(PathBuf::from("a.vidcut")),
+            Some(PathBuf::from("b.vidcut")),
+        );
+        assert_eq!(got.unwrap_err().code, vidcut_core::ErrorCode::Conflict);
+    }
 
     #[test]
     fn a_failed_duck_source_does_not_fail_the_others() {
