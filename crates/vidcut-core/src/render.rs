@@ -218,16 +218,8 @@ pub enum VideoPiece {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_lut: Option<PathBuf>,
     },
-    /// A frame of one color: black, or the color that a dip to color
-    /// goes through.
-    Black {
-        frames: i64,
-        #[serde(default, skip_serializing_if = "is_black")]
-        color: [u8; 3],
-        /// Its track is out of the render cache's User mode.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        excluded: bool,
-    },
+    /// A black frame.
+    Black { frames: i64 },
     /// A generator's picture, made at the plan's size.
     Generated {
         frames: i64,
@@ -630,10 +622,6 @@ pub struct Ramp {
 pub const WHOLE: u32 = 1 << 16;
 
 pub const BLACK: [u8; 3] = [0, 0, 0];
-
-fn is_black(c: &[u8; 3]) -> bool {
-    *c == BLACK
-}
 
 impl Ramp {
     pub fn frame(&self, k: i64) -> i64 {
@@ -1085,11 +1073,7 @@ impl Fade {
 
 impl VideoPiece {
     pub fn black(frames: i64) -> Self {
-        Self::Black {
-            frames,
-            color: BLACK,
-            excluded: false,
-        }
+        Self::Black { frames }
     }
     pub fn frames(&self) -> i64 {
         match self {
@@ -1275,13 +1259,7 @@ impl VideoPiece {
                     input_lut: input_lut.clone(),
                 }
             }
-            Self::Black {
-                color, excluded, ..
-            } => Self::Black {
-                frames,
-                color: *color,
-                excluded: *excluded,
-            },
+            Self::Black { .. } => Self::Black { frames },
             Self::Generated {
                 picture,
                 placed,
@@ -1324,18 +1302,7 @@ impl VideoPiece {
 
     fn goes_on_as(&self, next: &VideoPiece) -> bool {
         match (self, next) {
-            (
-                Self::Black {
-                    color: a,
-                    excluded: x,
-                    ..
-                },
-                Self::Black {
-                    color: b,
-                    excluded: y,
-                    ..
-                },
-            ) => a == b && x == y,
+            (Self::Black { .. }, Self::Black { .. }) => true,
             (
                 Self::Generated {
                     frames,
@@ -2046,11 +2013,13 @@ fn crossing(d: &transitions::Playing) -> Option<Placed> {
         composite_mode: d
             .before
             .map(|c| mode_at(c, c.end() - 1))
+            .or(d.after.map(|c| mode_at(c, c.start)))
             .filter(|m| *m != CompositeMode::Normal),
         ..Picture::default()
     };
     let joins = moving.is_some()
-        || (d.before.is_some() && d.after.is_some() && transitions::dip_of(d.transition).is_none());
+        || transitions::dip_of(d.transition).is_some()
+        || (d.before.is_some() && d.after.is_some());
     joins.then(|| Placed {
         clip: d.transition.id.clone(),
         picture,
@@ -2065,25 +2034,37 @@ fn crossing(d: &transitions::Playing) -> Option<Placed> {
     })
 }
 
+fn span_of(d: &transitions::Playing, falling: bool) -> (i64, i64) {
+    let mid = middle(d.frames);
+    match (transitions::dip_of(d.transition).is_some(), falling) {
+        (false, _) => d.frames,
+        (true, true) => (d.frames.0, mid),
+        (true, false) => (mid, d.frames.1),
+    }
+}
+
+fn sides_at<'a>(d: &transitions::Playing<'a>, now: i64) -> Vec<(Option<&'a Clip>, bool)> {
+    [(d.before, true), (d.after, false)]
+        .into_iter()
+        .filter(|(_, falling)| {
+            let (from, to) = span_of(d, *falling);
+            from <= now && now < to
+        })
+        .collect()
+}
+
 fn edges_on(p: &Project, t: &Track) -> HashMap<String, Vec<Edge>> {
     let mut edges: HashMap<String, Vec<Edge>> = HashMap::new();
     if !t.clips.iter().any(plays_inside) {
         return edges;
     }
     for d in transitions::playing(p, t, false, joins_compound) {
-        let dip = transitions::dip_of(d.transition).is_some();
-        let mid = middle(d.frames);
         for (side, falling) in [(d.before, true), (d.after, false)] {
             let Some(c) = side.filter(|c| plays_inside(c)) else {
                 continue;
             };
-            let frames = match (dip, falling) {
-                (false, _) => d.frames,
-                (true, true) => (d.frames.0, mid),
-                (true, false) => (mid, d.frames.1),
-            };
             edges.entry(c.id.clone()).or_default().push(Edge {
-                frames,
+                frames: span_of(&d, falling),
                 falling,
                 wipe: transitions::wipe_of(d.transition),
                 smooth: matches!(
@@ -2998,20 +2979,18 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
             }
             let within = inner.map(|i| i.nests.as_slice());
             let now = window.held.unwrap_or(x);
-            let ramp_of = |d: &transitions::Playing, falling, wipe| Ramp {
-                at: now - d.frames.0,
-                of: d.frames.1 - d.frames.0,
-                falling,
-                wipe,
-                held: window.held.is_some(),
-                moved: false,
+            let ramp_of = |d: &transitions::Playing, falling, wipe| {
+                let (from, to) = span_of(d, falling);
+                Ramp {
+                    at: now - from,
+                    of: to - from,
+                    falling,
+                    wipe,
+                    held: window.held.is_some(),
+                    moved: false,
+                }
             };
             let excluded = !t.render_cache;
-            let black = |color| VideoPiece::Black {
-                frames: y - x,
-                color,
-                excluded,
-            };
             let shows = |c: &&Clip| visible(t, c);
             let nest_of = |c: &Clip| {
                 within.and_then(|w| w.get(t.clips.iter().position(|x| std::ptr::eq(x, c))?))
@@ -3066,7 +3045,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     None => (
                         Some(ramp_of(d, falling, wipe)),
                         crossing(d)
-                            .map(|c| c.after(x - d.frames.0))
+                            .map(|c| c.after(x - span_of(d, falling).0))
                             .into_iter()
                             .collect::<Vec<_>>(),
                     ),
@@ -3178,30 +3157,6 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 .iter()
                 .find(|d| d.frames.0 <= now && now < d.frames.1)
             {
-                Some(d) if let Some(color) = transitions::dip_of(d.transition) => {
-                    let mid = middle(d.frames);
-                    let (side, half) = match now < mid {
-                        true => (d.before, (now - d.frames.0, mid - d.frames.0, true)),
-                        false => (d.after, (now - mid, d.frames.1 - mid, false)),
-                    };
-                    let half = Some(Ramp {
-                        at: half.0,
-                        of: half.1,
-                        falling: half.2,
-                        wipe: None,
-                        held: window.held.is_some(),
-                        moved: false,
-                    });
-                    let compound = side.is_some_and(|c| c.compound.is_some());
-                    let picture = match side.filter(shows) {
-                        Some(c) => Some(shown(c, half, !stack.is_empty())?),
-                        None if compound => None,
-                        None => Some(Layer::Picture(black(BLACK), half)),
-                    };
-                    stack = std::iter::once(Layer::Picture(black(color), None))
-                        .chain(picture)
-                        .collect();
-                }
                 Some(d) if let Some((f, g, smooth)) = smoothed(d, !stack.is_empty())? => {
                     let ramp = ramp_of(d, false, None);
                     flattened.extend(
@@ -3223,10 +3178,12 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 }
                 Some(d) => {
                     let below = !stack.is_empty();
-                    let sides = [(d.before, true), (d.after, false)];
-                    let covers = sides
-                        .iter()
-                        .all(|(c, _)| c.filter(shows).is_some_and(fills));
+                    let sides = sides_at(d, now);
+                    let plain = crossing(d).is_none_or(|c| c.picture.composite_mode.is_none());
+                    let covers = plain
+                        && sides
+                            .iter()
+                            .all(|(c, _)| c.filter(shows).is_some_and(fills));
                     let wipe = transitions::wipe_of(d.transition);
                     let mut layers = Vec::new();
                     for (c, falling) in sides {
@@ -3238,8 +3195,30 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         let drawn = bare.as_ref().unwrap_or(c);
                         layers.push(laid(drawn, nest_of(c), ramp, below, &chain)?);
                     }
+                    let outer = outer_at(d.before.or(d.after).and_then(nest_of), x);
+                    if let Some(color) = transitions::dip_of(d.transition) {
+                        let falling = now < middle(d.frames);
+                        let (ramp, chain) = sided(d, falling, None);
+                        let own = chain.first().map(|c| Placed {
+                            picture: Picture::default(),
+                            crossing: false,
+                            moving: None,
+                            ..c.clone()
+                        });
+                        let piece = VideoPiece::Generated {
+                            frames: y - x,
+                            picture: Generated::SolidColor { color },
+                            placed: own.into_iter().chain(chain).chain(outer.clone()).collect(),
+                            excluded,
+                        };
+                        let ramp = ramp.map(|r| Ramp {
+                            falling: !falling,
+                            ..r
+                        });
+                        layers.push(Layer::Placed(piece, ramp));
+                    }
                     if covers {
-                        hide_inside(&outer_at(d.before.and_then(nest_of), x), &mut stack);
+                        hide_inside(&outer, &mut stack);
                     }
                     stack.extend(layers);
                 }
@@ -3275,7 +3254,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 .find(|d| d.frames.0 <= now && now < d.frames.1)
             {
                 Some(d) => {
-                    for (c, falling) in [(d.before, true), (d.after, false)] {
+                    for (c, falling) in sides_at(d, now) {
                         let wipe = transitions::wipe_of(d.transition);
                         let (fade, crossed) = sided(d, falling, wipe);
                         if let Some(s) = c
@@ -4443,17 +4422,7 @@ mod tests {
     }
 
     #[test]
-    fn black_and_red_frames_stay_two_pieces() {
-        let red = VideoPiece::Black {
-            frames: 5,
-            color: [255, 0, 0],
-            excluded: false,
-        };
-        assert!(!VideoPiece::black(5).goes_on_as(&red));
-    }
-
-    #[test]
-    fn a_dip_to_red_fades_out_over_red_then_in() {
+    fn a_dip_to_red_brings_the_color_up_then_down() {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m2", 10, 60);
@@ -4467,15 +4436,17 @@ mod tests {
         let halves: Vec<([u8; 3], bool)> = plan
             .video
             .iter()
-            .filter_map(|p| match p {
-                VideoPiece::Mix { under, over } => match (&**under, over.first()) {
-                    (VideoPiece::Black { color, .. }, Some(o)) => Some((*color, o.ramp?.falling)),
+            .filter_map(|p| {
+                p.layers().into_iter().find_map(|(l, ramp)| match l {
+                    VideoPiece::Generated {
+                        picture: Generated::SolidColor { color },
+                        ..
+                    } => Some((*color, ramp?.falling)),
                     _ => None,
-                },
-                _ => None,
+                })
             })
             .collect();
-        assert_eq!(halves, [([255, 0, 0], true), ([255, 0, 0], false)]);
+        assert_eq!(halves, [([255, 0, 0], false), ([255, 0, 0], true)]);
     }
 
     #[test]

@@ -44,6 +44,7 @@ pub struct Gpu {
     screen_drawing: Drawing,
     wide_drawing: Drawing,
     adding: wgpu::RenderPipeline,
+    lettering_adding: wgpu::RenderPipeline,
     placed_mode: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     below_layout: wgpu::BindGroupLayout,
@@ -491,7 +492,7 @@ impl Gpu {
                 bind_group_layouts: &[Some(&lettering_layout)],
                 immediate_size: 0,
             });
-        let lettering_in = |format| {
+        let lettering_in = |format, blend| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("vidcut title"),
                 layout: Some(&lettering_pipeline_layout),
@@ -510,10 +511,7 @@ impl Gpu {
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
-                        blend: Some(wgpu::BlendState {
-                            color: premultiplied,
-                            alpha: premultiplied,
-                        }),
+                        blend: Some(blend),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
@@ -521,8 +519,19 @@ impl Gpu {
                 cache: None,
             })
         };
-        let lettering = lettering_in(TARGET);
-        let lettering_wide = lettering_in(MIXING);
+        let over = wgpu::BlendState {
+            color: premultiplied,
+            alpha: premultiplied,
+        };
+        let lettering = lettering_in(TARGET, over);
+        let lettering_wide = lettering_in(MIXING, over);
+        let lettering_adding = lettering_in(
+            MIXING,
+            wgpu::BlendState {
+                color: add(wgpu::BlendFactor::One),
+                alpha: add(wgpu::BlendFactor::One),
+            },
+        );
         let moving_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut move"),
             entries: &[
@@ -638,6 +647,7 @@ impl Gpu {
             screen_drawing,
             wide_drawing,
             adding,
+            lettering_adding,
             placed_mode,
             layout,
             below_layout,
@@ -1301,7 +1311,10 @@ impl MixDraw<'_, '_> {
                 }
                 MixPart::Title(j) => {
                     let mut pass = begin(encoder, canvas, None);
-                    let lettering = &self.gpu.lettering_wide;
+                    let lettering = match mix.added {
+                        true => &self.gpu.lettering_adding,
+                        false => &self.gpu.lettering_wide,
+                    };
                     lettered_over(
                         &mut pass,
                         lettering,

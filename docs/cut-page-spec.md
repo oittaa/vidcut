@@ -1093,11 +1093,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Thus the tracks below fade to the color and back, around a clip at Zoom 0.5 and under a clip at Opacity 50.
     - With no tracks below, black takes the place of the tracks below.
     - Thus the area around a clip at Zoom 0.5 fades from black to the color and back.
+    - In an export with alpha, the color has an alpha of 1 − level there. This is also true of a dip to black.
     - A dip with a clip on one side only has no picture in its other half. The frame without the dip is then the tracks below.
     - A dip at an edge of a compound clip acts as the same dip at an edge of a plain clip.
     - A compound clip with the dip inside it makes its own picture first, with the dip in it.
     - Its zoom, its opacity and its composite mode then place that picture. Thus the tracks below do not fade around it or under it.
-    - vidcut does not follow these rules yet. During the dip, the color takes the place of the tracks below ([todo](todo/dip-to-color-over-tracks-below.md)).
   - A request makes it: `{"type": "dip_to_color", "color": "#rrggbb"}`.
   - An OTIO file holds it as a Dip To Color Dissolve, with the color as its `color` value ([gotchas](gotchas.md#resolves-otio-files)).
 - **A wipe:**
@@ -1127,6 +1127,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - At a gap, the missing side shows the tracks below. Where it covers the other picture, that picture does not show.
   - The pictures move and blur first. Then the composite mode of the outgoing clip mixes them with the tracks below. The tracks below do not move.
     - The composite mode of the incoming clip has no effect during the transition.
+  - With no outgoing clip, the composite mode of the incoming clip mixes them (measured in Resolve Studio 21.2.0).
   - Resolve's measured geometry, blur and ease are in [gotchas](gotchas.md#resolves-otio-files).
   - A request makes one: `{"type": "push", "preset": "up", "border": 0.02}`, or `{"type": "slide", "preset": "top_left", "out": true}`.
   - An OTIO file holds them as Resolve's Push and Slide, with their values.
@@ -1196,6 +1197,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A Push moves it with its side.
   - In a Slide, a title on the outgoing side stays, and the incoming clip covers it.
   - In a Slide, a title on the incoming side comes in with its side.
+  - A Dip To Color Dissolve fades it to the color and from the color. Its clear parts show the tracks below.
 
 ### 8.12 Subtitles (pp. 645–646, 702, 1227–1248)
 - **Subtitle tracks** (pp. 646, 702, 1228, 1232, 1245):

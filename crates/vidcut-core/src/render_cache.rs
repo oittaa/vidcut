@@ -413,8 +413,7 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
         else {
             let excluded = matches!(
                 layer,
-                VideoPiece::Black { excluded: true, .. }
-                    | VideoPiece::Generated { excluded: true, .. }
+                VideoPiece::Generated { excluded: true, .. }
                     | VideoPiece::Flat { excluded: true, .. }
             );
             let mixed = !(user && excluded);
@@ -492,7 +491,7 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
                 *lut = PathBuf::from(crate::cube::stamp(lut));
             }
         }
-        VideoPiece::Black { excluded, .. } => *excluded = false,
+        VideoPiece::Black { .. } => {}
         VideoPiece::Generated {
             placed, excluded, ..
         } => {

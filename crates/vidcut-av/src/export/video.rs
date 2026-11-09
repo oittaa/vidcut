@@ -2608,9 +2608,6 @@ impl VideoFrames {
                                 };
                                 (self.generated_frame(pattern)?, how)
                             }
-                            VideoPiece::Black { color, .. } => {
-                                (self.solid_frame(*color)?, Made::Solid(*color))
-                            }
                             VideoPiece::Flat { pieces, .. } => {
                                 let mut made = self.flat_picture(pieces, layer.position(k))?;
                                 self.black_metadata(&mut made)?;

@@ -38,10 +38,10 @@ flowchart TD
 
 - `render::flatten_lanes` makes the `RenderPlan` of the timeline: video pieces, audio lanes, and a `LaneTrack` for each lane.
   - A dissolve or a placed picture is a `VideoPiece::Mix`. A title is a `VideoPiece::Titled`.
-  - A dip to color is two halves over a `VideoPiece::Black` of its color. The outgoing picture falls over the first half, the incoming one rises over the second.
-  - A Push or a Slide is two layers with the same `render::Move`: the outgoing side, then the incoming side marked `cross`. The `Move` holds the way, the values and the keys of the progress (`transitions::course_played`).
-    - At a gap, the missing side is a black piece with `gap` set. It does not cover the tracks below, and the screen draws nothing for it.
-    - `fs_motion` still hides the other side where the gap side covers it. Thus the tracks below show there.
+  - A dip to color is one clip at a time and a `Generated::SolidColor` of its color. They add up in a `place::Mix`, as the two sides of a dissolve do.
+  - A Push or a Slide is one `place::Mix` that holds a `place::Mix` for each side: the outgoing side, then the incoming side. The `render::Move` holds the way, the values and the keys of the progress (`transitions::course_played`).
+    - At a gap, the missing side has no layer.
+    - `fs_motion` hides the lower picture across the whole frame of the upper picture. Thus the tracks below show there when the upper picture is the missing side.
   - A Smooth Cut is the outgoing side, then the incoming side with a `render::Smooth` (`Over::smooth`). The `Smooth` holds the process and the keys of the morph ([export](export.md#smooth-cuts)).
 - The source viewer plays `render::tape`.
 - Where the project plays proxies (spec D41), `preview::apply_proxies` puts in the video of fresh proxies. Proxy frames keep the timestamps of their sources, so the player picks the same frames. The sound stays on the originals. A clip that its upscaler cannot take stays on its original ([GPU](gpu.md)).
@@ -295,11 +295,12 @@ The audio device:
   - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).
   - A compound clip mixes its tracks first, in a picture of its own ([export](export.md#placed-pictures)).
   - The two sides of a transition add into a picture of their own (`place::Mix`). Thus a mix below 0 is not clipped before it goes over.
+  - A title on a side of a transition adds in the same way (`lettering_adding`).
   - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
   - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
   - The two sides of a Push or a Slide draw into two pictures of their own (`Moves`), each over transparent.
     - `fs_motion` then lays them over the canvas, premultiplied. `Moving::shift` gives where each side is, in pixels of the frame.
-    - The sides draw without their composite modes. The mode of the outgoing clip mixes the moved result with the canvas, as for any `place::Mix`.
+    - The sides draw without their composite modes. The `Placed` of the crossing holds one mode. It mixes the moved result with the canvas, as for any `place::Mix`.
     - Why: thus the tracks below do not move, and the motion blur does not blur them, as in Resolve ([gotchas](../gotchas.md#resolves-otio-files)).
     - Each side moves by whole pixels. The band comes from the exact edges, on top.
     - A feather fades the upper side linearly across the band. In a corner, the smaller of the two fades applies.
@@ -432,9 +433,8 @@ What it renders:
   - A layer takes it only from its own picture (`checked_on_own`). The effects of a compound clip can work on its mix, at the draw.
   - A `Placed` around a title under another track gives it. The cache file holds that title.
   - A `Placed` around a title on top of all tracks gives none. The cache file does not hold that title.
-- Each `VideoPiece::Source`, `VideoPiece::Black` and `VideoPiece::Generated` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
+- Each `VideoPiece::Source` and `VideoPiece::Generated` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
   - In User mode, an excluded piece gives no `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime`, `Reason::Transition`, `Reason::Opacity` or `Reason::Composite`.
-  - Why the black pieces: the black side of a Push or a dip is a part of the transition of the track.
 - Slow media (`Reason::Media`) are of two kinds:
   - With GPU decoding on, media of a long-GOP codec that the GPU decoder does not take (vidcut-av `render_cache::slow`).
   - The render thread checks each file once. It keeps the answer by the path of the file, until the GPU preferences change or the file leaves the project.
