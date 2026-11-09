@@ -5,14 +5,15 @@ use crate::error::{Error, Result};
 use crate::model::{EqBand, EqKind, Equalizer};
 use crate::request::{EqBandSet, EqualizerSet};
 
-pub const FREQUENCY: RangeInclusive<f64> = 20.0..=20000.0;
-pub const GAIN: RangeInclusive<f64> = -20.0..=20.0;
-pub const Q: RangeInclusive<f64> = 0.3..=10.3;
+pub const FREQUENCY: RangeInclusive<f64> = 20.0..=22000.0;
+pub const GAIN: RangeInclusive<f64> = -70.0..=24.0;
+pub const Q: RangeInclusive<f64> = 0.3..=100.0;
 pub const BANDS: usize = 6;
 pub const FIRST_Q: f64 = 1.0;
-const PASS_Q: f64 = std::f64::consts::FRAC_1_SQRT_2;
+const PASS_Q: f64 = 1.0;
+const SHELF_Q: f64 = 0.75;
 const NOTCH_Q: f64 = 8.0;
-const FIRST_FREQUENCY: [f64; BANDS] = [80.0, 200.0, 800.0, 2500.0, 8000.0, 16000.0];
+const FIRST_FREQUENCY: [f64; BANDS] = [97.0, 117.0, 239.0, 1200.0, 6000.0, 19000.0];
 
 pub fn kinds(band: usize) -> &'static [EqKind] {
     use EqKind::{Bell, HiPass, HiShelf, LoPass, LoShelf, Notch};
@@ -47,6 +48,8 @@ pub fn first() -> Equalizer {
         on: (1..BANDS - 1).contains(&i),
         kind: match i {
             0 => EqKind::HiPass,
+            1 => EqKind::LoShelf,
+            4 => EqKind::HiShelf,
             5 => EqKind::LoPass,
             _ => EqKind::Bell,
         },
@@ -168,10 +171,16 @@ struct Biquad {
 
 impl Biquad {
     fn of(band: &EqBand, rate: f64) -> Self {
-        let w = 2.0 * PI * band.freq.min(rate * 0.49) / rate;
-        let (sin, cos) = w.sin_cos();
         let boost = 10f64.powf(band.gain / 40.0);
-        let shelf = sin * std::f64::consts::FRAC_1_SQRT_2 * 2.0 * boost.sqrt();
+        let corner = 10f64.powf(band.gain.abs() / 80.0);
+        let freq = match band.kind {
+            EqKind::LoShelf => band.freq / corner,
+            EqKind::HiShelf => band.freq * corner,
+            _ => band.freq,
+        };
+        let w = 2.0 * PI * freq.min(rate * 0.49) / rate;
+        let (sin, cos) = w.sin_cos();
+        let shelf = sin * boost.sqrt() / SHELF_Q;
         let (b, a) = match band.kind {
             EqKind::Bell => {
                 let alpha = sin / (2.0 * band.q);
@@ -390,15 +399,21 @@ mod tests {
     }
 
     #[test]
-    fn a_high_pass_is_three_db_down_at_its_frequency() {
-        let eq = band(0, EqKind::HiPass, 100.0, 0.0, 1.0);
-        assert_eq!(tenths(response_db(&eq, 100.0, 48000)), -3.0);
+    fn a_shelf_has_its_corner_past_its_frequency() {
+        let eq = band(4, EqKind::HiShelf, 1000.0, 12.0, 1.0);
+        assert_eq!(tenths(response_db(&eq, 1000.0, 48000)), 2.5);
     }
 
     #[test]
-    fn a_low_pass_is_three_db_down_at_its_frequency() {
+    fn a_high_pass_keeps_its_frequency_at_its_level() {
+        let eq = band(0, EqKind::HiPass, 100.0, 0.0, 1.0);
+        assert_eq!(tenths(response_db(&eq, 100.0, 48000)), 0.0);
+    }
+
+    #[test]
+    fn a_low_pass_keeps_its_frequency_at_its_level() {
         let eq = band(5, EqKind::LoPass, 4000.0, 0.0, 1.0);
-        assert_eq!(tenths(response_db(&eq, 4000.0, 48000)), -3.0);
+        assert_eq!(tenths(response_db(&eq, 4000.0, 48000)), 0.0);
     }
 
     #[test]
@@ -463,9 +478,9 @@ mod tests {
     }
 
     #[test]
-    fn a_gain_past_twenty_db_is_refused() {
+    fn a_gain_past_twenty_four_db_is_refused() {
         let mut b = set(2);
-        b.gain = Some(20.5);
+        b.gain = Some(24.5);
         let s = EqualizerSet {
             on: None,
             bands: vec![b],
@@ -491,7 +506,7 @@ mod tests {
             bands: vec![b],
         };
         let eq = patched(Some(&first()), &s).unwrap();
-        assert_eq!((eq.bands[1].gain, eq.bands[1].freq), (-4.0, 200.0));
+        assert_eq!((eq.bands[1].gain, eq.bands[1].freq), (-4.0, 117.0));
     }
 
     #[test]
