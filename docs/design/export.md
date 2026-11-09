@@ -516,6 +516,9 @@ The pictures:
   - `place::Placing` takes the outermost mode other than Normal, from the compound clips in to the picture. Thus the mode of a compound clip replaces the mode of a picture inside it.
   - It leaves out the compound clips that mix first (`Placing::inside`).
 - A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once.
+- A dissolve or a wipe with a composite mode on a side does not use a crossing pair.
+  - `crossing` makes one `Placed` that holds the mode of the outgoing side. The two sides add up in a `place::Mix`.
+  - That mode then mixes the `place::Mix` with the layers below. `placed_of` and `Around::at` take the mode off each side.
 - A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
 - A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
 
@@ -550,7 +553,7 @@ A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#81
 - A Smooth Cut needs each side as one picture ([Smooth Cuts](#smooth-cuts)). `Nest::flat` holds the widened compound clip for it. A side that cannot morph plays as a dissolve.
 - `crossing` makes one `Placed` that both sides share. It is no picture. `place::parts_of` makes a `place::Mix` of the two sides, with `added` set.
 - `MixDraw::lay` adds the parts of such a `place::Mix` (`Gpu::adding`). Thus the two sides add up, then go over the layers below, as a crossing pair does.
-- In a dissolve, a side with a composite mode does not cross. It fades over the other side.
+- The sides of such a `place::Mix` take no composite mode (`MixDraw::lay`).
 - `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`otio::tied`).
 - `AudioPiece::Source` holds them in `edges`. The mix multiplies them with the gain.
 
