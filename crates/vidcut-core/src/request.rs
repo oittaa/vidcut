@@ -1243,7 +1243,7 @@ pub enum Request {
         #[serde(default)]
         track: Option<String>,
         #[serde(default)]
-        how: crate::ops::compound::Place,
+        how: crate::ops::Place,
     },
     /// Decompose in Place: a compound clip becomes the clips it holds, at
     /// their times, trimmed to the part it shows. Inner track n goes on the

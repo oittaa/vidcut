@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::follow::{self, Before, Edit};
 use super::{
-    block_clip, clear_range, ensure_track, fix_audio, linked, locate, main_index, shift_from,
-    split_at, tracks, unlocked,
+    Place, block_clip, clear_range, ensure_track, fix_audio, linked, locate, main_index,
+    shift_from, split_at, tracks, unlocked,
 };
 use crate::error::{Error, Result};
 use crate::model::{Clip, Compound, Kept, PooledCompound, Project, Track, TrackKind};
@@ -277,28 +277,6 @@ pub fn remove_pooled(p: &mut Project, id: &str) -> Result<()> {
         return Err(Error::not_found(format!("no compound clip {id}")));
     }
     Ok(())
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum Place {
-    /// Write over what is there; nothing else moves.
-    #[default]
-    Overwrite,
-    /// On V1: open the timeline at `at`; later clips move right.
-    Insert,
-    /// On V1: take the place of the clip under `at`; later clips follow.
-    Replace,
 }
 
 struct Host<'a> {
