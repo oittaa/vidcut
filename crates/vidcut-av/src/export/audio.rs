@@ -820,7 +820,7 @@ impl Lane {
                                     .as_ref()
                                     .and_then(SourceAudio::channels_in)
                                     .is_some_and(|n| n == 1);
-                                let shared = mono && channels > 1;
+                                let shared = mono && channels == 2;
                                 Some(Isolator::new(model, *amount, rate, channels, shared)?)
                             }
                             Err(e) => {
