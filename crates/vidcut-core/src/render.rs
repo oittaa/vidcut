@@ -1866,6 +1866,43 @@ struct Edge {
     crossing: Option<Placed>,
 }
 
+impl Edge {
+    fn of(d: &transitions::Playing, falling: bool) -> Self {
+        Self {
+            frames: span_of(d, falling),
+            falling,
+            wipe: transitions::wipe_of(d.transition),
+            smooth: matches!(
+                transitions::kind_of(d.transition),
+                Some(PictureTransition::SmoothCut { .. })
+            ),
+            crossing: crossing(d),
+        }
+    }
+
+    fn ramp(&self, now: i64, held: bool) -> Ramp {
+        Ramp {
+            at: now - self.frames.0,
+            of: self.frames.1 - self.frames.0,
+            falling: self.falling,
+            wipe: self.wipe,
+            held,
+            moved: self.crossing.as_ref().is_some_and(|c| c.moving.is_some()),
+        }
+    }
+
+    fn crossed(&self, x: i64, ramp: Ramp) -> Option<Placed> {
+        let c = self.crossing.as_ref()?.after(x - self.frames.0);
+        Some(Placed {
+            ramp: ramp.moved.then_some(Ramp {
+                falling: false,
+                ..ramp
+            }),
+            ..c
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Around {
     placed: Placed,
@@ -1877,33 +1914,21 @@ struct Around {
 impl Around {
     fn at(&self, x: i64) -> Vec<Placed> {
         let now = self.held.unwrap_or(x);
+        let mut own = self.placed.after(x);
         let edge = self
             .edges
             .iter()
             .find(|e| e.frames.0 <= now && now < e.frames.1);
-        let mut own = self.placed.after(x);
-        own.ramp = edge.map(|e| Ramp {
-            at: now - e.frames.0,
-            of: e.frames.1 - e.frames.0,
-            falling: e.falling,
-            wipe: e.wipe,
-            held: self.held.is_some(),
-            moved: e.crossing.as_ref().is_some_and(|c| c.moving.is_some()),
-        });
-        let crossing = edge.and_then(|e| {
-            let c = e.crossing.as_ref()?.after(x - e.frames.0);
-            Some(Placed {
-                ramp: own.ramp.filter(|r| r.moved).map(|r| Ramp {
-                    falling: false,
-                    ..r
-                }),
-                ..c
-            })
-        });
-        if crossing.is_some() {
+        let Some(edge) = edge else {
+            return vec![own];
+        };
+        let ramp = edge.ramp(now, self.held.is_some());
+        own.ramp = Some(ramp);
+        let crossed = edge.crossed(x, ramp);
+        if crossed.is_some() {
             own.picture.composite_mode = None;
         }
-        std::iter::once(own).chain(crossing).collect()
+        std::iter::once(own).chain(crossed).collect()
     }
 }
 
@@ -2063,16 +2088,10 @@ fn edges_on(p: &Project, t: &Track) -> HashMap<String, Vec<Edge>> {
             let Some(c) = side.filter(|c| plays_inside(c)) else {
                 continue;
             };
-            edges.entry(c.id.clone()).or_default().push(Edge {
-                frames: span_of(&d, falling),
-                falling,
-                wipe: transitions::wipe_of(d.transition),
-                smooth: matches!(
-                    transitions::kind_of(d.transition),
-                    Some(PictureTransition::SmoothCut { .. })
-                ),
-                crossing: crossing(&d),
-            });
+            edges
+                .entry(c.id.clone())
+                .or_default()
+                .push(Edge::of(&d, falling));
         }
     }
     edges
@@ -2979,16 +2998,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
             }
             let within = inner.map(|i| i.nests.as_slice());
             let now = window.held.unwrap_or(x);
-            let ramp_of = |d: &transitions::Playing, falling, wipe| {
-                let (from, to) = span_of(d, falling);
-                Ramp {
-                    at: now - from,
-                    of: to - from,
-                    falling,
-                    wipe,
-                    held: window.held.is_some(),
-                    moved: false,
-                }
+            let ramp_of = |d: &transitions::Playing, falling| {
+                Edge::of(d, falling).ramp(now, window.held.is_some())
             };
             let excluded = !t.render_cache;
             let shows = |c: &&Clip| visible(t, c);
@@ -3014,42 +3025,23 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
             };
             let shown =
                 |c: &Clip, ramp: Option<Ramp>, below: bool| laid(c, nest_of(c), ramp, below, &[]);
-            let moved_chain = |d: &transitions::Playing, falling: bool| -> Option<[Placed; 2]> {
-                let across = crossing(d)
-                    .filter(|c| c.moving.is_some())?
-                    .after(x - d.frames.0);
-                let ramp = Ramp {
-                    moved: true,
-                    ..ramp_of(d, falling, None)
-                };
-                Some([
-                    Placed {
-                        picture: Picture::default(),
-                        ramp: Some(ramp),
-                        crossing: false,
-                        moving: None,
-                        ..across.clone()
-                    },
-                    Placed {
-                        ramp: Some(Ramp {
-                            falling: false,
-                            ..ramp
-                        }),
-                        ..across
-                    },
-                ])
+            let sided = |d: &transitions::Playing, falling: bool| {
+                let edge = Edge::of(d, falling);
+                let ramp = edge.ramp(now, window.held.is_some());
+                match (edge.crossed(x, ramp), ramp.moved) {
+                    (Some(across), true) => {
+                        let own = Placed {
+                            picture: Picture::default(),
+                            ramp: Some(ramp),
+                            crossing: false,
+                            moving: None,
+                            ..across.clone()
+                        };
+                        (None, vec![own, across])
+                    }
+                    (crossed, _) => (Some(ramp), crossed.into_iter().collect()),
+                }
             };
-            let sided =
-                |d: &transitions::Playing, falling: bool, wipe| match moved_chain(d, falling) {
-                    Some(chain) => (None, chain.to_vec()),
-                    None => (
-                        Some(ramp_of(d, falling, wipe)),
-                        crossing(d)
-                            .map(|c| c.after(x - span_of(d, falling).0))
-                            .into_iter()
-                            .collect::<Vec<_>>(),
-                    ),
-                };
             let flat = |c: &Clip,
                         whole: &Clip,
                         (at, mode): (i64, SmoothMode),
@@ -3153,12 +3145,12 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     _ => None,
                 })
             };
-            match played
+            let playing = played
                 .iter()
-                .find(|d| d.frames.0 <= now && now < d.frames.1)
-            {
+                .find(|d| d.frames.0 <= now && now < d.frames.1);
+            match playing {
                 Some(d) if let Some((f, g, smooth)) = smoothed(d, !stack.is_empty())? => {
-                    let ramp = ramp_of(d, false, None);
+                    let ramp = ramp_of(d, false);
                     flattened.extend(
                         [d.before, d.after]
                             .into_iter()
@@ -3167,7 +3159,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                             .map(|n| n.opened),
                     );
                     let outgoing = match smooth.mode {
-                        Some(_) => Layer::Placed(f, Some(ramp_of(d, true, None))),
+                        Some(_) => Layer::Placed(f, Some(ramp_of(d, true))),
                         None if f.placed().is_empty() => Layer::Picture(f, None),
                         None => Layer::Placed(f, None),
                     };
@@ -3184,13 +3176,12 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         && sides
                             .iter()
                             .all(|(c, _)| c.filter(shows).is_some_and(fills));
-                    let wipe = transitions::wipe_of(d.transition);
                     let mut layers = Vec::new();
                     for (c, falling) in sides {
                         let Some(c) = c.filter(shows) else {
                             continue;
                         };
-                        let (ramp, chain) = sided(d, falling, wipe);
+                        let (ramp, chain) = sided(d, falling);
                         let bare = without_mode(c).filter(|_| !chain.is_empty());
                         let drawn = bare.as_ref().unwrap_or(c);
                         layers.push(laid(drawn, nest_of(c), ramp, below, &chain)?);
@@ -3198,7 +3189,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     let outer = outer_at(d.before.or(d.after).and_then(nest_of), x);
                     if let Some(color) = transitions::dip_of(d.transition) {
                         let falling = now < middle(d.frames);
-                        let (ramp, chain) = sided(d, falling, None);
+                        let (ramp, chain) = sided(d, falling);
                         let own = chain.first().map(|c| Placed {
                             picture: Picture::default(),
                             crossing: false,
@@ -3233,8 +3224,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 }
             }
             let lettered = |c: &Clip, fade: Option<Ramp>, crossed: Vec<Placed>| {
-                let nest =
-                    within.and_then(|w| w.get(t.clips.iter().position(|o| std::ptr::eq(o, c))?));
+                let nest = nest_of(c);
                 let run = nest.and_then(|n| n.run).filter(|r| r.held).unwrap_or(Run {
                     at: x - c.start,
                     of: c.duration,
@@ -3249,14 +3239,10 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     placed: crossed.into_iter().chain(outer_at(nest, x)).collect(),
                 })
             };
-            match played
-                .iter()
-                .find(|d| d.frames.0 <= now && now < d.frames.1)
-            {
+            match playing {
                 Some(d) => {
                     for (c, falling) in sides_at(d, now) {
-                        let wipe = transitions::wipe_of(d.transition);
-                        let (fade, crossed) = sided(d, falling, wipe);
+                        let (fade, crossed) = sided(d, falling);
                         if let Some(s) = c
                             .filter(|c| titled(t, c))
                             .and_then(|c| lettered(c, fade, crossed))
