@@ -581,6 +581,7 @@ pub struct TitleOver {
     pub turn: [f32; 4],
     pub alpha: f32,
     pub placed: Vec<vidcut_core::render::Placed>,
+    pub nth: usize,
 }
 
 #[cfg(test)]
