@@ -1083,17 +1083,20 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Its color is black unless it is set. Resolve's Start Ratio and End Ratio come later.
   - **Over the tracks below** (measured in Resolve Studio 21.2.0):
     - The color is opaque, and it fills the frame.
-    - Each half is a dissolve between the picture of its clip and the color. That picture has the zoom and the opacity of the clip.
+    - Each half is a dissolve between the picture of its clip and the color.
+    - That picture has the zoom, the crop, the position, the rotation and the opacity of its clip.
     - The level is the share of the clip in that dissolve. The opacity of the clip does not fade the color.
-    - The composite mode of the clip then mixes the result with the tracks below.
+    - One composite mode then mixes both halves with the tracks below. It is the mode of the outgoing clip.
+    - With no outgoing clip, it is the mode of the incoming clip.
     - With the mode Normal, a frame is level × the frame without the dip + (1 − level) × the color.
+    - The mix keeps values below 0 and above 1. Only the output clips them.
     - Thus the tracks below fade to the color and back, around a clip at Zoom 0.5 and under a clip at Opacity 50.
-    - With no tracks below, the area around a clip at Zoom 0.5 fades from black to the color and back.
+    - With no tracks below, black takes the place of the tracks below.
+    - Thus the area around a clip at Zoom 0.5 fades from black to the color and back.
+    - A dip with a clip on one side only has no picture in its other half. The frame without the dip is then the tracks below.
+    - A dip at an edge of a compound clip acts as the same dip at an edge of a plain clip.
     - A compound clip with the dip inside it makes its own picture first, with the dip in it.
     - Its zoom, its opacity and its composite mode then place that picture. Thus the tracks below do not fade around it or under it.
-    - Not measured: a dip with a clip on one side only, and a dip at an edge of a compound clip.
-    - Also not measured: a crop, a position, a rotation, and an opacity with no tracks below.
-    - The two clips had the same composite mode. Thus the measurement does not show which clip gives the mode in each half.
     - vidcut does not follow these rules yet. During the dip, the color takes the place of the tracks below ([todo](todo/dip-to-color-over-tracks-below.md)).
   - A request makes it: `{"type": "dip_to_color", "color": "#rrggbb"}`.
   - An OTIO file holds it as a Dip To Color Dissolve, with the color as its `color` value ([gotchas](gotchas.md#resolves-otio-files)).

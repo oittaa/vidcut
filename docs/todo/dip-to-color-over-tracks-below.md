@@ -20,12 +20,11 @@
 
 - The dip takes the route of a transition with two sides ([design/export.md](../design/export.md#placed-pictures), `crossing`).
 - The color is the other side of each half. It fills the frame, and its level is 1 − the level of the clip.
-- The composite mode of the clip mixes the two sides with the tracks below, as in a dissolve.
+- The mode of the outgoing clip mixes both halves with the tracks below. With no outgoing clip, the mode of the incoming clip does.
+- With a clip on one side only, the other half has the color and the tracks below.
 - The layers of the tracks below stay in the plan.
 - Inside a compound clip, the color is a part of the picture of the compound clip. It does not cover the tracks below the compound clip.
 
 **To do:**
 
-- Measure in Resolve what the spec lists as not measured.
-- Measure which clip gives the composite mode in each half. Use two clips with different modes.
 - Change the plan. Then compare frames of an export with Resolve's frames, for each case above.
