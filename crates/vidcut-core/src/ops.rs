@@ -66,6 +66,28 @@ pub enum MoveMode {
     Overwrite,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Place {
+    /// Write over what is there; nothing else moves.
+    #[default]
+    Overwrite,
+    /// On V1: open the timeline at `at`; later clips move right.
+    Insert,
+    /// On V1: take the place of the clip under `at`; later clips follow.
+    Replace,
+}
+
 fn main_index(p: &Project) -> usize {
     p.track_index(MAIN).expect("every project has V1")
 }
@@ -1889,7 +1911,6 @@ pub fn change_speed(
         )));
     }
     let ripple = ripple.unwrap_or(p.settings.ripple_on);
-    let mut targets = Vec::new();
     for id in &linked::with_ties(p, ids) {
         let c = p
             .clip(id)
@@ -1904,10 +1925,8 @@ pub fn change_speed(
                 "{id} is a generator: it has no speed to change"
             )));
         }
-        targets.push((c.start, id.clone()));
     }
-    targets.sort();
-    for (_, id) in targets.into_iter().rev() {
+    for (id, lead) in speed::latest_first(p, ids) {
         let c = p.clip(&id).expect("found").clone();
         let mut n = c.clone();
         let (first, last) = (c.source_at(c.start), c.source_at(c.end() - 1));
@@ -1944,19 +1963,24 @@ pub fn change_speed(
             c.duration
         };
         let at_speed = format!("at {}%", Speed::percent(speed));
-        retimed(p, &c, n, want, ripple, &at_speed)?;
+        if lead {
+            retimed(p, &c, n, want, ripple, &at_speed)?;
+        } else {
+            repaced(p, &c, n, want, &at_speed)?;
+        }
     }
     Ok(())
 }
 
-fn retimed(
-    p: &mut Project,
-    c: &Clip,
-    mut n: Clip,
-    want: i64,
-    ripple: bool,
-    how: &str,
-) -> Result<()> {
+fn retimed(p: &mut Project, c: &Clip, n: Clip, want: i64, ripple: bool, how: &str) -> Result<()> {
+    let lo = repaced(p, c, n, want, how)?;
+    if lo != c.duration {
+        trim(p, &c.id, Edge::Tail, lo - c.duration, Some(ripple))?;
+    }
+    Ok(())
+}
+
+fn repaced(p: &mut Project, c: &Clip, mut n: Clip, want: i64, how: &str) -> Result<i64> {
     let fits = |d: i64| {
         let mut x = n.clone();
         x.duration = d;
@@ -1991,10 +2015,7 @@ fn retimed(
     }
     let (ti, ci) = locate(p, &c.id)?;
     p.tracks[ti].clips[ci] = n;
-    if lo != c.duration {
-        trim(p, &c.id, Edge::Tail, lo - c.duration, Some(ripple))?;
-    }
-    Ok(())
+    Ok(lo)
 }
 
 pub(crate) fn time_effect(old: Option<&Speed>, speed: f64) -> serde_json::Value {

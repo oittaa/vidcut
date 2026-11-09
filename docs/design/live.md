@@ -276,6 +276,7 @@ The bar and the Jobs button:
 
 - The view state is the selected edit points (`TimelineView::edit`, `TimelineView::edits`) and the selected dissolve (`TimelineView::transition`). It is also the target track, the zoom, the Timeline Options and the open windows.
 - `timeline.json` keeps the target track, the zoom and the Timeline Options. Requests reach the view state through `Renderer::gui`.
+- When another project opens, `TimelineView::switch_project` clears the view state. It keeps the Timeline Options and the choices that are not about one project. The open windows of the timeline close.
 - `LeftTab::Hidden` is the left area with no tab open. Each place that opens a tab sets `Workspace::left`, thus it also shows the area.
   - The tabs then are a row above the viewer (`Workspace::left_tick`). Thus the tab that hid the pool stays in reach.
 - The Trim Editor shows the selected edit while the player is stopped (`Workspace::trim_editor_edit`). A drag of its handles holds the trim (`TimelineView::strip_drag`), shows it (`Workspace::strip_drawn`), and sends it on release.
@@ -435,7 +436,7 @@ The bar and the Jobs button:
 **Silence stripes** ([deviation X48](../deviations.md#x48-ripple-delete-silences-stripes-can-be-edited-before-remove)).
 
 - `SilenceDialog` keeps the dry run of Ripple Delete Silence as `Stripe`s, and the user's edits to them (`stripe_press`, `stripe_drag`, `silence_keys`).
-- A changed setting runs the dry run again, and replaces the stripes and their edits.
+- A changed setting runs the dry run again, and replaces the stripes and their edits. A new revision of the project does the same (`SilenceDialog::forget_found`), because the stripes hold timeline frames.
 - Each change keeps the state before it (`Shot`). Ctrl+Z and Ctrl+Shift+Z step through these states (`SilenceDialog::undo`). The project's history stays as it is until Remove.
 - The dialog keeps the newest states (`SHOTS_KEPT`). Why: each state holds a copy of the stripes.
 - While the dialog is open, `Handle::skip` hands the stripes to the session. The session plays the timeline as Remove would leave it.

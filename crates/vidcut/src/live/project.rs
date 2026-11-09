@@ -4,6 +4,7 @@ use std::sync::mpsc::Sender;
 use notify::Watcher;
 use vidcut_core::model::Settings;
 use vidcut_core::steps::{Steps, StepsCache};
+use vidcut_core::store::Saved;
 use vidcut_core::{Editor, Env, Envelope, Project, Response, Result, Store};
 
 use super::Msg;
@@ -13,7 +14,7 @@ pub struct OpenProject {
     pub editor: Editor,
     disk: String,
     stamp: Option<(u64, std::time::SystemTime)>,
-    pub history_error: Option<String>,
+    pub unsaved: Option<String>,
     told: Option<String>,
     opened: u64,
     steps: StepsCache,
@@ -51,7 +52,7 @@ impl OpenProject {
             editor,
             disk,
             stamp,
-            history_error: None,
+            unsaved: None,
             told: None,
             opened,
             steps: StepsCache::default(),
@@ -137,25 +138,36 @@ impl OpenProject {
         let result = self.editor.apply(envelope, env, playhead);
         let committed = self.editor.unsaved() != was;
         if committed {
-            match self.store.save(&mut self.editor) {
-                Ok(saved) => {
-                    self.disk = saved.text;
-                    self.stamp = self.store.stamp();
-                    self.history_stamp = self.store.history_stamp();
-                    self.history_error = saved.history_error;
-                    if saved.compact {
-                        let store = self.store.clone();
-                        let _ = crate::threads::spawn(
-                            "vidcut-history",
-                            crate::threads::Work::Job,
-                            move || store.compact(),
-                        );
-                    }
+            let saved = self.store.save(&mut self.editor);
+            self.unsaved = unsaved_warning(&saved);
+            if let Ok(saved) = saved {
+                self.disk = saved.text;
+                self.stamp = self.store.stamp();
+                self.history_stamp = self.store.history_stamp();
+                if saved.compact {
+                    let store = self.store.clone();
+                    let _ = crate::threads::spawn(
+                        "vidcut-history",
+                        crate::threads::Work::Job,
+                        move || store.compact(),
+                    );
                 }
-                Err(e) => return (Err(e), true),
             }
         }
         (result, committed || refreshed)
+    }
+}
+
+fn unsaved_warning(saved: &Result<Saved>) -> Option<String> {
+    match saved {
+        Ok(saved) => saved
+            .history_error
+            .as_deref()
+            .map(crate::session::history_unsaved),
+        Err(e) => Some(format!(
+            "the edit is made, but it isn't saved ({}). The next edit tries to save it again",
+            e.message
+        )),
     }
 }
 
@@ -207,4 +219,40 @@ pub(super) fn watch(
         .watch(&dir, notify::RecursiveMode::NonRecursive)
         .ok()?;
     Some(watcher)
+}
+
+#[cfg(test)]
+mod tests {
+    use vidcut_core::Error;
+
+    use super::*;
+
+    fn saved(history_error: Option<&str>) -> Result<Saved> {
+        Ok(Saved {
+            text: String::new(),
+            history_error: history_error.map(String::from),
+            compact: false,
+        })
+    }
+
+    #[test]
+    fn a_failed_write_says_the_edit_is_made_but_not_saved() {
+        assert_eq!(
+            unsaved_warning(&Err(Error::internal("disk full"))).as_deref(),
+            Some(
+                "the edit is made, but it isn't saved (disk full). The next edit tries to save it again"
+            )
+        );
+    }
+
+    #[test]
+    fn a_clean_save_has_no_warning() {
+        assert_eq!(unsaved_warning(&saved(None)), None);
+    }
+
+    #[test]
+    fn a_save_without_its_history_says_so() {
+        let warning = unsaved_warning(&saved(Some("no room"))).unwrap();
+        assert!(warning.contains("undo history isn't (no room)"));
+    }
 }

@@ -516,6 +516,9 @@ fn ramp_skip(map: &[Section], at: f64) -> Option<i64> {
 
 fn exact_start(item: &Value, fps: Rational) -> Option<f64> {
     let (v, r) = time(&item["source_range"]["start_time"])?;
+    if schema(item).starts_with("Stack") {
+        return Some(v / r * fps.as_f64());
+    }
     let (bv, br) = time(&media_reference_of(item)["available_range"]["start_time"])?;
     Some((v / r - bv / br) * fps.as_f64())
 }
@@ -626,6 +629,12 @@ fn own_pace(meta: &mut Value, c: &Clip, s: i64) {
         if !matches!(&*speed.sections, [one] if one.at == 0 && one.from == 0.0) {
             meta["sections"] = json!(speed.sections);
         }
+    }
+}
+
+fn our_skip(speed: &mut Option<Speed>, item: &Value) {
+    if let (Some(s), Some(skip)) = (speed.as_mut(), item["metadata"][VIDCUT]["skip"].as_i64()) {
+        s.skip = skip;
     }
 }
 
@@ -886,6 +895,7 @@ pub fn export_drawn(
                 }
                 if let Some(k) = &c.compound {
                     tie(&mut it, c, k, &links, &mut given, &mut groups);
+                    own_pace(&mut it["metadata"][VIDCUT], c, s);
                 }
                 video.push(it);
                 if let Some(x) = transitions::tail(p, &edits, c, false, e, rate) {
@@ -1030,6 +1040,7 @@ pub fn export_drawn(
                     );
                     let mut it = block(c, k, &label, c.source_at(s), e - s, effects);
                     tie(&mut it, c, k, &links, &mut given, &mut groups);
+                    own_pace(&mut it["metadata"][VIDCUT], c, s);
                     audio.push(it);
                     if let Some(x) = transitions::tail(p, &edits, c, true, e, rate) {
                         audio.push(x);
@@ -2171,7 +2182,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let reference = media_reference_of(item);
             let block =
                 stack || plain.is_some() || schema(reference).starts_with("GeneratorReference");
-            let mut speed = speed_of(speed, item, fps, !block, &mut notes);
+            let mut speed = speed_of(speed, item, fps, !block || stack, &mut notes);
+            if stack {
+                our_skip(&mut speed, item);
+            }
             if block {
                 clip_markers(item, start, len, fps, &mut markers);
                 keys[i] = Some(clips.len());
@@ -2291,7 +2305,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             }
             let (mut effects, speed) = effects::read(item);
             let block = stack || plain.is_some();
-            let mut speed = speed_of(speed, item, fps, !block, &mut notes);
+            let mut speed = speed_of(speed, item, fps, !block || stack, &mut notes);
+            if stack {
+                our_skip(&mut speed, item);
+            }
             let x = scalar(speed.as_ref());
             if block {
                 clip_markers(item, start, len, fps, &mut markers);

@@ -131,6 +131,7 @@ impl Titles {
                     turn: [0.0, 0.0, 1.0, 0.0],
                     alpha,
                     placed: super::plan::previewed(&shown.placed, placing),
+                    nth: 0,
                 }));
                 kept.last.insert(shown.clip.clone(), key);
                 continue;
@@ -169,6 +170,7 @@ impl Titles {
                     ],
                     alpha,
                     placed: super::plan::previewed(&shown.placed, placing),
+                    nth: 0,
                 });
             }
             kept.last.insert(shown.clip.clone(), key);
