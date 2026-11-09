@@ -1579,7 +1579,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Normalize in the header opens Normalize Audio Levels for the clips of the section ([X72](#x72-normalize-audio-levels-on-the-cut-page)).
     - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([X64](#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
     - Pan sets the pan of the selected clips ([X153](#x153-every-clip-pans-as-on-a-stereo-track)).
-    - The Equalizer row has a switch and a button that opens the Equalizer window ([X154](#x154-the-equalizer-is-a-window-with-chosen-curves)).
+    - The Equalizer row has a switch and a button that opens the Equalizer window ([X154](#x154-the-equalizer-is-a-window)).
     - The Dialogue Leveler row has a switch and a button that opens the Dialogue Leveler window ([X155](#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
     - The Compressor row has a switch and a button that opens the Compressor window ([X156](#x156-the-compressor-is-on-a-clip)).
     - The Noise Reduction row has a switch and a button that opens the Noise Reduction window ([X157](#x157-noise-reduction-is-our-own-spectral-gate)).
@@ -2854,23 +2854,27 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - One slider is simpler. A section has no switch ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).
   - A value outside the range is an error in the script. A refusal shows the error.
 
-## X154. The Equalizer is a window with chosen curves
+## X154. The Equalizer is a window
 
 - **Resolve:**
   - The Equalizer is a section of the Inspector, and a change applies at once (pp. 745–746).
-  - Resolve's scripts cannot read or set it. Thus its frequencies and curves are not measured.
+  - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives its ranges, defaults and curves.
+  - Its switch starts off.
+  - The curve shows a Notch filter, but a render does not change the sound.
+  - A Bell filter is wider than its Q near the top of the range.
+  - Q 1 acts as Q 0.94 at 8000 Hz and as Q 0.75 at 16000 Hz. Q 4 acts as Q 2 at 16000 Hz.
 - **vidcut:**
   - The Equalizer window opens from the Audio section. Apply changes the clips. Cancel changes nothing.
-  - A frequency goes from 20 to 20000 Hz.
-  - Bands 1 to 6 start at 80, 200, 800, 2500, 8000 and 16000 Hz. Bands 2 to 5 start as Bell filters with Q 1.
-  - Band 1 starts as a Hi-Pass filter and band 6 as a Lo-Pass filter.
-  - Each filter is a biquad filter of 12 dB per octave. A Notch filter has a fixed width.
-  - The Lo-Pass and Hi-Pass filters have no slope control.
+  - The window opens with its switch on. A clip that has no equalizer keeps its sound.
+  - A Notch filter removes its frequency. Its width is fixed.
+  - A Bell filter has the given Q at each frequency.
   - An OTIO export keeps the Equalizer in vidcut's own metadata. The export gives the note `equalizer_kept`.
 - **Why:**
   - The Inspector is too narrow for six bands of four values.
   - A window with Apply makes one undo step for one set of changes.
-  - The [todo](todo/effects-library.md) lists what to measure in the Resolve window.
+  - With the switch on, the first Apply changes the sound as the user expects.
+  - A Notch filter that shows a cut and does not make it is a fault.
+  - The measurements do not give one rule for the width of a Bell filter near the top of the range. The difference is small below 8000 Hz.
 
 ## X155. The Dialogue Leveler follows the levels with its own rules
 

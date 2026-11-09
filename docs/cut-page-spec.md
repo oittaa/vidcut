@@ -2233,11 +2233,32 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - The gain goes from −20 to 20 dB, and the Q from 0.3 to 10.3.
     - Bands 1 and 6 are off by default, and bands 2 to 5 are on.
     - The pass filters have slopes from 6 to 24 dB per octave.
-  - The scripting API of Resolve Studio 21.2 cannot read or set the equalizer of a clip. Thus these are not measured:
-    - The range and the default of each frequency.
-    - The curve of each filter.
-    - The effect that an OTIO export writes.
-  - vidcut: the Equalizer row of the Audio section (X70) and `clip.set` set `equalizer` ([X154](deviations.md#x154-the-equalizer-is-a-window-with-chosen-curves)).
+  - The scripting API of Resolve Studio 21.2 cannot read or set the equalizer of a clip.
+  - The Inspector of a clip gives these values (measured):
+    - The switch of the equalizer starts off. Reset turns it off and restores the defaults.
+    - A frequency goes from 20 to 22000 Hz. A gain goes from −70 to 24 dB. A Q goes from 0.3 to 100.
+    - Band 1 starts off. It is a Hi-Pass filter at 97 Hz.
+    - Band 2 starts on. It is a Lo-Shelf filter at 117 Hz.
+    - Bands 3 and 4 start on. They are Bell filters at 239 and 1200 Hz with Q 1.
+    - Band 5 starts on. It is a Hi-Shelf filter at 6000 Hz.
+    - Band 6 starts off. It is a Lo-Pass filter at 19000 Hz.
+  - Renders of noise at 48 kHz give these curves (measured):
+    - Each filter is a biquad filter. With all gains at 0 dB, the sound does not change.
+    - A Bell filter has its gain at its frequency, and the given Q.
+    - A Lo-Shelf or Hi-Shelf filter has a fixed Q of 0.75.
+    - The corner of a shelf is 10^(|gain| / 80) times away from the given frequency. A Lo-Shelf moves down and a Hi-Shelf moves up.
+    - Thus a Hi-Shelf of 12 dB at 1000 Hz has about 2.5 dB at 1000 Hz.
+    - A Hi-Pass or Lo-Pass filter has 12 dB per octave and a fixed Q of 1. It has 0 dB at its frequency.
+    - The curve in the Inspector shows a Notch filter, but a render does not change the sound.
+  - An OTIO export writes the effect `Fairlight Clip Equaliser`, `Type` 64, and six effects `Fairlight Equaliser Band`, `Type` 63 (measured):
+    - The `Enabled` of the first effect is the switch of the equalizer. The `Enabled` of a band is the switch of that band.
+    - The parameter `eq band index` of a band goes from 0 to 5.
+    - The other parameters are present when they are not the default of the band.
+    - `eq type` is 1 Lo-Shelf, 2 Bell, 3 Hi-Shelf, 4 Notch, 5 Lo-Pass or 6 Hi-Pass.
+    - `eq frequency` is in Hz.
+    - `eq dB gain` is in tenths of a dB.
+    - `eq qFactor` is in thousandths of the Q.
+  - vidcut: the Equalizer row of the Audio section (X70) and `clip.set` set `equalizer` ([X154](deviations.md#x154-the-equalizer-is-a-window)).
 - **Dialogue Leveler** (pp. 743, 774–775):
   - The Dialogue Leveler has a switch, a preset, three processes and an Output Gain (p. 775).
   - The presets are Allow Wider Dynamics, More Lift For Low Levels, Lift Soft Whispery Sources and Optimize Moderate Levels (p. 775).
