@@ -7,7 +7,12 @@
 **Why:**
 
 - A drag is the usual way to put a Media Pool item on the timeline.
+- vidcut refuses a wipe, a push, a slide and a smooth cut at an edge of a compound clip. Each of them needs the compound clip as one picture.
+- Resolve Studio 21.2.0 plays speed keyframes on a compound clip, in its picture and in its sound.
+  - The edit tools of vidcut refuse them, and an OTIO import plays them at 100%.
 
 **To do:**
 
 - Let a drag put a compound clip of the Media Pool on the timeline.
+- Let an edge of a compound clip take a wipe, a push, a slide and a smooth cut.
+- Let a compound clip take speed keyframes. Each section plays at its own speed, as on a plain clip.

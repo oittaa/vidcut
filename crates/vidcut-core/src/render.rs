@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -7,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
-    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, DuckDetect,
+    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, Compound, DuckDetect,
     Generator, Gradient, Hdr, Keyframe, Media, MediaSuperScale, Picture, PictureTransition,
     Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode, SuperScale,
     TimelineColors, Title, Track, TrackKind, Transition, WipeDirection,
@@ -496,6 +497,13 @@ pub struct Placed {
     /// Set once `after` has placed this picture on a timeline frame.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ready: bool,
+    /// The level of a dissolve at an edge of this compound clip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ramp: Option<Ramp>,
+    /// This is no picture. It joins the two sides of a dissolve at an edge
+    /// of a compound clip: they add up, then go over the layers below.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub crossing: bool,
 }
 
 fn zero_i64(n: &i64) -> bool {
@@ -512,6 +520,8 @@ impl Placed {
             frame: 0,
             start: clip.start,
             ready: false,
+            ramp: None,
+            crossing: false,
         }
     }
 
@@ -525,6 +535,8 @@ impl Placed {
             frame: time - clip.start,
             start: clip.start,
             ready: true,
+            ramp: None,
+            crossing: false,
         }
     }
 
@@ -541,6 +553,8 @@ impl Placed {
             frame: self.frame + if self.ready { k } else { k - self.start },
             start: self.start,
             ready: true,
+            ramp: self.ramp.map(|r| r.after(k)),
+            crossing: self.crossing,
         }
     }
 
@@ -910,6 +924,10 @@ pub enum AudioPiece {
         /// `gain_db`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fade: Option<Fade>,
+        /// The fades at the edges of the compound clips around it: their
+        /// gains on top of `gain_db`.
+        #[serde(default, skip_serializing_if = "<[Fade]>::is_empty")]
+        edges: Box<[Fade]>,
         /// Its clip's volume keyframes (decision D81): their gain at each
         /// sample heard, on top of `gain_db`, which then holds the
         /// track's fader only.
@@ -1686,6 +1704,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 gain_db,
                 speed,
                 fade,
+                edges,
                 isolation,
                 keyed,
                 pan,
@@ -1703,6 +1722,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 gain_db: g2,
                 speed: sp2,
                 fade: f2,
+                edges: x2,
                 isolation: i2,
                 keyed: k2,
                 pan: p2,
@@ -1729,6 +1749,8 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             && *sp2 == 1.0
             && fade.is_none()
             && f2.is_none()
+            && edges.is_empty()
+            && x2.is_empty()
             && *source_sample + *samples == *s2 =>
         {
             *samples += n2
@@ -1815,9 +1837,53 @@ fn holds_mode(c: &Clip) -> bool {
         })
 }
 
+#[derive(Debug, Clone)]
+struct Edge {
+    frames: (i64, i64),
+    falling: bool,
+    crossing: Option<Placed>,
+}
+
+#[derive(Debug, Clone)]
+struct Around {
+    placed: Placed,
+    always: bool,
+    edges: Vec<Edge>,
+}
+
+impl Around {
+    fn at(&self, x: i64) -> Vec<Placed> {
+        let edge = self
+            .edges
+            .iter()
+            .find(|e| e.frames.0 <= x && x < e.frames.1);
+        if edge.is_none() && !self.always {
+            return Vec::new();
+        }
+        let mut own = self.placed.after(x);
+        own.ramp = edge.map(|e| Ramp {
+            at: x - e.frames.0,
+            of: e.frames.1 - e.frames.0,
+            falling: e.falling,
+            wipe: None,
+            held: false,
+        });
+        std::iter::once(own)
+            .chain(edge.and_then(|e| e.crossing.clone()))
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Fading {
+    frames: (i64, i64),
+    falling: bool,
+    curve: Curve,
+}
+
 #[derive(Debug, Clone, Default)]
 struct Nest {
-    outer: Vec<Placed>,
+    outer: Vec<Around>,
     run: Option<Run>,
 }
 
@@ -1846,11 +1912,148 @@ const EVERY_FRAME: Shown = Shown {
 struct Inner {
     nests: Vec<Nest>,
     shown: Shown,
+    fades: Vec<Fading>,
 }
 
 type Within = Vec<Inner>;
 
 pub const NESTED: usize = 8;
+
+type Nesting<'a> = (Option<&'a Nest>, bool, Option<&'a Placed>);
+
+fn crossing(d: &transitions::Playing) -> Option<Placed> {
+    let (from, to) = (d.before?, d.after?);
+    let moded = |c: &Clip| {
+        c.picture
+            .as_ref()
+            .is_some_and(|x| x.mode() != CompositeMode::Normal)
+    };
+    let joins = (from.compound.is_some() || to.compound.is_some())
+        && transitions::dip_of(d.transition).is_none()
+        && !moded(from)
+        && !moded(to);
+    joins.then(|| Placed {
+        clip: d.transition.id.clone(),
+        picture: Picture::default(),
+        run: None,
+        source: 0,
+        frame: 0,
+        start: 0,
+        ready: true,
+        ramp: None,
+        crossing: true,
+    })
+}
+
+fn edges_on(p: &Project, t: &Track) -> HashMap<String, Vec<Edge>> {
+    let mut edges: HashMap<String, Vec<Edge>> = HashMap::new();
+    if !t.clips.iter().any(plays_inside) {
+        return edges;
+    }
+    for d in transitions::playing(p, t, false, joins_compound) {
+        let dip = transitions::dip_of(d.transition).is_some();
+        let mid = middle(d.frames);
+        for (side, falling) in [(d.before, true), (d.after, false)] {
+            let Some(c) = side.filter(|c| plays_inside(c)) else {
+                continue;
+            };
+            let frames = match (dip, falling) {
+                (false, _) => d.frames,
+                (true, true) => (d.frames.0, mid),
+                (true, false) => (mid, d.frames.1),
+            };
+            edges.entry(c.id.clone()).or_default().push(Edge {
+                frames,
+                falling,
+                crossing: crossing(&d),
+            });
+        }
+    }
+    edges
+}
+
+fn edge_fades(p: &Project) -> HashMap<String, Vec<Fading>> {
+    let mut fades: HashMap<String, Vec<Fading>> = HashMap::new();
+    for t in p.tracks.iter().filter(|t| t.clips.iter().any(plays_inside)) {
+        for d in transitions::cross_fades(p, t) {
+            let Some(curve) = transitions::cross_fade(d.transition) else {
+                continue;
+            };
+            for (side, falling) in [(d.before, true), (d.after, false)] {
+                let Some(c) = side.filter(|c| plays_inside(c)) else {
+                    continue;
+                };
+                let blocks = match c.video {
+                    true => crate::otio::tied(p, &c.id),
+                    false => vec![c.id.clone()],
+                };
+                let fading = Fading {
+                    frames: d.frames,
+                    falling,
+                    curve,
+                };
+                for block in blocks {
+                    let held = fades.entry(block).or_default();
+                    if !held.contains(&fading) {
+                        held.push(fading);
+                    }
+                }
+            }
+        }
+    }
+    fades
+}
+
+fn joins_compound(t: &Transition) -> bool {
+    transitions::kind_of(t).is_some_and(|k| transitions::compound_takes(&k))
+}
+
+fn touches_compound(t: &Track, x: &Transition) -> bool {
+    [&x.from, &x.to]
+        .into_iter()
+        .flatten()
+        .any(|id| t.clips.iter().any(|c| &c.id == id && plays_inside(c)))
+}
+
+fn hollow(c: &Clip) -> Clip {
+    let mut hollow = c.clone();
+    hollow.compound = c.compound.as_ref().map(|k| Compound {
+        stack: Default::default(),
+        frames: k.frames,
+        tracks: Vec::new(),
+        made_from: Vec::new(),
+    });
+    hollow
+}
+
+fn reached(c: &Clip, sides: impl Iterator<Item = ((i64, i64), bool)>) -> (i64, i64) {
+    sides.fold(
+        (c.start, c.end()),
+        |(from, to), ((a, b), falling)| match falling {
+            true => (from, b),
+            false => (a, to),
+        },
+    )
+}
+
+fn split_at_fades(runs: Vec<(i64, i64)>, fades: &[Fading]) -> Vec<(i64, i64)> {
+    let marks: Vec<i64> = fades
+        .iter()
+        .flat_map(|f| [f.frames.0, f.frames.1])
+        .collect();
+    let mut out = Vec::new();
+    for (mut x, y) in runs {
+        let mut inside: Vec<i64> = marks.iter().copied().filter(|m| x < *m && *m < y).collect();
+        inside.sort_unstable();
+        inside.dedup();
+        for m in inside {
+            out.push((x, m));
+            x = m;
+        }
+        out.push((x, y));
+    }
+    out
+}
 
 fn expanded(p: &Project) -> Option<(Project, Within)> {
     let holds = |p: &Project| p.tracks.iter().any(|t| t.clips.iter().any(plays_inside));
@@ -1864,6 +2067,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
         .map(|t| Inner {
             nests: vec![Nest::default(); t.clips.len()],
             shown: EVERY_FRAME,
+            fades: Vec::new(),
         })
         .collect();
     for _ in 0..NESTED {
@@ -1871,9 +2075,13 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             break;
         }
         let (mut tracks, mut placed) = (Vec::new(), Vec::new());
+        let fades = edge_fades(&out);
         for (t, w) in out.tracks.iter().zip(&within) {
+            let edges = edges_on(&out, t);
             let (mut host, mut host_within) = (t.clone(), Vec::new());
             host.clips.clear();
+            host.transitions
+                .retain(|x| x.sound || joins_compound(x) || !touches_compound(t, x));
             let mut inner = Vec::new();
             for (c, nest) in t.clips.iter().zip(&w.nests) {
                 if !plays_inside(c) {
@@ -1884,12 +2092,36 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 if !c.enabled {
                     continue;
                 }
+                host.clips.push(hollow(c));
+                host_within.push(Nest::default());
                 let own = c.picture.clone().unwrap_or_default();
-                let chain: Vec<Placed> = (!own.is_usual() || holds_mode(c))
-                    .then(|| Placed::of(c, own, run_of(c, nest.run)))
+                let always = !own.is_usual() || holds_mode(c);
+                let edges = edges.get(&c.id).cloned().unwrap_or_default();
+                let fading = fades.get(&c.id).cloned().unwrap_or_default();
+                let (from, to) = reached(
+                    c,
+                    edges
+                        .iter()
+                        .map(|e| (e.frames, e.falling))
+                        .chain(fading.iter().map(|f| (f.frames, f.falling))),
+                );
+                let chain: Vec<Around> = (always || !edges.is_empty())
+                    .then(|| Around {
+                        placed: Placed::of(c, own, run_of(c, nest.run)),
+                        always,
+                        edges,
+                    })
                     .into_iter()
                     .chain(nest.outer.iter().cloned())
                     .collect();
+                let (head, tail) = ((c.start - from).max(0), (to - c.end()).max(0));
+                let wide = (head > 0 || tail > 0).then(|| {
+                    let mut wide = c.clone();
+                    wide.move_head(-head);
+                    wide.duration += tail;
+                    wide
+                });
+                let wide = wide.as_ref().unwrap_or(c);
                 let k = c.compound.as_ref().expect("plays inside");
                 for n in k.tracks.iter().filter(|n| n.kind == t.kind) {
                     let mut v = n.clone();
@@ -1900,7 +2132,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     v.volume_db = t.volume_db;
                     v.video_enabled &= t.video_enabled;
                     v.render_cache &= t.render_cache;
-                    let laid = inner_layout(p, n, c);
+                    let laid = inner_layout(p, n, wide);
                     v.transitions = laid.transitions;
                     let mut clips: Vec<(Clip, Nest)> = laid
                         .clips
@@ -1917,17 +2149,26 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     let (clips, nests) = clips.into_iter().unzip();
                     v.clips = clips;
                     let shown = Shown {
-                        from: w.shown.from.max(c.start),
-                        to: w.shown.to.min(c.end()),
+                        from: w.shown.from.max(from),
+                        to: w.shown.to.min(to),
                         held: laid.held,
                     };
-                    inner.push((v, Inner { nests, shown }));
+                    let fades: Vec<Fading> = w.fades.iter().chain(&fading).copied().collect();
+                    inner.push((
+                        v,
+                        Inner {
+                            nests,
+                            shown,
+                            fades,
+                        },
+                    ));
                 }
             }
             tracks.push(host);
             placed.push(Inner {
                 nests: host_within,
                 shown: w.shown,
+                fades: w.fades.clone(),
             });
             for (v, chains) in inner {
                 tracks.push(v);
@@ -2021,16 +2262,30 @@ fn held_on(n: &Track, c: &Clip, t: &Transition, cut: i64) -> Laid {
     }
 }
 
-fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, x: i64) -> Vec<Placed> {
-    let outer = nest.map_or(&[][..], |n| n.outer.as_slice());
+fn outer_at(nest: Option<&Nest>, x: i64) -> Vec<Placed> {
+    nest.iter()
+        .flat_map(|n| &n.outer)
+        .flat_map(|a| a.at(x))
+        .collect()
+}
+
+fn placed_of(
+    c: &Clip,
+    nest: Option<&Nest>,
+    over: bool,
+    crossed: Option<&Placed>,
+    x: i64,
+) -> Vec<Placed> {
+    let outer = outer_at(nest, x);
     let own = c.picture.clone().filter(|x| !x.is_usual());
-    if own.is_none() && outer.is_empty() && !over {
+    if own.is_none() && outer.is_empty() && !over && crossed.is_none() {
         return Vec::new();
     }
     let run = run_of(c, nest.and_then(|n| n.run)).after(x);
     let own = Placed::at(c, own.unwrap_or_default(), run, x);
     std::iter::once(own)
-        .chain(outer.iter().map(|p| p.after(x)))
+        .chain(crossed.cloned())
+        .chain(outer)
         .collect()
 }
 
@@ -2275,13 +2530,13 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     .is_some_and(|m| crate::place::fills(m, (s.width, s.height))))
     };
     let picture =
-        |c: &Clip, nest: Option<&Nest>, over: bool, x: i64, y: i64| -> Result<VideoPiece> {
+        |c: &Clip, (nest, over, crossed): Nesting, x: i64, y: i64| -> Result<VideoPiece> {
             let drawn = c.generator.as_ref();
             if let Some(picture) = drawn.and_then(|g| Generated::of(g, c.content_at(x))) {
                 return Ok(VideoPiece::Generated {
                     frames: y - x,
                     picture,
-                    placed: placed_of(c, nest, over, x),
+                    placed: placed_of(c, nest, over, crossed, x),
                     excluded: false,
                 });
             }
@@ -2299,7 +2554,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 alpha_mode: m.alpha_mode,
                 super_scale: super_scale_of(m.super_scale, s),
                 retime: retime_of(c, x, m, s),
-                placed: placed_of(c, nest, over, x),
+                placed: placed_of(c, nest, over, crossed, x),
                 cache: c.render_cache,
                 excluded: false,
                 made: None,
@@ -2331,10 +2586,14 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 excluded,
             };
             let shows = |c: &&Clip| visible(t, c);
-            let shown = |c: &Clip, ramp: Option<Ramp>, below: bool| -> Result<Layer> {
+            let joined = |c: &Clip,
+                          ramp: Option<Ramp>,
+                          below: bool,
+                          crossed: Option<&Placed>|
+             -> Result<Layer> {
                 let nest =
                     within.and_then(|w| w.get(t.clips.iter().position(|x| std::ptr::eq(x, c))?));
-                let mut piece = picture(c, nest, below && !fills(c), x, y)?;
+                let mut piece = picture(c, (nest, below && !fills(c), crossed), x, y)?;
                 if let VideoPiece::Source { excluded: e, .. }
                 | VideoPiece::Generated { excluded: e, .. } = &mut piece
                 {
@@ -2345,6 +2604,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     true => Layer::Picture(piece, ramp),
                 })
             };
+            let shown = |c: &Clip, ramp: Option<Ramp>, below: bool| joined(c, ramp, below, None);
             let smoothed = |d: &transitions::Playing,
                             below: bool|
              -> Result<Option<(VideoPiece, VideoPiece, Smooth)>> {
@@ -2402,11 +2662,15 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         wipe: None,
                         held: window.held,
                     });
+                    let compound = side.is_some_and(|c| c.compound.is_some());
                     let picture = match side.filter(shows) {
-                        Some(c) => shown(c, half, !stack.is_empty())?,
-                        None => Layer::Picture(black(BLACK), half),
+                        Some(c) => Some(shown(c, half, !stack.is_empty())?),
+                        None if compound => None,
+                        None => Some(Layer::Picture(black(BLACK), half)),
                     };
-                    stack = vec![Layer::Picture(black(color), None), picture];
+                    stack = std::iter::once(Layer::Picture(black(color), None))
+                        .chain(picture)
+                        .collect();
                 }
                 Some(d) if let Some(m) = Move::of(d) => {
                     let ramp = |falling| ramp_of(d, falling, None);
@@ -2456,8 +2720,14 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                                 _ => {}
                             }
                         }
-                        (Some(f), None) => stack.push(shown(f, Some(ramp(true)), below)?),
-                        (None, Some(g)) => stack.push(shown(g, Some(ramp(false)), below)?),
+                        (Some(f), None) => {
+                            let crossed = crossing(d);
+                            stack.push(joined(f, Some(ramp(true)), below, crossed.as_ref())?);
+                        }
+                        (None, Some(g)) => {
+                            let crossed = crossing(d);
+                            stack.push(joined(g, Some(ramp(false)), below, crossed.as_ref())?);
+                        }
                         (None, None) => {}
                     }
                 }
@@ -2476,7 +2746,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     }
                 }
             }
-            let lettered = |c: &Clip, fade: Option<Ramp>| {
+            let lettered = |c: &Clip, fade: Option<Ramp>, crossed: Option<Placed>| {
                 let nest =
                     within.and_then(|w| w.get(t.clips.iter().position(|o| std::ptr::eq(o, c))?));
                 Some(ShownTitle {
@@ -2489,8 +2759,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     },
                     source_in: c.source_in,
                     fade,
-                    placed: nest
-                        .map_or_else(Vec::new, |n| n.outer.iter().map(|p| p.after(x)).collect()),
+                    placed: crossed.into_iter().chain(outer_at(nest, x)).collect(),
                 })
             };
             match played
@@ -2502,7 +2771,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     for (c, falling) in [(d.before, true), (d.after, false)] {
                         if let Some(s) = c
                             .filter(|c| titled(t, c))
-                            .and_then(|c| lettered(c, Some(ramp(falling))))
+                            .and_then(|c| lettered(c, Some(ramp(falling)), crossing(d)))
                         {
                             stack.push(Layer::Title(Box::new(s)));
                         }
@@ -2513,7 +2782,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         .clip_covering(x)
                         .map(|ci| &t.clips[ci])
                         .filter(|c| titled(t, c))
-                        .and_then(|c| lettered(c, None))
+                        .and_then(|c| lettered(c, None, None))
                     {
                         stack.push(Layer::Title(Box::new(s)));
                     }
@@ -2565,9 +2834,9 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         if !track.in_mix(any_solo) || track.clips.iter().all(|c| c.audio.is_none()) {
             continue;
         }
-        let window = within
-            .and_then(|w| w.get(ti))
-            .map_or(EVERY_FRAME, |i| i.shown);
+        let held = within.and_then(|w| w.get(ti));
+        let window = held.map_or(EVERY_FRAME, |i| i.shown);
+        let around = held.map_or(&[][..], |i| i.fades.as_slice());
         let fades = transitions::playing(p, track, true, |t| transitions::cross_fade(t).is_some());
         let fade_of = |c: &Clip, into: bool| {
             fades.iter().find(|f| {
@@ -2624,13 +2893,14 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     );
                 } else {
                     let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
-                    for (x, y) in c.runs(x, y) {
+                    for (x, y) in split_at_fades(c.runs(x, y), around) {
                         let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
                         if let AudioPiece::Source {
                             gain_db,
                             silent,
                             joined,
                             fade: f2,
+                            edges,
                             isolation,
                             ..
                         } = &mut piece
@@ -2640,6 +2910,16 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                             *joined =
                                 x > start.max(a) && c.pace().steady(x - 1 - c.start) == Some(1);
                             *f2 = fade(f, x, falling);
+                            *edges = around
+                                .iter()
+                                .filter(|f| f.frames.0 <= x && x < f.frames.1)
+                                .map(|f| Fade {
+                                    at: abs(a) + sample(x) - abs(f.frames.0),
+                                    of: abs(f.frames.1) - abs(f.frames.0),
+                                    falling: f.falling,
+                                    curve: f.curve,
+                                })
+                                .collect();
                             *isolation = audio
                                 .voice_isolation
                                 .or(track.voice_isolation)
@@ -2728,6 +3008,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         speed: c.pace().rate(x - c.start),
         joined: false,
         fade: None,
+        edges: Box::default(),
         isolation: None,
         keyed,
         pan: audio.pan,
@@ -3048,6 +3329,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
         gain_db: 0.0,
         silent: false,
         fade: None,
+        edges: Box::default(),
         isolation: None,
         keyed: None,
         pan: 0.0,

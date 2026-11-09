@@ -2133,6 +2133,14 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A free track is used as it is, and no track is added.
   - Where a clip is in the way, a new track goes in at the target. The clip in the way and all higher tracks move up.
   - This is the same on video tracks and on audio tracks.
+- **A transition at an edge of a compound clip** (measured in Resolve Studio 21.2.0):
+  - A Cross Dissolve and a sound fade at an edge act as on a plain clip.
+  - The dissolve uses the frames that a trim hides in the compound clip.
+  - The compound clip mixes as one picture with the clip on the other side. A compound clip with clear parts shows the tracks below through them, as a placed clip does.
+  - A side with a composite mode fades over the other side, as a placed clip does.
+  - A compound clip with no hidden frames follows [X27](deviations.md#x27-a-dissolve-short-of-media-is-shortened).
+  - The sound fade of a picture edit also fades the sound of the compound clip on its audio track.
+  - vidcut also takes a dip to color at an edge. It refuses a wipe, a push, a slide and a smooth cut there ([todo](todo/compound-clips.md)).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -2807,7 +2815,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - An import warning names the clip.
     - An OTIO export writes a `Clip` with a `MissingReference` on its track.
     - Clips with the same place and the same link group in the file stay in one link group.
-    - A sound transition at such a clip stays in the export. vidcut plays no fade on the clip with no media, and no fade on the sound of a compound clip.
+    - A sound transition at such a clip stays in the export. vidcut plays no fade on the clip with no media.
   - **The linked parts of a clip with no media or of a compound clip.** Each part is a clip on its track. The parts act together, as linked clips do in Resolve:
     - Clips with no media are parts of one clip when they have the same link group, start and length.
     - A picture and a sound of a compound clip are one clip when they have the same sequence, start, length, source start and speed.
@@ -3861,7 +3869,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
     - The pictures of the compound clip in the frame set how they mix (measured in Resolve Studio 21.1.2). This rule is for each frame.
-    - **One picture in the frame:** it acts as if it were on the timeline.
+    - **One picture in the frame:** it acts as if it were on the timeline ([X164](deviations.md#x164-a-mode-inside-a-compound-clip-always-mixes-with-the-tracks-below)).
       - Its composite mode mixes with the tracks below the compound clip.
       - Its opacity and the opacity of the compound clip multiply.
       - A composite mode on the compound clip replaces its mode.
@@ -3883,14 +3891,17 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A picture alone with a composite mode keeps the mode, on the blurred picture.
     - **Titles:** a title counts as a picture.
       - A title alone takes the composite mode of the compound clip.
+      - A composite mode on the title acts as on a picture, measured with Difference. Alone, it mixes with the tracks below. Above a picture, it mixes with that picture.
       - The compound clip crops and fades a title at its own frame.
-    - vidcut's own choices, not measured ([todo](todo/compound-opacity.md)):
+    - Also measured in Resolve Studio 21.2.0:
       - A hard edge of the compound clip covers the mix once, as a soft edge does.
       - A picture at an opacity of 0 counts as a picture.
       - An upper soft edge over a partly clear picture gives the premultiplied sum of the same formula.
-      - The effects of the compound clip work on a title alone.
-      - A Mosaic Blur and a Glow on the compound clip follow the rule of the Gaussian Blur.
+      - A Gaussian Blur on the compound clip works on a title alone.
+      - A Mosaic Blur and a Glow on the compound clip follow the rule of the Gaussian Blur, at their default values.
       - A Film Grain on the compound clip counts its frames from the first frame of the compound clip.
+      - A trim or a move of the compound clip does not change the pattern of the grain.
+      - Float values stay exact inside a compound clip. A value above 1 is not clipped, and a value between 8-bit steps is not rounded.
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.

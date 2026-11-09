@@ -61,6 +61,13 @@ pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
     (!t.sound && dissolves(t)).then_some(PictureTransition::Dissolve)
 }
 
+pub fn compound_takes(kind: &PictureTransition) -> bool {
+    matches!(
+        kind,
+        PictureTransition::Dissolve | PictureTransition::DipToColor { .. }
+    )
+}
+
 pub fn mixes(t: &Transition) -> bool {
     dissolves(t)
         || wipe_of(t).is_some()
@@ -706,7 +713,7 @@ pub fn heard_at(fades: &[Playing], c: &Clip, at: i64) -> Option<f64> {
 fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     if sound {
         c.audio_range()
-            .or_else(|| c.is_sound_block().then(|| (c.start, c.end())))
+            .or_else(|| (c.is_sound_block() || c.compound.is_some()).then(|| (c.start, c.end())))
     } else {
         c.video.then(|| (c.start, c.end()))
     }

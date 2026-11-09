@@ -628,7 +628,10 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], (pw, ph): (f64, f
         shown: crop,
         edge,
         soft,
-        opacity: if gone { 0.0 } else { p.opaque() },
+        opacity: match gone {
+            true => 0.0,
+            false => p.opaque() * placed.ramp.map_or(1.0, |r| r.level(0)),
+        },
     }
 }
 
@@ -801,7 +804,12 @@ impl Placing {
                 made.append(&mut effects);
                 effects = made;
             }
-            if i == 0 && !levels.is_empty() && at == whole && p.picture.is_usual() {
+            if i == 0
+                && !levels.is_empty()
+                && at == whole
+                && p.picture.is_usual()
+                && p.ramp.is_none()
+            {
                 continue;
             }
             levels.push(Level { back, ..own });
@@ -940,6 +948,7 @@ pub enum MixPart {
 pub struct Mix {
     pub parts: Vec<MixPart>,
     pub placing: Placing,
+    pub added: bool,
     around: usize,
 }
 
@@ -1006,25 +1015,34 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixP
             .count();
         let (run, after) = rest.split_at(n);
         let inner = parts_of(run, depth + 1, frame);
-        let (held, around, grows) = match <[MixPart; 1]>::try_from(inner) {
-            Ok([MixPart::Mix(one)]) => (one.parts, one.around, true),
-            Ok([lone]) => (vec![lone], depth + 1, false),
-            Err(many) => (many, depth + 1, false),
+        let (held, around, added) = match <[MixPart; 1]>::try_from(inner) {
+            Ok([MixPart::Mix(one)]) => (one.parts, one.around, Some(one.added)),
+            Ok([lone]) => (vec![lone], depth + 1, None),
+            Err(many) => (many, depth + 1, None),
         };
+        let grows = added.is_some();
         let chain = first.chain();
         let placing = Placing::whole_inside(&chain[chain.len() - around..], frame, depth);
         let mixes = grows
             || match held.as_slice() {
                 [MixPart::Layer(_)] => false,
                 [MixPart::Title(_)] => {
-                    placing.mode != CompositeMode::Normal || !placing.effects.is_empty()
+                    placing.mode != CompositeMode::Normal
+                        || !placing.effects.is_empty()
+                        || outer.ramp.is_some()
                 }
-                _ => !outer.picture.is_usual() || run.iter().any(|m| m.holds_mode(depth)),
+                _ => {
+                    !outer.picture.is_usual()
+                        || outer.ramp.is_some()
+                        || outer.crossing
+                        || run.iter().any(|m| m.holds_mode(depth))
+                }
             };
         if mixes {
             parts.push(MixPart::Mix(Mix {
                 parts: held,
                 placing,
+                added: added.unwrap_or(outer.crossing),
                 around,
             }));
         } else {
@@ -1272,6 +1290,8 @@ mod tests {
             frame: 0,
             start: 0,
             ready: true,
+            ramp: None,
+            crossing: false,
         };
         let frame = (1920.0, 1080.0);
         let level = Placing::whole(&[placed], frame).levels[0];
@@ -1301,6 +1321,8 @@ mod tests {
             frame: 0,
             start: 0,
             ready: true,
+            ramp: None,
+            crossing: false,
         };
         let placing = Placing::whole(&[placed], (1920.0, 1080.0));
         let Work::Blur(b) = &placing.effects[0].work else {
@@ -1337,6 +1359,8 @@ mod tests {
             frame: 0,
             start: 0,
             ready: true,
+            ramp: None,
+            crossing: false,
         };
         assert_eq!(detail(&[placed]), 0.4);
     }

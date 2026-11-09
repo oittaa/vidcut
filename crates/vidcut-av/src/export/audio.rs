@@ -4,7 +4,7 @@ use std::sync::Arc;
 use vidcut_core::compressor::Dynamics;
 use vidcut_core::equalizer::Filter;
 use vidcut_core::leveler::Leveler;
-use vidcut_core::render::{AudioPiece, Dip, Ducking};
+use vidcut_core::render::{AudioPiece, Dip, Ducking, Fade};
 
 use super::ahead::Ahead;
 use crate::denoise::Denoiser;
@@ -732,6 +732,7 @@ impl Lane {
                 silent,
                 speed,
                 fade: cross,
+                edges,
                 isolation,
                 keyed,
                 pan,
@@ -883,13 +884,18 @@ impl Lane {
                 let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
                 let after = self.pieces.get(self.piece + 1);
                 let fade_in = before.is_some_and(|b| !plays_on(b, &piece) && !ramps_on(b, &piece))
-                    && !cross.is_some_and(|f| f.starts_silent());
+                    && !cross.is_some_and(|f| f.starts_silent())
+                    && !edges.iter().any(Fade::starts_silent);
                 let fade_out = after.is_some_and(|n| !plays_on(&piece, n) && !ramps_on(&piece, n))
-                    && !cross.is_some_and(|f| f.ends_silent(len));
+                    && !cross.is_some_and(|f| f.ends_silent(len))
+                    && !edges.iter().any(|f| f.ends_silent(len));
                 for i in 0..take {
                     let p = self.pos + i as i64;
                     let mut g = gain;
                     if let Some(f) = cross {
+                        g *= f.gain(p) as f32;
+                    }
+                    for f in edges {
                         g *= f.gain(p) as f32;
                     }
                     if let Some(k) = keyed {
@@ -998,6 +1004,7 @@ fn plays_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
                 samples,
                 speed,
                 fade,
+                edges,
                 ..
             },
             AudioPiece::Source {
@@ -1006,11 +1013,12 @@ fn plays_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
                 source_sample: n2,
                 speed: sp2,
                 fade: f2,
+                edges: e2,
                 ..
             },
         ) => {
             let read = (*samples as f64 * speed).round() as i64;
-            (fade.is_some() || f2.is_some())
+            (fade.is_some() || f2.is_some() || !edges.is_empty() || !e2.is_empty())
                 && path == p2
                 && stream == s2
                 && speed == sp2

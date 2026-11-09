@@ -1343,7 +1343,7 @@ impl MixDraw<'_> {
             match part {
                 MixPart::Layer(i) => {
                     let (bind, _, _, mode) = &self.binds[*i];
-                    self.lay(encoder, depth, bind, *mode);
+                    self.lay(encoder, depth, bind, (*mode, mix.added));
                 }
                 MixPart::Title(j) => {
                     let mut pass = begin(encoder, canvas, None);
@@ -1353,7 +1353,8 @@ impl MixDraw<'_> {
                 MixPart::Mix(inner) => {
                     self.mix(encoder, inner, depth + 1);
                     let bind = self.finished(encoder, inner, depth + 1, IN_MIX);
-                    self.lay(encoder, depth, &bind, inner.placing.mode.code());
+                    let how = (inner.placing.mode.code(), mix.added);
+                    self.lay(encoder, depth, &bind, how);
                 }
             }
         }
@@ -1389,7 +1390,7 @@ impl MixDraw<'_> {
         encoder: &mut wgpu::CommandEncoder,
         depth: usize,
         bind: &wgpu::BindGroup,
-        mode: u32,
+        (mode, added): (u32, bool),
     ) {
         let canvas = &self.canvases[depth];
         if mode != 0 {
@@ -1406,6 +1407,7 @@ impl MixDraw<'_> {
                 pass.set_pipeline(&self.gpu.placed_mode);
                 pass.set_bind_group(1, &below.bind, &[]);
             }
+            None if added => pass.set_pipeline(&self.gpu.adding),
             None => pass.set_pipeline(&self.gpu.wide_drawing.placed),
         }
         pass.set_bind_group(0, bind, &[]);
