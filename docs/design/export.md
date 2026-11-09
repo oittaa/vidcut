@@ -544,7 +544,7 @@ A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#81
 - The outgoing side's composite mode goes on the mix. `Ramp::moved` keeps the level of a side at 1.
 - `crossing` makes one `Placed` that both sides share. It is no picture. `place::parts_of` makes a `place::Mix` of the two sides, with `added` set.
 - `MixDraw::lay` adds the parts of such a `place::Mix` (`Gpu::adding`). Thus the two sides add up, then go over the layers below, as a crossing pair does.
-- A side with a composite mode does not cross. It fades over the other side.
+- In a dissolve, a side with a composite mode does not cross. It fades over the other side.
 - `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`otio::tied`).
 - `AudioPiece::Source` holds them in `edges`. The mix multiplies them with the gain.
 
