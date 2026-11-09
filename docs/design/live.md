@@ -184,7 +184,7 @@ Each wait has a deadline, except an untimed `jobs.wait`.
 - A job waits at its gate channel for its turn. An export waits after its files are planned (`Msg::JobPlanned`). The other jobs wait before they start.
 - A `background` request has its answer when the files are planned. Other requests have it when the job ends. The GUI's requests are `background`.
 - Automatic proxies are the core's own `proxy.generate` (`Origin::Session`).
-- An `apply` with a request that runs long (`runs_long`) runs first on a copy, on a thread. Then the core applies it. It takes what the copy measured and made.
+- An `apply` with a request that runs long (`runs_long`) runs first on a copy, on a thread. Then the core applies it. It takes what the copy measured and made. Both runs use the playhead of the request's start.
 
 Transcriptions:
 
