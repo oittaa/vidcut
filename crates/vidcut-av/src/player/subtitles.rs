@@ -120,6 +120,7 @@ fn over(picture: Arc<TitlePicture>, placed: Vec<Placed>) -> TitleOver {
         turn: [0.0, 0.0, 1.0, 0.0],
         alpha: 1.0,
         placed,
+        nth: 0,
     }
 }
 
