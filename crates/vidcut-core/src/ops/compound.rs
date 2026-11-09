@@ -499,6 +499,34 @@ fn put_back(p: &mut Project, ti: usize, inner: &Track, block: &Clip, made: &mut 
     }
 }
 
+fn fit_sound(p: &mut Project, ti: usize, made: &[String]) {
+    let clips = &mut p.tracks[ti].clips;
+    let stayed = |c: &&Clip| !made.contains(&c.id);
+    for i in 0..clips.len() {
+        if !made.contains(&clips[i].id) {
+            continue;
+        }
+        let before = clips[..i]
+            .iter()
+            .rev()
+            .filter(stayed)
+            .find_map(Clip::audio_range);
+        let after = clips[i + 1..]
+            .iter()
+            .filter(stayed)
+            .find_map(Clip::audio_range);
+        let (start, end) = (clips[i].start, clips[i].end());
+        if let Some(a) = clips[i].audio.as_mut() {
+            if let Some((_, reach)) = before {
+                a.head = a.head.max(reach - start);
+            }
+            if let Some((reach, _)) = after {
+                a.tail = a.tail.min(reach - end);
+            }
+        }
+    }
+}
+
 pub(crate) fn unnest(
     p: &mut Project,
     id: &str,
@@ -532,6 +560,8 @@ pub(crate) fn unnest(
         };
         let ti = target(p, inner.kind, base, number(inner) - 1, span);
         put_back(p, ti, inner, &block, &mut made);
+        fit_sound(p, ti, &made);
+        fix_audio(p, ti);
     }
     let dropped = otio::transitions::prune(p);
     if dropped > 0 {
@@ -561,6 +591,36 @@ mod tests {
             "edit.audio_roll",
             json!({"clip": id, "edge": "tail", "by": by}),
         ));
+    }
+
+    #[test]
+    fn a_decompose_ends_an_l_cut_at_the_trimmed_end_of_the_compound_clip() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        l_cut(&mut f, &a, 10);
+        let hosts = nest(&mut f, &[&a]);
+        let trim = json!({"clip": hosts[0], "edge": "tail", "to": "55f", "ripple": false});
+        f.ok(req("edit.trim", trim));
+        f.append("m1", 0, 15);
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        let range = f.editor.project().clip(&a).unwrap().audio_range();
+        assert_eq!(range, Some((0, 55)));
+    }
+
+    #[test]
+    fn a_decompose_keeps_the_l_cut_of_the_clip_before_it() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        let b = f.append("m1", 50, 100);
+        let hosts = nest(&mut f, &[&b]);
+        l_cut(&mut f, &a, 10);
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        let p = f.editor.project();
+        let ranges = (
+            p.clip(&a).unwrap().audio_range(),
+            p.clip(&b).unwrap().audio_range(),
+        );
+        assert_eq!(ranges, (Some((0, 60)), Some((60, 100))));
     }
 
     #[test]
