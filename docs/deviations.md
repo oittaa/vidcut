@@ -94,7 +94,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Delete Bin deletes the bin, the bins in it and their clips (p. 377).
 - **vidcut:**
   - `bins.remove` removes the bin and the bins in it. Their media move up to its parent bin.
-  - `media.remove` removes media. It needs `force` when clips use the media.
+  - `media.remove` removes media. It needs `force` when clips or compound clips use the media.
+  - `force` also deletes those compound clips, on the timeline and in the pool.
 - **Why:**
   - Bins only organize the pool.
   - When a script or a mistake removes a bin, the media and their clips must stay in the project.

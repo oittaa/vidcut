@@ -2767,7 +2767,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A `project.set` of one side checks the pair as it stands then, as a script in Resolve Studio 21.1.2 does.
   - Without them, the first media with video sets both, with no prompt. A prompt would stop scripts and agents.
   - The size can change at any time.
-  - The rate can change only while the timeline is empty, because positions are whole frames.
+  - The rate can change only with no clips on the timeline and no compound clips in the pool, because positions are whole frames.
 - **D38. Stills** (§3; pp. 114, 1194).
   - The manual gives two standard still durations: 5 s (p. 114) and 10 s (p. 1194).
   - vidcut takes 5 s, as a project setting (deviation X16).

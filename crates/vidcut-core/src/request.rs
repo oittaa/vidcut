@@ -27,7 +27,8 @@ pub enum Request {
     /// Settings, counts, duration and marks.
     #[serde(rename = "project.summary")]
     ProjectSummary {},
-    /// Change settings. `fps` can only change while the timeline is empty.
+    /// Change settings. `fps` can only change with no clips on the timeline
+    /// or compound clips in the pool.
     #[serde(rename = "project.set")]
     ProjectSet(ProjectSet),
     /// Create a project file. Without `fps` and a size, the first video
@@ -255,7 +256,8 @@ pub enum Request {
         at: Option<TimeSpec>,
     },
     /// Remove from the pool and from its synced groups. `force` also deletes
-    /// the clips that use it. A group with no file left goes too.
+    /// the clips and the compound clips that use it. A group with no file
+    /// left goes too.
     #[serde(rename = "media.remove")]
     MediaRemove {
         media: String,

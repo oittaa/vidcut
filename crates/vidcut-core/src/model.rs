@@ -4991,12 +4991,34 @@ pub struct PooledCompound {
     pub sound: Option<Compound>,
 }
 
+impl Compound {
+    pub fn holds(&self, media: &str) -> bool {
+        self.tracks
+            .iter()
+            .chain(&self.made_from)
+            .flat_map(|t| &t.clips)
+            .any(|c| c.uses(media))
+    }
+}
+
 impl PooledCompound {
     pub fn frames(&self) -> i64 {
         self.picture
             .as_ref()
             .or(self.sound.as_ref())
             .map_or(0, |k| k.frames)
+    }
+
+    pub fn blocks(&self) -> impl Iterator<Item = &Compound> {
+        self.picture.iter().chain(&self.sound)
+    }
+
+    pub fn blocks_mut(&mut self) -> impl Iterator<Item = &mut Compound> {
+        self.picture.iter_mut().chain(&mut self.sound)
+    }
+
+    pub fn holds(&self, media: &str) -> bool {
+        self.blocks().any(|k| k.holds(media))
     }
 }
 
@@ -5251,6 +5273,10 @@ impl Clip {
 
     pub fn is_sound_block(&self) -> bool {
         self.is_block() && !self.video
+    }
+
+    pub fn uses(&self, media: &str) -> bool {
+        self.media == media || self.compound.as_ref().is_some_and(|k| k.holds(media))
     }
 
     pub fn draws(&self) -> bool {
@@ -6200,6 +6226,13 @@ impl Project {
 
     pub fn pool(&self) -> HashMap<&str, &Media> {
         self.media.iter().map(|m| (m.id.as_str(), m)).collect()
+    }
+
+    pub fn clips_using<'a>(&'a self, media: &'a str) -> impl Iterator<Item = &'a Clip> {
+        self.tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter(move |c| c.uses(media))
     }
 
     pub fn find_clip(&self, id: &str) -> Option<(usize, usize)> {

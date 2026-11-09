@@ -2189,10 +2189,7 @@ impl Workspace {
             ui.separator();
         }
         let used = self.project().is_some_and(|p| {
-            p.tracks
-                .iter()
-                .flat_map(|t| &t.clips)
-                .any(|c| c.media == m.id)
+            p.clips_using(&m.id).next().is_some() || p.compounds.iter().any(|k| k.holds(&m.id))
         });
         let label = if used {
             "Remove from Pool (and its clips)"
@@ -2244,7 +2241,13 @@ impl Workspace {
             p.tracks
                 .iter()
                 .flat_map(|t| &t.clips)
-                .filter(|c| ids.contains(&c.media))
+                .filter(|c| ids.iter().any(|m| c.uses(m)))
+                .count()
+        });
+        let pooled = self.project().map_or(0, |p| {
+            p.compounds
+                .iter()
+                .filter(|k| ids.iter().any(|m| k.holds(m)))
                 .count()
         });
         let mut done = None;
@@ -2262,6 +2265,12 @@ impl Workspace {
                     n => format!("The {n} clips on the timeline that use {it} go too."),
                 };
                 ui.label(clips);
+            }
+            if pooled > 0 {
+                ui.label(match pooled {
+                    1 => "1 compound clip in the pool goes too.".to_string(),
+                    n => format!("{n} compound clips in the pool go too."),
+                });
             }
             ui.label(dim("The files stay on disk."));
             ui.add_space(6.0);
