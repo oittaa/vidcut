@@ -1197,6 +1197,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A Push moves it with its side.
   - In a Slide, a title on the outgoing side stays, and the incoming clip covers it.
   - In a Slide, a title on the incoming side comes in with its side.
+  - A Dip To Color Dissolve fades it to the color and from the color. Its clear parts show the tracks below.
 
 ### 8.12 Subtitles (pp. 645–646, 702, 1227–1248)
 - **Subtitle tracks** (pp. 646, 702, 1228, 1232, 1245):

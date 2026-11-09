@@ -295,6 +295,7 @@ The audio device:
   - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).
   - A compound clip mixes its tracks first, in a picture of its own ([export](export.md#placed-pictures)).
   - The two sides of a transition add into a picture of their own (`place::Mix`). Thus a mix below 0 is not clipped before it goes over.
+  - A title on a side of a transition adds in the same way (`lettering_adding`).
   - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
   - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
   - The two sides of a Push or a Slide draw into two pictures of their own (`Moves`), each over transparent.
