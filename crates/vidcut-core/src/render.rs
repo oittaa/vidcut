@@ -577,6 +577,10 @@ impl Placed {
         }
     }
 
+    fn keeps_cover(&self) -> bool {
+        !self.crossing && self.ramp.is_none() && self.picture.is_usual()
+    }
+
     pub fn source_after(&self, k: i64) -> i64 {
         self.source + if self.ready { k } else { k - self.start }
     }
@@ -1985,6 +1989,14 @@ pub const NESTED: usize = 8;
 
 type Nesting<'a> = (Option<&'a Nest>, bool, &'a [Placed]);
 
+fn visible(t: &Track, c: &Clip) -> bool {
+    t.video_enabled && c.enabled && c.video && (!c.is_block() || c.draws())
+}
+
+fn titled(t: &Track, c: &Clip) -> bool {
+    t.video_enabled && c.enabled && c.title.is_some()
+}
+
 fn mode_at(c: &Clip, t: i64) -> CompositeMode {
     let own = c
         .picture
@@ -1995,7 +2007,10 @@ fn mode_at(c: &Clip, t: i64) -> CompositeMode {
         .compound
         .iter()
         .flat_map(|k| &k.tracks)
-        .filter_map(|n| n.clip_covering(inner).map(|i| &n.clips[i]))
+        .filter_map(|n| {
+            let x = &n.clips[n.clip_covering(inner)?];
+            (visible(n, x) || titled(n, x)).then_some(x)
+        })
         .collect();
     match inside.as_slice() {
         [only] if own == CompositeMode::Normal => mode_at(only, inner),
@@ -2819,13 +2834,11 @@ enum Layer {
 
 impl Layer {
     fn hides(&self, stack: &mut Vec<Layer>) {
-        match self {
-            Layer::Placed(piece, _) if piece.placed().len() > 1 => {
-                let outer = &piece.placed()[1..];
-                stack.retain(|l| !l.inside(outer));
-            }
-            _ => stack.clear(),
-        }
+        let placed = match self {
+            Layer::Placed(piece, _) => piece.placed(),
+            _ => &[],
+        };
+        hide_inside(placed.get(1..).unwrap_or_default(), stack);
     }
 
     fn inside(&self, outer: &[Placed]) -> bool {
@@ -2837,6 +2850,13 @@ impl Layer {
             Layer::Title(t) => !outer.is_empty() && t.placed.ends_with(outer),
             _ => false,
         }
+    }
+}
+
+fn hide_inside(outer: &[Placed], stack: &mut Vec<Layer>) {
+    match outer.iter().position(|p| !p.keeps_cover()) {
+        Some(n) => stack.retain(|l| !l.inside(&outer[n..])),
+        None => stack.clear(),
     }
 }
 
@@ -2876,11 +2896,6 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
 
-    let visible = |t: &crate::model::Track, c: &Clip| {
-        t.video_enabled && c.enabled && c.video && (!c.is_block() || c.draws())
-    };
-    let titled =
-        |t: &crate::model::Track, c: &Clip| t.video_enabled && c.enabled && c.title.is_some();
     let (tracks, inside): (Vec<_>, Vec<_>) = p
         .tracks
         .iter()
@@ -3220,8 +3235,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         let drawn = bare.as_ref().unwrap_or(c);
                         layers.push(laid(drawn, nest_of(c), ramp, below, &chain)?);
                     }
-                    if let (true, Some(first)) = (covers, layers.first()) {
-                        first.hides(&mut stack);
+                    if covers {
+                        hide_inside(&outer_at(d.before.and_then(nest_of), x), &mut stack);
                     }
                     stack.extend(layers);
                 }
