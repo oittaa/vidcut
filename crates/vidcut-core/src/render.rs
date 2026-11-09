@@ -2392,11 +2392,14 @@ fn seen(x: &Clip, c: &Clip, (lo, hi): (i64, i64)) -> Option<(Clip, Run)> {
     y.walk(s - x.start);
     y.start = c.start + s - first;
     y.duration = e - s;
-    if let Some(a) = y.audio.as_mut()
-        && (s > x.start || e < x.end())
-    {
-        a.head = 0;
-        a.tail = 0;
+    if let Some(a) = y.audio.as_mut() {
+        if s > x.start || e < x.end() {
+            a.head = 0;
+            a.tail = 0;
+        } else {
+            a.head = a.head.max(first - x.start);
+            a.tail = a.tail.min(last - x.end());
+        }
     }
     let run = Run {
         at: s - x.start - y.start,
