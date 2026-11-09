@@ -2402,6 +2402,9 @@ fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
     };
     let wide = (head > 0 || tail > 0).then(|| {
         let mut wide = c.clone();
+        if n.kind == TrackKind::Video && (1..=head).any(|k| pace.speed_at(-k) == 0.0) {
+            back_at_own_speed(&mut wide);
+        }
         wide.move_head(-head);
         wide.duration += tail;
         wide
@@ -2433,6 +2436,27 @@ fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
             .collect(),
         held: false,
     }
+}
+
+fn back_at_own_speed(c: &mut Clip) {
+    let pace = c.pace();
+    let Some(s) = c.speed.as_mut() else {
+        return;
+    };
+    let own = Section {
+        at: s.skip,
+        from: pace.position(s.skip as f64),
+        speed: pace.rate(0),
+        ease: None,
+    };
+    let later = s.sections.iter().filter(|x| x.at > own.at).copied();
+    let mut sections: Vec<Section> = std::iter::once(own).chain(later).collect();
+    if let [one] = sections.as_mut_slice()
+        && one.speed < 0.0
+    {
+        one.from -= one.speed;
+    }
+    s.sections = sections.into();
 }
 
 fn held_on(n: &Track, c: &Clip, t: &Transition, cut: i64) -> Laid {
