@@ -1975,22 +1975,25 @@ fn titled(t: &Track, c: &Clip) -> bool {
     t.video_enabled && c.enabled && c.title.is_some()
 }
 
+fn pictures_at(c: &Clip, t: i64) -> Vec<&Clip> {
+    c.compound
+        .iter()
+        .flat_map(|k| &k.tracks)
+        .filter_map(|n| {
+            let x = &n.clips[n.clip_covering(t)?];
+            let holds = n.video_enabled && x.enabled && !pictures_at(x, x.source_at(t)).is_empty();
+            (visible(n, x) || titled(n, x) || holds).then_some(x)
+        })
+        .collect()
+}
+
 fn mode_at(c: &Clip, t: i64) -> CompositeMode {
     let own = c
         .picture
         .as_ref()
         .map_or(CompositeMode::Normal, |x| x.mode());
     let inner = c.source_at(t);
-    let inside: Vec<&Clip> = c
-        .compound
-        .iter()
-        .flat_map(|k| &k.tracks)
-        .filter_map(|n| {
-            let x = &n.clips[n.clip_covering(inner)?];
-            (visible(n, x) || titled(n, x)).then_some(x)
-        })
-        .collect();
-    match inside.as_slice() {
+    match pictures_at(c, inner).as_slice() {
         [only] if own == CompositeMode::Normal => mode_at(only, inner),
         _ => own,
     }
