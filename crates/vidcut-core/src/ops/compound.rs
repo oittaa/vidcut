@@ -597,6 +597,22 @@ mod tests {
     }
 
     #[test]
+    fn a_longer_speed_edit_moves_the_sound_of_the_next_compound_clip() {
+        let mut f = Fixture::new(&[(8.0, true)]);
+        let a = f.append("m1", 0, 60);
+        let b = f.append("m1", 60, 100);
+        let first = nest(&mut f, &[&a]);
+        let second = nest(&mut f, &[&b]);
+        let slower = json!({"clips": [first[0]], "speed": 0.5});
+        f.ok(req("edit.change_speed", slower));
+        let start = |id: &str| f.editor.project().clip(id).map(|c| c.start);
+        assert_eq!(
+            (start(&second[0]), start(&second[1])),
+            (Some(120), Some(120))
+        );
+    }
+
+    #[test]
     fn a_speed_keyframe_goes_on_both_blocks_of_a_compound_clip() {
         let mut f = Fixture::new(&[(4.0, true)]);
         let a = f.append("m1", 0, 60);

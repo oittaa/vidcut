@@ -1,5 +1,5 @@
 use super::keyframes::{Pick, picked_as};
-use super::{change_speed, check_source, linked, retimed, split_clip};
+use super::{change_speed, check_source, linked, repaced, retimed, split_clip};
 use crate::error::{Error, Result};
 use crate::model::{Clip, Ease, Project, Section, Speed};
 use crate::render::source_frame;
@@ -31,13 +31,17 @@ fn under(p: &Project, id: &str, t: i64) -> Result<Clip> {
     Ok(c)
 }
 
-fn latest_first(p: &Project, ids: &[String]) -> Vec<String> {
-    let mut list: Vec<(i64, String)> = ids
-        .iter()
-        .map(|id| (p.clip(id).map_or(0, |c| c.start), id.clone()))
+pub(super) fn latest_first(p: &Project, ids: &[String]) -> Vec<(String, bool)> {
+    let leads = linked::leads(p, ids);
+    let mut list: Vec<(i64, bool, String)> = linked::with_ties(p, ids)
+        .into_iter()
+        .map(|id| {
+            let lead = leads.contains(&id);
+            (p.clip(&id).map_or(0, |c| c.start), lead, id)
+        })
         .collect();
-    list.sort();
-    list.into_iter().rev().map(|(_, id)| id).collect()
+    list.sort_by_key(|&(start, lead, _)| (std::cmp::Reverse(start), lead));
+    list.into_iter().map(|(_, lead, id)| (id, lead)).collect()
 }
 
 fn sections(c: &Clip) -> (Vec<Section>, i64) {
@@ -206,11 +210,10 @@ pub fn set(
     ripple: Option<bool>,
 ) -> Result<()> {
     let ripple_on = ripple.unwrap_or(p.settings.ripple_on);
-    let leads = linked::leads(p, ids);
-    for id in latest_first(p, &linked::with_ties(p, ids)) {
+    for (id, lead) in latest_first(p, ids) {
         let c = clip_of(p, &id)?;
         let plain = c.speed.as_ref().is_none_or(|s| s.sections.len() < 2);
-        if plain && !leads.contains(&id) {
+        if plain && !lead {
             continue;
         }
         if plain && Speed::freezes(speed) && t >= c.start {
@@ -269,7 +272,11 @@ pub fn set(
         };
         let n = with(&c, map, skip);
         let how = format!("at {}%", Speed::percent(speed));
-        retimed(p, &c, n, want, ripple_on, &how)?;
+        if lead {
+            retimed(p, &c, n, want, ripple_on, &how)?;
+        } else {
+            repaced(p, &c, n, want, &how)?;
+        }
     }
     Ok(())
 }
@@ -277,7 +284,7 @@ pub fn set(
 pub fn freeze(p: &mut Project, ids: &[String], t: i64, ripple: Option<bool>) -> Result<()> {
     let ripple_on = ripple.unwrap_or(p.settings.ripple_on);
     let hold = (2.0 * p.settings.fps.as_f64()).round() as i64;
-    for id in latest_first(p, &linked::with_ties(p, ids)) {
+    for (id, lead) in latest_first(p, ids) {
         let c = under(p, &id, t)?;
         let (mut map, skip) = sections(&c);
         let u = skip + t - c.start;
@@ -306,7 +313,11 @@ pub fn freeze(p: &mut Project, ids: &[String], t: i64, ripple: Option<bool>) -> 
             c.duration
         };
         let n = with(&c, map, skip);
-        retimed(p, &c, n, want, ripple_on, "with a freeze frame")?;
+        if lead {
+            retimed(p, &c, n, want, ripple_on, "with a freeze frame")?;
+        } else {
+            repaced(p, &c, n, want, "with a freeze frame")?;
+        }
     }
     Ok(())
 }

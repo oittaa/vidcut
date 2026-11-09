@@ -2457,7 +2457,7 @@ fn composed_over(own: &crate::model::Speed, c: &Clip, k: i64) -> crate::model::S
     let on = |at: i64| own.skip as f64 + pace.exact(at) - pace.exact(k);
     let origin = position_in(&own.sections, on(k));
     let mut sections = Vec::new();
-    for (a, _) in c.runs(c.start + k, c.end()) {
+    for (a, b) in c.runs(c.start + k, c.end()) {
         let at = a - c.start;
         let v = pace.rate(at);
         let from = position_in(&own.sections, on(at)) - origin;
@@ -2470,11 +2470,16 @@ fn composed_over(own: &crate::model::Speed, c: &Clip, k: i64) -> crate::model::S
             });
             continue;
         }
-        sections.extend(composed_from(own, on(at), v).into_iter().map(|s| Section {
-            at: s.at + at - k,
-            from: s.from + from,
-            ..s
-        }));
+        sections.extend(
+            composed_from(own, on(at), v)
+                .into_iter()
+                .filter(|s| s.at < b - a)
+                .map(|s| Section {
+                    at: s.at + at - k,
+                    from: s.from + from,
+                    ..s
+                }),
+        );
     }
     crate::model::Speed {
         sections: sections.into(),
@@ -3570,6 +3575,36 @@ mod tests {
 
     fn fixture() -> Fixture {
         Fixture::new(&[(10.0, true), (4.0, true), (8.0, false)])
+    }
+
+    #[test]
+    fn sections_of_an_inner_clip_end_with_the_run_of_the_compound_clip() {
+        let speed = |list: &[(i64, f64, f64)]| crate::model::Speed {
+            sections: list
+                .iter()
+                .map(|&(at, from, speed)| Section {
+                    at,
+                    from,
+                    speed,
+                    ease: None,
+                })
+                .collect::<Vec<_>>()
+                .into(),
+            skip: 0,
+            effect: None,
+        };
+        let mut f = fixture();
+        let id = f.append("m1", 0, 70);
+        let mut c = f.editor.project().clip(&id).unwrap().clone();
+        c.speed = Some(speed(&[(0, 0.0, 2.0), (10, 20.0, 1.0)]));
+        let own = speed(&[(0, 0.0, 1.0), (20, 20.0, 2.0), (40, 60.0, 1.0)]);
+        let made = composed_over(&own, &c, 0);
+        let got: Vec<_> = made
+            .sections
+            .iter()
+            .map(|s| (s.at, s.from, s.speed))
+            .collect();
+        assert_eq!(got, [(0, 0.0, 2.0), (10, 20.0, 2.0), (30, 60.0, 1.0)]);
     }
 
     fn req(f: &mut Fixture, method: &str, params: serde_json::Value) {
