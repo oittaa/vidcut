@@ -3527,8 +3527,7 @@ impl Live {
         {
             self.multi_alone = false;
         }
-        if let Some(e) = open.history_error.take() {
-            let warning = crate::session::history_unsaved(&e);
+        if let Some(warning) = open.unsaved.take() {
             self.notice(warning.clone(), true);
             if let Ok(r) = result.as_mut() {
                 r.warnings.push(warning);
