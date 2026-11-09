@@ -734,6 +734,67 @@ mod tests {
         assert_eq!(plan(&f), before);
     }
 
+    fn keyed_clip(f: &mut Fixture) -> String {
+        let a = f.append("m1", 20, 70);
+        for (at, value) in [("10f", 0.0), ("30f", 1.0)] {
+            let key = json!({"clips": a, "param": "opacity", "at": at, "value": value});
+            f.ok(req("keyframes.add", key));
+        }
+        a
+    }
+
+    fn opacity_key_frames(f: &Fixture, id: &str) -> Vec<i64> {
+        let c = f.editor.project().clip(id).unwrap();
+        let keys = &c.picture.as_ref().unwrap().opacity_keys;
+        keys.iter().map(|k| k.frame).collect()
+    }
+
+    #[test]
+    fn a_faster_compound_clip_plays_the_keyframes_in_it_faster() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = keyed_clip(&mut f);
+        let hosts = nest(&mut f, &[&a]);
+        f.ok(req(
+            "edit.change_speed",
+            json!({"clips": [hosts[0]], "speed": 2.0}),
+        ));
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        assert_eq!(opacity_key_frames(&f, &a), vec![5, 15]);
+    }
+
+    #[test]
+    fn a_reversed_compound_clip_plays_the_keyframes_in_it_backward() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = keyed_clip(&mut f);
+        let hosts = nest(&mut f, &[&a]);
+        f.ok(req(
+            "edit.change_speed",
+            json!({"clips": [hosts[0]], "speed": -1.0}),
+        ));
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        assert_eq!(opacity_key_frames(&f, &a), vec![19, 39]);
+    }
+
+    #[test]
+    fn a_frozen_compound_clip_holds_the_value_of_the_keyframes_in_it() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = keyed_clip(&mut f);
+        let hosts = nest(&mut f, &[&a]);
+        let trim = json!({"clip": hosts[0], "edge": "head", "to": "20f", "ripple": false});
+        f.ok(req("edit.trim", trim));
+        f.ok(req(
+            "edit.change_speed",
+            json!({"clips": [hosts[0]], "speed": 0.0}),
+        ));
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        let c = f.editor.project().clip(&a).unwrap();
+        let picture = c.picture.as_ref().unwrap();
+        assert_eq!(
+            (picture.opacity, picture.opacity_keys.len()),
+            (Some(0.5), 0)
+        );
+    }
+
     #[test]
     fn a_frozen_compound_clip_holds_the_level_of_its_frame_in_a_dissolve() {
         let mut f = Fixture::new(&[(4.0, true)]);

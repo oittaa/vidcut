@@ -325,22 +325,28 @@ pub fn retimed(keys: &[Keyframe], old: &Clip, new: &Clip) -> Vec<Keyframe> {
     out
 }
 
+fn scale_handles(k: &mut Keyframe, ratio: f64) {
+    for h in [&mut k.in_handle, &mut k.out_handle].into_iter().flatten() {
+        h.frames *= ratio;
+    }
+    if ratio < 0.0 {
+        std::mem::swap(&mut k.in_handle, &mut k.out_handle);
+    }
+}
+
 pub fn scaled(keys: &[Keyframe], frame: impl Fn(i64) -> i64, ratio: f64) -> Vec<Keyframe> {
-    let handle = |h: Option<Handle>| {
-        h.map(|h| Handle {
-            frames: h.frames * ratio,
-            ..h
-        })
-    };
     let mut out: Vec<Keyframe> = keys
         .iter()
-        .map(|k| Keyframe {
-            frame: frame(k.frame),
-            value: k.value,
-            in_handle: handle(k.in_handle),
-            out_handle: handle(k.out_handle),
+        .map(|k| {
+            let mut k = Keyframe {
+                frame: frame(k.frame),
+                ..*k
+            };
+            scale_handles(&mut k, ratio);
+            k
         })
         .collect();
+    out.sort_by_key(|k| k.frame);
     out.dedup_by_key(|k| k.frame);
     out
 }
@@ -1086,9 +1092,7 @@ fn scale_channel(p: &mut Picture, v: PictureValue, conv: &impl Fn(i64) -> i64, r
         .map(|(i, k)| {
             let mut k = *k;
             k.frame = conv(k.frame);
-            for h in [&mut k.in_handle, &mut k.out_handle].into_iter().flatten() {
-                h.frames *= ratio;
-            }
+            scale_handles(&mut k, ratio);
             (k, y_was.get(i).copied().unwrap_or(0.0))
         })
         .collect();
