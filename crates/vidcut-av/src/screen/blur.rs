@@ -1,8 +1,8 @@
 use vidcut_core::lru::Lru;
-use vidcut_core::model::GlowOutput;
+use vidcut_core::model::{AreaShape, GlowOutput};
 use vidcut_core::place::{
-    Blurring, GlowSpread, Glowing, GrainTile, Graining, Level, Placing, Shading, Sharpening,
-    Tiling, Work, Working,
+    Blurring, GlowSpread, Glowing, GrainTile, Graining, Level, Masking, Placing, Shading,
+    Sharpening, Tiling, Work, Working,
 };
 
 use super::{Gpu, MIXING, begin, grain, sharpen, vignette};
@@ -60,6 +60,7 @@ pub(super) struct Pipes {
     glow: wgpu::RenderPipeline,
     grain_noise: wgpu::RenderPipeline,
     grain: wgpu::RenderPipeline,
+    area: wgpu::RenderPipeline,
 }
 
 impl Pipes {
@@ -148,6 +149,7 @@ impl Pipes {
             glow: pipeline(&plain, "fs_glow"),
             grain_noise: pipeline(&plain, "fs_grain_noise"),
             grain: pipeline(&plain, "fs_grain"),
+            area: pipeline(&plain, "fs_area"),
             layout,
             reading,
         }
@@ -754,6 +756,39 @@ fn glow_blurred<'a>(
     &blurred_between(gpu, (&ways, border), ([0.0; 4], window), (a, b), encoder).view
 }
 
+fn area_bytes(masking: &Masking) -> Vec<u8> {
+    let mut floats = Vec::with_capacity(16);
+    for [x, y, w] in masking.rows {
+        floats.extend([x, y, w, 0.0]);
+    }
+    let boxed = masking.shape == AreaShape::Box;
+    floats.extend([flag(boxed), masking.softness, flag(masking.invert), 0.0]);
+    float_bytes(&floats)
+}
+
+fn landed(
+    gpu: &Gpu,
+    own: &Texture,
+    (made, free): (&Texture, &Texture),
+    area: Option<&Masking>,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let from = match area {
+        Some(masking) => {
+            let step = (&gpu.blur.area, &area_bytes(masking)[..]);
+            let views = Views::with(&made.view, &own.view);
+            draw_step(gpu, step, views, &free.view, encoder);
+            free
+        }
+        None => made,
+    };
+    encoder.copy_texture_to_texture(
+        from.texture.as_image_copy(),
+        own.texture.as_image_copy(),
+        own.texture.size(),
+    );
+}
+
 fn glow_into(
     gpu: &Gpu,
     own: &Texture,
@@ -790,7 +825,7 @@ fn glow_into(
         mask,
         cells: None,
     };
-    let made = &scratch[1];
+    let [free, made] = scratch;
     draw_step(
         gpu,
         (&gpu.blur.glow, &bytes[..]),
@@ -798,11 +833,7 @@ fn glow_into(
         &made.view,
         encoder,
     );
-    encoder.copy_texture_to_texture(
-        made.texture.as_image_copy(),
-        own.texture.as_image_copy(),
-        own.texture.size(),
-    );
+    landed(gpu, own, (made, free), effect.area.as_ref(), encoder);
 }
 
 fn gaussian_ways(sigma: f64) -> Vec<(Pass, bool)> {
@@ -912,10 +943,10 @@ fn grain_into(
     let plain = ([0.0; 4], [0.0; 4]);
     let [one, two] = scratch;
     let blurred = blurred_between(gpu, ways, plain, (one, two), encoder);
-    let made = if soft.len().is_multiple_of(2) {
-        two
+    let (made, free) = if soft.len().is_multiple_of(2) {
+        (two, one)
     } else {
-        one
+        (one, two)
     };
     let views = Views {
         source: &blurred.view,
@@ -926,11 +957,7 @@ fn grain_into(
     };
     let last = (&gpu.blur.grain, &bytes[..]);
     draw_step(gpu, last, views, &made.view, encoder);
-    encoder.copy_texture_to_texture(
-        made.texture.as_image_copy(),
-        own.texture.as_image_copy(),
-        size,
-    );
+    landed(gpu, own, (made, free), effect.area.as_ref(), encoder);
 }
 
 fn effects_into(
@@ -991,12 +1018,8 @@ fn effects_into(
             from = &to.view;
             k = 1 - k;
         }
-        let made = &scratch[1 - k];
-        encoder.copy_texture_to_texture(
-            made.texture.as_image_copy(),
-            own.texture.as_image_copy(),
-            own.texture.size(),
-        );
+        let ends = (&scratch[1 - k], &scratch[k]);
+        landed(gpu, own, ends, effect.area.as_ref(), encoder);
     }
 }
 

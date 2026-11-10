@@ -436,7 +436,11 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut effects set c3 2 --center 0.25,0.75 --transparency 0.5 --composite-type screen\n  \
          vidcut effects set c3 3 --sharpen-amount 2.5 --fine-detail-size 0.03\n  \
          vidcut effects set c3 3 --fine-details 2 --large-details 3 --sharpen-chroma 1.5\n  \
-         vidcut effects set c3 0 --strength 0.6 --at 2s",
+         vidcut effects set c3 0 --strength 0.6 --at 2s\n  \
+         vidcut effects set c3 1 --area '{\"center\":[0.3,0.4],\"size\":[0.2,0.3]}'\n  \
+         vidcut effects set c3 1 --area '{\"shape\":\"box\",\"rotation\":15,\"softness\":0.3}'\n  \
+         vidcut effects set c3 1 --area '{\"invert\":true}'\n  \
+         vidcut effects set c3 1 --area null",
     ),
     (
         "effects.key",
