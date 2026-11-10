@@ -2549,7 +2549,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - A search of the Cut page chapters (pp. 635–791) finds no window and no mask for an effect of a clip.
   - The Color page has Power Windows: Circular, Linear, Polygonal, Curve and Gradient (p. 3308).
+  - A Polygonal window starts as a rectangle with four corner points. A click on it adds a control point, up to 128 (p. 3272).
   - A key adds a node with a window (p. 3268). A Circular, Linear or Polygonal window starts in the middle of the picture, with its controls in the Viewer (21.2).
+  - A Curve window starts with no shape. Each click in the Viewer adds a point, and a click on the first point closes the shape (pp. 3273–3274).
   - The blur of the node is in the Blur palette. It shows only inside the windows of the node (21.2).
 - **vidcut:**
   - An effect of a clip can have an area: an ellipse, a box or a polygon. The effect then shows only inside it. With `invert`, it shows only outside it.
@@ -2561,6 +2563,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
   - Edit Shape shows the handles of the area in the viewer.
     - A drag inside the area moves it. On an ellipse or a box, a corner changes its size, and the top handle turns it.
+    - On a polygon, Alt and a click also removes a point. Why: a trackpad has no middle button.
   - The Tools row under the viewer has Blur ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).
     - The right-click menu of a clip has Blur. It shows the Tools row with Blur on, for that clip.
     - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
@@ -2578,10 +2581,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
 
 - **Resolve:**
   - The Close Up edit of the Cut page does a face detection, and puts a face that it finds in the frame (p. 699).
+  - On the Media page, Analyze Clips for People finds faces to make People keywords (p. 418).
   - Face Refinement is a Resolve FX of Resolve Studio. Detect Faces in Frame draws a box on each face (p. 3615).
     - The user chooses one face. The tracking controls of the effect then follow it through the clip (pp. 3615–3616).
   - The manual names no way to make tracking data for each face of a clip on the Cut page ([X165](#x165-a-clip-has-motion-paths)).
   - A search of the whole manual finds no tool that finds text in a picture.
+    - A number plate is only an example for the Planar Tracker node of the Fusion page, where the user sets the track (p. 2820).
 - **vidcut:**
   - `motion.find` finds the things of one subject on the source frames that a clip shows. The subjects are `face` and `text`.
   - Each thing gets a motion path of its own.
