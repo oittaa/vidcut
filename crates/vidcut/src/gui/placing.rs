@@ -1951,9 +1951,7 @@ impl Workspace {
     }
 
     fn blur_controls(&mut self, ui: &egui::Ui, resp: &egui::Response, picture: Rect) -> bool {
-        if !self.timeline.picture_grab.blurring() {
-            return false;
-        }
+        let tool = self.timeline.picture_grab.blurring();
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         let Some(p) = self.project_shared() else {
             return false;
@@ -1980,11 +1978,11 @@ impl Workspace {
         let frame = (f64::from(p.settings.width), f64::from(p.settings.height));
         let [_, _, fw, fh] = content(&p, c, frame);
         let drawing = |h: &AreaHeld| h.hold == AreaHold::Draw;
-        if g.area_held.as_ref().is_some_and(drawing) {
+        if tool && g.area_held.as_ref().is_some_and(drawing) {
             self.blur_drag(ui, resp, &s, [fw, fh]);
             return true;
         }
-        if g.drawn.is_some() {
+        if tool && g.drawn.is_some() {
             self.blur_points(ui, resp, &s, stored.effects.len());
             return true;
         }
@@ -2007,6 +2005,9 @@ impl Workspace {
                 Stroke::new(1.0, accent.gamma_multiply(0.6)),
             );
         }
+        if self.timeline.picture_grab.tool.is_some() {
+            return false;
+        }
         let over = if resp.drag_started() {
             ui.input(|i| i.pointer.press_origin())
         } else {
@@ -2026,7 +2027,7 @@ impl Workspace {
         }
         if let Some((n, _)) = others.iter().find(|(_, a)| a.on(over)) {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-            if resp.drag_started() {
+            if tool && resp.drag_started() {
                 self.timeline.picture_grab.area = Some(*n);
                 return false;
             }
@@ -2034,6 +2035,12 @@ impl Workspace {
                 self.timeline.picture_grab.area = Some(*n);
             }
             return true;
+        }
+        if !tool {
+            if resp.clicked() && active.is_some() {
+                self.timeline.picture_grab.area = None;
+            }
+            return false;
         }
         ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
         let g = &mut self.timeline.picture_grab;
