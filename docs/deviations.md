@@ -2553,6 +2553,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A key adds a node with a window (p. 3268). A Circular, Linear or Polygonal window starts in the middle of the picture, with its controls in the Viewer (21.2).
   - A Curve window starts with no shape. Each click in the Viewer adds a point, and a click on the first point closes the shape (pp. 3273–3274).
   - The blur of the node is in the Blur palette. It shows only inside the windows of the node (21.2).
+  - The Viewer shows the outline of a window only while the Window palette or the Tracker palette is open (21.2).
+    - With the Blur palette open, it shows no outline. The Cut page shows no outline, and nothing there marks a clip with a window.
 - **vidcut:**
   - An effect of a clip can have an area: an ellipse, a box or a polygon. The effect then shows only inside it. With `invert`, it shows only outside it.
   - The area stays on the content of the picture through the transform, the crop, the flips, a Dynamic Zoom and a compound clip around it.
@@ -2562,6 +2564,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - `motion.remove` refuses a path that an area follows by its id. A path that an area follows by its subject can go.
   - Each effect in the Inspector has Area rows: Off, Ellipse, Box or Polygon, then Edit Shape, Invert Area, Area Softness and Follow.
     - Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
+  - The viewer shows a thin outline of each area of the selected clip at the playhead.
+    - A click on an outline, or inside it, shows the handles of that area. A click outside the areas hides the handles.
+    - With no clip selected, the viewer shows no outline. Thus it shows the picture of an export.
   - Edit Shape shows the handles of the area in the viewer.
     - A drag inside the area moves it. On an ellipse or a box, a corner changes its size, and the top handle turns it.
     - On a polygon, Alt and a click also removes a point. Why: a trackpad has no middle button.
@@ -2569,10 +2574,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The right-click menu of a clip has Blur. It shows the Tools row with Blur on, for that clip.
     - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
     - With Free Shape, each click adds a point. A click on the first point, or a double-click, closes the shape. Escape drops it.
-    - The other areas of the clip show as thin outlines.
+    - A drag on the outline of another area shows its handles and moves it.
   - The area has no keyframes ([todo](todo/motion-tracking.md)).
 - **Why:**
   - The user draws the area on the thing to hide, and sees the blur at once. Resolve needs a node, the Window palette and the Blur palette for that.
+  - The outline of an area tells where an effect works, with no tool open.
   - A blur over a face or a number plate must cover only that part of the picture.
   - A blur must not stay on the picture after its subject is gone. Thus a path ends, as the tracking of Magic Mask does, and not as a tracked window.
   - One effect can cover each face of a clip. The user then changes one blur, not one for each face.
