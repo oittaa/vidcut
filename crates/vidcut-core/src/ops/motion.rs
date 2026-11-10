@@ -241,7 +241,6 @@ pub struct Start {
     pub frame: i64,
     pub own: Area,
     pub bounds: [f64; 4],
-    pub fit: [f64; 2],
 }
 
 pub fn start(p: &Project, id: &str, effect: usize, at: i64) -> Result<Start> {
@@ -293,7 +292,6 @@ pub fn start(p: &Project, id: &str, effect: usize, at: i64) -> Result<Start> {
         frame,
         own,
         bounds: own.bounds(area, fit),
-        fit,
     })
 }
 
@@ -316,22 +314,12 @@ pub fn tracked(
     };
     let old = (area.follows.as_ref()).and_then(|f| c.motion.iter().find(|m| m.id == *f));
     if let Some(old) = old {
-        let round = |v: f64| (v * 1e5).round() / 1e5;
         let stays = |s: &&PathSample| match way {
             TrackWay::Both => false,
             TrackWay::Forward => s.frame < start.frame,
             TrackWay::Backward => s.frame > start.frame,
         };
-        let kept = old.samples.iter().filter(stays).map(|s| {
-            let a = s.area().within(&area, start.fit);
-            PathSample {
-                frame: s.frame,
-                center: a.center.map(round),
-                size: a.size.map(round),
-                rotation: (a.rotation * 100.0).round() / 100.0,
-            }
-        });
-        samples.extend(kept);
+        samples.extend(old.samples.iter().filter(stays).cloned());
         samples.sort_by_key(|s| s.frame);
     }
     let samples = motion::simplified(&samples);
