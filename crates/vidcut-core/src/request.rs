@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType,
-    EffectValue, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, GrainPreset,
-    Handle, LowerThirdLine, PathSample, PictureTool, PictureTransition, Place, SubtitleStyle,
-    TitleAlign, TitleAnchor, TitleKind, TitleStyle, TrackClip, VignetteMode, VignetteShape,
-    ZoomBox,
+    AreaShape, Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel,
+    EffectArea, EffectType, EffectValue, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput,
+    GrainComposite, GrainPreset, Handle, LowerThirdLine, PathSample, PictureTool,
+    PictureTransition, Place, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle,
+    TrackClip, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2712,7 +2712,8 @@ pub enum Request {
         ease: Option<Ease>,
     },
     /// Put one effect of a clip back at its usual values. It stays on, and
-    /// keeps its `render_cache`. An effect that is off does not change.
+    /// keeps its `render_cache` and its `area`. An effect that is off does
+    /// not change.
     /// `effect` counts from 0.
     #[serde(rename = "effects.reset")]
     EffectsReset { clip: ClipRef, effect: usize },
@@ -4664,6 +4665,17 @@ pub struct EffectChange {
     /// mode and in its User mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_cache: Option<bool>,
+    /// Where the effect works: an ellipse or a box of the picture, as
+    /// `{"shape": "box", "center": [0.3, 0.4], "size": [0.2, 0.2]}`. Each
+    /// field given replaces its own, and `{}` gives an effect with no area
+    /// the ellipse that touches the four sides of the picture. Null takes
+    /// the area off, and the effect works on the whole picture again.
+    #[serde(
+        default,
+        deserialize_with = "given",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub area: Option<Option<AreaChange>>,
     /// A Gaussian Blur's strength, from 0 (none) to 1; with `split`, across.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strength: Option<f64>,
@@ -4932,6 +4944,51 @@ pub struct EffectChange {
     /// How strong a Sharpen's detail of the colors is, from 1 to 5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sharpen_chroma: Option<f64>,
+}
+
+/// A change to the area of an effect: each field given replaces its own, and
+/// the rest stay as they are. The area is a part of a base box, the whole
+/// source picture. It stays on the content of the picture through its
+/// transform, its crop and its flips.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AreaChange {
+    /// `ellipse`, the ellipse that touches the four sides of the area's
+    /// box, or `box`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<AreaShape>,
+    /// Its middle, `[x, y]` as fractions of the base box from its top left,
+    /// each from -10 to 10: `[0.5, 0.5]` is the middle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// Its width and height as fractions of the base box, each from 0 to
+    /// 10: `[1, 1]` is as wide and as high as the base box.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<[f64; 2]>,
+    /// Degrees it is turned counterclockwise on the source picture, from
+    /// -100000 to 100000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
+    /// How soft its edge is, from 0 (a hard edge) to 1: the share of the way
+    /// from its edge to its middle over which the effect fades in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness: Option<f64>,
+    /// On, the effect works outside the area.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invert: Option<bool>,
+}
+
+impl AreaChange {
+    pub fn on(&self, a: EffectArea) -> EffectArea {
+        EffectArea {
+            shape: self.shape.unwrap_or(a.shape),
+            center: self.center.or(a.center),
+            size: self.size.or(a.size),
+            rotation: self.rotation.or(a.rotation),
+            softness: self.softness.or(a.softness),
+            invert: self.invert.unwrap_or(a.invert),
+        }
+    }
 }
 
 /// A change to a clip's Dynamic Zoom: each field given replaces its own,

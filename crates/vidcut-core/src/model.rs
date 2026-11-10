@@ -3306,6 +3306,77 @@ pub struct Effect {
     /// Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<EffectKeys>,
+    /// Where the effect works. Left out, it works on the whole picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<EffectArea>,
+}
+
+/// The part of a picture that an effect works in: an ellipse or a box inside
+/// a base box. The base box is the whole source picture. The area stays on
+/// the content of the picture through its transform, its crop and its flips.
+/// A field left out is at its usual value.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct EffectArea {
+    /// Its shape. Usual: `ellipse`.
+    #[serde(default, skip_serializing_if = "AreaShape::is_ellipse")]
+    pub shape: AreaShape,
+    /// Its middle, `[x, y]` as fractions of the base box from its top left,
+    /// each from -10 to 10. Usual: `[0.5, 0.5]`, the middle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// Its width and height as fractions of the base box, each from 0 to
+    /// 10. Usual: `[1, 1]`, as wide and as high as the base box.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<[f64; 2]>,
+    /// Degrees it is turned counterclockwise on the source picture, from
+    /// -100000 to 100000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
+    /// How soft its edge is, from 0 (a hard edge) to 1: the share of the way
+    /// from its edge to its middle over which the effect fades in. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness: Option<f64>,
+    /// On, the effect works outside the area. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invert: bool,
+}
+
+/// The shape of the area of an effect.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AreaShape {
+    /// The ellipse that touches the four sides of the box.
+    #[default]
+    Ellipse,
+    /// The box itself.
+    Box,
+}
+
+impl AreaShape {
+    pub fn is_ellipse(&self) -> bool {
+        *self == Self::Ellipse
+    }
+}
+
+impl EffectArea {
+    pub const MIDDLE: [f64; 2] = [0.5, 0.5];
+    pub const WHOLE: [f64; 2] = [1.0, 1.0];
+
+    pub fn middle(&self) -> [f64; 2] {
+        self.center.unwrap_or(Self::MIDDLE)
+    }
+
+    pub fn extent(&self) -> [f64; 2] {
+        self.size.unwrap_or(Self::WHOLE)
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.rotation.unwrap_or(0.0)
+    }
+
+    pub fn soft(&self) -> f64 {
+        self.softness.unwrap_or(0.0)
+    }
 }
 
 /// The keyframes of one value of an effect.
@@ -4239,6 +4310,7 @@ impl EffectType {
             use_alpha: true,
             render_cache: false,
             keys: Vec::new(),
+            area: None,
         }
     }
 }

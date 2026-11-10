@@ -3100,3 +3100,19 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
   - The path is apart from the keyframes, as the tracking data of the Color page is. Thus a new path keeps the keyframes that the user set.
+
+## X166. An effect has an area
+
+- **Resolve:**
+  - A search of the Cut page chapters (pp. 635–791) finds no window and no mask for an effect of a clip.
+  - The Color page has Power Windows: Circular, Linear, Polygonal, Curve and Gradient (p. 3308).
+- **vidcut:**
+  - An effect of a clip can have an area: an ellipse or a box. The effect then shows only inside it. With `invert`, it shows only outside it.
+  - The area has a center, a size, a rotation and a softness. The center and the size are fractions of the source picture.
+  - The area stays on the content of the picture through the transform, the crop, the flips, a Dynamic Zoom and a compound clip around it.
+  - `effects.set` takes `area`. Null takes the area off. `effects.reset` keeps the area.
+  - The area has no keyframes. The Inspector and the viewer have no controls for it ([todo](todo/motion-tracking.md)).
+- **Why:**
+  - A blur over a face or a number plate must cover only that part of the picture.
+  - A cut that vidcut delivers does not go through another page.
+  - One rule gives each of the six effects an area.

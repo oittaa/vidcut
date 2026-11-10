@@ -3,10 +3,10 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKeys, EffectKind,
-    FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, MosaicBlur,
-    Picture, PictureTool, Project, Sharpen, TrackKind, Vignette, VignetteMode, VignetteShape,
-    ZoomBox,
+    Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectArea, EffectKeys,
+    EffectKind, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite,
+    MosaicBlur, Picture, PictureTool, Project, Sharpen, TrackKind, Vignette, VignetteMode,
+    VignetteShape, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -509,7 +509,40 @@ fn plain_effect_checked(e: &Effect) -> Result<Effect> {
     Ok(Effect {
         kind,
         blend: e.blend.filter(|v| *v != 1.0),
+        area: e.area.as_ref().map(area_checked).transpose()?,
         ..e.clone()
+    })
+}
+
+fn area_checked(a: &EffectArea) -> Result<EffectArea> {
+    let reach = crate::motion::REACH;
+    let turn = crate::motion::TURN;
+    for v in a.center.into_iter().flatten() {
+        within(
+            Some(v),
+            (-reach, reach),
+            "an area's center is two fractions, each from -10 to 10",
+        )?;
+    }
+    for v in a.size.into_iter().flatten() {
+        within(
+            Some(v),
+            (0.0, reach),
+            "an area's size is two fractions, each from 0 to 10",
+        )?;
+    }
+    within(
+        a.rotation,
+        (-turn, turn),
+        "an area's rotation is from -100000 to 100000 degrees",
+    )?;
+    within(a.softness, (0.0, 1.0), "an area's softness is from 0 to 1")?;
+    Ok(EffectArea {
+        center: a.center.filter(|c| *c != EffectArea::MIDDLE),
+        size: a.size.filter(|s| *s != EffectArea::WHOLE),
+        rotation: a.rotation.filter(|r| *r != 0.0),
+        softness: a.softness.filter(|s| *s != 0.0),
+        ..a.clone()
     })
 }
 
@@ -913,7 +946,19 @@ pub fn effect_shown(e: &Effect) -> Value {
     if let (Some(out), Some(more)) = (out.as_object_mut(), more.as_object()) {
         out.extend(more.clone());
     }
+    out["area"] = e.area.as_ref().map_or(Value::Null, area_shown);
     out
+}
+
+fn area_shown(a: &EffectArea) -> Value {
+    json!({
+        "shape": a.shape,
+        "center": a.middle(),
+        "size": a.extent(),
+        "rotation": a.turn(),
+        "softness": a.soft(),
+        "invert": a.invert,
+    })
 }
 
 pub fn zoom_shown(z: &DynamicZoom) -> Value {

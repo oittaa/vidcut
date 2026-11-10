@@ -211,6 +211,9 @@ fn applied(e: &Effect, change: &EffectChange) -> Result<Effect> {
     given(&mut left.blend, &mut next.blend);
     taken(&mut left.use_alpha, &mut next.use_alpha);
     taken(&mut left.render_cache, &mut next.render_cache);
+    if let Some(area) = left.area.take() {
+        next.area = area.map(|change| change.on(next.area.take().unwrap_or_default()));
+    }
     match &mut next.kind {
         EffectKind::GaussianBlur(b) => gaussian_values(&mut left, b)?,
         EffectKind::MosaicBlur(m) => mosaic_values(&mut left, m)?,
@@ -301,6 +304,7 @@ pub fn reset(p: &mut Project, id: &str, n: usize) -> Result<()> {
     if e.on {
         *e = Effect {
             render_cache: e.render_cache,
+            area: e.area.take(),
             ..e.kind().made()
         };
     }

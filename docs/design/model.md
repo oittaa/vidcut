@@ -511,6 +511,12 @@ Writing:
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
   - `ops::picture::effect_checked` checks an effect. It is part of `ops::picture::checked`.
 - `ops::effect` holds the edits of the effects: `effects.add`, `effects.set`, `effects.key`, `effects.reset`, `effects.remove` and `effects.move`.
+- An `Effect` can have an `EffectArea` ([deviation X166](../deviations.md#x166-an-effect-has-an-area)). The effect then works only in that part of the picture.
+  - The area holds an `AreaShape`, a `center`, a `size`, a `rotation`, a `softness` and `invert`.
+  - The area is a part of a base box. The base box is the whole source picture (`Area::WHOLE`).
+  - `effects.set` takes an `AreaChange`. Its fields replace their own (`AreaChange::on`). Null takes the area off.
+  - `effects.reset` keeps the area. `ops::picture::effect_checked` checks it (`area_checked`).
+  - The area has no keyframes ([todo](../todo/motion-tracking.md)).
 - The `keys` of an `Effect` hold one `EffectKeys` for each `EffectValue` with keyframes, sorted by value.
   - `effect_keys` maps each `EffectValue` to its place in the kind of effect. An `EffectValue` of another kind has no place, and `ops::picture::effect_checked` refuses it.
   - `effect_checked` checks each keyframe as a plain value of the effect.

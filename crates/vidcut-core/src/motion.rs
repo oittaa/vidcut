@@ -15,6 +15,14 @@ pub struct Area {
     pub rotation: f64,
 }
 
+impl Area {
+    pub const WHOLE: Self = Self {
+        center: [0.5, 0.5],
+        size: [1.0, 1.0],
+        rotation: 0.0,
+    };
+}
+
 impl PathSample {
     pub fn area(&self) -> Area {
         Area {

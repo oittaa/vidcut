@@ -1204,6 +1204,29 @@ fn effect_mixed(px: vec2<i32>, made: vec4<f32>, blend: f32, use_alpha: f32) -> v
     return mix(was, out, blend);
 }
 
+struct Masking {
+    across: vec4<f32>,
+    down: vec4<f32>,
+    depth: vec4<f32>,
+    how: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> masking: Masking;
+
+@fragment
+fn fs_area(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let at = vec3<f32>(in.position.xy, 1.0);
+    let depth = dot(masking.depth.xyz, at);
+    let q = vec2<f32>(dot(masking.across.xyz, at), dot(masking.down.xyz, at)) / max(depth, 1e-6);
+    let r = select(length(q), max(abs(q.x), abs(q.y)), masking.how.x > 0.5);
+    let band = max(max(masking.how.y, fwidth(r)), 1e-6);
+    let t = clamp((1.0 - r) / band, 0.0, 1.0);
+    let inside = select(0.0, t * t * (3.0 - 2.0 * t), depth > 1e-6);
+    let share = select(inside, 1.0 - inside, masking.how.z > 0.5);
+    return mix(textureLoad(blur_start, px, 0), textureLoad(blur_source, px, 0), share);
+}
+
 fn blur_end(d: f32) -> vec4<f32> {
     if blurring.window.x < 0.5 {
         return vec4<f32>(1.0);

@@ -608,6 +608,11 @@ The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3
   - The fit of the picture sets its size (`OnFrame.fit`). Thus a Zoom and a Pan do not change the shape.
 - `place::Sharpening` holds the gain of each band of a Sharpen, for the brightness and for the colors.
   - A Sharpen with all gains at 0 and Use Alpha on is no work at all (`Sharpening::still`).
+- `place::Masking` holds the area of an effect at the frame (`Working.area`, [model](model.md#pictures)).
+  - Its `rows` map a pixel of the canvas to the axes of the area. On these axes, the edge of the area is at 1.
+  - The rows join the map of the placement (`Level.back`) with the place of the area on the source picture.
+  - That map gives a point of the source picture. Thus the area stays on the content through a flip, a Dynamic Zoom, a pitch and a yaw.
+  - The source picture counts with square pixels, at its fitted shape (`OnFrame.fit`). Thus an ellipse on a wide picture is a true ellipse.
 
 The draw:
 
@@ -660,6 +665,10 @@ The draw:
   - The color planes are made only when a color gain is not 0. At a Sharpen Chroma of 1 the color gains are 0 (`Sharpening`).
 - `fs_sharpen` adds the changes to the colors. Each change is for the output, so the colors need no second conversion.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
+- `blur::landed` ends each effect, of each kind:
+  - With an area, `fs_area` mixes the result with the picture that came in, by the area (`blur::area_bytes`). Without an area, it copies the result.
+  - `fs_area` fades the edge of the area over one pixel at least (`fwidth`). The softness makes that band wider, toward the middle.
+  - The coverage of a made frame goes through the same end. Thus its alpha changes only inside the area.
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).

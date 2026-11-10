@@ -1,7 +1,9 @@
 use crate::model::{
-    Border, CellShape, CompositeMode, Effect, EffectKind, FilmGrain, Glow, GlowAlpha, GlowFraming,
-    GlowOutput, Media, MosaicBlur, Picture, Sharpen, Vignette, VignetteMode, VignetteShape,
+    AreaShape, Border, CellShape, CompositeMode, Effect, EffectArea, EffectKind, FilmGrain, Glow,
+    GlowAlpha, GlowFraming, GlowOutput, Media, MosaicBlur, Picture, Sharpen, Vignette,
+    VignetteMode, VignetteShape,
 };
+use crate::motion::Area;
 use crate::render::{Moving, Placed, Wipe};
 
 const LEAST_ZOOM: f64 = 1e-9;
@@ -80,6 +82,49 @@ pub struct Working {
     pub work: Work,
     pub blend: f64,
     pub use_alpha: bool,
+    pub area: Option<Masking>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Masking {
+    pub rows: [[f64; 3]; 3],
+    pub shape: AreaShape,
+    pub softness: f64,
+    pub invert: bool,
+}
+
+impl Masking {
+    const LEAST_HALF: f64 = 1e-9;
+
+    fn of(area: &EffectArea, base: &Area, back: &[f64; 8], [fw, fh]: [f64; 2]) -> Self {
+        let turned = |[x, y]: [f64; 2], degrees: f64| {
+            let (sin, cos) = degrees.to_radians().sin_cos();
+            [x * cos + y * sin, y * cos - x * sin]
+        };
+        let [bw, bh] = [base.size[0] * fw, base.size[1] * fh];
+        let [cx, cy] = area.middle();
+        let [dx, dy] = turned([(cx - 0.5) * bw, (cy - 0.5) * bh], base.rotation);
+        let [px, py] = [base.center[0] * fw + dx, base.center[1] * fh + dy];
+        let [sx, sy] = area.extent();
+        let [hx, hy] = [sx * bw / 2.0, sy * bh / 2.0].map(|h| h.max(Self::LEAST_HALF));
+        let (sin, cos) = (base.rotation + area.turn()).to_radians().sin_cos();
+        let across = [fw * cos / hx, -fh * sin / hx, (py * sin - px * cos) / hx];
+        let down = [fw * sin / hy, fh * cos / hy, -(px * sin + py * cos) / hy];
+        let [a, b, e, c, d, f, g, h] = *back;
+        let through = |[u, v, w]: [f64; 3]| {
+            [
+                u * a + v * c + w * g,
+                u * b + v * d + w * h,
+                u * e + v * f + w,
+            ]
+        };
+        Self {
+            rows: [through(across), through(down), [g, h, 1.0]],
+            shape: area.shape,
+            softness: area.soft(),
+            invert: area.invert,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -436,6 +481,7 @@ struct OnFrame {
     frame: i64,
     fit: [f64; 4],
     canvas: [f64; 2],
+    back: [f64; 8],
 }
 
 impl Tiling {
@@ -564,10 +610,13 @@ impl Working {
                 Work::Sharpen(sharpening)
             }
         };
+        let [_, _, fw, fh] = on.fit;
+        let area = e.area.as_ref();
         Some(Self {
             work,
             blend: e.mixed(),
             use_alpha: e.use_alpha,
+            area: area.map(|a| Masking::of(a, &Area::WHOLE, &on.back, [fw, fh])),
         })
     }
 }
@@ -763,6 +812,7 @@ impl Placing {
             frame: p.frame,
             fit: fitted,
             canvas: [frame.0, frame.1],
+            back: own.back,
         };
         let effects = p
             .picture
