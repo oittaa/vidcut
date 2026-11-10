@@ -2559,6 +2559,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - With `follows`, the area follows a motion path of the clip ([X165](#x165-a-clip-has-motion-paths)).
     - `follows` can also name a subject, as `face`. The effect then works in the area of each path of that subject.
     - With `invert`, the effect works outside each area. While no path lasts, it then works on the whole picture.
+    - `motion.remove` refuses a path that an area follows by its id. A path that an area follows by its subject can go.
   - Each effect in the Inspector has Area rows: Off, Ellipse, Box or Polygon, then Edit Shape, Invert Area, Area Softness and Follow.
     - Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
   - Edit Shape shows the handles of the area in the viewer.
