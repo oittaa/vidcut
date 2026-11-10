@@ -2032,7 +2032,7 @@ fn details_text(j: &JobInfo, rate: Option<f64>) -> String {
         format!("{} ({}, {state})", j.title, j.id),
         format!(
             "vidcut {}, FFmpeg {}",
-            env!("CARGO_PKG_VERSION"),
+            crate::system::BUILD,
             vidcut_av::ffmpeg_version()
         ),
     ];

@@ -762,7 +762,7 @@ pub fn command() -> Command {
     let mut root = Command::new("vidcut")
         .version(format!(
             "{} (FFmpeg {})",
-            env!("CARGO_PKG_VERSION"),
+            crate::system::BUILD,
             vidcut_av::ffmpeg_version()
         ))
         .about("A simple, fully scriptable video cutting tool.")

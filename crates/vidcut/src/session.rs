@@ -787,7 +787,7 @@ fn display_gpus() -> Vec<String> {
 
 pub fn doctor() -> Value {
     let mut doctor = json!({
-        "vidcut": env!("CARGO_PKG_VERSION"),
+        "vidcut": crate::system::BUILD,
         "system": crate::system::version(),
         "ffmpeg": vidcut_av::library_versions(),
         "ffmpeg_missing": vidcut_av::parts::missing(),

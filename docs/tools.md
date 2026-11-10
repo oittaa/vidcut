@@ -1,5 +1,11 @@
 # Developer tools
 
+**The build:** vidcut gives its version with its build, as `0.1.0-g7c1ba35a-20261110`.
+
+- The build is the commit and the date of the commit. `-dirty` at the end tells that the build had changes that no commit holds.
+- `vidcut --version`, the status bar, `vidcut doctor`, the report of an export and the MCP server give it.
+- `crates/vidcut/build.rs` reads the commit from git (`VIDCUT_BUILD`). A build without git gives the version alone.
+
 **Fixtures:** this command makes a fixture, caches it and prints its path:
 
 ```bash
