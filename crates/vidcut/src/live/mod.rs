@@ -2487,6 +2487,19 @@ impl Live {
                 1 => "Detect Scene Cuts: split at 1 shot change".to_string(),
                 n => format!("Detect Scene Cuts: split at {n} shot changes"),
             },
+            "motion.find" => {
+                let subject = r.result["subject"].as_str();
+                let subject = subject.and_then(vidcut_core::model::Subject::named);
+                let many = subject.map_or("Subjects", vidcut_core::model::Subject::many);
+                let clips = r.result["clips"].as_array().into_iter().flatten();
+                let found: usize = clips
+                    .map(|c| c["paths"].as_array().map_or(0, Vec::len))
+                    .sum();
+                match found {
+                    0 => format!("Find {many}: none found"),
+                    n => format!("Find {many}: {n} found"),
+                }
+            }
             "media.add_folder" => folder_notice(&r.result),
             "subtitles.import"
                 if r.result["placed"] == "start"

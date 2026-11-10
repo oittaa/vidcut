@@ -11,12 +11,13 @@ use serde_json::{Value, json};
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel, Effect,
-    EffectKind, EffectValue, FilmGrain, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
-    GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, Picture, PictureTool,
-    Project, Retime, Sharpen, Speed, TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape,
-    ZoomBox,
+    AreaShape, Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel,
+    Effect, EffectArea, EffectKind, EffectValue, FilmGrain, GaussianBlur, Generator, Glow,
+    GlowAlpha, GlowFraming, GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe,
+    MosaicBlur, MotionPath, Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject,
+    TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
+use vidcut_core::motion::{REACH, TURN};
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
 use vidcut_core::time::TimeSpec;
@@ -35,6 +36,8 @@ use crate::live::PlayerId;
 
 const SAME: f64 = 1e-9;
 const FIELD_WIDTH: f32 = 76.0;
+const NAME_WIDTH: f32 = 140.0;
+const BLUR_SIZE: [f64; 2] = [1.3, 1.3];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Field {
@@ -83,7 +86,18 @@ enum Knob {
     Grain(GrainKnob),
     Vignette(VignetteKnob),
     Sharpen(SharpenKnob),
+    Area(AreaKnob),
     Blend,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum AreaKnob {
+    Softness,
+    CenterX,
+    CenterY,
+    Width,
+    Height,
+    Rotation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -638,6 +652,58 @@ impl SharpenKnob {
     }
 }
 
+impl AreaKnob {
+    fn dial(self) -> Dial {
+        let dial = |label, usual, range, speed| Dial {
+            label,
+            usual,
+            range,
+            speed,
+        };
+        let [x, y] = EffectArea::MIDDLE;
+        let [w, h] = EffectArea::WHOLE;
+        match self {
+            Self::Softness => dial("Area Softness", 0.0, 0.0..=1.0, 0.005),
+            Self::CenterX => dial("Center X", x, -REACH..=REACH, 0.001),
+            Self::CenterY => dial("Center Y", y, -REACH..=REACH, 0.001),
+            Self::Width => dial("Width", w, 0.0..=REACH, 0.001),
+            Self::Height => dial("Height", h, 0.0..=REACH, 0.001),
+            Self::Rotation => dial("Rotation", 0.0, -TURN..=TURN, 0.5),
+        }
+    }
+
+    fn read(self, a: &EffectArea) -> f64 {
+        match self {
+            Self::Softness => a.soft(),
+            Self::CenterX => a.middle()[0],
+            Self::CenterY => a.middle()[1],
+            Self::Width => a.extent()[0],
+            Self::Height => a.extent()[1],
+            Self::Rotation => a.turn(),
+        }
+    }
+
+    fn put(self, a: &mut EffectArea, to: f64) {
+        match self {
+            Self::Softness => a.softness = Some(to),
+            Self::CenterX => a.center = Some([to, a.middle()[1]]),
+            Self::CenterY => a.center = Some([a.middle()[0], to]),
+            Self::Width => a.size = Some([to, a.extent()[1]]),
+            Self::Height => a.size = Some([a.extent()[0], to]),
+            Self::Rotation => a.rotation = Some(to),
+        }
+    }
+
+    fn param(self, a: &EffectArea) -> Value {
+        match self {
+            Self::Softness => json!({ "softness": a.soft() }),
+            Self::CenterX | Self::CenterY => json!({ "center": a.middle() }),
+            Self::Width | Self::Height => json!({ "size": a.extent() }),
+            Self::Rotation => json!({ "rotation": a.turn() }),
+        }
+    }
+}
+
 impl Knob {
     fn dial(self) -> Dial {
         match self {
@@ -647,6 +713,7 @@ impl Knob {
             Knob::Grain(k) => k.dial(),
             Knob::Vignette(k) => k.dial(),
             Knob::Sharpen(k) => k.dial(),
+            Knob::Area(k) => k.dial(),
             Knob::Blend => Dial {
                 label: "Blend",
                 usual: 1.0,
@@ -664,6 +731,7 @@ impl Knob {
             (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.read(g),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.read(s),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.read(s),
+            (Knob::Area(k), _) => e.area.as_ref().map_or(k.dial().usual, |a| k.read(a)),
             (Knob::Blend, _) => e.mixed(),
             _ => self.dial().usual,
         }
@@ -680,6 +748,11 @@ impl Knob {
             (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.put(g, v),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.put(s, v),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.put(s, v),
+            (Knob::Area(k), _) => {
+                if let Some(a) = out.area.as_mut() {
+                    k.put(a, v);
+                }
+            }
             (Knob::Blend, _) => out.blend = Some(v),
             _ => {}
         }
@@ -710,6 +783,10 @@ impl Knob {
             (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.param(g),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.param(s),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.param(s),
+            (Knob::Area(k), _) => {
+                let area = e.area.as_ref();
+                ("area", area.map_or_else(|| json!({}), |a| k.param(a)))
+            }
             _ => ("blend", json!(e.mixed())),
         }
     }
@@ -1231,6 +1308,28 @@ struct Chosen {
     shape: Shape,
     frame: i64,
     effect_keys: Vec<KeyMark>,
+    paths: Vec<PathRow>,
+    finds: bool,
+}
+
+#[derive(Debug, Clone)]
+struct PathRow {
+    id: String,
+    name: Option<String>,
+    subject: Option<Subject>,
+}
+
+#[derive(Debug, Clone)]
+struct Finding {
+    method: &'static str,
+    params: Value,
+    subject: Subject,
+}
+
+impl PathRow {
+    fn label(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.id)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1310,6 +1409,16 @@ pub struct Inspector {
     recolored: Option<Recolored>,
     tinted: Option<Tinted>,
     lut_pick: Option<(Vec<String>, Picked)>,
+    naming: Option<Naming>,
+    subject: Subject,
+    finding: Option<Finding>,
+}
+
+#[derive(Debug)]
+struct Naming {
+    clip: String,
+    path: String,
+    text: String,
 }
 
 #[derive(Debug)]
@@ -2581,15 +2690,188 @@ fn sharpen_rows(ui: &mut egui::Ui, i: &Inspector, (n, e): (usize, &Effect), acts
     });
 }
 
+fn path_rows(c: &Clip) -> Vec<PathRow> {
+    let row = |m: &MotionPath| PathRow {
+        id: m.id.clone(),
+        name: m.name.clone(),
+        subject: m.subject,
+    };
+    c.motion.iter().map(row).collect()
+}
+
+fn found(c: &Chosen, subject: Subject) -> bool {
+    c.paths.iter().any(|p| p.subject == Some(subject))
+}
+
+fn find_request(c: &Chosen, subject: Subject) -> (&'static str, Value) {
+    let mut params = json!({ "clips": [c.id], "subject": subject });
+    if found(c, subject) {
+        params["replace"] = json!(true);
+    }
+    ("motion.find", params)
+}
+
+fn blur_request(c: &Chosen, subject: Subject) -> Option<(&'static str, Value)> {
+    let follows =
+        |e: &Effect| e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(subject.name());
+    let mut commands = Vec::new();
+    if !found(c, subject) {
+        let params = json!({ "clips": [c.id], "subject": subject });
+        commands.push(json!({ "method": "motion.find", "params": params }));
+    }
+    if !c.stored.effects.iter().any(follows) {
+        let area = json!({ "follows": subject.name(), "size": BLUR_SIZE });
+        let add = json!({ "clips": [c.id], "kind": "mosaic_blur" });
+        let set = json!({ "clip": c.id, "effect": c.stored.effects.len(), "area": area });
+        commands.push(json!({ "method": "effects.add", "params": add }));
+        commands.push(json!({ "method": "effects.set", "params": set }));
+    }
+    let label = format!("Blur {}", subject.many());
+    (!commands.is_empty()).then(|| ("apply", json!({ "commands": commands, "label": label })))
+}
+
+fn finds(method: &str, params: &Value) -> bool {
+    let commands = params["commands"].as_array();
+    method == "motion.find"
+        || commands.is_some_and(|c| c.iter().any(|c| c["method"] == "motion.find"))
+}
+
+fn with_model(method: &str, params: &mut Value) {
+    if method == "motion.find" {
+        params["download"] = json!(true);
+    }
+    for c in params["commands"].as_array_mut().into_iter().flatten() {
+        if c["method"] == "motion.find" {
+            c["params"]["download"] = json!(true);
+        }
+    }
+}
+
+fn area_label(shape: Option<AreaShape>) -> &'static str {
+    match shape {
+        None => "Off",
+        Some(AreaShape::Ellipse) => "Ellipse",
+        Some(AreaShape::Box) => "Box",
+        Some(AreaShape::Polygon) => "Polygon",
+    }
+}
+
+fn area_set(n: usize, change: Value) -> Act {
+    Act::EffectSet(n, json!({ "area": change }))
+}
+
+fn all_of(subject: Subject) -> String {
+    format!("All {}", subject.many())
+}
+
+fn follow_row(
+    ui: &mut egui::Ui,
+    (n, a): (usize, &EffectArea),
+    paths: &[PathRow],
+    acts: &mut Vec<Act>,
+) {
+    let now = a.follows.as_deref();
+    let subject = now.and_then(Subject::named);
+    let followed = paths.iter().find(|p| Some(p.id.as_str()) == now);
+    let shown = match (subject, followed) {
+        (Some(s), _) => all_of(s),
+        (None, Some(p)) => p.label().to_string(),
+        (None, None) => "None".to_string(),
+    };
+    label(ui, "Follow", now.is_some());
+    egui::ComboBox::from_id_salt(("inspector-area-follow", n))
+        .selected_text(shown)
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(now.is_none(), "None").clicked() && now.is_some() {
+                acts.push(area_set(n, json!({ "follows": null })));
+            }
+            for s in Subject::ALL {
+                let on = subject == Some(s);
+                if ui.selectable_label(on, all_of(s)).clicked() && !on {
+                    acts.push(area_set(n, json!({ "follows": s.name() })));
+                }
+            }
+            for p in paths {
+                let on = Some(p.id.as_str()) == now;
+                if ui.selectable_label(on, p.label()).clicked() && !on {
+                    acts.push(area_set(n, json!({ "follows": p.id })));
+                }
+            }
+        });
+    if reset(ui, now.is_some()) {
+        acts.push(area_set(n, json!({ "follows": null })));
+    }
+    ui.end_row();
+}
+
+fn area_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e): (usize, &Effect),
+    paths: &[PathRow],
+    acts: &mut Vec<Act>,
+) {
+    let area = |ui: &mut egui::Ui, k: AreaKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Area(k)), e, acts);
+    };
+    rows(ui, (n, "area"), |ui| {
+        let now = e.area.as_ref().map(|a| a.shape);
+        label(ui, "Area", now.is_some());
+        dialog::switch(ui, |ui| {
+            for shape in [None, Some(AreaShape::Ellipse), Some(AreaShape::Box)] {
+                let name = area_label(shape);
+                if ui.selectable_label(shape == now, name).clicked() && shape != now {
+                    acts.push(area_set(
+                        n,
+                        shape.map_or(Value::Null, |s| json!({ "shape": s })),
+                    ));
+                }
+            }
+        });
+        if reset(ui, now.is_some()) {
+            acts.push(area_set(n, Value::Null));
+        }
+        ui.end_row();
+        let Some(a) = &e.area else {
+            return;
+        };
+        label(ui, "Invert Area", a.invert);
+        let mut invert = a.invert;
+        if ui.checkbox(&mut invert, "").clicked() {
+            acts.push(area_set(n, json!({ "invert": invert })));
+        }
+        if reset(ui, a.invert) {
+            acts.push(area_set(n, json!({ "invert": false })));
+        }
+        ui.end_row();
+        area(ui, AreaKnob::Softness, acts);
+        follow_row(ui, (n, a), paths, acts);
+    });
+    if e.area.is_some() {
+        fold(ui, (n, "Area Advanced Controls"), |ui| {
+            for k in [
+                AreaKnob::CenterX,
+                AreaKnob::CenterY,
+                AreaKnob::Width,
+                AreaKnob::Height,
+                AreaKnob::Rotation,
+            ] {
+                area(ui, k, acts);
+            }
+        });
+    }
+}
+
 fn effect_block(
     ui: &mut egui::Ui,
     i: &Inspector,
     (n, count): (usize, usize),
-    (e, marks): (&Effect, &KeyMark),
+    (e, marks, paths): (&Effect, &KeyMark, &[PathRow]),
     acts: &mut Vec<Act>,
 ) {
     let mut fresh = e.kind().made();
     fresh.on = e.on;
+    fresh.area = e.area.clone();
     let changed = *e != fresh;
     let header = |ui: &mut egui::Ui| {
         let mut act = None;
@@ -2638,6 +2920,7 @@ fn effect_block(
                     EffectKind::Vignette(v) => vignette_rows(ui, i, (n, e, v), acts),
                     EffectKind::Sharpen(_) => sharpen_rows(ui, i, (n, e), acts),
                 }
+                area_rows(ui, i, (n, e), paths, acts);
                 fold(ui, (n, "Global Blend"), |ui| {
                     knob(ui, i, (n, Knob::Blend), e, acts);
                     check(ui, (n, "Use Alpha", e.use_alpha, true), "use_alpha", acts);
@@ -2651,7 +2934,7 @@ fn effects(ui: &mut egui::Ui, i: &Inspector, c: &Chosen, acts: &mut Vec<Act>) {
     for (n, e) in c.shown.effects.iter().enumerate() {
         let shown = e.adopted(c.frame as f64);
         let marks = c.effect_keys.get(n).cloned().unwrap_or_default();
-        effect_block(ui, i, (n, count), (&shown, &marks), acts);
+        effect_block(ui, i, (n, count), (&shown, &marks, &c.paths), acts);
     }
 }
 
@@ -2848,6 +3131,8 @@ impl Workspace {
                         shape: shape(&p, c),
                         frame: c.content_at(self.snap.timeline.position),
                         effect_keys: effect_marks(c, self.snap.timeline.position),
+                        paths: path_rows(c),
+                        finds: vidcut_core::ops::motion::takes(c),
                     }
                 })
             })
@@ -3591,6 +3876,118 @@ impl Workspace {
         }
     }
 
+    fn find(&mut self, method: &'static str, params: Value, subject: Subject) {
+        let dir = crate::paths::models_dir();
+        if finds(method, &params) && !vidcut_av::subjects::needed(&dir, subject).is_empty() {
+            self.inspector.finding = Some(Finding {
+                method,
+                params,
+                subject,
+            });
+        } else {
+            self.send(method, params);
+        }
+    }
+
+    pub(super) fn motion_prompt(&mut self, ctx: &egui::Context) {
+        let Some(finding) = self.inspector.finding.clone() else {
+            return;
+        };
+        let (method, mut params) = (finding.method, finding.params);
+        let needs = vidcut_av::subjects::needed(&crate::paths::models_dir(), finding.subject);
+        if needs.is_empty() {
+            self.inspector.finding = None;
+            self.send(method, params);
+            return;
+        }
+        match super::speech::ask_download(ctx, "motion-download", &needs, "Download") {
+            Some(true) => {
+                self.inspector.finding = None;
+                with_model(method, &mut params);
+                self.send(method, params);
+            }
+            Some(false) => self.inspector.finding = None,
+            None => {}
+        }
+    }
+
+    fn motion_section(&mut self, ui: &mut egui::Ui, c: &Chosen) {
+        if !c.finds {
+            return;
+        }
+        let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let mut naming = self.inspector.naming.take();
+        let mut subject = self.inspector.subject;
+        let mut sends = Vec::new();
+        let mut asked = None;
+        group(
+            ui,
+            "Motion",
+            |_| (),
+            |ui| {
+                label(ui, "Subject", false);
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("inspector-motion-subject")
+                        .selected_text(subject.many())
+                        .show_ui(ui, |ui| {
+                            for s in Subject::ALL {
+                                ui.selectable_value(&mut subject, s, s.many());
+                            }
+                        });
+                    if ui.button("Find").clicked() {
+                        asked = Some(find_request(c, subject));
+                    }
+                    let blur = blur_request(c, subject);
+                    let button = egui::Button::new("Blur");
+                    if ui.add_enabled(blur.is_some(), button).clicked() {
+                        asked = blur;
+                    }
+                });
+                ui.end_row();
+                for (n, row) in c.paths.iter().enumerate() {
+                    let now = row.name.as_deref().unwrap_or("");
+                    let typed = naming
+                        .as_ref()
+                        .filter(|n| n.clip == c.id && n.path == row.id)
+                        .map(|n| n.text.clone());
+                    let mut text = typed.clone().unwrap_or_else(|| now.to_string());
+                    label(ui, if n == 0 { "Found" } else { "" }, false);
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .hint_text("Name")
+                            .desired_width(NAME_WIDTH),
+                    );
+                    if field.lost_focus() && !cancelled && text.trim() != now {
+                        let params = json!({ "clip": c.id, "path": row.id, "name": text });
+                        sends.push(("motion.set", params));
+                    }
+                    if field.has_focus() {
+                        naming = Some(Naming {
+                            clip: c.id.clone(),
+                            path: row.id.clone(),
+                            text,
+                        });
+                    } else if typed.is_some() {
+                        naming = None;
+                    }
+                    if icon(ui, TRASH, "Delete", true) {
+                        let params = json!({ "clip": c.id, "paths": [row.id] });
+                        sends.push(("motion.remove", params));
+                    }
+                    ui.end_row();
+                }
+            },
+        );
+        self.inspector.naming = naming;
+        self.inspector.subject = subject;
+        for (method, params) in sends {
+            self.send(method, params);
+        }
+        if let Some((method, params)) = asked {
+            self.find(method, params, subject);
+        }
+    }
+
     fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
         use super::super_scale::{SHARPNESS, UPSCALERS, label_of, unfit, upscaler_text};
         let mut media: Vec<String> = chosen
@@ -4203,6 +4600,7 @@ impl Workspace {
                     composite(ui, i, &p, at, &chosen, &mut acts);
                     self.input_lut_section(ui, &p, &chosen);
                     self.super_scale_section(ui, &p, &chosen);
+                    self.motion_section(ui, &chosen[0]);
                     effects(ui, &self.inspector, &chosen[0], &mut acts);
                 }
                 if !paced.is_empty() {

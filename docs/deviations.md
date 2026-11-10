@@ -3098,6 +3098,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A path lasts from its first sample to its last. Before and after them it has no area. Between two samples, the area goes in a line.
   - A path stays on its source frames through a trim, a slip, a split, a copy and a speed change.
   - The area of an effect can follow a path ([X166](#x166-an-effect-has-an-area)). `motion.find` makes a path for each face or each block of text ([X167](#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+  - The Inspector has a Motion section for a clip that takes paths, above the effects. Its first row has a Subject menu, Find and Blur.
+    - Find sends `motion.find` for the subject, with `replace` when the clip has paths of that subject.
+    - Blur is one undo step. It sends one `apply`: `motion.find` when the clip has no path of the subject, then a Mosaic Blur whose area follows the subject.
+    - Blur adds no second blur when an effect of the clip follows the subject. Then the button is off.
+    - The Inspector asks before the model of a subject downloads, as it asks for the other local models.
+    - Each path has its name in a field and a Delete button. A new name sends `motion.set`. Delete sends `motion.remove`.
   - An OpenTimelineIO file keeps the paths in its `vidcut` metadata. Other editors do not read them.
 - **Why:**
   - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
@@ -3123,7 +3129,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - With `invert`, the effect works outside each area. While no path lasts, it then works on the whole picture.
     - `motion.remove` refuses a path that an area follows by its id. A path that an area follows by its subject can go.
     - An OpenTimelineIO file carries the area and the path that it follows, in its `vidcut` metadata.
-  - The area has no keyframes. The Inspector and the viewer have no controls for it ([todo](todo/motion-tracking.md)).
+  - Each effect in the Inspector has Area rows: Off, Ellipse or Box, then Invert Area, Area Softness and Follow. Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
+    - Follow lists None, All Faces, All Text and the motion paths of the clip. All Faces sends the subject `face`. Each change sends `effects.set` with `area`.
+  - The area has no keyframes. The viewer has no controls for it ([todo](todo/motion-tracking.md)).
 - **Why:**
   - A blur over a face or a number plate must cover only that part of the picture.
   - A blur must not stay on the picture after its subject is gone. Thus a path ends, as the tracking of Magic Mask does, and not as a tracked window.
@@ -3163,7 +3171,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The request gives the score of each path: how sure the model is, as the mean of its frames.
   - A path keeps only the samples that it needs. Between them, the line is at most a twentieth of the size of the thing off.
   - A second `motion.find` of one subject on a clip needs `replace`. It then takes the earlier paths of that subject off first.
-  - The Inspector and the viewer have no control for it ([todo](todo/motion-tracking.md)).
+  - The Motion section of the Inspector has Find and Blur for it ([X165](#x165-a-clip-has-motion-paths)).
+  - While the Inspector is open, the viewer shows a box with its name on each path of the selected clip.
+  - After a Find, the status line tells how many things it found.
 - **Why:**
   - A blur must cover each face of a clip, and the user must not draw each one.
   - Text is the next thing that people hide: names, addresses, documents and screens.
