@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
@@ -56,7 +58,7 @@ pub fn add(p: &mut Project, id: &str, name: Option<&str>, samples: &[PathSample]
     c.motion.push(MotionPath {
         id: path.clone(),
         name: name.and_then(named),
-        samples: samples.to_vec(),
+        samples: Arc::new(samples.to_vec()),
     });
     Ok(json!({ "clip": id, "path": path }))
 }
@@ -82,7 +84,7 @@ pub fn set(p: &mut Project, id: &str, path: &str, change: PathChange) -> Result<
         return Err(Error::invalid(why));
     }
     let m = path_of(clip_of(p, id)?, path)?;
-    let mut samples = m.samples.clone();
+    let mut samples = m.samples.to_vec();
     if let Some([first, last]) = change.clear {
         motion::clear(&mut samples, (first, last));
     }
@@ -97,7 +99,7 @@ pub fn set(p: &mut Project, id: &str, path: &str, change: PathChange) -> Result<
     if let Some(why) = motion::samples_problem(&samples) {
         return Err(Error::invalid(why));
     }
-    m.samples = samples;
+    m.samples = Arc::new(samples);
     if let Some(name) = change.name {
         m.name = named(name);
     }
@@ -130,8 +132,10 @@ pub fn remove(p: &mut Project, id: &str, paths: Option<&[String]>) -> Result<()>
 }
 
 pub fn shift(c: &mut Clip, by: i64) {
-    for s in c.motion.iter_mut().flat_map(|m| &mut m.samples) {
-        s.frame += by;
+    for m in &mut c.motion {
+        for s in Arc::make_mut(&mut m.samples) {
+            s.frame += by;
+        }
     }
 }
 

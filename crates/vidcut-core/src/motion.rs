@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::model::{MotionPath, PathSample};
 
@@ -160,9 +161,10 @@ pub fn clear(samples: &mut Vec<PathSample>, (first, last): (i64, i64)) {
 
 pub fn rescale(paths: &mut [MotionPath], conv: impl Fn(i64) -> i64) {
     for path in paths {
-        for s in &mut path.samples {
+        let samples = Arc::make_mut(&mut path.samples);
+        for s in samples.iter_mut() {
             s.frame = conv(s.frame);
         }
-        path.samples.dedup_by_key(|s| s.frame);
+        samples.dedup_by_key(|s| s.frame);
     }
 }

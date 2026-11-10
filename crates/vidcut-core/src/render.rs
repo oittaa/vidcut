@@ -559,7 +559,7 @@ fn zero_i64(n: &i64) -> bool {
 /// way from a keyframe position of the clip to its source frame.
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct Followed {
-    /// The paths, on source frames.
+    /// The paths, on source frames, without their names.
     pub paths: Arc<[MotionPath]>,
     /// How the clip walks its source from its first frame.
     pub pace: Pace,
@@ -567,52 +567,28 @@ pub struct Followed {
     pub from: i64,
     /// The keyframe position of the clip's first frame.
     pub key: i64,
-    #[serde(skip)]
-    stamp: u64,
 }
 
 impl std::fmt::Debug for Followed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Followed({}, {:x})", self.paths.len(), self.stamp)
+        write!(f, "Followed({})", self.paths.len())
     }
 }
 
 impl PartialEq for Followed {
     fn eq(&self, other: &Self) -> bool {
-        self.stamp == other.stamp
-            && self.from == other.from
+        let same = |(a, b): (&MotionPath, &MotionPath)| {
+            a.id == b.id && (Arc::ptr_eq(&a.samples, &b.samples) || a.samples == b.samples)
+        };
+        self.from == other.from
             && self.key == other.key
             && self.pace == other.pace
-            && (Arc::ptr_eq(&self.paths, &other.paths) || self.paths == other.paths)
+            && self.paths.len() == other.paths.len()
+            && self.paths.iter().zip(other.paths.iter()).all(same)
     }
 }
 
 impl Followed {
-    fn made(paths: Arc<[MotionPath]>, pace: Pace, from: i64, key: i64) -> Self {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::hash::DefaultHasher::new();
-        for path in paths.iter() {
-            path.id.hash(&mut hasher);
-            for s in &path.samples {
-                s.frame.hash(&mut hasher);
-                for v in s.center.iter().chain(&s.size).chain([&s.rotation]) {
-                    v.to_bits().hash(&mut hasher);
-                }
-            }
-        }
-        (from, key, pace.skip).hash(&mut hasher);
-        for s in pace.map.iter() {
-            (s.at, s.speed.to_bits()).hash(&mut hasher);
-        }
-        Self {
-            paths,
-            pace,
-            from,
-            key,
-            stamp: hasher.finish(),
-        }
-    }
-
     pub fn of(clip: &Clip, picture: &Picture) -> Self {
         let follows = |m: &&MotionPath| {
             let named = |e: &crate::model::Effect| {
@@ -620,16 +596,21 @@ impl Followed {
             };
             picture.effects.iter().any(named)
         };
-        let paths: Arc<[MotionPath]> = clip.motion.iter().filter(follows).cloned().collect();
+        let shared = |m: &MotionPath| MotionPath {
+            id: m.id.clone(),
+            name: None,
+            samples: m.samples.clone(),
+        };
+        let paths: Arc<[MotionPath]> = clip.motion.iter().filter(follows).map(shared).collect();
         if paths.is_empty() {
             return Self::default();
         }
-        Self::made(
+        Self {
             paths,
-            clip.pace(),
-            clip.source_in,
-            clip.content_at(clip.start),
-        )
+            pace: clip.pace(),
+            from: clip.source_in,
+            key: clip.content_at(clip.start),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -648,16 +629,20 @@ impl Followed {
             Some(MotionPath {
                 id: m.id.clone(),
                 name: None,
-                samples: vec![PathSample {
+                samples: Arc::new(vec![PathSample {
                     frame: 0,
                     center: area.center,
                     size: area.size,
                     rotation: area.rotation,
-                }],
+                }]),
             })
         };
-        let paths: Arc<[MotionPath]> = self.paths.iter().filter_map(held).collect();
-        Self::made(paths, Pace::default(), 0, 0)
+        Self {
+            paths: self.paths.iter().filter_map(held).collect(),
+            pace: Pace::default(),
+            from: 0,
+            key: 0,
+        }
     }
 }
 

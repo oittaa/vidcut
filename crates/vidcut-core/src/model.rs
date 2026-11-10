@@ -1839,7 +1839,7 @@ pub struct MotionPath {
     pub name: Option<String>,
     /// The area on source frames: at least one sample, one for a frame, in
     /// the order of the frames.
-    pub samples: Vec<PathSample>,
+    pub samples: Arc<Vec<PathSample>>,
 }
 
 /// The area of a motion path on one source frame.

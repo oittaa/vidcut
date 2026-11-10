@@ -572,6 +572,7 @@ Dynamic Zoom and keyframes (D75):
 - The viewer and the export both take this `Placing`. Thus there is one draw path.
 - `Placed` also holds the motion paths that the areas of its effects follow (`render::Followed`, [model](model.md#motion-paths)).
   - `Followed::of` takes them from the clip, with the pace of the clip and the source frame of its first frame.
+  - A path shares its samples with the clip (`MotionPath.samples`). Thus a placed picture copies no sample, and two plans of one project compare them by their place in memory.
   - `Followed::base` gives the area of a path at the frame. It goes from the keyframe frame to the source frame through the pace.
   - Why: a path is on source frames, and the keyframe frame of a clip with a speed is a frame of the retimed source.
   - The paths are behind an `Arc`. Thus `Placed::after` copies no sample.
