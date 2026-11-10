@@ -269,6 +269,7 @@ pub fn set(
     let e = &mut effects_of(p, id, n)?[n];
     let mut next = applied(e, change)?;
     if let Some(path) = next.area.as_ref().and_then(|a| a.follows.as_ref())
+        && crate::model::Subject::named(path).is_none()
         && !paths.contains(path)
     {
         return Err(Error::not_found(format!(

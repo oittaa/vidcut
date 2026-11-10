@@ -543,7 +543,7 @@ Writing:
   - Thus a trim, a slip, a split, a copy and a speed change do not change a path.
   - `shift_source` moves the samples with `source_in` when the limits of a subclip change.
 - `MotionPath::area_at` gives the `motion::Area` on a frame.
-  - Between two samples, the area goes in a line. Outside the samples, it stays where the nearest sample put it.
+  - A path lasts from its first sample to its last. Before and after them it has no area. Between two samples, the area goes in a line.
 - A path is not keyframes. Why: a new path must not remove the keyframes that the user set, and one path can move several things.
 - `ops::motion` holds the edits: `motion.add`, `motion.set`, `motion.remove` and `motion.find`. `motion.list` reads the paths.
   - `motion.set` removes a range of samples first (`motion::clear`). Then it puts the new samples on their frames (`motion::put`).

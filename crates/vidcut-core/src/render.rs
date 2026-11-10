@@ -578,7 +578,9 @@ impl std::fmt::Debug for Followed {
 impl PartialEq for Followed {
     fn eq(&self, other: &Self) -> bool {
         let same = |(a, b): (&MotionPath, &MotionPath)| {
-            a.id == b.id && (Arc::ptr_eq(&a.samples, &b.samples) || a.samples == b.samples)
+            a.id == b.id
+                && a.subject == b.subject
+                && (Arc::ptr_eq(&a.samples, &b.samples) || a.samples == b.samples)
         };
         self.from == other.from
             && self.key == other.key
@@ -590,16 +592,13 @@ impl PartialEq for Followed {
 
 impl Followed {
     pub fn of(clip: &Clip, picture: &Picture) -> Self {
-        let follows = |m: &&MotionPath| {
-            let named = |e: &crate::model::Effect| {
-                e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(m.id.as_str())
-            };
-            picture.effects.iter().any(named)
-        };
+        let named = |e: &crate::model::Effect| e.area.as_ref()?.follows.clone();
+        let named: Vec<String> = picture.effects.iter().filter_map(named).collect();
+        let follows = |m: &&MotionPath| named.iter().any(|n| m.follows(n));
         let shared = |m: &MotionPath| MotionPath {
             id: m.id.clone(),
             name: None,
-            subject: None,
+            subject: m.subject,
             samples: m.samples.clone(),
         };
         let paths: Arc<[MotionPath]> = clip.motion.iter().filter(follows).map(shared).collect();
@@ -618,10 +617,10 @@ impl Followed {
         self.paths.is_empty()
     }
 
-    pub fn base(&self, path: &str, source: i64) -> Option<Area> {
-        let frame = self.from + self.pace.offset(source - self.key);
-        let path = self.paths.iter().find(|m| m.id == path)?;
-        path.area_at(frame as f64)
+    pub fn bases(&self, named: &str, source: i64) -> Vec<Area> {
+        let frame = (self.from + self.pace.offset(source - self.key)) as f64;
+        let followed = self.paths.iter().filter(|m| m.follows(named));
+        followed.filter_map(|m| m.area_at(frame)).collect()
     }
 
     pub fn at(&self, source: i64) -> Self {
@@ -630,7 +629,7 @@ impl Followed {
             Some(MotionPath {
                 id: m.id.clone(),
                 name: None,
-                subject: None,
+                subject: m.subject,
                 samples: Arc::new(vec![PathSample {
                     frame: 0,
                     center: area.center,

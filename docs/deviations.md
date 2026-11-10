@@ -3088,12 +3088,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Tracker palette of the Color page moves a window or an effect with a feature of the frame (pp. 3308, 3494).
   - Its tracking data is apart from the values of the window, and those values can have keyframes (p. 3309).
   - On a frame with no tracking data, the window stays where the first or the last tracked frame put it (p. 3310).
+    - For a subject that disappears, the manual tells the user to fade the correction out with keyframes (p. 3310).
+  - Magic Mask takes a stroke out of the tracking at the frame where its subject is fully off screen (p. 3305).
   - Clear Selected Track Data removes a part of the data. Resolve then goes in a line across that part (p. 3315).
   - The scripting API of Resolve Studio 21.2 has no call that makes or reads a track.
 - **vidcut:**
   - A clip of footage, a still or an image sequence has motion paths. A motion path tells where one area of the source picture is on each source frame.
   - `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths. A script gives the samples.
-  - Between two samples, the area goes in a line. Outside the samples, it stays where the nearest sample put it.
+  - A path lasts from its first sample to its last. Before and after them it has no area. Between two samples, the area goes in a line.
   - A path stays on its source frames through a trim, a slip, a split, a copy and a speed change.
   - The area of an effect can follow a path ([X166](#x166-an-effect-has-an-area)). `motion.find` makes a path for each face ([X167](#x167-vidcut-finds-the-faces-of-a-clip)).
   - An OpenTimelineIO file keeps the paths in its `vidcut` metadata. Other editors do not read them.
@@ -3113,11 +3115,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - `effects.set` takes `area`. Null takes the area off. `effects.reset` keeps the area.
   - With `follows`, the area names a motion path of the clip ([X165](#x165-a-clip-has-motion-paths)). The area of the path is then the base box, in place of the whole picture.
     - The center, the size and the rotation of the area then count from the box of the path. A size of 1.2 is that box, a fifth larger.
-    - `motion.remove` refuses a path that an area follows.
+    - `follows` can also name a subject, as `face`. The effect then works in the area of each path that `motion.find` made for that subject.
+    - The effect works in the area of a path only while that path lasts. Thus the blur of a face goes when the face is gone.
+    - `motion.remove` refuses a path that an area follows by its id. A path that an area follows by its subject can go.
     - An OpenTimelineIO file carries the area and the path that it follows, in its `vidcut` metadata.
   - The area has no keyframes. The Inspector and the viewer have no controls for it ([todo](todo/motion-tracking.md)).
 - **Why:**
   - A blur over a face or a number plate must cover only that part of the picture.
+  - A blur must not stay on the picture after its subject is gone. Thus a path ends, as the tracking of Magic Mask does, and not as a tracked window.
+  - One effect can cover each face of a clip. The user then changes one blur, not one for each face.
   - A cut that vidcut delivers does not go through another page.
   - One rule gives each of the six effects an area.
 

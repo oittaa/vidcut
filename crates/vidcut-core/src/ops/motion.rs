@@ -192,7 +192,7 @@ pub fn list(p: &Project, ids: Option<&[String]>, at: Option<i64>, samples: bool)
 }
 
 pub fn violation(c: &Clip) -> Option<String> {
-    let has = |path: &str| c.motion.iter().any(|m| m.id == path);
+    let has = |path: &str| Subject::named(path).is_some() || c.motion.iter().any(|m| m.id == path);
     if let Some((n, path)) = followers(c).find(|(_, path)| !has(path)) {
         return Some(format!(
             "{}: the area of effect {n} follows motion path {path}, which the clip has not",

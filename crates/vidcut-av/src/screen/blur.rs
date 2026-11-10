@@ -149,7 +149,7 @@ impl Pipes {
             glow: pipeline(&plain, "fs_glow"),
             grain_noise: pipeline(&plain, "fs_grain_noise"),
             grain: pipeline(&plain, "fs_grain"),
-            area: pipeline(&plain, "fs_area"),
+            area: pipeline(&of(&reading), "fs_area"),
             layout,
             reading,
         }
@@ -757,13 +757,22 @@ fn glow_blurred<'a>(
 }
 
 fn area_bytes(masking: &Masking) -> Vec<u8> {
-    let mut floats = Vec::with_capacity(16);
-    for [x, y, w] in masking.rows {
-        floats.extend([x, y, w, 0.0]);
-    }
     let boxed = masking.shape == AreaShape::Box;
-    floats.extend([flag(boxed), masking.softness, flag(masking.invert), 0.0]);
-    float_bytes(&floats)
+    let count = masking.maps.len() as f64;
+    float_bytes(&[flag(boxed), masking.softness, flag(masking.invert), count])
+}
+
+fn area_maps(gpu: &Gpu, masking: &Masking) -> wgpu::Buffer {
+    let floats: Vec<f64> = masking.maps.iter().flatten().flatten().copied().collect();
+    let bytes = float_bytes(&floats);
+    let maps = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vidcut area"),
+        size: bytes.len() as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    gpu.queue.write_buffer(&maps, 0, &bytes);
+    maps
 }
 
 fn landed(
@@ -775,8 +784,12 @@ fn landed(
 ) {
     let from = match area {
         Some(masking) => {
+            let maps = area_maps(gpu, masking);
             let step = (&gpu.blur.area, &area_bytes(masking)[..]);
-            let views = Views::with(&made.view, &own.view);
+            let views = Views {
+                cells: Some(&maps),
+                ..Views::with(&made.view, &own.view)
+            };
             draw_step(gpu, step, views, &free.view, encoder);
             free
         }

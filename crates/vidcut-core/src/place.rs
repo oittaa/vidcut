@@ -85,9 +85,9 @@ pub struct Working {
     pub area: Option<Masking>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Masking {
-    pub rows: [[f64; 3]; 3],
+    pub maps: Vec<[[f64; 3]; 3]>,
     pub shape: AreaShape,
     pub softness: f64,
     pub invert: bool,
@@ -96,7 +96,19 @@ pub struct Masking {
 impl Masking {
     const LEAST_HALF: f64 = 1e-9;
 
-    fn of(area: &EffectArea, base: &Area, back: &[f64; 8], [fw, fh]: [f64; 2]) -> Self {
+    fn of(area: &EffectArea, bases: &[Area], back: &[f64; 8], fit: [f64; 2]) -> Self {
+        Self {
+            maps: bases
+                .iter()
+                .map(|b| Self::map(area, b, back, fit))
+                .collect(),
+            shape: area.shape,
+            softness: area.soft(),
+            invert: area.invert,
+        }
+    }
+
+    fn map(area: &EffectArea, base: &Area, back: &[f64; 8], [fw, fh]: [f64; 2]) -> [[f64; 3]; 3] {
         let turned = |[x, y]: [f64; 2], degrees: f64| {
             let (sin, cos) = degrees.to_radians().sin_cos();
             [x * cos + y * sin, y * cos - x * sin]
@@ -118,12 +130,7 @@ impl Masking {
                 u * e + v * f + w,
             ]
         };
-        Self {
-            rows: [through(across), through(down), [g, h, 1.0]],
-            shape: area.shape,
-            softness: area.soft(),
-            invert: area.invert,
-        }
+        [through(across), through(down), [g, h, 1.0]]
     }
 }
 
@@ -581,10 +588,19 @@ impl Shading {
 }
 
 impl Working {
-    fn of(e: &Effect, on: &OnFrame, base: &Area) -> Option<Self> {
+    fn of(e: &Effect, on: &OnFrame, bases: Option<&[Area]>) -> Option<Self> {
         if !e.on || e.mixed() <= 0.0 {
             return None;
         }
+        let [_, _, fw, fh] = on.fit;
+        let masked = |a: &EffectArea, bases: &[Area]| Masking::of(a, bases, &on.back, [fw, fh]);
+        let area = match (e.area.as_ref(), bases) {
+            (None, _) => None,
+            (Some(a), None) => Some(masked(a, &[Area::WHOLE])),
+            (Some(a), Some([])) if a.invert => None,
+            (Some(_), Some([])) => return None,
+            (Some(a), Some(found)) => Some(masked(a, found)),
+        };
         let work = match &e.kind {
             EffectKind::GaussianBlur(b) => {
                 let (across, down) = b.spreads(on.width);
@@ -610,13 +626,11 @@ impl Working {
                 Work::Sharpen(sharpening)
             }
         };
-        let [_, _, fw, fh] = on.fit;
-        let area = e.area.as_ref();
         Some(Self {
             work,
             blend: e.mixed(),
             use_alpha: e.use_alpha,
-            area: area.map(|a| Masking::of(a, base, &on.back, [fw, fh])),
+            area,
         })
     }
 }
@@ -815,16 +829,16 @@ impl Placing {
             back: own.back,
         };
         let based = |e: &Effect| {
-            let path = e.area.as_ref()?.follows.as_deref()?;
-            p.followed.base(path, p.source)
+            let named = e.area.as_ref()?.follows.as_deref()?;
+            Some(p.followed.bases(named, p.source))
         };
         let effects = p
             .picture
             .effects
             .iter()
             .filter_map(|e| {
-                let base = based(e).unwrap_or(Area::WHOLE);
-                Working::of(&e.sampled(p.source as f64), &on, &base)
+                let bases = based(e);
+                Working::of(&e.sampled(p.source as f64), &on, bases.as_deref())
             })
             .collect();
         let [u0, v0, u1, v1] = own.edge;

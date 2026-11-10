@@ -1827,9 +1827,8 @@ pub struct Clip {
 
 /// A motion path of a clip: where one area of its picture is on its source
 /// frames. A face, a number plate or another thing in the picture has one.
-/// Between two samples the area moves in a straight line. Before the first
-/// sample it is where that sample puts it, and after the last sample, where
-/// the last one puts it.
+/// The path lasts from its first sample to its last: before and after them
+/// it has no area. Between two samples the area moves in a straight line.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MotionPath {
     /// `p<N>`, its own among the paths of the clip.
@@ -1867,6 +1866,10 @@ impl Subject {
         match self {
             Self::Face => "Face",
         }
+    }
+
+    pub fn named(name: &str) -> Option<Self> {
+        [Self::Face].into_iter().find(|s| s.name() == name)
     }
 }
 
@@ -3368,10 +3371,13 @@ pub struct EffectArea {
     /// On, the effect works outside the area. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
-    /// The id of a motion path of the same clip, as `p1`. The base box is
-    /// then the area of that path at each frame, turned as the path turns
-    /// it: with a `size` of `[1.2, 1.2]`, the area is the path's box, a
-    /// fifth larger. Left out, the base box is the whole source picture.
+    /// The id of a motion path of the same clip, as `p1`, or a subject, as
+    /// `face`: then each path of the clip that `motion.find` made for that
+    /// subject. The base box is then the area of a path at each frame,
+    /// turned as the path turns it: with a `size` of `[1.2, 1.2]`, the area
+    /// is the path's box, a fifth larger. With several paths, the effect
+    /// works in the area of each. It works in none before a path starts and
+    /// after it ends. Left out, the base box is the whole source picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follows: Option<String>,
 }
