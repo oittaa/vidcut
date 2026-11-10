@@ -239,6 +239,9 @@ pub enum VideoPiece {
         frames: i64,
         pieces: Arc<[VideoPiece]>,
         skip: i64,
+        /// The compound clips that it plays inside.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        placed: Vec<Placed>,
         /// Its track is out of the render cache's User mode.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         excluded: bool,
@@ -1087,7 +1090,9 @@ impl VideoPiece {
 
     pub fn placed(&self) -> &[Placed] {
         match self {
-            Self::Source { placed, .. } | Self::Generated { placed, .. } => placed,
+            Self::Source { placed, .. }
+            | Self::Generated { placed, .. }
+            | Self::Flat { placed, .. } => placed,
             _ => &[],
         }
     }
@@ -1274,12 +1279,14 @@ impl VideoPiece {
             Self::Flat {
                 pieces,
                 skip,
+                placed,
                 excluded,
                 ..
             } => Self::Flat {
                 frames,
                 pieces: pieces.clone(),
                 skip: skip + k,
+                placed: placed.iter().map(|p| p.after(k)).collect(),
                 excluded: *excluded,
             },
             Self::Mix { under, over } => Self::Mix {
@@ -3253,6 +3260,16 @@ impl<'a> Span<'a> {
             frames: y - x,
             pieces,
             skip: 0,
+            placed: placed_of(
+                &Clip {
+                    picture: None,
+                    ..c.clone()
+                },
+                self.nest_of(c),
+                false,
+                &[],
+                x,
+            ),
             excluded,
         }))
     }
@@ -3282,14 +3299,9 @@ impl<'a> Span<'a> {
             let moved = |p: &Placed| !fills(c) || !p.picture.is_usual();
             let backward = mode != SmoothMode::Faster && c.pace().speed() < 0.0;
             if backward || piece.placed().first().is_some_and(moved) {
-                return match nest.is_some_and(|n| !n.outer.is_empty()) {
-                    true => Ok(None),
-                    false => {
-                        let mut wide = widened(c, d.frames);
-                        wide.retime = ClipRetime::Nearest;
-                        self.flat(c, &wide, (at, mode), below)
-                    }
-                };
+                let mut wide = widened(c, d.frames);
+                wide.retime = ClipRetime::Nearest;
+                return self.flat(c, &wide, (at, mode), below);
             }
             match &mut piece {
                 VideoPiece::Source {

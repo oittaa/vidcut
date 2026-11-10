@@ -1,6 +1,6 @@
 # A Smooth Cut over other tracks
 
-vidcut plays a Smooth Cut as a Cross Dissolve when a side does not cover the frame and other tracks are below it.
+vidcut plays a Smooth Cut as a Cross Dissolve when a side is not opaque over the whole frame and other tracks are below it.
 
 Resolve Studio 21.2.0 morphs this case:
 

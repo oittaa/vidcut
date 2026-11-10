@@ -285,7 +285,8 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - A side is a file, a generator's picture or a compound clip (`Side`). Why: a Solid Color acts as a still in a Smooth Cut ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
 - A compound clip is one side (`VideoPiece::Flat`). `flat_pieces` makes the plan of that clip alone, and its inner tracks draw nothing in those frames.
 - `FlatSide` draws these pieces with a `VideoFrames` of its own, into a float frame of the timeline size. Thus its tracks, transitions and titles take the usual path.
-- Over a lower track, a side that does not cover the frame plays as a cross dissolve. Why: the morph has no alpha ([todo](../todo/smooth-cut-over-tracks.md)).
+- Over a lower track, a side that is not opaque over the whole frame plays as a cross dissolve. Why: the morph has no alpha ([todo](../todo/smooth-cut-over-tracks.md)).
+- A flat side in a compound clip keeps the `Placed` list of that compound clip (`VideoPiece::Flat`).
 - With Faster, a gradient with keyframes stays on one source frame (`Generated::held`).
 - `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`). `ColorSides` draws a generator's picture the same way.
 - `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).

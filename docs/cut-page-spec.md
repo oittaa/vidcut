@@ -1145,7 +1145,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A side played backward morphs.
     - A clip in a compound clip morphs.
     - A gap is a black picture. Thus a Smooth Cut at the end of a clip is a morph into black.
-  - A side that does not cover the frame, over other tracks (measured in Resolve Studio 21.2.0):
+  - A side that is not opaque over the whole frame, over other tracks (measured in Resolve Studio 21.2.0, with a Zoom):
     - The tracks below show through. The alpha of the morph is the alpha of the two sides, mixed by the level of the transition.
     - vidcut plays this case as a Cross Dissolve ([todo](todo/smooth-cut-over-tracks.md)).
   - A composite mode does not stop the morph (measured in Resolve Studio 21.2.0):
