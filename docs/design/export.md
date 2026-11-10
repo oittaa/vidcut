@@ -517,7 +517,7 @@ The pictures:
 - A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
 - A transition with two sides is one `place::Mix`. `crossing` makes one `Placed` that both sides share.
   - The two sides add up. Neither side has its own composite mode.
-  - The `Placed` holds the mode of the outgoing side, or of the incoming side if there is no outgoing clip. That mode mixes the `place::Mix` with the layers below.
+  - The `Placed` holds the mode of the outgoing side on that frame, or of the incoming side if there is no outgoing clip (`mode_at`). That mode mixes the `place::Mix` with the layers below.
   - Where both sides fill the frame and the crossing has no mode, the plan leaves out the layers below. Inside a placed compound clip, it leaves out only the layers of that compound clip. Nothing of them shows.
 - A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
 - A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
@@ -532,9 +532,8 @@ A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contrad
   - `blur::canvas_bind` maps it and covers it by `Mix.placing`: transform, edges, soft edges and opacity. The shader reads it as `made` 6.
   - With effects, `blur::Blurred::canvas_effects` places it with no opacity (`bared`), then runs the effects. The grid pictures of a Glow come from the same `Spare`. `blur::shown_bind` then shows it with the opacity.
   - The outer pass mixes it with the tracks below, by the mode of `Mix.placing`.
-- One part alone gives its composite mode to the `place::Mix` (`parts_of`). A mode on the compound clip replaces it.
+- One part alone gives its composite mode to the `place::Mix` (`parts_of`). A mode on the compound clip replaces it. A transition inside gives no mode (`run_mode`).
 - A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded.
-- A transition at an edge of a compound clip takes the mode of the picture that the outgoing side shows (`mode_at`).
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
 A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120)):

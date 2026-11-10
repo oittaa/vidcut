@@ -2170,7 +2170,12 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - The compound clip mixes as one picture with the clip on the other side. A compound clip with clear parts shows the tracks below through them, as a placed clip does.
   - A side with a composite mode also acts as on a plain clip.
   - A compound clip with no hidden frames follows [X27](deviations.md#x27-a-dissolve-short-of-media-is-shortened).
-  - A clip with a composite mode alone inside a compound clip acts as a plain clip with that mode.
+  - One picture inside a compound clip gives its composite mode to the transition, frame by frame:
+    - On a frame with one picture inside, the transition has the mode of that picture.
+    - On a frame with two pictures inside, or inside a transition of the compound clip, the transition has no mode.
+    - A transition with one side, for example a fade out, counts as a transition inside.
+    - A dip to color reads the outgoing side also on the hidden frames after its end.
+  - A transition inside a compound clip, also with one side, does not give its mode to the compound clip.
   - The sound fade of a picture edit also fades the sound of the compound clip on its audio track.
   - A Smooth Cut acts as on a plain clip too. The compound clip is one picture of the frame size.
   - vidcut also takes a dip to color at an edge.
