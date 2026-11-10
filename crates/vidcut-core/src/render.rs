@@ -3234,13 +3234,13 @@ impl<'a> Span<'a> {
     ) -> Result<Option<VideoPiece>> {
         let (p, t, (x, y)) = (self.plan.p, self.lane.track, (self.x, self.y));
         let excluded = !t.render_cache;
-        let held = self.nest_of(c).and_then(|n| n.run).is_some_and(|r| r.held);
-        if held || !t.video_enabled {
+        if !t.video_enabled {
             return Ok(None);
         }
-        let (a, b) = match mode {
-            SmoothMode::Faster => (at, at + 1),
-            _ => (x, y),
+        let (a, b) = match (self.held, mode) {
+            (true, _) => (self.now, self.now + 1),
+            (false, SmoothMode::Faster) => (at, at + 1),
+            (false, _) => (x, y),
         };
         let bare = without_mode(whole);
         let drawn = bare.as_ref().unwrap_or(whole);

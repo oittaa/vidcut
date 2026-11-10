@@ -281,7 +281,7 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - Each side takes Nearest. With Faster, each side stays on one source frame (`Pace::of` at the speed 0).
 - Each side is one whole picture of the timeline size. Why: the models take whole RGB frames, with no alpha.
 - A side with a placed picture or played backward is one side as a compound clip is (`VideoPiece::Flat`). A gap is a flat side of black, and it is clear over the layers below.
-- A moved side in a frozen compound clip plays as a cross dissolve. Why: `Span::flat` draws no held run.
+- In a frozen compound clip, a flat side holds one frame of its track (`Span::flat`).
 - A composite mode alone does not make a placed picture here (`without_mode`). `Smooth::mode` holds the mode of the outgoing clip.
 - A side is a file, a generator's picture or a compound clip (`Side`). Why: a Solid Color acts as a still in a Smooth Cut ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
 - A compound clip is one side (`VideoPiece::Flat`). `flat_pieces` makes the plan of that clip alone, and its inner tracks draw nothing in those frames.
@@ -292,7 +292,8 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`). `ColorSides` draws a generator's picture the same way.
 - `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).
 - The made frame replaces the incoming layer, at full weight. With no `Smooth::mode` and no flat side, it covers the outgoing layer, and the layers below are not in the plan.
-- With a flat side, `Smooth::clear` is true. The made frame carries the mixed alpha as its matte. `Smooth::lay` gives it a place in the layers, in the mix of its compound clip. The layers below show through and stay in the plan, also when the side covers the frame, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
+- With a flat side, `Smooth::clear` is true. The made frame carries the mixed alpha as its matte. `Smooth::lay` gives it a place in the layers, in the mix of its compound clip.
+- The layers below show through. They stay in the plan, also when the side covers the frame. `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
 - With a `Smooth::mode`, the layers below stay. `Smooth::lay` gives the made frame that mode, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
 - The key of the pair holds both files, both frames, both looks and both sides. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.
 - The morph has no shot-change test. Why: a Smooth Cut always joins two shots.
