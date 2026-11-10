@@ -181,6 +181,15 @@ pub struct Look {
     pub every: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Follow {
+    pub look: Look,
+    pub at: f64,
+    pub area: [f32; 4],
+    pub backward: bool,
+    pub forward: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Detections {
     pub pts: Vec<f64>,
@@ -239,6 +248,11 @@ impl Detections {
     pub fn shown(&self, time: f64) -> &[Found] {
         let found = self.found.get(self.seen(time)).or(self.found.last());
         found.map_or(&[], Vec::as_slice)
+    }
+
+    pub fn scene_shown(&self, time: f64) -> f32 {
+        let scene = self.scene.get(self.seen(time));
+        scene.copied().unwrap_or(0.0)
     }
 
     pub fn cut(&self, before: f64, at: f64) -> bool {

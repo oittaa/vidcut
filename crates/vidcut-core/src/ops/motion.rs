@@ -3,8 +3,8 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, MotionPath, PathSample, Project, Subject};
-use crate::motion;
+use crate::model::{Clip, EffectArea, MotionPath, PathSample, Project, Subject, TrackWay};
+use crate::motion::{self, Area};
 
 use super::locate;
 
@@ -233,6 +233,147 @@ pub fn findable(p: &mut Project, id: &str, subject: Subject, replace: bool) -> R
         )));
     }
     Ok(c.shown())
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Start {
+    pub frames: (i64, i64),
+    pub frame: i64,
+    pub own: Area,
+    pub bounds: [f64; 4],
+    pub fit: [f64; 2],
+}
+
+pub fn start(p: &Project, id: &str, effect: usize, at: i64) -> Result<Start> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    let media = p.media(&c.media).filter(|m| takes(c) && !m.is_still());
+    let Some(media) = media else {
+        return Err(Error::invalid(format!(
+            "{id} has no moving source picture: a track follows a thing in footage or an image \
+             sequence"
+        )));
+    };
+    if !(c.start..c.end()).contains(&at) {
+        return Err(Error::invalid(format!(
+            "{id} does not show frame {at}: a track starts on a frame of the clip"
+        )));
+    }
+    let effects = c.picture.iter().flat_map(|x| &x.effects);
+    let area = effects
+        .into_iter()
+        .nth(effect)
+        .and_then(|e| e.area.as_ref());
+    let Some(area) = area else {
+        return Err(Error::invalid(format!(
+            "effect {effect} of {id} has no area: a track follows the thing under an area \
+             (effects.set)"
+        )));
+    };
+    let frame = c.source_at(at);
+    let base = match area.follows.as_deref() {
+        None => Area::WHOLE,
+        Some(named) => {
+            let followed = c.motion.iter().filter(|m| m.follows(named));
+            let base = followed.filter_map(|m| m.area_at(frame as f64)).next();
+            base.ok_or_else(|| {
+                Error::invalid(format!(
+                    "the area of effect {effect} of {id} follows {named}, which does not last \
+                     on this frame"
+                ))
+            })?
+        }
+    };
+    let shown = media.info.video.as_ref().map(|v| v.display_size());
+    let (w, h) = shown.unwrap_or((p.settings.width, p.settings.height));
+    let fit = [f64::from(w.max(1)), f64::from(h.max(1))];
+    let own = base.within(area, fit);
+    Ok(Start {
+        frames: c.shown(),
+        frame,
+        own,
+        bounds: own.bounds(area, fit),
+        fit,
+    })
+}
+
+const TRACK: &str = "Track";
+
+pub fn tracked(
+    p: &mut Project,
+    id: &str,
+    effect: usize,
+    (start, way): (&Start, TrackWay),
+    mut samples: Vec<PathSample>,
+) -> Result<Value> {
+    let c = clip_of(p, id)?;
+    let effects = c.picture.iter().flat_map(|x| &x.effects);
+    let area = effects.into_iter().nth(effect).and_then(|e| e.area.clone());
+    let Some(area) = area else {
+        return Err(Error::invalid(format!(
+            "effect {effect} of {id} has no area"
+        )));
+    };
+    let old = (area.follows.as_ref()).and_then(|f| c.motion.iter().find(|m| m.id == *f));
+    if let Some(old) = old {
+        let round = |v: f64| (v * 1e5).round() / 1e5;
+        let stays = |s: &&PathSample| match way {
+            TrackWay::Both => false,
+            TrackWay::Forward => s.frame < start.frame,
+            TrackWay::Backward => s.frame > start.frame,
+        };
+        let kept = old.samples.iter().filter(stays).map(|s| {
+            let a = s.area().within(&area, start.fit);
+            PathSample {
+                frame: s.frame,
+                center: a.center.map(round),
+                size: a.size.map(round),
+                rotation: (a.rotation * 100.0).round() / 100.0,
+            }
+        });
+        samples.extend(kept);
+        samples.sort_by_key(|s| s.frame);
+    }
+    let samples = motion::simplified(&samples);
+    if let Some(why) = motion::samples_problem(&samples) {
+        return Err(Error::invalid(why));
+    }
+    let tracks = |m: &MotionPath| {
+        let name = m.name.as_deref();
+        m.subject.is_none() && name.is_some_and(|n| n.starts_with(TRACK))
+    };
+    let old = old.filter(|m| tracks(m)).map(|m| m.id.clone());
+    let shared = |old: &String| followers(c).any(|(n, path)| n != effect && path == old);
+    if let Some(old) = old.filter(|old| !shared(old)) {
+        c.motion.retain(|m| m.id != old);
+    }
+    if c.motion.len() >= motion::PATHS_KEPT {
+        return Err(Error::invalid(format!(
+            "{id} has {} motion paths, the most a clip takes",
+            motion::PATHS_KEPT
+        )));
+    }
+    let number = 1 + c.motion.iter().filter(|m| tracks(m)).count();
+    let path = MotionPath {
+        id: motion::next_id(&c.motion),
+        name: Some(format!("{TRACK} {number}")),
+        subject: None,
+        samples: Arc::new(samples),
+    };
+    let shown = shown(c, &path, None, false);
+    let follows = Some(path.id.clone());
+    c.motion.push(path);
+    let effects = c.picture.iter_mut().flat_map(|x| &mut x.effects);
+    if let Some(e) = effects.into_iter().nth(effect) {
+        e.area = Some(EffectArea {
+            follows,
+            center: None,
+            size: None,
+            rotation: None,
+            ..area
+        });
+    }
+    Ok(shown)
 }
 
 pub fn found(

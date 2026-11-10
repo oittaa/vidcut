@@ -1891,6 +1891,16 @@ impl Live {
                 Ok(())
             }));
         }
+        if let Request::MotionTrack { .. } = &envelope.request {
+            let looks = vidcut_core::editor::track_looks(p, &envelope.request, playhead);
+            return Some(Box::new(move || {
+                use vidcut_core::Env;
+                for (media, follow, download) in &looks {
+                    AvEnv::new().tracked(media, *follow, *download)?;
+                }
+                Ok(())
+            }));
+        }
         let (clips, sound, speech, download) = match &envelope.request {
             Request::EditRippleDeleteSilence { parts: Some(_), .. } => return None,
             Request::EditRippleDeleteSilence {
@@ -2498,6 +2508,15 @@ impl Live {
                 match found {
                     0 => format!("Find {many}: none found"),
                     n => format!("Find {many}: {n} found"),
+                }
+            }
+            "motion.track" => {
+                let frame = |key: &str| r.result[key].as_i64().unwrap_or(0);
+                let frames = frame("last") - frame("first") + 1;
+                let lost = |key: &str| r.result[key].as_str() == Some("lost");
+                match lost("backward") || lost("forward") {
+                    true => format!("Track: {frames} frames, then lost"),
+                    false => format!("Track: {frames} frames"),
                 }
             }
             "media.add_folder" => folder_notice(&r.result),
@@ -3334,6 +3353,7 @@ impl Live {
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
             | Request::MotionFind { .. }
+            | Request::MotionTrack { .. }
             | Request::EditRippleDeleteWords { quiet: true, .. } => {
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Measure(measure, Box::new(envelope), None),
@@ -5155,6 +5175,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::ClipNormalize { .. }
         | Request::EditDetectSceneCuts { .. }
         | Request::MotionFind { .. }
+        | Request::MotionTrack { .. }
         | Request::EditRippleDeleteWords { quiet: true, .. }
         | Request::TrackSet {
             duck: Some(Some(_)),

@@ -324,6 +324,11 @@ pub fn describe_at(
             d.params["subject"].as_str().unwrap_or("face"),
             d.clips("clips")
         ),
+        "motion.track" => format!(
+            "Track the area of effect {} of {}",
+            d.params["effect"],
+            d.clips("clip")
+        ),
         "picture.clear" => match d.params["tool"].as_str() {
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
             Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),

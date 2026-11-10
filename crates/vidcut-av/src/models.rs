@@ -102,6 +102,13 @@ pub fn inspect(
             loaded: Some("tract"),
         });
     }
+    if model.id == vidcut_core::catalog::VITTRACK.id {
+        crate::tracking::inspect(dir, download)?;
+        return Ok(Inspected {
+            found,
+            loaded: Some("tract"),
+        });
+    }
     match model.id {
         "parakeet-ultra" | "qwen3-asr" | "whisper-large-v3" | "silero-vad" | "sortformer"
         | "moss" => {

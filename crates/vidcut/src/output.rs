@@ -104,6 +104,15 @@ pub fn print(method: &str, r: &Response, json: bool) {
         if method == "motion.find" {
             found_paths(&r.result);
         }
+        if method == "motion.track" {
+            let v = &r.result;
+            let text = |key: &str| v[key].as_str().unwrap_or("-").to_string();
+            println!("  path     {} ({})", text("id"), text("name"));
+            println!("  frames   {} to {}", v["first"], v["last"]);
+            println!("  score    {}", v["score"]);
+            println!("  backward {}", text("backward"));
+            println!("  forward  {}", text("forward"));
+        }
         if let Some(removed) = r.result.get("removed").and_then(Value::as_array) {
             if let Some(frames) = r.result.get("frames") {
                 println!("  removed  {frames} frames in {} parts", removed.len());

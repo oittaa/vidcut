@@ -361,7 +361,7 @@ pub fn run_with(
                 Request::SubtitlesRetime { .. } => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-retime")?;
                 }
-                Request::MotionFind { .. } => {
+                Request::MotionFind { .. } | Request::MotionTrack { .. } => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-subjects")?;
                 }
                 Request::SubtitlesTimeWords { .. } => {
