@@ -7,8 +7,22 @@ A camera RAW file holds the values of the sensor, before the camera makes a pict
 **Why:**
 
 - A timeline that goes to Resolve for the grade often starts from RAW files ([roadmap](../roadmap.md#use-cases)). vidcut must read them to cut them.
-- Camera Raw settings are the first stage of the picture ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+- The Cut page Inspector has the Camera Raw settings of a clip.
 - Kdenlive and Shotcut list RAW on their roadmaps ([Kdenlive](https://kdenlive.org/roadmap/), [Shotcut](https://shotcutapp.com/roadmap/)).
+
+**What the manual says:**
+
+- Raw decoding is the first image processing operation (p. 166, [spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+- Chapter 7 gives the settings of each format (pp. 165–190).
+  - The formats are ARRI, Blackmagic RAW, Canon RAW, CinemaDNG, Nikon RAW, Panasonic Varicam RAW, Phantom Cine, RED and Sony RAW.
+- The settings are in three places (p. 165):
+  - the Camera Raw panel of the Project Settings;
+  - the Inspector of the Media, Cut and Edit pages;
+  - the Camera Raw palette of the Color page.
+- The Image panel of the Cut page Inspector has them (p. 749).
+- Blackmagic RAW has Decode Quality, Decode Using, Color Science, White Balance, Color Space and Gamma (pp. 170–171).
+  - It also has Exposure, Color Temp and Tint (p. 173).
+- A search of the manual finds no ProRes RAW.
 
 **In the code:**
 
@@ -22,11 +36,11 @@ A camera RAW file holds the values of the sensor, before the camera makes a pict
 
 **To do:**
 
+- Measure the lines of the manual above in Resolve. The manual and the application can differ.
 - Add a RAW clip of each format that FFmpeg reads to `tests/media-manifest.toml`.
 - Check CinemaDNG. FFmpeg has a TIFF decoder. Whether it reads the pictures of a CinemaDNG folder is not checked.
 - Check what vidcut does with each clip now: the probe, the picture, its colors and its proxy.
-- Measure the Camera Raw settings of Resolve for each format: the decode quality, the white balance, the color space and the gamma.
-- Measure what an OpenTimelineIO file keeps of those settings.
-- Decide Blackmagic RAW. It needs the SDK of Blackmagic Design. Check its license against AGENTS.md rule 6.
+- Measure what an OpenTimelineIO file keeps of the Camera Raw settings.
+- Decide Blackmagic RAW. Find a library that decodes it, and check its license against AGENTS.md rule 6.
 - Proxies first: the cut plays from a proxy, and Resolve reads the RAW file again for the grade.
 - The CLI, IPC and MCP perform the same action as the GUI.
