@@ -292,8 +292,8 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`). `ColorSides` draws a generator's picture the same way.
 - `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).
 - The made frame replaces the incoming layer, at full weight. With no `Smooth::mode` and no flat side, it covers the outgoing layer, and the layers below are not in the plan.
-- With a flat side, `Smooth::clear` is true. The made frame carries the mixed alpha as its matte, and `Smooth::placed` gives it a place in the layers. The layers below show through, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
-- With a `Smooth::mode`, the layers below stay. `Smooth::placed` gives the made frame that mode, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
+- With a flat side, `Smooth::clear` is true. The made frame carries the mixed alpha as its matte. `Smooth::lay` gives it a place in the layers, in the mix of its compound clip. The layers below show through and stay in the plan, also when the side covers the frame, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
+- With a `Smooth::mode`, the layers below stay. `Smooth::lay` gives the made frame that mode, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
 - The key of the pair holds both files, both frames, both looks and both sides. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.
 - The morph has no shot-change test. Why: a Smooth Cut always joins two shots.
 - The morph takes the decoded frames. AI Super Scale does not enlarge them.
@@ -539,7 +539,7 @@ A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contrad
   - With effects, `blur::Blurred::canvas_effects` places it with no opacity (`bared`), then runs the effects. The grid pictures of a Glow come from the same `Spare`. `blur::shown_bind` then shows it with the opacity.
   - The outer pass mixes it with the tracks below, by the mode of `Mix.placing`.
 - One part alone gives its composite mode to the `place::Mix` (`parts_of`). A mode on the compound clip replaces it. A transition inside gives no mode (`run_mode`).
-- A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded.
+- A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded. A Smooth Cut with a flat side keeps them (`Smooth::clear`).
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
 A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120)):

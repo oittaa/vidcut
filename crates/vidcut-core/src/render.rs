@@ -467,8 +467,12 @@ impl Smooth {
         Some((smooth, mode))
     }
 
-    pub fn placed(&self) -> Option<Placed> {
-        (self.mode.is_some() || self.clear).then(|| Placed {
+    pub fn lay(&self, placed: &mut Vec<Placed>) {
+        if let Some(own) = placed.first_mut() {
+            own.picture.composite_mode = self.mode.or(own.picture.composite_mode);
+            return;
+        }
+        placed.extend((self.mode.is_some() || self.clear).then(|| Placed {
             clip: String::new(),
             picture: Picture {
                 composite_mode: self.mode,
@@ -482,7 +486,7 @@ impl Smooth {
             ramp: None,
             crossing: false,
             moving: None,
-        })
+        }));
     }
 
     pub fn at(&self, ramp: &Ramp, k: i64) -> f64 {
@@ -3363,7 +3367,9 @@ impl<'a> Span<'a> {
                 .map(|n| n.opened),
         );
         let smooth = Smooth {
-            clear: !covers(&f) || !covers(&g),
+            clear: [&f, &g]
+                .iter()
+                .any(|p| matches!(p, VideoPiece::Flat { .. })),
             ..smooth
         };
         let keeps_below = smooth.mode.is_some() || smooth.clear;
