@@ -44,7 +44,8 @@ flowchart TD
 - **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
   - `render::flatten` works in stages. `planned_video` makes the pictures and `planned_audio` makes the sound.
-  - `cuts_of` finds the frames where the picture changes. A `render::Span` is one track between two cuts, and it adds the layers of that track.
+  - `cuts_of` finds the frames where the picture changes. A `render::Span` is one track between two cuts. It gives the layers of that track and what they hide (`Drawn`).
+  - `uncovered` removes the layers that a higher layer hides.
   - `piece_of` puts the layers of all tracks between two cuts into one `VideoPiece`.
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
   - A count with no default layout in FFmpeg uses the first channels of the 22.2 layout (`channel_layout`). Why: the mix needs a layout, and a stereo file then goes to the first two channels.
