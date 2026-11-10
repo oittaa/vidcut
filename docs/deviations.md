@@ -3147,9 +3147,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - **Faces:**
     - A face that is not found for up to a second, and then shows near the same place, stays on its path.
     - A face that is found with confidence on fewer frames than half a second has gets no path.
+      - In a shot shorter than half a second, a face found with confidence on each frame of the shot gets a path.
     - The model is YuNet, on the CPU. Its file of 233 kB downloads when the request has `download`.
     - A shot change inside a clip ends each path. A face of the next shot gets a new path, also at the same place.
-      - The shot changes are those that Detect Scene Cuts finds at its usual score.
+      - vidcut measures a shot change as Detect Scene Cuts does, at its usual score, on the pictures that `motion.find` looks at.
+      - For a file with another frame rate than the project, the two can find different shot changes.
   - **Text:**
     - A path is a line of text, or a block of lines that are near each other.
     - A line that leans gets an area that leans with it.

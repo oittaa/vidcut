@@ -91,6 +91,8 @@ flowchart TD
     - Why: the box of the next shot at the same place is another thing. The user must be able to remove it alone.
   - A path stays only with boxes of a score of `start` or more on as many frames as `shortest_secs` has.
     - Why: a pattern that looks like a face scores high on a few frames only.
+    - A shot inside the clip can have fewer frames than that. Then each frame of the shot is sufficient.
+      - Why: each path starts again at a shot change. A face of a short shot must get its path too.
   - A path stays only with a box on a share of `steady` of its frames. Faces have no such rule.
     - Why: a pattern that looks like text comes and goes from frame to frame. A face that turns away is not found for a time, and must stay.
   - `motion::simplified` keeps the first sample, the last sample, and each sample that the line between its kept neighbors misses.
