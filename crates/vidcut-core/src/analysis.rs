@@ -185,16 +185,19 @@ pub struct Look {
 pub struct Detections {
     pub pts: Vec<f64>,
     pub found: Vec<Vec<Found>>,
+    pub scene: Vec<f32>,
 }
 
 impl Detections {
-    const TAG: &'static [u8; 4] = b"vcd2";
+    const TAG: &'static [u8; 4] = b"vcd3";
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Self::TAG.to_vec();
         out.extend_from_slice(&(self.pts.len() as u64).to_le_bytes());
-        for (pts, found) in self.pts.iter().zip(&self.found) {
+        for (i, (pts, found)) in self.pts.iter().zip(&self.found).enumerate() {
+            let scene = self.scene.get(i).copied().unwrap_or(0.0);
             out.extend_from_slice(&pts.to_le_bytes());
+            out.extend_from_slice(&scene.to_le_bytes());
             out.extend_from_slice(&(found.len() as u64).to_le_bytes());
             for f in found {
                 let [x, y] = f.center;
@@ -213,6 +216,7 @@ impl Detections {
         let mut d = Self::default();
         for _ in 0..n {
             d.pts.push(r.f64()?);
+            d.scene.push(r.f32()?);
             let k = usize::try_from(r.u64()?).ok()?;
             let mut found = Vec::new();
             for _ in 0..k {
@@ -228,10 +232,19 @@ impl Detections {
         Some(d)
     }
 
+    fn seen(&self, time: f64) -> usize {
+        self.pts.partition_point(|&p| p < time)
+    }
+
     pub fn shown(&self, time: f64) -> &[Found] {
-        let i = self.pts.partition_point(|&p| p < time);
-        let found = self.found.get(i).or(self.found.last());
+        let found = self.found.get(self.seen(time)).or(self.found.last());
         found.map_or(&[], Vec::as_slice)
+    }
+
+    pub fn cut(&self, before: f64, at: f64) -> bool {
+        let last = self.scene.len().saturating_sub(1);
+        let (a, b) = (self.seen(before), self.seen(at).min(last));
+        b > a && (self.scene[a + 1..=b].iter()).any(|&s| f64::from(s) >= SCENE_SCORE)
     }
 }
 

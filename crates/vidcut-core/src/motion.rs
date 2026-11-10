@@ -283,7 +283,11 @@ pub fn joined(
     let mut open: Vec<Open> = Vec::new();
     let mut done: Vec<Open> = Vec::new();
     for frame in first..end {
-        let boxes = found.shown(shown_time(origin, fps, frame));
+        let shown = |f: i64| shown_time(origin, fps, f);
+        if frame > first && found.cut(shown(frame - 1), shown(frame)) {
+            done.append(&mut open);
+        }
+        let boxes = found.shown(shown(frame));
         let kept = boxes.iter().copied().filter(|f| f.score >= rules.keep);
         let boxes: Vec<Found> = kept.collect();
         let (live, gone): (Vec<Open>, Vec<Open>) =

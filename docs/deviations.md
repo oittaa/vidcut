@@ -3148,7 +3148,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - A face that is not found for up to a second, and then shows near the same place, stays on its path.
     - A face that is found with confidence on fewer frames than half a second has gets no path.
     - The model is YuNet, on the CPU. Its file of 233 kB downloads when the request has `download`.
-    - A cut inside a clip ends a path, or continues it on another face at the same place. vidcut does not tell faces apart.
+    - A shot change inside a clip ends each path. A face of the next shot gets a new path, also at the same place.
+      - The shot changes are those that Detect Scene Cuts finds at its usual score.
   - **Text:**
     - A path is a line of text, or a block of lines that are near each other.
     - A line that leans gets an area that leans with it.

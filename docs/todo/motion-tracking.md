@@ -77,8 +77,6 @@ In this file, a path is never a track of the timeline.
 - **Area keyframes:** keyframes on the center, the size, the rotation and the softness of the area of an effect.
 - **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
   - Try how many frames a found path must start early and end late.
-- **Cuts inside a clip:**
-  - A path can continue across a cut inside a clip, on another face at the same place. Decide whether a cut ends each path.
 - **Faces, what is left:**
   - Check `motion.find` on a file with a rotation in its metadata. `subjects::find` turns the picture upright before the model sees it.
   - Measure YuNet on the GPU against the CPU, and build it there if it is clearly faster ([analysis](../design/analysis.md#subjects)).
