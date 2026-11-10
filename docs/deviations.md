@@ -3115,10 +3115,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A search of the Cut page chapters (pp. 635–791) finds no window and no mask for an effect of a clip.
   - The Color page has Power Windows: Circular, Linear, Polygonal, Curve and Gradient (p. 3308).
   - A Polygonal window starts as a rectangle with four corner points. A click on it adds a control point, up to 128 (p. 3272).
+  - A key adds a node with a window (p. 3268). A Circular, Linear or Polygonal window starts in the middle of the picture, with its controls in the Viewer (21.2).
+  - A Curve window starts with no shape. Each click in the Viewer adds a point, and a click on the first point closes the shape (pp. 3273–3274).
+  - The blur of the node is in the Blur palette. It shows only inside the windows of the node (21.2).
 - **vidcut:**
   - An effect of a clip can have an area: an ellipse, a box or a polygon. The effect then shows only inside it. With `invert`, it shows only outside it.
   - A polygon has from 3 to 128 points with straight sides between them. With no points, it has the four corners of the box of the area.
-    - A request gives the points. The viewer has no way to draw them ([todo](todo/motion-tracking.md)).
   - The area has a center, a size, a rotation and a softness. The center and the size are fractions of the source picture.
   - The area stays on the content of the picture through the transform, the crop, the flips, a Dynamic Zoom and a compound clip around it.
   - `effects.set` takes `area`. Null takes the area off. `effects.reset` keeps the area.
@@ -3129,10 +3131,22 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - With `invert`, the effect works outside each area. While no path lasts, it then works on the whole picture.
     - `motion.remove` refuses a path that an area follows by its id. A path that an area follows by its subject can go.
     - An OpenTimelineIO file carries the area and the path that it follows, in its `vidcut` metadata.
-  - Each effect in the Inspector has Area rows: Off, Ellipse or Box, then Invert Area, Area Softness and Follow. Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
-    - Follow lists None, All Faces and the motion paths of the clip. All Faces sends the subject `face`. Each change sends `effects.set` with `area`.
-  - The area has no keyframes. The viewer has no controls for it ([todo](todo/motion-tracking.md)).
+  - Each effect in the Inspector has Area rows: Off, Ellipse, Box or Polygon, then Edit Shape, Invert Area, Area Softness and Follow.
+    - Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
+    - Follow lists None, All Faces, All Text and the motion paths of the clip. All Faces sends the subject `face`. Each change sends `effects.set` with `area`.
+  - Edit Shape shows the handles of the area in the viewer. `gui.show effect_area` shows them for the first effect of the clip that has an area.
+    - A drag inside the area moves it. On an ellipse or a box, a corner changes its size, a side changes one side, and the top handle turns it.
+    - On a polygon, a drag moves a point. A click on a side adds a point, and a middle-click on a point removes it.
+    - The pointer shows what a drag does. The handle under the pointer has a white ring.
+  - The Tools row under the viewer has Blur ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). `gui.show blur` turns it on.
+    - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
+    - With Free Shape, each click adds a point. A click on the first point, or a double-click, closes the shape. Escape drops it.
+    - A new blur is one `apply` of `effects.add` and `effects.set`. Thus it is one undo step. Its handles show at once.
+    - The other areas of the clip show as thin outlines. A click on one shows its handles.
+    - All Faces and All Text do what Blur does in the Motion section of the Inspector. Delete removes the effect whose handles show.
+  - The area has no keyframes ([todo](todo/motion-tracking.md)).
 - **Why:**
+  - The user draws the area on the thing to hide, and sees the blur at once. Resolve needs a node, the Window palette and the Blur palette for that.
   - A blur over a face or a number plate must cover only that part of the picture.
   - A blur must not stay on the picture after its subject is gone. Thus a path ends, as the tracking of Magic Mask does, and not as a tracked window.
   - One effect can cover each face of a clip. The user then changes one blur, not one for each face.

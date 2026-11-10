@@ -2713,18 +2713,23 @@ fn find_request(c: &Chosen, subject: Subject) -> (&'static str, Value) {
     ("motion.find", params)
 }
 
-fn blur_request(c: &Chosen, subject: Subject) -> Option<(&'static str, Value)> {
+fn blur_request(
+    id: &str,
+    found: bool,
+    effects: &[Effect],
+    subject: Subject,
+) -> Option<(&'static str, Value)> {
     let follows =
         |e: &Effect| e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(subject.name());
     let mut commands = Vec::new();
-    if !found(c, subject) {
-        let params = json!({ "clips": [c.id], "subject": subject });
+    if !found {
+        let params = json!({ "clips": [id], "subject": subject });
         commands.push(json!({ "method": "motion.find", "params": params }));
     }
-    if !c.stored.effects.iter().any(follows) {
+    if !effects.iter().any(follows) {
         let area = json!({ "follows": subject.name(), "size": BLUR_SIZE });
-        let add = json!({ "clips": [c.id], "kind": "mosaic_blur" });
-        let set = json!({ "clip": c.id, "effect": c.stored.effects.len(), "area": area });
+        let add = json!({ "clips": [id], "kind": "mosaic_blur" });
+        let set = json!({ "clip": id, "effect": effects.len(), "area": area });
         commands.push(json!({ "method": "effects.add", "params": add }));
         commands.push(json!({ "method": "effects.set", "params": set }));
     }
@@ -2762,7 +2767,7 @@ fn area_set(n: usize, change: Value) -> Act {
     Act::EffectSet(n, json!({ "area": change }))
 }
 
-fn all_of(subject: Subject) -> String {
+pub(super) fn all_of(subject: Subject) -> String {
     format!("All {}", subject.many())
 }
 
@@ -3890,7 +3895,22 @@ impl Workspace {
         }
     }
 
-    fn find(&mut self, method: &'static str, params: Value, subject: Subject) {
+    pub(super) fn subject_blur(
+        &self,
+        clip: &str,
+        subject: Subject,
+    ) -> Option<(&'static str, Value)> {
+        let p = self.project_shared()?;
+        let c = p.clip(clip)?;
+        if !vidcut_core::ops::motion::takes(c) {
+            return None;
+        }
+        let found = c.motion.iter().any(|m| m.subject == Some(subject));
+        let effects = c.picture.as_ref().map_or(&[][..], |x| &x.effects);
+        blur_request(clip, found, effects, subject)
+    }
+
+    pub(super) fn find(&mut self, method: &'static str, params: Value, subject: Subject) {
         let dir = crate::paths::models_dir();
         if finds(method, &params) && !vidcut_av::subjects::needed(&dir, subject).is_empty() {
             self.inspector.finding = Some(Finding {
@@ -3951,7 +3971,7 @@ impl Workspace {
                     if ui.button("Find").clicked() {
                         asked = Some(find_request(c, subject));
                     }
-                    let blur = blur_request(c, subject);
+                    let blur = blur_request(&c.id, found(c, subject), &c.stored.effects, subject);
                     let button = egui::Button::new("Blur");
                     if ui.add_enabled(blur.is_some(), button).clicked() {
                         asked = blur;

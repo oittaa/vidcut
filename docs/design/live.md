@@ -362,6 +362,16 @@ The bar and the Jobs button:
 - A drag, or a run of wheel notches (`Wheeled`, `Workspace::settle_picture_wheel`), ends in one `picture.set`.
 - The dragged picture goes to the core with `Handle::preview_pictures`. After it, the sent picture goes there until the project has it (`tools::landing`).
 - The boxes of a Dynamic Zoom are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
+- `Workspace::area_controls` draws the handles of the area of one effect (`AreaShown`), before `Workspace::picture_controls`.
+  - `AreaShown::grip` gives what a press holds (`AreaHold`). `area_moved` gives the area of a drag, and `Workspace::land_area` sends one `effects.set`.
+  - `AreaShown::cursor` gives the pointer of a hold. `paint_area` puts a ring on the handle under the pointer.
+  - On a polygon, `Workspace::area_points` adds a point on a click on a side. It removes a point on a middle-click.
+- The Blur tool (`Workspace::blur_tool`, `Grab::blurring`) draws a new area in the viewer (`Workspace::blur_controls`).
+  - A drag holds `AreaHold::Draw` (`Workspace::blur_drag`). `area_drawn` makes the area from the two ends of the drag. The picture with the new effect is the preview.
+  - With Free Shape, `Workspace::blur_points` keeps the clicked points. `area_through` makes the polygon when the shape closes.
+  - `drawn_request` is the `apply` of the new blur. `Workspace::land_drawn` sends it and shows the handles of the new effect.
+  - A press on the shown area goes to `Workspace::area_controls`. A press on another area of the clip first makes that area the shown one.
+  - `Workspace::blur_tools` is the row of the tool: the shapes, one button for each `Subject` (`Workspace::subject_blur`) and Delete.
 
 **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`).
 

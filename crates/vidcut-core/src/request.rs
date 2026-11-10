@@ -4405,8 +4405,12 @@ pub enum GuiPanel {
     /// The viewer's handles on the area of an effect of the selected clip:
     /// the first of its effects that has an area.
     EffectArea,
-    /// The viewer's Tools row: Transform, Crop and Dynamic Zoom, the flips,
-    /// Swap, the ease and Reset.
+    /// The viewer's Blur tool on the selected clip. A drag in the picture
+    /// then adds a Mosaic Blur with that area, and a drag on an area changes
+    /// it.
+    Blur,
+    /// The viewer's Tools row: Transform, Crop, Dynamic Zoom and Blur, the
+    /// flips, Swap, the ease, Reset, and the shapes and subjects of Blur.
     Tools,
 }
 
