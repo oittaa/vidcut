@@ -1412,6 +1412,7 @@ pub struct Inspector {
     naming: Option<Naming>,
     subject: Subject,
     finding: Option<Finding>,
+    area_edit: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -1497,6 +1498,7 @@ enum Act {
     Flips([Option<bool>; 2]),
     Zooming(bool),
     Boxes,
+    AreaEdit(usize),
     Ease(Ease),
     Mode(CompositeMode),
     Swap,
@@ -2752,6 +2754,7 @@ fn area_label(shape: Option<AreaShape>) -> &'static str {
         None => "Off",
         Some(AreaShape::Ellipse) => "Ellipse",
         Some(AreaShape::Box) => "Box",
+        Some(AreaShape::Polygon) => "Polygon",
     }
 }
 
@@ -2816,15 +2819,27 @@ fn area_rows(
     rows(ui, (n, "area"), |ui| {
         let now = e.area.as_ref().map(|a| a.shape);
         label(ui, "Area", now.is_some());
-        dialog::switch(ui, |ui| {
-            for shape in [None, Some(AreaShape::Ellipse), Some(AreaShape::Box)] {
-                let name = area_label(shape);
-                if ui.selectable_label(shape == now, name).clicked() && shape != now {
-                    acts.push(area_set(
-                        n,
-                        shape.map_or(Value::Null, |s| json!({ "shape": s })),
-                    ));
-                }
+        let shapes = [
+            None,
+            Some(AreaShape::Ellipse),
+            Some(AreaShape::Box),
+            Some(AreaShape::Polygon),
+        ];
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt(("inspector-area-shape", n))
+                .selected_text(area_label(now))
+                .show_ui(ui, |ui| {
+                    for shape in shapes {
+                        let name = area_label(shape);
+                        if ui.selectable_label(shape == now, name).clicked() && shape != now {
+                            let change = shape.map_or(Value::Null, |s| json!({ "shape": s }));
+                            acts.push(area_set(n, change));
+                        }
+                    }
+                });
+            let edit = egui::Button::selectable(i.area_edit == Some(n), "Edit Shape");
+            if ui.add_enabled(now.is_some(), edit).clicked() {
+                acts.push(Act::AreaEdit(n));
             }
         });
         if reset(ui, now.is_some()) {
@@ -4379,6 +4394,11 @@ impl Workspace {
                     self.show_boxes(chosen);
                 }
             }
+            Act::AreaEdit(n) => {
+                let grab = &mut self.timeline.picture_grab;
+                grab.area = (grab.area != Some(n)).then_some(n);
+                grab.tool = None;
+            }
             Act::Boxes => {
                 if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
                     self.timeline.picture_grab.tool = None;
@@ -4600,6 +4620,7 @@ impl Workspace {
                     self.input_lut_section(ui, &p, &chosen);
                     self.super_scale_section(ui, &p, &chosen);
                     self.motion_section(ui, &chosen[0]);
+                    self.inspector.area_edit = self.timeline.picture_grab.area;
                     effects(ui, &self.inspector, &chosen[0], &mut acts);
                 }
                 if !paced.is_empty() {

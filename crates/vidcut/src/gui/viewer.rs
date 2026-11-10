@@ -451,6 +451,7 @@ impl Workspace {
         if mode == ViewerMode::Timeline
             && offline.is_none()
             && played.is_some()
+            && !self.area_controls(ui, &area_resp, picture)
             && !self.picture_controls(ui, &area_resp, picture)
         {
             self.title_controls(ui, &area_resp, picture);
