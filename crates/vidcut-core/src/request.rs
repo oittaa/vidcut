@@ -2797,10 +2797,10 @@ pub enum Request {
     /// up to a second, and then shows near the same place, stays on its path.
     /// A shot change inside a clip ends each path, and a thing of the next
     /// shot gets a new one.
-    /// A face found for under half a second gets no path. In a shot that
-    /// is shorter than that, a face found on each frame of the shot gets
-    /// one. Text gets a path
-    /// when it is found for a second, on four of each five frames; lines
+    /// A face found for under half a second gets no path. Text gets a path
+    /// when it is found for a second, on four of each five frames. Less time
+    /// can be left before a shot change or the end of the clip; a thing
+    /// found on each of those frames then gets a path. Lines of text
     /// that are near each other are one block with one path, and a line
     /// that leans gets an area that leans with it. The paths get names in
     /// the order the things first show: `Face 1`, `Face 2`, or `Text 1`,
