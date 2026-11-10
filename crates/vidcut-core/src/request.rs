@@ -2795,6 +2795,8 @@ pub enum Request {
     /// or image sequences, and give each thing a motion path. It looks at
     /// the source frames that each clip shows. A thing that is not found for
     /// up to a second, and then shows near the same place, stays on its path.
+    /// A shot change inside a clip ends each path, and a thing of the next
+    /// shot gets a new one.
     /// A face found for under half a second gets no path. Text gets a path
     /// when it is found for a second, on four of each five frames; lines
     /// that are near each other are one block with one path, and a line

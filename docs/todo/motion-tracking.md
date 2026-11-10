@@ -77,8 +77,6 @@ In this file, a path is never a track of the timeline.
 - **Area keyframes:** keyframes on the center, the size, the rotation and the softness of the area of an effect.
 - **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
   - Try how many frames a found path must start early and end late.
-- **Cuts inside a clip:**
-  - A path can continue across a cut inside a clip, on another face at the same place. Decide whether a cut ends each path.
 - **Faces, what is left:**
   - Check `motion.find` on a file with a rotation in its metadata. `subjects::find` turns the picture upright before the model sees it.
   - Measure YuNet on the GPU against the CPU, and build it there if it is clearly faster ([analysis](../design/analysis.md#subjects)).
@@ -99,7 +97,7 @@ In this file, a path is never a track of the timeline.
   - The detector takes most of the time of a text find. Try the model on the GPU.
 - **A drawn box:** one request tracks a box of the selected clip from the playhead, forward or backward.
   - The request tells the frame where it loses the subject. The user starts again from that frame.
-- **Find and Blur in the app:** try the two buttons of the Motion section in a window. Only their requests ran, from the CLI.
+- **The Motion section in the app:** click Blur in a window, and take a find that asks for the download of its model. Find ran from its button.
 - **Titles and clips follow a path** of another clip.
 - **A subject with its matte:** with [subject masks](subject-masks.md).
 - **Resolve measurement:**
