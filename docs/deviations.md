@@ -3155,7 +3155,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - **Faces:**
     - A face that is not found for up to a second, and then shows near the same place, stays on its path.
     - A face that is found with confidence on fewer frames than half a second has gets no path.
-      - In a shot shorter than half a second, a face found with confidence on each frame of the shot gets a path.
+      - Less than half a second can be left before a shot change or the end of the clip. A face found with confidence on each of those frames then gets a path.
     - The model is YuNet, on the CPU. Its file of 233 kB downloads when the request has `download`.
     - A shot change inside a clip ends each path. A face of the next shot gets a new path, also at the same place.
       - vidcut measures a shot change as Detect Scene Cuts does, at its usual score, on the pictures that `motion.find` looks at.
@@ -3165,6 +3165,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - A line that leans gets an area that leans with it.
     - A thing gets a path only when the model finds it for a second, on four of each five frames.
       - Why: a pattern that looks like text comes and goes from frame to frame.
+      - Less than a second can be left before a shot change or the end of the clip. Text found on each of those frames then gets a path.
     - The model is the mobile detection model of PP-OCRv5, on the CPU. Its file of 4.8 MB downloads when the request has `download`.
     - The model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
   - The request gives the gaps of each path: the frames where it did not find the thing. The area goes in a line across a gap.

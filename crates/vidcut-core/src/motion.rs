@@ -337,12 +337,12 @@ pub fn joined(
         let lasts = o.seen - o.samples[0].frame + 1;
         o.samples.len() as f64 >= rules.steady * lasts as f64
     };
-    let shot = |o: &Open| {
-        let next = shots.partition_point(|&s| s <= o.samples[0].frame);
-        let to = shots.get(next).copied().unwrap_or(end);
-        (to - shots[next - 1]) as usize
+    let left = |o: &Open| {
+        let from = o.samples[0].frame;
+        let next = shots.partition_point(|&s| s <= from);
+        (shots.get(next).copied().unwrap_or(end) - from) as usize
     };
-    done.retain(|o| o.sure >= shortest.min(shot(o)) && steady(o));
+    done.retain(|o| o.sure >= shortest.min(left(o)) && steady(o));
     done.sort_by(|a, b| {
         let (a, b) = (&a.samples[0], &b.samples[0]);
         (a.frame, a.center[0])
