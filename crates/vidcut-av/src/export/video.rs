@@ -1823,7 +1823,7 @@ impl ColorSides {
     ) -> Result<frame::Video> {
         self.on_this_gpu();
         let mut hash = std::hash::DefaultHasher::new();
-        pattern.hash(&mut hash);
+        (pattern, colors.is_some()).hash(&mut hash);
         let key = Some(hash.finish() as i64);
         let drawn = &mut self.drawn;
         let filled = || filled_generator(pattern, look.size, colors);
@@ -2637,7 +2637,10 @@ impl VideoFrames {
                                 took: started.elapsed(),
                                 cached: None,
                             }),
-                            alpha_mode: AlphaMode::Straight,
+                            alpha_mode: match layer {
+                                VideoPiece::Flat { .. } => AlphaMode::Premultiplied,
+                                _ => AlphaMode::Straight,
+                            },
                             alpha_use: AlphaUse::Shown,
                             matte: None,
                         });
@@ -2755,9 +2758,10 @@ impl VideoFrames {
         (smooth, t): (&Smooth, f64),
         started: Instant,
     ) -> Result<()> {
-        let Some((frame, took)) = self.smooth_frame(piece, i, smooth, t)? else {
+        let Some((frame, matte, took)) = self.smooth_frame(piece, i, smooth, t)? else {
             return Ok(());
         };
+        let hides_outgoing = smooth.mode.is_some() || smooth.clear;
         let last = made.last_mut().expect("just made");
         last.frame = Some(frame);
         last.origin = Some(Origin {
@@ -2777,13 +2781,14 @@ impl VideoFrames {
         last.wipe = None;
         last.share = 1.0;
         last.woven = None;
-        last.alpha_mode = AlphaMode::Straight;
+        last.alpha_mode = match matte {
+            Some(_) => AlphaMode::Premultiplied,
+            None => AlphaMode::Straight,
+        };
         last.alpha_use = AlphaUse::Shown;
-        last.matte = None;
+        last.matte = matte;
         last.lut = None;
-        if smooth.mode.is_some()
-            && let [.., outgoing, _] = made
-        {
+        if hides_outgoing && let [.., outgoing, _] = made {
             outgoing.weight = Some(0);
         }
         Ok(())
@@ -3637,8 +3642,9 @@ impl VideoFrames {
         }
         if !self.flats.contains(&key) {
             let (w, h, _) = self.maker.out();
-            let pixel = format::Pixel::GBRPF32LE;
-            let mut reader = VideoFrames::new(pieces, self.fps, w, h, pixel, self.timeline);
+            let pixel = format::Pixel::GBRAPF32LE;
+            let mut reader = VideoFrames::new(pieces, self.fps, w, h, pixel, self.timeline)
+                .writing_alpha(Some(AlphaOut::Premultiplied));
             reader.timeline = self.timeline;
             reader.drawn_in = self.drawn_in;
             reader.decoder = self.decoder.clone();
@@ -3674,7 +3680,7 @@ impl VideoFrames {
         i: usize,
         smooth: &Smooth,
         t: f64,
-    ) -> Result<Option<(frame::Video, Duration)>> {
+    ) -> Result<Option<(frame::Video, Option<frame::Video>, Duration)>> {
         let side_of = |j: usize| self.side_of(piece, j);
         let (Some(sa), Some(sb)) = (i.checked_sub(1).and_then(side_of), side_of(i)) else {
             return Ok(None);
@@ -3697,6 +3703,7 @@ impl VideoFrames {
         let frames = retime == Retime::Macos;
         let made_reading = self.maker.reading();
         let colors = self.drawn_in;
+        let drawn_flat = look.clone().with_alpha(AlphaMode::Premultiplied, false);
         let mut picture =
             |side: Side, flat: Option<&frame::Video>| -> Result<(frame::Video, Option<i64>, u64)> {
                 let s = match side {
@@ -3707,7 +3714,7 @@ impl VideoFrames {
                     }
                     Side::Flat(_, at) => {
                         let f = flat.expect("made above");
-                        return Ok((self.color_sides.flat(f, &look, frames)?, Some(at), 0));
+                        return Ok((self.color_sides.flat(f, &drawn_flat, frames)?, Some(at), 0));
                     }
                 };
                 let src = &mut self.open[s];
@@ -3739,6 +3746,21 @@ impl VideoFrames {
                 made_picture(made, size, pb, form_of(&a))?
             }
         };
+        let matte = match smooth.clear {
+            true => {
+                let through = look.clone().with_alpha(AlphaMode::Premultiplied, true);
+                let sides = &mut self.color_sides;
+                let mut alpha = |flat: Option<&frame::Video>| match flat {
+                    Some(f) => sides.flat(f, &through, false),
+                    None => sides.picture(Pattern::SolidColor([255; 3]), None, &look, false),
+                };
+                let (ma, mb) = (alpha(fa.as_ref())?, alpha(fb.as_ref())?);
+                let by = Retime::FrameBlend;
+                let mixed = crate::interpolate::matte_between(by, &key, &ma, &mb, size, t)?;
+                Some(made_picture(mixed, size, pb, form_of(&ma))?)
+            }
+            false => None,
+        };
         let took = clock.elapsed();
         crate::debug!(
             "interpolate",
@@ -3769,7 +3791,7 @@ impl VideoFrames {
                 made
             }
         };
-        Ok(Some((finished, took)))
+        Ok(Some((finished, matte, took)))
     }
 
     fn shown(

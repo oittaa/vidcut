@@ -441,6 +441,10 @@ pub struct Smooth {
     /// the layers below. Left out, the made frame covers them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<CompositeMode>,
+    /// A side is a picture with alpha. The layers below show through the
+    /// made frame.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clear: bool,
 }
 
 impl Smooth {
@@ -458,15 +462,16 @@ impl Smooth {
             retime,
             keys,
             mode: composite,
+            clear: false,
         };
         Some((smooth, mode))
     }
 
     pub fn placed(&self) -> Option<Placed> {
-        self.mode.map(|mode| Placed {
+        (self.mode.is_some() || self.clear).then(|| Placed {
             clip: String::new(),
             picture: Picture {
-                composite_mode: Some(mode),
+                composite_mode: self.mode,
                 ..Picture::default()
             },
             run: None,
@@ -3066,11 +3071,15 @@ fn cuts_of(p: &Project, lanes: &[VideoLane], (a, b): (i64, i64)) -> Vec<i64> {
     cuts
 }
 
+fn covers(piece: &VideoPiece) -> bool {
+    piece.placed().is_empty() && !matches!(piece, VideoPiece::Flat { .. })
+}
+
 fn piece_of(stack: Vec<Layer>, frames: i64) -> VideoPiece {
     let mut piece = VideoPiece::black(frames);
     for layer in stack {
         piece = match layer {
-            Layer::Picture(shown, None) if shown.placed().is_empty() => shown,
+            Layer::Picture(shown, None) if covers(&shown) => shown,
             Layer::Picture(shown, ramp) => piece.with_over(Over {
                 piece: shown,
                 ramp,
@@ -3218,10 +3227,8 @@ impl<'a> Span<'a> {
         c: &Clip,
         whole: &Clip,
         (at, mode): (i64, SmoothMode),
-        below: bool,
     ) -> Result<Option<VideoPiece>> {
         let (p, t, (x, y)) = (self.plan.p, self.lane.track, (self.x, self.y));
-        let (pool, s) = (&self.plan.pool, &p.settings);
         let excluded = !t.render_cache;
         let held = self.nest_of(c).and_then(|n| n.run).is_some_and(|r| r.held);
         if held || !t.video_enabled {
@@ -3234,44 +3241,21 @@ impl<'a> Span<'a> {
         let bare = without_mode(whole);
         let drawn = bare.as_ref().unwrap_or(whole);
         let pieces = flat_pieces(p, t, drawn, (a.max(0), b.max(1)))?;
-        let covers = |piece: &VideoPiece| {
-            let layers = piece.layers();
-            let bottom = layers
-                .iter()
-                .map(|(l, _)| *l)
-                .find(|l| !matches!(l, VideoPiece::Black { .. }));
-            match bottom {
-                Some(VideoPiece::Source { media, placed, .. }) => {
-                    placed.iter().all(|p| p.picture.is_usual())
-                        && pool
-                            .get(media.as_str())
-                            .is_some_and(|m| crate::place::fills(m, (s.width, s.height)))
-                }
-                Some(VideoPiece::Generated { placed, .. }) => {
-                    placed.iter().all(|p| p.picture.is_usual())
-                }
-                _ => false,
-            }
-        };
-        if below && !pieces.iter().all(covers) {
-            return Ok(None);
-        }
         Ok(Some(VideoPiece::Flat {
             frames: y - x,
             pieces,
             skip: 0,
-            placed: placed_of(
-                &Clip {
-                    picture: None,
-                    ..c.clone()
-                },
-                self.nest_of(c),
-                false,
-                &[],
-                x,
-            ),
+            placed: self.outer_of(c),
             excluded,
         }))
+    }
+
+    fn outer_of(&self, c: &Clip) -> Vec<Placed> {
+        let bare = Clip {
+            picture: None,
+            ..c.clone()
+        };
+        placed_of(&bare, self.nest_of(c), false, &[], self.x)
     }
 
     fn smoothed(
@@ -3288,7 +3272,7 @@ impl<'a> Span<'a> {
         let side = |c: &Clip, at: i64| -> Result<Option<VideoPiece>> {
             let nest = self.nest_of(c);
             if let Some(whole) = nest.and_then(|n| n.flat.as_deref()) {
-                return self.flat(c, whole, (at, mode), below);
+                return self.flat(c, whole, (at, mode));
             }
             if !shows(&c) {
                 return Ok(None);
@@ -3301,7 +3285,7 @@ impl<'a> Span<'a> {
             if backward || piece.placed().first().is_some_and(moved) {
                 let mut wide = widened(c, d.frames);
                 wide.retime = ClipRetime::Nearest;
-                return self.flat(c, &wide, (at, mode), below);
+                return self.flat(c, &wide, (at, mode));
             }
             match &mut piece {
                 VideoPiece::Source {
@@ -3325,15 +3309,19 @@ impl<'a> Span<'a> {
             }
             Ok(Some(piece))
         };
-        let gap = || VideoPiece::Generated {
+        let gap = || VideoPiece::Flat {
             frames: self.y - x,
-            picture: Generated::SolidColor { color: [0; 3] },
-            placed: Vec::new(),
+            pieces: vec![VideoPiece::black(self.y - x)].into(),
+            skip: 0,
+            placed: d
+                .before
+                .or(d.after)
+                .map_or_else(Vec::new, |c| self.outer_of(c)),
             excluded: false,
         };
         let either = |c: Option<&Clip>, at: i64| match c {
             Some(c) => side(c, at),
-            None => Ok((!below).then(gap)),
+            None => Ok(Some(gap())),
         };
         Ok(
             match (
@@ -3374,8 +3362,13 @@ impl<'a> Span<'a> {
                 .filter_map(|c| self.nest_of(c).filter(|n| n.flat.is_some()))
                 .map(|n| n.opened),
         );
-        let outgoing = Layer::Picture(f, smooth.mode.map(|_| self.ramp_of(d, true)));
-        if smooth.mode.is_none() {
+        let smooth = Smooth {
+            clear: !covers(&f) || !covers(&g),
+            ..smooth
+        };
+        let keeps_below = smooth.mode.is_some() || smooth.clear;
+        let outgoing = Layer::Picture(f, keeps_below.then(|| self.ramp_of(d, true)));
+        if !keeps_below {
             outgoing.hides(stack);
         }
         stack.extend([outgoing, Layer::Smoothed(g, ramp, smooth)]);

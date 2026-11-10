@@ -280,17 +280,19 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - `render::flatten` puts the incoming side over the outgoing side. Its `Over` holds a `render::Smooth`: the `Retime` of the Process and the keys of the curve.
 - Each side takes Nearest. With Faster, each side stays on one source frame (`Pace::of` at the speed 0).
 - Each side is one whole picture of the timeline size. Why: the models take whole RGB frames, with no alpha.
-- A side with a placed picture or played backward is one side as a compound clip is (`VideoPiece::Flat`). A gap is a black `Generated::SolidColor`.
+- A side with a placed picture or played backward is one side as a compound clip is (`VideoPiece::Flat`). A gap is a flat side of black, and it is clear over the layers below.
+- A moved side in a frozen compound clip plays as a cross dissolve. Why: `Span::flat` draws no held run.
 - A composite mode alone does not make a placed picture here (`without_mode`). `Smooth::mode` holds the mode of the outgoing clip.
 - A side is a file, a generator's picture or a compound clip (`Side`). Why: a Solid Color acts as a still in a Smooth Cut ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
 - A compound clip is one side (`VideoPiece::Flat`). `flat_pieces` makes the plan of that clip alone, and its inner tracks draw nothing in those frames.
 - `FlatSide` draws these pieces with a `VideoFrames` of its own, into a float frame of the timeline size. Thus its tracks, transitions and titles take the usual path.
-- Over a lower track, a side that is not opaque over the whole frame plays as a cross dissolve. Why: the morph has no alpha ([todo](../todo/smooth-cut-over-tracks.md)).
+- `FlatSide` keeps the alpha of the side, premultiplied. `VideoFrames::smooth_frame` mixes the alpha of the two sides at `Smooth::at` (`interpolate::matte_between`). A side that is a file or a generator is opaque.
 - A flat side in a compound clip keeps the `Placed` list of that compound clip (`VideoPiece::Flat`).
 - With Faster, a gradient with keyframes stays on one source frame (`Generated::held`).
 - `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`). `ColorSides` draws a generator's picture the same way.
 - `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).
-- The made frame replaces the incoming layer, at full weight. With no `Smooth::mode`, it covers the outgoing layer, and the layers below are not in the plan.
+- The made frame replaces the incoming layer, at full weight. With no `Smooth::mode` and no flat side, it covers the outgoing layer, and the layers below are not in the plan.
+- With a flat side, `Smooth::clear` is true. The made frame carries the mixed alpha as its matte, and `Smooth::placed` gives it a place in the layers. The layers below show through, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
 - With a `Smooth::mode`, the layers below stay. `Smooth::placed` gives the made frame that mode, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
 - The key of the pair holds both files, both frames, both looks and both sides. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.
 - The morph has no shot-change test. Why: a Smooth Cut always joins two shots.
