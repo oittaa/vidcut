@@ -282,10 +282,12 @@ pub fn joined(
     let shortest = (rules.shortest_secs * fps).round().max(1.0) as usize;
     let mut open: Vec<Open> = Vec::new();
     let mut done: Vec<Open> = Vec::new();
+    let mut shots = vec![first];
     for frame in first..end {
         let shown = |f: i64| shown_time(origin, fps, f);
         if frame > first && found.cut(shown(frame - 1), shown(frame)) {
             done.append(&mut open);
+            shots.push(frame);
         }
         let boxes = found.shown(shown(frame));
         let kept = boxes.iter().copied().filter(|f| f.score >= rules.keep);
@@ -335,7 +337,12 @@ pub fn joined(
         let lasts = o.seen - o.samples[0].frame + 1;
         o.samples.len() as f64 >= rules.steady * lasts as f64
     };
-    done.retain(|o| o.sure >= shortest && steady(o));
+    let shot = |o: &Open| {
+        let next = shots.partition_point(|&s| s <= o.samples[0].frame);
+        let to = shots.get(next).copied().unwrap_or(end);
+        (to - shots[next - 1]) as usize
+    };
+    done.retain(|o| o.sure >= shortest.min(shot(o)) && steady(o));
     done.sort_by(|a, b| {
         let (a, b) = (&a.samples[0], &b.samples[0]);
         (a.frame, a.center[0])
