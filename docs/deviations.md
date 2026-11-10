@@ -3136,9 +3136,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Follow lists None, All Faces, All Text and the motion paths of the clip. All Faces sends the subject `face`. Each change sends `effects.set` with `area`.
   - Edit Shape shows the handles of the area in the viewer. `gui.show effect_area` shows them for the first effect of the clip that has an area.
     - A drag inside the area moves it. On an ellipse or a box, a corner changes its size, and the top handle turns it.
-      - A side handle moves that side. The opposite side stays in place.
     - On a polygon, a drag moves a point. A click on a side adds a point.
-      - A middle-click on a point removes it, as in Resolve (p. 3273). Alt and a click removes it too. Why: a trackpad has no middle button.
+      - Alt and a click also removes a point. Why: a trackpad has no middle button.
     - The pointer shows what a drag does. The handle under the pointer has a white ring.
   - The Tools row under the viewer has Blur ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). `gui.show blur` turns it on.
     - The right-click menu of a clip has Blur. It shows the Tools row with Blur on, for that clip.
