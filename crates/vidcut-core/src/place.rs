@@ -955,8 +955,8 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixP
 
 fn run_mode(part: &MixPart, run: &[Member<'_>]) -> CompositeMode {
     match part {
-        MixPart::Mix(m) => m.placing.mode,
-        MixPart::Title(_) => CompositeMode::Normal,
+        MixPart::Mix(m) if !m.added => m.placing.mode,
+        MixPart::Mix(_) | MixPart::Title(_) => CompositeMode::Normal,
         MixPart::Layer(i) => run
             .iter()
             .find(|m| !m.title && m.index == *i)

@@ -441,7 +441,7 @@ pub struct Smooth {
 }
 
 impl Smooth {
-    fn of(d: &transitions::Playing) -> Option<(Self, SmoothMode)> {
+    fn of(p: &Project, d: &transitions::Playing) -> Option<(Self, SmoothMode)> {
         let (kind, keys) = transitions::course_played(d.transition, d.frames.1 - d.frames.0)?;
         let PictureTransition::SmoothCut { mode, process, .. } = kind else {
             return None;
@@ -449,7 +449,7 @@ impl Smooth {
         let retime = process.retime();
         let composite = d
             .before
-            .map(|c| mode_at(c, c.end() - 1))
+            .map(|c| mode_at(p, c, c.end() - 1))
             .filter(|m| *m != CompositeMode::Normal);
         let smooth = Self {
             retime,
@@ -1864,10 +1864,19 @@ struct Edge {
     wipe: Option<WipeDirection>,
     smooth: bool,
     crossing: Option<Placed>,
+    modes: (i64, Vec<CompositeMode>),
 }
 
 impl Edge {
-    fn of(d: &transitions::Playing, falling: bool) -> Self {
+    fn of(
+        p: &Project,
+        d: &transitions::Playing,
+        falling: bool,
+        (side, over): (Option<&Clip>, (i64, i64)),
+    ) -> Self {
+        let modes = (over.0..over.1)
+            .map(|t| side.map_or(CompositeMode::Normal, |c| mode_at(p, c, t)))
+            .collect();
         Self {
             frames: span_of(d, falling),
             falling,
@@ -1877,6 +1886,7 @@ impl Edge {
                 Some(PictureTransition::SmoothCut { .. })
             ),
             crossing: crossing(d),
+            modes: (over.0, modes),
         }
     }
 
@@ -1892,7 +1902,12 @@ impl Edge {
     }
 
     fn crossed(&self, x: i64, ramp: Ramp) -> Option<Placed> {
-        let c = self.crossing.as_ref()?.after(x - self.frames.0);
+        let mut c = self.crossing.as_ref()?.after(x - self.frames.0);
+        let (from, modes) = &self.modes;
+        c.picture.composite_mode = modes
+            .get((self.frames.0 + ramp.at - from) as usize)
+            .copied()
+            .filter(|m| *m != CompositeMode::Normal);
         Some(Placed {
             ramp: ramp.moved.then_some(Ramp {
                 falling: false,
@@ -2001,14 +2016,28 @@ fn pictures_at(c: &Clip, t: i64) -> Vec<&Clip> {
         .collect()
 }
 
-fn mode_at(c: &Clip, t: i64) -> CompositeMode {
+fn crosses_inside(p: &Project, c: &Clip, t: i64) -> bool {
+    c.compound
+        .iter()
+        .flat_map(|k| &k.tracks)
+        .filter(|n| !n.transitions.is_empty())
+        .any(|n| {
+            transitions::playing(p, n, false, transitions::mixes)
+                .iter()
+                .any(|d| d.frames.0 <= t && t < d.frames.1)
+        })
+}
+
+fn mode_at(p: &Project, c: &Clip, t: i64) -> CompositeMode {
     let own = c
         .picture
         .as_ref()
         .map_or(CompositeMode::Normal, |x| x.mode());
     let inner = c.source_at(t);
     match pictures_at(c, inner).as_slice() {
-        [only] if own == CompositeMode::Normal => mode_at(only, inner),
+        [only] if own == CompositeMode::Normal && !crosses_inside(p, c, inner) => {
+            mode_at(p, only, inner)
+        }
         _ => own,
     }
 }
@@ -2034,20 +2063,12 @@ fn without_mode(c: &Clip) -> Option<Clip> {
 
 fn crossing(d: &transitions::Playing) -> Option<Placed> {
     let moving = Move::of(d);
-    let picture = Picture {
-        composite_mode: d
-            .before
-            .map(|c| mode_at(c, c.end() - 1))
-            .or(d.after.map(|c| mode_at(c, c.start)))
-            .filter(|m| *m != CompositeMode::Normal),
-        ..Picture::default()
-    };
     let joins = moving.is_some()
         || transitions::dip_of(d.transition).is_some()
         || (d.before.is_some() && d.after.is_some());
     joins.then(|| Placed {
         clip: d.transition.id.clone(),
-        picture,
+        picture: Picture::default(),
         run: None,
         source: 0,
         frame: 0,
@@ -2088,10 +2109,12 @@ fn edges_on(p: &Project, t: &Track) -> HashMap<String, Vec<Edge>> {
             let Some(c) = side.filter(|c| plays_inside(c)) else {
                 continue;
             };
-            edges
-                .entry(c.id.clone())
-                .or_default()
-                .push(Edge::of(&d, falling));
+            edges.entry(c.id.clone()).or_default().push(Edge::of(
+                p,
+                &d,
+                falling,
+                (d.before.or(d.after), span_of(&d, falling)),
+            ));
         }
     }
     edges
@@ -2140,7 +2163,17 @@ fn touches_compound(t: &Track, x: &Transition) -> bool {
         .any(|id| t.clips.iter().any(|c| &c.id == id && plays_inside(c)))
 }
 
-fn hollow(c: &Clip) -> Clip {
+fn nest_in<'a>(inner: Option<&'a Inner>, t: &Track, c: &Clip) -> Option<&'a Nest> {
+    inner?
+        .nests
+        .get(t.clips.iter().position(|x| std::ptr::eq(x, c))?)
+}
+
+fn whole<'a>(nest: Option<&'a Nest>, c: &'a Clip) -> &'a Clip {
+    nest.and_then(|n| n.flat.as_deref()).unwrap_or(c)
+}
+
+fn hollow(p: &Project, c: &Clip) -> Clip {
     let mut hollow = c.clone();
     hollow.compound = c.compound.as_ref().map(|k| Compound {
         stack: Default::default(),
@@ -2148,7 +2181,7 @@ fn hollow(c: &Clip) -> Clip {
         tracks: Vec::new(),
         made_from: Vec::new(),
     });
-    let mode = mode_at(c, c.end() - 1);
+    let mode = mode_at(p, c, c.end() - 1);
     if mode != CompositeMode::Normal {
         hollow.picture.get_or_insert_default().composite_mode = Some(mode);
     }
@@ -2222,11 +2255,12 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 if !c.enabled {
                     continue;
                 }
-                host.clips.push(hollow(c));
+                host.clips.push(hollow(p, c));
                 opened += 1;
                 let own = c.picture.clone().unwrap_or_default();
                 let edges = edges.get(&c.id).cloned().unwrap_or_default();
                 let smooth = edges.iter().any(|e| e.smooth);
+                let crossed = !edges.is_empty();
                 let fading = fades.get(&c.id).cloned().unwrap_or_default();
                 let (from, to) = reached(
                     c,
@@ -2258,7 +2292,10 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                         flat: Some(Box::new(wide.clone())),
                         opened,
                     },
-                    false => Nest::default(),
+                    false => Nest {
+                        flat: crossed.then(|| Box::new(wide.clone())),
+                        ..Nest::default()
+                    },
                 });
                 let k = c.compound.as_ref().expect("plays inside");
                 let cut = stretches(wide, t.kind);
@@ -2934,6 +2971,17 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
             if transitions::dip_of(d.transition).is_some() {
                 cuts.push(middle(d.frames).clamp(from, to));
             }
+            if let Some(c) = d
+                .before
+                .or(d.after)
+                .map(|c| whole(nest_in(*inner, t, c), c))
+            {
+                cuts.extend(
+                    ((from + 1).max(d.frames.0 + 1)..to.min(d.frames.1)).filter(|&f| {
+                        c.compound.is_some() && mode_at(p, c, f) != mode_at(p, c, f - 1)
+                    }),
+                );
+            }
         }
     }
     cuts.sort_unstable();
@@ -2996,16 +3044,13 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
             if inner.is_some_and(drawn_flat) {
                 continue;
             }
-            let within = inner.map(|i| i.nests.as_slice());
             let now = window.held.unwrap_or(x);
             let ramp_of = |d: &transitions::Playing, falling| {
-                Edge::of(d, falling).ramp(now, window.held.is_some())
+                Edge::of(p, d, falling, (None, (now, now))).ramp(now, window.held.is_some())
             };
             let excluded = !t.render_cache;
             let shows = |c: &&Clip| visible(t, c);
-            let nest_of = |c: &Clip| {
-                within.and_then(|w| w.get(t.clips.iter().position(|x| std::ptr::eq(x, c))?))
-            };
+            let nest_of = |c: &Clip| nest_in(*inner, t, c);
             let laid = |c: &Clip,
                         nest: Option<&Nest>,
                         ramp: Option<Ramp>,
@@ -3026,7 +3071,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
             let shown =
                 |c: &Clip, ramp: Option<Ramp>, below: bool| laid(c, nest_of(c), ramp, below, &[]);
             let sided = |d: &transitions::Playing, falling: bool| {
-                let edge = Edge::of(d, falling);
+                let side = d.before.or(d.after).map(|c| whole(nest_of(c), c));
+                let edge = Edge::of(p, d, falling, (side, (now, now + 1)));
                 let ramp = edge.ramp(now, window.held.is_some());
                 match (edge.crossed(x, ramp), ramp.moved) {
                     (Some(across), true) => {
@@ -3092,7 +3138,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
             let smoothed = |d: &transitions::Playing,
                             below: bool|
              -> Result<Option<(VideoPiece, VideoPiece, Smooth)>> {
-                let Some((smooth, mode)) = Smooth::of(d) else {
+                let Some((smooth, mode)) = Smooth::of(p, d) else {
                     return Ok(None);
                 };
                 let (Some(f), Some(g)) = (d.before, d.after) else {
@@ -3171,17 +3217,17 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 Some(d) => {
                     let below = !stack.is_empty();
                     let sides = sides_at(d, now);
-                    let plain = crossing(d).is_none_or(|c| c.picture.composite_mode.is_none());
-                    let covers = plain
-                        && sides
-                            .iter()
-                            .all(|(c, _)| c.filter(shows).is_some_and(fills));
+                    let fill = sides
+                        .iter()
+                        .all(|(c, _)| c.filter(shows).is_some_and(fills));
+                    let mut moded = false;
                     let mut layers = Vec::new();
                     for (c, falling) in sides {
                         let Some(c) = c.filter(shows) else {
                             continue;
                         };
                         let (ramp, chain) = sided(d, falling);
+                        moded |= chain.iter().any(|c| c.picture.composite_mode.is_some());
                         let bare = without_mode(c).filter(|_| !chain.is_empty());
                         let drawn = bare.as_ref().unwrap_or(c);
                         layers.push(laid(drawn, nest_of(c), ramp, below, &chain)?);
@@ -3208,7 +3254,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         });
                         layers.push(Layer::Placed(piece, ramp));
                     }
-                    if covers {
+                    if fill && !moded {
                         hide_inside(&outer, &mut stack);
                     }
                     stack.extend(layers);
