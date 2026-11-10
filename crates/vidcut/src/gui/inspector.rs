@@ -1412,6 +1412,7 @@ pub struct Inspector {
     naming: Option<Naming>,
     subject: Subject,
     finding: Option<Finding>,
+    area_edit: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -1497,6 +1498,7 @@ enum Act {
     Flips([Option<bool>; 2]),
     Zooming(bool),
     Boxes,
+    AreaEdit(usize),
     Ease(Ease),
     Mode(CompositeMode),
     Swap,
@@ -2711,18 +2713,23 @@ fn find_request(c: &Chosen, subject: Subject) -> (&'static str, Value) {
     ("motion.find", params)
 }
 
-fn blur_request(c: &Chosen, subject: Subject) -> Option<(&'static str, Value)> {
+fn blur_request(
+    id: &str,
+    found: bool,
+    effects: &[Effect],
+    subject: Subject,
+) -> Option<(&'static str, Value)> {
     let follows =
         |e: &Effect| e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(subject.name());
     let mut commands = Vec::new();
-    if !found(c, subject) {
-        let params = json!({ "clips": [c.id], "subject": subject });
+    if !found {
+        let params = json!({ "clips": [id], "subject": subject });
         commands.push(json!({ "method": "motion.find", "params": params }));
     }
-    if !c.stored.effects.iter().any(follows) {
+    if !effects.iter().any(follows) {
         let area = json!({ "follows": subject.name(), "size": BLUR_SIZE });
-        let add = json!({ "clips": [c.id], "kind": "mosaic_blur" });
-        let set = json!({ "clip": c.id, "effect": c.stored.effects.len(), "area": area });
+        let add = json!({ "clips": [id], "kind": "mosaic_blur" });
+        let set = json!({ "clip": id, "effect": effects.len(), "area": area });
         commands.push(json!({ "method": "effects.add", "params": add }));
         commands.push(json!({ "method": "effects.set", "params": set }));
     }
@@ -2760,7 +2767,7 @@ fn area_set(n: usize, change: Value) -> Act {
     Act::EffectSet(n, json!({ "area": change }))
 }
 
-fn all_of(subject: Subject) -> String {
+pub(super) fn all_of(subject: Subject) -> String {
     format!("All {}", subject.many())
 }
 
@@ -2817,15 +2824,27 @@ fn area_rows(
     rows(ui, (n, "area"), |ui| {
         let now = e.area.as_ref().map(|a| a.shape);
         label(ui, "Area", now.is_some());
-        dialog::switch(ui, |ui| {
-            for shape in [None, Some(AreaShape::Ellipse), Some(AreaShape::Box)] {
-                let name = area_label(shape);
-                if ui.selectable_label(shape == now, name).clicked() && shape != now {
-                    acts.push(area_set(
-                        n,
-                        shape.map_or(Value::Null, |s| json!({ "shape": s })),
-                    ));
-                }
+        let shapes = [
+            None,
+            Some(AreaShape::Ellipse),
+            Some(AreaShape::Box),
+            Some(AreaShape::Polygon),
+        ];
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt(("inspector-area-shape", n))
+                .selected_text(area_label(now))
+                .show_ui(ui, |ui| {
+                    for shape in shapes {
+                        let name = area_label(shape);
+                        if ui.selectable_label(shape == now, name).clicked() && shape != now {
+                            let change = shape.map_or(Value::Null, |s| json!({ "shape": s }));
+                            acts.push(area_set(n, change));
+                        }
+                    }
+                });
+            let edit = egui::Button::selectable(i.area_edit == Some(n), "Edit Shape");
+            if ui.add_enabled(now.is_some(), edit).clicked() {
+                acts.push(Act::AreaEdit(n));
             }
         });
         if reset(ui, now.is_some()) {
@@ -3876,7 +3895,22 @@ impl Workspace {
         }
     }
 
-    fn find(&mut self, method: &'static str, params: Value, subject: Subject) {
+    pub(super) fn subject_blur(
+        &self,
+        clip: &str,
+        subject: Subject,
+    ) -> Option<(&'static str, Value)> {
+        let p = self.project_shared()?;
+        let c = p.clip(clip)?;
+        if !vidcut_core::ops::motion::takes(c) {
+            return None;
+        }
+        let found = c.motion.iter().any(|m| m.subject == Some(subject));
+        let effects = c.picture.as_ref().map_or(&[][..], |x| &x.effects);
+        blur_request(clip, found, effects, subject)
+    }
+
+    pub(super) fn find(&mut self, method: &'static str, params: Value, subject: Subject) {
         let dir = crate::paths::models_dir();
         if finds(method, &params) && !vidcut_av::subjects::needed(&dir, subject).is_empty() {
             self.inspector.finding = Some(Finding {
@@ -3937,7 +3971,7 @@ impl Workspace {
                     if ui.button("Find").clicked() {
                         asked = Some(find_request(c, subject));
                     }
-                    let blur = blur_request(c, subject);
+                    let blur = blur_request(&c.id, found(c, subject), &c.stored.effects, subject);
                     let button = egui::Button::new("Blur");
                     if ui.add_enabled(blur.is_some(), button).clicked() {
                         asked = blur;
@@ -4380,6 +4414,11 @@ impl Workspace {
                     self.show_boxes(chosen);
                 }
             }
+            Act::AreaEdit(n) => {
+                let grab = &mut self.timeline.picture_grab;
+                grab.area = (grab.area != Some(n)).then_some(n);
+                grab.tool = None;
+            }
             Act::Boxes => {
                 if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
                     self.timeline.picture_grab.tool = None;
@@ -4601,6 +4640,7 @@ impl Workspace {
                     self.input_lut_section(ui, &p, &chosen);
                     self.super_scale_section(ui, &p, &chosen);
                     self.motion_section(ui, &chosen[0]);
+                    self.inspector.area_edit = self.timeline.picture_grab.area;
                     effects(ui, &self.inspector, &chosen[0], &mut acts);
                 }
                 if !paced.is_empty() {

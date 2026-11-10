@@ -3475,7 +3475,8 @@ pub enum Request {
     /// `transitions`, `titles`, `inspector` or `keyframes` (tabs in the Media
     /// Pool's place), or the
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
-    /// clip (the topmost clip at the playhead when none is selected), or
+    /// clip (the topmost clip at the playhead when none is selected), the
+    /// `effect_area` handles on the area of an effect of that clip, or
     /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
     /// buttons. Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
@@ -4405,8 +4406,15 @@ pub enum GuiPanel {
     /// The viewer's Dynamic Zoom boxes on the selected clip: the start box
     /// and the end box.
     DynamicZoom,
-    /// The viewer's Tools row: Transform, Crop and Dynamic Zoom, the flips,
-    /// Swap, the ease and Reset.
+    /// The viewer's handles on the area of an effect of the selected clip:
+    /// the first of its effects that has an area.
+    EffectArea,
+    /// The viewer's Blur tool on the selected clip, with the Tools row. A
+    /// drag in the picture then adds a Mosaic Blur with that area, and a drag
+    /// on an area changes it.
+    Blur,
+    /// The viewer's Tools row: Transform, Crop, Dynamic Zoom and Blur, the
+    /// flips, Swap, the ease, Reset, and the shapes and subjects of Blur.
     Tools,
 }
 

@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    Clip, CompositeMode, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
+    AreaShape, Clip, CompositeMode, DynamicZoom, Ease, EffectArea, EffectType, Picture,
+    PictureTool, Project, Subject, TrackKind, ZoomBox,
 };
 use vidcut_core::motion::Area;
 use vidcut_core::ops::picture::{has_picture, zoom_shown};
@@ -100,6 +101,12 @@ struct Wheeled {
 pub struct Grab {
     pub(crate) tool: Option<PictureTool>,
     pub(crate) row: bool,
+    pub(crate) area: Option<usize>,
+    blur: bool,
+    shape: AreaShape,
+    blurred: Option<String>,
+    drawn: Option<(String, Vec<[f64; 2]>)>,
+    area_held: Option<AreaHeld>,
     held: Option<Held>,
     wheel: Option<Wheeled>,
     landing: Option<(String, Picture, Instant, Picture)>,
@@ -109,6 +116,10 @@ pub struct Grab {
 impl Grab {
     pub(super) fn cancel_landing(&mut self) {
         self.landing = None;
+    }
+
+    pub(crate) fn blurring(&self) -> bool {
+        self.blur && self.tool.is_none()
     }
 }
 
@@ -523,6 +534,9 @@ pub(super) fn topmost(p: &Project, at: i64) -> Option<String> {
 impl Workspace {
     fn grab_wanted(&self) -> Option<(String, Picture)> {
         let g = &self.timeline.picture_grab;
+        if let Some(h) = &g.area_held {
+            return Some((h.clip.clone(), h.now.clone()));
+        }
         if let Some(h) = &g.held {
             return Some((h.clip.clone(), h.now.clone()));
         }
@@ -560,6 +574,10 @@ impl Workspace {
                     .held
                     .as_ref()
                     .map(|h| h.start.clone())
+                    .or_else(|| {
+                        let held = self.timeline.picture_grab.area_held.as_ref();
+                        held.map(|h| h.start.clone())
+                    })
                     .or_else(|| {
                         self.timeline
                             .picture_grab
@@ -703,7 +721,15 @@ impl Workspace {
     }
 
     pub(super) fn show_picture_tool(&mut self, tool: PictureTool) {
-        self.timeline.picture_grab.tool = Some(tool);
+        let g = &mut self.timeline.picture_grab;
+        g.tool = Some(tool);
+        g.area = None;
+        g.blur = false;
+        g.drawn = None;
+        self.select_shown();
+    }
+
+    fn select_shown(&mut self) {
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         let Some(p) = self.project_shared() else {
             return;
@@ -712,6 +738,21 @@ impl Workspace {
             && let Some(id) = topmost(&p, at)
         {
             self.send("selection.set", json!({ "clips": [id] }));
+        }
+    }
+
+    pub(super) fn blur_tool(&mut self, on: bool) {
+        let g = &mut self.timeline.picture_grab;
+        g.blur = on;
+        g.drawn = None;
+        g.blurred = None;
+        g.area_held = None;
+        if on {
+            g.tool = None;
+            g.row = true;
+            self.select_shown();
+        } else {
+            g.area = None;
         }
     }
 
@@ -740,7 +781,17 @@ impl Workspace {
                 self.picture_tool(t);
             }
         }
-        let Some(tool) = tool else {
+        let blurs = self.timeline.picture_grab.blurring();
+        let b = egui::Button::selectable(blurs, "Blur");
+        if ui.add_enabled(found || blurs, b).clicked() {
+            self.blur_tool(!blurs);
+        }
+        if self.timeline.picture_grab.blurring() {
+            ui.separator();
+            self.blur_tools(ui, clip.as_ref());
+            return;
+        }
+        let Some(tool) = self.timeline.picture_grab.tool else {
             return;
         };
         ui.separator();
@@ -781,6 +832,46 @@ impl Workspace {
             self.end_picture_wheel();
             self.timeline.picture_grab.landing = None;
             self.send("picture.clear", json!({ "clips": [id], "tool": tool }));
+        }
+    }
+
+    fn blur_tools(&mut self, ui: &mut egui::Ui, clip: Option<&(String, Picture)>) {
+        let now = self.timeline.picture_grab.shape;
+        for (label, shape) in [
+            ("Ellipse", AreaShape::Ellipse),
+            ("Box", AreaShape::Box),
+            ("Free Shape", AreaShape::Polygon),
+        ] {
+            if ui.selectable_label(now == shape, label).clicked() {
+                let g = &mut self.timeline.picture_grab;
+                g.shape = shape;
+                g.drawn = None;
+            }
+        }
+        ui.separator();
+        for subject in Subject::ALL {
+            let request = clip.and_then(|(id, _)| self.subject_blur(id, subject));
+            let b = egui::Button::new(super::inspector::all_of(subject));
+            if ui.add_enabled(request.is_some(), b).clicked()
+                && let Some((method, params)) = request
+            {
+                self.find(method, params, subject);
+            }
+        }
+        ui.separator();
+        let chosen = clip
+            .zip(self.timeline.picture_grab.area)
+            .filter(|((_, pic), n)| {
+                let effect = pic.effects.get(*n);
+                effect.is_some_and(|e| e.area.is_some())
+            });
+        if ui
+            .add_enabled(chosen.is_some(), egui::Button::new("Delete"))
+            .clicked()
+            && let Some(((id, _), n)) = chosen
+        {
+            self.timeline.picture_grab.area = None;
+            self.send("effects.remove", json!({ "clip": id, "effect": n }));
         }
     }
 
@@ -1286,4 +1377,817 @@ impl Workspace {
             );
         }
     }
+}
+
+const AREA_GRIP: f32 = 9.0;
+const AREA_TURN: f32 = 24.0;
+const AREA_ROUND: usize = 64;
+const DRAW_LEAST: f32 = 4.0;
+const DRAW_SAME: f32 = 3.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AreaHold {
+    Move,
+    Corner,
+    Side(bool),
+    Turn,
+    Point(usize),
+    Draw,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct AreaHeld {
+    clip: String,
+    effect: usize,
+    hold: AreaHold,
+    from: Pos2,
+    start: Picture,
+    now: Picture,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AreaBox {
+    center: [f64; 2],
+    half: [f64; 2],
+    turn: f64,
+    base: Area,
+    fit: [f64; 2],
+}
+
+fn turned([x, y]: [f64; 2], degrees: f64) -> [f64; 2] {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    [x * cos + y * sin, y * cos - x * sin]
+}
+
+impl AreaBox {
+    const LEAST: f64 = 1e-6;
+
+    fn of(a: &EffectArea, base: Area, [fw, fh]: [f64; 2]) -> Self {
+        let [bw, bh] = [base.size[0] * fw, base.size[1] * fh];
+        let [cx, cy] = a.middle();
+        let [dx, dy] = turned([(cx - 0.5) * bw, (cy - 0.5) * bh], base.rotation);
+        let [sx, sy] = a.extent();
+        Self {
+            center: [base.center[0] * fw + dx, base.center[1] * fh + dy],
+            half: [sx * bw / 2.0, sy * bh / 2.0].map(|h| h.max(Self::LEAST)),
+            turn: base.rotation + a.turn(),
+            base,
+            fit: [fw, fh],
+        }
+    }
+
+    fn uv(&self, [x, y]: [f64; 2]) -> [f64; 2] {
+        let [dx, dy] = turned([x * self.half[0], y * self.half[1]], self.turn);
+        [
+            (self.center[0] + dx) / self.fit[0],
+            (self.center[1] + dy) / self.fit[1],
+        ]
+    }
+
+    fn local(&self, [u, v]: [f64; 2]) -> [f64; 2] {
+        let off = [
+            u * self.fit[0] - self.center[0],
+            v * self.fit[1] - self.center[1],
+        ];
+        let [x, y] = turned(off, -self.turn);
+        [x / self.half[0], y / self.half[1]]
+    }
+
+    fn written(&self, a: &EffectArea) -> EffectArea {
+        let [bw, bh] = [
+            (self.base.size[0] * self.fit[0]).max(Self::LEAST),
+            (self.base.size[1] * self.fit[1]).max(Self::LEAST),
+        ];
+        let off = [
+            self.center[0] - self.base.center[0] * self.fit[0],
+            self.center[1] - self.base.center[1] * self.fit[1],
+        ];
+        let [dx, dy] = turned(off, -self.base.rotation);
+        EffectArea {
+            center: Some([0.5 + dx / bw, 0.5 + dy / bh]),
+            size: Some([2.0 * self.half[0] / bw, 2.0 * self.half[1] / bh]),
+            rotation: Some(self.turn - self.base.rotation),
+            ..a.clone()
+        }
+    }
+}
+
+fn area_outline(a: &EffectArea) -> Vec<[f64; 2]> {
+    match a.shape {
+        AreaShape::Ellipse => (0..AREA_ROUND)
+            .map(|i| {
+                let t = std::f64::consts::TAU * i as f64 / AREA_ROUND as f64;
+                [t.cos(), t.sin()]
+            })
+            .collect(),
+        AreaShape::Box => vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]],
+        AreaShape::Polygon => a
+            .corners()
+            .iter()
+            .map(|[x, y]| [x * 2.0 - 1.0, y * 2.0 - 1.0])
+            .collect(),
+    }
+}
+
+fn area_holds(a: &EffectArea, [x, y]: [f64; 2]) -> bool {
+    match a.shape {
+        AreaShape::Ellipse => x.hypot(y) <= 1.0,
+        AreaShape::Box => x.abs().max(y.abs()) <= 1.0,
+        AreaShape::Polygon => {
+            let points = area_outline(a);
+            let mut inside = false;
+            let mut b = points[points.len() - 1];
+            for a in points {
+                let crosses = (a[1] > y) != (b[1] > y);
+                if crosses && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0] {
+                    inside = !inside;
+                }
+                b = a;
+            }
+            inside
+        }
+    }
+}
+
+fn near_side(a: Pos2, b: Pos2, p: Pos2) -> f32 {
+    let (e, w) = (b - a, p - a);
+    let along = (w.dot(e) / e.length_sq().max(1e-6)).clamp(0.0, 1.0);
+    (w - e * along).length()
+}
+
+fn area_drawn(shape: AreaShape, a: [f64; 2], b: [f64; 2]) -> EffectArea {
+    let middle = |i: usize| rounded((a[i] + b[i]) / 2.0, 4);
+    let span = |i: usize| rounded((a[i] - b[i]).abs(), 4);
+    EffectArea {
+        shape,
+        center: Some([middle(0), middle(1)]),
+        size: Some([span(0), span(1)]),
+        ..EffectArea::default()
+    }
+}
+
+fn area_through(points: &[[f64; 2]]) -> Option<EffectArea> {
+    let span = |i: usize| {
+        let low = points.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min);
+        let high = points
+            .iter()
+            .map(|p| p[i])
+            .fold(f64::NEG_INFINITY, f64::max);
+        (low, rounded(high - low, 4))
+    };
+    let ((x, w), (y, h)) = (span(0), span(1));
+    if points.len() < 3 || w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let inside = |p: &[f64; 2]| [rounded((p[0] - x) / w, 4), rounded((p[1] - y) / h, 4)];
+    Some(EffectArea {
+        shape: AreaShape::Polygon,
+        center: Some([rounded(x + w / 2.0, 4), rounded(y + h / 2.0, 4)]),
+        size: Some([w, h]),
+        points: points.iter().map(inside).collect(),
+        ..EffectArea::default()
+    })
+}
+
+fn drawn_request(clip: &str, effect: usize, area: &EffectArea) -> Value {
+    let mut change = json!({
+        "shape": area.shape,
+        "center": area.middle(),
+        "size": area.extent(),
+    });
+    if !area.points.is_empty() {
+        change["points"] = json!(area.points);
+    }
+    let add = json!({ "clips": [clip], "kind": EffectType::MosaicBlur });
+    let set = json!({ "clip": clip, "effect": effect, "area": change });
+    json!({
+        "commands": [
+            { "method": "effects.add", "params": add },
+            { "method": "effects.set", "params": set },
+        ],
+        "label": "Blur Area",
+    })
+}
+
+fn squared(from: Pos2, to: Pos2) -> Pos2 {
+    let d = to - from;
+    let side = d.x.abs().max(d.y.abs());
+    from + vec2(side.copysign(d.x), side.copysign(d.y))
+}
+
+fn outline_on(s: &Shown, frame: &AreaBox, area: &EffectArea) -> Vec<Pos2> {
+    area_outline(area)
+        .into_iter()
+        .map(|l| s.screen(frame.uv(l)))
+        .collect()
+}
+
+fn paint_outline(painter: &egui::Painter, outline: &[Pos2], stroke: Stroke) {
+    for i in 0..outline.len() {
+        painter.line_segment([outline[i], outline[(i + 1) % outline.len()]], stroke);
+    }
+}
+
+struct AreaShown {
+    s: Shown,
+    area: EffectArea,
+    frame: AreaBox,
+}
+
+impl AreaShown {
+    fn screen(&self, local: [f64; 2]) -> Pos2 {
+        self.s.screen(self.frame.uv(local))
+    }
+
+    fn on(&self, p: Pos2) -> bool {
+        self.grip(p).is_some() || (!self.sized() && self.side_at(p).is_some())
+    }
+
+    fn cursor(&self, hold: AreaHold, p: Pos2) -> CursorIcon {
+        let middle = self.screen([0.0, 0.0]);
+        match hold {
+            AreaHold::Move => CursorIcon::Move,
+            AreaHold::Draw => CursorIcon::Crosshair,
+            AreaHold::Turn | AreaHold::Point(_) => CursorIcon::PointingHand,
+            AreaHold::Corner => {
+                let d = p - middle;
+                if d.x * d.y > 0.0 {
+                    CursorIcon::ResizeNwSe
+                } else {
+                    CursorIcon::ResizeNeSw
+                }
+            }
+            AreaHold::Side(across) => {
+                let side = if across { [1.0, 0.0] } else { [0.0, 1.0] };
+                let n = self.screen(side) - middle;
+                if n.x.abs() >= n.y.abs() {
+                    CursorIcon::ResizeHorizontal
+                } else {
+                    CursorIcon::ResizeVertical
+                }
+            }
+        }
+    }
+
+    fn local(&self, p: Pos2) -> [f64; 2] {
+        self.frame.local(self.s.back(&self.s.level, p))
+    }
+
+    fn turn_at(&self) -> Pos2 {
+        let (top, middle) = (self.screen([0.0, -1.0]), self.screen([0.0, 0.0]));
+        top + (top - middle).normalized() * AREA_TURN
+    }
+
+    fn sized(&self) -> bool {
+        self.area.shape != AreaShape::Polygon
+    }
+
+    fn grip(&self, p: Pos2) -> Option<AreaHold> {
+        let near = |local: [f64; 2]| (self.screen(local) - p).length() <= AREA_GRIP;
+        if self.sized() {
+            if (self.turn_at() - p).length() <= AREA_GRIP {
+                return Some(AreaHold::Turn);
+            }
+            let corners = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
+            if corners.into_iter().any(near) {
+                return Some(AreaHold::Corner);
+            }
+            for (local, across) in [
+                ([1.0, 0.0], true),
+                ([-1.0, 0.0], true),
+                ([0.0, 1.0], false),
+                ([0.0, -1.0], false),
+            ] {
+                if near(local) {
+                    return Some(AreaHold::Side(across));
+                }
+            }
+        } else if let Some(i) = area_outline(&self.area).into_iter().position(near) {
+            return Some(AreaHold::Point(i));
+        }
+        area_holds(&self.area, self.local(p)).then_some(AreaHold::Move)
+    }
+
+    fn side_at(&self, p: Pos2) -> Option<(usize, [f64; 2])> {
+        let points = area_outline(&self.area);
+        let n = points.len();
+        let far = |i: usize| near_side(self.screen(points[i]), self.screen(points[(i + 1) % n]), p);
+        let nearest = (0..n).min_by(|a, b| far(*a).total_cmp(&far(*b)))?;
+        (far(nearest) <= AREA_GRIP).then(|| (nearest, self.local(p)))
+    }
+}
+
+fn area_moved(held: &AreaHeld, shown: &AreaShown, to: Pos2) -> Option<EffectArea> {
+    let start = &shown.area;
+    let mut frame = shown.frame;
+    let (from, now) = (shown.local(held.from), shown.local(to));
+    match held.hold {
+        AreaHold::Move => {
+            let back = |p: Pos2| shown.s.back(&shown.s.level, p);
+            let (a, b) = (back(held.from), back(to));
+            frame.center[0] += (b[0] - a[0]) * frame.fit[0];
+            frame.center[1] += (b[1] - a[1]) * frame.fit[1];
+        }
+        AreaHold::Corner => {
+            let by = now[0].hypot(now[1]) / from[0].hypot(from[1]).max(AreaBox::LEAST);
+            frame.half = frame.half.map(|h| (h * by).max(AreaBox::LEAST));
+        }
+        AreaHold::Side(across) => {
+            let i = usize::from(!across);
+            let side = from[i].signum();
+            let by = (((now[i] - from[i]) * side + 2.0) / 2.0).max(AreaBox::LEAST);
+            let mut shift = [0.0, 0.0];
+            shift[i] = side * (by - 1.0) * frame.half[i];
+            let [dx, dy] = turned(shift, frame.turn);
+            frame.center = [frame.center[0] + dx, frame.center[1] + dy];
+            frame.half[i] = (frame.half[i] * by).max(AreaBox::LEAST);
+        }
+        AreaHold::Turn => {
+            let uv = shown.s.back(&shown.s.level, to);
+            let off = [
+                uv[0] * frame.fit[0] - frame.center[0],
+                uv[1] * frame.fit[1] - frame.center[1],
+            ];
+            frame.turn = (-off[0]).atan2(-off[1]).to_degrees();
+        }
+        AreaHold::Point(i) => {
+            let mut points = start.corners().to_vec();
+            *points.get_mut(i)? = [(now[0] + 1.0) / 2.0, (now[1] + 1.0) / 2.0];
+            return Some(EffectArea {
+                points,
+                ..start.clone()
+            });
+        }
+        AreaHold::Draw => return None,
+    }
+    Some(frame.written(start))
+}
+
+fn area_change(from: &EffectArea, to: &EffectArea) -> Option<Value> {
+    let mut change = json!({});
+    if from.middle() != to.middle() {
+        change["center"] = json!(to.middle());
+    }
+    if from.extent() != to.extent() {
+        change["size"] = json!(to.extent());
+    }
+    if from.turn() != to.turn() {
+        change["rotation"] = json!(to.turn());
+    }
+    if from.points != to.points {
+        change["points"] = json!(to.points);
+    }
+    change
+        .as_object()
+        .is_some_and(|o| !o.is_empty())
+        .then_some(change)
+}
+
+impl Workspace {
+    pub(super) fn show_effect_area(&mut self) {
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(c) = target(&p, &self.snap.selection.clips, at) else {
+            return;
+        };
+        let effects = c.picture.iter().flat_map(|x| &x.effects);
+        let Some(n) = effects.into_iter().position(|e| e.area.is_some()) else {
+            return;
+        };
+        self.timeline.picture_grab.area = Some(n);
+        self.timeline.picture_grab.tool = None;
+    }
+
+    fn area_shown(&self, picture: Rect, held: Option<&AreaHeld>) -> Option<AreaShown> {
+        self.area_at(picture, self.timeline.picture_grab.area?, held)
+    }
+
+    fn area_clip<'a>(&self, p: &'a Project, at: i64) -> Option<&'a Clip> {
+        let chosen = target(p, &self.snap.selection.clips, at);
+        if chosen.is_some() || !self.timeline.picture_grab.blurring() {
+            return chosen;
+        }
+        p.clip(&topmost(p, at)?)
+    }
+
+    fn area_at(&self, picture: Rect, n: usize, held: Option<&AreaHeld>) -> Option<AreaShown> {
+        let p = self.project_shared()?;
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+        let c = self.area_clip(&p, at)?;
+        let shown = match held {
+            Some(h) if h.clip == c.id => h.start.clone(),
+            _ => c.picture.clone().unwrap_or_default(),
+        };
+        let area = shown.effects.get(n)?.area.clone()?;
+        let source = c.source_at(at) as f64;
+        let base = match area.follows.as_deref() {
+            None => Area::WHOLE,
+            Some(named) => {
+                let followed = c.motion.iter().filter(|m| m.follows(named));
+                followed.filter_map(|m| m.area_at(source)).next()?
+            }
+        };
+        let frame = (f64::from(p.settings.width), f64::from(p.settings.height));
+        let [_, _, fw, fh] = content(&p, c, frame);
+        let s = shape_of(&p, c, shown, picture, at)?;
+        Some(AreaShown {
+            s,
+            frame: AreaBox::of(&area, base, [fw, fh]),
+            area,
+        })
+    }
+
+    fn land_area(&mut self, held: &AreaHeld) {
+        let area = |p: &Picture| p.effects.get(held.effect).and_then(|e| e.area.clone());
+        let (Some(from), Some(to)) = (area(&held.start), area(&held.now)) else {
+            return;
+        };
+        if let Some(change) = area_change(&from, &to) {
+            let params = json!({ "clip": held.clip, "effect": held.effect, "area": change });
+            self.send("effects.set", params);
+            self.timeline.picture_grab.landing = Some((
+                held.clip.clone(),
+                held.now.clone(),
+                Instant::now(),
+                held.start.clone(),
+            ));
+        }
+    }
+
+    fn area_points(&mut self, ui: &egui::Ui, resp: &egui::Response, shown: &AreaShown) {
+        if shown.sized() {
+            return;
+        }
+        let Some(at) = ui.input(|i| i.pointer.interact_pos()) else {
+            return;
+        };
+        let n = self.timeline.picture_grab.area.unwrap_or(0);
+        let mut points = shown.area.corners().to_vec();
+        let held = shown.grip(at);
+        let alt = resp.clicked() && ui.input(|i| i.modifiers.alt);
+        if alt || resp.clicked_by(egui::PointerButton::Middle) {
+            let Some(AreaHold::Point(i)) = held else {
+                return;
+            };
+            if points.len() <= 3 {
+                return;
+            }
+            points.remove(i);
+        } else if resp.clicked() && !matches!(held, Some(AreaHold::Point(_))) {
+            let Some((i, [x, y])) = shown.side_at(at) else {
+                return;
+            };
+            if points.len() >= EffectArea::POINTS_KEPT {
+                return;
+            }
+            points.insert(i + 1, [(x + 1.0) / 2.0, (y + 1.0) / 2.0]);
+        } else {
+            return;
+        }
+        let area = json!({ "points": points });
+        let params = json!({ "clip": shown.s.clip, "effect": n, "area": area });
+        self.send("effects.set", params);
+    }
+
+    fn land_drawn(&mut self, held: &AreaHeld) {
+        let drawn = held.now.effects.get(held.effect);
+        let Some(area) = drawn.and_then(|e| e.area.as_ref()) else {
+            return;
+        };
+        self.send("apply", drawn_request(&held.clip, held.effect, area));
+        let g = &mut self.timeline.picture_grab;
+        g.area = Some(held.effect);
+        g.landing = Some((
+            held.clip.clone(),
+            held.now.clone(),
+            Instant::now(),
+            held.start.clone(),
+        ));
+    }
+
+    fn blur_drag(&mut self, ui: &egui::Ui, resp: &egui::Response, s: &Shown, fit: [f64; 2]) {
+        let Some(mut held) = self.timeline.picture_grab.area_held.clone() else {
+            return;
+        };
+        ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+        if let Some(to) = pointer.filter(|_| resp.dragged()) {
+            let to = if ui.input(|i| i.modifiers.shift) {
+                squared(held.from, to)
+            } else {
+                to
+            };
+            let d = to - held.from;
+            held.now = held.start.clone();
+            if d.x.abs().min(d.y.abs()) >= DRAW_LEAST {
+                let ends = (s.back(&s.level, held.from), s.back(&s.level, to));
+                let shape = self.timeline.picture_grab.shape;
+                let mut effect = EffectType::MosaicBlur.made();
+                effect.area = Some(area_drawn(shape, ends.0, ends.1));
+                held.now.effects.push(effect);
+            }
+            self.timeline.picture_grab.area_held = Some(held.clone());
+        }
+        let drawn = held.now.effects.get(held.effect);
+        if let Some(area) = drawn.and_then(|e| e.area.as_ref()) {
+            let frame = AreaBox::of(area, Area::WHOLE, fit);
+            let stroke = Stroke::new(1.5, super::theme::colors().accent);
+            let painter = ui.painter_at(ui.clip_rect());
+            paint_outline(&painter, &outline_on(s, &frame, area), stroke);
+        }
+        if resp.drag_stopped() {
+            self.timeline.picture_grab.area_held = None;
+            self.land_drawn(&held);
+        } else if !resp.dragged() {
+            self.timeline.picture_grab.area_held = None;
+        }
+    }
+
+    fn blur_points(&mut self, ui: &egui::Ui, resp: &egui::Response, s: &Shown, effect: usize) {
+        let Some((clip, mut points)) = self.timeline.picture_grab.drawn.clone() else {
+            return;
+        };
+        ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.timeline.picture_grab.drawn = None;
+            return;
+        }
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+        let at: Vec<Pos2> = points.iter().map(|uv| s.screen(*uv)).collect();
+        let within = |q: Pos2, reach: f32| pointer.is_some_and(|p| p.distance(q) <= reach);
+        let closes = points.len() >= 3 && within(at[0], AREA_GRIP);
+        let mut done = resp.double_clicked() && points.len() >= 3;
+        if resp.clicked()
+            && let Some(p) = pointer
+        {
+            let same = at.last().is_some_and(|q| within(*q, DRAW_SAME));
+            if closes {
+                done = true;
+            } else if !same && points.len() < EffectArea::POINTS_KEPT {
+                points.push(s.back(&s.level, p));
+                self.timeline.picture_grab.drawn = Some((clip.clone(), points.clone()));
+            }
+        }
+        if done {
+            self.timeline.picture_grab.drawn = None;
+            if let Some(area) = area_through(&points) {
+                self.send("apply", drawn_request(&clip, effect, &area));
+                self.timeline.picture_grab.area = Some(effect);
+            }
+            return;
+        }
+        let accent = super::theme::colors().accent;
+        let painter = ui.painter_at(ui.clip_rect());
+        let at: Vec<Pos2> = points.iter().map(|uv| s.screen(*uv)).collect();
+        for pair in at.windows(2) {
+            painter.line_segment([pair[0], pair[1]], Stroke::new(1.5, accent));
+        }
+        if let (Some(last), Some(p)) = (at.last(), pointer) {
+            let to = if closes { at[0] } else { p };
+            painter.line_segment([*last, to], Stroke::new(1.0, accent));
+        }
+        for q in &at {
+            painter.rect_filled(
+                Rect::from_center_size(*q, Vec2::splat(GRAB * 1.4)),
+                1.0,
+                accent,
+            );
+        }
+        if closes {
+            painter.circle_stroke(at[0], GRAB * 1.6, Stroke::new(2.0, Color32::WHITE));
+        }
+    }
+
+    fn blur_controls(&mut self, ui: &egui::Ui, resp: &egui::Response, picture: Rect) -> bool {
+        if !self.timeline.picture_grab.blurring() {
+            return false;
+        }
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+        let Some(p) = self.project_shared() else {
+            return false;
+        };
+        let clip = self.area_clip(&p, at);
+        let g = &mut self.timeline.picture_grab;
+        if g.drawn.as_ref().map(|(id, _)| id) != clip.map(|c| &c.id) {
+            g.drawn = None;
+        }
+        if g.blurred.as_ref() != clip.map(|c| &c.id) {
+            if g.blurred.is_some() {
+                g.area = None;
+                g.area_held = None;
+            }
+            g.blurred = clip.map(|c| c.id.clone());
+        }
+        let Some(c) = clip else {
+            return false;
+        };
+        let stored = c.picture.clone().unwrap_or_default();
+        let Some(s) = shape_of(&p, c, stored.clone(), picture, at) else {
+            return false;
+        };
+        let frame = (f64::from(p.settings.width), f64::from(p.settings.height));
+        let [_, _, fw, fh] = content(&p, c, frame);
+        let drawing = |h: &AreaHeld| h.hold == AreaHold::Draw;
+        if g.area_held.as_ref().is_some_and(drawing) {
+            self.blur_drag(ui, resp, &s, [fw, fh]);
+            return true;
+        }
+        if g.drawn.is_some() {
+            self.blur_points(ui, resp, &s, stored.effects.len());
+            return true;
+        }
+        if g.area_held.is_some() {
+            return false;
+        }
+        let active = g.area;
+        let others: Vec<(usize, AreaShown)> = (0..stored.effects.len())
+            .rev()
+            .filter(|n| Some(*n) != active)
+            .filter_map(|n| self.area_at(picture, n, None).map(|a| (n, a)))
+            .collect();
+        let accent = super::theme::colors().accent;
+        let painter = ui.painter_at(picture);
+        for (_, a) in &others {
+            let outline = outline_on(&a.s, &a.frame, &a.area);
+            paint_outline(
+                &painter,
+                &outline,
+                Stroke::new(1.0, accent.gamma_multiply(0.6)),
+            );
+        }
+        let over = if resp.drag_started() {
+            ui.input(|i| i.pointer.press_origin())
+        } else {
+            ui.input(|i| i.pointer.hover_pos())
+                .filter(|_| resp.hovered())
+        };
+        let Some(over) = over.filter(|p| picture.contains(*p)) else {
+            return false;
+        };
+        let pressed = resp.clicked() || resp.drag_started();
+        if pressed && !self.snap.selection.clips.contains(&c.id) {
+            self.send("selection.set", json!({ "clips": [c.id] }));
+        }
+        let shown = active.and_then(|n| self.area_at(picture, n, None));
+        if shown.is_some_and(|a| a.on(over)) {
+            return false;
+        }
+        if let Some((n, _)) = others.iter().find(|(_, a)| a.on(over)) {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            if resp.drag_started() {
+                self.timeline.picture_grab.area = Some(*n);
+                return false;
+            }
+            if resp.clicked() {
+                self.timeline.picture_grab.area = Some(*n);
+            }
+            return true;
+        }
+        ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+        let g = &mut self.timeline.picture_grab;
+        if g.shape == AreaShape::Polygon {
+            if resp.clicked() {
+                g.drawn = Some((c.id.clone(), vec![s.back(&s.level, over)]));
+            }
+        } else if resp.drag_started() {
+            g.area_held = Some(AreaHeld {
+                clip: c.id.clone(),
+                effect: stored.effects.len(),
+                hold: AreaHold::Draw,
+                from: over,
+                now: stored.clone(),
+                start: stored,
+            });
+        }
+        true
+    }
+
+    pub(super) fn area_controls(
+        &mut self,
+        ui: &egui::Ui,
+        resp: &egui::Response,
+        picture: Rect,
+    ) -> bool {
+        let drawing = self.blur_controls(ui, resp, picture);
+        let editing = |h: &AreaHeld| h.hold != AreaHold::Draw;
+        let held = self.timeline.picture_grab.area_held.clone();
+        let held = held.filter(editing);
+        let Some(shown) = self.area_shown(picture, held.as_ref()) else {
+            if held.is_some() {
+                self.timeline.picture_grab.area_held = None;
+            }
+            if drawing {
+                self.sync_picture_preview();
+            }
+            return drawing;
+        };
+        let Some(n) = self.timeline.picture_grab.area else {
+            return drawing;
+        };
+        if drawing {
+            self.sync_picture_preview();
+            paint_area(&ui.painter_at(picture), &shown, None, None);
+            return true;
+        }
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+        let over = pointer.filter(|_| resp.hovered());
+        let hover = over.and_then(|p| shown.grip(p));
+        let point = matches!(hover, Some(AreaHold::Point(_)));
+        let adds = over
+            .filter(|_| held.is_none() && !point && !shown.sized())
+            .filter(|p| shown.side_at(*p).is_some());
+        if adds.is_some() {
+            ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+        } else if let (Some(hold), Some(p)) = (held.as_ref().map(|h| h.hold).or(hover), pointer) {
+            ui.ctx().set_cursor_icon(shown.cursor(hold, p));
+        }
+        if resp.drag_started()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+            && let Some(hold) = shown.grip(press)
+        {
+            let start = shown.s.picture.clone();
+            self.timeline.picture_grab.area_held = Some(AreaHeld {
+                clip: shown.s.clip.clone(),
+                effect: n,
+                hold,
+                from: press,
+                now: start.clone(),
+                start,
+            });
+        }
+        if let (Some(mut held), Some(to)) = (self.timeline.picture_grab.area_held.clone(), pointer)
+            && resp.dragged()
+            && let Some(area) = area_moved(&held, &shown, to)
+            && let Some(e) = held.now.effects.get_mut(held.effect)
+        {
+            e.area = Some(area);
+            self.timeline.picture_grab.area_held = Some(held);
+        }
+        let mut busy = held.is_some() || hover.is_some();
+        if resp.drag_stopped()
+            && let Some(held) = self.timeline.picture_grab.area_held.take()
+        {
+            busy = true;
+            self.land_area(&held);
+        }
+        self.area_points(ui, resp, &shown);
+        self.sync_picture_preview();
+        let held = self.timeline.picture_grab.area_held.clone();
+        let moved = held
+            .as_ref()
+            .and_then(|h| h.now.effects.get(h.effect))
+            .and_then(|e| e.area.clone());
+        let drawn = match moved {
+            Some(area) => AreaShown {
+                frame: AreaBox::of(&area, shown.frame.base, shown.frame.fit),
+                area,
+                s: shown.s,
+            },
+            None => shown,
+        };
+        let hot = pointer.filter(|_| held.is_some() || hover.is_some());
+        paint_area(&ui.painter_at(picture), &drawn, hot, adds);
+        busy || adds.is_some()
+    }
+}
+
+fn paint_area(painter: &egui::Painter, shown: &AreaShown, hot: Option<Pos2>, adds: Option<Pos2>) {
+    let accent = super::theme::colors().accent;
+    let stroke = Stroke::new(1.5, accent);
+    let outline = outline_on(&shown.s, &shown.frame, &shown.area);
+    paint_outline(painter, &outline, stroke);
+    let lit = |at: Pos2| hot.is_some_and(|p| p.distance(at) <= AREA_GRIP);
+    let ring = |at: Pos2, reach: f32| {
+        if lit(at) {
+            painter.circle_stroke(at, reach + 3.0, Stroke::new(2.0, Color32::WHITE));
+        }
+    };
+    let square = |at: Pos2| {
+        painter.rect_filled(
+            Rect::from_center_size(at, Vec2::splat(GRAB * 1.4)),
+            1.0,
+            accent,
+        );
+        ring(at, GRAB);
+    };
+    if let Some(at) = adds {
+        painter.circle_filled(at, GRAB * 0.7, Color32::WHITE);
+        painter.circle_stroke(at, GRAB * 0.7, stroke);
+    }
+    if !shown.sized() {
+        outline.into_iter().for_each(square);
+        return;
+    }
+    for corner in [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]] {
+        square(shown.screen(corner));
+    }
+    for side in [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]] {
+        painter.circle_filled(shown.screen(side), GRAB * 0.7, accent);
+        ring(shown.screen(side), GRAB * 0.7);
+    }
+    painter.line_segment([shown.screen([0.0, -1.0]), shown.turn_at()], stroke);
+    painter.circle_filled(shown.turn_at(), GRAB * 0.9, accent);
+    ring(shown.turn_at(), GRAB * 0.9);
 }

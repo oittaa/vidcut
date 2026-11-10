@@ -291,6 +291,8 @@ impl Workspace {
             GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
+            GuiPanel::EffectArea => self.show_effect_area(),
+            GuiPanel::Blur => self.blur_tool(true),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
         }
     }
@@ -382,6 +384,8 @@ impl Workspace {
                     g.tool = None;
                 }
             }
+            GuiPanel::EffectArea => self.timeline.picture_grab.area = None,
+            GuiPanel::Blur => self.blur_tool(false),
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
         }
     }
@@ -424,6 +428,11 @@ impl Workspace {
                 GuiPanel::DynamicZoom,
                 tool == Some(PictureTool::DynamicZoom),
             ),
+            (
+                GuiPanel::EffectArea,
+                self.timeline.picture_grab.area.is_some(),
+            ),
+            (GuiPanel::Blur, self.timeline.picture_grab.blurring()),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
         ];
         let (edit, edits) = self.selected_edit_points();
