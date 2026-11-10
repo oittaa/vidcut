@@ -2111,6 +2111,7 @@ fn our_picture(item: &Value) -> Option<Picture> {
     let paths = our_motion(item);
     for area in p.effects.iter_mut().filter_map(|e| e.area.as_mut()) {
         if let Some(id) = &area.follows
+            && crate::model::Subject::named(id).is_none()
             && !paths.iter().any(|m| m.id == *id)
         {
             area.follows = None;

@@ -60,11 +60,19 @@ impl PathSample {
 }
 
 impl MotionPath {
+    pub fn follows(&self, named: &str) -> bool {
+        self.id == named || self.subject.is_some_and(|s| s.name() == named)
+    }
+
     pub fn area_at(&self, frame: f64) -> Option<Area> {
         let s = &self.samples;
+        let (first, last) = self.span()?;
+        if frame < first as f64 || frame > last as f64 {
+            return None;
+        }
         let next = s.partition_point(|x| x.frame as f64 <= frame);
-        if next == 0 || next == s.len() {
-            return s.get(next.saturating_sub(1)).map(PathSample::area);
+        if next == s.len() {
+            return s.last().map(PathSample::area);
         }
         let (a, b) = (&s[next - 1], &s[next]);
         let t = (frame - a.frame as f64) / (b.frame - a.frame) as f64;

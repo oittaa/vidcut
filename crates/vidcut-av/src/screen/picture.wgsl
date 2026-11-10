@@ -1205,25 +1205,42 @@ fn effect_mixed(px: vec2<i32>, made: vec4<f32>, blend: f32, use_alpha: f32) -> v
 }
 
 struct Masking {
-    across: vec4<f32>,
-    down: vec4<f32>,
-    depth: vec4<f32>,
     how: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> masking: Masking;
+@group(0) @binding(3) var<storage, read> area_maps: array<f32>;
+
+fn area_reach(i: i32, at: vec3<f32>) -> f32 {
+    let o = i * 9;
+    let across = vec3<f32>(area_maps[o], area_maps[o + 1], area_maps[o + 2]);
+    let down = vec3<f32>(area_maps[o + 3], area_maps[o + 4], area_maps[o + 5]);
+    let far = vec3<f32>(area_maps[o + 6], area_maps[o + 7], area_maps[o + 8]);
+    let depth = dot(far, at);
+    if depth <= 1e-6 {
+        return 1e9;
+    }
+    let q = vec2<f32>(dot(across, at), dot(down, at)) / depth;
+    return select(length(q), max(abs(q.x), abs(q.y)), masking.how.x > 0.5);
+}
+
+fn area_inside(i: i32, xy: vec2<f32>) -> f32 {
+    let r = area_reach(i, vec3<f32>(xy, 1.0));
+    let across = area_reach(i, vec3<f32>(xy + vec2<f32>(1.0, 0.0), 1.0));
+    let down = area_reach(i, vec3<f32>(xy + vec2<f32>(0.0, 1.0), 1.0));
+    let band = max(max(masking.how.y, abs(across - r) + abs(down - r)), 1e-6);
+    let t = clamp((1.0 - r) / band, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
 
 @fragment
 fn fs_area(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
-    let at = vec3<f32>(in.position.xy, 1.0);
-    let depth = dot(masking.depth.xyz, at);
-    let q = vec2<f32>(dot(masking.across.xyz, at), dot(masking.down.xyz, at)) / max(depth, 1e-6);
-    let r = select(length(q), max(abs(q.x), abs(q.y)), masking.how.x > 0.5);
-    let band = max(max(masking.how.y, fwidth(r)), 1e-6);
-    let t = clamp((1.0 - r) / band, 0.0, 1.0);
-    let inside = select(0.0, t * t * (3.0 - 2.0 * t), depth > 1e-6);
-    let share = select(inside, 1.0 - inside, masking.how.z > 0.5);
+    var outside = 1.0;
+    for (var i = 0; i < i32(masking.how.w); i++) {
+        outside *= 1.0 - area_inside(i, in.position.xy);
+    }
+    let share = select(1.0 - outside, outside, masking.how.z > 0.5);
     return mix(textureLoad(blur_start, px, 0), textureLoad(blur_source, px, 0), share);
 }
 

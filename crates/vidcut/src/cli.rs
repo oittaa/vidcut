@@ -442,6 +442,7 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut effects set c3 1 --area '{\"shape\":\"box\",\"rotation\":15,\"softness\":0.3}'\n  \
          vidcut effects set c3 1 --area '{\"invert\":true}'\n  \
          vidcut effects set c3 1 --area '{\"follows\":\"p1\",\"size\":[1.2,1.2]}'\n  \
+         vidcut effects set c3 1 --area '{\"follows\":\"face\",\"size\":[1.3,1.3]}'\n  \
          vidcut effects set c3 1 --area '{\"follows\":null}'\n  \
          vidcut effects set c3 1 --area null",
     ),

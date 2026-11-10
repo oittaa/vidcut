@@ -75,8 +75,9 @@ In this file, a path is never a track of the timeline.
 **To do:**
 
 - **Area keyframes:** keyframes on the center, the size, the rotation and the softness of the area of an effect.
-- **The ends of a found path:** an area that follows a path shows before the first sample and after the last sample of the path.
-  - After a cut inside a clip, the blur of a found face thus stays at its last place. Decide whether the area hides there.
+- **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
+  - Try how many frames a found path must start early and end late.
+- **Cuts inside a clip:**
   - A path can continue across a cut inside a clip, on another face at the same place. Decide whether a cut ends each path.
 - **Faces, what is left:**
   - Check `motion.find` on a file with a rotation in its metadata. `subjects::find` turns the picture upright before the model sees it.
@@ -87,8 +88,9 @@ In this file, a path is never a track of the timeline.
   - The maker of YuNet gives face sizes from about 10 to 300 pixels. The model sees a picture with a longer side of 640 pixels.
     - Check a close shot where a face is larger than 300 of those pixels, and a wide shot with faces under 10.
     - Decide whether the model also sees the picture at another size.
-- **More subjects:** people, vehicles and animals, and number plates.
+- **More subjects:** number plates, text, people, vehicles and animals. The things that people blur most must be one choice each.
   - Find a number plate model that reads the plates of other countries.
+  - Find a text model with a license that fits.
 - **A drawn box:** one request tracks a box of the selected clip from the playhead, forward or backward.
   - The request tells the frame where it loses the subject. The user starts again from that frame.
 - **The Inspector and the viewer:** the buttons, the box on the picture, the list of paths, and the controls of the area of an effect.

@@ -573,7 +573,9 @@ Dynamic Zoom and keyframes (D75):
 - `Placed` also holds the motion paths that the areas of its effects follow (`render::Followed`, [model](model.md#motion-paths)).
   - `Followed::of` takes them from the clip, with the pace of the clip and the source frame of its first frame.
   - A path shares its samples with the clip (`MotionPath.samples`). Thus a placed picture copies no sample, and two plans of one project compare them by their place in memory.
-  - `Followed::base` gives the area of a path at the frame. It goes from the keyframe frame to the source frame through the pace.
+  - `Followed::bases` gives the area of each followed path that lasts at the frame. It goes from the keyframe frame to the source frame through the pace.
+  - `follows` names one path by its id, or each path of a subject (`MotionPath::follows`).
+  - `place::Masking` holds one map for each of these areas, and `fs_area` joins them in one pass. With no area at the frame, `Working::of` gives no work for the effect. With `invert` on, it then gives the work with no mask: the effect is on the whole picture.
   - Why: a path is on source frames, and the keyframe frame of a clip with a speed is a frame of the retimed source.
   - The paths are behind an `Arc`. Thus `Placed::after` copies no sample.
 
@@ -675,7 +677,8 @@ The draw:
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
 - `blur::landed` ends each effect, of each kind:
   - With an area, `fs_area` mixes the result with the picture that came in, by the area (`blur::area_bytes`). Without an area, it copies the result.
-  - `fs_area` fades the edge of the area over one pixel at least (`fwidth`). The softness makes that band wider, toward the middle.
+  - `fs_area` fades the edge of an area over one pixel at least (`area_inside`). The softness makes that band wider, toward the middle.
+  - `blur::area_maps` gives the shader the map of each area. A pixel takes the effect by the areas together (`area_reach`).
   - The coverage of a made frame goes through the same end. Thus its alpha changes only inside the area.
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.

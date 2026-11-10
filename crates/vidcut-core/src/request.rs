@@ -2737,9 +2737,9 @@ pub enum Request {
     MotionList {
         #[serde(default)]
         clips: Option<OneOrMany<ClipRef>>,
-        /// Each path also gives its `area` at this time: the source `frame`
-        /// of its clip there, and the `center`, `size` and `rotation` of the
-        /// area on it.
+        /// Each path that lasts at this time also gives its `area` there: the
+        /// source `frame` of its clip, and the `center`, `size` and `rotation`
+        /// of the area on it.
         #[serde(default)]
         at: Option<TimeSpec>,
         /// Each path also gives every sample.
@@ -2747,10 +2747,10 @@ pub enum Request {
         samples: bool,
     },
     /// Add a motion path to a clip of footage, a still or an image sequence
-    /// (`c3`, or `V2@15s`). Between two samples the area moves in a straight
-    /// line. Before the first sample it is where that sample puts it, and
-    /// after the last sample, where the last one puts it. The path stays on
-    /// its source frames through trims, slips, splits and speed changes.
+    /// (`c3`, or `V2@15s`). The path lasts from its first sample to its last:
+    /// before and after them it has no area. Between two samples the area
+    /// moves in a straight line. The path stays on its source frames through
+    /// trims, slips, splits and speed changes.
     /// Returns the `clip` and the id of the new `path`.
     #[serde(rename = "motion.add")]
     MotionAdd {
@@ -5009,11 +5009,13 @@ pub struct AreaChange {
     /// On, the effect works outside the area.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invert: Option<bool>,
-    /// The id of a motion path of the same clip (`motion.list`), as `p1`:
-    /// the base box is then the area of that path at each frame, so the
-    /// area moves with the path. With a `size` of `[1.2, 1.2]`, the area is
-    /// the path's box, a fifth larger. Null stops it, and the base box is
-    /// the whole source picture again.
+    /// The id of a motion path of the same clip (`motion.list`), as `p1`, or
+    /// a subject, as `face`: then each path that `motion.find` made for that
+    /// subject. The base box is then the area of a path at each frame, so
+    /// the area moves with the path, and the effect works in the area of
+    /// each path while that path lasts. With a `size` of `[1.2, 1.2]`, the
+    /// area is the path's box, a fifth larger. Null stops it, and the base
+    /// box is the whole source picture again.
     #[serde(
         default,
         deserialize_with = "given",
