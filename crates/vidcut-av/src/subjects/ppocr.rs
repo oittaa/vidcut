@@ -176,10 +176,13 @@ fn lines(map: &[f32], width: usize, content: (usize, usize)) -> Vec<Found> {
 pub fn name() -> String {
     let hundredths = |v: f32| (v * 100.0).round();
     format!(
-        "ppocr-{SIDE}-{}-{}-{}-blocks",
+        "ppocr-{SIDE}-{}-{}-{}-{}-{MOST}-{}-{}-blocks",
         hundredths(LEAST),
         hundredths(INK),
-        hundredths(GROW)
+        hundredths(GROW),
+        hundredths(SMALLEST),
+        hundredths(LONG),
+        hundredths(LEVEL)
     )
 }
 
