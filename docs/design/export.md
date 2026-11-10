@@ -45,7 +45,7 @@ flowchart TD
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
   - `render::flatten` works in stages. `planned_video` makes the pictures and `planned_audio` makes the sound.
   - `cuts_of` finds the frames where the picture changes. A `render::Span` is one track between two cuts. It gives the layers of that track and what they hide (`Drawn`).
-  - `uncovered` removes the layers that a higher layer hides.
+  - `uncovered` removes the layers that a higher layer hides. It also removes the layers of a compound clip that a Smooth Cut draws as one picture.
   - `piece_of` puts the layers of all tracks between two cuts into one `VideoPiece`.
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
   - A count with no default layout in FFmpeg uses the first channels of the 22.2 layout (`channel_layout`). Why: the mix needs a layout, and a stereo file then goes to the first two channels.
