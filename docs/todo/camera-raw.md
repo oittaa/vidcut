@@ -6,8 +6,7 @@ A camera RAW file holds the values of the sensor, before the camera makes a pict
 
 **Why:**
 
-- A timeline that goes to Resolve for the grade often starts from RAW files ([roadmap](../roadmap.md#use-cases)). vidcut must read them to cut them.
-- The Cut page Inspector has the Camera Raw settings of a clip.
+- The Cut page Inspector has the Camera Raw settings of a clip (p. 749).
 - Kdenlive and Shotcut list RAW on their roadmaps ([Kdenlive](https://kdenlive.org/roadmap/), [Shotcut](https://shotcutapp.com/roadmap/)).
 
 **What the manual says:**
@@ -42,5 +41,4 @@ A camera RAW file holds the values of the sensor, before the camera makes a pict
 - Check what vidcut does with each clip now: the probe, the picture, its colors and its proxy.
 - Measure what an OpenTimelineIO file keeps of the Camera Raw settings.
 - Decide Blackmagic RAW. Find a library that decodes it, and check its license against AGENTS.md rule 6.
-- Proxies first: the cut plays from a proxy, and Resolve reads the RAW file again for the grade.
 - The CLI, IPC and MCP perform the same action as the GUI.

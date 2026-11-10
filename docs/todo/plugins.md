@@ -7,7 +7,7 @@ A plugin is an effect that the code of another maker gives. vidcut loads no plug
 **Why:**
 
 - The picture effects and the sound tools of vidcut are a fixed set. A user who needs another one cannot add it.
-- The Cut page shows the installed plugins beside its own effects.
+- The Cut page shows the installed plugins beside its own effects (p. 765).
 - Kdenlive lists OpenFX, LV2 and VST on its [roadmap](https://kdenlive.org/roadmap/).
 
 **What the manual says:**
@@ -34,7 +34,7 @@ A plugin is an effect that the code of another maker gives. vidcut loads no plug
 
 - Measure the lines of the manual above in Resolve. The manual and the application can differ.
 - Decide the formats. Resolve has OpenFX, VST3 and Audio Units.
-  - CLAP and LV2 are not in Resolve. Record a deviation if vidcut gets one of them.
+  - The manual names neither CLAP nor LV2. Record a deviation if vidcut gets one of them.
   - Resolve has no VST effects on Linux (p. 4005). Decide the format for Linux.
 - Check the license of each SDK against the license of vidcut (AGENTS.md rule 6).
   - The VST 3 SDK is MIT from version 3.8 ([license](https://steinbergmedia.github.io/vst3_dev_portal/pages/VST+3+Licensing/VST3+License)).
