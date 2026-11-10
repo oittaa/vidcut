@@ -5477,6 +5477,7 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
             if let Some(picture) = c.picture.as_mut() {
                 picture.scale_times(&conv, &|_| ratio);
             }
+            crate::motion::rescale(&mut c.motion, conv);
             if let Some(title) = c.title.as_mut().filter(|t| t.is_keyed()) {
                 title.each_line(|line| {
                     let mut picture = line.as_picture();
@@ -5798,7 +5799,11 @@ fn place_imported(
             retime: crate::model::ClipRetime::Project,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
-            motion: Vec::new(),
+            motion: if c.video {
+                c.motion.clone()
+            } else {
+                Vec::new()
+            },
         });
         placed.insert(track_of(&c.track));
     }

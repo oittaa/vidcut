@@ -3096,7 +3096,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Between two samples, the area goes in a line. Outside the samples, it stays where the nearest sample put it.
   - A path stays on its source frames through a trim, a slip, a split, a copy and a speed change.
   - Nothing follows a path, and vidcut finds no motion in a picture ([todo](todo/motion-tracking.md)).
-  - An OpenTimelineIO file does not carry a path.
+  - An OpenTimelineIO file keeps the paths in its `vidcut` metadata. Other editors do not read them.
 - **Why:**
   - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
   - The path is apart from the keyframes, as the tracking data of the Color page is. Thus a new path keeps the keyframes that the user set.

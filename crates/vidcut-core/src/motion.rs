@@ -149,3 +149,12 @@ pub fn put(samples: &[PathSample], new: &[PathSample]) -> Vec<PathSample> {
 pub fn clear(samples: &mut Vec<PathSample>, (first, last): (i64, i64)) {
     samples.retain(|s| s.frame < first || s.frame > last);
 }
+
+pub fn rescale(paths: &mut [MotionPath], conv: impl Fn(i64) -> i64) {
+    for path in paths {
+        for s in &mut path.samples {
+            s.frame = conv(s.frame);
+        }
+        path.samples.dedup_by_key(|s| s.frame);
+    }
+}
