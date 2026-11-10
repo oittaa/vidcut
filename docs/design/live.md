@@ -373,6 +373,7 @@ The bar and the Jobs button:
   - A press on the shown area goes to `Workspace::area_controls`. A press on another area of the clip first makes that area the shown one.
   - `Workspace::blur_controls` also runs with the tool off. It then paints the outline of each area of the selected clip.
     - A click on an outline makes that area the shown one. A click outside the areas shows none.
+    - With a picture tool on (`Grab::tool`), it takes no pointer. Thus `Workspace::picture_controls` gets each press.
     - `Grab::blurring` tells whether a drag draws a new area. With the tool off, no drag starts on an area that is not the shown one.
   - `Workspace::blur_tools` is the row of the tool: the shapes, one button for each `Subject` (`Workspace::subject_blur`) and Delete.
 

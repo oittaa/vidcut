@@ -3138,6 +3138,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Follow lists None, All Faces, All Text and the motion paths of the clip. All Faces sends the subject `face`. Each change sends `effects.set` with `area`.
   - The viewer shows a thin outline of each area of the selected clip at the playhead.
     - A click on an outline, or inside it, shows the handles of that area. A click outside the areas hides the handles.
+    - With Transform, Crop or Dynamic Zoom on, the outlines show and take no click. The pointer then works that tool.
     - With no clip selected, the viewer shows no outline. Thus it shows the picture of an export.
     - Why: the user sees where each effect works, with no tool open.
   - Edit Shape shows the handles of the area in the viewer. `gui.show effect_area` shows them for the first effect of the clip that has an area.

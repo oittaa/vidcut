@@ -2020,6 +2020,9 @@ impl Workspace {
                 Stroke::new(1.0, accent.gamma_multiply(0.6)),
             );
         }
+        if self.timeline.picture_grab.tool.is_some() {
+            return false;
+        }
         let over = if resp.drag_started() {
             ui.input(|i| i.pointer.press_origin())
         } else {
