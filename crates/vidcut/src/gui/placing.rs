@@ -1757,9 +1757,13 @@ impl Workspace {
         let p = self.project_shared()?;
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         let c = self.area_clip(&p, at)?;
+        let wanted = || {
+            let mut wanted = self.picture_wanted().into_iter();
+            wanted.find(|(id, _)| *id == c.id).map(|(_, x)| x)
+        };
         let shown = match held {
             Some(h) if h.clip == c.id => h.start.clone(),
-            _ => c.picture.clone().unwrap_or_default(),
+            _ => wanted().unwrap_or_else(|| c.picture.clone().unwrap_or_default()),
         };
         let area = shown.effects.get(n)?.area.clone()?;
         let source = c.source_at(at) as f64;
@@ -2107,10 +2111,11 @@ impl Workspace {
             self.timeline.picture_grab.area_held = Some(held);
         }
         let mut busy = held.is_some() || hover.is_some();
+        let mut dropped = false;
         if resp.drag_stopped()
             && let Some(held) = self.timeline.picture_grab.area_held.take()
         {
-            busy = true;
+            (busy, dropped) = (true, true);
             self.land_area(&held);
         }
         self.area_points(ui, resp, &shown);
@@ -2126,6 +2131,7 @@ impl Workspace {
                 area,
                 s: shown.s,
             },
+            None if dropped => self.area_shown(picture, None).unwrap_or(shown),
             None => shown,
         };
         let hot = pointer.filter(|_| held.is_some() || hover.is_some());
