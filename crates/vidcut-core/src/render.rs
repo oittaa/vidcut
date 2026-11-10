@@ -3284,7 +3284,7 @@ impl<'a> Span<'a> {
             let bare = without_mode(c);
             let drawn = bare.as_ref().unwrap_or(c);
             let mut piece = self.laid(drawn, nest, below, &[])?;
-            let moved = |p: &Placed| !fills(c) || !p.picture.is_usual();
+            let moved = |p: &Placed| !fills(drawn) || !p.picture.is_usual();
             let backward = mode != SmoothMode::Faster && c.pace().speed() < 0.0;
             if backward || piece.placed().first().is_some_and(moved) {
                 let mut wide = widened(c, d.frames);
