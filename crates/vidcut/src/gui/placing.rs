@@ -104,6 +104,7 @@ pub struct Grab {
     pub(crate) area: Option<usize>,
     blur: bool,
     shape: AreaShape,
+    blurred: Option<String>,
     drawn: Option<(String, Vec<[f64; 2]>)>,
     area_held: Option<AreaHeld>,
     held: Option<Held>,
@@ -744,9 +745,11 @@ impl Workspace {
         let g = &mut self.timeline.picture_grab;
         g.blur = on;
         g.drawn = None;
+        g.blurred = None;
         g.area_held = None;
         if on {
             g.tool = None;
+            g.row = true;
             self.select_shown();
         } else {
             g.area = None;
@@ -1756,10 +1759,18 @@ impl Workspace {
         self.area_at(picture, self.timeline.picture_grab.area?, held)
     }
 
+    fn area_clip<'a>(&self, p: &'a Project, at: i64) -> Option<&'a Clip> {
+        let chosen = target(p, &self.snap.selection.clips, at);
+        if chosen.is_some() || !self.timeline.picture_grab.blurring() {
+            return chosen;
+        }
+        p.clip(&topmost(p, at)?)
+    }
+
     fn area_at(&self, picture: Rect, n: usize, held: Option<&AreaHeld>) -> Option<AreaShown> {
         let p = self.project_shared()?;
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
-        let c = target(&p, &self.snap.selection.clips, at)?;
+        let c = self.area_clip(&p, at)?;
         let shown = match held {
             Some(h) if h.clip == c.id => h.start.clone(),
             _ => c.picture.clone().unwrap_or_default(),
@@ -1951,10 +1962,17 @@ impl Workspace {
         let Some(p) = self.project_shared() else {
             return false;
         };
-        let clip = target(&p, &self.snap.selection.clips, at);
+        let clip = self.area_clip(&p, at);
         let g = &mut self.timeline.picture_grab;
         if g.drawn.as_ref().map(|(id, _)| id) != clip.map(|c| &c.id) {
             g.drawn = None;
+        }
+        if g.blurred.as_ref() != clip.map(|c| &c.id) {
+            if g.blurred.is_some() {
+                g.area = None;
+                g.area_held = None;
+            }
+            g.blurred = clip.map(|c| c.id.clone());
         }
         let Some(c) = clip else {
             return false;
@@ -2002,6 +2020,10 @@ impl Workspace {
         let Some(over) = over.filter(|p| picture.contains(*p)) else {
             return false;
         };
+        let pressed = resp.clicked() || resp.drag_started();
+        if pressed && !self.snap.selection.clips.contains(&c.id) {
+            self.send("selection.set", json!({ "clips": [c.id] }));
+        }
         let shown = active.and_then(|n| self.area_at(picture, n, None));
         if shown.is_some_and(|a| a.on(over)) {
             return false;

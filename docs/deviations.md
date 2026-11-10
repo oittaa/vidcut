@@ -3139,6 +3139,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - On a polygon, a drag moves a point. A click on a side adds a point, and a middle-click on a point removes it.
     - The pointer shows what a drag does. The handle under the pointer has a white ring.
   - The Tools row under the viewer has Blur ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). `gui.show blur` turns it on.
+    - The right-click menu of a clip has Blur. It shows the Tools row with Blur on, for that clip.
+    - The tool works on the selected clip at the playhead, else on the top clip there. A press in the picture selects that clip.
     - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
     - With Free Shape, each click adds a point. A click on the first point, or a double-click, closes the shape. Escape drops it.
     - A new blur is one `apply` of `effects.add` and `effects.set`. Thus it is one undo step. Its handles show at once.
