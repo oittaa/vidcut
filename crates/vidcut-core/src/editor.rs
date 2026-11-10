@@ -4349,7 +4349,8 @@ fn mutate(
             for (id, media, frames) in looks {
                 let look = subject_look(&media, fps, frames);
                 let found = env.subjects(&media, *subject, look, *download)?;
-                let tracks = crate::motion::joined(&found, media.origin(), fps, frames);
+                let rules = crate::motion::Join::of(*subject);
+                let tracks = crate::motion::joined(&found, media.origin(), fps, frames, &rules);
                 out.push(ops::motion::found(p, id, *subject, tracks)?);
             }
             json!({ "clips": out })

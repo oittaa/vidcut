@@ -3097,7 +3097,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths. A script gives the samples.
   - A path lasts from its first sample to its last. Before and after them it has no area. Between two samples, the area goes in a line.
   - A path stays on its source frames through a trim, a slip, a split, a copy and a speed change.
-  - The area of an effect can follow a path ([X166](#x166-an-effect-has-an-area)). `motion.find` makes a path for each face ([X167](#x167-vidcut-finds-the-faces-of-a-clip)).
+  - The area of an effect can follow a path ([X166](#x166-an-effect-has-an-area)). `motion.find` makes a path for each face or each block of text ([X167](#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
   - An OpenTimelineIO file keeps the paths in its `vidcut` metadata. Other editors do not read them.
 - **Why:**
   - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
@@ -3128,7 +3128,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A cut that vidcut delivers does not go through another page.
   - One rule gives each of the six effects an area.
 
-## X167. vidcut finds the faces of a clip
+## X167. vidcut finds the faces and the text of a clip
 
 - **Resolve:**
   - The Close Up edit of the Cut page does a face detection, and puts a face that it finds in the frame (p. 699).
@@ -3136,16 +3136,29 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Face Refinement is a Resolve FX of Resolve Studio. Detect Faces in Frame draws a box on each face (p. 3615).
     - The user chooses one face. The tracking controls of the effect then follow it through the clip (pp. 3615–3616).
   - The manual names no way to make tracking data for each face of a clip on the Cut page ([X165](#x165-a-clip-has-motion-paths)).
+  - A search of the whole manual finds no tool that finds text in a picture.
+    - A number plate is only an example for the Planar Tracker node of the Fusion page, where the user sets the track (p. 2820).
 - **vidcut:**
-  - `motion.find` finds the faces on the source frames that a clip shows. Each face gets a motion path: `Face 1`, `Face 2`.
-  - A face that is not found for up to a second, and then shows near the same place, stays on its path.
-  - A face that is found with confidence on fewer frames than half a second has gets no path.
-  - The request gives the gaps of each path: the frames where it did not find the face. The area goes in a line across a gap.
-  - A path keeps only the samples that it needs. Between them, the line is at most a twentieth of the size of the face off.
-  - A second `motion.find` on a clip needs `replace`. It then takes the earlier face paths off first.
-  - The model is YuNet, on the CPU. Its file of 233 kB downloads when the request has `download`.
-  - A cut inside a clip ends a path, or continues it on another face at the same place. vidcut does not tell faces apart.
+  - `motion.find` finds the things of one subject on the source frames that a clip shows. The subjects are `face` and `text`.
+  - Each thing gets a motion path: `Face 1`, `Face 2`, or `Text 1`, `Text 2`.
+  - **Faces:**
+    - A face that is not found for up to a second, and then shows near the same place, stays on its path.
+    - A face that is found with confidence on fewer frames than half a second has gets no path.
+    - The model is YuNet, on the CPU. Its file of 233 kB downloads when the request has `download`.
+    - A cut inside a clip ends a path, or continues it on another face at the same place. vidcut does not tell faces apart.
+  - **Text:**
+    - A path is a line of text, or a block of lines that are near each other.
+    - A line that leans gets an area that leans with it.
+    - A thing gets a path only when the model finds it for a second, on four of each five frames.
+      - Why: a pattern that looks like text comes and goes from frame to frame.
+    - The model is the mobile detection model of PP-OCRv5, on the CPU. Its file of 4.8 MB downloads when the request has `download`.
+    - The model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
+  - The request gives the gaps of each path: the frames where it did not find the thing. The area goes in a line across a gap.
+  - The request gives the score of each path: how sure the model is, as the mean of its frames.
+  - A path keeps only the samples that it needs. Between them, the line is at most a twentieth of the size of the thing off.
+  - A second `motion.find` of one subject on a clip needs `replace`. It then takes the earlier paths of that subject off first.
   - The Inspector and the viewer have no control for it ([todo](todo/motion-tracking.md)).
 - **Why:**
   - A blur must cover each face of a clip, and the user must not draw each one.
+  - Text is the next thing that people hide: names, addresses, documents and screens.
   - One request gives the paths. The area of an effect then follows a path ([X166](#x166-an-effect-has-an-area)).

@@ -114,8 +114,8 @@ pub fn inspect(
                 loaded: Some("tract"),
             })
         }
-        "yunet" => {
-            crate::subjects::inspect(dir, vidcut_core::model::Subject::Face, download)?;
+        id if crate::subjects::of(id).is_some() => {
+            crate::subjects::inspect(dir, crate::subjects::of(id).expect("listed"), download)?;
             Ok(Inspected {
                 found,
                 loaded: Some("tract"),

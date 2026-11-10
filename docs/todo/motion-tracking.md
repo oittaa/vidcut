@@ -40,7 +40,7 @@ In this file, a path is never a track of the timeline.
 - Transform, Crop and the values of the effects have keyframes ([keyframes.md](keyframes.md)).
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path ([deviation X166](../deviations.md#x166-an-effect-has-an-area)).
-- `motion.find` finds the faces of a clip with a detector model ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-of-a-clip)).
+- `motion.find` finds the faces and the text of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
 - No request follows a point or a drawn box, and no request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
 
@@ -88,9 +88,15 @@ In this file, a path is never a track of the timeline.
   - The maker of YuNet gives face sizes from about 10 to 300 pixels. The model sees a picture with a longer side of 640 pixels.
     - Check a close shot where a face is larger than 300 of those pixels, and a wide shot with faces under 10.
     - Decide whether the model also sees the picture at another size.
-- **More subjects:** number plates, text, people, vehicles and animals. The things that people blur most must be one choice each.
-  - Find a number plate model that reads the plates of other countries.
-  - Find a text model with a license that fits.
+- **More subjects:** number plates, people, vehicles and animals. The things that people blur most must be one choice each.
+  - A search on 2026-11-10 found no number plate model that has a clear license, a small size and plates of many countries.
+    - The models with a clear license know the plates of one country, or have about 40 MB and attention layers.
+  - Check on a picture with a number plate whether the text subject finds its characters. No test clip has a number plate.
+  - YOLOX-S finds people, vehicles, animals and screens.
+- **Text, the open parts:**
+  - Very small text: try a longer side above 960 pixels for a large source, and measure the time.
+  - Text that comes into the picture has no blur on its first frames, as a face has not.
+  - The detector takes most of the time of a text find. Try the model on the GPU.
 - **A drawn box:** one request tracks a box of the selected clip from the playhead, forward or backward.
   - The request tells the frame where it loses the subject. The user starts again from that frame.
 - **The Inspector and the viewer:** the buttons, the box on the picture, the list of paths, and the controls of the area of an effect.

@@ -1853,23 +1853,31 @@ pub enum Subject {
     /// them. Its file (233 kB) downloads at its first use.
     #[default]
     Face,
+    /// Lines of text: signs, captions, documents and screens. A small
+    /// neural network (PP-OCRv5) on the CPU finds them. Its file (4.8 MB)
+    /// downloads at its first use.
+    Text,
 }
 
 impl Subject {
+    pub const ALL: [Self; 2] = [Self::Face, Self::Text];
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Face => "face",
+            Self::Text => "text",
         }
     }
 
     pub fn title(self) -> &'static str {
         match self {
             Self::Face => "Face",
+            Self::Text => "Text",
         }
     }
 
     pub fn named(name: &str) -> Option<Self> {
-        [Self::Face].into_iter().find(|s| s.name() == name)
+        Self::ALL.into_iter().find(|s| s.name() == name)
     }
 }
 

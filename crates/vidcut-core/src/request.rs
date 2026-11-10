@@ -2795,13 +2795,19 @@ pub enum Request {
     /// or image sequences, and give each thing a motion path. It looks at
     /// the source frames that each clip shows. A thing that is not found for
     /// up to a second, and then shows near the same place, stays on its path.
-    /// A thing found for under half a second gets no path. The paths get
-    /// names in the order the things first show: `Face 1`, `Face 2`.
+    /// A face found for under half a second gets no path. Text gets a path
+    /// when it is found for a second, on four of each five frames; lines
+    /// that are near each other are one block with one path, and a line
+    /// that leans gets an area that leans with it. The paths get names in
+    /// the order the things first show: `Face 1`, `Face 2`, or `Text 1`,
+    /// `Text 2`.
     ///
     /// Returns each clip with its new `paths`: the `id`, the `name`, the
     /// `count` of its samples, the source frames `first` and `last` of them,
-    /// and the `gaps`: the ranges of source frames between them where the
-    /// thing was not found. The area moves in a straight line across a gap.
+    /// the `score` (how sure the model is, from 0 to 1, the mean of the
+    /// frames it was `seen` on), and the `gaps`: the ranges of source
+    /// frames between them where the thing was not found. The area moves in
+    /// a straight line across a gap.
     #[serde(rename = "motion.find")]
     MotionFind {
         clips: OneOrMany<ClipRef>,
