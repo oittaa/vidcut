@@ -4088,7 +4088,30 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The fall starts Lookahead + Rise Time + 10 to 15 ms before the source.
     - The recovery starts Hold + 1 to 21 ms after the source ends.
     - The recovery lasts the Recovery Time.
-    - A stereo target track has other times (X68). The fall with a Rise Time of 10 ms has another shape (X69).
+    - The fall with a Rise Time of 10 ms has another shape (X69).
+  - **A stereo target track in Resolve** (X68):
+    - The left channel of the target had a sine, and the right channel a cosine. Thus the gain of each channel is known.
+    - The times are for the right channel, in ms. They count as in the mono table.
+
+    | Duck Amount | Lookahead | Rise Time | Hold | Recovery Time | Fall starts | Full dip | Recovery starts | Recovery ends |
+    |---|---|---|---|---|---|---|---|---|
+    | 2.7 | 15 | 10 | 150 | 750 | −40 | −30 | +60 | +430 |
+    | 10 | 15 | 10 | 150 | 750 | −40 | −26 | +60 | +430 |
+    | 10 | 15 | 200 | 150 | 750 | −230 | −130 | −29 | +348 |
+    | 10 | 15 | 10 | 500 | 750 | −40 | −26 | +231 | +608 |
+    | 10 | 15 | 10 | 150 | 1000 | −40 | −26 | +60 | +556 |
+    | 10 | 100 | 10 | 150 | 750 | −120 | −106 | +20 | +390 |
+
+    - Rise Time, Hold and Recovery Time act at half their values.
+    - The fall starts at the same time as on a mono track.
+    - The fall with a Rise Time of 200 ms lasts 100 ms. The recovery lasts 376 ms at 750, and 500 ms at 1000.
+    - The recovery starts (Hold − Lookahead − Rise Time) / 2 after the source ends, to within 7 ms.
+    - The recovery, and the fall with a Rise Time of 200 ms, are half cosines, as on a mono track.
+    - The two channels get different gains while the gain changes:
+      - At 10 dB with a Rise Time of 10 ms, the right channel falls 8.2 dB in the first 16 samples. The left channel falls 0.4 dB.
+      - In a fall, the gain of each channel jumps at the 10 ms steps.
+      - In the recovery, the left channel is 1 to 9 ms later than the right, and 0.2 dB apart at most.
+    - The cause of these differences is not known.
   - **vidcut's gain**, for a Duck Amount of A dB:
     - A source is active from s to e.
     - The fall starts at s − Lookahead − Rise Time, and ends at s − Lookahead.
