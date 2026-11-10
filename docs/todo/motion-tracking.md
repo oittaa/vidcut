@@ -1,25 +1,38 @@
 # Motion tracking
 
-**When:** not decided.
+**When:** now, one pull request for each step below.
 
-A track is the path of a point or an area of the picture through the frames of a clip. vidcut makes no track.
+A motion path is the path of an area of the picture through the frames of a clip. vidcut makes no motion path.
+
+In this file, a path is never a track of the timeline.
 
 **Why:**
 
 - A blur over a face or a number plate must follow it.
 - A title or a picture that points at a thing must follow it.
-- Without a track, the user sets a keyframe by hand at each move.
+- Without a motion path, the user sets a keyframe by hand at each move.
 
 **What the manual says:**
 
 - A search of the Cut page chapters (pp. 635–791) finds the Tracker palette only under Stabilization (pp. 738, 770).
 - The Tracker palette of the Color page has three modes: Window, Stabilizer and FX (p. 3308).
   - Window mode moves a Power Window with a feature of the frame.
+  - Stabilizer mode uses the same technology to steady the whole frame.
   - FX mode moves a Resolve FX or an OFX plugin that has position controls. It uses a point tracker.
+- A track starts at the playhead. It runs forward to the last frame of the clip, or backward to the first (p. 3308).
+  - One command tracks one frame (p. 3309).
+- A track holds Pan, Tilt, Zoom, Rotate and Perspective 3D. The user chooses them before the track (p. 3313).
+- The tracking data is apart from the values of the window, and those values can have keyframes (p. 3309).
+  - A change of the window after the track offsets it from the tracked path.
+  - A tracked effect takes an offset in the same way (p. 3495).
+- A new track of a window replaces its tracking data (p. 3309).
+- On a frame with no tracking data, the window stays where the first or the last tracked frame put it (p. 3310).
+- Clear Selected Track Data removes a part of the data. Resolve then goes in a line across that part (p. 3315).
+- Copy Track Data and Paste Track Data move a track between an effect and a window (p. 3311).
 - On the Color page, a Resolve FX with position parameters takes a track (p. 3494).
   - The manual names Dent, Lens Flare, Light Rays, Mirrors, Radial Blur, Ripples, Vortex and Zoom Blur.
 - IntelliTrack is a second point tracker of FX mode. Only Resolve Studio has it (p. 3496).
-- Copy Track Data and Paste Track Data move a track between an effect and a window (p. 3311).
+- The scripting API of Resolve Studio 21.2 has no call that makes or reads a track.
 
 **In the code:**
 
@@ -27,17 +40,58 @@ A track is the path of a point or an area of the picture through the frames of a
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - No effect has an area. `MosaicBlur::position` places its grid, and `Vignette::center` places its middle.
 - No request analyzes the motion of a picture. [Stabilization](stabilization.md) needs such an analysis too.
-- A [subject mask](subject-masks.md) is a matte that a track can move.
+- A [subject mask](subject-masks.md) is a matte that a motion path can move.
+
+**How:**
+
+- **A motion path is data of its own on a clip.** It is not keyframes.
+  - Why: Resolve keeps the two apart. A new path then keeps the keyframes that the user set by hand, and one path can move several things.
+  - A sample has a position, a size and a rotation on one source frame. They are fractions of the source picture.
+  - Between two samples, the path goes in a line. Before the first sample and after the last, it holds that sample.
+- **A value follows a path.** Its own number and its keyframes are then an offset from the path.
+- **vidcut finds the motion in two ways:**
+  - A detector model finds each subject of one kind on each frame, with no click. vidcut joins the boxes of one subject into a path.
+  - A tracker follows a box that the user draws, from the playhead forward or backward.
+- **An effect gets an area:** a box or an ellipse with a soft edge. The effect shows only inside it. The area follows a path.
+- Each of these is more than the Cut page has. The pull request that builds a part records its deviation.
+
+**The models** (read on 2026-11-10 from the pages of their makers):
+
+| Subject | Model | File | License |
+|---|---|---|---|
+| A face | YuNet, from OpenCV Zoo | 233 kB | MIT |
+| A number plate | LPD-YuNet, from OpenCV Zoo | 4.15 MB | Apache 2.0 |
+| A person, a vehicle, an animal and the other COCO classes | YOLOX-S, from OpenCV Zoo | 35.9 MB | Apache 2.0 |
+| A drawn box | VitTrack, from OpenCV Zoo | 715 kB | Apache 2.0 |
+| A subject with its matte | EdgeTAM, or SAM 2.1 tiny | not read | Apache 2.0 |
+
+- LPD-YuNet learned from Chinese number plates. Its maker says that it can miss other plates.
+- YOLOX has smaller sizes at its maker: Nano with 0.91 M parameters, and Tiny with 5.06 M.
+- EgoBlur finds faces and number plates under Apache 2.0. Each of its two models is about 400 MB.
+- These do not fit:
+  - CoTracker3: its license is CC BY-NC 4.0.
+  - The number plate detectors of open-image-models: the page gives no license for the model files.
+  - D-FINE: the page gives no license for the COCO model files, and it gives no ONNX file.
+- Not checked: how well each model holds on real clips.
 
 **To do:**
 
-- Measure the lines of the manual above in Resolve. The manual and the application can differ.
-- Measure whether a track of the Color page plays on the Cut page, and what Follow FX Tracker does with it.
-- Record a deviation if the Cut page makes no track and this item is built.
-- Measure what an OpenTimelineIO file keeps of a track.
-- Decide what a track gives: keyframes of values that already have them, or a path of its own.
-- One request tracks a point or a box of the selected clip from the playhead, forward or backward.
-- The request tells the frame where it loses the subject. The user starts again from that frame.
-- A blur with an area: an effect needs a box or an ellipse before a track can move it.
-- The viewer and the export play the same result.
-- The CLI, IPC and MCP perform the same action as the GUI.
+- **Motion paths:** the type on a clip, and the requests that add, list, change and remove a path.
+  - A split, a trim, a copy and a speed change keep the path on its source frames.
+- **Effect area:** the box or the ellipse on an effect, and the path that it follows.
+  - The viewer and the export play the same result.
+- **Faces:** one request finds the faces of the selected clip and makes a path for each.
+  - A missing model asks for a download and checks a SHA-256, as the other local models do.
+  - The request tells the frames where it loses a face.
+- **More subjects:** people, vehicles and animals, and number plates.
+  - Find a number plate model that reads the plates of other countries.
+- **A drawn box:** one request tracks a box of the selected clip from the playhead, forward or backward.
+  - The request tells the frame where it loses the subject. The user starts again from that frame.
+- **The Inspector and the viewer:** the buttons, the box on the picture, and the list of paths.
+- **Titles and clips follow a path** of another clip.
+- **A subject with its matte:** with [subject masks](subject-masks.md).
+- **Resolve measurement:**
+  - Measure the lines of the manual above in Resolve. The manual and the application can differ.
+  - Measure whether a track of the Color page plays on the Cut page, and what Follow FX Tracker does with it.
+  - Measure what an OpenTimelineIO file keeps of a track.
+- The CLI, IPC and MCP perform the same action as the GUI, in each step.
