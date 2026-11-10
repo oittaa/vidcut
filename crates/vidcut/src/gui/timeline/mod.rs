@@ -4223,6 +4223,7 @@ mod tests {
             retime: vidcut_core::model::ClipRetime::Project,
             color: None,
             render_cache: vidcut_core::model::ClipCache::Auto,
+            motion: Vec::new(),
         }
     }
 

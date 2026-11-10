@@ -3080,3 +3080,23 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The mode of one picture always mixes with the tracks below.
 - **Why:**
   - A move of 1 pixel must not change a black frame to the correct picture. This behavior of Resolve is a fault.
+
+## X165. A clip has motion paths
+
+- **Resolve:**
+  - The Cut page makes no track of a thing in the picture. Its chapters name the Tracker palette only under Stabilization (pp. 738, 770).
+  - The Tracker palette of the Color page moves a window or an effect with a feature of the frame (pp. 3308, 3494).
+  - Its tracking data is apart from the values of the window, and those values can have keyframes (p. 3309).
+  - On a frame with no tracking data, the window stays where the first or the last tracked frame put it (p. 3310).
+  - Clear Selected Track Data removes a part of the data. Resolve then goes in a line across that part (p. 3315).
+  - The scripting API of Resolve Studio 21.2 has no call that makes or reads a track.
+- **vidcut:**
+  - A clip of footage, a still or an image sequence has motion paths. A motion path tells where one area of the source picture is on each source frame.
+  - `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths. A script gives the samples.
+  - Between two samples, the area goes in a line. Outside the samples, it stays where the nearest sample put it.
+  - A path stays on its source frames through a trim, a slip, a split, a copy and a speed change.
+  - Nothing follows a path, and vidcut finds no motion in a picture ([todo](todo/motion-tracking.md)).
+  - An OpenTimelineIO file does not carry a path.
+- **Why:**
+  - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
+  - The path is apart from the keyframes, as the tracking data of the Color page is. Thus a new path keeps the keyframes that the user set.

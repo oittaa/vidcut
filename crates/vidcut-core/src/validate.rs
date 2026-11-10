@@ -79,6 +79,9 @@ pub fn violations(p: &Project) -> Vec<String> {
             if let Some(e) = crate::ops::picture::violation(p, i, c) {
                 v.push(e);
             }
+            if let Some(e) = crate::ops::motion::violation(c) {
+                v.push(e);
+            }
             if c.is_block() {
                 let video = (c.is_generator() && !c.is_offline()) || t.kind == TrackKind::Video;
                 if !c.media.is_empty()

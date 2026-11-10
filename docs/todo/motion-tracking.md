@@ -2,7 +2,7 @@
 
 **When:** now, one pull request for each step below.
 
-A motion path is the path of an area of the picture through the frames of a clip. vidcut makes no motion path.
+A motion path is the path of an area of the picture through the frames of a clip. A clip stores motion paths ([model](../design/model.md#motion-paths)). vidcut finds no motion in a picture, and nothing follows a path.
 
 In this file, a path is never a track of the timeline.
 
@@ -36,6 +36,7 @@ In this file, a path is never a track of the timeline.
 
 **In the code:**
 
+- A clip holds motion paths, and `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read them ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
 - Transform, Crop and the values of the effects have keyframes ([keyframes.md](keyframes.md)).
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - No effect has an area. `MosaicBlur::position` places its grid, and `Vignette::center` places its middle.
@@ -44,11 +45,8 @@ In this file, a path is never a track of the timeline.
 
 **How:**
 
-- **A motion path is data of its own on a clip.** It is not keyframes.
-  - Why: Resolve keeps the two apart. A new path then keeps the keyframes that the user set by hand, and one path can move several things.
-  - A sample has a position, a size and a rotation on one source frame. They are fractions of the source picture.
-  - Between two samples, the path goes in a line. Before the first sample and after the last, it holds that sample.
 - **A value follows a path.** Its own number and its keyframes are then an offset from the path.
+  - Why: Resolve keeps the tracking data apart from the values. A new path then keeps the keyframes that the user set by hand.
 - **vidcut finds the motion in two ways:**
   - A detector model finds each subject of one kind on each frame, with no click. vidcut joins the boxes of one subject into a path.
   - A tracker follows a box that the user draws, from the playhead forward or backward.
@@ -76,8 +74,7 @@ In this file, a path is never a track of the timeline.
 
 **To do:**
 
-- **Motion paths:** the type on a clip, and the requests that add, list, change and remove a path.
-  - A split, a trim, a copy and a speed change keep the path on its source frames.
+- **Paths in a file:** an OpenTimelineIO file keeps the paths of a clip in its `vidcut` metadata.
 - **Effect area:** the box or the ellipse on an effect, and the path that it follows.
   - The viewer and the export play the same result.
 - **Faces:** one request finds the faces of the selected clip and makes a path for each.

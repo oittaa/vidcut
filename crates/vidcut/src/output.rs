@@ -33,6 +33,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 | "effects"
                 | "speed"
                 | "generators"
+                | "motion"
         )
     ) && !matches!(
         method,
@@ -53,6 +54,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
             | "marks.get"
             | "markers.list"
             | "picture.get"
+            | "motion.list"
     );
     if mutation {
         if r.dry_run {
@@ -93,6 +95,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
         }
         if let Some(track) = r.result.get("track").and_then(Value::as_str) {
             println!("  on       {track}");
+        }
+        if method == "motion.add"
+            && let Some(path) = r.result.get("path").and_then(Value::as_str)
+        {
+            println!("  path     {path}");
         }
         if let Some(removed) = r.result.get("removed").and_then(Value::as_array) {
             if let Some(frames) = r.result.get("frames") {
