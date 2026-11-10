@@ -623,6 +623,22 @@ impl Followed {
         followed.filter_map(|m| m.area_at(frame)).collect()
     }
 
+    pub fn stamp_at(&self, source: i64) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let frame = (self.from + self.pace.offset(source - self.key)) as f64;
+        let mut hasher = std::hash::DefaultHasher::new();
+        for m in self.paths.iter() {
+            if let Some(area) = m.area_at(frame) {
+                m.id.hash(&mut hasher);
+                let numbers = area.center.iter().chain(&area.size).chain([&area.rotation]);
+                for v in numbers {
+                    v.to_bits().hash(&mut hasher);
+                }
+            }
+        }
+        hasher.finish()
+    }
+
     pub fn at(&self, source: i64) -> Self {
         let held = |m: &MotionPath| {
             let area = m.area_at((self.from + self.pace.offset(source - self.key)) as f64)?;
