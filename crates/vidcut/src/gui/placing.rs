@@ -1552,6 +1552,22 @@ fn area_change(from: &EffectArea, to: &EffectArea) -> Option<Value> {
 }
 
 impl Workspace {
+    pub(super) fn show_effect_area(&mut self) {
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(c) = target(&p, &self.snap.selection.clips, at) else {
+            return;
+        };
+        let effects = c.picture.iter().flat_map(|x| &x.effects);
+        let Some(n) = effects.into_iter().position(|e| e.area.is_some()) else {
+            return;
+        };
+        self.timeline.picture_grab.area = Some(n);
+        self.timeline.picture_grab.tool = None;
+    }
+
     fn area_shown(&self, picture: Rect, held: Option<&AreaHeld>) -> Option<AreaShown> {
         let n = self.timeline.picture_grab.area?;
         let p = self.project_shared()?;

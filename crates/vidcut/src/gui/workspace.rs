@@ -291,6 +291,7 @@ impl Workspace {
             GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
+            GuiPanel::EffectArea => self.show_effect_area(),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
         }
     }
@@ -382,6 +383,7 @@ impl Workspace {
                     g.tool = None;
                 }
             }
+            GuiPanel::EffectArea => self.timeline.picture_grab.area = None,
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
         }
     }
@@ -423,6 +425,10 @@ impl Workspace {
             (
                 GuiPanel::DynamicZoom,
                 tool == Some(PictureTool::DynamicZoom),
+            ),
+            (
+                GuiPanel::EffectArea,
+                self.timeline.picture_grab.area.is_some(),
             ),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
         ];
