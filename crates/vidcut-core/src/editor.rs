@@ -4286,6 +4286,36 @@ fn mutate(
             ops::effect::shift(p, &id, *effect, *to)?;
             Value::Null
         }
+        Request::MotionAdd {
+            clip,
+            name,
+            samples,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::motion::add(p, &id, name.as_deref(), samples)?
+        }
+        Request::MotionSet {
+            clip,
+            path,
+            name,
+            samples,
+            clear,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let change = ops::motion::PathChange {
+                name: name.as_deref(),
+                samples: samples.as_deref(),
+                clear: *clear,
+            };
+            ops::motion::set(p, &id, path, change)?;
+            Value::Null
+        }
+        Request::MotionRemove { clip, paths } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let paths = paths.as_ref().map(OneOrMany::to_vec);
+            ops::motion::remove(p, &id, paths.as_deref())?;
+            Value::Null
+        }
         Request::SubtitlesSet {
             cue,
             text,
@@ -5616,6 +5646,7 @@ fn place_imported(
                 retime: crate::model::ClipRetime::Project,
                 color: color(c),
                 render_cache: crate::model::ClipCache::Auto,
+                motion: Vec::new(),
             });
             placed.insert(track_of(&c.track));
             continue;
@@ -5767,6 +5798,7 @@ fn place_imported(
             retime: crate::model::ClipRetime::Project,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
+            motion: Vec::new(),
         });
         placed.insert(track_of(&c.track));
     }
@@ -7123,6 +7155,14 @@ pub fn query(
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;
             ops::picture::get(p, &id)?
+        }
+        Request::MotionList { clips, at, samples } => {
+            let ids = clips
+                .as_ref()
+                .map(|c| resolve_clips(p, &c.to_vec(), playhead))
+                .transpose()?;
+            let at = at.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            ops::motion::list(p, ids.as_deref(), at, *samples)?
         }
         Request::TitlesList { track, range } => {
             let (a, b) = match range {
@@ -8717,6 +8757,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
     }
     if !keyed.is_empty() {
         v["keyframes"] = json!(keyed);
+    }
+    if !c.motion.is_empty() {
+        v["motion"] = json!(c.motion.iter().map(|m| &m.id).collect::<Vec<_>>());
     }
     v
 }

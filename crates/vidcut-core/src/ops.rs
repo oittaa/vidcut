@@ -6,6 +6,7 @@ mod follow;
 pub mod generators;
 pub mod keyframes;
 pub mod linked;
+pub mod motion;
 pub mod normalize;
 pub mod picture;
 mod source_overwrite;
@@ -290,6 +291,7 @@ pub(crate) fn block_clip(
         retime: crate::model::ClipRetime::Project,
         color: None,
         render_cache: crate::model::ClipCache::Auto,
+        motion: Vec::new(),
     }
 }
 
@@ -372,6 +374,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         retime: crate::model::ClipRetime::Project,
         color: None,
         render_cache: crate::model::ClipCache::Auto,
+        motion: Vec::new(),
     })
 }
 
@@ -2750,6 +2753,7 @@ fn compound_outside(k: &Compound, media: &str, part: std::ops::Range<i64>) -> Op
 
 fn shift_source(c: &mut Clip, by: i64) {
     c.source_in += by;
+    motion::shift(c, by);
     if c.speed.is_some() {
         return;
     }
@@ -3174,6 +3178,15 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         clip.video = clip.video && has_video && on_video;
         if !clip.video {
             clip.picture = None;
+        }
+        if !motion::takes(&clip) {
+            clip.motion.clear();
+        }
+        if let Some(why) = crate::motion::problem(&clip.motion) {
+            return Err(Error::invalid(format!(
+                "pasted clip {} has an invalid motion path: {why}",
+                clip.id
+            )));
         }
         if (!clip.video && clip.audio.is_none() && !sound_block) || (sound_block && on_video) {
             return Err(Error::invalid(format!(

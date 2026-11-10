@@ -58,6 +58,10 @@ classDiagram
     frame, value
     in_handle, out_handle
   }
+  class MotionPath {
+    id, name
+    samples: Vec~PathSample~
+  }
   class Transition {
     id
     from, to
@@ -115,6 +119,7 @@ classDiagram
   ClipAudio *-- "*" Keyframe : gain_keys
   Clip *-- "0..1" Title : title
   Clip *-- "0..1" Picture : picture
+  Clip *-- "*" MotionPath : motion
   Clip ..> Media : media id
   Clip *-- "0..1" Generator : generator
   Generator *-- "0..1" Kept : reference
@@ -300,6 +305,7 @@ Ranges and resolution:
 | marker | k1, k2 … | `Project::alloc_marker_id` |
 | carried transition | t1, t2 … | `Project::alloc_transition_id` |
 | cue | q1, q2 … | `Project::alloc_cue_id` |
+| motion path | p1, p2 … in each clip | `motion::next_id` |
 | track | V1 … then A1 …, by place | `ops::tracks`; removing one renumbers the rest |
 | subtitle track | S1 …, by place | `ops::subtitles::add_track`; removing one renumbers the rest |
 
@@ -517,6 +523,27 @@ Writing:
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
 - The shader of the viewer and the export holds the sums of the composite modes (D75, `mixed` in `picture.wgsl`).
 
+## Motion paths
+
+- A clip of footage, a still or an image sequence can carry motion paths in `Clip.motion` ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
+  - `ops::motion::takes` tells which clips take them: not titles, generators, compound clips or sound.
+- A `MotionPath` tells where one area of the source picture is on the source frames of the clip. It has an id, a name and its samples.
+- A `PathSample` holds the source `frame`, the `center` and the `size` of the area as fractions of the source picture, and the `rotation`.
+  - The `frame` counts as `source_in` does, at each speed of the clip (`Clip::source_at`).
+  - Why: a thing is at one place on a source picture, at any speed that plays that picture.
+  - Thus a trim, a slip, a split, a copy and a speed change do not change a path.
+  - `shift_source` moves the samples with `source_in` when the limits of a subclip change.
+- `MotionPath::area_at` gives the `motion::Area` on a frame.
+  - Between two samples, the area goes in a line. Outside the samples, it stays where the nearest sample put it.
+- A path is not keyframes. Why: a new path must not remove the keyframes that the user set, and one path can move several things.
+- `ops::motion` holds the edits: `motion.add`, `motion.set` and `motion.remove`. `motion.list` reads the paths.
+  - `motion.set` removes a range of samples first (`motion::clear`). Then it puts the new samples on their frames (`motion::put`).
+  - A path keeps one sample at least. `motion.remove` takes a path off.
+- A clip has at most `PATHS_KEPT` paths, and a path has at most `SAMPLES_KEPT` samples.
+- `motion::problem` is the check that the requests, `ops::paste` and `validate::violations` share.
+- `timeline.get` names the paths of a clip in `motion`.
+- Nothing draws with a path, and an OTIO file does not carry one ([todo](../todo/motion-tracking.md)).
+
 ## Ducking
 
 - A track can carry a `Duck` ([spec D76](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It holds `on`, its `sources` by track id, the Duck Amount, the four times, `detect` (`DuckDetect`) and `threshold_db`.
@@ -728,7 +755,7 @@ Reset:
 - known media and bins
 - gains in range
 - titles on video tracks
-- titles, subtitle styles and duckings that their requests would refuse
+- titles, subtitle styles, duckings and motion paths that their requests would refuse
 
 It runs:
 
@@ -741,6 +768,7 @@ It runs:
 - `crates/vidcut-core/src/model.rs`, `crates/vidcut-core/src/time.rs`, `crates/vidcut-core/src/store.rs`
 - `crates/vidcut-core/src/fingerprint.rs`, `crates/vidcut-core/src/validate.rs`, `crates/vidcut-core/src/folder.rs`
 - `crates/vidcut-core/src/keyframes.rs`, `crates/vidcut-core/src/place.rs`, `crates/vidcut-core/src/duck.rs`
+- `crates/vidcut-core/src/motion.rs`
 - `crates/vidcut-core/src/ops/`
 - `crates/vidcut-core/src/otio.rs`, `crates/vidcut-core/src/otio/`
 - `crates/vidcut-core/src/editor.rs`

@@ -312,6 +312,13 @@ pub fn describe_at(
             d.clips("clip"),
             d.params["to"].as_u64().unwrap_or(0) + 1
         ),
+        "motion.add" => format!("Add a motion path to {}", d.clips("clip")),
+        "motion.set" => format!(
+            "Change motion path {} of {}",
+            d.params["path"].as_str().unwrap_or(""),
+            d.clips("clip")
+        ),
+        "motion.remove" => format!("Remove motion paths of {}", d.clips("clip")),
         "picture.clear" => match d.params["tool"].as_str() {
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
             Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),

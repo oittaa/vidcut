@@ -1818,6 +1818,46 @@ pub struct Clip {
     /// slow media and AI Super Scale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
+    /// Its motion paths: where things in its picture are on its source
+    /// frames. Only a clip of footage, a still or an image sequence has
+    /// them. Left out when it has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub motion: Vec<MotionPath>,
+}
+
+/// A motion path of a clip: where one area of its picture is on its source
+/// frames. A face, a number plate or another thing in the picture has one.
+/// Between two samples the area moves in a straight line. Before the first
+/// sample it is where that sample puts it, and after the last sample, where
+/// the last one puts it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MotionPath {
+    /// `p<N>`, its own among the paths of the clip.
+    pub id: String,
+    /// What it follows, for example `Face 1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The area on source frames: at least one sample, one for a frame, in
+    /// the order of the frames.
+    pub samples: Vec<PathSample>,
+}
+
+/// The area of a motion path on one source frame.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PathSample {
+    /// The source frame, counted as a clip's `source_in` is, at any speed of
+    /// the clip.
+    pub frame: i64,
+    /// The middle of the area, `[x, y]` as fractions of the source picture
+    /// from its top left, each from -10 to 10.
+    pub center: [f64; 2],
+    /// The width and the height of the area, as fractions of the source
+    /// picture, each from 0 to 10. A point has no size: `[0, 0]`.
+    pub size: [f64; 2],
+    /// Degrees the area is turned counterclockwise, from -100000 to 100000.
+    /// Usual: 0.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation: f64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -6092,6 +6132,7 @@ impl Cue {
             retime: ClipRetime::Project,
             color: None,
             render_cache: ClipCache::Auto,
+            motion: Vec::new(),
         }
     }
 

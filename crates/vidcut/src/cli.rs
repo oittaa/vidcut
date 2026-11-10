@@ -94,6 +94,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("effects.reset", &["clip", "effect"]),
     ("effects.remove", &["clip", "effect"]),
     ("effects.move", &["clip", "effect", "to"]),
+    ("motion.add", &["clip"]),
+    ("motion.set", &["clip", "path"]),
+    ("motion.remove", &["clip"]),
     ("edit.append", &["media"]),
     ("edit.smart_insert", &["media"]),
     ("edit.insert", &["media"]),
@@ -211,6 +214,10 @@ const GROUPS: &[(&str, &str)] = &[
     (
         "models",
         "The AI models and speech services: their files, limits and prices",
+    ),
+    (
+        "motion",
+        "Motion paths of clips: where things in the picture are",
     ),
     (
         "picture",
@@ -434,6 +441,27 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "effects.key",
         "vidcut effects key c3 0 --at 2s\n  vidcut effects key c3 0 --at 2s --ease ease_in_out",
+    ),
+    (
+        "motion.list",
+        "vidcut motion list\n  vidcut motion list --clips c3 --at 2s\n  \
+         vidcut motion list --clips c3 --samples",
+    ),
+    (
+        "motion.add",
+        "vidcut motion add c3 --name \"Face 1\" --samples \
+         '[{\"frame\":0,\"center\":[0.4,0.3],\"size\":[0.1,0.2]},\
+         {\"frame\":48,\"center\":[0.6,0.35],\"size\":[0.1,0.2]}]'\n  \
+         vidcut motion add V2@10s --samples @path.json",
+    ),
+    (
+        "motion.set",
+        "vidcut motion set c3 p1 --name \"Number plate\"\n  vidcut motion set c3 p1 --clear 20,30\n  \
+         vidcut motion set c3 p1 --clear 48,100000 --samples @rest.json",
+    ),
+    (
+        "motion.remove",
+        "vidcut motion remove c3\n  vidcut motion remove c3 --paths p1,p2",
     ),
     (
         "export.start",

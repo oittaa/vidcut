@@ -10,8 +10,9 @@ use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType,
     EffectValue, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, GrainPreset,
-    Handle, LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign,
-    TitleAnchor, TitleKind, TitleStyle, TrackClip, VignetteMode, VignetteShape, ZoomBox,
+    Handle, LowerThirdLine, PathSample, PictureTool, PictureTransition, Place, SubtitleStyle,
+    TitleAlign, TitleAnchor, TitleKind, TitleStyle, TrackClip, VignetteMode, VignetteShape,
+    ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2726,6 +2727,67 @@ pub enum Request {
         effect: usize,
         to: usize,
     },
+    /// The motion paths of `clips`, or of every clip that has some. A motion
+    /// path tells where one area of a clip's picture is on its source frames:
+    /// a face, a number plate or another thing in the picture. Each clip
+    /// gives its `track` and its `paths`: the `id`, the `name`, the `count`
+    /// of its samples, and the source frames `first` and `last` of them.
+    #[serde(rename = "motion.list")]
+    MotionList {
+        #[serde(default)]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// Each path also gives its `area` at this time: the source `frame`
+        /// of its clip there, and the `center`, `size` and `rotation` of the
+        /// area on it.
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        /// Each path also gives every sample.
+        #[serde(default)]
+        samples: bool,
+    },
+    /// Add a motion path to a clip of footage, a still or an image sequence
+    /// (`c3`, or `V2@15s`). Between two samples the area moves in a straight
+    /// line. Before the first sample it is where that sample puts it, and
+    /// after the last sample, where the last one puts it. The path stays on
+    /// its source frames through trims, slips, splits and speed changes.
+    /// Returns the `clip` and the id of the new `path`.
+    #[serde(rename = "motion.add")]
+    MotionAdd {
+        clip: ClipRef,
+        /// What it follows, for example `Face 1`.
+        #[serde(default)]
+        name: Option<String>,
+        /// The area on source frames: at least one sample, one for a frame,
+        /// in the order of the frames. `timeline.at` gives the source frame
+        /// of a clip at a time.
+        samples: Vec<PathSample>,
+    },
+    /// Change one motion path of a clip. `clear` works first, then `samples`.
+    #[serde(rename = "motion.set")]
+    MotionSet {
+        clip: ClipRef,
+        /// The id of the path (`motion.list`), as `p1`.
+        path: String,
+        /// Its new name. An empty name takes the name off.
+        #[serde(default)]
+        name: Option<String>,
+        /// Samples to put on their source frames, in the order of the
+        /// frames. A sample takes the place of the sample on its frame.
+        #[serde(default)]
+        samples: Option<Vec<PathSample>>,
+        /// Two source frames: the samples from the first to the second go,
+        /// those two frames too. The area then moves in a straight line
+        /// across that part.
+        #[serde(default)]
+        clear: Option<[i64; 2]>,
+    },
+    /// Take motion paths off a clip: `paths`, or all of them.
+    #[serde(rename = "motion.remove")]
+    MotionRemove {
+        clip: ClipRef,
+        #[serde(default)]
+        paths: Option<OneOrMany<String>>,
+    },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.
     #[serde(rename = "export.plan")]
@@ -5417,6 +5479,7 @@ impl Request {
                     | Self::TitlesList { .. }
                     | Self::GeneratorsList { .. }
                     | Self::PictureGet { .. }
+                    | Self::MotionList { .. }
                     | Self::SubtitlesExport { .. }
                     | Self::AnalyzeWords { .. }
                     | Self::MediaTranscribe { .. }
