@@ -3118,6 +3118,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A key adds a node with a window (p. 3268). A Circular, Linear or Polygonal window starts in the middle of the picture, with its controls in the Viewer (21.2).
   - A Curve window starts with no shape. Each click in the Viewer adds a point, and a click on the first point closes the shape (pp. 3273–3274).
   - The blur of the node is in the Blur palette. It shows only inside the windows of the node (21.2).
+  - The Viewer shows the outline of a window only while the Window palette or the Tracker palette is open (21.2).
+    - With the Blur palette open, it shows no outline. The Cut page shows no outline, and nothing there marks a clip with a window.
 - **vidcut:**
   - An effect of a clip can have an area: an ellipse, a box or a polygon. The effect then shows only inside it. With `invert`, it shows only outside it.
   - A polygon has from 3 to 128 points with straight sides between them. With no points, it has the four corners of the box of the area.
@@ -3134,6 +3136,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Each effect in the Inspector has Area rows: Off, Ellipse, Box or Polygon, then Edit Shape, Invert Area, Area Softness and Follow.
     - Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
     - Follow lists None, All Faces, All Text and the motion paths of the clip. All Faces sends the subject `face`. Each change sends `effects.set` with `area`.
+  - The viewer shows a thin outline of each area of the selected clip at the playhead.
+    - A click on an outline, or inside it, shows the handles of that area. A click outside the areas hides the handles.
+    - With no clip selected, the viewer shows no outline. Thus it shows the picture of an export.
+    - Why: the user sees where each effect works, with no tool open.
   - Edit Shape shows the handles of the area in the viewer. `gui.show effect_area` shows them for the first effect of the clip that has an area.
     - A drag inside the area moves it. On an ellipse or a box, a corner changes its size, and the top handle turns it.
     - On a polygon, a drag moves a point. A click on a side adds a point.
@@ -3145,7 +3151,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
     - With Free Shape, each click adds a point. A click on the first point, or a double-click, closes the shape. Escape drops it.
     - A new blur is one `apply` of `effects.add` and `effects.set`. Thus it is one undo step. Its handles show at once.
-    - The other areas of the clip show as thin outlines. A click on one shows its handles.
+    - A drag on the outline of another area shows its handles and moves it.
     - All Faces and All Text do what Blur does in the Motion section of the Inspector. Delete removes the effect whose handles show.
   - The area has no keyframes ([todo](todo/motion-tracking.md)).
 - **Why:**
