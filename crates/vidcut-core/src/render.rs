@@ -2010,7 +2010,7 @@ type Within = Vec<Inner>;
 
 pub const NESTED: usize = 8;
 
-type Nesting<'a> = (Option<&'a Nest>, bool, &'a [Placed]);
+type Nesting<'a> = (Option<&'a Nest>, &'a [Placed]);
 
 fn visible(t: &Track, c: &Clip) -> bool {
     t.video_enabled && c.enabled && c.video && (!c.is_block() || c.draws())
@@ -2595,10 +2595,16 @@ fn outer_at(nest: Option<&Nest>, x: i64) -> Vec<Placed> {
         .collect()
 }
 
-fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, crossed: &[Placed], x: i64) -> Vec<Placed> {
+fn placed_of(
+    c: &Clip,
+    nest: Option<&Nest>,
+    fills: bool,
+    crossed: &[Placed],
+    x: i64,
+) -> Vec<Placed> {
     let outer = outer_at(nest, x);
     let own = c.picture.clone().filter(|x| !x.is_usual());
-    if own.is_none() && outer.is_empty() && !over && crossed.is_empty() {
+    if own.is_none() && outer.is_empty() && fills && crossed.is_empty() {
         return Vec::new();
     }
     let run = run_of(c, nest.and_then(|n| n.run)).after(x);
@@ -3115,20 +3121,15 @@ impl VideoPlan<'_> {
                     .is_some_and(|m| crate::place::fills(m, (s.width, s.height))))
     }
 
-    fn picture(
-        &self,
-        c: &Clip,
-        (nest, over, crossed): Nesting,
-        x: i64,
-        y: i64,
-    ) -> Result<VideoPiece> {
+    fn picture(&self, c: &Clip, (nest, crossed): Nesting, x: i64, y: i64) -> Result<VideoPiece> {
         let (pool, s) = (&self.pool, &self.p.settings);
+        let fills = self.fills(c);
         let drawn = c.generator.as_ref();
         if let Some(picture) = drawn.and_then(|g| Generated::of(g, c.content_at(x))) {
             return Ok(VideoPiece::Generated {
                 frames: y - x,
                 picture,
-                placed: placed_of(c, nest, over, crossed, x),
+                placed: placed_of(c, nest, fills, crossed, x),
                 excluded: false,
             });
         }
@@ -3146,7 +3147,7 @@ impl VideoPlan<'_> {
             alpha_mode: m.alpha_mode,
             super_scale: super_scale_of(m.super_scale, s),
             retime: retime_of(c, x, m, s),
-            placed: placed_of(c, nest, over, crossed, x),
+            placed: placed_of(c, nest, fills, crossed, x),
             cache: c.render_cache,
             excluded: false,
             made: None,
@@ -3176,17 +3177,8 @@ impl<'a> Span<'a> {
             .find(|d| d.frames.0 <= self.now && self.now < d.frames.1)
     }
 
-    fn laid(
-        &self,
-        c: &Clip,
-        nest: Option<&Nest>,
-        below: bool,
-        crossed: &[Placed],
-    ) -> Result<VideoPiece> {
-        let over = below && !self.plan.fills(c);
-        let mut piece = self
-            .plan
-            .picture(c, (nest, over, crossed), self.x, self.y)?;
+    fn laid(&self, c: &Clip, nest: Option<&Nest>, crossed: &[Placed]) -> Result<VideoPiece> {
+        let mut piece = self.plan.picture(c, (nest, crossed), self.x, self.y)?;
         if let VideoPiece::Source { excluded: e, .. } | VideoPiece::Generated { excluded: e, .. } =
             &mut piece
         {
@@ -3259,13 +3251,12 @@ impl<'a> Span<'a> {
             picture: None,
             ..c.clone()
         };
-        placed_of(&bare, self.nest_of(c), false, &[], self.x)
+        placed_of(&bare, self.nest_of(c), true, &[], self.x)
     }
 
     fn smoothed(
         &self,
         d: &transitions::Playing,
-        below: bool,
     ) -> Result<Option<(VideoPiece, VideoPiece, Smooth)>> {
         let (p, t, x) = (self.plan.p, self.lane.track, self.x);
         let shows = |c: &&Clip| visible(t, c);
@@ -3283,7 +3274,7 @@ impl<'a> Span<'a> {
             }
             let bare = without_mode(c);
             let drawn = bare.as_ref().unwrap_or(c);
-            let mut piece = self.laid(drawn, nest, below, &[])?;
+            let mut piece = self.laid(drawn, nest, &[])?;
             let moved = |p: &Placed| !fills(drawn) || !p.picture.is_usual();
             let backward = mode != SmoothMode::Faster && c.pace().speed() < 0.0;
             if backward || piece.placed().first().is_some_and(moved) {
@@ -3342,7 +3333,7 @@ impl<'a> Span<'a> {
         let Some(d) = self.playing() else {
             return self.plain(stack);
         };
-        match self.smoothed(d, !stack.is_empty())? {
+        match self.smoothed(d)? {
             Some((f, g, smooth)) => {
                 self.smooth_cut(d, (f, g, smooth), stack, flattened);
                 Ok(())
@@ -3385,7 +3376,6 @@ impl<'a> Span<'a> {
         let shows = |c: &&Clip| visible(t, c);
         let fills = |c: &Clip| self.plan.fills(c);
         let excluded = !t.render_cache;
-        let below = !stack.is_empty();
         let sides = sides_at(d, now);
         let fill = sides
             .iter()
@@ -3401,7 +3391,7 @@ impl<'a> Span<'a> {
             let bare = without_mode(c).filter(|_| !chain.is_empty());
             let drawn = bare.as_ref().unwrap_or(c);
             layers.push(Layer::Picture(
-                self.laid(drawn, self.nest_of(c), below, &chain)?,
+                self.laid(drawn, self.nest_of(c), &chain)?,
                 ramp,
             ));
         }
@@ -3438,7 +3428,7 @@ impl<'a> Span<'a> {
         let (t, now) = (self.lane.track, self.now);
         let covering = t.clip_covering(now).map(|ci| &t.clips[ci]);
         if let Some(c) = covering.filter(|c| visible(t, c)) {
-            let piece = self.laid(c, self.nest_of(c), !stack.is_empty(), &[])?;
+            let piece = self.laid(c, self.nest_of(c), &[])?;
             let layer = Layer::Picture(piece, None);
             if self.plan.fills(c) {
                 layer.hides(stack);
