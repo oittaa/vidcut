@@ -3117,6 +3117,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The center, the size and the rotation of the area then count from the box of the path. A size of 1.2 is that box, a fifth larger.
     - `follows` can also name a subject, as `face`. The effect then works in the area of each path that `motion.find` made for that subject.
     - The effect works in the area of a path only while that path lasts. Thus the blur of a face goes when the face is gone.
+    - With `invert`, the effect works outside each area. While no path lasts, it then works on the whole picture.
     - `motion.remove` refuses a path that an area follows by its id. A path that an area follows by its subject can go.
     - An OpenTimelineIO file carries the area and the path that it follows, in its `vidcut` metadata.
   - The area has no keyframes. The Inspector and the viewer have no controls for it ([todo](todo/motion-tracking.md)).

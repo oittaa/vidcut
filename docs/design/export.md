@@ -575,7 +575,7 @@ Dynamic Zoom and keyframes (D75):
   - A path shares its samples with the clip (`MotionPath.samples`). Thus a placed picture copies no sample, and two plans of one project compare them by their place in memory.
   - `Followed::bases` gives the area of each followed path that lasts at the frame. It goes from the keyframe frame to the source frame through the pace.
   - `follows` names one path by its id, or each path of a subject (`MotionPath::follows`).
-  - `place::Masking` holds one map for each of these areas, and `fs_area` joins them in one pass. With no area at the frame, `Working::of` gives no work for the effect.
+  - `place::Masking` holds one map for each of these areas, and `fs_area` joins them in one pass. With no area at the frame, `Working::of` gives no work for the effect. With `invert` on, it then gives the work with no mask: the effect is on the whole picture.
   - Why: a path is on source frames, and the keyframe frame of a clip with a speed is a frame of the retimed source.
   - The paths are behind an `Arc`. Thus `Placed::after` copies no sample.
 
