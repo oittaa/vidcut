@@ -2032,6 +2032,7 @@ impl Workspace {
         self.speech_window(&ctx);
         self.isolation_prompt(&ctx);
         self.models_prompt(&ctx);
+        self.motion_prompt(&ctx);
         self.ducking_windows(&ctx);
         self.transcription_window(&ctx);
         self.clip_info_window(&ctx);

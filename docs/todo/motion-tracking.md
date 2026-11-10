@@ -99,8 +99,8 @@ In this file, a path is never a track of the timeline.
   - The detector takes most of the time of a text find. Try the model on the GPU.
 - **A drawn box:** one request tracks a box of the selected clip from the playhead, forward or backward.
   - The request tells the frame where it loses the subject. The user starts again from that frame.
-- **The Inspector and the viewer:** the buttons, the box on the picture, the list of paths, and the controls of the area of an effect.
-  - The GUI asks before `motion.find` downloads its model, as it asks for the other local models.
+- **The viewer:** the handles of an area on the picture.
+- **Find and Blur in the app:** try the two buttons of the Motion section in a window. Only their requests ran, from the CLI.
 - **Titles and clips follow a path** of another clip.
 - **A subject with its matte:** with [subject masks](subject-masks.md).
 - **Resolve measurement:**

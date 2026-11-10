@@ -1876,6 +1876,13 @@ impl Subject {
         }
     }
 
+    pub fn many(self) -> &'static str {
+        match self {
+            Self::Face => "Faces",
+            Self::Text => "Text",
+        }
+    }
+
     pub fn named(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|s| s.name() == name)
     }

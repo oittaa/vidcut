@@ -382,6 +382,21 @@ The bar and the Jobs button:
   - The section shows the values of the playhead's frame (`Effect::adopted`).
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.
   - The Keyframe button and its ease menu send `effects.key`. Previous and Next seek (`step_effect`).
+  - Each effect has the same Area rows (`area_rows`). Each change is one `effects.set` with `area`. Off sends a null `area`.
+    - The numbers of the area are knobs (`AreaKnob`), so a drag previews and lands as the other values do.
+    - The Follow menu lists None, one entry for each `Subject` (`Subject::ALL`, `all_of`) and the motion paths of the clip (`follow_row`, `PathRow`).
+    - A subject entry sends the name of the subject in `follows`. It is there also when the clip has no path of that subject.
+- `Workspace::motion_section` shows for the first selected clip that takes motion paths (`ops::motion::takes`), above the effects.
+  - Its first row has a menu of the subjects (`Subject::ALL`), Find and Blur.
+  - Find sends `motion.find` (`find_request`), with `replace` when the clip has paths of that subject.
+  - Blur sends one `apply` (`blur_request`). It has `motion.find` when the clip has no such path.
+    - Then it has `effects.add` of a Mosaic Blur, and `effects.set` with an `area` that follows the subject.
+    - It leaves the blur out when an effect of the clip follows the subject. With nothing to send, the button is off.
+    - The live core runs an `apply` with `motion.find` as a long edit (`runs_long`): it measures on a job thread first.
+  - `Workspace::find` asks before a download when the model of the subject is not there (`subjects::needed`, `Finding`). `Workspace::motion_prompt` shows the question that the other local models use (`ask_download`), and `with_model` then sets `download` on `motion.find`.
+  - The rows below list the motion paths of the clip.
+  - A name goes with `motion.set` when its field loses the focus (`Naming`). Escape drops the typed name. Delete sends `motion.remove`.
+  - The rows read the paths from the shared project of the snapshot. The snapshot holds no copy of the samples.
 - `Workspace::input_lut_section` shows the Input LUT row of the media of the selected clips, with a file pick and Reset. Each change is one `media.set`.
   - The Input LUT submenu of the pool's right-click menu sends the same request (`Workspace::pool_item_menu`, `Workspace::ask_input_lut`).
 - `speed_section` sends what the Change Clip Speed window sends (`SpeedDialog::params`). `Workspace::audio_section` sends `clip.set`.

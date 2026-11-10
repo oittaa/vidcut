@@ -4353,7 +4353,7 @@ fn mutate(
                 let tracks = crate::motion::joined(&found, media.origin(), fps, frames, &rules);
                 out.push(ops::motion::found(p, id, *subject, tracks)?);
             }
-            json!({ "clips": out })
+            json!({ "subject": subject, "clips": out })
         }
         Request::SubtitlesSet {
             cue,

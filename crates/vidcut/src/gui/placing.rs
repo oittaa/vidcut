@@ -5,11 +5,13 @@ use serde_json::{Value, json};
 use vidcut_core::model::{
     Clip, CompositeMode, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
 };
+use vidcut_core::motion::Area;
 use vidcut_core::ops::picture::{has_picture, zoom_shown};
 use vidcut_core::place::{Level, Placing, anchored, apply, flipped};
 use vidcut_core::render::{Placed, Run};
 
 use super::timeline::tools::landing;
+use super::title_browser::LeftTab;
 use super::workspace::Workspace;
 
 const GRAB: f32 = 6.0;
@@ -1231,4 +1233,57 @@ pub(super) fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
         .as_object()
         .is_some_and(|o| o.len() > 1)
         .then_some(params)
+}
+
+fn area_corners(a: &Area, [fw, fh]: [f64; 2]) -> [[f64; 2]; 4] {
+    let (sin, cos) = a.rotation.to_radians().sin_cos();
+    let (hx, hy) = (a.size[0] * fw / 2.0, a.size[1] * fh / 2.0);
+    [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]].map(|[x, y]| {
+        let (rx, ry) = (x * cos + y * sin, y * cos - x * sin);
+        [a.center[0] + rx / fw, a.center[1] + ry / fh]
+    })
+}
+
+impl Workspace {
+    pub(super) fn paint_motion(&self, ui: &egui::Ui, picture: Rect) {
+        if self.left != LeftTab::Inspector {
+            return;
+        }
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+        let Some(c) = target(&p, &self.snap.selection.clips, at) else {
+            return;
+        };
+        if c.motion.is_empty() {
+            return;
+        }
+        let shown = c.picture.clone().unwrap_or_default();
+        let Some(s) = shape_of(&p, c, shown, picture, at) else {
+            return;
+        };
+        let frame = (f64::from(p.settings.width), f64::from(p.settings.height));
+        let [_, _, fw, fh] = content(&p, c, frame);
+        let painter = ui.painter_at(picture);
+        let color = super::theme::colors().accent;
+        let source = c.source_at(at) as f64;
+        for m in &c.motion {
+            let Some(area) = m.area_at(source) else {
+                continue;
+            };
+            let corners = area_corners(&area, [fw, fh]).map(|uv| s.screen(uv));
+            for i in 0..4 {
+                let edge = [corners[i], corners[(i + 1) % 4]];
+                painter.line_segment(edge, Stroke::new(1.5, color));
+            }
+            painter.text(
+                corners[0] - vec2(0.0, 3.0),
+                egui::Align2::LEFT_BOTTOM,
+                m.name.as_deref().unwrap_or(&m.id),
+                egui::FontId::proportional(12.0),
+                color,
+            );
+        }
+    }
 }
