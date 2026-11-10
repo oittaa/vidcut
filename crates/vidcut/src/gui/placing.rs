@@ -532,16 +532,16 @@ pub(super) fn topmost(p: &Project, at: i64) -> Option<String> {
 }
 
 impl Workspace {
-    fn grab_wanted(&self) -> Option<(String, Picture)> {
+    fn grab_wanted(&self) -> Option<(String, Picture, Picture)> {
         let g = &self.timeline.picture_grab;
         if let Some(h) = &g.area_held {
-            return Some((h.clip.clone(), h.now.clone()));
+            return Some((h.clip.clone(), h.now.clone(), h.start.clone()));
         }
         if let Some(h) = &g.held {
-            return Some((h.clip.clone(), h.now.clone()));
+            return Some((h.clip.clone(), h.now.clone(), h.start.clone()));
         }
         if let Some(w) = &g.wheel {
-            return Some((w.clip.clone(), w.now.clone()));
+            return Some((w.clip.clone(), w.now.clone(), w.start.clone()));
         }
         let (clip, to, since, from) = g.landing.as_ref()?;
         let stored = self
@@ -550,7 +550,8 @@ impl Workspace {
             .picture
             .clone()
             .unwrap_or_default();
-        landing(to, since.elapsed(), from, &stored).map(|t| (clip.clone(), t.clone()))
+        let landed = landing(to, since.elapsed(), from, &stored)?;
+        Some((clip.clone(), landed.clone(), from.clone()))
     }
 
     pub(super) fn picture_wanted(&self) -> Vec<(String, Picture)> {
@@ -567,27 +568,7 @@ impl Workspace {
             (id.to_string(), stored.preview(baseline, picture, at))
         };
         match self.grab_wanted() {
-            Some((id, picture)) => {
-                let baseline = self
-                    .timeline
-                    .picture_grab
-                    .held
-                    .as_ref()
-                    .map(|h| h.start.clone())
-                    .or_else(|| {
-                        let held = self.timeline.picture_grab.area_held.as_ref();
-                        held.map(|h| h.start.clone())
-                    })
-                    .or_else(|| {
-                        self.timeline
-                            .picture_grab
-                            .wheel
-                            .as_ref()
-                            .map(|w| w.start.clone())
-                    })
-                    .unwrap_or_else(|| picture.clone());
-                vec![preview(&id, &baseline, &picture)]
-            }
+            Some((id, picture, baseline)) => vec![preview(&id, &baseline, &picture)],
             None => self
                 .inspector_wanted()
                 .into_iter()
@@ -1781,9 +1762,13 @@ impl Workspace {
         let p = self.project_shared()?;
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         let c = self.area_clip(&p, at)?;
+        let wanted = || {
+            let mut wanted = self.picture_wanted().into_iter();
+            wanted.find(|(id, _)| *id == c.id).map(|(_, x)| x)
+        };
         let shown = match held {
             Some(h) if h.clip == c.id => h.start.clone(),
-            _ => c.picture.clone().unwrap_or_default(),
+            _ => wanted().unwrap_or_else(|| c.picture.clone().unwrap_or_default()),
         };
         let area = shown.effects.get(n)?.area.clone()?;
         let source = c.source_at(at) as f64;
@@ -2138,10 +2123,11 @@ impl Workspace {
             self.timeline.picture_grab.area_held = Some(held);
         }
         let mut busy = held.is_some() || hover.is_some();
+        let mut dropped = false;
         if resp.drag_stopped()
             && let Some(held) = self.timeline.picture_grab.area_held.take()
         {
-            busy = true;
+            (busy, dropped) = (true, true);
             self.land_area(&held);
         }
         self.area_points(ui, resp, &shown);
@@ -2157,6 +2143,7 @@ impl Workspace {
                 area,
                 s: shown.s,
             },
+            None if dropped => self.area_shown(picture, None).unwrap_or(shown),
             None => shown,
         };
         let hot = pointer.filter(|_| held.is_some() || hover.is_some());

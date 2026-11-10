@@ -509,7 +509,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         pid,
         socket,
         project: None,
-        version: env!("CARGO_PKG_VERSION").into(),
+        version: crate::system::BUILD.into(),
     });
     let (theme, theme_error) = chosen_theme();
     let theme = Arc::new(theme);

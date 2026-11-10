@@ -138,7 +138,7 @@ pub fn serve(project: Option<PathBuf>, options: RouteOptions) -> Result<()> {
                         "serverInfo": {
                             "name": "vidcut",
                             "title": "vidcut video editor",
-                            "version": env!("CARGO_PKG_VERSION"),
+                            "version": crate::system::BUILD,
                         },
                         "instructions": INSTRUCTIONS,
                     }),

@@ -1518,6 +1518,7 @@ mod tests {
             }))
             .with_sampling(Sampling::Own);
         let size = (picture.width(), picture.height());
+        let _share = store::Share::join(u64::MAX, 1);
         store::global().put(planned.id(0), Arc::new(picture));
         let kept = Kept::of(&plan, &plan);
         assert!(kept.at(0, Some(0), size).is_none());
