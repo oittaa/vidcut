@@ -293,7 +293,7 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).
 - The made frame replaces the incoming layer, at full weight. With no `Smooth::mode` and no flat side, it covers the outgoing layer, and the layers below are not in the plan.
 - With a flat side, `Smooth::clear` is true. The made frame carries the mixed alpha as its matte. `Smooth::lay` gives it a place in the layers, in the mix of its compound clip.
-- The layers below show through. They stay in the plan, also when the side covers the frame. `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
+- With a flat side, the layers below show through. They stay in the plan, also when that side covers the frame. `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
 - With a `Smooth::mode`, the layers below stay. `Smooth::lay` gives the made frame that mode, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
 - The key of the pair holds both files, both frames, both looks and both sides. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.
 - The morph has no shot-change test. Why: a Smooth Cut always joins two shots.
