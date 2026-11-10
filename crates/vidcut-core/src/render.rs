@@ -2049,12 +2049,11 @@ fn mode_at(p: &Project, c: &Clip, t: i64) -> CompositeMode {
     }
 }
 
-fn usual_but_mode(p: &Picture) -> bool {
-    Picture {
-        composite_mode: None,
-        ..p.clone()
-    }
-    .is_usual()
+fn widened(c: &Clip, (from, to): (i64, i64)) -> Clip {
+    let mut wide = c.clone();
+    wide.move_head(-(c.start - from).max(0));
+    wide.duration += (to - c.end()).max(0);
+    wide
 }
 
 fn without_mode(c: &Clip) -> Option<Clip> {
@@ -2286,13 +2285,8 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 .chain(nest.outer.iter().cloned())
                 .collect();
                 let (head, tail) = ((c.start - from).max(0), (to - c.end()).max(0));
-                let wide = (head > 0 || tail > 0).then(|| {
-                    let mut wide = c.clone();
-                    wide.move_head(-head);
-                    wide.duration += tail;
-                    wide
-                });
-                let wide = wide.as_ref().unwrap_or(c);
+                let wide = widened(c, (c.start - head, c.end() + tail));
+                let wide = &wide;
                 host_within.push(match smooth {
                     true => Nest {
                         outer: nest.outer.clone(),
@@ -3222,10 +3216,8 @@ impl<'a> Span<'a> {
         let (p, t, (x, y)) = (self.plan.p, self.lane.track, (self.x, self.y));
         let (pool, s) = (&self.plan.pool, &p.settings);
         let excluded = !t.render_cache;
-        let usual = whole.picture.as_ref().is_none_or(usual_but_mode);
-        let backward = mode != SmoothMode::Faster && whole.pace().speed() < 0.0;
         let held = self.nest_of(c).and_then(|n| n.run).is_some_and(|r| r.held);
-        if held || !t.video_enabled || !usual || backward {
+        if held || !t.video_enabled {
             return Ok(None);
         }
         let (a, b) = match mode {
@@ -3276,23 +3268,24 @@ impl<'a> Span<'a> {
         let Some((smooth, mode)) = Smooth::of(p, d) else {
             return Ok(None);
         };
-        let (Some(f), Some(g)) = (d.before, d.after) else {
-            return Ok(None);
-        };
-        let moded = smooth.mode.is_some();
         let side = |c: &Clip, at: i64| -> Result<Option<VideoPiece>> {
-            if let Some(whole) = self.nest_of(c).and_then(|n| n.flat.as_deref()) {
+            let nest = self.nest_of(c);
+            if let Some(whole) = nest.and_then(|n| n.flat.as_deref()) {
                 return self.flat(c, whole, (at, mode), below);
             }
-            if !shows(&c) || moded && mode != SmoothMode::Faster && c.pace().speed() < 0.0 {
+            if !shows(&c) {
                 return Ok(None);
             }
             let bare = without_mode(c);
             let drawn = bare.as_ref().unwrap_or(c);
-            let mut piece = self.laid(drawn, self.nest_of(c), below, &[])?;
+            let mut piece = self.laid(drawn, nest, below, &[])?;
             let moved = |p: &Placed| !fills(c) || !p.picture.is_usual();
-            if piece.placed().first().is_some_and(moved) {
-                return Ok(None);
+            let backward = mode != SmoothMode::Faster && c.pace().speed() < 0.0;
+            if backward || piece.placed().first().is_some_and(moved) {
+                return match nest.is_some_and(|n| !n.outer.is_empty()) {
+                    true => Ok(None),
+                    false => self.flat(c, &widened(c, d.frames), (at, mode), below),
+                };
             }
             match &mut piece {
                 VideoPiece::Source {
@@ -3316,10 +3309,25 @@ impl<'a> Span<'a> {
             }
             Ok(Some(piece))
         };
-        Ok(match (side(f, d.frames.0)?, side(g, d.frames.1 - 1)?) {
-            (Some(f), Some(g)) => Some((f, g, smooth)),
-            _ => None,
-        })
+        let gap = || VideoPiece::Generated {
+            frames: self.y - x,
+            picture: Generated::SolidColor { color: [0; 3] },
+            placed: Vec::new(),
+            excluded: false,
+        };
+        let either = |c: Option<&Clip>, at: i64| match c {
+            Some(c) => side(c, at),
+            None => Ok((!below).then(gap)),
+        };
+        Ok(
+            match (
+                either(d.before, d.frames.0)?,
+                either(d.after, d.frames.1 - 1)?,
+            ) {
+                (Some(f), Some(g)) => Some((f, g, smooth)),
+                _ => None,
+            },
+        )
     }
 
     fn pictures(&self, stack: &mut Vec<Layer>, flattened: &mut Vec<usize>) -> Result<()> {

@@ -1140,9 +1140,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Ease and Transition Curve are as for a Push. Frame f of n frames shows the morph at curve(f) + 0.5 / n, at most 1.
   - The morph takes the nearest source frame of each clip. A clip with a speed change shows no frames between its source frames.
   - A Solid Color side acts as a still side. Measured in Resolve Studio 21.1.2: two Solid Colors give the same picture as two stills of those colors.
-  - It morphs two pictures that each cover the frame alone, with the usual Inspector values or only a composite mode. It plays as a Cross Dissolve in these cases:
-    - A side is a gap, a clip in a compound clip, or a clip over other tracks that does not fill the frame.
-    - A side has Inspector values other than a composite mode, or plays backward.
+  - It morphs the two pictures as they are on the frame (measured in Resolve Studio 21.2.0):
+    - A side with Inspector values morphs as it shows, for example with a Pan, a Zoom or an Opacity. A bar is black in the morph.
+    - A side played backward morphs.
+    - A clip in a compound clip morphs.
+    - A gap is a black picture. Thus a Smooth Cut at the end of a clip is a morph into black.
+  - A side that does not cover the frame, over other tracks (measured in Resolve Studio 21.2.0):
+    - The tracks below show through. The alpha of the morph is the alpha of the two sides, mixed by the level of the transition.
+    - vidcut plays this case as a Cross Dissolve ([todo](todo/smooth-cut-over-tracks.md)).
   - A composite mode does not stop the morph (measured in Resolve Studio 21.2.0):
     - The composite mode of the outgoing clip mixes the morph with the tracks below.
     - The composite mode of the incoming clip has no effect during the transition.

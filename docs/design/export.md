@@ -279,12 +279,13 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 
 - `render::flatten` puts the incoming side over the outgoing side. Its `Over` holds a `render::Smooth`: the `Retime` of the Process and the keys of the curve.
 - Each side takes Nearest. With Faster, each side stays on one source frame (`Pace::of` at the speed 0).
-- Two sides with no placed picture morph. Other sides play as a cross dissolve. Why: the models take whole RGB frames, with no alpha.
+- Each side is one whole picture of the timeline size. Why: the models take whole RGB frames, with no alpha.
+- A side with a placed picture or played backward is one side as a compound clip is (`VideoPiece::Flat`). A gap is a black `Generated::SolidColor`.
 - A composite mode alone does not make a placed picture here (`without_mode`). `Smooth::mode` holds the mode of the outgoing clip.
 - A side is a file, a generator's picture or a compound clip (`Side`). Why: a Solid Color acts as a still in a Smooth Cut ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
-- A compound clip with its usual picture is one side (`VideoPiece::Flat`). `flat_pieces` makes the plan of that clip alone, and its inner tracks draw nothing in those frames.
+- A compound clip is one side (`VideoPiece::Flat`). `flat_pieces` makes the plan of that clip alone, and its inner tracks draw nothing in those frames.
 - `FlatSide` draws these pieces with a `VideoFrames` of its own, into a float frame of the timeline size. Thus its tracks, transitions and titles take the usual path.
-- Over a lower track, a compound clip without a whole picture at the bottom plays as a cross dissolve. Why: the morph has no alpha.
+- Over a lower track, a side that does not cover the frame plays as a cross dissolve. Why: the morph has no alpha ([todo](../todo/smooth-cut-over-tracks.md)).
 - With Faster, a gradient with keyframes stays on one source frame (`Generated::held`).
 - `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`). `ColorSides` draws a generator's picture the same way.
 - `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).
@@ -292,7 +293,6 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - With a `Smooth::mode`, the layers below stay. `Smooth::placed` gives the made frame that mode, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
 - The key of the pair holds both files, both frames, both looks and both sides. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.
 - The morph has no shot-change test. Why: a Smooth Cut always joins two shots.
-- A side played backward takes the usual path. The transition then plays as a cross dissolve.
 - The morph takes the decoded frames. AI Super Scale does not enlarge them.
 - The morph draws each side with no frames around it. Thus an interlaced side gives only the rows of its own field ([gpu](gpu.md#deinterlacing-and-hdr)).
 
