@@ -63,6 +63,8 @@ flowchart TD
   - It scales each picture to the longer side that the model takes (`yunet::SIDE`, `ppocr::SIDE`), upright, with square pixels.
   - The model runs with tract on the CPU, one picture on each thread of the pool (`pool::run`).
   - `Detections` holds the time of each picture and its `Found` boxes: the center, the size, the rotation and the score. The center and the size are fractions of the picture.
+  - `Detections` also holds the scene score of each picture against the picture before it (`scene`).
+    - `Looking::picture` measures it on the small picture, with `small_luma`, `mafd` and `scene_score` of `analyze.scenes`. Thus the file is not decoded a second time.
   - It keeps each box with a score of `yunet::LEAST` or `ppocr::LEAST` or more. Why: the core can then decide again with other scores, and nothing is measured again.
 - `yunet` prepares the picture and decodes the outputs of the model:
   - The picture goes in as blue, green and red values from 0 to 255. Its right side and its bottom are padded to a multiple of 32.
@@ -85,6 +87,8 @@ flowchart TD
   - A box with a score of `start` or more opens a path. A box with a score of `keep` or more continues a path.
     - Why: a face that turns away scores lower, and its path must not stop there.
   - A path waits `wait_secs` for its thing. Then the path ends.
+  - Each open path ends at a shot change inside the clip (`Detections::cut`, with `SCENE_SCORE`). A thing of the next shot opens a new path.
+    - Why: the box of the next shot at the same place is another thing. The user must be able to remove it alone.
   - A path stays only with boxes of a score of `start` or more on as many frames as `shortest_secs` has.
     - Why: a pattern that looks like a face scores high on a few frames only.
   - A path stays only with a box on a share of `steady` of its frames. Faces have no such rule.

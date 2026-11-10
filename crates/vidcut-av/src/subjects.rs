@@ -212,6 +212,8 @@ struct Looking {
     content: (u32, u32),
     turn: u16,
     scaler: Option<scaling::Context>,
+    measure: Option<scaling::Context>,
+    before: Option<(Vec<u8>, f64)>,
 }
 
 impl Looking {
@@ -222,10 +224,12 @@ impl Looking {
             content,
             turn,
             scaler: None,
+            measure: None,
+            before: None,
         })
     }
 
-    fn picture(&mut self, decoded: &frame::Video) -> Result<Vec<f32>> {
+    fn picture(&mut self, decoded: &frame::Video) -> Result<(Vec<f32>, f32)> {
         let (cw, ch) = self.content;
         let scaled = if self.turn % 180 == 90 {
             (ch, cw)
@@ -233,8 +237,18 @@ impl Looking {
             (cw, ch)
         };
         let bgr = small(&mut self.scaler, decoded, scaled)?;
+        let luma = crate::analysis::small_luma(&mut self.measure, &bgr)?;
+        let (scene, moved) = match &self.before {
+            Some((last, moved)) => {
+                let now = crate::analysis::mafd(last, &luma);
+                (crate::analysis::scene_score(now, *moved), now)
+            }
+            None => (0.0, 0.0),
+        };
+        self.before = Some((luma, moved));
         let content = (cw as usize, ch as usize);
-        Ok(planes(&bgr, self.turn, content, self.model.size()))
+        let planes = planes(&bgr, self.turn, content, self.model.size());
+        Ok((planes, scene))
     }
 
     fn found(&self, pictures: &[Vec<f32>]) -> Result<Vec<Vec<Found>>> {
@@ -306,8 +320,10 @@ pub fn find(
                             looking.insert(seeing)
                         }
                     };
-                    waiting.push(seeing.picture(&decoded)?);
+                    let (picture, scene) = seeing.picture(&decoded)?;
+                    waiting.push(picture);
                     out.pts.push(pts);
+                    out.scene.push(scene);
                     wanted = ((pts - look.from) / look.every.max(1e-9)).floor() as u64 + 1;
                 }
             }
