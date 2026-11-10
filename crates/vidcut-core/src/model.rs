@@ -3379,6 +3379,12 @@ pub struct EffectArea {
     /// On, the effect works outside the area. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
+    /// The corners of a `polygon`, in their order: each `[x, y]` as
+    /// fractions of the area's own box from its top left, each from -10 to
+    /// 10, from 3 to 128 of them. Left out, the four corners of that box.
+    /// Another shape does not use them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub points: Vec<[f64; 2]>,
     /// The id of a motion path of the same clip, as `p1`, or a subject, as
     /// `face`: then each path of the clip that `motion.find` made for that
     /// subject. The base box is then the area of a path at each frame,
@@ -3399,6 +3405,9 @@ pub enum AreaShape {
     Ellipse,
     /// The box itself.
     Box,
+    /// A shape with straight sides through the `points` of the area, in
+    /// their order.
+    Polygon,
 }
 
 impl AreaShape {
@@ -3410,6 +3419,16 @@ impl AreaShape {
 impl EffectArea {
     pub const MIDDLE: [f64; 2] = [0.5, 0.5];
     pub const WHOLE: [f64; 2] = [1.0, 1.0];
+    pub const CORNERS: [[f64; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    pub const POINTS_KEPT: usize = 128;
+
+    pub fn corners(&self) -> &[[f64; 2]] {
+        if self.points.is_empty() {
+            &Self::CORNERS
+        } else {
+            &self.points
+        }
+    }
 
     pub fn middle(&self) -> [f64; 2] {
         self.center.unwrap_or(Self::MIDDLE)

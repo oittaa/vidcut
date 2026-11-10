@@ -3,10 +3,10 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectArea, EffectKeys,
-    EffectKind, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite,
-    MosaicBlur, Picture, PictureTool, Project, Sharpen, TrackKind, Vignette, VignetteMode,
-    VignetteShape, ZoomBox,
+    AreaShape, Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectArea,
+    EffectKeys, EffectKind, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput,
+    GrainComposite, MosaicBlur, Picture, PictureTool, Project, Sharpen, TrackKind, Vignette,
+    VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -537,6 +537,20 @@ fn area_checked(a: &EffectArea) -> Result<EffectArea> {
         "an area's rotation is from -100000 to 100000 degrees",
     )?;
     within(a.softness, (0.0, 1.0), "an area's softness is from 0 to 1")?;
+    let most = EffectArea::POINTS_KEPT;
+    if !a.points.is_empty() && !(3..=most).contains(&a.points.len()) {
+        return Err(Error::invalid(format!(
+            "an area's points are from 3 to {most} corners, not {}",
+            a.points.len()
+        )));
+    }
+    for v in a.points.iter().flatten() {
+        within(
+            Some(*v),
+            (-reach, reach),
+            "an area's points are fractions, each from -10 to 10",
+        )?;
+    }
     Ok(EffectArea {
         center: a.center.filter(|c| *c != EffectArea::MIDDLE),
         size: a.size.filter(|s| *s != EffectArea::WHOLE),
@@ -951,8 +965,10 @@ pub fn effect_shown(e: &Effect) -> Value {
 }
 
 fn area_shown(a: &EffectArea) -> Value {
+    let points = (a.shape == AreaShape::Polygon).then(|| a.corners());
     json!({
         "shape": a.shape,
+        "points": points,
         "center": a.middle(),
         "size": a.extent(),
         "rotation": a.turn(),

@@ -3108,8 +3108,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - A search of the Cut page chapters (pp. 635–791) finds no window and no mask for an effect of a clip.
   - The Color page has Power Windows: Circular, Linear, Polygonal, Curve and Gradient (p. 3308).
+  - A Polygonal window starts as a rectangle with four corner points. A click on it adds a control point, up to 128 (p. 3272).
 - **vidcut:**
-  - An effect of a clip can have an area: an ellipse or a box. The effect then shows only inside it. With `invert`, it shows only outside it.
+  - An effect of a clip can have an area: an ellipse, a box or a polygon. The effect then shows only inside it. With `invert`, it shows only outside it.
+  - A polygon has from 3 to 128 points with straight sides between them. With no points, it has the four corners of the box of the area.
+    - A request gives the points. The viewer has no way to draw them ([todo](todo/motion-tracking.md)).
   - The area has a center, a size, a rotation and a softness. The center and the size are fractions of the source picture.
   - The area stays on the content of the picture through the transform, the crop, the flips, a Dynamic Zoom and a compound clip around it.
   - `effects.set` takes `area`. Null takes the area off. `effects.reset` keeps the area.

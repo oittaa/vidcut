@@ -757,13 +757,31 @@ fn glow_blurred<'a>(
 }
 
 fn area_bytes(masking: &Masking) -> Vec<u8> {
-    let boxed = masking.shape == AreaShape::Box;
+    let shape = match masking.shape {
+        AreaShape::Ellipse => 0.0,
+        AreaShape::Box => 1.0,
+        AreaShape::Polygon => 2.0,
+    };
     let count = masking.maps.len() as f64;
-    float_bytes(&[flag(boxed), masking.softness, flag(masking.invert), count])
+    let points = masking.points.len() as f64;
+    float_bytes(&[
+        shape,
+        masking.softness,
+        flag(masking.invert),
+        count,
+        points,
+        0.0,
+        0.0,
+        0.0,
+    ])
 }
 
 fn area_maps(gpu: &Gpu, masking: &Masking) -> wgpu::Buffer {
-    let floats: Vec<f64> = masking.maps.iter().flatten().flatten().copied().collect();
+    let maps = masking.maps.iter().flatten().flatten();
+    let floats: Vec<f64> = maps
+        .chain(masking.points.iter().flatten())
+        .copied()
+        .collect();
     let bytes = float_bytes(&floats);
     let maps = gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("vidcut area"),
