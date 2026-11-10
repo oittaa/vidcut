@@ -1235,7 +1235,7 @@ impl Workspace {
     fn version(&self) -> String {
         format!(
             "vidcut {} · FFmpeg {}",
-            env!("CARGO_PKG_VERSION"),
+            crate::system::BUILD,
             vidcut_av::ffmpeg_release()
         )
     }

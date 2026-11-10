@@ -1,5 +1,7 @@
 use serde_json::{Value, json};
 
+pub const BUILD: &str = env!("VIDCUT_BUILD");
+
 pub fn version() -> String {
     #[cfg(windows)]
     {
