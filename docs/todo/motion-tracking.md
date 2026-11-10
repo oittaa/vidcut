@@ -98,7 +98,7 @@ In this file, a path is never a track of the timeline.
 - **A drawn box:** one request tracks a box of the selected clip from the playhead, forward or backward.
   - The request tells the frame where it loses the subject. The user starts again from that frame.
 - **The viewer:** the handles of an area on the picture.
-- **Find and Blur in the app:** try the two buttons of the Motion section in a window. Only their requests ran, from the CLI.
+- **The Motion section in the app:** click Blur in a window, and take a find that asks for the download of its model. Find ran from its button.
 - **Titles and clips follow a path** of another clip.
 - **A subject with its matte:** with [subject masks](subject-masks.md).
 - **Resolve measurement:**

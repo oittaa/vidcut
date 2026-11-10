@@ -3130,7 +3130,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - `motion.remove` refuses a path that an area follows by its id. A path that an area follows by its subject can go.
     - An OpenTimelineIO file carries the area and the path that it follows, in its `vidcut` metadata.
   - Each effect in the Inspector has Area rows: Off, Ellipse or Box, then Invert Area, Area Softness and Follow. Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
-    - Follow lists None, All Faces and the motion paths of the clip. All Faces sends the subject `face`. Each change sends `effects.set` with `area`.
+    - Follow lists None, All Faces, All Text and the motion paths of the clip. All Faces sends the subject `face`. Each change sends `effects.set` with `area`.
   - The area has no keyframes. The viewer has no controls for it ([todo](todo/motion-tracking.md)).
 - **Why:**
   - A blur over a face or a number plate must cover only that part of the picture.
