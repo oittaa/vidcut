@@ -95,6 +95,13 @@ pub fn inspect(
     download: bool,
 ) -> Result<Inspected> {
     let found = vidcut_core::catalog::Found::default();
+    if let Some(subject) = crate::subjects::of(model.id) {
+        crate::subjects::inspect(dir, subject, download)?;
+        return Ok(Inspected {
+            found,
+            loaded: Some("tract"),
+        });
+    }
     match model.id {
         "parakeet-ultra" | "qwen3-asr" | "whisper-large-v3" | "silero-vad" | "sortformer"
         | "moss" => {
@@ -109,13 +116,6 @@ pub fn inspect(
         }
         "dpdfnet" => {
             crate::isolate::inspect(dir, download)?;
-            Ok(Inspected {
-                found,
-                loaded: Some("tract"),
-            })
-        }
-        id if crate::subjects::of(id).is_some() => {
-            crate::subjects::inspect(dir, crate::subjects::of(id).expect("listed"), download)?;
             Ok(Inspected {
                 found,
                 loaded: Some("tract"),
