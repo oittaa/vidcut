@@ -1692,6 +1692,11 @@ fn area_moved(held: &AreaHeld, shown: &AreaShown, to: Pos2) -> Option<EffectArea
             let by = now[0].hypot(now[1]) / from[0].hypot(from[1]).max(AreaBox::LEAST);
             frame.half = frame.half.map(|h| (h * by).max(AreaBox::LEAST));
         }
+        AreaHold::Side(across) if matches!(start.shape, AreaShape::Ellipse) => {
+            let i = usize::from(!across);
+            let by = now[i].abs() / from[i].abs().max(AreaBox::LEAST);
+            frame.half[i] = (frame.half[i] * by).max(AreaBox::LEAST);
+        }
         AreaHold::Side(across) => {
             let i = usize::from(!across);
             let side = from[i].signum();
