@@ -2875,7 +2875,6 @@ fn composed_from(own: &crate::model::Speed, u0: f64, v: f64) -> Vec<Section> {
 
 enum Layer {
     Picture(VideoPiece, Option<Ramp>),
-    Placed(VideoPiece, Option<Ramp>),
     Smoothed(VideoPiece, Ramp, Smooth),
     Title(Box<ShownTitle>),
 }
@@ -2883,7 +2882,7 @@ enum Layer {
 impl Layer {
     fn hides(&self, stack: &mut Vec<Layer>) {
         let placed = match self {
-            Layer::Placed(piece, _) => piece.placed(),
+            Layer::Picture(piece, _) => piece.placed(),
             _ => &[],
         };
         hide_inside(placed.get(1..).unwrap_or_default(), stack);
@@ -2891,7 +2890,7 @@ impl Layer {
 
     fn inside(&self, outer: &[Placed]) -> bool {
         match self {
-            Layer::Placed(piece, _) => {
+            Layer::Picture(piece, _) => {
                 let placed = piece.placed();
                 placed.len() > outer.len() && placed.ends_with(outer)
             }
@@ -3070,8 +3069,8 @@ fn piece_of(stack: Vec<Layer>, frames: i64) -> VideoPiece {
     let mut piece = VideoPiece::black(frames);
     for layer in stack {
         piece = match layer {
-            Layer::Picture(shown, None) => shown,
-            Layer::Picture(shown, ramp) | Layer::Placed(shown, ramp) => piece.with_over(Over {
+            Layer::Picture(shown, None) if shown.placed().is_empty() => shown,
+            Layer::Picture(shown, ramp) => piece.with_over(Over {
                 piece: shown,
                 ramp,
                 smooth: None,
@@ -3167,10 +3166,9 @@ impl<'a> Span<'a> {
         &self,
         c: &Clip,
         nest: Option<&Nest>,
-        ramp: Option<Ramp>,
         below: bool,
         crossed: &[Placed],
-    ) -> Result<Layer> {
+    ) -> Result<VideoPiece> {
         let over = below && !self.plan.fills(c);
         let mut piece = self
             .plan
@@ -3180,10 +3178,7 @@ impl<'a> Span<'a> {
         {
             *e = !self.lane.track.render_cache;
         }
-        Ok(match piece.placed().is_empty() {
-            false => Layer::Placed(piece, ramp),
-            true => Layer::Picture(piece, ramp),
-        })
+        Ok(piece)
     }
 
     fn ramp_of(&self, d: &transitions::Playing, falling: bool) -> Ramp {
@@ -3294,15 +3289,11 @@ impl<'a> Span<'a> {
             }
             let bare = without_mode(c);
             let drawn = bare.as_ref().unwrap_or(c);
-            let mut piece = match self.laid(drawn, self.nest_of(c), None, below, &[])? {
-                Layer::Picture(piece, _) => piece,
-                Layer::Placed(piece, _)
-                    if fills(c) && piece.placed().first().is_some_and(|p| p.picture.is_usual()) =>
-                {
-                    piece
-                }
-                _ => return Ok(None),
-            };
+            let mut piece = self.laid(drawn, self.nest_of(c), below, &[])?;
+            let moved = |p: &Placed| !fills(c) || !p.picture.is_usual();
+            if piece.placed().first().is_some_and(moved) {
+                return Ok(None);
+            }
             match &mut piece {
                 VideoPiece::Source {
                     source_frame,
@@ -3359,11 +3350,7 @@ impl<'a> Span<'a> {
                 .filter_map(|c| self.nest_of(c).filter(|n| n.flat.is_some()))
                 .map(|n| n.opened),
         );
-        let outgoing = match smooth.mode {
-            Some(_) => Layer::Placed(f, Some(self.ramp_of(d, true))),
-            None if f.placed().is_empty() => Layer::Picture(f, None),
-            None => Layer::Placed(f, None),
-        };
+        let outgoing = Layer::Picture(f, smooth.mode.map(|_| self.ramp_of(d, true)));
         if smooth.mode.is_none() {
             outgoing.hides(stack);
         }
@@ -3390,7 +3377,10 @@ impl<'a> Span<'a> {
             moded |= chain.iter().any(|c| c.picture.composite_mode.is_some());
             let bare = without_mode(c).filter(|_| !chain.is_empty());
             let drawn = bare.as_ref().unwrap_or(c);
-            layers.push(self.laid(drawn, self.nest_of(c), ramp, below, &chain)?);
+            layers.push(Layer::Picture(
+                self.laid(drawn, self.nest_of(c), below, &chain)?,
+                ramp,
+            ));
         }
         let outer = outer_at(d.before.or(d.after).and_then(|c| self.nest_of(c)), x);
         if let Some(color) = transitions::dip_of(d.transition) {
@@ -3412,7 +3402,7 @@ impl<'a> Span<'a> {
                 falling: !falling,
                 ..r
             });
-            layers.push(Layer::Placed(piece, ramp));
+            layers.push(Layer::Picture(piece, ramp));
         }
         if fill && !moded {
             hide_inside(&outer, stack);
@@ -3423,11 +3413,11 @@ impl<'a> Span<'a> {
 
     fn plain(&self, stack: &mut Vec<Layer>) -> Result<()> {
         let (t, now) = (self.lane.track, self.now);
-        let shows = |c: &&Clip| visible(t, c);
-        let fills = |c: &Clip| self.plan.fills(c);
-        if let Some(c) = t.clip_covering(now).map(|ci| &t.clips[ci]).filter(shows) {
-            let layer = self.laid(c, self.nest_of(c), None, !stack.is_empty(), &[])?;
-            if !matches!(layer, Layer::Placed(..)) || fills(c) {
+        let covering = t.clip_covering(now).map(|ci| &t.clips[ci]);
+        if let Some(c) = covering.filter(|c| visible(t, c)) {
+            let piece = self.laid(c, self.nest_of(c), !stack.is_empty(), &[])?;
+            let layer = Layer::Picture(piece, None);
+            if self.plan.fills(c) {
                 layer.hides(stack);
             }
             stack.push(layer);
