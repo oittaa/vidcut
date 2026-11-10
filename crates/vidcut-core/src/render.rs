@@ -2896,14 +2896,6 @@ enum Layer {
 }
 
 impl Layer {
-    fn hides(&self, stack: &mut Vec<Layer>) {
-        let placed = match self {
-            Layer::Picture(piece, _) => piece.placed(),
-            _ => &[],
-        };
-        hide_inside(placed.get(1..).unwrap_or_default(), stack);
-    }
-
     fn inside(&self, outer: &[Placed]) -> bool {
         match self {
             Layer::Picture(piece, _) => {
@@ -2921,6 +2913,27 @@ fn hide_inside(outer: &[Placed], stack: &mut Vec<Layer>) {
         Some(n) => stack.retain(|l| !l.inside(&outer[n..])),
         None => stack.clear(),
     }
+}
+
+#[derive(Default)]
+struct Drawn {
+    hides: Option<Vec<Placed>>,
+    layers: Vec<Layer>,
+}
+
+fn around(piece: &VideoPiece) -> Vec<Placed> {
+    piece.placed().get(1..).unwrap_or_default().to_vec()
+}
+
+fn uncovered(drawn: Vec<Drawn>) -> Vec<Layer> {
+    let mut stack = Vec::new();
+    for Drawn { hides, layers } in drawn {
+        if let Some(outer) = hides {
+            hide_inside(&outer, &mut stack);
+        }
+        stack.extend(layers);
+    }
+    stack
 }
 
 fn middle((start, end): (i64, i64)) -> i64 {
@@ -3018,7 +3031,7 @@ fn planned_video(
     let mut video = Vec::new();
     for w in cuts_of(p, &lanes, (a, b)).windows(2) {
         let (x, y) = (w[0], w[1]);
-        let mut stack: Vec<Layer> = Vec::new();
+        let mut drawn = Vec::new();
         let mut flattened: Vec<usize> = Vec::new();
         for lane in &lanes {
             let window = lane.window();
@@ -3033,10 +3046,11 @@ fn planned_video(
                 now: window.held.unwrap_or(x),
                 held: window.held.is_some(),
             };
-            span.pictures(&mut stack, &mut flattened)?;
-            span.titles(&mut stack);
+            let mut pictures = span.pictures(&mut flattened)?;
+            pictures.layers.extend(span.titles());
+            drawn.push(pictures);
         }
-        push_video(&mut video, piece_of(stack, y - x));
+        push_video(&mut video, piece_of(uncovered(drawn), y - x));
     }
     Ok(video)
 }
@@ -3329,16 +3343,13 @@ impl<'a> Span<'a> {
         )
     }
 
-    fn pictures(&self, stack: &mut Vec<Layer>, flattened: &mut Vec<usize>) -> Result<()> {
+    fn pictures(&self, flattened: &mut Vec<usize>) -> Result<Drawn> {
         let Some(d) = self.playing() else {
-            return self.plain(stack);
+            return self.plain();
         };
         match self.smoothed(d)? {
-            Some((f, g, smooth)) => {
-                self.smooth_cut(d, (f, g, smooth), stack, flattened);
-                Ok(())
-            }
-            None => self.crossing(d, stack),
+            Some(sides) => Ok(self.smooth_cut(d, sides, flattened)),
+            None => self.crossing(d),
         }
     }
 
@@ -3346,9 +3357,8 @@ impl<'a> Span<'a> {
         &self,
         d: &transitions::Playing,
         (f, g, smooth): (VideoPiece, VideoPiece, Smooth),
-        stack: &mut Vec<Layer>,
         flattened: &mut Vec<usize>,
-    ) {
+    ) -> Drawn {
         let ramp = self.ramp_of(d, false);
         flattened.extend(
             [d.before, d.after]
@@ -3364,14 +3374,16 @@ impl<'a> Span<'a> {
             ..smooth
         };
         let keeps_below = smooth.mode.is_some() || smooth.clear;
-        let outgoing = Layer::Picture(f, keeps_below.then(|| self.ramp_of(d, true)));
-        if !keeps_below {
-            outgoing.hides(stack);
+        Drawn {
+            hides: (!keeps_below).then(|| around(&f)),
+            layers: vec![
+                Layer::Picture(f, keeps_below.then(|| self.ramp_of(d, true))),
+                Layer::Smoothed(g, ramp, smooth),
+            ],
         }
-        stack.extend([outgoing, Layer::Smoothed(g, ramp, smooth)]);
     }
 
-    fn crossing(&self, d: &transitions::Playing, stack: &mut Vec<Layer>) -> Result<()> {
+    fn crossing(&self, d: &transitions::Playing) -> Result<Drawn> {
         let (t, (x, y), now) = (self.lane.track, (self.x, self.y), self.now);
         let shows = |c: &&Clip| visible(t, c);
         let fills = |c: &Clip| self.plan.fills(c);
@@ -3417,25 +3429,23 @@ impl<'a> Span<'a> {
             });
             layers.push(Layer::Picture(piece, ramp));
         }
-        if fill && !moded {
-            hide_inside(&outer, stack);
-        }
-        stack.extend(layers);
-        Ok(())
+        Ok(Drawn {
+            hides: (fill && !moded).then_some(outer),
+            layers,
+        })
     }
 
-    fn plain(&self, stack: &mut Vec<Layer>) -> Result<()> {
+    fn plain(&self) -> Result<Drawn> {
         let (t, now) = (self.lane.track, self.now);
         let covering = t.clip_covering(now).map(|ci| &t.clips[ci]);
-        if let Some(c) = covering.filter(|c| visible(t, c)) {
-            let piece = self.laid(c, self.nest_of(c), &[])?;
-            let layer = Layer::Picture(piece, None);
-            if self.plan.fills(c) {
-                layer.hides(stack);
-            }
-            stack.push(layer);
-        }
-        Ok(())
+        let Some(c) = covering.filter(|c| visible(t, c)) else {
+            return Ok(Drawn::default());
+        };
+        let piece = self.laid(c, self.nest_of(c), &[])?;
+        Ok(Drawn {
+            hides: self.plan.fills(c).then(|| around(&piece)),
+            layers: vec![Layer::Picture(piece, None)],
+        })
     }
 
     fn lettered(&self, c: &Clip, fade: Option<Ramp>, crossed: Vec<Placed>) -> Option<ShownTitle> {
@@ -3456,7 +3466,7 @@ impl<'a> Span<'a> {
         })
     }
 
-    fn titles(&self, stack: &mut Vec<Layer>) {
+    fn titles(&self) -> Vec<Layer> {
         let (t, now) = (self.lane.track, self.now);
         let sides = match self.playing() {
             Some(d) => sides_at(d, now)
@@ -3472,14 +3482,14 @@ impl<'a> Span<'a> {
                 Vec::new(),
             )],
         };
-        for (c, fade, crossed) in sides {
-            if let Some(s) = c
-                .filter(|c| titled(t, c))
-                .and_then(|c| self.lettered(c, fade, crossed))
-            {
-                stack.push(Layer::Title(Box::new(s)));
-            }
-        }
+        sides
+            .into_iter()
+            .filter_map(|(c, fade, crossed)| {
+                let c = c.filter(|c| titled(t, c))?;
+                self.lettered(c, fade, crossed)
+            })
+            .map(|s| Layer::Title(Box::new(s)))
+            .collect()
     }
 }
 
