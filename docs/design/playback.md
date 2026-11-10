@@ -164,6 +164,7 @@ flowchart TD
   - Why the timeline colors: an HDR picture goes to the AI stages only in an SDR timeline, tone-mapped.
   - The `Id` also holds the exact source position (`Plan::id`). Thus each made frame is a kept picture of its own.
   - The `Id` also holds the keyframe position of the frame and the place of its Dynamic Zoom (`placed_now`). The keyframe position is in it only when the picture has keyframes, or when the area of an effect follows a motion path.
+  - The `Id` also holds a stamp of the box of each followed path at the frame (`Followed::stamp_at`). Thus a change of a sample makes the frame again.
   - Why: the made frame keeps the placement of its frame (`Sampling::Placed`), and the draw uses that placement.
   - A cut of the piece (`VideoPiece::part`) does not change these values. Thus a piece that plays in part from the cache keeps the `Id` of each frame.
   - A frame of an AI process aims ahead of the clock by the mean time of the recent made frames (`make_cost`). On the way, the player skips the frames between. Why: they would be late.
