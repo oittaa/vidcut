@@ -375,7 +375,9 @@ The bar and the Jobs button:
     - A click on an outline makes that area the shown one. A click outside the areas shows none.
     - With a picture tool on (`Grab::tool`), it takes no pointer. Thus `Workspace::picture_controls` gets each press.
     - `Grab::blurring` tells whether a drag draws a new area. With the tool off, no drag starts on an area that is not the shown one.
-  - `Workspace::blur_tools` is the row of the tool: the shapes, one button for each `Subject` (`Workspace::subject_blur`) and Delete.
+  - `Workspace::blur_tools` is the row of the tool: the shapes, one button for each `Subject` (`Workspace::subject_blur`), Track and Delete.
+    - Track sends `motion.track` for the shown area (`Workspace::track`): both ways, or forward when the area follows a track.
+    - It asks before the download of the model, as Find does (`Finding`, `model_needs`).
 
 **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`).
 

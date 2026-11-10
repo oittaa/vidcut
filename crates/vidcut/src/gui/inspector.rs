@@ -1323,7 +1323,7 @@ struct PathRow {
 struct Finding {
     method: &'static str,
     params: Value,
-    subject: Subject,
+    subject: Option<Subject>,
 }
 
 impl PathRow {
@@ -2743,8 +2743,16 @@ fn finds(method: &str, params: &Value) -> bool {
         || commands.is_some_and(|c| c.iter().any(|c| c["method"] == "motion.find"))
 }
 
+fn model_needs(subject: Option<Subject>) -> Vec<vidcut_av::models::Need> {
+    let dir = crate::paths::models_dir();
+    match subject {
+        Some(subject) => vidcut_av::subjects::needed(&dir, subject),
+        None => vidcut_av::tracking::needed(&dir),
+    }
+}
+
 fn with_model(method: &str, params: &mut Value) {
-    if method == "motion.find" {
+    if method == "motion.find" || method == "motion.track" {
         params["download"] = json!(true);
     }
     for c in params["commands"].as_array_mut().into_iter().flatten() {
@@ -3911,15 +3919,45 @@ impl Workspace {
     }
 
     pub(super) fn find(&mut self, method: &'static str, params: Value, subject: Subject) {
-        let dir = crate::paths::models_dir();
-        if finds(method, &params) && !vidcut_av::subjects::needed(&dir, subject).is_empty() {
+        if finds(method, &params) && !model_needs(Some(subject)).is_empty() {
             self.inspector.finding = Some(Finding {
                 method,
                 params,
-                subject,
+                subject: Some(subject),
             });
         } else {
             self.send(method, params);
+        }
+    }
+
+    pub(super) fn track(&mut self, clip: &str, effect: usize) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(c) = p.clip(clip) else {
+            return;
+        };
+        let effects = c.picture.iter().flat_map(|x| &x.effects);
+        let area = effects
+            .into_iter()
+            .nth(effect)
+            .and_then(|e| e.area.as_ref());
+        let follows = area.and_then(|a| a.follows.as_ref());
+        let tracked = c.motion.iter().filter(|m| m.subject.is_none());
+        let way = match tracked.map(|m| &m.id).any(|id| Some(id) == follows) {
+            true => "forward",
+            false => "both",
+        };
+        let at = self.snap.timeline.position;
+        let params = json!({ "clip": clip, "effect": effect, "at": at, "way": way });
+        if model_needs(None).is_empty() {
+            self.send("motion.track", params);
+        } else {
+            self.inspector.finding = Some(Finding {
+                method: "motion.track",
+                params,
+                subject: None,
+            });
         }
     }
 
@@ -3928,7 +3966,7 @@ impl Workspace {
             return;
         };
         let (method, mut params) = (finding.method, finding.params);
-        let needs = vidcut_av::subjects::needed(&crate::paths::models_dir(), finding.subject);
+        let needs = model_needs(finding.subject);
         if needs.is_empty() {
             self.inspector.finding = None;
             self.send(method, params);
