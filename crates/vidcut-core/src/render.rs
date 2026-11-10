@@ -2940,24 +2940,97 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         Some((q, w)) => (q, Some(w)),
         None => (p, None),
     };
-    let pool = p.pool();
     let s = &p.settings;
-    let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
+    let video = planned_video(p, within, (a, b))?;
+    let (audio, lanes) = planned_audio(p, within, (a, b))?;
+    let ducking = crate::duck::planned(p, &lanes, a, b);
+    let plan = RenderPlan {
+        fps: s.fps,
+        width: s.width,
+        height: s.height,
+        sample_rate: s.sample_rate,
+        channels: s.channels,
+        frames: b - a,
+        video,
+        audio,
+        ducking,
+        range: (a, b),
+        name: "timeline".into(),
+        colors: None,
+        output_lut: s.output_lut.clone(),
+    };
+    Ok((plan, lanes))
+}
 
-    let (tracks, inside): (Vec<_>, Vec<_>) = p
+struct VideoLane<'a> {
+    track: &'a Track,
+    inner: Option<&'a Inner>,
+    played: Vec<transitions::Playing<'a>>,
+}
+
+impl VideoLane<'_> {
+    fn window(&self) -> Shown {
+        self.inner.map_or(EVERY_FRAME, |i| i.shown)
+    }
+
+    fn drawn_flat(&self, flattened: &[usize]) -> bool {
+        self.inner.is_some_and(|i| {
+            i.nests
+                .iter()
+                .flat_map(|n| &n.outer)
+                .any(|a| flattened.contains(&a.opened))
+        })
+    }
+}
+
+fn planned_video(
+    p: &Project,
+    within: Option<&Within>,
+    (a, b): (i64, i64),
+) -> Result<Vec<VideoPiece>> {
+    let lanes: Vec<VideoLane> = p
         .tracks
         .iter()
         .enumerate()
         .filter(|(_, t)| t.kind == TrackKind::Video)
-        .map(|(i, t)| (t, within.and_then(|w| w.get(i))))
-        .unzip();
-    let dissolves: Vec<_> = tracks
-        .iter()
-        .map(|t| transitions::playing(p, t, false, transitions::mixes))
+        .map(|(i, t)| VideoLane {
+            track: t,
+            inner: within.and_then(|w| w.get(i)),
+            played: transitions::playing(p, t, false, transitions::mixes),
+        })
         .collect();
+    let plan = VideoPlan { p, pool: p.pool() };
+    let mut video = Vec::new();
+    for w in cuts_of(p, &lanes, (a, b)).windows(2) {
+        let (x, y) = (w[0], w[1]);
+        let mut stack: Vec<Layer> = Vec::new();
+        let mut flattened: Vec<usize> = Vec::new();
+        for lane in &lanes {
+            let window = lane.window();
+            if x < window.from || x >= window.to || lane.drawn_flat(&flattened) {
+                continue;
+            }
+            let span = Span {
+                plan: &plan,
+                lane,
+                x,
+                y,
+                now: window.held.unwrap_or(x),
+                held: window.held.is_some(),
+            };
+            span.pictures(&mut stack, &mut flattened)?;
+            span.titles(&mut stack);
+        }
+        push_video(&mut video, piece_of(stack, y - x));
+    }
+    Ok(video)
+}
+
+fn cuts_of(p: &Project, lanes: &[VideoLane], (a, b): (i64, i64)) -> Vec<i64> {
     let mut cuts = vec![a, b];
-    for ((t, played), inner) in tracks.iter().zip(&dissolves).zip(&inside) {
-        let shown = inner.map_or(EVERY_FRAME, |i| i.shown);
+    for lane in lanes {
+        let (t, inner) = (lane.track, lane.inner);
+        let shown = lane.window();
         let (from, to) = (a.max(shown.from), b.min(shown.to));
         if to <= from {
             continue;
@@ -2974,16 +3047,12 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 cuts.push(s);
             }
         }
-        for d in played {
+        for d in &lane.played {
             cuts.extend([d.frames.0, d.frames.1].map(|f| f.clamp(from, to)));
             if transitions::dip_of(d.transition).is_some() {
                 cuts.push(middle(d.frames).clamp(from, to));
             }
-            if let Some(c) = d
-                .before
-                .or(d.after)
-                .map(|c| whole(nest_in(*inner, t, c), c))
-            {
+            if let Some(c) = d.before.or(d.after).map(|c| whole(nest_in(inner, t, c), c)) {
                 cuts.extend(
                     ((from + 1).max(d.frames.0 + 1)..to.min(d.frames.1)).filter(|&f| {
                         c.compound.is_some() && mode_at(p, c, f) != mode_at(p, c, f - 1)
@@ -2994,353 +3063,431 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     }
     cuts.sort_unstable();
     cuts.dedup();
-    let fills = |c: &Clip| {
+    cuts
+}
+
+fn piece_of(stack: Vec<Layer>, frames: i64) -> VideoPiece {
+    let mut piece = VideoPiece::black(frames);
+    for layer in stack {
+        piece = match layer {
+            Layer::Picture(shown, None) => shown,
+            Layer::Picture(shown, ramp) | Layer::Placed(shown, ramp) => piece.with_over(Over {
+                piece: shown,
+                ramp,
+                smooth: None,
+            }),
+            Layer::Smoothed(shown, ramp, smooth) => piece.with_over(Over {
+                piece: shown,
+                ramp: Some(ramp),
+                smooth: Some(smooth),
+            }),
+            Layer::Title(t) => piece.with_title(*t),
+        };
+    }
+    piece
+}
+
+struct VideoPlan<'a> {
+    p: &'a Project,
+    pool: HashMap<&'a str, &'a Media>,
+}
+
+impl VideoPlan<'_> {
+    fn fills(&self, c: &Clip) -> bool {
+        let (pool, s) = (&self.pool, &self.p.settings);
         c.picture.as_ref().is_none_or(Picture::is_usual)
             && (c.draws()
                 || pool
                     .get(c.media.as_str())
                     .is_some_and(|m| crate::place::fills(m, (s.width, s.height))))
-    };
-    let picture =
-        |c: &Clip, (nest, over, crossed): Nesting, x: i64, y: i64| -> Result<VideoPiece> {
-            let drawn = c.generator.as_ref();
-            if let Some(picture) = drawn.and_then(|g| Generated::of(g, c.content_at(x))) {
-                return Ok(VideoPiece::Generated {
-                    frames: y - x,
-                    picture,
-                    placed: placed_of(c, nest, over, crossed, x),
-                    excluded: false,
-                });
-            }
-            let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
-            let (path, origin) = origin_of(m);
-            Ok(VideoPiece::Source {
-                media: c.media.clone(),
-                path,
-                origin,
-                source_frame: c.source_at(x),
-                frames: y - x,
-                image: image_of(m),
-                pace: c.pace().after(x - c.start),
-                color_space: m.color_space,
-                alpha_mode: m.alpha_mode,
-                super_scale: super_scale_of(m.super_scale, s),
-                retime: retime_of(c, x, m, s),
-                placed: placed_of(c, nest, over, crossed, x),
-                cache: c.render_cache,
-                excluded: false,
-                made: None,
-                input_lut: m.input_lut.clone(),
-            })
-        };
-    let mut video = Vec::new();
-    for w in cuts.windows(2) {
-        let (x, y) = (w[0], w[1]);
-        let mut stack: Vec<Layer> = Vec::new();
-        let mut flattened: Vec<usize> = Vec::new();
-        for ((t, played), inner) in tracks.iter().zip(&dissolves).zip(&inside) {
-            let window = inner.map_or(EVERY_FRAME, |i| i.shown);
-            if x < window.from || x >= window.to {
-                continue;
-            }
-            let drawn_flat = |i: &Inner| {
-                i.nests
-                    .iter()
-                    .flat_map(|n| &n.outer)
-                    .any(|a| flattened.contains(&a.opened))
-            };
-            if inner.is_some_and(drawn_flat) {
-                continue;
-            }
-            let now = window.held.unwrap_or(x);
-            let ramp_of = |d: &transitions::Playing, falling| {
-                Edge::of(p, d, falling, (None, (now, now), false)).ramp(now, window.held.is_some())
-            };
-            let excluded = !t.render_cache;
-            let shows = |c: &&Clip| visible(t, c);
-            let nest_of = |c: &Clip| nest_in(*inner, t, c);
-            let laid = |c: &Clip,
-                        nest: Option<&Nest>,
-                        ramp: Option<Ramp>,
-                        below: bool,
-                        crossed: &[Placed]|
-             -> Result<Layer> {
-                let mut piece = picture(c, (nest, below && !fills(c), crossed), x, y)?;
-                if let VideoPiece::Source { excluded: e, .. }
-                | VideoPiece::Generated { excluded: e, .. } = &mut piece
-                {
-                    *e = excluded;
-                }
-                Ok(match piece.placed().is_empty() {
-                    false => Layer::Placed(piece, ramp),
-                    true => Layer::Picture(piece, ramp),
-                })
-            };
-            let shown =
-                |c: &Clip, ramp: Option<Ramp>, below: bool| laid(c, nest_of(c), ramp, below, &[]);
-            let sided = |d: &transitions::Playing, falling: bool| {
-                let side = d.before.or(d.after).map(|c| whole(nest_of(c), c));
-                let inside = d
-                    .before
-                    .or(d.after)
-                    .and_then(nest_of)
-                    .is_some_and(|n| !n.outer.is_empty());
-                let edge = Edge::of(p, d, falling, (side, (now, now + 1), inside));
-                let ramp = edge.ramp(now, window.held.is_some());
-                match (edge.crossed(x, ramp), ramp.moved) {
-                    (Some(across), true) => {
-                        let own = Placed {
-                            picture: Picture::default(),
-                            ramp: Some(ramp),
-                            crossing: false,
-                            moving: None,
-                            ..across.clone()
-                        };
-                        (None, vec![own, across])
-                    }
-                    (crossed, _) => (Some(ramp), crossed.into_iter().collect()),
-                }
-            };
-            let flat = |c: &Clip,
-                        whole: &Clip,
-                        (at, mode): (i64, SmoothMode),
-                        below: bool|
-             -> Result<Option<VideoPiece>> {
-                let usual = whole.picture.as_ref().is_none_or(usual_but_mode);
-                let backward = mode != SmoothMode::Faster && whole.pace().speed() < 0.0;
-                let held = nest_of(c).and_then(|n| n.run).is_some_and(|r| r.held);
-                if held || !t.video_enabled || !usual || backward {
-                    return Ok(None);
-                }
-                let (a, b) = match mode {
-                    SmoothMode::Faster => (at, at + 1),
-                    _ => (x, y),
-                };
-                let bare = without_mode(whole);
-                let drawn = bare.as_ref().unwrap_or(whole);
-                let pieces = flat_pieces(p, t, drawn, (a.max(0), b.max(1)))?;
-                let covers = |piece: &VideoPiece| {
-                    let layers = piece.layers();
-                    let bottom = layers
-                        .iter()
-                        .map(|(l, _)| *l)
-                        .find(|l| !matches!(l, VideoPiece::Black { .. }));
-                    match bottom {
-                        Some(VideoPiece::Source { media, placed, .. }) => {
-                            placed.iter().all(|p| p.picture.is_usual())
-                                && pool
-                                    .get(media.as_str())
-                                    .is_some_and(|m| crate::place::fills(m, (s.width, s.height)))
-                        }
-                        Some(VideoPiece::Generated { placed, .. }) => {
-                            placed.iter().all(|p| p.picture.is_usual())
-                        }
-                        _ => false,
-                    }
-                };
-                if below && !pieces.iter().all(covers) {
-                    return Ok(None);
-                }
-                Ok(Some(VideoPiece::Flat {
-                    frames: y - x,
-                    pieces,
-                    skip: 0,
-                    excluded,
-                }))
-            };
-            let smoothed = |d: &transitions::Playing,
-                            below: bool|
-             -> Result<Option<(VideoPiece, VideoPiece, Smooth)>> {
-                let Some((smooth, mode)) = Smooth::of(p, d) else {
-                    return Ok(None);
-                };
-                let (Some(f), Some(g)) = (d.before, d.after) else {
-                    return Ok(None);
-                };
-                let moded = smooth.mode.is_some();
-                let side = |c: &Clip, at: i64| -> Result<Option<VideoPiece>> {
-                    if let Some(whole) = nest_of(c).and_then(|n| n.flat.as_deref()) {
-                        return flat(c, whole, (at, mode), below);
-                    }
-                    if !shows(&c) || moded && mode != SmoothMode::Faster && c.pace().speed() < 0.0 {
-                        return Ok(None);
-                    }
-                    let bare = without_mode(c);
-                    let drawn = bare.as_ref().unwrap_or(c);
-                    let mut piece = match laid(drawn, nest_of(c), None, below, &[])? {
-                        Layer::Picture(piece, _) => piece,
-                        Layer::Placed(piece, _)
-                            if fills(c)
-                                && piece.placed().first().is_some_and(|p| p.picture.is_usual()) =>
-                        {
-                            piece
-                        }
-                        _ => return Ok(None),
-                    };
-                    match &mut piece {
-                        VideoPiece::Source {
-                            source_frame,
-                            pace,
-                            retime,
-                            ..
-                        } => {
-                            *retime = Retime::Nearest;
-                            if mode == SmoothMode::Faster {
-                                *source_frame = c.source_at(at);
-                                *pace = Pace::of(0.0, 0);
-                            }
-                        }
-                        VideoPiece::Generated { picture, .. } => {
-                            if mode == SmoothMode::Faster {
-                                *picture = picture.after(at - x).held();
-                            }
-                        }
-                        _ => return Ok(None),
-                    }
-                    Ok(Some(piece))
-                };
-                Ok(match (side(f, d.frames.0)?, side(g, d.frames.1 - 1)?) {
-                    (Some(f), Some(g)) => Some((f, g, smooth)),
-                    _ => None,
-                })
-            };
-            let playing = played
-                .iter()
-                .find(|d| d.frames.0 <= now && now < d.frames.1);
-            match playing {
-                Some(d) if let Some((f, g, smooth)) = smoothed(d, !stack.is_empty())? => {
-                    let ramp = ramp_of(d, false);
-                    flattened.extend(
-                        [d.before, d.after]
-                            .into_iter()
-                            .flatten()
-                            .filter_map(|c| nest_of(c).filter(|n| n.flat.is_some()))
-                            .map(|n| n.opened),
-                    );
-                    let outgoing = match smooth.mode {
-                        Some(_) => Layer::Placed(f, Some(ramp_of(d, true))),
-                        None if f.placed().is_empty() => Layer::Picture(f, None),
-                        None => Layer::Placed(f, None),
-                    };
-                    if smooth.mode.is_none() {
-                        outgoing.hides(&mut stack);
-                    }
-                    stack.extend([outgoing, Layer::Smoothed(g, ramp, smooth)]);
-                }
-                Some(d) => {
-                    let below = !stack.is_empty();
-                    let sides = sides_at(d, now);
-                    let fill = sides
-                        .iter()
-                        .all(|(c, _)| c.filter(shows).is_some_and(fills));
-                    let mut moded = false;
-                    let mut layers = Vec::new();
-                    for (c, falling) in sides {
-                        let Some(c) = c.filter(shows) else {
-                            continue;
-                        };
-                        let (ramp, chain) = sided(d, falling);
-                        moded |= chain.iter().any(|c| c.picture.composite_mode.is_some());
-                        let bare = without_mode(c).filter(|_| !chain.is_empty());
-                        let drawn = bare.as_ref().unwrap_or(c);
-                        layers.push(laid(drawn, nest_of(c), ramp, below, &chain)?);
-                    }
-                    let outer = outer_at(d.before.or(d.after).and_then(nest_of), x);
-                    if let Some(color) = transitions::dip_of(d.transition) {
-                        let falling = now < middle(d.frames);
-                        let (ramp, chain) = sided(d, falling);
-                        let own = chain.first().map(|c| Placed {
-                            picture: Picture::default(),
-                            crossing: false,
-                            moving: None,
-                            ..c.clone()
-                        });
-                        let piece = VideoPiece::Generated {
-                            frames: y - x,
-                            picture: Generated::SolidColor { color },
-                            placed: own.into_iter().chain(chain).chain(outer.clone()).collect(),
-                            excluded,
-                        };
-                        let ramp = ramp.map(|r| Ramp {
-                            falling: !falling,
-                            ..r
-                        });
-                        layers.push(Layer::Placed(piece, ramp));
-                    }
-                    if fill && !moded {
-                        hide_inside(&outer, &mut stack);
-                    }
-                    stack.extend(layers);
-                }
-                None => {
-                    if let Some(c) = t.clip_covering(now).map(|ci| &t.clips[ci]).filter(shows) {
-                        let layer = shown(c, None, !stack.is_empty())?;
-                        if !matches!(layer, Layer::Placed(..)) || fills(c) {
-                            layer.hides(&mut stack);
-                        }
-                        stack.push(layer);
-                    }
-                }
-            }
-            let lettered = |c: &Clip, fade: Option<Ramp>, crossed: Vec<Placed>| {
-                let nest = nest_of(c);
-                let run = nest.and_then(|n| n.run).filter(|r| r.held).unwrap_or(Run {
-                    at: x - c.start,
-                    of: c.duration,
-                    held: false,
-                });
-                Some(ShownTitle {
-                    clip: c.id.clone(),
-                    title: c.title.clone()?,
-                    run,
-                    source_in: c.source_in,
-                    fade,
-                    placed: crossed.into_iter().chain(outer_at(nest, x)).collect(),
-                })
-            };
-            match playing {
-                Some(d) => {
-                    for (c, falling) in sides_at(d, now) {
-                        let (fade, crossed) = sided(d, falling);
-                        if let Some(s) = c
-                            .filter(|c| titled(t, c))
-                            .and_then(|c| lettered(c, fade, crossed))
-                        {
-                            stack.push(Layer::Title(Box::new(s)));
-                        }
-                    }
-                }
-                None => {
-                    if let Some(s) = t
-                        .clip_covering(now)
-                        .map(|ci| &t.clips[ci])
-                        .filter(|c| titled(t, c))
-                        .and_then(|c| lettered(c, None, Vec::new()))
-                    {
-                        stack.push(Layer::Title(Box::new(s)));
-                    }
-                }
-            }
-        }
-        let mut piece = VideoPiece::black(y - x);
-        for layer in stack {
-            piece = match layer {
-                Layer::Picture(shown, None) => shown,
-                Layer::Picture(shown, ramp) | Layer::Placed(shown, ramp) => piece.with_over(Over {
-                    piece: shown,
-                    ramp,
-                    smooth: None,
-                }),
-                Layer::Smoothed(shown, ramp, smooth) => piece.with_over(Over {
-                    piece: shown,
-                    ramp: Some(ramp),
-                    smooth: Some(smooth),
-                }),
-                Layer::Title(t) => piece.with_title(*t),
-            };
-        }
-        push_video(&mut video, piece);
     }
+
+    fn picture(
+        &self,
+        c: &Clip,
+        (nest, over, crossed): Nesting,
+        x: i64,
+        y: i64,
+    ) -> Result<VideoPiece> {
+        let (pool, s) = (&self.pool, &self.p.settings);
+        let drawn = c.generator.as_ref();
+        if let Some(picture) = drawn.and_then(|g| Generated::of(g, c.content_at(x))) {
+            return Ok(VideoPiece::Generated {
+                frames: y - x,
+                picture,
+                placed: placed_of(c, nest, over, crossed, x),
+                excluded: false,
+            });
+        }
+        let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
+        let (path, origin) = origin_of(m);
+        Ok(VideoPiece::Source {
+            media: c.media.clone(),
+            path,
+            origin,
+            source_frame: c.source_at(x),
+            frames: y - x,
+            image: image_of(m),
+            pace: c.pace().after(x - c.start),
+            color_space: m.color_space,
+            alpha_mode: m.alpha_mode,
+            super_scale: super_scale_of(m.super_scale, s),
+            retime: retime_of(c, x, m, s),
+            placed: placed_of(c, nest, over, crossed, x),
+            cache: c.render_cache,
+            excluded: false,
+            made: None,
+            input_lut: m.input_lut.clone(),
+        })
+    }
+}
+
+struct Span<'a> {
+    plan: &'a VideoPlan<'a>,
+    lane: &'a VideoLane<'a>,
+    x: i64,
+    y: i64,
+    now: i64,
+    held: bool,
+}
+
+impl<'a> Span<'a> {
+    fn nest_of(&self, c: &Clip) -> Option<&'a Nest> {
+        nest_in(self.lane.inner, self.lane.track, c)
+    }
+
+    fn playing(&self) -> Option<&'a transitions::Playing<'a>> {
+        self.lane
+            .played
+            .iter()
+            .find(|d| d.frames.0 <= self.now && self.now < d.frames.1)
+    }
+
+    fn laid(
+        &self,
+        c: &Clip,
+        nest: Option<&Nest>,
+        ramp: Option<Ramp>,
+        below: bool,
+        crossed: &[Placed],
+    ) -> Result<Layer> {
+        let over = below && !self.plan.fills(c);
+        let mut piece = self
+            .plan
+            .picture(c, (nest, over, crossed), self.x, self.y)?;
+        if let VideoPiece::Source { excluded: e, .. } | VideoPiece::Generated { excluded: e, .. } =
+            &mut piece
+        {
+            *e = !self.lane.track.render_cache;
+        }
+        Ok(match piece.placed().is_empty() {
+            false => Layer::Placed(piece, ramp),
+            true => Layer::Picture(piece, ramp),
+        })
+    }
+
+    fn ramp_of(&self, d: &transitions::Playing, falling: bool) -> Ramp {
+        Edge::of(self.plan.p, d, falling, (None, (self.now, self.now), false))
+            .ramp(self.now, self.held)
+    }
+
+    fn sided(&self, d: &transitions::Playing, falling: bool) -> (Option<Ramp>, Vec<Placed>) {
+        let (x, now) = (self.x, self.now);
+        let nest_of = |c| self.nest_of(c);
+        let side = d.before.or(d.after).map(|c| whole(nest_of(c), c));
+        let inside = d
+            .before
+            .or(d.after)
+            .and_then(nest_of)
+            .is_some_and(|n| !n.outer.is_empty());
+        let edge = Edge::of(self.plan.p, d, falling, (side, (now, now + 1), inside));
+        let ramp = edge.ramp(now, self.held);
+        match (edge.crossed(x, ramp), ramp.moved) {
+            (Some(across), true) => {
+                let own = Placed {
+                    picture: Picture::default(),
+                    ramp: Some(ramp),
+                    crossing: false,
+                    moving: None,
+                    ..across.clone()
+                };
+                (None, vec![own, across])
+            }
+            (crossed, _) => (Some(ramp), crossed.into_iter().collect()),
+        }
+    }
+
+    fn flat(
+        &self,
+        c: &Clip,
+        whole: &Clip,
+        (at, mode): (i64, SmoothMode),
+        below: bool,
+    ) -> Result<Option<VideoPiece>> {
+        let (p, t, (x, y)) = (self.plan.p, self.lane.track, (self.x, self.y));
+        let (pool, s) = (&self.plan.pool, &p.settings);
+        let excluded = !t.render_cache;
+        let usual = whole.picture.as_ref().is_none_or(usual_but_mode);
+        let backward = mode != SmoothMode::Faster && whole.pace().speed() < 0.0;
+        let held = self.nest_of(c).and_then(|n| n.run).is_some_and(|r| r.held);
+        if held || !t.video_enabled || !usual || backward {
+            return Ok(None);
+        }
+        let (a, b) = match mode {
+            SmoothMode::Faster => (at, at + 1),
+            _ => (x, y),
+        };
+        let bare = without_mode(whole);
+        let drawn = bare.as_ref().unwrap_or(whole);
+        let pieces = flat_pieces(p, t, drawn, (a.max(0), b.max(1)))?;
+        let covers = |piece: &VideoPiece| {
+            let layers = piece.layers();
+            let bottom = layers
+                .iter()
+                .map(|(l, _)| *l)
+                .find(|l| !matches!(l, VideoPiece::Black { .. }));
+            match bottom {
+                Some(VideoPiece::Source { media, placed, .. }) => {
+                    placed.iter().all(|p| p.picture.is_usual())
+                        && pool
+                            .get(media.as_str())
+                            .is_some_and(|m| crate::place::fills(m, (s.width, s.height)))
+                }
+                Some(VideoPiece::Generated { placed, .. }) => {
+                    placed.iter().all(|p| p.picture.is_usual())
+                }
+                _ => false,
+            }
+        };
+        if below && !pieces.iter().all(covers) {
+            return Ok(None);
+        }
+        Ok(Some(VideoPiece::Flat {
+            frames: y - x,
+            pieces,
+            skip: 0,
+            excluded,
+        }))
+    }
+
+    fn smoothed(
+        &self,
+        d: &transitions::Playing,
+        below: bool,
+    ) -> Result<Option<(VideoPiece, VideoPiece, Smooth)>> {
+        let (p, t, x) = (self.plan.p, self.lane.track, self.x);
+        let shows = |c: &&Clip| visible(t, c);
+        let fills = |c: &Clip| self.plan.fills(c);
+        let Some((smooth, mode)) = Smooth::of(p, d) else {
+            return Ok(None);
+        };
+        let (Some(f), Some(g)) = (d.before, d.after) else {
+            return Ok(None);
+        };
+        let moded = smooth.mode.is_some();
+        let side = |c: &Clip, at: i64| -> Result<Option<VideoPiece>> {
+            if let Some(whole) = self.nest_of(c).and_then(|n| n.flat.as_deref()) {
+                return self.flat(c, whole, (at, mode), below);
+            }
+            if !shows(&c) || moded && mode != SmoothMode::Faster && c.pace().speed() < 0.0 {
+                return Ok(None);
+            }
+            let bare = without_mode(c);
+            let drawn = bare.as_ref().unwrap_or(c);
+            let mut piece = match self.laid(drawn, self.nest_of(c), None, below, &[])? {
+                Layer::Picture(piece, _) => piece,
+                Layer::Placed(piece, _)
+                    if fills(c) && piece.placed().first().is_some_and(|p| p.picture.is_usual()) =>
+                {
+                    piece
+                }
+                _ => return Ok(None),
+            };
+            match &mut piece {
+                VideoPiece::Source {
+                    source_frame,
+                    pace,
+                    retime,
+                    ..
+                } => {
+                    *retime = Retime::Nearest;
+                    if mode == SmoothMode::Faster {
+                        *source_frame = c.source_at(at);
+                        *pace = Pace::of(0.0, 0);
+                    }
+                }
+                VideoPiece::Generated { picture, .. } => {
+                    if mode == SmoothMode::Faster {
+                        *picture = picture.after(at - x).held();
+                    }
+                }
+                _ => return Ok(None),
+            }
+            Ok(Some(piece))
+        };
+        Ok(match (side(f, d.frames.0)?, side(g, d.frames.1 - 1)?) {
+            (Some(f), Some(g)) => Some((f, g, smooth)),
+            _ => None,
+        })
+    }
+
+    fn pictures(&self, stack: &mut Vec<Layer>, flattened: &mut Vec<usize>) -> Result<()> {
+        let Some(d) = self.playing() else {
+            return self.plain(stack);
+        };
+        match self.smoothed(d, !stack.is_empty())? {
+            Some((f, g, smooth)) => {
+                self.smooth_cut(d, (f, g, smooth), stack, flattened);
+                Ok(())
+            }
+            None => self.crossing(d, stack),
+        }
+    }
+
+    fn smooth_cut(
+        &self,
+        d: &transitions::Playing,
+        (f, g, smooth): (VideoPiece, VideoPiece, Smooth),
+        stack: &mut Vec<Layer>,
+        flattened: &mut Vec<usize>,
+    ) {
+        let ramp = self.ramp_of(d, false);
+        flattened.extend(
+            [d.before, d.after]
+                .into_iter()
+                .flatten()
+                .filter_map(|c| self.nest_of(c).filter(|n| n.flat.is_some()))
+                .map(|n| n.opened),
+        );
+        let outgoing = match smooth.mode {
+            Some(_) => Layer::Placed(f, Some(self.ramp_of(d, true))),
+            None if f.placed().is_empty() => Layer::Picture(f, None),
+            None => Layer::Placed(f, None),
+        };
+        if smooth.mode.is_none() {
+            outgoing.hides(stack);
+        }
+        stack.extend([outgoing, Layer::Smoothed(g, ramp, smooth)]);
+    }
+
+    fn crossing(&self, d: &transitions::Playing, stack: &mut Vec<Layer>) -> Result<()> {
+        let (t, (x, y), now) = (self.lane.track, (self.x, self.y), self.now);
+        let shows = |c: &&Clip| visible(t, c);
+        let fills = |c: &Clip| self.plan.fills(c);
+        let excluded = !t.render_cache;
+        let below = !stack.is_empty();
+        let sides = sides_at(d, now);
+        let fill = sides
+            .iter()
+            .all(|(c, _)| c.filter(shows).is_some_and(fills));
+        let mut moded = false;
+        let mut layers = Vec::new();
+        for (c, falling) in sides {
+            let Some(c) = c.filter(shows) else {
+                continue;
+            };
+            let (ramp, chain) = self.sided(d, falling);
+            moded |= chain.iter().any(|c| c.picture.composite_mode.is_some());
+            let bare = without_mode(c).filter(|_| !chain.is_empty());
+            let drawn = bare.as_ref().unwrap_or(c);
+            layers.push(self.laid(drawn, self.nest_of(c), ramp, below, &chain)?);
+        }
+        let outer = outer_at(d.before.or(d.after).and_then(|c| self.nest_of(c)), x);
+        if let Some(color) = transitions::dip_of(d.transition) {
+            let falling = now < middle(d.frames);
+            let (ramp, chain) = self.sided(d, falling);
+            let own = chain.first().map(|c| Placed {
+                picture: Picture::default(),
+                crossing: false,
+                moving: None,
+                ..c.clone()
+            });
+            let piece = VideoPiece::Generated {
+                frames: y - x,
+                picture: Generated::SolidColor { color },
+                placed: own.into_iter().chain(chain).chain(outer.clone()).collect(),
+                excluded,
+            };
+            let ramp = ramp.map(|r| Ramp {
+                falling: !falling,
+                ..r
+            });
+            layers.push(Layer::Placed(piece, ramp));
+        }
+        if fill && !moded {
+            hide_inside(&outer, stack);
+        }
+        stack.extend(layers);
+        Ok(())
+    }
+
+    fn plain(&self, stack: &mut Vec<Layer>) -> Result<()> {
+        let (t, now) = (self.lane.track, self.now);
+        let shows = |c: &&Clip| visible(t, c);
+        let fills = |c: &Clip| self.plan.fills(c);
+        if let Some(c) = t.clip_covering(now).map(|ci| &t.clips[ci]).filter(shows) {
+            let layer = self.laid(c, self.nest_of(c), None, !stack.is_empty(), &[])?;
+            if !matches!(layer, Layer::Placed(..)) || fills(c) {
+                layer.hides(stack);
+            }
+            stack.push(layer);
+        }
+        Ok(())
+    }
+
+    fn lettered(&self, c: &Clip, fade: Option<Ramp>, crossed: Vec<Placed>) -> Option<ShownTitle> {
+        let x = self.x;
+        let nest = self.nest_of(c);
+        let run = nest.and_then(|n| n.run).filter(|r| r.held).unwrap_or(Run {
+            at: x - c.start,
+            of: c.duration,
+            held: false,
+        });
+        Some(ShownTitle {
+            clip: c.id.clone(),
+            title: c.title.clone()?,
+            run,
+            source_in: c.source_in,
+            fade,
+            placed: crossed.into_iter().chain(outer_at(nest, x)).collect(),
+        })
+    }
+
+    fn titles(&self, stack: &mut Vec<Layer>) {
+        let (t, now) = (self.lane.track, self.now);
+        let sides = match self.playing() {
+            Some(d) => sides_at(d, now)
+                .into_iter()
+                .map(|(c, falling)| {
+                    let (fade, crossed) = self.sided(d, falling);
+                    (c, fade, crossed)
+                })
+                .collect(),
+            None => vec![(
+                t.clip_covering(now).map(|ci| &t.clips[ci]),
+                None,
+                Vec::new(),
+            )],
+        };
+        for (c, fade, crossed) in sides {
+            if let Some(s) = c
+                .filter(|c| titled(t, c))
+                .and_then(|c| self.lettered(c, fade, crossed))
+            {
+                stack.push(Layer::Title(Box::new(s)));
+            }
+        }
+    }
+}
+
+fn planned_audio(
+    p: &Project,
+    within: Option<&Within>,
+    (a, b): (i64, i64),
+) -> Result<(Vec<Vec<AudioPiece>>, Vec<LaneTrack>)> {
+    let pool = p.pool();
+    let s = &p.settings;
+    let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
 
     let any_solo = p.any_solo();
     let mut audio = Vec::new();
@@ -3466,23 +3613,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         }
     }
 
-    let ducking = crate::duck::planned(p, &lanes, a, b);
-    let plan = RenderPlan {
-        fps: s.fps,
-        width: s.width,
-        height: s.height,
-        sample_rate: s.sample_rate,
-        channels: s.channels,
-        frames: b - a,
-        video,
-        audio,
-        ducking,
-        range: (a, b),
-        name: "timeline".into(),
-        colors: None,
-        output_lut: s.output_lut.clone(),
-    };
-    Ok((plan, lanes))
+    Ok((audio, lanes))
 }
 
 fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> AudioPiece {
