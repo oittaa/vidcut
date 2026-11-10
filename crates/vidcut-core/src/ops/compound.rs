@@ -119,6 +119,7 @@ fn sound_part(c: &Clip) -> Option<Clip> {
     part.video = false;
     part.picture = None;
     part.effects = None;
+    part.motion.clear();
     part.move_head(head);
     part.duration += tail;
     Some(part)
