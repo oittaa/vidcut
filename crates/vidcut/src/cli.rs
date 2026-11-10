@@ -440,6 +440,8 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut effects set c3 0 --strength 0.6 --at 2s\n  \
          vidcut effects set c3 1 --area '{\"center\":[0.3,0.4],\"size\":[0.2,0.3]}'\n  \
          vidcut effects set c3 1 --area '{\"shape\":\"box\",\"rotation\":15,\"softness\":0.3}'\n  \
+         vidcut effects set c3 1 --area \
+         '{\"shape\":\"polygon\",\"points\":[[0.5,0],[1,1],[0,1]]}'\n  \
          vidcut effects set c3 1 --area '{\"invert\":true}'\n  \
          vidcut effects set c3 1 --area '{\"follows\":\"p1\",\"size\":[1.2,1.2]}'\n  \
          vidcut effects set c3 1 --area '{\"follows\":\"face\",\"size\":[1.3,1.3]}'\n  \

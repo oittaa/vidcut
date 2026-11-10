@@ -88,6 +88,7 @@ pub struct Working {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Masking {
     pub maps: Vec<[[f64; 3]; 3]>,
+    pub points: Vec<[f64; 2]>,
     pub shape: AreaShape,
     pub softness: f64,
     pub invert: bool,
@@ -102,6 +103,10 @@ impl Masking {
                 .iter()
                 .map(|b| Self::map(area, b, back, fit))
                 .collect(),
+            points: match area.shape {
+                AreaShape::Polygon => area.corners().to_vec(),
+                _ => Vec::new(),
+            },
             shape: area.shape,
             softness: area.soft(),
             invert: area.invert,

@@ -679,6 +679,7 @@ The draw:
   - With an area, `fs_area` mixes the result with the picture that came in, by the area (`blur::area_bytes`). Without an area, it copies the result.
   - `fs_area` fades the edge of an area over one pixel at least (`area_inside`). The softness makes that band wider, toward the middle.
   - `blur::area_maps` gives the shader the map of each area. A pixel takes the effect by the areas together (`area_reach`).
+  - For a polygon, `area_sides` gives the distance of a pixel to the nearest side, less than 0 inside. The points follow the maps in the same buffer.
   - The coverage of a made frame goes through the same end. Thus its alpha changes only inside the area.
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.

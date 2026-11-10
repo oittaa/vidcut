@@ -513,6 +513,7 @@ Writing:
 - `ops::effect` holds the edits of the effects: `effects.add`, `effects.set`, `effects.key`, `effects.reset`, `effects.remove` and `effects.move`.
 - An `Effect` can have an `EffectArea` ([deviation X166](../deviations.md#x166-an-effect-has-an-area)). The effect then works only in that part of the picture.
   - The area holds an `AreaShape`, a `center`, a `size`, a `rotation`, a `softness` and `invert`.
+  - A `polygon` also holds its `points`, as fractions of the box of the area (`EffectArea::corners`). At most `POINTS_KEPT` points.
   - The area is a part of a base box. The base box is the whole source picture (`Area::WHOLE`), or the area of a motion path.
   - With `follows`, the area names a motion path of the same clip. The base box is then the area of that path at each frame ([export](export.md#placed-pictures)).
   - `effects.set` refuses a `follows` that names no path of the clip. `motion.remove` refuses a path that an area follows.

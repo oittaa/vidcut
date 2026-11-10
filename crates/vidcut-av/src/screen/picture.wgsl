@@ -1206,10 +1206,39 @@ fn effect_mixed(px: vec2<i32>, made: vec4<f32>, blend: f32, use_alpha: f32) -> v
 
 struct Masking {
     how: vec4<f32>,
+    more: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> masking: Masking;
 @group(0) @binding(3) var<storage, read> area_maps: array<f32>;
+
+fn area_point(i: i32) -> vec2<f32> {
+    let o = i32(masking.how.w) * 9 + i * 2;
+    return vec2<f32>(area_maps[o], area_maps[o + 1]);
+}
+
+fn area_sides(p: vec2<f32>) -> f32 {
+    let n = i32(masking.more.x);
+    var near = 1e18;
+    var sign = 1.0;
+    var b = area_point(n - 1);
+    for (var i = 0; i < n; i++) {
+        let a = area_point(i);
+        let e = b - a;
+        let w = p - a;
+        let along = clamp(dot(w, e) / max(dot(e, e), 1e-12), 0.0, 1.0);
+        let off = w - e * along;
+        near = min(near, dot(off, off));
+        let up = p.y >= a.y;
+        let under = p.y < b.y;
+        let left = e.x * w.y > e.y * w.x;
+        if (up && under && left) || (!up && !under && !left) {
+            sign = -sign;
+        }
+        b = a;
+    }
+    return sign * sqrt(near);
+}
 
 fn area_reach(i: i32, at: vec3<f32>) -> f32 {
     let o = i * 9;
@@ -1221,6 +1250,9 @@ fn area_reach(i: i32, at: vec3<f32>) -> f32 {
         return 1e9;
     }
     let q = vec2<f32>(dot(across, at), dot(down, at)) / depth;
+    if masking.how.x > 1.5 {
+        return 1.0 + 2.0 * area_sides(q * 0.5 + 0.5);
+    }
     return select(length(q), max(abs(q.x), abs(q.y)), masking.how.x > 0.5);
 }
 

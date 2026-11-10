@@ -4993,7 +4993,8 @@ pub struct EffectChange {
 #[serde(deny_unknown_fields)]
 pub struct AreaChange {
     /// `ellipse`, the ellipse that touches the four sides of the area's
-    /// box, or `box`.
+    /// box, `box`, or `polygon`, a shape with straight sides through
+    /// `points`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<AreaShape>,
     /// Its middle, `[x, y]` as fractions of the base box from its top left,
@@ -5015,6 +5016,11 @@ pub struct AreaChange {
     /// On, the effect works outside the area.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invert: Option<bool>,
+    /// The corners of a `polygon`, in their order: each `[x, y]` as
+    /// fractions of the area's own box from its top left, from 3 to 128 of
+    /// them. `[]` gives the four corners of that box again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<[f64; 2]>>,
     /// The id of a motion path of the same clip (`motion.list`), as `p1`, or
     /// a subject, as `face`: then each path that `motion.find` made for that
     /// subject. The base box is then the area of a path at each frame, so
@@ -5039,6 +5045,7 @@ impl AreaChange {
             rotation: self.rotation.or(a.rotation),
             softness: self.softness.or(a.softness),
             invert: self.invert.unwrap_or(a.invert),
+            points: self.points.clone().unwrap_or(a.points),
             follows: self.follows.clone().unwrap_or(a.follows),
         }
     }
