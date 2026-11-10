@@ -74,7 +74,6 @@ In this file, a path is never a track of the timeline.
 
 **To do:**
 
-- **Paths in a file:** an OpenTimelineIO file keeps the paths of a clip in its `vidcut` metadata.
 - **Effect area:** the box or the ellipse on an effect, and the path that it follows.
   - The viewer and the export play the same result.
 - **Faces:** one request finds the faces of the selected clip and makes a path for each.

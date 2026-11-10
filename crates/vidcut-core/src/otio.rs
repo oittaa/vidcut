@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Compound, ImageSequence, Keyframe, Marks, Media, Picture, Project, Section, Speed, Title,
-    TrackKind,
+    Clip, Compound, ImageSequence, Keyframe, Marks, Media, MotionPath, Picture, Project, Section,
+    Speed, Title, TrackKind,
 };
 use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
@@ -827,6 +827,9 @@ pub fn export_drawn(
                 if let Some(x) = &c.picture {
                     meta["picture"] = json!(x);
                 }
+                if !c.motion.is_empty() {
+                    meta["motion"] = json!(c.motion);
+                }
                 if let Some(au) = &c.audio {
                     meta["stream"] = json!(au.stream);
                     meta["gain_db"] = json!(au.gain_db);
@@ -1433,6 +1436,7 @@ pub struct ImportedClip {
     pub title: Option<Title>,
     pub title_from: Option<Value>,
     pub picture: Option<Picture>,
+    pub motion: Vec<MotionPath>,
     pub compound: Option<Compound>,
     pub speed: Option<Speed>,
     pub color: Option<String>,
@@ -1521,6 +1525,7 @@ impl ImportedClip {
             title: None,
             title_from: None,
             picture: None,
+            motion: Vec::new(),
             compound: None,
             speed: None,
             color: clip_color(item),
@@ -2105,6 +2110,14 @@ fn our_picture(item: &Value) -> Option<Picture> {
     crate::ops::picture::checked(&p).ok().flatten()
 }
 
+fn our_motion(item: &Value) -> Vec<MotionPath> {
+    let paths = item["metadata"][VIDCUT].get("motion").cloned();
+    paths
+        .and_then(|v| serde_json::from_value::<Vec<MotionPath>>(v).ok())
+        .filter(|paths| crate::motion::problem(paths).is_none())
+        .unwrap_or_default()
+}
+
 fn marker(k: &Value, at: i64, fps: Rational) -> ImportedMarker {
     let color = match k["metadata"][VIDCUT]["color"].as_str() {
         Some(c) if crate::ops::MARKER_COLORS.contains(&c) => c.to_string(),
@@ -2271,6 +2284,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         title: None,
                         title_from: None,
                         picture: our_picture(item),
+                        motion: our_motion(item),
                         compound: None,
                         speed,
                         color: clip_color(item),
@@ -2487,6 +2501,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 title: None,
                 title_from: None,
                 picture: None,
+                motion: Vec::new(),
                 compound: None,
                 speed,
                 color: clip_color(item),

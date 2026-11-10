@@ -542,7 +542,10 @@ Writing:
 - A clip has at most `PATHS_KEPT` paths, and a path has at most `SAMPLES_KEPT` samples.
 - `motion::problem` is the check that the requests, `ops::paste` and `validate::violations` share.
 - `timeline.get` names the paths of a clip in `motion`.
-- Nothing draws with a path, and an OTIO file does not carry one ([todo](../todo/motion-tracking.md)).
+- An OTIO file keeps the paths of a clip in the `vidcut` metadata of its video item, on the same source frames.
+  - An import reads them back only when `motion::problem` accepts them (`our_motion`).
+  - An import at another frame rate moves the samples to the project's rate (`motion::rescale`). Two samples that land on one frame leave the first.
+- Nothing draws with a path ([todo](../todo/motion-tracking.md)).
 
 ## Ducking
 
@@ -612,7 +615,7 @@ The metadata:
 | Metadata | Holds |
 |---|---|
 | `vidcut` on clips, for the sound | `stream`, `gain_db`, `muted`, `pan`, `equalizer`, `dialogue_leveler`, `compressor`, `noise_reduction`; `gain_keys` from the item's first source frame |
-| `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects |
+| `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects; the `motion` paths of a clip |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`, a clip volume effect with the volume keyframes in its `Key Frames`, a clip pan effect (`effects::sound`), and `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling, and Dynamic Zoom (`otio::picture`), fitted, in place of carried ones |
