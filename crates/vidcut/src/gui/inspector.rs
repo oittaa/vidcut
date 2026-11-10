@@ -2752,6 +2752,7 @@ fn area_label(shape: Option<AreaShape>) -> &'static str {
         None => "Off",
         Some(AreaShape::Ellipse) => "Ellipse",
         Some(AreaShape::Box) => "Box",
+        Some(AreaShape::Polygon) => "Polygon",
     }
 }
 
