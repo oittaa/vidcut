@@ -175,8 +175,12 @@ fn lines(map: &[f32], width: usize, content: (usize, usize)) -> Vec<Found> {
 
 pub fn name() -> String {
     let hundredths = |v: f32| (v * 100.0).round();
+    let colors = MEAN.iter().chain(&SPREAD);
+    let colors: String = colors
+        .map(|v| format!("-{}", (v * 1000.0).round()))
+        .collect();
     format!(
-        "ppocr-{SIDE}-{}-{}-{}-{}-{MOST}-{}-{}-blocks",
+        "ppocr-{SIDE}-{}-{}-{}-{}-{MOST}-{}-{}{colors}-blocks",
         hundredths(LEAST),
         hundredths(INK),
         hundredths(GROW),

@@ -82,7 +82,8 @@ pub fn of(id: &str) -> Option<Subject> {
 }
 
 pub fn name(subject: Subject) -> String {
-    format!("{}-{}", subject.name(), rules(subject))
+    let weights: String = file(subject).sha256.chars().take(8).collect();
+    format!("{}-{weights}-{}", subject.name(), rules(subject))
 }
 
 pub fn needed(dir: &Path, subject: Subject) -> Vec<Need> {
