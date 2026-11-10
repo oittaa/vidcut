@@ -3095,7 +3095,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths. A script gives the samples.
   - Between two samples, the area goes in a line. Outside the samples, it stays where the nearest sample put it.
   - A path stays on its source frames through a trim, a slip, a split, a copy and a speed change.
-  - Nothing follows a path, and vidcut finds no motion in a picture ([todo](todo/motion-tracking.md)).
+  - The area of an effect can follow a path ([X166](#x166-an-effect-has-an-area)). vidcut finds no motion in a picture ([todo](todo/motion-tracking.md)).
   - An OpenTimelineIO file keeps the paths in its `vidcut` metadata. Other editors do not read them.
 - **Why:**
   - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
@@ -3111,6 +3111,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The area has a center, a size, a rotation and a softness. The center and the size are fractions of the source picture.
   - The area stays on the content of the picture through the transform, the crop, the flips, a Dynamic Zoom and a compound clip around it.
   - `effects.set` takes `area`. Null takes the area off. `effects.reset` keeps the area.
+  - With `follows`, the area names a motion path of the clip ([X165](#x165-a-clip-has-motion-paths)). The area of the path is then the base box, in place of the whole picture.
+    - The center, the size and the rotation of the area then count from the box of the path. A size of 1.2 is that box, a fifth larger.
+    - `motion.remove` refuses a path that an area follows.
+    - An OpenTimelineIO file carries the area and the path that it follows, in its `vidcut` metadata.
   - The area has no keyframes. The Inspector and the viewer have no controls for it ([todo](todo/motion-tracking.md)).
 - **Why:**
   - A blur over a face or a number plate must cover only that part of the picture.

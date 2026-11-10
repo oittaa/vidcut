@@ -3312,7 +3312,8 @@ pub struct Effect {
 }
 
 /// The part of a picture that an effect works in: an ellipse or a box inside
-/// a base box. The base box is the whole source picture. The area stays on
+/// a base box. The base box is the whole source picture, or with `follows`
+/// the area of a motion path of the clip at each frame. The area stays on
 /// the content of the picture through its transform, its crop and its flips.
 /// A field left out is at its usual value.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -3339,6 +3340,12 @@ pub struct EffectArea {
     /// On, the effect works outside the area. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub invert: bool,
+    /// The id of a motion path of the same clip, as `p1`. The base box is
+    /// then the area of that path at each frame, turned as the path turns
+    /// it: with a `size` of `[1.2, 1.2]`, the area is the path's box, a
+    /// fifth larger. Left out, the base box is the whole source picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follows: Option<String>,
 }
 
 /// The shape of the area of an effect.

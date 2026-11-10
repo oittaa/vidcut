@@ -570,6 +570,11 @@ Dynamic Zoom and keyframes (D75):
 - `Effect::sampled` reads each keyed value of an effect at that frame. `Working::of` then builds the work of the effect from plain values.
 - `layer_size` fits the layer for the closer Dynamic Zoom box (`DynamicZoom::closest`) and the largest zoom key (`place::detail`).
 - The viewer and the export both take this `Placing`. Thus there is one draw path.
+- `Placed` also holds the motion paths that the areas of its effects follow (`render::Followed`, [model](model.md#motion-paths)).
+  - `Followed::of` takes them from the clip, with the pace of the clip and the source frame of its first frame.
+  - `Followed::base` gives the area of a path at the frame. It goes from the keyframe frame to the source frame through the pace.
+  - Why: a path is on source frames, and the keyframe frame of a clip with a speed is a frame of the retimed source.
+  - The paths are behind an `Arc`. Thus `Placed::after` copies no sample.
 
 Soft crop edges:
 
@@ -613,6 +618,8 @@ The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3
   - The rows join the map of the placement (`Level.back`) with the place of the area on the source picture.
   - That map gives a point of the source picture. Thus the area stays on the content through a flip, a Dynamic Zoom, a pitch and a yaw.
   - The source picture counts with square pixels, at its fitted shape (`OnFrame.fit`). Thus an ellipse on a wide picture is a true ellipse.
+  - `Placing::new` gives `Working::of` the base box of the area: the whole picture, or the area of the followed path at the frame.
+  - An area that follows a path that the plan does not hold takes the whole picture as its base box.
 
 The draw:
 

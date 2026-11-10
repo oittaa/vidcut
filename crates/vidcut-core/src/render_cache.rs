@@ -263,7 +263,7 @@ impl Setup<'_> {
 
     fn piece_name(&self, piece: &VideoPiece, plan: &RenderPlan) -> Key {
         let mut whole = bare(piece).clone();
-        plain(&mut whole, &|m: &str, p: &Path| self.name(m, p));
+        plain(&mut whole, &|m: &str, p: &Path| self.name(m, p), false);
         let whole = serde_json::to_vec(&whole).unwrap_or_default();
         digest(&[self.stem(plan).as_bytes(), &whole])
     }
@@ -471,7 +471,7 @@ pub fn bare(piece: &VideoPiece) -> &VideoPiece {
     }
 }
 
-fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
+fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String, one: bool) {
     match piece {
         VideoPiece::Source {
             media,
@@ -486,7 +486,7 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
             *path = PathBuf::new();
             *cache = ClipCache::Auto;
             *excluded = false;
-            placed.iter_mut().for_each(plain_placed);
+            placed.iter_mut().for_each(|p| plain_placed(p, one));
             if let Some(lut) = input_lut {
                 *lut = PathBuf::from(crate::cube::stamp(lut));
             }
@@ -496,7 +496,7 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
             placed, excluded, ..
         } => {
             *excluded = false;
-            placed.iter_mut().for_each(plain_placed);
+            placed.iter_mut().for_each(|p| plain_placed(p, one));
         }
         VideoPiece::Flat {
             pieces,
@@ -505,31 +505,34 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
             ..
         } => {
             *excluded = false;
-            placed.iter_mut().for_each(plain_placed);
+            placed.iter_mut().for_each(|p| plain_placed(p, one));
             let mut inner = pieces.to_vec();
-            inner.iter_mut().for_each(|p| plain(p, name));
+            inner.iter_mut().for_each(|p| plain(p, name, one));
             *pieces = inner.into();
         }
         VideoPiece::Mix { under, over } => {
-            plain(under, name);
+            plain(under, name, one);
             for o in over {
-                plain(&mut o.piece, name);
+                plain(&mut o.piece, name, one);
             }
         }
         VideoPiece::Titled { under, titles } => {
-            plain(under, name);
-            titles.iter_mut().for_each(plain_title);
+            plain(under, name, one);
+            titles.iter_mut().for_each(|t| plain_title(t, one));
         }
     }
 }
 
-fn plain_title(t: &mut ShownTitle) {
+fn plain_title(t: &mut ShownTitle, one: bool) {
     t.clip.clear();
-    t.placed.iter_mut().for_each(plain_placed);
+    t.placed.iter_mut().for_each(|p| plain_placed(p, one));
 }
 
-fn plain_placed(p: &mut Placed) {
+fn plain_placed(p: &mut Placed, one: bool) {
     p.clip.clear();
+    if one && !p.followed.is_empty() {
+        p.followed = p.followed.at(p.source);
+    }
     if p.ready {
         p.start = 0;
     }
@@ -640,7 +643,7 @@ impl Cache {
         let keys: Arc<[Key]> = (0..bare.frames())
             .map(|k| {
                 let mut one = bare.part(k, 1);
-                plain(&mut one, &name);
+                plain(&mut one, &name, true);
                 let json = serde_json::to_vec(&one).unwrap_or_default();
                 digest(&[stem.as_bytes(), &json])
             })
@@ -660,7 +663,7 @@ impl Cache {
         let name = |m: &str, p: &Path| setup.name(m, p);
         let alone = alone(layer);
         let mut whole = alone.clone();
-        plain(&mut whole, &name);
+        plain(&mut whole, &name, false);
         let whole = serde_json::to_vec(&whole).unwrap_or_default();
         let memo = digest(&[stem.as_bytes(), &whole]);
         if let Some(keys) = self.keys.get(&memo) {
@@ -673,7 +676,7 @@ impl Cache {
                 if let VideoPiece::Source { pace, .. } = &mut one {
                     *pace = Default::default();
                 }
-                plain(&mut one, &name);
+                plain(&mut one, &name, true);
                 let json = serde_json::to_vec(&one).unwrap_or_default();
                 let at = ((alone.exact(k) * 1e6).round() as i64).to_le_bytes();
                 match retimed {
@@ -1383,6 +1386,7 @@ mod tests {
                     ramp: None,
                     crossing: false,
                     moving: None,
+                    followed: Default::default(),
                 }],
             }],
         }

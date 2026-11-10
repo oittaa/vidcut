@@ -2782,7 +2782,9 @@ pub enum Request {
         #[serde(default)]
         clear: Option<[i64; 2]>,
     },
-    /// Take motion paths off a clip: `paths`, or all of them.
+    /// Take motion paths off a clip: `paths`, or all of them. A path that
+    /// the area of an effect follows stays, and the request fails: first
+    /// give that area another `follows`, or none (`effects.set`).
     #[serde(rename = "motion.remove")]
     MotionRemove {
         clip: ClipRef,
@@ -4666,10 +4668,11 @@ pub struct EffectChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_cache: Option<bool>,
     /// Where the effect works: an ellipse or a box of the picture, as
-    /// `{"shape": "box", "center": [0.3, 0.4], "size": [0.2, 0.2]}`. Each
-    /// field given replaces its own, and `{}` gives an effect with no area
-    /// the ellipse that touches the four sides of the picture. Null takes
-    /// the area off, and the effect works on the whole picture again.
+    /// `{"shape": "box", "center": [0.3, 0.4], "size": [0.2, 0.2]}`, or of
+    /// the area of a motion path, as `{"follows": "p1"}`. Each field given
+    /// replaces its own, and `{}` gives an effect with no area the ellipse
+    /// that touches the four sides of the picture. Null takes the area off,
+    /// and the effect works on the whole picture again.
     #[serde(
         default,
         deserialize_with = "given",
@@ -4947,10 +4950,11 @@ pub struct EffectChange {
 }
 
 /// A change to the area of an effect: each field given replaces its own, and
-/// the rest stay as they are. The area is a part of a base box, the whole
-/// source picture. It stays on the content of the picture through its
-/// transform, its crop and its flips.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// the rest stay as they are. The area is a part of a base box: the whole
+/// source picture, or with `follows` the area of a motion path at each
+/// frame. It stays on the content of the picture through its transform, its
+/// crop and its flips.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AreaChange {
     /// `ellipse`, the ellipse that touches the four sides of the area's
@@ -4976,6 +4980,17 @@ pub struct AreaChange {
     /// On, the effect works outside the area.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invert: Option<bool>,
+    /// The id of a motion path of the same clip (`motion.list`), as `p1`:
+    /// the base box is then the area of that path at each frame, so the
+    /// area moves with the path. With a `size` of `[1.2, 1.2]`, the area is
+    /// the path's box, a fifth larger. Null stops it, and the base box is
+    /// the whole source picture again.
+    #[serde(
+        default,
+        deserialize_with = "given",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub follows: Option<Option<String>>,
 }
 
 impl AreaChange {
@@ -4987,6 +5002,7 @@ impl AreaChange {
             rotation: self.rotation.or(a.rotation),
             softness: self.softness.or(a.softness),
             invert: self.invert.unwrap_or(a.invert),
+            follows: self.follows.clone().unwrap_or(a.follows),
         }
     }
 }

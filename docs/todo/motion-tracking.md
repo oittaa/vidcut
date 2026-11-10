@@ -2,7 +2,7 @@
 
 **When:** now, one pull request for each step below.
 
-A motion path is the path of an area of the picture through the frames of a clip. A clip stores motion paths ([model](../design/model.md#motion-paths)). vidcut finds no motion in a picture, and nothing follows a path.
+A motion path is the path of an area of the picture through the frames of a clip. A clip stores motion paths, and the area of an effect follows a path ([model](../design/model.md#motion-paths)). vidcut finds no motion in a picture.
 
 In this file, a path is never a track of the timeline.
 
@@ -39,7 +39,7 @@ In this file, a path is never a track of the timeline.
 - A clip holds motion paths, and `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read them ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
 - Transform, Crop and the values of the effects have keyframes ([keyframes.md](keyframes.md)).
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
-- An effect has an area: an ellipse or a box of the source picture ([deviation X166](../deviations.md#x166-an-effect-has-an-area)). The area follows no path.
+- An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path ([deviation X166](../deviations.md#x166-an-effect-has-an-area)).
 - No request analyzes the motion of a picture. [Stabilization](stabilization.md) needs such an analysis too.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
 
@@ -50,7 +50,6 @@ In this file, a path is never a track of the timeline.
 - **vidcut finds the motion in two ways:**
   - A detector model finds each subject of one kind on each frame, with no click. vidcut joins the boxes of one subject into a path.
   - A tracker follows a box that the user draws, from the playhead forward or backward.
-- **The area of an effect follows a path.** The area of the path is then the base box of the area of the effect.
 - Each of these is more than the Cut page has. The pull request that builds a part records its deviation.
 
 **The models** (read on 2026-11-10 from the pages of their makers):
@@ -74,8 +73,6 @@ In this file, a path is never a track of the timeline.
 
 **To do:**
 
-- **Area follows a path:** the area of an effect takes a motion path as its base box.
-  - The viewer and the export play the same result.
 - **Area keyframes:** keyframes on the center, the size, the rotation and the softness of the area of an effect.
 - **Faces:** one request finds the faces of the selected clip and makes a path for each.
   - A missing model asks for a download and checks a SHA-256, as the other local models do.

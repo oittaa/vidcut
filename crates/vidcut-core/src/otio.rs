@@ -2106,7 +2106,16 @@ fn our_str(item: &Value, key: &str) -> Option<String> {
 }
 
 fn our_picture(item: &Value) -> Option<Picture> {
-    let p = serde_json::from_value(item["metadata"][VIDCUT].get("picture")?.clone()).ok()?;
+    let mut p: Picture =
+        serde_json::from_value(item["metadata"][VIDCUT].get("picture")?.clone()).ok()?;
+    let paths = our_motion(item);
+    for area in p.effects.iter_mut().filter_map(|e| e.area.as_mut()) {
+        if let Some(id) = &area.follows
+            && !paths.iter().any(|m| m.id == *id)
+        {
+            area.follows = None;
+        }
+    }
     crate::ops::picture::checked(&p).ok().flatten()
 }
 

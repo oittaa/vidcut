@@ -104,17 +104,26 @@ pub fn set(p: &mut Project, id: &str, path: &str, change: PathChange) -> Result<
     Ok(())
 }
 
+fn followers(c: &Clip) -> impl Iterator<Item = (usize, &str)> {
+    let effects = c.picture.iter().flat_map(|x| x.effects.iter().enumerate());
+    effects.filter_map(|(n, e)| Some((n, e.area.as_ref()?.follows.as_deref()?)))
+}
+
 pub fn remove(p: &mut Project, id: &str, paths: Option<&[String]>) -> Result<()> {
     let c = clip_of(p, id)?;
-    let Some(paths) = paths else {
-        if c.motion.is_empty() {
-            return Err(Error::not_found(format!("{id} has no motion paths")));
-        }
-        c.motion.clear();
-        return Ok(());
-    };
+    let all: Vec<String> = c.motion.iter().map(|m| m.id.clone()).collect();
+    if paths.is_none() && all.is_empty() {
+        return Err(Error::not_found(format!("{id} has no motion paths")));
+    }
+    let paths = paths.unwrap_or(&all);
     for path in paths {
         path_of(c, path)?;
+    }
+    if let Some((n, path)) = followers(c).find(|(_, path)| paths.iter().any(|x| x == path)) {
+        return Err(Error::invalid(format!(
+            "the area of effect {n} of {id} follows motion path {path}: first give that area \
+             another `follows`, or none (effects.set)"
+        )));
     }
     c.motion.retain(|m| !paths.contains(&m.id));
     Ok(())
@@ -175,6 +184,13 @@ pub fn list(p: &Project, ids: Option<&[String]>, at: Option<i64>, samples: bool)
 }
 
 pub fn violation(c: &Clip) -> Option<String> {
+    let has = |path: &str| c.motion.iter().any(|m| m.id == path);
+    if let Some((n, path)) = followers(c).find(|(_, path)| !has(path)) {
+        return Some(format!(
+            "{}: the area of effect {n} follows motion path {path}, which the clip has not",
+            c.id
+        ));
+    }
     if c.motion.is_empty() {
         return None;
     }

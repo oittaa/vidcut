@@ -9,10 +9,11 @@ use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
     AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, Compound, DuckDetect,
-    Generator, Gradient, Hdr, Keyframe, Media, MediaSuperScale, Picture, PictureTransition,
-    Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode, SuperScale,
-    TimelineColors, Title, Track, TrackKind, Transition, WipeDirection,
+    Generator, Gradient, Hdr, Keyframe, Media, MediaSuperScale, MotionPath, PathSample, Picture,
+    PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode,
+    SuperScale, TimelineColors, Title, Track, TrackKind, Transition, WipeDirection,
 };
+use crate::motion::Area;
 use crate::otio::transitions;
 use crate::time::Rational;
 
@@ -486,6 +487,7 @@ impl Smooth {
             ramp: None,
             crossing: false,
             moving: None,
+            followed: Followed::default(),
         }));
     }
 
@@ -543,14 +545,125 @@ pub struct Placed {
     /// The Push or the Slide of this crossing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moving: Option<Move>,
+    /// The motion paths that the areas of its effects follow. Left out
+    /// when none follows a path.
+    #[serde(default, skip_serializing_if = "Followed::is_empty")]
+    pub followed: Followed,
 }
 
 fn zero_i64(n: &i64) -> bool {
     *n == 0
 }
 
+/// The motion paths that the areas of a picture's effects follow, with the
+/// way from a keyframe position of the clip to its source frame.
+#[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct Followed {
+    /// The paths, on source frames.
+    pub paths: Arc<[MotionPath]>,
+    /// How the clip walks its source from its first frame.
+    pub pace: Pace,
+    /// The source frame of the clip's first frame.
+    pub from: i64,
+    /// The keyframe position of the clip's first frame.
+    pub key: i64,
+    #[serde(skip)]
+    stamp: u64,
+}
+
+impl std::fmt::Debug for Followed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Followed({}, {:x})", self.paths.len(), self.stamp)
+    }
+}
+
+impl PartialEq for Followed {
+    fn eq(&self, other: &Self) -> bool {
+        self.stamp == other.stamp
+            && self.from == other.from
+            && self.key == other.key
+            && self.pace == other.pace
+            && (Arc::ptr_eq(&self.paths, &other.paths) || self.paths == other.paths)
+    }
+}
+
+impl Followed {
+    fn made(paths: Arc<[MotionPath]>, pace: Pace, from: i64, key: i64) -> Self {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        for path in paths.iter() {
+            path.id.hash(&mut hasher);
+            for s in &path.samples {
+                s.frame.hash(&mut hasher);
+                for v in s.center.iter().chain(&s.size).chain([&s.rotation]) {
+                    v.to_bits().hash(&mut hasher);
+                }
+            }
+        }
+        (from, key, pace.skip).hash(&mut hasher);
+        for s in pace.map.iter() {
+            (s.at, s.speed.to_bits()).hash(&mut hasher);
+        }
+        Self {
+            paths,
+            pace,
+            from,
+            key,
+            stamp: hasher.finish(),
+        }
+    }
+
+    pub fn of(clip: &Clip, picture: &Picture) -> Self {
+        let follows = |m: &&MotionPath| {
+            let named = |e: &crate::model::Effect| {
+                e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(m.id.as_str())
+            };
+            picture.effects.iter().any(named)
+        };
+        let paths: Arc<[MotionPath]> = clip.motion.iter().filter(follows).cloned().collect();
+        if paths.is_empty() {
+            return Self::default();
+        }
+        Self::made(
+            paths,
+            clip.pace(),
+            clip.source_in,
+            clip.content_at(clip.start),
+        )
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+
+    pub fn base(&self, path: &str, source: i64) -> Option<Area> {
+        let frame = self.from + self.pace.offset(source - self.key);
+        let path = self.paths.iter().find(|m| m.id == path)?;
+        path.area_at(frame as f64)
+    }
+
+    pub fn at(&self, source: i64) -> Self {
+        let held = |m: &MotionPath| {
+            let area = m.area_at((self.from + self.pace.offset(source - self.key)) as f64)?;
+            Some(MotionPath {
+                id: m.id.clone(),
+                name: None,
+                samples: vec![PathSample {
+                    frame: 0,
+                    center: area.center,
+                    size: area.size,
+                    rotation: area.rotation,
+                }],
+            })
+        };
+        let paths: Arc<[MotionPath]> = self.paths.iter().filter_map(held).collect();
+        Self::made(paths, Pace::default(), 0, 0)
+    }
+}
+
 impl Placed {
     pub fn of(clip: &Clip, picture: Picture, run: Run) -> Self {
+        let followed = Followed::of(clip, &picture);
         Self {
             clip: clip.id.clone(),
             run: picture.dynamic_zoom.map(|_| run),
@@ -562,11 +675,13 @@ impl Placed {
             ramp: None,
             crossing: false,
             moving: None,
+            followed,
         }
     }
 
     pub fn at(clip: &Clip, picture: Picture, run: Run, time: i64) -> Self {
         let run = picture.dynamic_zoom.map(|_| run);
+        let followed = Followed::of(clip, &picture);
         Self {
             clip: clip.id.clone(),
             picture,
@@ -578,6 +693,7 @@ impl Placed {
             ramp: None,
             crossing: false,
             moving: None,
+            followed,
         }
     }
 
@@ -601,6 +717,7 @@ impl Placed {
             ramp: self.ramp.map(|r| r.after(k)),
             crossing: self.crossing,
             moving: self.moving.clone(),
+            followed: self.followed.clone(),
         }
     }
 
@@ -2100,6 +2217,7 @@ fn crossing(d: &transitions::Playing, inside: bool) -> Option<Placed> {
         ramp: None,
         crossing: true,
         moving,
+        followed: Followed::default(),
     })
 }
 
@@ -3228,6 +3346,7 @@ impl<'a> Span<'a> {
                     ramp: Some(ramp),
                     crossing: false,
                     moving: None,
+                    followed: Followed::default(),
                     ..across.clone()
                 };
                 (None, vec![own, across])
@@ -3418,6 +3537,7 @@ impl<'a> Span<'a> {
                 picture: Picture::default(),
                 crossing: false,
                 moving: None,
+                followed: Followed::default(),
                 ..c.clone()
             });
             let piece = VideoPiece::Generated {
