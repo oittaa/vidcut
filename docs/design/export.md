@@ -44,8 +44,8 @@ flowchart TD
 - **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
   - `render::flatten` works in stages. `planned_video` makes the pictures and `planned_audio` makes the sound.
-  - `cuts_of` finds the frames where the picture changes. Each `Span` between two cuts adds the layers of one track.
-  - `piece_of` puts the layers of a span into one `VideoPiece`.
+  - `cuts_of` finds the frames where the picture changes. A `render::Span` is one track between two cuts, and it adds the layers of that track.
+  - `piece_of` puts the layers of all tracks between two cuts into one `VideoPiece`.
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
   - A count with no default layout in FFmpeg uses the first channels of the 22.2 layout (`channel_layout`). Why: the mix needs a layout, and a stereo file then goes to the first two channels.
   - An encoder can take fewer channels. Then the export fails with the name of the encoder and the channel count.
@@ -279,20 +279,24 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 
 - `render::flatten` puts the incoming side over the outgoing side. Its `Over` holds a `render::Smooth`: the `Retime` of the Process and the keys of the curve.
 - Each side takes Nearest. With Faster, each side stays on one source frame (`Pace::of` at the speed 0).
-- Two sides with no placed picture morph. Other sides play as a cross dissolve. Why: the models take whole RGB frames, with no alpha.
+- Each side is one whole picture of the timeline size. Why: the models take whole RGB frames, with no alpha.
+- A side with a placed picture or played backward is one side as a compound clip is (`VideoPiece::Flat`). A gap is a flat side of black, and it is clear over the layers below.
+- In a frozen compound clip, a flat side holds one frame of its track (`Span::flat`).
 - A composite mode alone does not make a placed picture here (`without_mode`). `Smooth::mode` holds the mode of the outgoing clip.
 - A side is a file, a generator's picture or a compound clip (`Side`). Why: a Solid Color acts as a still in a Smooth Cut ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
-- A compound clip with its usual picture is one side (`VideoPiece::Flat`). `flat_pieces` makes the plan of that clip alone, and its inner tracks draw nothing in those frames.
+- A compound clip is one side (`VideoPiece::Flat`). `flat_pieces` makes the plan of that clip alone, and its inner tracks draw nothing in those frames.
 - `FlatSide` draws these pieces with a `VideoFrames` of its own, into a float frame of the timeline size. Thus its tracks, transitions and titles take the usual path.
-- Over a lower track, a compound clip without a whole picture at the bottom plays as a cross dissolve. Why: the morph has no alpha.
+- `FlatSide` keeps the alpha of the side, premultiplied. `VideoFrames::smooth_frame` mixes the alpha of the two sides at `Smooth::at` (`interpolate::matte_between`). A side that is a file or a generator is opaque.
+- A flat side in a compound clip keeps the `Placed` list of that compound clip (`VideoPiece::Flat`).
 - With Faster, a gradient with keyframes stays on one source frame (`Generated::held`).
 - `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`). `ColorSides` draws a generator's picture the same way.
 - `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).
-- The made frame replaces the incoming layer, at full weight. With no `Smooth::mode`, it covers the outgoing layer, and the layers below are not in the plan.
-- With a `Smooth::mode`, the layers below stay. `Smooth::placed` gives the made frame that mode, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
+- The made frame replaces the incoming layer, at full weight. With no `Smooth::mode` and no flat side, it covers the outgoing layer, and the layers below are not in the plan.
+- With a flat side, `Smooth::clear` is true. The made frame carries the mixed alpha as its matte. `Smooth::lay` gives it a place in the layers, in the mix of its compound clip.
+- With a flat side, the layers below show through. They stay in the plan, also when that side covers the frame. `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
+- With a `Smooth::mode`, the layers below stay. `Smooth::lay` gives the made frame that mode, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
 - The key of the pair holds both files, both frames, both looks and both sides. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.
 - The morph has no shot-change test. Why: a Smooth Cut always joins two shots.
-- A side played backward takes the usual path. The transition then plays as a cross dissolve.
 - The morph takes the decoded frames. AI Super Scale does not enlarge them.
 - The morph draws each side with no frames around it. Thus an interlaced side gives only the rows of its own field ([gpu](gpu.md#deinterlacing-and-hdr)).
 
@@ -536,7 +540,7 @@ A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contrad
   - With effects, `blur::Blurred::canvas_effects` places it with no opacity (`bared`), then runs the effects. The grid pictures of a Glow come from the same `Spare`. `blur::shown_bind` then shows it with the opacity.
   - The outer pass mixes it with the tracks below, by the mode of `Mix.placing`.
 - One part alone gives its composite mode to the `place::Mix` (`parts_of`). A mode on the compound clip replaces it. A transition inside gives no mode (`run_mode`).
-- A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded.
+- A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded. A Smooth Cut with a flat side keeps them (`Smooth::clear`).
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
 A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120)):

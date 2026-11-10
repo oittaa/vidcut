@@ -239,6 +239,9 @@ pub enum VideoPiece {
         frames: i64,
         pieces: Arc<[VideoPiece]>,
         skip: i64,
+        /// The compound clips that it plays inside.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        placed: Vec<Placed>,
         /// Its track is out of the render cache's User mode.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         excluded: bool,
@@ -438,6 +441,10 @@ pub struct Smooth {
     /// the layers below. Left out, the made frame covers them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<CompositeMode>,
+    /// A side is a picture with alpha. The layers below show through the
+    /// made frame.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clear: bool,
 }
 
 impl Smooth {
@@ -455,15 +462,20 @@ impl Smooth {
             retime,
             keys,
             mode: composite,
+            clear: false,
         };
         Some((smooth, mode))
     }
 
-    pub fn placed(&self) -> Option<Placed> {
-        self.mode.map(|mode| Placed {
+    pub fn lay(&self, placed: &mut Vec<Placed>) {
+        if let Some(own) = placed.first_mut() {
+            own.picture.composite_mode = self.mode.or(own.picture.composite_mode);
+            return;
+        }
+        placed.extend((self.mode.is_some() || self.clear).then(|| Placed {
             clip: String::new(),
             picture: Picture {
-                composite_mode: Some(mode),
+                composite_mode: self.mode,
                 ..Picture::default()
             },
             run: None,
@@ -474,7 +486,7 @@ impl Smooth {
             ramp: None,
             crossing: false,
             moving: None,
-        })
+        }));
     }
 
     pub fn at(&self, ramp: &Ramp, k: i64) -> f64 {
@@ -1087,7 +1099,9 @@ impl VideoPiece {
 
     pub fn placed(&self) -> &[Placed] {
         match self {
-            Self::Source { placed, .. } | Self::Generated { placed, .. } => placed,
+            Self::Source { placed, .. }
+            | Self::Generated { placed, .. }
+            | Self::Flat { placed, .. } => placed,
             _ => &[],
         }
     }
@@ -1274,12 +1288,14 @@ impl VideoPiece {
             Self::Flat {
                 pieces,
                 skip,
+                placed,
                 excluded,
                 ..
             } => Self::Flat {
                 frames,
                 pieces: pieces.clone(),
                 skip: skip + k,
+                placed: placed.iter().map(|p| p.after(k)).collect(),
                 excluded: *excluded,
             },
             Self::Mix { under, over } => Self::Mix {
@@ -2049,12 +2065,11 @@ fn mode_at(p: &Project, c: &Clip, t: i64) -> CompositeMode {
     }
 }
 
-fn usual_but_mode(p: &Picture) -> bool {
-    Picture {
-        composite_mode: None,
-        ..p.clone()
-    }
-    .is_usual()
+fn widened(c: &Clip, (from, to): (i64, i64)) -> Clip {
+    let mut wide = c.clone();
+    wide.move_head(-(c.start - from).max(0));
+    wide.duration += (to - c.end()).max(0);
+    wide
 }
 
 fn without_mode(c: &Clip) -> Option<Clip> {
@@ -2286,13 +2301,8 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 .chain(nest.outer.iter().cloned())
                 .collect();
                 let (head, tail) = ((c.start - from).max(0), (to - c.end()).max(0));
-                let wide = (head > 0 || tail > 0).then(|| {
-                    let mut wide = c.clone();
-                    wide.move_head(-head);
-                    wide.duration += tail;
-                    wide
-                });
-                let wide = wide.as_ref().unwrap_or(c);
+                let wide = widened(c, (c.start - head, c.end() + tail));
+                let wide = &wide;
                 host_within.push(match smooth {
                     true => Nest {
                         outer: nest.outer.clone(),
@@ -3065,11 +3075,15 @@ fn cuts_of(p: &Project, lanes: &[VideoLane], (a, b): (i64, i64)) -> Vec<i64> {
     cuts
 }
 
+fn covers(piece: &VideoPiece) -> bool {
+    piece.placed().is_empty() && !matches!(piece, VideoPiece::Flat { .. })
+}
+
 fn piece_of(stack: Vec<Layer>, frames: i64) -> VideoPiece {
     let mut piece = VideoPiece::black(frames);
     for layer in stack {
         piece = match layer {
-            Layer::Picture(shown, None) if shown.placed().is_empty() => shown,
+            Layer::Picture(shown, None) if covers(&shown) => shown,
             Layer::Picture(shown, ramp) => piece.with_over(Over {
                 piece: shown,
                 ramp,
@@ -3217,52 +3231,35 @@ impl<'a> Span<'a> {
         c: &Clip,
         whole: &Clip,
         (at, mode): (i64, SmoothMode),
-        below: bool,
     ) -> Result<Option<VideoPiece>> {
         let (p, t, (x, y)) = (self.plan.p, self.lane.track, (self.x, self.y));
-        let (pool, s) = (&self.plan.pool, &p.settings);
         let excluded = !t.render_cache;
-        let usual = whole.picture.as_ref().is_none_or(usual_but_mode);
-        let backward = mode != SmoothMode::Faster && whole.pace().speed() < 0.0;
-        let held = self.nest_of(c).and_then(|n| n.run).is_some_and(|r| r.held);
-        if held || !t.video_enabled || !usual || backward {
+        if !t.video_enabled {
             return Ok(None);
         }
-        let (a, b) = match mode {
-            SmoothMode::Faster => (at, at + 1),
-            _ => (x, y),
+        let (a, b) = match (self.held, mode) {
+            (true, _) => (self.now, self.now + 1),
+            (false, SmoothMode::Faster) => (at, at + 1),
+            (false, _) => (x, y),
         };
         let bare = without_mode(whole);
         let drawn = bare.as_ref().unwrap_or(whole);
         let pieces = flat_pieces(p, t, drawn, (a.max(0), b.max(1)))?;
-        let covers = |piece: &VideoPiece| {
-            let layers = piece.layers();
-            let bottom = layers
-                .iter()
-                .map(|(l, _)| *l)
-                .find(|l| !matches!(l, VideoPiece::Black { .. }));
-            match bottom {
-                Some(VideoPiece::Source { media, placed, .. }) => {
-                    placed.iter().all(|p| p.picture.is_usual())
-                        && pool
-                            .get(media.as_str())
-                            .is_some_and(|m| crate::place::fills(m, (s.width, s.height)))
-                }
-                Some(VideoPiece::Generated { placed, .. }) => {
-                    placed.iter().all(|p| p.picture.is_usual())
-                }
-                _ => false,
-            }
-        };
-        if below && !pieces.iter().all(covers) {
-            return Ok(None);
-        }
         Ok(Some(VideoPiece::Flat {
             frames: y - x,
             pieces,
             skip: 0,
+            placed: self.outer_of(c),
             excluded,
         }))
+    }
+
+    fn outer_of(&self, c: &Clip) -> Vec<Placed> {
+        let bare = Clip {
+            picture: None,
+            ..c.clone()
+        };
+        placed_of(&bare, self.nest_of(c), false, &[], self.x)
     }
 
     fn smoothed(
@@ -3276,23 +3273,23 @@ impl<'a> Span<'a> {
         let Some((smooth, mode)) = Smooth::of(p, d) else {
             return Ok(None);
         };
-        let (Some(f), Some(g)) = (d.before, d.after) else {
-            return Ok(None);
-        };
-        let moded = smooth.mode.is_some();
         let side = |c: &Clip, at: i64| -> Result<Option<VideoPiece>> {
-            if let Some(whole) = self.nest_of(c).and_then(|n| n.flat.as_deref()) {
-                return self.flat(c, whole, (at, mode), below);
+            let nest = self.nest_of(c);
+            if let Some(whole) = nest.and_then(|n| n.flat.as_deref()) {
+                return self.flat(c, whole, (at, mode));
             }
-            if !shows(&c) || moded && mode != SmoothMode::Faster && c.pace().speed() < 0.0 {
+            if !shows(&c) {
                 return Ok(None);
             }
             let bare = without_mode(c);
             let drawn = bare.as_ref().unwrap_or(c);
-            let mut piece = self.laid(drawn, self.nest_of(c), below, &[])?;
+            let mut piece = self.laid(drawn, nest, below, &[])?;
             let moved = |p: &Placed| !fills(c) || !p.picture.is_usual();
-            if piece.placed().first().is_some_and(moved) {
-                return Ok(None);
+            let backward = mode != SmoothMode::Faster && c.pace().speed() < 0.0;
+            if backward || piece.placed().first().is_some_and(moved) {
+                let mut wide = widened(c, d.frames);
+                wide.retime = ClipRetime::Nearest;
+                return self.flat(c, &wide, (at, mode));
             }
             match &mut piece {
                 VideoPiece::Source {
@@ -3316,10 +3313,29 @@ impl<'a> Span<'a> {
             }
             Ok(Some(piece))
         };
-        Ok(match (side(f, d.frames.0)?, side(g, d.frames.1 - 1)?) {
-            (Some(f), Some(g)) => Some((f, g, smooth)),
-            _ => None,
-        })
+        let gap = || VideoPiece::Flat {
+            frames: self.y - x,
+            pieces: vec![VideoPiece::black(self.y - x)].into(),
+            skip: 0,
+            placed: d
+                .before
+                .or(d.after)
+                .map_or_else(Vec::new, |c| self.outer_of(c)),
+            excluded: false,
+        };
+        let either = |c: Option<&Clip>, at: i64| match c {
+            Some(c) => side(c, at),
+            None => Ok(Some(gap())),
+        };
+        Ok(
+            match (
+                either(d.before, d.frames.0)?,
+                either(d.after, d.frames.1 - 1)?,
+            ) {
+                (Some(f), Some(g)) => Some((f, g, smooth)),
+                _ => None,
+            },
+        )
     }
 
     fn pictures(&self, stack: &mut Vec<Layer>, flattened: &mut Vec<usize>) -> Result<()> {
@@ -3350,8 +3366,15 @@ impl<'a> Span<'a> {
                 .filter_map(|c| self.nest_of(c).filter(|n| n.flat.is_some()))
                 .map(|n| n.opened),
         );
-        let outgoing = Layer::Picture(f, smooth.mode.map(|_| self.ramp_of(d, true)));
-        if smooth.mode.is_none() {
+        let smooth = Smooth {
+            clear: [&f, &g]
+                .iter()
+                .any(|p| matches!(p, VideoPiece::Flat { .. })),
+            ..smooth
+        };
+        let keeps_below = smooth.mode.is_some() || smooth.clear;
+        let outgoing = Layer::Picture(f, keeps_below.then(|| self.ramp_of(d, true)));
+        if !keeps_below {
             outgoing.hides(stack);
         }
         stack.extend([outgoing, Layer::Smoothed(g, ramp, smooth)]);

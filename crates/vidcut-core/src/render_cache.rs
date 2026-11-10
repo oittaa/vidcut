@@ -499,9 +499,13 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
             placed.iter_mut().for_each(plain_placed);
         }
         VideoPiece::Flat {
-            pieces, excluded, ..
+            pieces,
+            placed,
+            excluded,
+            ..
         } => {
             *excluded = false;
+            placed.iter_mut().for_each(plain_placed);
             let mut inner = pieces.to_vec();
             inner.iter_mut().for_each(|p| plain(p, name));
             *pieces = inner.into();
