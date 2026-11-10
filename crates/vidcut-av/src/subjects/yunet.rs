@@ -19,7 +19,8 @@ pub(crate) struct Model {
 }
 
 pub fn name() -> String {
-    format!("yunet-{SIDE}-{}", (LEAST * 100.0).round())
+    let hundredths = |v: f32| (v * 100.0).round();
+    format!("yunet-{SIDE}-{}-{}", hundredths(LEAST), hundredths(SAME))
 }
 
 fn bad(path: &Path, what: impl std::fmt::Display) -> Error {
