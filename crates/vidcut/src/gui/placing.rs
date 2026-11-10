@@ -1694,7 +1694,12 @@ fn area_moved(held: &AreaHeld, shown: &AreaShown, to: Pos2) -> Option<EffectArea
         }
         AreaHold::Side(across) => {
             let i = usize::from(!across);
-            let by = now[i].abs() / from[i].abs().max(AreaBox::LEAST);
+            let side = from[i].signum();
+            let by = (((now[i] - from[i]) * side + 2.0) / 2.0).max(AreaBox::LEAST);
+            let mut shift = [0.0, 0.0];
+            shift[i] = side * (by - 1.0) * frame.half[i];
+            let [dx, dy] = turned(shift, frame.turn);
+            frame.center = [frame.center[0] + dx, frame.center[1] + dy];
             frame.half[i] = (frame.half[i] * by).max(AreaBox::LEAST);
         }
         AreaHold::Turn => {
@@ -1821,7 +1826,8 @@ impl Workspace {
         let n = self.timeline.picture_grab.area.unwrap_or(0);
         let mut points = shown.area.corners().to_vec();
         let held = shown.grip(at);
-        if resp.clicked_by(egui::PointerButton::Middle) {
+        let alt = resp.clicked() && ui.input(|i| i.modifiers.alt);
+        if alt || resp.clicked_by(egui::PointerButton::Middle) {
             let Some(AreaHold::Point(i)) = held else {
                 return;
             };

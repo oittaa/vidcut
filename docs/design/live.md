@@ -365,7 +365,7 @@ The bar and the Jobs button:
 - `Workspace::area_controls` draws the handles of the area of one effect (`AreaShown`), before `Workspace::picture_controls`.
   - `AreaShown::grip` gives what a press holds (`AreaHold`). `area_moved` gives the area of a drag, and `Workspace::land_area` sends one `effects.set`.
   - `AreaShown::cursor` gives the pointer of a hold. `paint_area` puts a ring on the handle under the pointer.
-  - On a polygon, `Workspace::area_points` adds a point on a click on a side. It removes a point on a middle-click.
+  - On a polygon, `Workspace::area_points` adds a point on a click on a side. It removes a point on a middle-click, or on a click with Alt.
 - The Blur tool (`Workspace::blur_tool`, `Grab::blurring`) draws a new area in the viewer (`Workspace::blur_controls`).
   - A drag holds `AreaHold::Draw` (`Workspace::blur_drag`). `area_drawn` makes the area from the two ends of the drag. The picture with the new effect is the preview.
   - With Free Shape, `Workspace::blur_points` keeps the clicked points. `area_through` makes the polygon when the shape closes.
