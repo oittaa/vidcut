@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, MotionPath, PathSample, Project};
+use crate::model::{Clip, MotionPath, PathSample, Project, Subject};
 use crate::motion;
 
 use super::locate;
@@ -58,6 +58,7 @@ pub fn add(p: &mut Project, id: &str, name: Option<&str>, samples: &[PathSample]
     c.motion.push(MotionPath {
         id: path.clone(),
         name: name.and_then(named),
+        subject: None,
         samples: Arc::new(samples.to_vec()),
     });
     Ok(json!({ "clip": id, "path": path }))
@@ -144,6 +145,9 @@ fn shown(c: &Clip, m: &MotionPath, at: Option<i64>, samples: bool) -> Value {
     if let Some(name) = &m.name {
         v["name"] = json!(name);
     }
+    if let Some(subject) = m.subject {
+        v["subject"] = json!(subject);
+    }
     if let Some((first, last)) = m.span() {
         v["first"] = json!(first);
         v["last"] = json!(last);
@@ -205,4 +209,61 @@ pub fn violation(c: &Clip) -> Option<String> {
         ));
     }
     motion::problem(&c.motion).map(|why| format!("{}: {why}", c.id))
+}
+
+fn of_subject(c: &Clip, subject: Subject) -> Vec<String> {
+    let found = c.motion.iter().filter(|m| m.subject == Some(subject));
+    found.map(|m| m.id.clone()).collect()
+}
+
+pub fn findable(p: &mut Project, id: &str, subject: Subject, replace: bool) -> Result<(i64, i64)> {
+    let c = clip_of(p, id)?;
+    let old = of_subject(c, subject);
+    if !old.is_empty() && !replace {
+        return Err(Error::invalid(format!(
+            "{id} already has {} {} paths: pass replace (--replace) to find them again",
+            old.len(),
+            subject.name()
+        )));
+    }
+    if let Some((n, path)) = followers(c).find(|(_, path)| old.iter().any(|x| x == path)) {
+        return Err(Error::invalid(format!(
+            "the area of effect {n} of {id} follows motion path {path}: first give that area \
+             another `follows`, or none (effects.set)"
+        )));
+    }
+    Ok(c.shown())
+}
+
+pub fn found(
+    p: &mut Project,
+    id: &str,
+    subject: Subject,
+    tracks: Vec<motion::FoundPath>,
+) -> Result<Value> {
+    let c = clip_of(p, id)?;
+    let old = of_subject(c, subject);
+    c.motion.retain(|m| !old.contains(&m.id));
+    if c.motion.len() + tracks.len() > motion::PATHS_KEPT {
+        return Err(Error::invalid(format!(
+            "{id} would have {} motion paths, more than the {} a clip takes",
+            c.motion.len() + tracks.len(),
+            motion::PATHS_KEPT
+        )));
+    }
+    let mut paths = Vec::new();
+    for (n, track) in tracks.into_iter().enumerate() {
+        let path = MotionPath {
+            id: motion::next_id(&c.motion),
+            name: Some(format!("{} {}", subject.title(), n + 1)),
+            subject: Some(subject),
+            samples: Arc::new(track.samples),
+        };
+        let mut v = shown(c, &path, None, false);
+        v["seen"] = json!(track.seen);
+        v["gaps"] = json!(track.gaps);
+        paths.push(v);
+        c.motion.push(path);
+    }
+    Ok(json!({ "clip": id, "paths": paths }))
 }

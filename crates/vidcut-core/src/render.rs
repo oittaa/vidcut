@@ -599,6 +599,7 @@ impl Followed {
         let shared = |m: &MotionPath| MotionPath {
             id: m.id.clone(),
             name: None,
+            subject: None,
             samples: m.samples.clone(),
         };
         let paths: Arc<[MotionPath]> = clip.motion.iter().filter(follows).map(shared).collect();
@@ -645,6 +646,7 @@ impl Followed {
             Some(MotionPath {
                 id: m.id.clone(),
                 name: None,
+                subject: None,
                 samples: Arc::new(vec![PathSample {
                     frame: 0,
                     center: area.center,

@@ -68,6 +68,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - Linux keeps 15 characters of a thread name.
 - By default, PID is the newest `vidcut`.
 - The `[decoding]` lines of `VIDCUT_DEBUG` give the thread count of each reader when it opens. They also give how many readers are open when one opens or closes.
+- The `[subjects]` line of `VIDCUT_DEBUG` is for `motion.find`. It gives the pictures that the model saw, the frames decoded, the time, and the time in the model.
 
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` makes a test encode with each GPU encoder (NVENC, VAAPI, AMF, QSV) on each GPU. It does not use the cache.
 

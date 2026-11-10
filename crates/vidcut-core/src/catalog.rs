@@ -659,6 +659,25 @@ pub static DPDFNET: Model = Model {
     price: None,
 };
 
+pub const YUNET_ONNX: File = File {
+    name: "yunet/face_detection_yunet_2023mar.onnx",
+    title: "YuNet face detection",
+    url: "https://huggingface.co/opencv/opencv_zoo/resolve/39a1451d0f9b23fc4ebaed06a277127efa0374d0/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+    bytes: 232_589,
+    sha256: "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+};
+
+pub static YUNET: Model = Model {
+    id: "yunet",
+    times: None,
+    title: "YuNet face detection",
+    files: &[YUNET_ONNX],
+    service: None,
+    languages: &[],
+    limits: &[],
+    price: None,
+};
+
 pub const NANOVSR_SCALE: u32 = 4;
 pub const NANOVSR_FRAMES: usize = 15;
 
@@ -785,7 +804,7 @@ pub static EMA_VFI: Model = Model {
     price: None,
 };
 
-pub static ALL: [&Model; 13] = [
+pub static ALL: [&Model; 14] = [
     &PARAKEET_ULTRA,
     &QWEN3_ASR,
     &WHISPER_LARGE_V3,
@@ -795,6 +814,7 @@ pub static ALL: [&Model; 13] = [
     &XAI,
     &GOOGLE,
     &DPDFNET,
+    &YUNET,
     &NANOVSR,
     &FLASHVSR,
     &RIFE,

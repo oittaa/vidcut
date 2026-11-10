@@ -114,6 +114,13 @@ pub fn inspect(
                 loaded: Some("tract"),
             })
         }
+        "yunet" => {
+            crate::subjects::inspect(dir, vidcut_core::model::Subject::Face, download)?;
+            Ok(Inspected {
+                found,
+                loaded: Some("tract"),
+            })
+        }
         "nanovsr" => {
             crate::super_scale::nanovsr::inspect(dir, download)?;
             Ok(Inspected {

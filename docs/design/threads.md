@@ -50,6 +50,7 @@ The values in the Priority column:
 | `vidcut-viewer-close`, `vidcut-two-up-close`, `vidcut-frees-imports` | `threads::closing` | drop players, Vulkan imports | interactive |
 | `vidcut-cancel` | `ipc::client::call` | watches the cancel of a CLI call | interactive |
 | `vidcut-proxies`, `vidcut-transcribe`, `vidcut-retime`, `vidcut-sound-sync`, `vidcut-story-N` | `work_first` in `session::run_with`, `storyboard::render` | the work of a headless proxy, transcription, re-timing or sound sync before its edit; storyboard pictures | starter's (`Work::current`) |
+| `vidcut-subjects` | `work_first` in `session::run_with` | the pictures of a headless `motion.find` before its edit | starter's (`Work::current`) |
 | `vidcut-upload` | `speech_api::transcribe` | the upload to a paid speech service and its reply, while the job's thread reports and cancels | inherited |
 | `vidcut-speakers` | `transcribe::speakers_of` | the run of a speaker model, while the job's thread reports the time and cancels it | inherited |
 | `vidcut-play-video`, `vidcut-play-audio`, `vidcut-play-windows` | `Player::new`; windows once followed | the decoding, mix and two-up windows of an engine | inherited |

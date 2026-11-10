@@ -2,7 +2,7 @@
 
 **When:** now, one pull request for each step below.
 
-A motion path is the path of an area of the picture through the frames of a clip. A clip stores motion paths, and the area of an effect follows a path ([model](../design/model.md#motion-paths)). vidcut finds no motion in a picture.
+A motion path is the path of an area of the picture through the frames of a clip. A clip stores motion paths, and the area of an effect follows a path ([model](../design/model.md#motion-paths)). `motion.find` makes a path for each face of a clip ([analysis](../design/analysis.md#subjects)). vidcut follows no other thing.
 
 In this file, a path is never a track of the timeline.
 
@@ -40,7 +40,8 @@ In this file, a path is never a track of the timeline.
 - Transform, Crop and the values of the effects have keyframes ([keyframes.md](keyframes.md)).
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path ([deviation X166](../deviations.md#x166-an-effect-has-an-area)).
-- No request analyzes the motion of a picture. [Stabilization](stabilization.md) needs such an analysis too.
+- `motion.find` finds the faces of a clip with a detector model ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-of-a-clip)).
+- No request follows a point or a drawn box, and no request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
 
 **How:**
@@ -74,14 +75,24 @@ In this file, a path is never a track of the timeline.
 **To do:**
 
 - **Area keyframes:** keyframes on the center, the size, the rotation and the softness of the area of an effect.
-- **Faces:** one request finds the faces of the selected clip and makes a path for each.
-  - A missing model asks for a download and checks a SHA-256, as the other local models do.
-  - The request tells the frames where it loses a face.
+- **The ends of a found path:** an area that follows a path shows before the first sample and after the last sample of the path.
+  - After a cut inside a clip, the blur of a found face thus stays at its last place. Decide whether the area hides there.
+  - A path can continue across a cut inside a clip, on another face at the same place. Decide whether a cut ends each path.
+- **Faces, what is left:**
+  - Check `motion.find` on a file with a rotation in its metadata. `subjects::find` turns the picture upright before the model sees it.
+  - Measure YuNet on the GPU against the CPU, and build it there if it is clearly faster ([analysis](../design/analysis.md#subjects)).
+    - Measured on 2026-11-10, on 16 threads, with the file decoded on the GPU:
+    - A 720p file at 24 fps gives 253 pictures in a second. The model takes 61 % of that time.
+    - A 2160p file at 59.94 fps in a project of 24 fps gives 57 pictures in a second. The model takes 21 % of that time.
+  - The maker of YuNet gives face sizes from about 10 to 300 pixels. The model sees a picture with a longer side of 640 pixels.
+    - Check a close shot where a face is larger than 300 of those pixels, and a wide shot with faces under 10.
+    - Decide whether the model also sees the picture at another size.
 - **More subjects:** people, vehicles and animals, and number plates.
   - Find a number plate model that reads the plates of other countries.
 - **A drawn box:** one request tracks a box of the selected clip from the playhead, forward or backward.
   - The request tells the frame where it loses the subject. The user starts again from that frame.
 - **The Inspector and the viewer:** the buttons, the box on the picture, the list of paths, and the controls of the area of an effect.
+  - The GUI asks before `motion.find` downloads its model, as it asks for the other local models.
 - **Titles and clips follow a path** of another clip.
 - **A subject with its matte:** with [subject masks](subject-masks.md).
 - **Resolve measurement:**

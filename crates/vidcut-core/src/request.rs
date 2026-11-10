@@ -11,8 +11,8 @@ use crate::model::{
     AreaShape, Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel,
     EffectArea, EffectType, EffectValue, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput,
     GrainComposite, GrainPreset, Handle, LowerThirdLine, PathSample, PictureTool,
-    PictureTransition, Place, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle,
-    TrackClip, VignetteMode, VignetteShape, ZoomBox,
+    PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
+    TitleStyle, TrackClip, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2790,6 +2790,35 @@ pub enum Request {
         clip: ClipRef,
         #[serde(default)]
         paths: Option<OneOrMany<String>>,
+    },
+    /// Find things of one kind in the pictures of clips of footage, stills
+    /// or image sequences, and give each thing a motion path. It looks at
+    /// the source frames that each clip shows. A thing that is not found for
+    /// up to a second, and then shows near the same place, stays on its path.
+    /// A thing found for under half a second gets no path. The paths get
+    /// names in the order the things first show: `Face 1`, `Face 2`.
+    ///
+    /// Returns each clip with its new `paths`: the `id`, the `name`, the
+    /// `count` of its samples, the source frames `first` and `last` of them,
+    /// and the `gaps`: the ranges of source frames between them where the
+    /// thing was not found. The area moves in a straight line across a gap.
+    #[serde(rename = "motion.find")]
+    MotionFind {
+        clips: OneOrMany<ClipRef>,
+        /// The kind of thing to find. Usual: `face`.
+        #[serde(default)]
+        subject: Subject,
+        /// Take the paths that an earlier `motion.find` of this subject made
+        /// off the clip first. Without it, a clip that has such paths is an
+        /// error. A path that the area of an effect follows stays, and the
+        /// request fails, as in `motion.remove`.
+        #[serde(default)]
+        replace: bool,
+        /// Download the model of the subject when it is not on this
+        /// computer, checked against its SHA-256. Without it, a missing
+        /// model is an error that tells its size.
+        #[serde(default)]
+        download: bool,
     },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.

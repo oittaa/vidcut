@@ -1837,9 +1837,37 @@ pub struct MotionPath {
     /// What it follows, for example `Face 1`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The kind of thing that `motion.find` found for this path. Left out on
+    /// a path that it did not make.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<Subject>,
     /// The area on source frames: at least one sample, one for a frame, in
     /// the order of the frames.
     pub samples: Arc<Vec<PathSample>>,
+}
+
+/// A kind of thing that `motion.find` finds in a picture.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Subject {
+    /// The faces of people. A small neural network (YuNet) on the CPU finds
+    /// them. Its file (233 kB) downloads at its first use.
+    #[default]
+    Face,
+}
+
+impl Subject {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Face => "face",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Face => "Face",
+        }
+    }
 }
 
 /// The area of a motion path on one source frame.
