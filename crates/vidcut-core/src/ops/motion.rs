@@ -261,6 +261,7 @@ pub fn found(
         };
         let mut v = shown(c, &path, None, false);
         v["seen"] = json!(track.seen);
+        v["score"] = json!(track.score);
         v["gaps"] = json!(track.gaps);
         paths.push(v);
         c.motion.push(path);

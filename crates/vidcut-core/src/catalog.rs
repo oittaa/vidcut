@@ -678,6 +678,25 @@ pub static YUNET: Model = Model {
     price: None,
 };
 
+pub const PPOCR_DET_ONNX: File = File {
+    name: "ppocr/PP-OCRv5_mobile_det.onnx",
+    title: "PP-OCRv5 text detection",
+    url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.onnx",
+    bytes: 4_826_518,
+    sha256: "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
+};
+
+pub static PPOCR_DET: Model = Model {
+    id: "ppocr-det",
+    times: None,
+    title: "PP-OCRv5 text detection",
+    files: &[PPOCR_DET_ONNX],
+    service: None,
+    languages: &[],
+    limits: &[],
+    price: None,
+};
+
 pub const NANOVSR_SCALE: u32 = 4;
 pub const NANOVSR_FRAMES: usize = 15;
 
@@ -804,7 +823,7 @@ pub static EMA_VFI: Model = Model {
     price: None,
 };
 
-pub static ALL: [&Model; 14] = [
+pub static ALL: [&Model; 15] = [
     &PARAKEET_ULTRA,
     &QWEN3_ASR,
     &WHISPER_LARGE_V3,
@@ -815,6 +834,7 @@ pub static ALL: [&Model; 14] = [
     &GOOGLE,
     &DPDFNET,
     &YUNET,
+    &PPOCR_DET,
     &NANOVSR,
     &FLASHVSR,
     &RIFE,

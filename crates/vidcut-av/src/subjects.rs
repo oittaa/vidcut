@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use vidcut_core::analysis::{Detections, Found, Look};
+use vidcut_core::catalog;
 use vidcut_core::model::Subject;
 
 use crate::decode::{Input, Reading, VideoReader};
@@ -11,23 +12,77 @@ use crate::export::Progress;
 use crate::ffmpeg::{format, frame, software::scaling};
 use crate::models::{self, Fetch, Need};
 
+pub mod ppocr;
 pub mod yunet;
 
-fn file(subject: Subject) -> vidcut_core::catalog::File {
+const STEP: u32 = 32;
+
+fn padded(side: u32) -> u32 {
+    side.div_ceil(STEP) * STEP
+}
+
+fn model(subject: Subject) -> &'static catalog::Model {
     match subject {
-        Subject::Face => yunet::FILE,
+        Subject::Face => &catalog::YUNET,
+        Subject::Text => &catalog::PPOCR_DET,
     }
 }
 
-pub fn name(subject: Subject) -> String {
+fn file(subject: Subject) -> catalog::File {
     match subject {
-        Subject::Face => format!(
-            "{}-yunet-{}-{}",
-            subject.name(),
-            yunet::SIDE,
-            (yunet::LEAST * 100.0).round()
-        ),
+        Subject::Face => yunet::FILE,
+        Subject::Text => ppocr::FILE,
     }
+}
+
+fn side(subject: Subject) -> u32 {
+    match subject {
+        Subject::Face => yunet::SIDE,
+        Subject::Text => ppocr::SIDE,
+    }
+}
+
+fn rules(subject: Subject) -> String {
+    match subject {
+        Subject::Face => yunet::name(),
+        Subject::Text => ppocr::name(),
+    }
+}
+
+enum Net {
+    Face(yunet::Model),
+    Text(ppocr::Model),
+}
+
+impl Net {
+    fn load(subject: Subject, path: &Path, size: (u32, u32)) -> Result<Self> {
+        Ok(match subject {
+            Subject::Face => Self::Face(yunet::Model::load(path, size)?),
+            Subject::Text => Self::Text(ppocr::Model::load(path, size)?),
+        })
+    }
+
+    fn size(&self) -> (usize, usize) {
+        match self {
+            Self::Face(m) => m.size(),
+            Self::Text(m) => m.size(),
+        }
+    }
+
+    fn find(&self, picture: &[f32], content: (usize, usize)) -> Result<Vec<Found>> {
+        match self {
+            Self::Face(m) => m.find(picture),
+            Self::Text(m) => m.find(picture, content),
+        }
+    }
+}
+
+pub fn of(id: &str) -> Option<Subject> {
+    Subject::ALL.into_iter().find(|s| model(*s).id == id)
+}
+
+pub fn name(subject: Subject) -> String {
+    format!("{}-{}", subject.name(), rules(subject))
 }
 
 pub fn needed(dir: &Path, subject: Subject) -> Vec<Need> {
@@ -64,11 +119,11 @@ pub fn get_ready(dir: &Path, subject: Subject, download: bool) -> Result<()> {
 pub fn inspect(dir: &Path, subject: Subject, download: bool) -> Result<()> {
     get_ready(dir, subject, download)?;
     models::verify(dir, &[file(subject)])?;
-    let side = (yunet::SIDE, yunet::SIDE);
-    yunet::Model::load(&dir.join(file(subject).name), side).map(drop)
+    let side = (side(subject), side(subject));
+    Net::load(subject, &dir.join(file(subject).name), side).map(drop)
 }
 
-fn fitted(decoded: &frame::Video, turn: u16) -> (u32, u32) {
+fn fitted(decoded: &frame::Video, turn: u16, most: u32) -> (u32, u32) {
     let sar = decoded.aspect_ratio();
     let wide = match (sar.numerator(), sar.denominator()) {
         (n, d) if n > 0 && d > 0 => f64::from(n) / f64::from(d),
@@ -79,8 +134,8 @@ fn fitted(decoded: &frame::Video, turn: u16) -> (u32, u32) {
         f64::from(decoded.height()),
     );
     let (w, h) = if turn % 180 == 90 { (h, w) } else { (w, h) };
-    let scale = f64::from(yunet::SIDE) / w.max(h).max(1.0);
-    let side = |v: f64| ((v * scale).round() as u32).clamp(2, yunet::SIDE);
+    let scale = f64::from(most) / w.max(h).max(1.0);
+    let side = |v: f64| ((v * scale).round() as u32).clamp(2, most);
     (side(w), side(h))
 }
 
@@ -153,17 +208,17 @@ fn planes(
 }
 
 struct Looking {
-    model: yunet::Model,
+    model: Net,
     content: (u32, u32),
     turn: u16,
     scaler: Option<scaling::Context>,
 }
 
 impl Looking {
-    fn start(path: &Path, first: &frame::Video, turn: u16) -> Result<Self> {
-        let content = fitted(first, turn);
+    fn start(subject: Subject, path: &Path, first: &frame::Video, turn: u16) -> Result<Self> {
+        let content = fitted(first, turn, side(subject));
         Ok(Self {
-            model: yunet::Model::load(path, content)?,
+            model: Net::load(subject, path, content)?,
             content,
             turn,
             scaler: None,
@@ -186,15 +241,16 @@ impl Looking {
         let slots: Vec<Mutex<Option<Result<Vec<Found>>>>> =
             pictures.iter().map(|_| Mutex::new(None)).collect();
         let model = &self.model;
+        let content = (self.content.0 as usize, self.content.1 as usize);
         crate::pool::run(pictures.len(), &|i| {
-            let found = model.find(&pictures[i]);
+            let found = model.find(&pictures[i], content);
             *crate::pool::lock(&slots[i]) = Some(found);
         });
         let (cw, ch) = (self.content.0 as f32, self.content.1 as f32);
         let share = |f: Found| Found {
             center: [f.center[0] / cw, f.center[1] / ch],
             size: [f.size[0] / cw, f.size[1] / ch],
-            score: f.score,
+            ..f
         };
         slots
             .into_iter()
@@ -245,7 +301,10 @@ pub fn find(
                 if pts >= due {
                     let seeing = match &mut looking {
                         Some(seeing) => seeing,
-                        None => looking.insert(Looking::start(&weights, &decoded, turn)?),
+                        None => {
+                            let seeing = Looking::start(subject, &weights, &decoded, turn)?;
+                            looking.insert(seeing)
+                        }
                     };
                     waiting.push(seeing.picture(&decoded)?);
                     out.pts.push(pts);

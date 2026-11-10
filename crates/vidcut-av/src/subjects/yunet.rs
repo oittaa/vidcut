@@ -11,7 +11,6 @@ pub const SIDE: u32 = 640;
 pub const LEAST: f32 = 0.3;
 pub const SAME: f32 = 0.3;
 const STRIDES: [usize; 3] = [8, 16, 32];
-const STEP: u32 = 32;
 
 pub(crate) struct Model {
     plan: Arc<TypedRunnableModel>,
@@ -19,12 +18,12 @@ pub(crate) struct Model {
     outputs: [[usize; 3]; 3],
 }
 
-fn bad(path: &Path, what: impl std::fmt::Display) -> Error {
-    Error::Invalid(format!("{}: {what}", path.display()))
+pub fn name() -> String {
+    format!("yunet-{SIDE}-{}", (LEAST * 100.0).round())
 }
 
-pub(crate) fn padded(side: u32) -> u32 {
-    side.div_ceil(STEP) * STEP
+fn bad(path: &Path, what: impl std::fmt::Display) -> Error {
+    Error::Invalid(format!("{}: {what}", path.display()))
 }
 
 fn overlap(a: &Found, b: &Found) -> f32 {
@@ -58,7 +57,7 @@ impl Model {
         for (slots, stride) in outputs.iter_mut().zip(STRIDES) {
             *slots = [at("cls", stride)?, at("obj", stride)?, at("bbox", stride)?];
         }
-        let (w, h) = (padded(w) as usize, padded(h) as usize);
+        let (w, h) = (super::padded(w) as usize, super::padded(h) as usize);
         let mut model = onnx
             .model_for_proto_model(&proto)
             .map_err(|e| bad(path, e))?;
@@ -109,6 +108,7 @@ impl Model {
                 found.push(Found {
                     center: [(col + b[0]) * s, (row + b[1]) * s],
                     size: [b[2].exp() * s, b[3].exp() * s],
+                    rotation: 0.0,
                     score,
                 });
             }

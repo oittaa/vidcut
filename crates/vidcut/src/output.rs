@@ -1450,12 +1450,13 @@ fn found_paths(result: &Value) {
         println!("  {}  {} paths", text(clip, "clip"), paths.len());
         for p in paths {
             println!(
-                "    {:<5}{:<10} source {}..{}  seen on {} frames, {} samples, {} gaps",
+                "    {:<5}{:<10} source {}..{}  seen on {} frames, score {}, {} samples, {} gaps",
                 text(p, "id"),
                 text(p, "name"),
                 p["first"],
                 p["last"],
                 p["seen"],
+                p["score"],
                 p["count"],
                 p["gaps"].as_array().map_or(0, Vec::len)
             );

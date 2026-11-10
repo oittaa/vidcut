@@ -52,39 +52,55 @@ flowchart TD
 
 ## Subjects
 
-- `motion.find` gives each face of a clip a motion path ([model](model.md#motion-paths), [deviation X167](../deviations.md#x167-vidcut-finds-the-faces-of-a-clip)).
+- `motion.find` gives each thing of one `Subject` in a clip a motion path ([model](model.md#motion-paths), [deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+  - `Subject::Face` is a face. `Subject::Text` is a line or a block of text. `Subject::ALL` lists the subjects.
+  - The subjects differ in two places only: `subjects::Net` holds the model of each, and `Join::of` holds the rules of its paths.
 - `subjects::find` in vidcut-av measures. It reads only the range that the clip shows:
   - A `Look` has the first time, the last time and the time between two frames of the project (`every`).
   - `VideoReader` seeks to the first time. It decodes on the GPU or the CPU, as the preferences tell.
   - `subjects::find` looks only at the first decoded frame at or after each time of the `Look`.
     - Why: a file of 60 fps in a project of 24 fps shows two frames of each five.
-  - It scales each picture to a longer side of `yunet::SIDE` pixels, upright, with square pixels.
-  - YuNet runs with tract on the CPU, one picture on each thread of the pool (`pool::run`).
-  - `Detections` holds the time of each picture and its `Found` boxes: the center, the size and the score. The center and the size are fractions of the picture.
-  - It keeps each box with a score of `yunet::LEAST` or more. Why: the core can then decide again with other scores, and nothing is measured again.
+  - It scales each picture to the longer side that the model takes (`yunet::SIDE`, `ppocr::SIDE`), upright, with square pixels.
+  - The model runs with tract on the CPU, one picture on each thread of the pool (`pool::run`).
+  - `Detections` holds the time of each picture and its `Found` boxes: the center, the size, the rotation and the score. The center and the size are fractions of the picture.
+  - It keeps each box with a score of `yunet::LEAST` or `ppocr::LEAST` or more. Why: the core can then decide again with other scores, and nothing is measured again.
 - `yunet` prepares the picture and decodes the outputs of the model:
   - The picture goes in as blue, green and red values from 0 to 255. Its right side and its bottom are padded to a multiple of 32.
   - Each of the strides 8, 16 and 32 gives a class score, an object score and a box for each cell.
   - The score of a box is the root of the product of the two scores.
   - Of the boxes that overlap more than `yunet::SAME`, the box with the highest score stays.
-- `motion::joined` in vidcut-core decides:
+- `ppocr` finds text with the PP-OCRv5 mobile detection model, by the rules of the config of that model:
+  - The picture goes in as blue, green and red values, each less its mean and divided by its spread (`MEAN`, `SPREAD`).
+  - The model gives one map of the picture. A value tells how sure the model is that the pixel is in the middle part of a line of text.
+  - `regions` takes each group of pixels above `INK` that touch.
+  - `line` makes the box of a region. Its score is the mean of the map in the box.
+  - The box then grows by its area times `GROW` over the sum of its sides. Why: the map holds only the middle part of each line.
+  - `lean` gives a long, narrow region the angle of its main axis, and the box then leans with the text.
+    - A region that is not `LONG` times longer than wide, or that leans less than `LEVEL` degrees, gets an upright box.
+  - `blocks` joins upright boxes that overlap into one box.
+    - Why: the model finds the lines of a paragraph apart on one frame and together on the next. One block is the same on each frame.
+- `motion::joined` in vidcut-core decides, by the `Join` of the subject:
   - It takes the picture that each source frame shows (`Detections::shown`), by the rule of `analysis::shown`.
-  - A box joins the open path whose last box overlaps it most. The overlap must be `OVERLAP` or more.
-  - A box with a score of `START` or more opens a path. A box with a score of `KEEP` or more continues a path.
+  - A box joins the open path whose last box overlaps it most. The overlap must be `overlap` or more.
+  - A box with a score of `start` or more opens a path. A box with a score of `keep` or more continues a path.
     - Why: a face that turns away scores lower, and its path must not stop there.
-  - A path waits `WAIT_SECS` for its thing. Then the path ends.
-  - A path stays only with boxes of a score of `START` or more on as many frames as `SHORTEST_SECS` has.
+  - A path waits `wait_secs` for its thing. Then the path ends.
+  - A path stays only with boxes of a score of `start` or more on as many frames as `shortest_secs` has.
     - Why: a pattern that looks like a face scores high on a few frames only.
+  - A path stays only with a box on a share of `steady` of its frames. Faces have no such rule.
+    - Why: a pattern that looks like text comes and goes from frame to frame. A face that turns away is not found for a time, and must stay.
   - `motion::simplified` keeps the first sample, the last sample, and each sample that the line between its kept neighbors misses.
-    - A miss is more than `SLACK` of the size of the box, in the center or in the size.
+    - A miss is more than `SLACK` of the size of the box, in the center or in the size, or more than `TURN_SLACK` degrees.
     - Why: the project file holds each sample, and vidcut writes that file after each edit.
     - Thus an area of 1.2 times the box of a path covers the face on each frame where the model found it.
-  - `FoundPath` gives the gaps of a path from its boxes before that step.
+  - `FoundPath` gives the gaps of a path from its boxes before that step, and the mean of their scores.
 - A still has one picture. `subject_look` asks for it once, and each frame of the clip takes its boxes.
-- `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the model, its sizes and the `Look` (`subjects::name`).
+- `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the subject, the rules of its model and the `Look` (`subjects::name`).
+  - Each model names its own rules (`yunet::name`, `ppocr::name`). Thus a change of a rule gives another file.
 - With `VIDCUT_DEBUG`, a line of the area `subjects` gives the pictures, the frames, the time and the time in the model.
 - In a GUI, `Live::measuring` measures on `vidcut-measure` first (`editor::subject_looks`). Headless, `work_first` measures on `vidcut-subjects`.
-- The model file is `catalog::YUNET_ONNX`. `subjects::get_ready` fetches it when the request has `download`.
+- The model files are `catalog::YUNET_ONNX` and `catalog::PPOCR_DET_ONNX`. `subjects::get_ready` fetches the file of the subject when the request has `download`.
+- `models.check` finds the subject of a model id with `subjects::of`.
 
 ## In a GUI
 

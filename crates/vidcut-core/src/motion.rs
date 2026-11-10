@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::analysis::{Detections, Found, Look};
-use crate::model::{MotionPath, PathSample};
+use crate::model::{MotionPath, PathSample, Subject};
 
 pub const PATHS_KEPT: usize = 256;
 pub const SAMPLES_KEPT: usize = 1_000_000;
@@ -180,24 +180,54 @@ pub fn rescale(paths: &mut [MotionPath], conv: impl Fn(i64) -> i64) {
 
 pub const SLACK: f64 = 0.05;
 pub const LEAST_SLACK: f64 = 0.0005;
+pub const TURN_SLACK: f64 = 2.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FoundPath {
     pub samples: Vec<PathSample>,
     pub gaps: Vec<[i64; 2]>,
     pub seen: usize,
+    pub score: f64,
 }
 
-pub const START: f32 = 0.7;
-pub const KEEP: f32 = 0.4;
-pub const OVERLAP: f64 = 0.2;
-pub const WAIT_SECS: f64 = 1.0;
-pub const SHORTEST_SECS: f64 = 0.5;
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Join {
+    pub start: f32,
+    pub keep: f32,
+    pub overlap: f64,
+    pub wait_secs: f64,
+    pub shortest_secs: f64,
+    pub steady: f64,
+}
+
+impl Join {
+    pub fn of(subject: Subject) -> Self {
+        match subject {
+            Subject::Face => Self {
+                start: 0.7,
+                keep: 0.4,
+                overlap: 0.2,
+                wait_secs: 1.0,
+                shortest_secs: 0.5,
+                steady: 0.0,
+            },
+            Subject::Text => Self {
+                start: 0.7,
+                keep: 0.6,
+                overlap: 0.2,
+                wait_secs: 1.0,
+                shortest_secs: 1.0,
+                steady: 0.8,
+            },
+        }
+    }
+}
 
 struct Open {
     last: Found,
     seen: i64,
     sure: usize,
+    total: f64,
     samples: Vec<PathSample>,
 }
 
@@ -225,7 +255,7 @@ fn sample(frame: i64, f: &Found) -> PathSample {
         frame,
         center: f.center.map(round5),
         size: f.size.map(round5),
-        rotation: 0.0,
+        rotation: (f64::from(f.rotation) * 100.0).round() / 100.0,
     }
 }
 
@@ -246,14 +276,16 @@ pub fn joined(
     origin: f64,
     fps: f64,
     (first, end): (i64, i64),
+    rules: &Join,
 ) -> Vec<FoundPath> {
-    let wait = (WAIT_SECS * fps).round() as i64;
-    let shortest = (SHORTEST_SECS * fps).round().max(1.0) as usize;
+    let wait = (rules.wait_secs * fps).round() as i64;
+    let shortest = (rules.shortest_secs * fps).round().max(1.0) as usize;
     let mut open: Vec<Open> = Vec::new();
     let mut done: Vec<Open> = Vec::new();
     for frame in first..end {
         let boxes = found.shown(shown_time(origin, fps, frame));
-        let boxes: Vec<Found> = boxes.iter().copied().filter(|f| f.score >= KEEP).collect();
+        let kept = boxes.iter().copied().filter(|f| f.score >= rules.keep);
+        let boxes: Vec<Found> = kept.collect();
         let (live, gone): (Vec<Open>, Vec<Open>) =
             open.into_iter().partition(|o| frame - o.seen <= wait);
         open = live;
@@ -262,7 +294,7 @@ pub fn joined(
         for (t, o) in open.iter().enumerate() {
             for (b, f) in boxes.iter().enumerate() {
                 let near = overlap(&o.last, f);
-                if near >= OVERLAP {
+                if near >= rules.overlap {
                     pairs.push((near, t, b));
                 }
             }
@@ -275,35 +307,42 @@ pub fn joined(
                 (moved[t], joined[b]) = (true, true);
                 let o = &mut open[t];
                 (o.last, o.seen) = (boxes[b], frame);
-                o.sure += usize::from(boxes[b].score >= START);
+                o.sure += usize::from(boxes[b].score >= rules.start);
+                o.total += f64::from(boxes[b].score);
                 o.samples.push(sample(frame, &boxes[b]));
             }
         }
         let fresh = boxes
             .iter()
             .zip(&joined)
-            .filter(|(f, j)| !**j && f.score >= START);
+            .filter(|(f, j)| !**j && f.score >= rules.start);
         for (f, _) in fresh {
             open.push(Open {
                 last: *f,
                 seen: frame,
                 sure: 1,
+                total: f64::from(f.score),
                 samples: vec![sample(frame, f)],
             });
         }
     }
     done.extend(open);
-    done.retain(|o| o.sure >= shortest);
-    let mut done: Vec<Vec<PathSample>> = done.into_iter().map(|o| o.samples).collect();
+    let steady = |o: &Open| {
+        let lasts = o.seen - o.samples[0].frame + 1;
+        o.samples.len() as f64 >= rules.steady * lasts as f64
+    };
+    done.retain(|o| o.sure >= shortest && steady(o));
     done.sort_by(|a, b| {
-        (a[0].frame, a[0].center[0])
-            .partial_cmp(&(b[0].frame, b[0].center[0]))
+        let (a, b) = (&a.samples[0], &b.samples[0]);
+        (a.frame, a.center[0])
+            .partial_cmp(&(b.frame, b.center[0]))
             .unwrap_or(Ordering::Equal)
     });
-    let made = |seen: Vec<PathSample>| FoundPath {
-        gaps: gaps(&seen),
-        samples: simplified(&seen),
-        seen: seen.len(),
+    let made = |o: Open| FoundPath {
+        gaps: gaps(&o.samples),
+        samples: simplified(&o.samples),
+        seen: o.samples.len(),
+        score: (o.total / o.samples.len() as f64 * 100.0).round() / 100.0,
     };
     done.into_iter().map(made).collect()
 }
@@ -324,7 +363,8 @@ fn off(a: &PathSample, b: &PathSample, s: &PathSample) -> f64 {
         let size = (s.size[i] - mix(a.size[i], b.size[i])).abs();
         center.max(size) / (SLACK * s.size[i]).max(LEAST_SLACK)
     };
-    side(0).max(side(1))
+    let turn = (s.rotation - mix(a.rotation, b.rotation)).abs() / TURN_SLACK;
+    side(0).max(side(1)).max(turn)
 }
 
 pub fn simplified(samples: &[PathSample]) -> Vec<PathSample> {

@@ -170,6 +170,7 @@ impl PictureStats {
 pub struct Found {
     pub center: [f32; 2],
     pub size: [f32; 2],
+    pub rotation: f32,
     pub score: f32,
 }
 
@@ -187,7 +188,7 @@ pub struct Detections {
 }
 
 impl Detections {
-    const TAG: &'static [u8; 4] = b"vcd1";
+    const TAG: &'static [u8; 4] = b"vcd2";
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Self::TAG.to_vec();
@@ -196,7 +197,9 @@ impl Detections {
             out.extend_from_slice(&pts.to_le_bytes());
             out.extend_from_slice(&(found.len() as u64).to_le_bytes());
             for f in found {
-                for v in [f.center[0], f.center[1], f.size[0], f.size[1], f.score] {
+                let [x, y] = f.center;
+                let [w, h] = f.size;
+                for v in [x, y, w, h, f.rotation, f.score] {
                     out.extend_from_slice(&v.to_le_bytes());
                 }
             }
@@ -216,6 +219,7 @@ impl Detections {
                 found.push(Found {
                     center: [r.f32()?, r.f32()?],
                     size: [r.f32()?, r.f32()?],
+                    rotation: r.f32()?,
                     score: r.f32()?,
                 });
             }
