@@ -2917,6 +2917,7 @@ fn hide_inside(outer: &[Placed], stack: &mut Vec<Layer>) {
 
 #[derive(Default)]
 struct Drawn {
+    flat: Vec<usize>,
     hides: Option<Vec<Placed>>,
     layers: Vec<Layer>,
 }
@@ -2925,13 +2926,17 @@ fn around(piece: &VideoPiece) -> Vec<Placed> {
     piece.placed().get(1..).unwrap_or_default().to_vec()
 }
 
-fn uncovered(drawn: Vec<Drawn>) -> Vec<Layer> {
+fn uncovered(drawn: Vec<(&VideoLane, Drawn)>) -> Vec<Layer> {
+    let flat: Vec<usize> = drawn.iter().flat_map(|(_, d)| d.flat.clone()).collect();
     let mut stack = Vec::new();
-    for Drawn { hides, layers } in drawn {
-        if let Some(outer) = hides {
+    for (lane, d) in drawn {
+        if lane.drawn_flat(&flat) {
+            continue;
+        }
+        if let Some(outer) = d.hides {
             hide_inside(&outer, &mut stack);
         }
-        stack.extend(layers);
+        stack.extend(d.layers);
     }
     stack
 }
@@ -3001,12 +3006,12 @@ impl VideoLane<'_> {
         self.inner.map_or(EVERY_FRAME, |i| i.shown)
     }
 
-    fn drawn_flat(&self, flattened: &[usize]) -> bool {
+    fn drawn_flat(&self, flat: &[usize]) -> bool {
         self.inner.is_some_and(|i| {
             i.nests
                 .iter()
                 .flat_map(|n| &n.outer)
-                .any(|a| flattened.contains(&a.opened))
+                .any(|a| flat.contains(&a.opened))
         })
     }
 }
@@ -3032,10 +3037,9 @@ fn planned_video(
     for w in cuts_of(p, &lanes, (a, b)).windows(2) {
         let (x, y) = (w[0], w[1]);
         let mut drawn = Vec::new();
-        let mut flattened: Vec<usize> = Vec::new();
         for lane in &lanes {
             let window = lane.window();
-            if x < window.from || x >= window.to || lane.drawn_flat(&flattened) {
+            if x < window.from || x >= window.to {
                 continue;
             }
             let span = Span {
@@ -3046,9 +3050,9 @@ fn planned_video(
                 now: window.held.unwrap_or(x),
                 held: window.held.is_some(),
             };
-            let mut pictures = span.pictures(&mut flattened)?;
+            let mut pictures = span.pictures()?;
             pictures.layers.extend(span.titles());
-            drawn.push(pictures);
+            drawn.push((lane, pictures));
         }
         push_video(&mut video, piece_of(uncovered(drawn), y - x));
     }
@@ -3343,12 +3347,12 @@ impl<'a> Span<'a> {
         )
     }
 
-    fn pictures(&self, flattened: &mut Vec<usize>) -> Result<Drawn> {
+    fn pictures(&self) -> Result<Drawn> {
         let Some(d) = self.playing() else {
             return self.plain();
         };
         match self.smoothed(d)? {
-            Some(sides) => Ok(self.smooth_cut(d, sides, flattened)),
+            Some(sides) => Ok(self.smooth_cut(d, sides)),
             None => self.crossing(d),
         }
     }
@@ -3357,16 +3361,14 @@ impl<'a> Span<'a> {
         &self,
         d: &transitions::Playing,
         (f, g, smooth): (VideoPiece, VideoPiece, Smooth),
-        flattened: &mut Vec<usize>,
     ) -> Drawn {
         let ramp = self.ramp_of(d, false);
-        flattened.extend(
-            [d.before, d.after]
-                .into_iter()
-                .flatten()
-                .filter_map(|c| self.nest_of(c).filter(|n| n.flat.is_some()))
-                .map(|n| n.opened),
-        );
+        let flat = [d.before, d.after]
+            .into_iter()
+            .flatten()
+            .filter_map(|c| self.nest_of(c).filter(|n| n.flat.is_some()))
+            .map(|n| n.opened)
+            .collect();
         let smooth = Smooth {
             clear: [&f, &g]
                 .iter()
@@ -3375,6 +3377,7 @@ impl<'a> Span<'a> {
         };
         let keeps_below = smooth.mode.is_some() || smooth.clear;
         Drawn {
+            flat,
             hides: (!keeps_below).then(|| around(&f)),
             layers: vec![
                 Layer::Picture(f, keeps_below.then(|| self.ramp_of(d, true))),
@@ -3432,6 +3435,7 @@ impl<'a> Span<'a> {
         Ok(Drawn {
             hides: (fill && !moded).then_some(outer),
             layers,
+            ..Drawn::default()
         })
     }
 
@@ -3445,6 +3449,7 @@ impl<'a> Span<'a> {
         Ok(Drawn {
             hides: self.plan.fills(c).then(|| around(&piece)),
             layers: vec![Layer::Picture(piece, None)],
+            ..Drawn::default()
         })
     }
 
