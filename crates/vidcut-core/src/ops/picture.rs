@@ -958,6 +958,7 @@ fn area_shown(a: &EffectArea) -> Value {
         "rotation": a.turn(),
         "softness": a.soft(),
         "invert": a.invert,
+        "follows": a.follows,
     })
 }
 

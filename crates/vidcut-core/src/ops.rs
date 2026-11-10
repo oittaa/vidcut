@@ -3182,10 +3182,9 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         if !motion::takes(&clip) {
             clip.motion.clear();
         }
-        if let Some(why) = crate::motion::problem(&clip.motion) {
+        if let Some(why) = motion::violation(&clip) {
             return Err(Error::invalid(format!(
-                "pasted clip {} has an invalid motion path: {why}",
-                clip.id
+                "pasted clip has an invalid motion path: {why}"
             )));
         }
         if (!clip.video && clip.audio.is_none() && !sound_block) || (sound_block && on_video) {

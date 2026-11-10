@@ -260,8 +260,21 @@ pub fn set(
         return Err(Error::usage("effects.set needs a value to change"));
     }
     let frame = at.map(|t| source_frame(p, id, t)).transpose()?;
+    let (ti, ci) = locate(p, id)?;
+    let paths: Vec<String> = p.tracks[ti].clips[ci]
+        .motion
+        .iter()
+        .map(|m| m.id.clone())
+        .collect();
     let e = &mut effects_of(p, id, n)?[n];
     let mut next = applied(e, change)?;
+    if let Some(path) = next.area.as_ref().and_then(|a| a.follows.as_ref())
+        && !paths.contains(path)
+    {
+        return Err(Error::not_found(format!(
+            "{id} has no motion path {path} for the area to follow"
+        )));
+    }
     let named = named_values(e, change)?;
     for value in e.keys.iter().map(|k| k.value).filter(|v| named.contains(v)) {
         let Some(frame) = frame else {

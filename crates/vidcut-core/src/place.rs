@@ -581,7 +581,7 @@ impl Shading {
 }
 
 impl Working {
-    fn of(e: &Effect, on: &OnFrame) -> Option<Self> {
+    fn of(e: &Effect, on: &OnFrame, base: &Area) -> Option<Self> {
         if !e.on || e.mixed() <= 0.0 {
             return None;
         }
@@ -616,7 +616,7 @@ impl Working {
             work,
             blend: e.mixed(),
             use_alpha: e.use_alpha,
-            area: area.map(|a| Masking::of(a, &Area::WHOLE, &on.back, [fw, fh])),
+            area: area.map(|a| Masking::of(a, base, &on.back, [fw, fh])),
         })
     }
 }
@@ -814,11 +814,18 @@ impl Placing {
             canvas: [frame.0, frame.1],
             back: own.back,
         };
+        let based = |e: &Effect| {
+            let path = e.area.as_ref()?.follows.as_deref()?;
+            p.followed.base(path, p.source)
+        };
         let effects = p
             .picture
             .effects
             .iter()
-            .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
+            .filter_map(|e| {
+                let base = based(e).unwrap_or(Area::WHOLE);
+                Working::of(&e.sampled(p.source as f64), &on, &base)
+            })
             .collect();
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&own.back, c));
@@ -1252,6 +1259,7 @@ mod tests {
             ramp: None,
             crossing: false,
             moving: None,
+            followed: Default::default(),
         };
         let frame = (1920.0, 1080.0);
         let level = Placing::whole(&[placed], frame).level;
@@ -1284,6 +1292,7 @@ mod tests {
             ramp: None,
             crossing: false,
             moving: None,
+            followed: Default::default(),
         };
         let placing = Placing::whole(&[placed], (1920.0, 1080.0));
         let Work::Blur(b) = &placing.effects[0].work else {
@@ -1323,6 +1332,7 @@ mod tests {
             ramp: None,
             crossing: false,
             moving: None,
+            followed: Default::default(),
         };
         assert_eq!(detail(&[placed]), 0.4);
     }

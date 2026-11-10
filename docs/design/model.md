@@ -513,7 +513,9 @@ Writing:
 - `ops::effect` holds the edits of the effects: `effects.add`, `effects.set`, `effects.key`, `effects.reset`, `effects.remove` and `effects.move`.
 - An `Effect` can have an `EffectArea` ([deviation X166](../deviations.md#x166-an-effect-has-an-area)). The effect then works only in that part of the picture.
   - The area holds an `AreaShape`, a `center`, a `size`, a `rotation`, a `softness` and `invert`.
-  - The area is a part of a base box. The base box is the whole source picture (`Area::WHOLE`).
+  - The area is a part of a base box. The base box is the whole source picture (`Area::WHOLE`), or the area of a motion path.
+  - With `follows`, the area names a motion path of the same clip. The base box is then the area of that path at each frame ([export](export.md#placed-pictures)).
+  - `effects.set` refuses a `follows` that names no path of the clip. `motion.remove` refuses a path that an area follows.
   - `effects.set` takes an `AreaChange`. Its fields replace their own (`AreaChange::on`). Null takes the area off.
   - `effects.reset` keeps the area. `ops::picture::effect_checked` checks it (`area_checked`).
   - The area has no keyframes ([todo](../todo/motion-tracking.md)).
@@ -548,10 +550,11 @@ Writing:
 - A clip has at most `PATHS_KEPT` paths, and a path has at most `SAMPLES_KEPT` samples.
 - `motion::problem` is the check that the requests, `ops::paste` and `validate::violations` share.
 - `timeline.get` names the paths of a clip in `motion`.
+- The area of an effect can follow a path ([pictures](#pictures)). `ops::motion::violation` refuses an area that follows a path that the clip does not have.
 - An OTIO file keeps the paths of a clip in the `vidcut` metadata of its video item, on the same source frames.
   - An import reads them back only when `motion::problem` accepts them (`our_motion`).
   - An import at another frame rate moves the samples to the project's rate (`motion::rescale`). Two samples that land on one frame leave the first.
-- Nothing draws with a path ([todo](../todo/motion-tracking.md)).
+  - `our_picture` reads the area of an effect with no `follows` when the file does not hold that path.
 
 ## Ducking
 

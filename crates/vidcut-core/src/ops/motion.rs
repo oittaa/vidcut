@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
@@ -56,7 +58,7 @@ pub fn add(p: &mut Project, id: &str, name: Option<&str>, samples: &[PathSample]
     c.motion.push(MotionPath {
         id: path.clone(),
         name: name.and_then(named),
-        samples: samples.to_vec(),
+        samples: Arc::new(samples.to_vec()),
     });
     Ok(json!({ "clip": id, "path": path }))
 }
@@ -82,7 +84,7 @@ pub fn set(p: &mut Project, id: &str, path: &str, change: PathChange) -> Result<
         return Err(Error::invalid(why));
     }
     let m = path_of(clip_of(p, id)?, path)?;
-    let mut samples = m.samples.clone();
+    let mut samples = m.samples.to_vec();
     if let Some([first, last]) = change.clear {
         motion::clear(&mut samples, (first, last));
     }
@@ -97,32 +99,43 @@ pub fn set(p: &mut Project, id: &str, path: &str, change: PathChange) -> Result<
     if let Some(why) = motion::samples_problem(&samples) {
         return Err(Error::invalid(why));
     }
-    m.samples = samples;
+    m.samples = Arc::new(samples);
     if let Some(name) = change.name {
         m.name = named(name);
     }
     Ok(())
 }
 
+fn followers(c: &Clip) -> impl Iterator<Item = (usize, &str)> {
+    let effects = c.picture.iter().flat_map(|x| x.effects.iter().enumerate());
+    effects.filter_map(|(n, e)| Some((n, e.area.as_ref()?.follows.as_deref()?)))
+}
+
 pub fn remove(p: &mut Project, id: &str, paths: Option<&[String]>) -> Result<()> {
     let c = clip_of(p, id)?;
-    let Some(paths) = paths else {
-        if c.motion.is_empty() {
-            return Err(Error::not_found(format!("{id} has no motion paths")));
-        }
-        c.motion.clear();
-        return Ok(());
-    };
+    let all: Vec<String> = c.motion.iter().map(|m| m.id.clone()).collect();
+    if paths.is_none() && all.is_empty() {
+        return Err(Error::not_found(format!("{id} has no motion paths")));
+    }
+    let paths = paths.unwrap_or(&all);
     for path in paths {
         path_of(c, path)?;
+    }
+    if let Some((n, path)) = followers(c).find(|(_, path)| paths.iter().any(|x| x == path)) {
+        return Err(Error::invalid(format!(
+            "the area of effect {n} of {id} follows motion path {path}: first give that area \
+             another `follows`, or none (effects.set)"
+        )));
     }
     c.motion.retain(|m| !paths.contains(&m.id));
     Ok(())
 }
 
 pub fn shift(c: &mut Clip, by: i64) {
-    for s in c.motion.iter_mut().flat_map(|m| &mut m.samples) {
-        s.frame += by;
+    for m in &mut c.motion {
+        for s in Arc::make_mut(&mut m.samples) {
+            s.frame += by;
+        }
     }
 }
 
@@ -175,6 +188,13 @@ pub fn list(p: &Project, ids: Option<&[String]>, at: Option<i64>, samples: bool)
 }
 
 pub fn violation(c: &Clip) -> Option<String> {
+    let has = |path: &str| c.motion.iter().any(|m| m.id == path);
+    if let Some((n, path)) = followers(c).find(|(_, path)| !has(path)) {
+        return Some(format!(
+            "{}: the area of effect {n} follows motion path {path}, which the clip has not",
+            c.id
+        ));
+    }
     if c.motion.is_empty() {
         return None;
     }
