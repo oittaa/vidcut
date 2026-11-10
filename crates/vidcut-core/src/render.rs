@@ -3284,7 +3284,11 @@ impl<'a> Span<'a> {
             if backward || piece.placed().first().is_some_and(moved) {
                 return match nest.is_some_and(|n| !n.outer.is_empty()) {
                     true => Ok(None),
-                    false => self.flat(c, &widened(c, d.frames), (at, mode), below),
+                    false => {
+                        let mut wide = widened(c, d.frames);
+                        wide.retime = ClipRetime::Nearest;
+                        self.flat(c, &wide, (at, mode), below)
+                    }
                 };
             }
             match &mut piece {
