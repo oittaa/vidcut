@@ -534,7 +534,6 @@ A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contrad
   - The outer pass mixes it with the tracks below, by the mode of `Mix.placing`.
 - One part alone gives its composite mode to the `place::Mix` (`parts_of`). A mode on the compound clip replaces it. A transition inside gives no mode (`run_mode`).
 - A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded.
-- A transition at an edge of a compound clip takes the mode of the picture that the outgoing side shows (`mode_at`).
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
 A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120)):

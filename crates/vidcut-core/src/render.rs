@@ -1872,7 +1872,7 @@ impl Edge {
         p: &Project,
         d: &transitions::Playing,
         falling: bool,
-        (side, over): (Option<&Clip>, (i64, i64)),
+        (side, over, inside): (Option<&Clip>, (i64, i64), bool),
     ) -> Self {
         let modes = (over.0..over.1)
             .map(|t| side.map_or(CompositeMode::Normal, |c| mode_at(p, c, t)))
@@ -1885,7 +1885,7 @@ impl Edge {
                 transitions::kind_of(d.transition),
                 Some(PictureTransition::SmoothCut { .. })
             ),
-            crossing: crossing(d),
+            crossing: crossing(d, inside),
             modes: (over.0, modes),
         }
     }
@@ -2010,10 +2010,14 @@ fn pictures_at(c: &Clip, t: i64) -> Vec<&Clip> {
         .flat_map(|k| &k.tracks)
         .filter_map(|n| {
             let x = &n.clips[n.clip_covering(t)?];
-            let holds = n.video_enabled && x.enabled && !pictures_at(x, x.source_at(t)).is_empty();
-            (visible(n, x) || titled(n, x) || holds).then_some(x)
+            shown_inside(n, x, t).then_some(x)
         })
         .collect()
+}
+
+fn shown_inside(n: &Track, x: &Clip, t: i64) -> bool {
+    let holds = n.video_enabled && x.enabled && !pictures_at(x, x.source_at(t)).is_empty();
+    visible(n, x) || titled(n, x) || holds
 }
 
 fn crosses_inside(p: &Project, c: &Clip, t: i64) -> bool {
@@ -2024,7 +2028,10 @@ fn crosses_inside(p: &Project, c: &Clip, t: i64) -> bool {
         .any(|n| {
             transitions::playing(p, n, false, transitions::mixes)
                 .iter()
-                .any(|d| d.frames.0 <= t && t < d.frames.1)
+                .any(|d| {
+                    let side = |x: &Option<&Clip>| x.is_some_and(|x| shown_inside(n, x, t));
+                    d.frames.0 <= t && t < d.frames.1 && (side(&d.before) || side(&d.after))
+                })
         })
 }
 
@@ -2061,9 +2068,10 @@ fn without_mode(c: &Clip) -> Option<Clip> {
     })
 }
 
-fn crossing(d: &transitions::Playing) -> Option<Placed> {
+fn crossing(d: &transitions::Playing, inside: bool) -> Option<Placed> {
     let moving = Move::of(d);
-    let joins = moving.is_some()
+    let joins = inside
+        || moving.is_some()
         || transitions::dip_of(d.transition).is_some()
         || (d.before.is_some() && d.after.is_some());
     joins.then(|| Placed {
@@ -2113,7 +2121,7 @@ fn edges_on(p: &Project, t: &Track) -> HashMap<String, Vec<Edge>> {
                 p,
                 &d,
                 falling,
-                (d.before.or(d.after), span_of(&d, falling)),
+                (d.before.or(d.after), span_of(&d, falling), false),
             ));
         }
     }
@@ -3046,7 +3054,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
             }
             let now = window.held.unwrap_or(x);
             let ramp_of = |d: &transitions::Playing, falling| {
-                Edge::of(p, d, falling, (None, (now, now))).ramp(now, window.held.is_some())
+                Edge::of(p, d, falling, (None, (now, now), false)).ramp(now, window.held.is_some())
             };
             let excluded = !t.render_cache;
             let shows = |c: &&Clip| visible(t, c);
@@ -3072,7 +3080,12 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 |c: &Clip, ramp: Option<Ramp>, below: bool| laid(c, nest_of(c), ramp, below, &[]);
             let sided = |d: &transitions::Playing, falling: bool| {
                 let side = d.before.or(d.after).map(|c| whole(nest_of(c), c));
-                let edge = Edge::of(p, d, falling, (side, (now, now + 1)));
+                let inside = d
+                    .before
+                    .or(d.after)
+                    .and_then(nest_of)
+                    .is_some_and(|n| !n.outer.is_empty());
+                let edge = Edge::of(p, d, falling, (side, (now, now + 1), inside));
                 let ramp = edge.ramp(now, window.held.is_some());
                 match (edge.crossed(x, ramp), ramp.moved) {
                     (Some(across), true) => {
