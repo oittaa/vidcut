@@ -95,8 +95,9 @@ flowchart TD
     - Thus an area of 1.2 times the box of a path covers the face on each frame where the model found it.
   - `FoundPath` gives the gaps of a path from its boxes before that step, and the mean of their scores.
 - A still has one picture. `subject_look` asks for it once, and each frame of the clip takes its boxes.
-- `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the subject, the rules of its model and the `Look` (`subjects::name`).
-  - Each model names its own rules (`yunet::name`, `ppocr::name`). Thus a change of a rule gives another file.
+- `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the subject, the model file, the rules of its model and the `Look` (`subjects::name`).
+  - The model file is the first 8 digits of its SHA-256 in the catalog. Thus a new model file gives another file.
+  - Each model names its own rules (`yunet::name`, `ppocr::name`), with the values that prepare the picture. Thus a change of a rule gives another file.
 - With `VIDCUT_DEBUG`, a line of the area `subjects` gives the pictures, the frames, the time and the time in the model.
 - In a GUI, `Live::measuring` measures on `vidcut-measure` first (`editor::subject_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model files are `catalog::YUNET_ONNX` and `catalog::PPOCR_DET_ONNX`. `subjects::get_ready` fetches the file of the subject when the request has `download`.
