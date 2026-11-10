@@ -21,7 +21,7 @@ In this file, a path is never a track of the timeline.
   - FX mode moves a Resolve FX or an OFX plugin that has position controls. It uses a point tracker.
 - A track starts at the playhead. It runs forward to the last frame of the clip, or backward to the first (p. 3308).
   - One command tracks one frame (p. 3309).
-- A track holds Pan, Tilt, Zoom, Rotate and Perspective 3D. The user chooses them before the track (p. 3313).
+- A track holds Pan, Tilt, Zoom, Rotate and Perspective 3D. The user chooses them before the track (pp. 3312–3313).
 - The tracking data is apart from the values of the window, and those values can have keyframes (p. 3309).
   - A change of the window after the track offsets it from the tracked path.
   - A tracked effect takes an offset in the same way (p. 3495).
