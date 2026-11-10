@@ -3095,7 +3095,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths. A script gives the samples.
   - Between two samples, the area goes in a line. Outside the samples, it stays where the nearest sample put it.
   - A path stays on its source frames through a trim, a slip, a split, a copy and a speed change.
-  - The area of an effect can follow a path ([X166](#x166-an-effect-has-an-area)). vidcut finds no motion in a picture ([todo](todo/motion-tracking.md)).
+  - The area of an effect can follow a path ([X166](#x166-an-effect-has-an-area)). `motion.find` makes a path for each face ([X167](#x167-vidcut-finds-the-faces-of-a-clip)).
   - An OpenTimelineIO file keeps the paths in its `vidcut` metadata. Other editors do not read them.
 - **Why:**
   - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
@@ -3120,3 +3120,25 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A blur over a face or a number plate must cover only that part of the picture.
   - A cut that vidcut delivers does not go through another page.
   - One rule gives each of the six effects an area.
+
+## X167. vidcut finds the faces of a clip
+
+- **Resolve:**
+  - The Close Up edit of the Cut page does a face detection, and puts a face that it finds in the frame (p. 699).
+  - On the Media page, Analyze Clips for People finds faces to make People keywords (p. 418).
+  - Face Refinement is a Resolve FX of Resolve Studio. Detect Faces in Frame draws a box on each face (p. 3615).
+    - The user chooses one face. The tracking controls of the effect then follow it through the clip (pp. 3615–3616).
+  - The manual names no way to make tracking data for each face of a clip on the Cut page ([X165](#x165-a-clip-has-motion-paths)).
+- **vidcut:**
+  - `motion.find` finds the faces on the source frames that a clip shows. Each face gets a motion path: `Face 1`, `Face 2`.
+  - A face that is not found for up to a second, and then shows near the same place, stays on its path.
+  - A face that is found with confidence on fewer frames than half a second has gets no path.
+  - The request gives the gaps of each path: the frames where it did not find the face. The area goes in a line across a gap.
+  - A path keeps only the samples that it needs. Between them, the line is at most a twentieth of the size of the face off.
+  - A second `motion.find` on a clip needs `replace`. It then takes the earlier face paths off first.
+  - The model is YuNet, on the CPU. Its file of 233 kB downloads when the request has `download`.
+  - A cut inside a clip ends a path, or continues it on another face at the same place. vidcut does not tell faces apart.
+  - The Inspector and the viewer have no control for it ([todo](todo/motion-tracking.md)).
+- **Why:**
+  - A blur must cover each face of a clip, and the user must not draw each one.
+  - One request gives the paths. The area of an effect then follows a path ([X166](#x166-an-effect-has-an-area)).

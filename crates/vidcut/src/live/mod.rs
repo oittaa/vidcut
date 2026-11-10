@@ -1881,6 +1881,16 @@ impl Live {
     fn measuring(&self, envelope: &Envelope) -> Option<Measure> {
         let p = self.project.as_ref()?.project();
         let playhead = Some(self.player.position(TIMELINE));
+        if let Request::MotionFind { .. } = &envelope.request {
+            let looks = vidcut_core::editor::subject_looks(p, &envelope.request, playhead);
+            return Some(Box::new(move || {
+                use vidcut_core::Env;
+                for (media, subject, span, download) in &looks {
+                    AvEnv::new().subjects(media, *subject, *span, *download)?;
+                }
+                Ok(())
+            }));
+        }
         let (clips, sound, speech, download) = match &envelope.request {
             Request::EditRippleDeleteSilence { parts: Some(_), .. } => return None,
             Request::EditRippleDeleteSilence {
@@ -3310,6 +3320,7 @@ impl Live {
             },
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
+            | Request::MotionFind { .. }
             | Request::EditRippleDeleteWords { quiet: true, .. } => {
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Measure(measure, Box::new(envelope), None),
@@ -5130,6 +5141,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::SubtitlesTimeWords { .. }
         | Request::ClipNormalize { .. }
         | Request::EditDetectSceneCuts { .. }
+        | Request::MotionFind { .. }
         | Request::EditRippleDeleteWords { quiet: true, .. }
         | Request::TrackSet {
             duck: Some(Some(_)),

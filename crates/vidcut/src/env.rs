@@ -3,14 +3,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, SoundMatch, VoiceActivity};
+use vidcut_core::analysis::{
+    AudioLevels, Detections, Look, Loudness, PictureStats, SoundMatch, VoiceActivity,
+};
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::duck::Measured;
 use vidcut_core::editor::GeneratedProxy;
 use vidcut_core::fingerprint::Origin;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
-    AudioInfo, DuckDetect, FieldOrder, Hdr, Media, MediaInfo, StartTimecode, VideoInfo, proxy_size,
+    AudioInfo, DuckDetect, FieldOrder, Hdr, Media, MediaInfo, StartTimecode, Subject, VideoInfo,
+    proxy_size,
 };
 use vidcut_core::render::RenderPlan;
 use vidcut_core::time::Rational;
@@ -28,6 +31,7 @@ struct Memos {
     levels: Memo<AudioLevels>,
     pictures: Memo<PictureStats>,
     voices: Memo<VoiceActivity>,
+    subjects: Memo<Detections>,
     transcripts: Mutex<Lru<(Origin, u32), Vec<Kept>, MEMOS_KEPT>>,
 }
 
@@ -372,6 +376,36 @@ impl Env for AvEnv {
             || vidcut_av::transcribe::voice_activity(media, stream, &paths::models_dir(), download),
             VoiceActivity::to_bytes,
             VoiceActivity::from_bytes,
+        )
+    }
+
+    fn subjects(
+        &self,
+        media: &Media,
+        subject: Subject,
+        look: Look,
+        download: bool,
+    ) -> Result<Arc<Detections>> {
+        let dir = paths::models_dir();
+        vidcut_av::subjects::get_ready(&dir, subject, download).map_err(av_error)?;
+        let us = |secs: f64| (secs * 1e6).round() as i64;
+        let key = format!(
+            "{}-{}-{}-{}",
+            vidcut_av::subjects::name(subject),
+            us(look.from),
+            us(look.to),
+            us(look.every)
+        );
+        measured(
+            &self.memos.subjects,
+            analysis_file(media, &key),
+            || {
+                let decoder = crate::preferences::gpu_decoding().own_decoder();
+                let input = input_of(media);
+                vidcut_av::subjects::find(&input, subject, look, decoder.as_ref(), &dir)
+            },
+            Detections::to_bytes,
+            Detections::from_bytes,
         )
     }
 

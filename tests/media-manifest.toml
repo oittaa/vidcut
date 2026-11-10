@@ -122,7 +122,15 @@ license = "NASA's metadata: rights 'For copyright and restrictions, refer to htt
 purpose = "NASA's video 'NASA's Nancy Grace Roman Space Telescope Postlaunch News Conference - 4K', created 2026-08-30, 3376.5 s long, for silence cutting and speech detection. This is NASA's mobile rendition: H.264 320x180 15 fps, AAC 22050 Hz stereo, 141964865 bytes"
 sha256 = "bc4b366781f12f79837ddec4ee2364f78c554e5063f329d862bbe5c284e69a8c"
 full_url = "https://images-assets.nasa.gov/video/KSC-20260830-VP-FMX02-0001-Roman_Space_Telescope_Postlaunch_News_Conference_4K-M26245/KSC-20260830-VP-FMX02-0001-Roman_Space_Telescope_Postlaunch_News_Conference_4K-M26245~orig.mp4"
-full = "the original of the same video, not fetched: 3209050026 bytes; NASA's metadata gives 3840x2160, 59.94 fps, H.264, AAC 48000 Hz stereo. nasa-roman-presser-medium is NASA's medium rendition"
+full = "the original of the same video is nasa-roman-presser-full: 3209050026 bytes; NASA's metadata gives 3840x2160, 59.94 fps, H.264, AAC 48000 Hz stereo. nasa-roman-presser-medium is NASA's medium rendition"
+
+[[clip]]
+name = "nasa-roman-presser-full"
+file = "roman-postlaunch-presser-full.mp4"
+url = "https://images-assets.nasa.gov/video/KSC-20260830-VP-FMX02-0001-Roman_Space_Telescope_Postlaunch_News_Conference_4K-M26245/KSC-20260830-VP-FMX02-0001-Roman_Space_Telescope_Postlaunch_News_Conference_4K-M26245~orig.mp4"
+license = "NASA's metadata: rights 'For copyright and restrictions, refer to http://www.nasa.gov/multimedia/guidelines/index.html' (now https://www.nasa.gov/nasa-brand-center/images-and-media/), usage terms 'PAO Approved For Release'"
+purpose = "NASA's original of nasa-roman-presser: H.264 Main 3840x2160 59.94 fps, 3209050026 bytes. Faces for motion.find: from 600 s, a close shot of one speaker, then a wide shot of six speakers at a table, each face about a fortieth of the picture's width"
+sha256 = "1a6560ed72c3c8b4227d59813a574b69e7a2df86b40bb17182ccd97eff374d10"
 
 [[clip]]
 name = "nasa-roman-presser-medium"

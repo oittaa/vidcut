@@ -231,6 +231,16 @@ impl Env for FakeEnv {
         ))
     }
 
+    fn subjects(
+        &self,
+        _media: &Media,
+        _subject: crate::model::Subject,
+        _look: crate::analysis::Look,
+        _download: bool,
+    ) -> Result<Arc<crate::analysis::Detections>> {
+        Ok(Arc::default())
+    }
+
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
         let gains: Vec<f64> = plan
             .audio

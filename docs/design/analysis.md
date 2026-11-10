@@ -1,7 +1,7 @@
 # Analysis
 
-- The automatic tools (`edit.ripple_delete_silence`, `edit.detect_scene_cuts`) and the measurements (`analyze.silence`, `analyze.scenes`, `analyze.black`, `analyze.loudness`, `analyze.ducking`, `timeline.boring`) split in two: vidcut-av measures media, and vidcut-core decides.
-- A measurement decodes whole streams. Thus the results are cached by the `Origin` of the file.
+- The automatic tools (`edit.ripple_delete_silence`, `edit.detect_scene_cuts`, `motion.find`) and the measurements (`analyze.silence`, `analyze.scenes`, `analyze.black`, `analyze.loudness`, `analyze.ducking`, `timeline.boring`) split in two: vidcut-av measures media, and vidcut-core decides.
+- A measurement decodes whole streams. Thus the results are cached by the `Origin` of the file. `motion.find` decodes only the range that its clip shows ([subjects](#subjects)).
 - A GUI measures on a job thread before it edits.
 
 ```mermaid
@@ -30,6 +30,7 @@ flowchart TD
 | `analyze.ducking` | `Env::audio_levels` of the sources of the ducking; with `detect: speech`, also `Env::voice_activity` | `duck::graph`: `Heard::peak` and `Dip::gain_db` at each point |
 | `clip.normalize` | `Env::loudness` of each clip alone (`render::sound_alone`), without its volume keyframes | `normalize::gains`; the edit then sets each `gain_db`, or moves all the keyframes of a clip (`ClipAudio::raise`) |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
+| `motion.find` | `Env::subjects`: the boxes of one kind of thing on each picture that the clip shows, each with a score | `motion::joined`; the edit then calls `ops::motion::found` |
 
 - Given `parts`, `edit.ripple_delete_silence` measures nothing. It checks that each part is inside its clip and apart from the other parts, and cuts them.
 
@@ -48,6 +49,42 @@ flowchart TD
 - `keyframes::Gain` gives the gain of a clip with volume keyframes at each level. Silence, ducking and the quiet edges of `edit.ripple_delete_words` use it ([spec D84](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
 **Why** probabilities, not the segments of transcribe.cpp: the segments depend on the threshold and the lengths. Thus each change in the dialog would run the VAD over the whole file again. The probabilities are measured once and cached, and each change is decided again at once.
+
+## Subjects
+
+- `motion.find` gives each face of a clip a motion path ([model](model.md#motion-paths), [deviation X167](../deviations.md#x167-vidcut-finds-the-faces-of-a-clip)).
+- `subjects::find` in vidcut-av measures. It reads only the range that the clip shows:
+  - A `Look` has the first time, the last time and the time between two frames of the project (`every`).
+  - `VideoReader` seeks to the first time. It decodes on the GPU or the CPU, as the preferences tell.
+  - `subjects::find` looks only at the first decoded frame at or after each time of the `Look`.
+    - Why: a file of 60 fps in a project of 24 fps shows two frames of each five.
+  - It scales each picture to a longer side of `yunet::SIDE` pixels, upright, with square pixels.
+  - YuNet runs with tract on the CPU, one picture on each thread of the pool (`pool::run`).
+  - `Detections` holds the time of each picture and its `Found` boxes: the center, the size and the score. The center and the size are fractions of the picture.
+  - It keeps each box with a score of `yunet::LEAST` or more. Why: the core can then decide again with other scores, and nothing is measured again.
+- `yunet` prepares the picture and decodes the outputs of the model:
+  - The picture goes in as blue, green and red values from 0 to 255. Its right side and its bottom are padded to a multiple of 32.
+  - Each of the strides 8, 16 and 32 gives a class score, an object score and a box for each cell.
+  - The score of a box is the root of the product of the two scores.
+  - Of the boxes that overlap more than `yunet::SAME`, the box with the highest score stays.
+- `motion::joined` in vidcut-core decides:
+  - It takes the picture that each source frame shows (`Detections::shown`), by the rule of `analysis::shown`.
+  - A box joins the open path whose last box overlaps it most. The overlap must be `OVERLAP` or more.
+  - A box with a score of `START` or more opens a path. A box with a score of `KEEP` or more continues a path.
+    - Why: a face that turns away scores lower, and its path must not stop there.
+  - A path waits `WAIT_SECS` for its thing. Then the path ends.
+  - A path stays only with boxes of a score of `START` or more on as many frames as `SHORTEST_SECS` has.
+    - Why: a pattern that looks like a face scores high on a few frames only.
+  - `motion::simplified` keeps the first sample, the last sample, and each sample that the line between its kept neighbors misses.
+    - A miss is more than `SLACK` of the size of the box, in the center or in the size.
+    - Why: the project file holds each sample, and vidcut writes that file after each edit.
+    - Thus an area of 1.2 times the box of a path covers the face on each frame where the model found it.
+  - `FoundPath` gives the gaps of a path from its boxes before that step.
+- A still has one picture. `subject_look` asks for it once, and each frame of the clip takes its boxes.
+- `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the model, its sizes and the `Look` (`subjects::name`).
+- With `VIDCUT_DEBUG`, a line of the area `subjects` gives the pictures, the frames, the time and the time in the model.
+- In a GUI, `Live::measuring` measures on `vidcut-measure` first (`editor::subject_looks`). Headless, `work_first` measures on `vidcut-subjects`.
+- The model file is `catalog::YUNET_ONNX`. `subjects::get_ready` fetches it when the request has `download`.
 
 ## In a GUI
 
@@ -312,6 +349,7 @@ flowchart TD
 | tiles of the timeline and the pool, 24 pool pictures of each video media | `thumbs` (`thumbcache`) | origin, size, frames or picture count, input color space, Alpha Mode of a file with alpha |
 | waveforms | `waveforms` | origin, channels |
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
+| the boxes of the faces of a range | `analysis` (`AvEnv`) | origin, the model and its sizes, the `Look` |
 | sound matches of two files | `analysis` (`AvEnv`) | both origins |
 | transcripts (`media.transcribe`) | `analysis` (`AvEnv`) | origin, stream |
 | light, for HDR metadata | `analysis` (`light::cache_in`) | origin, input color space |
@@ -325,7 +363,7 @@ flowchart TD
 
 - `reset` with `keep_downloads` keeps `models` and `speech-replies`.
 - `Tiles::evict` drops kept pictures past the memory budget of the tile cache.
-- The disk cache holds the levels, voice activity, picture stats and sound matches. The `cache` setting limits the disk cache.
+- The disk cache holds the levels, voice activity, picture stats, sound matches and boxes of faces. The `cache` setting limits the disk cache.
 - Each `AvEnv` keeps a few results and transcripts in memory (`Memos`). One request can ask for the same file many times.
   - An `AvEnv` lives for one request or one job. Its results leave the memory when it ends.
   - The disk cache can refuse a result. The next request then measures that file again.
@@ -402,6 +440,7 @@ A file with a `part` piece in its name is still being written, and does not coun
 - `crates/vidcut-core/src/fingerprint.rs`, `crates/vidcut-core/src/dirs.rs`, `crates/vidcut-core/src/disk_cache.rs`
 - `crates/vidcut-core/src/transcript.rs`, `crates/vidcut-core/src/transcripts.rs`, `crates/vidcut-core/src/speakers.rs`, `crates/vidcut-core/src/retime.rs`
 - `crates/vidcut-av/src/analysis.rs`, `crates/vidcut-av/src/transcribe.rs`, `crates/vidcut-av/src/speech_api.rs`, `crates/vidcut-av/src/models.rs`
+- `crates/vidcut-av/src/subjects.rs`, `crates/vidcut-av/src/subjects/yunet.rs`, `crates/vidcut-core/src/motion.rs`
 - `crates/vidcut-av/src/light.rs`, `crates/vidcut-av/src/waveform.rs`, `crates/vidcut-av/src/thumbs.rs`
 - `crates/vidcut/src/env.rs`, `crates/vidcut/src/paths.rs`, `crates/vidcut/src/preferences.rs`, `crates/vidcut/src/services.rs`
 - `crates/vidcut/src/thumbcache.rs`, `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/storyboard.rs`

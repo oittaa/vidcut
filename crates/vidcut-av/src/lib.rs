@@ -43,6 +43,7 @@ pub mod route;
 pub mod screen;
 pub mod speech_api;
 pub(crate) mod stretch;
+pub mod subjects;
 pub mod super_scale;
 pub mod testdata;
 pub mod thumbs;

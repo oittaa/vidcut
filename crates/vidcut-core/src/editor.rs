@@ -7,7 +7,8 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::analysis::{
-    self, AudioLevels, Loudness, PictureStats, SilenceSettings, Span, SpeechSettings, VoiceActivity,
+    self, AudioLevels, Detections, Look, Loudness, PictureStats, SilenceSettings, Span,
+    SpeechSettings, VoiceActivity,
 };
 use crate::change::Change;
 use crate::error::{Error, ErrorCode, Result};
@@ -15,8 +16,8 @@ use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marker, Marks,
-    Media, MediaInfo, Picture, Project, Proxy, Title, Track, TrackKind, Transition, VideoInfo,
-    WordsChange,
+    Media, MediaInfo, Picture, Project, Proxy, Subject, Title, Track, TrackKind, Transition,
+    VideoInfo, WordsChange,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -156,6 +157,19 @@ pub trait Env {
     fn voice_isolation(&self, download: bool) -> Result<()> {
         let _ = download;
         Err(Error::usage("voice isolation runs in the vidcut program"))
+    }
+
+    fn subjects(
+        &self,
+        media: &Media,
+        subject: Subject,
+        look: Look,
+        download: bool,
+    ) -> Result<Arc<Detections>> {
+        let _ = (media, subject, look, download);
+        Err(Error::usage(
+            "the things in a picture are found by the vidcut program",
+        ))
     }
 
     fn ai_upscaler(&self, upscaler: crate::model::Upscaler, download: bool) -> Result<()> {
@@ -4316,6 +4330,30 @@ fn mutate(
             ops::motion::remove(p, &id, paths.as_deref())?;
             Value::Null
         }
+        Request::MotionFind {
+            clips,
+            subject,
+            replace,
+            download,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let fps = p.settings.fps.as_f64();
+            let mut looks = Vec::new();
+            for id in &ids {
+                let frames = ops::motion::findable(p, id, *subject, *replace)?;
+                let media = p.clip(id).and_then(|c| p.media(&c.media)).cloned();
+                let media = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
+                looks.push((id, media, frames));
+            }
+            let mut out = Vec::new();
+            for (id, media, frames) in looks {
+                let look = subject_look(&media, fps, frames);
+                let found = env.subjects(&media, *subject, look, *download)?;
+                let tracks = crate::motion::joined(&found, media.origin(), fps, frames);
+                out.push(ops::motion::found(p, id, *subject, tracks)?);
+            }
+            json!({ "clips": out })
+        }
         Request::SubtitlesSet {
             cue,
             text,
@@ -6712,6 +6750,36 @@ pub fn models_after(
             .filter(|u| !upscalers.contains(u))
             .collect(),
     ))
+}
+
+pub type SubjectLook = (Media, Subject, Look, bool);
+
+fn subject_look(media: &Media, fps: f64, frames: (i64, i64)) -> Look {
+    let seen = if media.is_still() { (0, 1) } else { frames };
+    crate::motion::look(media.origin(), fps, seen)
+}
+
+pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<SubjectLook> {
+    let Request::MotionFind {
+        clips,
+        subject,
+        download,
+        ..
+    } = request
+    else {
+        return Vec::new();
+    };
+    let fps = p.settings.fps.as_f64();
+    let ids = resolve_clips(p, &clips.to_vec(), playhead).unwrap_or_default();
+    let clips = ids.iter().filter_map(|id| p.clip(id));
+    clips
+        .filter(|c| ops::motion::takes(c))
+        .filter_map(|c| {
+            let media = p.media(&c.media)?;
+            let look = subject_look(media, fps, c.shown());
+            Some((media.clone(), *subject, look, *download))
+        })
+        .collect()
 }
 
 fn ready_retimes(env: &dyn Env, p: &Project, ids: &[String]) -> Result<()> {

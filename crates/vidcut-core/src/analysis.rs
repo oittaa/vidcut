@@ -166,6 +166,71 @@ impl PictureStats {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Found {
+    pub center: [f32; 2],
+    pub size: [f32; 2],
+    pub score: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Look {
+    pub from: f64,
+    pub to: f64,
+    pub every: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Detections {
+    pub pts: Vec<f64>,
+    pub found: Vec<Vec<Found>>,
+}
+
+impl Detections {
+    const TAG: &'static [u8; 4] = b"vcd1";
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Self::TAG.to_vec();
+        out.extend_from_slice(&(self.pts.len() as u64).to_le_bytes());
+        for (pts, found) in self.pts.iter().zip(&self.found) {
+            out.extend_from_slice(&pts.to_le_bytes());
+            out.extend_from_slice(&(found.len() as u64).to_le_bytes());
+            for f in found {
+                for v in [f.center[0], f.center[1], f.size[0], f.size[1], f.score] {
+                    out.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+        }
+        out
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        let mut r = Bytes(b.strip_prefix(Self::TAG)?);
+        let n = usize::try_from(r.u64()?).ok()?;
+        let mut d = Self::default();
+        for _ in 0..n {
+            d.pts.push(r.f64()?);
+            let k = usize::try_from(r.u64()?).ok()?;
+            let mut found = Vec::new();
+            for _ in 0..k {
+                found.push(Found {
+                    center: [r.f32()?, r.f32()?],
+                    size: [r.f32()?, r.f32()?],
+                    score: r.f32()?,
+                });
+            }
+            d.found.push(found);
+        }
+        Some(d)
+    }
+
+    pub fn shown(&self, time: f64) -> &[Found] {
+        let i = self.pts.partition_point(|&p| p < time);
+        let found = self.found.get(i).or(self.found.last());
+        found.map_or(&[], Vec::as_slice)
+    }
+}
+
 /// Loudness of a mix (EBU R128, ITU-R BS.1770).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Loudness {

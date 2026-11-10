@@ -101,6 +101,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
         {
             println!("  path     {path}");
         }
+        if method == "motion.find" {
+            found_paths(&r.result);
+        }
         if let Some(removed) = r.result.get("removed").and_then(Value::as_array) {
             if let Some(frames) = r.result.get("frames") {
                 println!("  removed  {frames} frames in {} parts", removed.len());
@@ -1438,6 +1441,26 @@ fn live(method: &str, r: &Response) -> Option<()> {
         _ => return None,
     }
     Some(())
+}
+
+fn found_paths(result: &Value) {
+    for clip in result["clips"].as_array().into_iter().flatten() {
+        let paths = clip["paths"].as_array().map_or(&[][..], Vec::as_slice);
+        let text = |v: &Value, k: &str| v[k].as_str().unwrap_or_default().to_string();
+        println!("  {}  {} paths", text(clip, "clip"), paths.len());
+        for p in paths {
+            println!(
+                "    {:<5}{:<10} source {}..{}  seen on {} frames, {} samples, {} gaps",
+                text(p, "id"),
+                text(p, "name"),
+                p["first"],
+                p["last"],
+                p["seen"],
+                p["count"],
+                p["gaps"].as_array().map_or(0, Vec::len)
+            );
+        }
+    }
 }
 
 fn edit_point(e: &Value) -> String {

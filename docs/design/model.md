@@ -536,6 +536,7 @@ Writing:
 - A clip of footage, a still or an image sequence can carry motion paths in `Clip.motion` ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
   - `ops::motion::takes` tells which clips take them: not titles, generators, compound clips or sound.
 - A `MotionPath` tells where one area of the source picture is on the source frames of the clip. It has an id, a name and its samples.
+  - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). `motion.find` with `replace` takes off the paths of that subject.
 - A `PathSample` holds the source `frame`, the `center` and the `size` of the area as fractions of the source picture, and the `rotation`.
   - The `frame` counts as `source_in` does, at each speed of the clip (`Clip::source_at`).
   - Why: a thing is at one place on a source picture, at any speed that plays that picture.
@@ -544,7 +545,7 @@ Writing:
 - `MotionPath::area_at` gives the `motion::Area` on a frame.
   - Between two samples, the area goes in a line. Outside the samples, it stays where the nearest sample put it.
 - A path is not keyframes. Why: a new path must not remove the keyframes that the user set, and one path can move several things.
-- `ops::motion` holds the edits: `motion.add`, `motion.set` and `motion.remove`. `motion.list` reads the paths.
+- `ops::motion` holds the edits: `motion.add`, `motion.set`, `motion.remove` and `motion.find`. `motion.list` reads the paths.
   - `motion.set` removes a range of samples first (`motion::clear`). Then it puts the new samples on their frames (`motion::put`).
   - A path keeps one sample at least. `motion.remove` takes a path off.
 - A clip has at most `PATHS_KEPT` paths, and a path has at most `SAMPLES_KEPT` samples.
