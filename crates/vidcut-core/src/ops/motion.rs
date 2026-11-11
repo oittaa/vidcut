@@ -153,12 +153,7 @@ fn led(p: &Project, id: &str, paths: &[String]) -> Result<()> {
     }
 }
 
-pub fn follow(
-    p: &mut Project,
-    id: &str,
-    to: Option<(&str, &str)>,
-    keep: Option<i64>,
-) -> Result<Value> {
+pub fn follow(p: &mut Project, id: &str, to: Option<(&str, &str)>) -> Result<Value> {
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
     let Some(old) = c.title.clone() else {
@@ -191,25 +186,23 @@ pub fn follow(
         follows,
         ..old.clone()
     };
-    if let Some(at) = keep {
-        let off = |t: &Title| {
-            let lead = t
-                .follows
-                .as_ref()
-                .and_then(|f| crate::render::Lead::of(p, c, f));
-            let spot = lead.and_then(|l| l.spot(at - c.start));
-            spot.map_or([0.0, 0.0], |[x, y]| [x - 0.5, y - 0.5])
-        };
-        let (was, now) = (off(&old), off(&next));
-        next.moved([was[0] - now[0], was[1] - now[1]]);
-        let round = |v: f64| (v * 1e5).round() / 1e5;
-        next.each_line(|line| {
-            line.position = line.position.map(|at| at.map(round));
-            line.position_keys
-                .iter_mut()
-                .for_each(|k| k.value = round(k.value));
-            line.position_y.iter_mut().for_each(|v| *v = round(*v));
-        });
+    if next.follows.is_some() {
+        let keyed = |keys: &[crate::model::Keyframe]| !keys.is_empty();
+        let upper = old.upper.as_ref().is_some_and(|u| keyed(&u.position_keys));
+        if keyed(&old.position_keys) || upper {
+            return Err(Error::invalid(format!(
+                "the position of {id} has keyframes: first remove them (keyframes.remove)"
+            )));
+        }
+        let [x, y] = old.place();
+        let [mx, my] = crate::model::Picture::MIDDLE;
+        next.moved([mx - x, my - y]);
+        next.position = Some(crate::model::Picture::MIDDLE);
+        if let Some(upper) = next.upper.as_mut() {
+            upper.position = upper
+                .position
+                .map(|at| at.map(crate::otio::effects::rounded));
+        }
     }
     let next = super::titles::checked(&next)?;
     let shown = json!({ "clip": id, "follows": next.follows, "position": next.place() });

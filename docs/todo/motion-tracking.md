@@ -108,6 +108,8 @@ In this file, a path is never a track of the timeline.
   - A title inside a compound clip follows no path.
   - An OpenTimelineIO file does not keep what a title follows.
   - Measure on the Fusion page where a connected node stays after the last frame of a track.
+  - Measure on the Fusion page what a connection does to a Center with keyframes. Until then, `motion.follow` refuses a title with keyframes on its position.
+  - Measure on the Fusion page where a node goes when its connection to a tracker is removed. Until then, a title that stops following keeps its numbers.
 - **A subject with its matte:** with [subject masks](subject-masks.md).
 - **Resolve measurement:**
   - Measure the lines of the manual above in Resolve. The manual and the application can differ.

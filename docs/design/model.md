@@ -555,7 +555,9 @@ Writing:
 - `timeline.get` names the paths of a clip in `motion`.
 - The area of an effect can follow a path ([pictures](#pictures)). `ops::motion::violation` refuses an area that follows a path that the clip does not have.
 - A title can follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)). `Title.follows` holds a `Follow`: the id of that clip and the id of the path.
-  - `ops::motion::follow` sets it for `motion.follow`. It names the clip that `under` gives, as `ops::motion::settle` does. With `keep`, it moves the positions of the title by the difference of the two places (`Title::moved`).
+  - `ops::motion::follow` sets it for `motion.follow`. It names the clip that `under` gives, as `ops::motion::settle` does.
+    - It puts the title on the thing: the position becomes the middle. `Title::moved` moves the upper line of a lower third by the same amount.
+    - It refuses a title with keyframes on its position.
   - `motion.remove` and `motion.find` with `replace` refuse a path that a title follows (`led`).
   - `ops::motion::settle` runs after each request:
     - A title whose clip or path is gone follows no path, with a warning.

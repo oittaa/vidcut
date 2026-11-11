@@ -2630,12 +2630,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
 
 - **Resolve:**
   - The Cut page and the Edit page cannot make a title follow a thing. Their chapters name a tracker only for stabilization (pp. 738, 770, 923, 1209).
-  - On the Fusion page, a Tracker node gives the path of each pattern as Offset Position. The Center of another node connects to it, and that node then follows the path (p. 1793).
+  - On the Fusion page, a text whose Center connects to a tracker goes onto the tracked path. The X and Y Offset of the tracker move it away (pp. 1793, 1804, 1805).
   - On a frame with no tracking data, a tracked window stays where the first or the last tracked frame put it (p. 3310).
 - **vidcut:**
-  - `motion.follow` makes a title follow a motion path of another clip of the timeline ([X165](#x165-a-clip-has-motion-paths)).
-  - Follow in the Inspector of a title lists the paths of the clips under it. After a choice, the title stays where it is on the frame of the playhead.
-  - Each position of the title then counts from the middle of the thing on the path. The keyframes of the position still work.
+  - `motion.follow` makes a title follow a motion path of another clip of the timeline ([X165](#x165-a-clip-has-motion-paths)). Follow in the Inspector of a title lists the paths of the clips under it.
+  - The title goes onto the thing: its position becomes the middle. Each position of the title then counts from the middle of the thing.
   - The title keeps its size and its angle.
   - Before the first sample of the path and after its last, the title stays where that sample puts it.
   - Before and after the clip of the path, the title stays where the first or the last frame of that clip puts it.
@@ -2644,5 +2643,3 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A name or a label must stay with a person or a thing that moves.
   - One setting does the work of a tracker node and a connection.
-  - The title stays where its path ends, as the window of Resolve does. The user trims the title clip where the title must end.
-    - The area of an effect ends with its path instead ([X168](#x168-the-area-of-an-effect-follows-a-thing)): a blur that stays covers the wrong place.

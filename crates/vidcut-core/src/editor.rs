@@ -4402,13 +4402,7 @@ fn mutate(
             out["forward"] = json!(stops.1);
             out
         }
-        Request::MotionFollow {
-            clip,
-            of,
-            path,
-            keep,
-            at,
-        } => {
+        Request::MotionFollow { clip, of, path } => {
             let id = resolve_clip(p, clip, playhead)?;
             let to = match (of, path) {
                 (Some(of), Some(path)) => Some((resolve_clip(p, of, playhead)?, path.clone())),
@@ -4419,17 +4413,8 @@ fn mutate(
                     ));
                 }
             };
-            let at = match (*keep, at) {
-                (false, _) => None,
-                (true, Some(t)) => Some(resolve(p, t, playhead)?),
-                (true, None) => Some(playhead.ok_or_else(|| {
-                    Error::usage(
-                        "motion.follow with `keep` needs `at` (--at): there is no playhead",
-                    )
-                })?),
-            };
             let to = to.as_ref().map(|(of, path)| (of.as_str(), path.as_str()));
-            ops::motion::follow(p, &id, to, at)?
+            ops::motion::follow(p, &id, to)?
         }
         Request::SubtitlesSet {
             cue,
