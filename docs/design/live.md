@@ -456,6 +456,7 @@ The bar and the Jobs button:
 - The selected rows are a list of values (`Editor::rows`). A click on a row's name or on a keyframe changes them.
 - Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes (`KeyCmd`, `Workspace::key_cmd`) act on the selected marks or the selected rows.
   - `Workspace::key_target` takes only the rows that the open tab or tray shows.
+  - `Workspace::tray_adds_speed` sends Add Keyframe to the speed keyframes when the tray shows no selected row or keyframe.
   - `Workspace::key_cmd_why` gives the next step for an item that is off. The menu shows it as the tooltip.
   - `Workspace::key_menu_why` gives the step that the three items share. The menu shows it as a line under them.
   - Delete All Keyframes keeps its question in `Editor::deleting` until the user answers (`Workspace::delete_all_window`).
