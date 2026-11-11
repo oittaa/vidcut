@@ -359,7 +359,7 @@ Relinking:
 - `Project::subtitles` holds the subtitle tracks. S1 is nearest the video. One track is `shown` at a time.
 - A `Cue` spans whole frames, as a clip does. The cues of a track are sorted by start, and can overlap.
 - Its `text` is lines, with `<i>`, `<b>`, `<u>` and `<font color>` around words. `Place` tells where on the picture it goes.
-- `speaker` is the person who says it. `color` is its own color, over the color of the person (`Speakers::color_of`, [deviation X63](../deviations.md#x63-subtitles-keep-their-speaker-painted-in-the-persons-color)).
+- `speaker` is the person who says it. `color` is its own color, over the color of the person (`Speakers::color_of`, [spec §8.12](../cut-page-spec.md#812-subtitles-pp-645646-702-12271248)).
 - `picture` is a `Picture` for a picture as large as the frame.
   - Its keyframes count frames from the start of the cue. Thus `Cue::as_clip` makes a `Clip` with `source_in` 0, and the keyframe code uses that clip for the time.
   - `Project::key_holder` finds a clip or a cue by id for the `keyframes.*` requests.
