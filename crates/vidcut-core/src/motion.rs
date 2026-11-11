@@ -176,6 +176,14 @@ impl MotionPath {
         self.area_at(frame.clamp(first as f64, last as f64))
     }
 
+    pub fn base_at(&self, frame: f64) -> Option<Area> {
+        if self.tracked {
+            self.held_at(frame)
+        } else {
+            self.area_at(frame)
+        }
+    }
+
     pub fn span(&self) -> Option<(i64, i64)> {
         Some((self.samples.first()?.frame, self.samples.last()?.frame))
     }

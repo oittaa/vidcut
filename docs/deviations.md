@@ -2537,7 +2537,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - A clip of footage, a still or an image sequence has motion paths. A motion path tells where one area of the source picture is on each source frame.
   - `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths. A script gives the samples.
-  - A path lasts from its first sample to its last. Before and after them it has no area.
+  - A path that `motion.track` made holds its place outside its samples. Before its first sample and after its last, the area is where that sample puts it.
+  - Another path lasts from its first sample to its last. Before and after them it has no area. Thus a path that `motion.find` made ends where its thing is gone.
   - The area of an effect can follow a path ([X166](#x166-an-effect-has-an-area)). `motion.find` makes a path for each face or each block of text ([X167](#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
   - The Inspector has a Motion section for a clip that takes paths, above the effects. Its first row has a Subject menu, Find and Blur.
 - **Why:**
@@ -2582,7 +2583,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The user draws the area on the thing to hide, and sees the blur at once. Resolve needs a node, the Window palette and the Blur palette for that.
   - The outline of an area tells where an effect works, with no tool open.
   - A blur over a face or a number plate must cover only that part of the picture.
-  - A blur must not stay on the picture after its subject is gone. Thus a path ends, as the tracking of Magic Mask does, and not as a tracked window.
   - One effect can cover each face of a clip. The user then changes one blur, not one for each face.
   - One rule gives each of the six effects an area.
 
@@ -2622,13 +2622,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Track follows the thing under an area. It is in the Area rows of each effect, and under the viewer while the handles of an area show.
     - A second Track keeps the track before the playhead, and goes forward from the playhead.
     - On the first frame of a track, Track goes backward, and keeps the track after that frame.
-  - The track stops at a shot change. Where the track ends, the effect ends.
+  - The track stops at a shot change. After the track, the area stays at its last place for the rest of the clip. Before the track, it stays at its first place.
   - The track follows the place and the size of the thing. It does not follow a turn or a change of perspective.
   - `motion.track` refuses an area with keyframes on its center, its size or its rotation.
 - **Why:**
   - A track that keeps those keyframes as an offset is not built yet ([todo](todo/motion-tracking.md)).
-  - A blur must not go on a thing of the next shot. It must not stay on the picture after its thing is gone ([X166](#x166-an-effect-has-an-area)).
-  - The user sees where a track ends, goes to that frame, and tracks again from there.
+  - A blur must not go on a thing of the next shot.
   - The model gives a box, and a box has no turn.
 
 ## X169. A title follows a motion path
