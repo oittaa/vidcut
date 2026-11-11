@@ -42,15 +42,20 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - Quick Export shows a progress bar dialog while it exports (p. 789).
   - The Deliver page has the render settings and the Render Queue (pp. 4103–4132).
+  - In Resolve Studio 21.2, the Quick Export row is H.264 Master, HyperDeck, H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok, Presentations, Dropbox and Replay.
+  - YouTube has a menu of four sizes, 720p to 2160p (p. 4105).
+  - HyperDeck makes H.264 files for a Blackmagic HyperDeck (p. 4108). Presentations uploads to Blackmagic Cloud (p. 4106).
 - **vidcut:**
-  - Quick Export has a shorter row: H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, TikTok.
+  - The Quick Export row is AV1, H.264 Master, H.265 Master, ProRes 422 HQ, YouTube 1080p, YouTube 2160p, Vimeo 1080p and TikTok.
+  - It has no HyperDeck, Presentations, Dropbox or Replay.
   - The Export dialog also shows the live plan, and gives the export as a shell command.
   - In a running GUI, exports are jobs ([design/export.md](design/export.md#the-guis-exports), [design/live.md](design/live.md#jobs)).
   - No progress dialog opens. Jobs shows the progress of each job.
 - **Why:**
   - The plan and the command let scripts reproduce GUI exports.
   - An export runs beside the editing. A dialog over the timeline for each export interrupts that editing.
-  - A short row is quicker to choose from. AV1 makes the smallest files, and current GPUs encode it. For masters, H.265 replaces H.264.
+  - vidcut does not upload, and it has no settings for a Blackmagic HyperDeck. The Export dialog has H.264 for other needs.
+  - One item in the row is one preset, with no menu. Thus YouTube shows as two items, 1080p and 2160p.
 
 ## X4. Undo history persists across sessions and CLI runs
 

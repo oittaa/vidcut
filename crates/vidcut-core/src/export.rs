@@ -795,20 +795,6 @@ pub fn builtin_presets() -> Vec<Preset> {
     };
     vec![
         preset(
-            "h265-master",
-            "H.265 Master",
-            "QuickTime, 10-bit HEVC (Main10), AAC 320 kb/s",
-            true,
-            av(
-                C::Mov,
-                VideoSettings {
-                    bit_depth: Some(10),
-                    ..video(V::Hevc, Some(18))
-                },
-                audio(A::Aac, Some(320)),
-            ),
-        ),
-        preset(
             "av1",
             "AV1",
             "MP4, 10-bit AV1, AAC: small files for YouTube and the web",
@@ -818,6 +804,27 @@ pub fn builtin_presets() -> Vec<Preset> {
                 VideoSettings {
                     bit_depth: Some(10),
                     ..video(V::Av1, Some(30))
+                },
+                audio(A::Aac, Some(320)),
+            ),
+        ),
+        preset(
+            "h264-master",
+            "H.264 Master",
+            "QuickTime, high-quality H.264, AAC 320 kb/s",
+            true,
+            av(C::Mov, video(V::H264, Some(16)), audio(A::Aac, Some(320))),
+        ),
+        preset(
+            "h265-master",
+            "H.265 Master",
+            "QuickTime, 10-bit HEVC (Main10), AAC 320 kb/s",
+            true,
+            av(
+                C::Mov,
+                VideoSettings {
+                    bit_depth: Some(10),
+                    ..video(V::Hevc, Some(18))
                 },
                 audio(A::Aac, Some(320)),
             ),
@@ -851,6 +858,13 @@ pub fn builtin_presets() -> Vec<Preset> {
             av(C::Mp4, sized(3840, 2160, 18), audio(A::Aac, Some(320))),
         ),
         preset(
+            "vimeo-1080p",
+            "Vimeo 1080p",
+            "MP4, H.264 1920×1080, AAC",
+            true,
+            av(C::Mp4, sized(1920, 1080, 18), audio(A::Aac, Some(320))),
+        ),
+        preset(
             "tiktok",
             "TikTok",
             "MP4, vertical H.264 1080×1920, AAC",
@@ -865,25 +879,11 @@ pub fn builtin_presets() -> Vec<Preset> {
             ),
         ),
         preset(
-            "h264-master",
-            "H.264 Master",
-            "QuickTime, high-quality H.264, AAC 320 kb/s",
-            false,
-            av(C::Mov, video(V::H264, Some(16)), audio(A::Aac, Some(320))),
-        ),
-        preset(
             "youtube-720p",
             "YouTube 720p",
             "MP4, H.264 1280×720, AAC",
             false,
             av(C::Mp4, sized(1280, 720, 18), audio(A::Aac, Some(320))),
-        ),
-        preset(
-            "vimeo-1080p",
-            "Vimeo 1080p",
-            "MP4, H.264 1920×1080, AAC",
-            false,
-            av(C::Mp4, sized(1920, 1080, 18), audio(A::Aac, Some(320))),
         ),
         preset(
             "vp9-webm",
