@@ -556,6 +556,9 @@ Writing:
   - `shift_source` moves the samples with `source_in` when the limits of a subclip change.
 - `MotionPath::area_at` gives the `motion::Area` on a frame.
   - A path lasts from its first sample to its last. Before and after them it has no area. Between two samples, the area goes in a line.
+- `MotionPath::base_at` gives the area that an effect follows on a frame.
+  - On a path with `tracked`, it gives the first or the last sample outside the samples (`MotionPath::held_at`). Other paths use `area_at`.
+  - Why: a tracked window holds its first and its last place. A Magic Mask stroke ends where its thing goes off the picture.
 - A path is not keyframes. Why: a new path must not remove the keyframes that the user set, and one path can move several things.
 - `ops::motion` holds the edits: `motion.add`, `motion.set`, `motion.remove`, `motion.find` and `motion.track`. `motion.list` reads the paths.
   - `motion.set` removes a range of samples first (`motion::clear`). Then it puts the new samples on their frames (`motion::put`).

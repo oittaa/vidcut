@@ -325,7 +325,7 @@ fn shown(c: &Clip, m: &MotionPath, at: Option<i64>, samples: bool) -> Value {
     }
     if let Some(at) = at {
         let frame = c.source_at(at);
-        if let Some(area) = m.area_at(frame as f64) {
+        if let Some(area) = m.base_at(frame as f64) {
             v["area"] = json!({
                 "frame": frame,
                 "center": area.center,
@@ -445,7 +445,7 @@ pub fn start(p: &Project, id: &str, effect: usize, at: i64) -> Result<Start> {
         None => Area::WHOLE,
         Some(named) => {
             let followed = c.motion.iter().filter(|m| m.follows(named));
-            let base = followed.filter_map(|m| m.area_at(frame as f64)).next();
+            let base = followed.filter_map(|m| m.base_at(frame as f64)).next();
             base.ok_or_else(|| {
                 Error::invalid(format!(
                     "the area of effect {effect} of {id} follows {named}, which does not last \

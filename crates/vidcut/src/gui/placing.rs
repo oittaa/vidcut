@@ -1361,7 +1361,7 @@ impl Workspace {
         let color = super::theme::colors().accent;
         let source = c.source_at(at) as f64;
         for m in &c.motion {
-            let Some(area) = m.area_at(source) else {
+            let Some(area) = m.base_at(source) else {
                 continue;
             };
             let corners = area_corners(&area, [fw, fh]).map(|uv| s.screen(uv));
@@ -1798,7 +1798,7 @@ impl Workspace {
             None => Area::WHOLE,
             Some(named) => {
                 let followed = c.motion.iter().filter(|m| m.follows(named));
-                followed.filter_map(|m| m.area_at(source)).next()?
+                followed.filter_map(|m| m.base_at(source)).next()?
             }
         };
         let frame = (f64::from(p.settings.width), f64::from(p.settings.height));
