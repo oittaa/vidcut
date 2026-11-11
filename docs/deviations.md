@@ -2552,6 +2552,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A Polygonal window starts as a rectangle with four corner points. A click on it adds a control point, up to 128 (p. 3272).
   - A key adds a node with a window (p. 3268). A Circular, Linear or Polygonal window starts in the middle of the picture, with its controls in the Viewer (21.2).
   - A Curve window starts with no shape. Each click in the Viewer adds a point, and a click on the first point closes the shape (pp. 3273–3274).
+  - A polygon window can be animated with the Keyframe Editor (p. 3273).
   - The blur of the node is in the Blur palette. It shows only inside the windows of the node (21.2).
   - The Viewer shows the outline of a window only while the Window palette or the Tracker palette is open (21.2).
     - With the Blur palette open, it shows no outline. The Cut page shows no outline, and nothing there marks a clip with a window.
@@ -2575,7 +2576,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
     - With Free Shape, each click adds a point. A click on the first point, or a double-click, closes the shape. Escape drops it.
     - A drag on the outline of another area shows its handles and moves it.
+  - The points of a polygon take no keyframes.
 - **Why:**
+  - Keyframes on the points of a polygon are not built yet ([todo](todo/motion-tracking.md)).
   - The user draws the area on the thing to hide, and sees the blur at once. Resolve needs a node, the Window palette and the Blur palette for that.
   - The outline of an area tells where an effect works, with no tool open.
   - A blur over a face or a number plate must cover only that part of the picture.
@@ -2613,6 +2616,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The tracker does not stop at a shot change. In a clip with a cut, it ran 7 frames into the next shot, and then stopped (21.2).
   - After the track stops, the window stays at its last place for the rest of the clip (21.2).
   - One button tracks forward and reverse from the playhead. A second track from a later frame keeps the track before that frame (21.2).
+  - Tracking data is apart from the transform of a window, which can have keyframes. A change of the window offsets it from the tracked path (p. 3309).
 - **vidcut:**
   - `motion.track` follows the thing under the area of an effect, backward and forward from one frame.
   - Track follows the thing under an area. It is in the Area rows of each effect, and under the viewer while the handles of an area show.
@@ -2620,7 +2624,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - On the first frame of a track, Track goes backward, and keeps the track after that frame.
   - The track stops at a shot change. Where the track ends, the effect ends.
   - The track follows the place and the size of the thing. It does not follow a turn or a change of perspective.
+  - `motion.track` refuses an area with keyframes on its center, its size or its rotation.
 - **Why:**
+  - A track that keeps those keyframes as an offset is not built yet ([todo](todo/motion-tracking.md)).
   - A blur must not go on a thing of the next shot. It must not stay on the picture after its thing is gone ([X166](#x166-an-effect-has-an-area)).
   - The user sees where a track ends, goes to that frame, and tracks again from there.
   - The model gives a box, and a box has no turn.
@@ -2631,9 +2637,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Cut page and the Edit page cannot make a title follow a thing. Their chapters name a tracker only for stabilization (pp. 738, 770, 923, 1209).
   - On the Fusion page, a text whose Center connects to a tracker goes onto the tracked path. The X and Y Offset of the tracker move it away (pp. 1793, 1804, 1805).
   - On a frame with no tracking data, a tracked window stays where the first or the last tracked frame put it (p. 3310).
+  - The manual does not tell what a connection does to a Center with keyframes. It also does not tell where a node goes when its connection is removed.
 - **vidcut:**
   - `motion.follow` makes a title follow a motion path of another clip of the timeline ([X165](#x165-a-clip-has-motion-paths)). Follow in the Inspector of a title lists the paths of the clips under it.
   - The title goes onto the thing: its position becomes the middle. Each position of the title then counts from the middle of the thing.
+  - `motion.follow` refuses a title with keyframes on its position.
+  - A title that stops following keeps its numbers. Thus it leaves the thing.
   - The title keeps its size and its angle.
   - Before the first sample of the path and after its last, the title stays where that sample puts it.
   - Before and after the clip of the path, the title stays where the first or the last frame of that clip puts it.
@@ -2642,3 +2651,4 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A name or a label must stay with a person or a thing that moves.
   - One setting does the work of a tracker node and a connection.
+  - A title with keyframes, and a title that stops following, wait for a measurement in Resolve ([todo](todo/motion-tracking.md)).
