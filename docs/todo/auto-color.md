@@ -13,7 +13,7 @@ The Color section of the Cut page viewer Tools has one control, Auto Color. vidc
 
 **In the code:**
 
-- The viewer Tools row has Transform, Crop and Dynamic Zoom ([deviation X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).
+- The viewer Tools row has Transform, Crop and Dynamic Zoom ([deviation X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles)).
 - That row has no Color section.
 - vidcut has no grade ([deviation X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)).
 

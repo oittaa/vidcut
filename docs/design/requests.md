@@ -221,7 +221,7 @@ The History panel (`HistoryUi`):
 - An undo, redo or `history.go` from the GUI publishes a `Flash` of what it moved through.
 - [deviations X33–X38](../deviations.md#x33-each-undo-step-says-what-where-and-how-much) tell the behavior.
 
-**Why** the lock, the revision and the reload: the CLI, agents and the GUI edit one file at the same time ([deviation X1](../deviations.md#x1-projects-are-always-saved-standalone-json-files)).
+**Why** the lock, the revision and the reload: the CLI, agents and the GUI edit one file at the same time.
 
 - The lock orders the writers.
 - The file always holds the latest project.
