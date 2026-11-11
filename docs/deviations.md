@@ -69,18 +69,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Bins only organize the pool.
   - When a script or a mistake removes a bin, the media and their clips must stay in the project.
 
-## X7. Timelines start at 00:00:00:00
-
-- **Resolve:**
-  - New timelines start at record timecode 01:00:00:00 (p. 678).
-- **vidcut:**
-  - The default start timecode is 00:00:00:00.
-  - New Project and Project Settings offer 00, 01 and 10 hours, or any timecode that the user types.
-  - Timecodes in commands are record timecodes.
-- **Why:**
-  - With a zero start, timecode, seconds and frame numbers count from one point. Thus `00:01:00:00` and `60s` are the same frame.
-  - One hour (programmes) and ten hours (UK broadcast) are the usual other starts.
-
 ## X8. The source viewer counts project frames
 
 - **Resolve:**
@@ -1978,7 +1966,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - After a decompose beside a J or L cut, the cut stays. A sound that comes back starts after that cut.
     - A clip whose sound the cuts cover, alone or together, has no sound.
 - **Why:**
-  - A timeline starts at 00:00:00:00 ([X7](#x7-timelines-start-at-00000000)). Thus a compound clip has no start timecode.
   - A project has one timeline (X2). Thus a pool item has no timeline to open.
   - A clip holds its picture and sound as one. Half of a clip is not a thing that vidcut can select.
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
