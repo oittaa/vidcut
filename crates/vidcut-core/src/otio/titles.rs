@@ -1134,6 +1134,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         opacity: None,
         opacity_keys: Vec::new(),
         upper: None,
+        follows: None,
     };
     crate::ops::titles::checked(&title).ok()
 }
@@ -1414,6 +1415,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         opacity: None,
         opacity_keys: Vec::new(),
         upper: None,
+        follows: None,
     };
     let [x, from_bottom] = at;
     title.position = Some([across(x), down(1.0 - from_bottom)]);

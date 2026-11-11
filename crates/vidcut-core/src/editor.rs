@@ -842,6 +842,7 @@ impl Editor {
         if dropped > 0 {
             warnings.push(otio::transitions::dropped(dropped));
         }
+        warnings.extend(ops::motion::settle(&mut working));
         let problems = validate::violations(&working);
         if !problems.is_empty() {
             return Err(Error::internal(format!(
@@ -1108,6 +1109,7 @@ impl Editor {
         if dropped > 0 {
             warnings.push(otio::transitions::dropped(dropped));
         }
+        warnings.extend(ops::motion::settle(&mut working));
         let problems = validate::violations(&working);
         if !problems.is_empty() {
             return Err(Error::conflict(format!(
@@ -4399,6 +4401,35 @@ fn mutate(
             out["backward"] = json!(stops.0);
             out["forward"] = json!(stops.1);
             out
+        }
+        Request::MotionFollow {
+            clip,
+            of,
+            path,
+            keep,
+            at,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let to = match (of, path) {
+                (Some(of), Some(path)) => Some((resolve_clip(p, of, playhead)?, path.clone())),
+                (None, None) => None,
+                _ => {
+                    return Err(Error::usage(
+                        "motion.follow needs `of` (--of) and `path` (--path) together, or neither",
+                    ));
+                }
+            };
+            let at = match (*keep, at) {
+                (false, _) => None,
+                (true, Some(t)) => Some(resolve(p, t, playhead)?),
+                (true, None) => Some(playhead.ok_or_else(|| {
+                    Error::usage(
+                        "motion.follow with `keep` needs `at` (--at): there is no playhead",
+                    )
+                })?),
+            };
+            let to = to.as_ref().map(|(of, path)| (of.as_str(), path.as_str()));
+            ops::motion::follow(p, &id, to, at)?
         }
         Request::SubtitlesSet {
             cue,

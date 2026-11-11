@@ -3,7 +3,9 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, EffectArea, MotionPath, PathSample, Project, Subject, TrackWay};
+use crate::model::{
+    Clip, EffectArea, Follow, MotionPath, PathSample, Project, Subject, Title, TitleKind, TrackWay,
+};
 use crate::motion::{self, Area};
 
 use super::locate;
@@ -129,8 +131,141 @@ pub fn remove(p: &mut Project, id: &str, paths: Option<&[String]>) -> Result<()>
              another `follows`, or none (effects.set)"
         )));
     }
-    c.motion.retain(|m| !paths.contains(&m.id));
+    led(p, id, paths)?;
+    clip_of(p, id)?.motion.retain(|m| !paths.contains(&m.id));
     Ok(())
+}
+
+fn led(p: &Project, id: &str, paths: &[String]) -> Result<()> {
+    let titles = p.tracks.iter().flat_map(|t| &t.clips);
+    let follows = |c: &Clip| {
+        let follow = c.title.as_ref()?.follows.as_ref()?;
+        let named = follow.clip == id && paths.contains(&follow.path);
+        named.then(|| (c.id.clone(), follow.path.clone()))
+    };
+    match titles.into_iter().find_map(follows) {
+        Some((title, path)) => Err(Error::invalid(format!(
+            "the title {title} follows motion path {path} of {id}: first give that title \
+             another path, or none (motion.follow)"
+        ))),
+        None => Ok(()),
+    }
+}
+
+pub fn follow(
+    p: &mut Project,
+    id: &str,
+    to: Option<(&str, &str)>,
+    keep: Option<i64>,
+) -> Result<Value> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    let Some(old) = c.title.clone() else {
+        return Err(Error::invalid(format!("{id} is not a title")));
+    };
+    let follows = match to {
+        None => None,
+        Some(_) if old.kind == TitleKind::Scroll => {
+            return Err(Error::invalid("a scroll follows no motion path"));
+        }
+        Some((of, path)) => {
+            let (ai, aj) = locate(p, of)?;
+            let a = &p.tracks[ai].clips[aj];
+            if !takes(a) {
+                return Err(Error::invalid(format!(
+                    "{of} has no source picture: a title follows a path of footage, a still or \
+                     an image sequence"
+                )));
+            }
+            if !a.motion.iter().any(|m| m.id == path) {
+                return Err(Error::not_found(format!("{of} has no motion path {path}")));
+            }
+            Some(Follow {
+                clip: of.to_string(),
+                path: path.to_string(),
+            })
+        }
+    };
+    let mut next = Title {
+        follows,
+        ..old.clone()
+    };
+    if let Some(at) = keep {
+        let off = |t: &Title| {
+            let lead = t
+                .follows
+                .as_ref()
+                .and_then(|f| crate::render::Lead::of(p, c, f));
+            let spot = lead.and_then(|l| l.spot(at - c.start));
+            spot.map_or([0.0, 0.0], |[x, y]| [x - 0.5, y - 0.5])
+        };
+        let (was, now) = (off(&old), off(&next));
+        next.moved([was[0] - now[0], was[1] - now[1]]);
+    }
+    let next = super::titles::checked(&next)?;
+    let shown = json!({ "clip": id, "follows": next.follows, "position": next.place() });
+    p.tracks[ti].clips[ci].title = Some(next);
+    Ok(shown)
+}
+
+pub fn settle(p: &mut Project) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let mut changes = Vec::new();
+    for (ti, t) in p.tracks.iter().enumerate() {
+        for (ci, c) in t.clips.iter().enumerate() {
+            let Some(f) = c.title.as_ref().and_then(|t| t.follows.as_ref()) else {
+                continue;
+            };
+            let meets = |x: &Clip| x.start < c.end() && c.start < x.end();
+            let path_of = |x: &Clip| x.motion.iter().find(|m| m.id == f.path).cloned();
+            let led = p.clip(&f.clip).filter(|x| takes(x));
+            match led.and_then(|x| Some((x, path_of(x)?))) {
+                Some((x, _)) if meets(x) => {}
+                Some((x, path)) => {
+                    let same = |y: &&Clip| {
+                        let part = y.id != x.id && takes(y) && meets(y) && y.media == x.media;
+                        part && path_of(y).is_some_and(|m| m.samples == path.samples)
+                    };
+                    let clips = p.tracks.iter().flat_map(|t| &t.clips);
+                    if let Some(y) = clips.filter(same).min_by_key(|y| y.start) {
+                        changes.push((ti, ci, Some(y.id.clone())));
+                    }
+                }
+                None => {
+                    warnings.push(format!(
+                        "{} follows no motion path now: {} or its path {} is gone",
+                        c.id, f.clip, f.path
+                    ));
+                    changes.push((ti, ci, None));
+                }
+            }
+        }
+    }
+    for (ti, ci, to) in changes {
+        let Some(title) = p.tracks[ti].clips[ci].title.as_mut() else {
+            continue;
+        };
+        match (to, title.follows.as_mut()) {
+            (Some(id), Some(f)) => f.clip = id,
+            _ => title.follows = None,
+        }
+    }
+    warnings
+}
+
+pub fn follow_violation(p: &Project, c: &Clip) -> Option<String> {
+    let title = c.title.as_ref()?;
+    let f = title.follows.as_ref()?;
+    if title.kind == TitleKind::Scroll {
+        return Some(format!("{}: a scroll that follows a motion path", c.id));
+    }
+    let has = |x: &Clip| takes(x) && x.motion.iter().any(|m| m.id == f.path);
+    (!p.clip(&f.clip).is_some_and(has)).then(|| {
+        format!(
+            "{}: the title follows motion path {} of {}, which is not there",
+            c.id, f.path, f.clip
+        )
+    })
 }
 
 pub fn shift(c: &mut Clip, by: i64) {
@@ -236,7 +371,9 @@ pub fn findable(p: &mut Project, id: &str, subject: Subject, replace: bool) -> R
              another `follows`, or none (effects.set)"
         )));
     }
-    Ok(c.shown())
+    let shown = c.shown();
+    led(p, id, &old)?;
+    Ok(shown)
 }
 
 #[derive(Debug, Clone, PartialEq)]

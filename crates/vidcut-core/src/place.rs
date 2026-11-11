@@ -655,7 +655,12 @@ fn whole_pixels(part: f64, pixels: f64) -> f64 {
     (part * pixels + 1e-6).floor() / pixels.max(1.0)
 }
 
-fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], (pw, ph): (f64, f64)) -> Level {
+pub(crate) fn level(
+    placed: &Placed,
+    frame: (f64, f64),
+    fitted: [f64; 4],
+    (pw, ph): (f64, f64),
+) -> Level {
     let sampled = placed.picture.sampled(placed.source as f64);
     let p = &sampled;
     let [_, _, fw, fh] = fitted;

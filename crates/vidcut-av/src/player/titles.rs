@@ -51,7 +51,7 @@ fn key_of(t: &Title, s: &ShownTitle, size: (u32, u32), timeline: u32) -> Key {
 
 fn wanted(preview: &Preview, s: &ShownTitle) -> Title {
     match preview {
-        Some((clip, t)) if *clip == s.clip => t.sampled(s.frame()),
+        Some((clip, t)) if *clip == s.clip => s.led(t.sampled(s.frame())),
         _ => s.title.clone(),
     }
 }

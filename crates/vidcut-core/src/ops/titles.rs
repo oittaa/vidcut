@@ -191,6 +191,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         opacity,
         opacity_keys: t.opacity_keys.clone(),
         upper,
+        follows: t.follows.clone().filter(|_| t.kind != TitleKind::Scroll),
     })
 }
 
@@ -348,6 +349,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
             rotation_keys: old.rotation_keys.clone(),
             opacity_keys: old.opacity_keys.clone(),
             upper: old.upper.clone(),
+            follows: old.follows.clone(),
             ..l.on(&old.text)
         },
         None => old.clone(),
@@ -371,6 +373,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
         t.position_handles.clear();
         t.zoom_keys.clear();
         t.rotation_keys.clear();
+        t.follows = None;
     }
     if let Some(a) = change.align {
         t.align = Some(a);
