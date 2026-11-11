@@ -2203,6 +2203,7 @@ impl Workspace {
                 | Gesture::Generator { .. }
                 | Gesture::Transition { .. }
                 | Gesture::Effect { .. }
+                | Gesture::Look { .. }
                 | Gesture::Subtitles { .. }
         ) {
             d.upper = layout.upper.area.expand(8.0).contains(pos);
@@ -3216,6 +3217,15 @@ impl Workspace {
         });
     }
 
+    pub(crate) fn start_look_drag(&mut self, name: String, press: Pos2) {
+        self.timeline.snap_flipped = false;
+        self.timeline.drag = Some(ActiveDrag {
+            drag: Drag::new(Gesture::Look { name }, press),
+            upper: false,
+            preview: Preview::default(),
+        });
+    }
+
     pub(crate) fn media_drag_overlay(&self, ctx: &egui::Context) {
         if let Some(text) = self.bin_drag_label()
             && let Some(pos) = ctx.input(|i| i.pointer.latest_pos())
@@ -3260,6 +3270,7 @@ impl Workspace {
                 )),
             ),
             Gesture::Effect { label, .. } => ((*label).to_string(), None),
+            Gesture::Look { name } => (name.clone(), None),
             _ => return,
         };
         let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) else {
@@ -3286,10 +3297,10 @@ impl Workspace {
             painter.text(
                 at + vec2(0.0, 20.0),
                 Align2::LEFT_TOP,
-                if range.is_some() {
-                    "drop on the timeline"
-                } else {
-                    "drop on a clip"
+                match (&d.drag.gesture, range) {
+                    (Gesture::Look { .. }, _) => "drop on a subtitle track",
+                    (_, Some(_)) => "drop on the timeline",
+                    (_, None) => "drop on a clip",
                 },
                 FontId::proportional(10.0),
                 theme::colors().text_dim,

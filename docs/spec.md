@@ -3995,6 +3995,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Word: bold capitals at 10%, with an outline of 16 pixels, popping at 1.15. 20 characters.
     - Plain: the usual style, at 42.
   - Its dialog shows the looks as tiles. Each tile draws a sample in its look.
+  - The Animated Subtitles section of the Titles tab shows the looks that animate their words, as tiles.
+  - A drag of a tile onto a subtitle track or its header sets the style of the track to that look (`track.set` with `look`).
+  - A locked track takes no look.
   - The looks are those of D71.
   - Export and Quick Export burn in the shown track by default when it animates its words, and say so.
   - The default of the request stays files.

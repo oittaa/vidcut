@@ -14,8 +14,9 @@ use vidcut_core::validate::GAIN;
 use super::EditSel;
 use super::edits::{Plan, Trim, applied};
 use super::geometry::{
-    Hit, Rows, SNAP_PX, Scale, Snap, clip_edge_near, clips_in, edit_near, hit_rows, level_at,
-    sound_band, transition_over, transition_span, volume_gain, volume_level, volume_span, volume_y,
+    Hit, Rows, SNAP_PX, Scale, Snap, clip_edge_near, clips_in, edit_near, hit_rows, is_subtitle,
+    level_at, sound_band, transition_over, transition_span, volume_gain, volume_level, volume_span,
+    volume_y,
 };
 
 pub const HOVER: Duration = Duration::from_millis(800);
@@ -124,6 +125,9 @@ pub enum Gesture {
     Effect {
         kind: EffectType,
         label: &'static str,
+    },
+    Look {
+        name: String,
     },
     CueMove {
         cues: Vec<String>,
@@ -412,6 +416,7 @@ impl Drag {
             }
             Gesture::Transition { kind, .. } => transition_preview(ctx, pos, kind),
             Gesture::Effect { kind, .. } => effect_preview(ctx, pos, *kind),
+            Gesture::Look { name } => look_preview(ctx, pos, name),
             Gesture::Trim {
                 clip,
                 edge,
@@ -865,6 +870,27 @@ fn effect_preview(ctx: &Ctx, pos: Pos2, kind: EffectType) -> Preview {
     Preview {
         request: request("effects.add", json!({ "clips": [c.id], "kind": kind })),
         ghost: Some((c.start, c.end())),
+        row: Some(row.track.clone()),
+        ..Preview::default()
+    }
+}
+
+fn look_preview(ctx: &Ctx, pos: Pos2, name: &str) -> Preview {
+    let Some(row) = ctx.rows.at(pos.y).filter(|r| {
+        is_subtitle(&r.track)
+            && (ctx.rows.area.left() - super::HEADER..=ctx.rows.area.right()).contains(&pos.x)
+    }) else {
+        return Preview::default();
+    };
+    if ctx
+        .project
+        .subtitle_track(&row.track)
+        .is_none_or(|t| t.locked)
+    {
+        return Preview::default();
+    }
+    Preview {
+        request: request("track.set", json!({ "track": row.track, "look": name })),
         row: Some(row.track.clone()),
         ..Preview::default()
     }

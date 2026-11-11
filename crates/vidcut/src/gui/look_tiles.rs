@@ -34,6 +34,11 @@ fn sample(style: &SubtitleStyle, (w, h): (u32, u32)) -> Vec<Sprite> {
     vidcut_av::burn::paint(&[cue], w, h, 1080).all()
 }
 
+pub(super) enum Took<'a> {
+    Click(&'a Look),
+    Drag(&'a Look, egui::Pos2),
+}
+
 #[derive(Default)]
 pub(super) struct Tiles {
     kept: HashMap<String, TextureHandle>,
@@ -82,7 +87,7 @@ impl Tiles {
         ui: &mut egui::Ui,
         looks: &'a [Look],
         chosen: &str,
-    ) -> Option<&'a Look> {
+    ) -> Option<Took<'a>> {
         let ppp = ui.ctx().pixels_per_point();
         let size = ((TILE.x * ppp).round() as u32, (TILE.y * ppp).round() as u32);
         let c = theme::colors();
@@ -103,7 +108,7 @@ impl Tiles {
                         let tile = ui.add(
                             egui::Image::new((id, TILE))
                                 .corner_radius(corners)
-                                .sense(Sense::click()),
+                                .sense(Sense::click_and_drag()),
                         );
                         let stroke = match (on, tile.hovered()) {
                             (true, _) => Stroke::new(2.0, c.selection),
@@ -118,14 +123,22 @@ impl Tiles {
                         });
                         let label = ui
                             .vertical_centered(|ui| {
-                                ui.add(egui::Label::new(name).truncate().sense(Sense::click()))
+                                ui.add(
+                                    egui::Label::new(name)
+                                        .truncate()
+                                        .sense(Sense::click_and_drag()),
+                                )
                             })
                             .inner;
                         tile.union(label)
                     })
                     .inner;
                 if r.clicked() {
-                    took = Some(look);
+                    took = Some(Took::Click(look));
+                } else if r.drag_started()
+                    && let Some(press) = ui.input(|i| i.pointer.press_origin())
+                {
+                    took = Some(Took::Drag(look, press));
                 }
             }
         });
