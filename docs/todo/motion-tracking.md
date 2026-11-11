@@ -103,7 +103,7 @@ In this file, a path is never a track of the timeline.
 - **The Motion section in the app:** click Blur in a window, and take a find that asks for the download of its model. Find ran from its button.
 - **A clip follows a path** of another clip: a picture in a picture, or a sticker.
 - **A title that follows a path, what is left:**
-  - Follow in the Inspector of a title, and the handles of such a title in the viewer.
+  - Try Follow in the app: the menu, a drag of a title that follows a path, and its zoom and turn handles.
   - The size and the angle of the thing do not move the title.
   - A title inside a compound clip follows no path.
   - An OpenTimelineIO file does not keep what a title follows.

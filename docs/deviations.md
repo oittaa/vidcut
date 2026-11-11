@@ -2634,6 +2634,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - On a frame with no tracking data, a tracked window stays where the first or the last tracked frame put it (p. 3310).
 - **vidcut:**
   - `motion.follow` makes a title follow a motion path of another clip of the timeline ([X165](#x165-a-clip-has-motion-paths)).
+  - Follow in the Inspector of a title lists the paths of the clips under it. After a choice, the title stays where it is on the frame of the playhead.
   - Each position of the title then counts from the middle of the thing on the path. The keyframes of the position still work.
   - The title keeps its size and its angle.
   - Before the first sample of the path and after its last, the title stays where that sample puts it.
