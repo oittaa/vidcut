@@ -110,7 +110,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A drag on the line between two keyframes bends that part of the curve ([X162](deviations.md#x162-a-drag-on-the-line-bends-the-curve)).
     - A click on the line clears the selection (measured in Resolve Studio 21.2). A double-click on it adds a keyframe.
     - Alt and a click on the line adds a keyframe at that point (measured in Resolve Studio 21.2).
-    - The ⋯ menu has Enable Snapping (p. 1264). It is on by default (measured in Resolve Studio 21.2). With it on, a dragged keyframe goes to the playhead and to the keyframes of other values ([X159](deviations.md#x159-snapping-also-goes-to-other-keyframes)).
+    - The ⋯ menu has Enable Snapping (p. 1264). It is on by default (measured in Resolve Studio 21.2). With it on, a dragged control point goes to the playhead.
+      - A keyframe of another curve and a timeline marker are not targets (measured in Resolve Studio 21.2).
+      - vidcut: snapping acts on a track, a group track and a curve.
+      - vidcut: it does not act on a handle, or on a Shift-drag that changes only the value.
     - A drag on a group track moves that group's keyframes at that time.
     - A drag on an In or Out handle changes that handle. A handle value moves the key's own value.
     - On Position, Zoom and the anchor point, Y keeps the handle frames and uses a value offset of 0.
