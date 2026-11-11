@@ -31,6 +31,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - This is simple for a cutting tool, and it is an obvious mapping for scripts.
   - Several timelines are several project files that share media.
+  - The owner decided that several timelines in one project can wait.
 
 ## X3. Exports are jobs, and Quick Export has a shorter row
 
@@ -1352,6 +1353,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The corners, the sides, the turn handle and the wheel work about the anchor point. Thus the user sees that point.
   - A drag inside the box already moves the picture.
 
+## X83. Pitch and yaw are Inspector values
+
+- **Resolve:**
+  - The onscreen Transform controls set Zoom, Position, Rotation, Pitch, Yaw and Flip (p. 767).
+  - The Inspector sets Pitch and Yaw too (p. 735).
+- **vidcut:**
+  - The Transform handles in the viewer do not set Pitch or Yaw.
+- **Why:**
+  - Pitch and yaw are numbers, as Rotation is.
+  - The Inspector is where those numbers are set.
+  - The viewer handles move, zoom, turn and crop the picture.
+
 ## X86. The Full Screen button is on the viewer
 
 - **Resolve:**
@@ -1429,6 +1442,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A video model adds detail that a classic upscaler cannot. Some users wait a long time for the best pictures, and others want good pictures fast.
   - vidcut makes a picture only as large as the output shows it. A factor would only limit placed pictures. Thus On is sufficient.
   - The owner chose the scaler of macOS as the default on macOS. The owner also decided that AI Fast and AI Slow stay off there. Thus an export has different pixels on macOS and on other systems, and the owner accepts this.
+  - The owner approved the defaults of Super Scale as better than those of Resolve.
 
 ## X89. A wipe reveals from one edge
 
@@ -1484,6 +1498,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The AI of vidcut needs no paid version. Thus slow motion gets it by default.
   - Other speeds and frame rates gain less from made frames. Thus Auto keeps the speed of Nearest for them.
   - A morph from one shot into the next looks wrong. Thus a shot change keeps the nearer source frame, as Nearest does.
+  - The owner approved the Auto default as better than the Nearest default of Resolve.
 
 ## X94. Speed keyframes and the Mark menu's keyframe items
 
@@ -2583,6 +2598,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A blur must not go on a thing of the next shot. It must not stay on the picture after its thing is gone ([X166](#x166-an-effect-has-an-area)).
   - The user sees where a track ends, goes to that frame, and tracks again from there.
   - The model gives a box, and a box has no turn.
+  - The owner decided to keep the end of the effect at the end of the track for now.
 
 ## X169. A title follows a motion path
 

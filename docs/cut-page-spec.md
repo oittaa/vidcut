@@ -1496,6 +1496,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: the shape and snapping of the title handles (X52).
   - vidcut: the Inspector shows lengths in pixels, zoom in percent and rotation in degrees (X70).
   - vidcut: the zoom and the rotation work about the anchor point, and a cross marks it in the viewer (D92, X82).
+  - vidcut: Pitch and Yaw are in the Inspector, and the viewer does not set them (D93, X83).
   - Details: D75.
 - **Crop** (p. 768):
   - A handle on each side crops that side.
@@ -4384,7 +4385,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - An import reads these keys only when Retime and Scaling leaves the picture at its fitted size, and only without Bezier handles.
     - With a crop, fill or stretch, the move of the anchor point goes into `position`. Thus `position` would need keys of its own.
   - `picture.set` takes `anchor`. `picture.clear` with `transform` puts it back in the middle.
-- **D93. Pitch and yaw** (§8.15; pp. 735, 767).
+- **D93. Pitch and yaw** (§8.15; pp. 735, 767; deviation X83).
   - The manual lists Pitch and Yaw with the other Transform values (pp. 735, 767).
   - It does not give their units or the order in which they work.
   - The range, the order and the lean come from Resolve Studio 21 stills and OTIO ([gotchas](gotchas.md#resolves-otio-files)).
@@ -4399,7 +4400,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - With no rotation, yaw keeps vertical edges vertical.
   - With no rotation, pitch keeps horizontal edges horizontal.
   - The viewer and the export use the same map.
-  - The Inspector sets them. The viewer handles do not set them.
+  - The Inspector sets them. The viewer handles do not set them (X83).
   - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
   - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
   - Each can have keyframes (D75). Their keys have the form of the keys of the rotation, in the units of the plain value.
