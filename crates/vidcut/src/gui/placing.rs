@@ -121,6 +121,10 @@ impl Grab {
     pub(crate) fn blurring(&self) -> bool {
         self.blur && self.tool.is_none()
     }
+
+    pub(crate) fn rowed(&self) -> bool {
+        self.row || self.area.is_some()
+    }
 }
 
 fn slopes(back: &[f64; 8], [x, y]: [f64; 2]) -> [f64; 2] {
@@ -750,6 +754,10 @@ impl Workspace {
     pub(super) fn picture_tools_row(&mut self, ui: &mut egui::Ui) {
         let tool = self.timeline.picture_grab.tool;
         let clip = self.tools_clip();
+        if !self.timeline.picture_grab.row {
+            self.area_tools(ui, clip.as_ref());
+            return;
+        }
         let found = clip.is_some();
         for (label, t) in [
             ("Transform", PictureTool::Transform),
@@ -770,9 +778,12 @@ impl Workspace {
         if self.timeline.picture_grab.blurring() {
             ui.separator();
             self.blur_tools(ui, clip.as_ref());
-            return;
         }
         let Some(tool) = self.timeline.picture_grab.tool else {
+            if self.timeline.picture_grab.area.is_some() {
+                ui.separator();
+                self.area_tools(ui, clip.as_ref());
+            }
             return;
         };
         ui.separator();
@@ -839,7 +850,9 @@ impl Workspace {
                 self.find(method, params, subject);
             }
         }
-        ui.separator();
+    }
+
+    fn area_tools(&mut self, ui: &mut egui::Ui, clip: Option<&(String, Picture)>) {
         let chosen = clip
             .zip(self.timeline.picture_grab.area)
             .filter(|((_, pic), n)| {
