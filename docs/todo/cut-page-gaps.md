@@ -10,3 +10,4 @@ What [the spec](../cut-page-spec.md) describes and vidcut does not do.
 - The Y, CbCr and RGB overlays of the Waveform (p. 3097), and RGB, YRGB and YCbCr in the Parade (p. 3102)
 - The skin tone line of the Vectorscope (p. 3098), and Video Level Scopes in the scale menu
 - The unlabeled dashed lines of the HDR scale
+- Copy and paste of the Equalizer settings of a clip (p. 745; [§9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779))

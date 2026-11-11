@@ -1751,7 +1751,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
-  - vidcut: its Audio section has Volume, Pan, Mute, Equalizer, Dialogue Leveler, Compressor, Noise Reduction and Voice Isolation for the selected clips with sound (X70).
+  - vidcut: its Audio section has Volume, Pan, Mute, Dialogue Leveler, Compressor, Noise Reduction and Voice Isolation for the selected clips with sound (X70).
+  - vidcut: an Equalizer section follows the Audio section ([§9](#9-audio-pp-642-649650-743744-771-773-778779)).
   - vidcut: its Crop section has Softness, and its Composite section has Composite Mode and Opacity.
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
@@ -2484,6 +2485,8 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - vidcut: `clip.set` refuses a Pan outside the range ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
 - **Clip equalizer** (pp. 743, 745–746, 3950–3952):
   - The Equalizer of a clip has six bands, a switch for all the bands and a reset button (p. 745).
+  - The switch turns the equalizer off and on, and keeps the values (p. 745).
+  - The settings copy and paste from one clip equalizer to another, and to and from a track equalizer (p. 745).
   - A graph shows the curve. It has a numbered handle for each band that is on. A drag on a handle changes its band (p. 745).
   - Each band has a switch, a filter, a frequency and a gain (pp. 745–746).
   - Only the Bell filter has a Q. A low Q affects a wide range of frequencies (p. 746).
@@ -2496,6 +2499,12 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Bands 1 and 6 are off by default, and bands 2 to 5 are on.
     - The pass filters have slopes from 6 to 24 dB per octave.
   - The scripting API of Resolve Studio 21.2 cannot read or set the equalizer of a clip.
+  - On the Cut page of Resolve Studio 21.2, the Equalizer is a section of the Audio tab of the Inspector (measured):
+    - It has a switch at the left of its name, a reset button, the graph and the bands 1 to 6.
+    - Each band has a switch, a filter menu, a Frequency and a Gain. A Bell band also has a Q.
+    - While the switch is off, the fields of the bands cannot be edited.
+    - The switch turned on makes bands 2 to 5 active. Bands 1 and 6 stay off.
+    - With the switch off, the curve shows dimmed.
   - The Inspector of a clip gives these values (measured):
     - The switch of the equalizer starts off. Reset turns it off and restores the defaults.
     - A frequency goes from 20 to 22000 Hz. A gain goes from −70 to 24 dB. A Q goes from 0.3 to 100.
@@ -2521,7 +2530,19 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - `eq frequency` is in Hz.
     - `eq dB gain` is in tenths of a dB.
     - `eq qFactor` is in thousandths of the Q.
-  - vidcut: the Equalizer row of the Audio section (X70) and `clip.set` set `equalizer` ([X154](deviations.md#x154-the-equalizer-is-a-window)).
+  - vidcut: the Equalizer section follows the Audio section of the Inspector (X70). It has the switch, Reset, the graph and a row for each band.
+  - vidcut: a change applies at once. A drag on a handle or on a field makes one change when it stops.
+  - vidcut: with several clips with sound selected, the section shows the first clip.
+    - A change of a band goes to all of them, and turns on the equalizer of each.
+    - The switch and Reset also act on all of them.
+  - vidcut: the Gain of a Notch, Hi-Pass or Lo-Pass filter shows, but it cannot be edited.
+  - vidcut: `clip.set` sets `equalizer`. Its `on` is the switch.
+    - On a clip with no equalizer, a change makes a flat one. It is on, unless `on` is false.
+    - null makes the equalizer off again, with the usual values. Reset sends it.
+  - vidcut: a Notch filter cuts its frequency, and a Bell filter keeps its Q ([X170](deviations.md#x170-the-clip-equalizer-differs-in-three-ways)).
+  - vidcut: an OTIO export keeps the equalizer in vidcut's own metadata ([X170](deviations.md#x170-the-clip-equalizer-differs-in-three-ways)).
+    - An equalizer that changes the sound gives the note `equalizer_kept`.
+    - An equalizer that is off does not change the sound, also after an import.
 - **Dialogue Leveler** (pp. 743, 774–775):
   - The Dialogue Leveler has a switch, a preset, three processes and an Output Gain (p. 775).
   - The presets are Allow Wider Dynamics, More Lift For Low Levels, Lift Soft Whispery Sources and Optimize Moderate Levels (p. 775).

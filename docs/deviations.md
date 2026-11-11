@@ -753,11 +753,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - With several clips selected, its header is Multiple Clips, and a value that differs between them shows a dash (measured in Resolve Studio 21.1.2).
 - **vidcut:**
   - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
-  - It shows the Title section of a title, the Subtitle section of a subtitle, and the picture, Speed and Audio sections of other clips.
+  - It shows the Title section of a title, the Subtitle section of a subtitle, and the picture, Speed, Audio and Equalizer sections of other clips.
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing selected that it can show, it shows one line.
   - With several clips selected, a section shows the first clip that it acts on. Its header gives the number of these clips.
-  - The Transform and Crop sections have a switch at the left of their names. The Pan row has a switch too. Dynamic Zoom, Composite, Speed and the other Audio rows have none.
+  - The Transform, Crop and Equalizer sections have a switch at the left of their names. The Pan row has a switch too. Dynamic Zoom, Composite, Speed and the other Audio rows have none.
   - Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
   - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has no accent color, and its Reset does nothing.
@@ -775,7 +775,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - Normalize in the header opens Normalize Audio Levels for the clips of the section ([spec §9](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
     - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([spec §9](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
     - Pan sets the pan of the selected clips ([X153](#x153-every-clip-pans-as-on-a-stereo-track)).
-    - The Equalizer row has a switch and a button that opens the Equalizer window ([X154](#x154-the-equalizer-is-a-window)).
     - The Dialogue Leveler row has a switch and a button that opens the Dialogue Leveler window ([X155](#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
     - The Compressor row has a switch and a button that opens the Compressor window ([X156](#x156-the-compressor-is-on-a-clip)).
     - The Noise Reduction row has a switch and a button that opens the Noise Reduction window ([X157](#x157-noise-reduction-is-our-own-spectral-gate)).
@@ -1679,27 +1678,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Resolve puts a mono clip on a stereo track by default. Thus the law of a stereo track is what most clips get.
   - A value outside the range is an error in the script. A refusal shows the error.
 
-## X154. The Equalizer is a window
-
-- **Resolve:**
-  - The Equalizer is a section of the Inspector, and a change applies at once (pp. 745–746).
-  - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives its ranges, defaults and curves.
-  - Its switch starts off.
-  - The curve shows a Notch filter, but a render does not change the sound.
-  - A Bell filter is wider than its Q near the top of the range.
-  - Q 1 acts as Q 0.94 at 8000 Hz and as Q 0.75 at 16000 Hz. Q 4 acts as Q 2 at 16000 Hz.
-- **vidcut:**
-  - The Equalizer window opens from the Audio section. Apply changes the clips. Cancel changes nothing.
-  - The window opens with its switch on. A clip that has no equalizer keeps its sound.
-  - A Notch filter removes its frequency. Its width is fixed.
-  - A Bell filter has the given Q at each frequency.
-  - An OTIO export keeps the Equalizer in vidcut's own metadata. The export gives the note `equalizer_kept`.
-- **Why:**
-  - The Inspector is too narrow for six bands of four values. A window with Apply makes one undo step for one set of changes.
-  - With the switch on, the first Apply changes the sound as the user expects.
-  - A Notch filter that shows a cut and does not make it is a fault.
-  - The measurements do not give one rule for the width of a Bell filter near the top of the range. The difference is small below 8000 Hz.
-
 ## X155. The Dialogue Leveler follows the levels with its own rules
 
 - **Resolve:**
@@ -1981,3 +1959,20 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A name or a label must stay with a person or a thing that moves.
   - One setting does the work of a tracker node and a connection.
   - A title with keyframes, and a title that stops following, wait for a measurement in Resolve ([todo](todo/motion-tracking.md)).
+
+## X170. The clip Equalizer differs in three ways
+
+- **Resolve:**
+  - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the ranges, defaults and curves of the clip equalizer.
+  - The curve shows a Notch filter, but a render does not change the sound.
+  - A Bell filter is wider than its Q near the top of the range.
+  - Q 1 acts as Q 0.94 at 8000 Hz and as Q 0.75 at 16000 Hz. Q 4 acts as Q 2 at 16000 Hz.
+  - An OTIO export writes the effect `Fairlight Clip Equaliser` and six band effects.
+- **vidcut:**
+  - A Notch filter removes its frequency. Its width is fixed.
+  - A Bell filter has the given Q at each frequency.
+  - An OTIO export keeps the Equalizer in vidcut's own metadata. The export gives the note `equalizer_kept`.
+- **Why:**
+  - A Notch filter that shows a cut and does not make it is a fault.
+  - The measurements do not give one rule for the width of a Bell filter near the top of the range. The difference is small below 8000 Hz.
+  - The Equalizer effects of Resolve in OTIO are open work ([todo](todo/effects-library.md)).

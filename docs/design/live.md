@@ -400,6 +400,11 @@ The bar and the Jobs button:
   - A color row sends one `generators.set` when the pointer is up. Then `Recolored` shows the sent color until the project has it (`tools::landing`).
   - The Center rows of a Four Color Gradient act as the other keyed rows. A value goes with `generators.set`, and its keyframes go with `keyframes.add`. Reset removes the keyframes and sets 0.
   - The Level row of an EBU Color Bar sends one `generators.set` for each choice.
+- The Equalizer section (`Workspace::equalizer_section`) shows the equalizer of the first selected clip with sound. A clip with none shows `equalizer::usual`.
+  - Its header is the one of the other sections with a switch (`switched_fold`).
+  - A drag on a handle of the graph or on a field keeps the changed equalizer in a `Draft`. The pointer up sends one `clip.set` with the changed values.
+  - Then the `Draft` shows the sent values until the project has them (`tools::landing`).
+  - While the switch is off, the graph and the bands are disabled. The curve shows the bands as with the switch on.
 - The effect sections show the effects of the first selected clip (`effect_block`). Each change is one `effects.set` for that clip.
   - A dragged value previews as a picture with the changed effect (`knob_picture`). `Picture::preview` puts a keyframe on each changed value that has keyframes (`Effect::previewed`).
   - On a value with keyframes, `knob_picture` puts a keyframe on the frame of the playhead (`Knob::keyed_value`). `effects.set` then has `at`.
@@ -717,7 +722,7 @@ sequenceDiagram
 - `crates/vidcut/src/gui/speech.rs`, `crates/vidcut/src/gui/retime.rs`
 - `crates/vidcut/src/gui/mixer.rs`, `crates/vidcut/src/gui/ducking.rs`
 - `crates/vidcut/src/gui/dialog.rs`, `crates/vidcut/src/gui/look_tiles.rs`
-- `crates/vidcut/src/gui/placing.rs`, `crates/vidcut/src/gui/inspector.rs`, `crates/vidcut/src/gui/window.rs`
+- `crates/vidcut/src/gui/placing.rs`, `crates/vidcut/src/gui/inspector.rs`, `crates/vidcut/src/gui/equalizer.rs`, `crates/vidcut/src/gui/window.rs`
 - `crates/vidcut/src/live/`
 - `crates/vidcut/src/ipc/server.rs`, `crates/vidcut/src/ipc/registry.rs`
 - `crates/vidcut/src/omarchy.rs`, `crates/vidcut/src/themes.rs`
