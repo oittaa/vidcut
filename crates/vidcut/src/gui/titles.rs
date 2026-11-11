@@ -69,6 +69,7 @@ pub struct TitleDialog {
     loaded: bool,
     focus: bool,
     dirty: bool,
+    typed: bool,
     from: Option<Title>,
     selection: (usize, usize),
     word_color: String,
@@ -118,6 +119,7 @@ impl TitleDialog {
             loaded: false,
             focus: true,
             dirty: false,
+            typed: false,
             from: None,
             base: None,
             picker: None,
@@ -152,6 +154,15 @@ impl TitleDialog {
 
     pub(super) fn previewing(&self) -> Option<(String, Title)> {
         self.shown.clone().map(|t| (self.clip.clone(), t))
+    }
+
+    pub(super) fn text_mut(&mut self) -> &mut String {
+        &mut self.text
+    }
+
+    pub(super) fn typed(&mut self) {
+        self.dirty = true;
+        self.typed = true;
     }
 
     pub(super) fn placed(&mut self, t: &Title) {
@@ -810,6 +821,7 @@ impl Workspace {
         if !d.error.is_empty() {
             ui.colored_label(ui.visuals().error_fg_color, &d.error);
         }
+        changed |= std::mem::take(&mut d.typed);
         d.dirty |= changed;
         if d.dirty
             && (self.inspector_commits() || follow.is_some())

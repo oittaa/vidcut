@@ -426,7 +426,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Over them, the pointer becomes a move, resize or hand cursor. The corners zoom the title, and the pointer shows the zoom.
   - A scroll moves only across.
   - The title shows during the drag. One `titles.set` follows on release.
-  - A double-click on the title in the viewer opens the section.
+  - A double-click on the title in the viewer edits its text in a box there, as in Resolve. It also opens the section.
 - **Why:**
   - One change for each title keeps typing out of the undo history.
   - Handles that show on hover, and a cursor that changes over them, show that the user can drag them.

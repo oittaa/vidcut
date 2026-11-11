@@ -1657,7 +1657,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A click on the text in the viewer gives onscreen controls for its Position, Zoom and Rotation.
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
-  - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title section.
+  - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title section and a text box at the title.
+    - Typing in the box changes the title in the viewer and the text of the Title section at once.
+    - The box closes when it loses the focus, for example with Esc or a click outside it. Then one `titles.set` puts the change in.
   - With several titles selected, the Inspector shows nothing (measured in Resolve Studio 21.1.2).
   - vidcut: the Title section does not show then (X70). The Keyframes tab still shows the item selected first (§2).
 - **Kinds** (p. 1178):
