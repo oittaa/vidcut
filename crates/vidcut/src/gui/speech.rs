@@ -8,7 +8,7 @@ use vidcut_core::model::Project;
 use vidcut_core::request::{FindSpeech, GoogleOptions, SpeakerModel, SpeechModel, XaiOptions};
 
 use super::dialog;
-use super::look_tiles::Tiles;
+use super::look_tiles::{Tiles, Took};
 use super::theme;
 use super::workspace::{Workspace, dim, escape_cancels};
 
@@ -1083,7 +1083,7 @@ impl Workspace {
                         )))
                         .truncate(),
                     );
-                } else if let Some(l) = tiles.show(ui, &looks, &s.look) {
+                } else if let Some(Took::Click(l)) = tiles.show(ui, &looks, &s.look) {
                     s.take_look(l);
                 }
                 dialog::form(ui, "speech-form", |ui| {

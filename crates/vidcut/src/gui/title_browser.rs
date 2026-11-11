@@ -11,6 +11,7 @@ use vidcut_core::lru::Lru;
 use vidcut_core::model::{Project, Title, TitleAlign, TitleKind};
 
 use super::export::Ask;
+use super::look_tiles::{Tiles, Took};
 use super::theme;
 use super::workspace::{Workspace, dim};
 
@@ -176,6 +177,7 @@ pub struct Browser {
     pub hover_scrub: bool,
     cards: HashMap<String, Card>,
     hovered: Option<(String, i64)>,
+    animated: Tiles,
 }
 
 impl Default for Browser {
@@ -184,6 +186,7 @@ impl Default for Browser {
             hover_scrub: true,
             cards: HashMap::new(),
             hovered: None,
+            animated: Tiles::default(),
         }
     }
 }
@@ -357,6 +360,14 @@ impl Workspace {
         let templates = templates(self.looks.of(LookKind::Titles));
         let keys: Vec<String> = templates.iter().map(card_key).collect();
         self.titles.cards.retain(|k, _| keys.contains(k));
+        let animated: Vec<Look> = self
+            .looks
+            .of(LookKind::Subtitles)
+            .iter()
+            .filter(|l| matches!(&l.styled, Styled::Subtitles(s) if s.style.words.is_some()))
+            .cloned()
+            .collect();
+        let mut look_grab = None;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -401,7 +412,19 @@ impl Workspace {
                         });
                     }
                 });
+                if !animated.is_empty() {
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("Animated Subtitles").strong());
+                    ui.add_space(4.0);
+                    if let Some(Took::Drag(l, press)) = self.titles.animated.show(ui, &animated, "")
+                    {
+                        look_grab = Some((l.name.clone(), press));
+                    }
+                }
             });
+        if let Some((name, press)) = look_grab {
+            self.start_look_drag(name, press);
+        }
         if let Some((t, press)) = grabbed {
             self.start_title_drag(&p, t.clone(), press);
         }

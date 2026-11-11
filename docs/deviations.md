@@ -537,11 +537,13 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - The highlighted word is then not the word that is spoken, until the word timings are updated.
 - **vidcut:**
   - The animation is part of the style of a track (D69). The user sets it in the Subtitle Track section of the Inspector or with `track.set`.
+  - The Animated Subtitles section of the Titles tab shows the animated looks.
+  - A drag of a look onto the header of a subtitle track sets the style of the track, as in Resolve.
   - The looks of Create Subtitles from Audio ([spec §8.12](spec.md#812-subtitles-pp-645646-702-12271248)) put the speech on a new track that is already animated.
   - Word times follow edits and new text automatically (D70).
 - **Why:**
   - It is one step from the speech to animated subtitles.
-  - The user does not make subtitles, find a template and drop it on the track. Fusion is not necessary.
+  - Fusion is not necessary. A look is a style, and the user can change it in the Inspector.
   - Word times stay correct after an edit or a correction, and there is no button to remember.
 
 ## X60. Clip Info is a window
