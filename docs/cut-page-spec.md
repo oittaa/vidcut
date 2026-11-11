@@ -627,7 +627,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 
 **Lower timeline:**
 - It is a detail view around the playhead (p. 644).
-- Alt+wheel (Option+wheel on a Mac) and the − and + buttons zoom it (p. 853).
+- Alt+wheel (Option+wheel on a Mac) and the − and + buttons zoom it. Alt+wheel is the zoom of the Edit page timeline (p. 853).
 - vidcut: Ctrl+wheel (deviation X21) and a trackpad pinch zoom it too.
 - The manual calls its zoom fixed, but Resolve zooms it too.
 - A sideways swipe scrolls it (p. 66).
