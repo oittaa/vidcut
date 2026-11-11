@@ -194,7 +194,15 @@ pub fn follow(p: &mut Project, id: &str, to: Option<(&str, &str)>) -> Result<Val
                 "the position of {id} has keyframes: first remove them (keyframes.remove)"
             )));
         }
+        let [x, y] = old.place();
+        let [mx, my] = crate::model::Picture::MIDDLE;
+        next.moved([mx - x, my - y]);
         next.position = Some(crate::model::Picture::MIDDLE);
+        if let Some(upper) = next.upper.as_mut() {
+            upper.position = upper
+                .position
+                .map(|at| at.map(crate::otio::effects::rounded));
+        }
     }
     let next = super::titles::checked(&next)?;
     let shown = json!({ "clip": id, "follows": next.follows, "position": next.place() });

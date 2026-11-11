@@ -2871,8 +2871,9 @@ pub enum Request {
     /// title (`c5`, or `V2@15s`) goes onto the thing on the path, and moves
     /// with it: its `position` becomes `[0.5, 0.5]`. Each `position` of the
     /// title counts from the middle of that thing, and `[0.5, 0.5]` puts the
-    /// `anchor` of the title on it. A title with keyframes on its position
-    /// is refused. The title keeps its size and its angle.
+    /// `anchor` of the title on it. The upper line of a lower third moves by
+    /// the same amount. A title with keyframes on its position is refused.
+    /// The title keeps its size and its angle.
     ///
     /// `of` is the clip that has the path, and `path` is the id of the path
     /// (`motion.list`). That clip is footage, a still or an image sequence
