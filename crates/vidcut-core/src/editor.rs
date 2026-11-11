@@ -250,6 +250,10 @@ pub trait Env {
         crate::preferences::Proxies::default()
     }
 
+    fn still_duration(&self) -> crate::time::TimeSpec {
+        crate::preferences::Editing::default().still_duration
+    }
+
     fn fillers(&self, language: &str) -> Option<Vec<String>> {
         let _ = language;
         None
@@ -2621,7 +2625,8 @@ fn mutate(
                     true => env.probe_sequence(path, fps.unwrap_or(p.settings.fps))?,
                     false => env.probe(path)?,
                 };
-                let id = add_media(p, &mut files, probed);
+                let still = still_secs(p, env)?;
+                let id = add_media(p, &mut files, probed, still);
                 if !ids.contains(&id) {
                     ids.push(id);
                 }
@@ -5088,11 +5093,17 @@ impl PoolFiles {
     }
 }
 
-fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> String {
+fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia, still: f64) -> String {
     if let Some(existing) = files.find(p, &probed.path, &probed.sequence) {
         return existing.id.clone();
     }
     first_video_sets_format(p, &probed.info);
+    let still_secs = probed
+        .info
+        .video
+        .as_ref()
+        .filter(|v| v.still)
+        .map(|_| still);
     let id = p.alloc_media_id();
     let name = match &probed.sequence {
         Some(s) => s.display(),
@@ -5117,6 +5128,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         super_scale: Default::default(),
         left_out: Vec::new(),
         words: Vec::new(),
+        still_secs,
         sequence: probed.sequence,
         proxy: None,
         color: None,
@@ -5133,6 +5145,23 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
     });
     files.note(p, p.media.len() - 1);
     id
+}
+
+fn still_secs(p: &Project, env: &dyn Env) -> Result<f64> {
+    let c = TimeContext {
+        start_tc: 0,
+        ..p.time_context(None)
+    };
+    let secs = p
+        .settings
+        .fps
+        .frames_to_secs(c.resolve(&env.still_duration())?);
+    if !(secs > 0.0 && secs <= crate::model::STILL_LIMIT_SECS) {
+        return Err(Error::invalid(
+            "the still duration of the preferences is not from a frame to 17 h 40 min",
+        ));
+    }
+    Ok(secs)
 }
 
 #[derive(Default)]
@@ -5200,7 +5229,8 @@ fn add_folder(
                 continue;
             }
         };
-        let id = add_media(p, files, probed);
+        let still = still_secs(p, env)?;
+        let id = add_media(p, files, probed, still);
         ops::move_media(p, std::slice::from_ref(&id), bin)?;
         if !out.media.contains(&id) {
             out.media.push(id);
@@ -5507,7 +5537,8 @@ fn find_media<'a>(
             });
         match probed {
             Some(probed) => {
-                let id = add_media(p, &mut files, probed);
+                let still = still_secs(p, env)?;
+                let id = add_media(p, &mut files, probed, still);
                 if found.insert(id.clone()) {
                     media.push(id.clone());
                 }
@@ -6966,19 +6997,6 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     }
     if let Some(tc) = &set.start_tc {
         p.settings.set_start_tc(tc)?;
-    }
-    if let Some(d) = &set.still_duration {
-        let c = TimeContext {
-            start_tc: 0,
-            ..p.time_context(None)
-        };
-        let secs = p.settings.fps.frames_to_secs(c.resolve(d)?);
-        if !(secs > 0.0 && secs <= crate::model::STILL_LIMIT_SECS) {
-            return Err(Error::invalid(
-                "a still lasts at least a frame and at most 17 h 40 min",
-            ));
-        }
-        p.settings.still_secs = secs;
     }
     if let Some(on) = set.use_proxies {
         p.settings.use_proxies = on;

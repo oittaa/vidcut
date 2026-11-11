@@ -18,7 +18,7 @@ classDiagram
     width, height
     sample_rate, channels
     start_tc, drop_frame
-    ripple_on, still_secs
+    ripple_on
     auto_format, use_proxies, render_cache
     fillers, timeline_colors
     retime, upscaler
@@ -29,7 +29,7 @@ classDiagram
     size, mtime_ns, fingerprint
     info: MediaInfo
     color_space, alpha_mode, super_scale, left_out
-    sequence, subtitles, words
+    sequence, still_secs, subtitles, words
     subclip, markers
   }
   class Proxy {
@@ -176,6 +176,7 @@ Stills ([D38](../spec.md#12-decisions-on-gaps-and-contradictions)):
 
 - A file is a still when an image demuxer reads it (`image2`, the `_pipe` demuxers).
 - A GIF or animated WebP (`gif`, `webp_anim`) of one frame is also a still.
+- `still_secs` is the length of a still. The import takes it from the preference `editing.still_duration`, through `Env::still_duration`. A later change of the preference keeps it.
 - An animated WebP of more frames lasts as long as its frames do. Why: `webp_anim` reports no duration.
 - `probe` refuses an animated WebP that `webp_pipe` reads ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)).
 

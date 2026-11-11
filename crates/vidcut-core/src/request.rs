@@ -4762,9 +4762,6 @@ pub struct ProjectSet {
     /// drop-frame).
     #[serde(default)]
     pub start_tc: Option<TimeSpec>,
-    /// How long a still lasts when edited without a range, e.g. `5s`.
-    #[serde(default)]
-    pub still_duration: Option<TimeSpec>,
     /// Play fresh proxies in the preview. Export still reads the originals.
     #[serde(default)]
     pub use_proxies: Option<bool>,

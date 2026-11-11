@@ -110,9 +110,6 @@ pub struct Settings {
     pub drop_frame: bool,
     /// Format not chosen yet: the first video media added sets fps and size.
     pub auto_format: bool,
-    /// How long a still lasts when edited without a range or marks, and
-    /// what the viewer shows of it, in seconds (decision D38).
-    pub still_secs: f64,
     /// The preview plays a fresh proxy instead of the original picture
     /// (decision D41). Export, frames, analysis and OTIO ignore this.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -153,7 +150,6 @@ impl Default for Settings {
             start_tc: 30 * 3600,
             drop_frame: false,
             auto_format: true,
-            still_secs: 5.0,
             use_proxies: false,
             fillers: BTreeMap::new(),
             timeline_colors: TimelineColors::Auto,
@@ -404,6 +400,11 @@ pub struct Media {
     /// For a numbered image sequence, its files; `path` is the first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence: Option<ImageSequence>,
+    /// How long a still lasts, in seconds: the still duration of the
+    /// preferences when it came into the pool (decision D38). Left out for
+    /// other files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub still_secs: Option<f64>,
     /// A smaller copy the preview can play. Absent until one is generated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<Proxy>,
@@ -6599,7 +6600,7 @@ impl Project {
 
     pub fn file_frames(&self, media: &Media) -> i64 {
         let secs = match (&media.info.video, media.info.audio.first()) {
-            (Some(v), _) if v.still => self.settings.still_secs,
+            (Some(v), _) if v.still => media.still_secs.unwrap_or_default(),
             (Some(v), _) => v.duration,
             (None, Some(a)) => a.duration,
             (None, None) => 0.0,

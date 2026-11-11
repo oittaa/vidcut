@@ -576,6 +576,13 @@ impl Env for AvEnv {
             .unwrap_or_default()
     }
 
+    fn still_duration(&self) -> vidcut_core::time::TimeSpec {
+        crate::preferences::load()
+            .map(|p| p.editing)
+            .unwrap_or_default()
+            .still_duration
+    }
+
     fn local_stamp(&self) -> String {
         crate::when::local_time(crate::when::now_ms())
             .map_or_else(String::new, |t| t.full().replacen(' ', "-", 1))

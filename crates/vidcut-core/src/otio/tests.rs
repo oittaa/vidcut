@@ -179,7 +179,7 @@ fn the_settings_come_back_from_an_otio_file() {
         "project.set",
         json!({"fps": "30000/1001", "drop_frame": true, "width": 1280, "height": 720,
                "sample_rate": 44100, "channels": 6, "ripple_on": false,
-               "start_tc": "01:00:00;00", "still_duration": "3s", "use_proxies": true}),
+               "start_tc": "01:00:00;00", "use_proxies": true}),
     ));
     f.ok(req(
         "edit.append",

@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{Error, Result};
-use crate::model::{Media, PROXY_LONGEST};
+use crate::model::{Media, PROXY_LONGEST, STILL_LIMIT_SECS};
+use crate::time::TimeSpec;
 
 /// Everything a person may set for vidcut as a whole. Missing keys in the
 /// file take their defaults: it is edited by hand too.
@@ -24,12 +25,39 @@ pub struct Preferences {
     pub transcripts: Transcripts,
     pub services: Services,
     pub viewer: ViewerPrefs,
+    pub editing: Editing,
     /// The keys that differ from the defaults, by action. `keys.list` names
     /// the actions. An action that is not here has its default keys, and an
     /// empty list leaves an action with no key. `keys.set` and `keys.reset`
     /// change them.
     #[schemars(with = "BTreeMap<String, Vec<String>>")]
     pub keys: crate::shortcuts::Custom,
+}
+
+/// How edits go on this computer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Editing {
+    /// How long a still lasts when it comes into the pool: seconds (`5s`) or
+    /// frames of the project (`120f`), from a frame to 17 h 40 min. Stills
+    /// already in the pool keep their length. Default `5s`.
+    pub still_duration: TimeSpec,
+}
+
+impl Default for Editing {
+    fn default() -> Self {
+        Self {
+            still_duration: TimeSpec::Seconds(5.0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EditingPatch {
+    /// Seconds (`5s`) or frames (`120f`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub still_duration: Option<TimeSpec>,
 }
 
 /// How this computer makes the render cache of the project that is open
@@ -824,6 +852,8 @@ pub struct PreferencesPatch {
     pub services: Option<ServicesPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewer: Option<ViewerPrefsPatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editing: Option<EditingPatch>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1072,12 +1102,28 @@ impl Preferences {
         if let Some(s) = patch.viewer.as_ref().and_then(|v| v.scopes.as_ref()) {
             p.viewer.scopes = p.viewer.scopes.patched(s);
         }
+        if let Some(d) = patch
+            .editing
+            .as_ref()
+            .and_then(|e| e.still_duration.as_ref())
+        {
+            p.editing.still_duration = d.clone();
+        }
         p.check()?;
         Ok(p)
     }
 
     pub fn check(&self) -> Result<()> {
         crate::shortcuts::Bindings::of(&self.keys)?;
+        match self.editing.still_duration {
+            TimeSpec::Frames(n) if n > 0 => {}
+            TimeSpec::Seconds(s) if s > 0.0 && s <= STILL_LIMIT_SECS => {}
+            _ => {
+                return Err(Error::usage(
+                    "editing.still_duration: seconds or frames, from a frame to 17 h 40 min",
+                ));
+            }
+        }
         for (key, mb) in [
             ("player.memory_mb", self.player.memory_mb),
             ("player.video_memory_mb", self.player.video_memory_mb),

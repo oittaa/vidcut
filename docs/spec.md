@@ -293,7 +293,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Descending reverses the whole order (p. 663).
     - `pool.set` with `view` `metadata` opens this view.
   - A sound file shows its waveform.
-  - **Metadata Display** (p. 665): a tag icon beside the search field shows metadata of the selected clip at the top of the pool (deviation X60). The metadata is the camera name, scene, shot and take, frame rate and resolution.
+  - **Metadata Display** (p. 665): a tag icon beside the search field shows metadata of the selected clip at the top of the pool. The metadata is the camera name, scene, shot and take, frame rate and resolution.
+    - vidcut: the strip also shows the codec, the bits and chroma subsampling, SDR or HDR, and the length.
+    - It also shows the start timecode, the sound and the file size.
 - **Sort and search** (pp. 666–667):
   - Sort Media By has Clip Name, Date Imported, Date Modified, Timecode (D59), Camera, Date Time, Bin, Scene Shot, Clip Color and Online Status. Each is ascending or descending.
   - vidcut also sorts by Duration.
@@ -3135,7 +3137,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The rate can change only with no clips on the timeline and no compound clips in the pool, because positions are whole frames.
 - **D38. Stills** (§3; pp. 114, 1194).
   - The manual gives two standard still durations: 5 s (p. 114) and 10 s (p. 1194).
-  - vidcut takes 5 s, as a project setting (deviation X16).
+  - vidcut takes 5 s by default. Preferences > Editing > Standard Still Duration sets it, in seconds or frames (p. 114).
+  - Each still gets that duration when it comes into the pool. A later change of the preference keeps the duration of the stills in the pool.
   - A still edited without a range has that duration.
   - A range or a trim makes it up to 17 h 40 min (p. 1194).
   - Every source frame of a still shows its picture. Thus only that length limits its clips, the frames of a dissolve too.
@@ -4002,6 +4005,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Word: bold capitals at 10%, with an outline of 16 pixels, popping at 1.15. 20 characters.
     - Plain: the usual style, at 42.
   - Its dialog shows the looks as tiles. Each tile draws a sample in its look.
+  - The Animated Subtitles section of the Titles tab shows the looks that animate their words, as tiles.
+  - A drag of a tile onto the header of a subtitle track sets the style of the track to that look (`track.set` with `look`).
+  - A locked track takes no look.
   - The looks are those of D71.
   - Export and Quick Export burn in the shown track by default when it animates its words, and say so.
   - The default of the request stays files.

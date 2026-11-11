@@ -18,10 +18,7 @@ fn state(f: &Fixture) -> Project {
 fn undo_and_redo_go_back_through_every_state() {
     let mut f = Fixture::new(&[(10.0, true), (10.0, true), (8.0, false)]);
     let edits = [
-        req(
-            "project.set",
-            json!({"ripple_on": true, "still_duration": "3s"}),
-        ),
+        req("project.set", json!({"ripple_on": false})),
         req("bins.add", json!({"path": "Interviews"})),
         req("media.move", json!({"media": "m2", "bin": "Interviews"})),
         req("media.set", json!({"media": "m1", "color": "teal"})),
