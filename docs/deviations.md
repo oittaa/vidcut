@@ -2598,7 +2598,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A blur must not go on a thing of the next shot. It must not stay on the picture after its thing is gone ([X166](#x166-an-effect-has-an-area)).
   - The user sees where a track ends, goes to that frame, and tracks again from there.
   - The model gives a box, and a box has no turn.
-  - The owner decided to keep the end of the effect at the end of the track for now.
 
 ## X169. A title follows a motion path
 
