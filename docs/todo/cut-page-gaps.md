@@ -17,3 +17,4 @@ What [the spec](../cut-page-spec.md) describes and vidcut does not do.
 - The skin tone line of the Vectorscope (p. 3098), and Video Level Scopes in the scale menu
 - The unlabeled dashed lines of the HDR scale
 - Copy and paste of the Equalizer settings of a clip (p. 745; [§9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779))
+- The Reset of the Dialogue Leveler section, once its values are measured (p. 734; [§9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779))
