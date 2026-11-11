@@ -6,4 +6,8 @@ What [the spec](../cut-page-spec.md) describes and vidcut does not do.
 - Zoom of the waveform in the Source Clip scroll area, once measured ([§4.1](../cut-page-spec.md#41-modes))
 - Audio Assistant, Voice Convert, Set Color and Add Marker, and Add Transition to All Edits in Timeline Actions ([§2](../cut-page-spec.md#2-layout-pp-636637))
 - The switch of Dynamic Zoom, Composite, Speed and the other Audio groups, which turns a group off (p. 734; [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768))
+- The Histogram and the other scopes (pp. 3093, 3097)
+- The Y, CbCr and RGB overlays of the Waveform (p. 3097), and RGB, YRGB and YCbCr in the Parade (p. 3102)
+- The skin tone line of the Vectorscope (p. 3098), and Video Level Scopes in the scale menu
+- The unlabeled dashed lines of the HDR scale
 - The Reset of the Dialogue Leveler section, once its values are measured (p. 734; [§9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779))

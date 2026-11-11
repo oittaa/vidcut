@@ -3900,7 +3900,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         edges: Box::default(),
         isolation: None,
         keyed,
-        pan: audio.pan,
+        pan: audio.heard_pan(),
         equalizer: audio
             .equalizer
             .clone()

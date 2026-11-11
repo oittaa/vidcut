@@ -1028,38 +1028,14 @@ fn locked(now: Option<Lock>, shift: bool, moved: Vec2) -> Option<Lock> {
     )
 }
 
-fn snapped(
-    clip: &Clip,
-    lanes: &[Lane],
-    marks: &[Mark],
-    by: i64,
-    play: i64,
-    ppf: f32,
-) -> Option<(i64, i64)> {
+fn snapped(clip: &Clip, marks: &[Mark], by: i64, play: i64, ppf: f32) -> Option<(i64, i64)> {
     let reach = f64::from(SNAP_PX / ppf.max(1e-3));
-    let mut best: Option<(i64, i64, i64)> = None;
-    for m in marks {
-        let from = clip.key_time(m.frame);
-        let others = lanes
-            .iter()
-            .filter(|l| l.param != m.param)
-            .flat_map(|l| l.keys.iter().map(move |k| (l.param, k.frame)))
-            .filter(|(param, frame)| {
-                !marks.contains(&Mark {
-                    param: *param,
-                    frame: *frame,
-                })
-            })
-            .map(|(_, frame)| clip.key_time(frame));
-        for to in std::iter::once(play as f64).chain(others) {
-            let wanted = (to - from).round() as i64;
-            let gap = (wanted - by).abs();
-            if gap as f64 <= reach && best.is_none_or(|b| gap < b.0) {
-                best = Some((gap, wanted, to.round() as i64));
-            }
-        }
-    }
-    best.map(|(_, by, at)| (by, at))
+    marks
+        .iter()
+        .map(|m| (play as f64 - clip.key_time(m.frame)).round() as i64)
+        .filter(|wanted| ((wanted - by).abs() as f64) <= reach)
+        .min_by_key(|wanted| (wanted - by).abs())
+        .map(|wanted| (wanted, play))
 }
 
 fn handle_body(id: &str, mark: Mark, out: bool, handle: Handle) -> Value {
@@ -1595,7 +1571,7 @@ impl Workspace {
         self.expire_pending(&clip, rev);
         let play = self.snap.timeline.position;
         let view = self.key_editor.view.unwrap_or_else(|| clip_span(&clip));
-        self.key_header(ui, &p, &clip, view, play);
+        self.key_header(ui, &p, (&clip, &lanes), view, play);
         if lanes.is_empty() {
             ui.label(dim("No Keyframes"));
             return;
@@ -2183,7 +2159,7 @@ impl Workspace {
         &mut self,
         ui: &mut egui::Ui,
         p: &Project,
-        clip: &Clip,
+        (clip, lanes): (&Clip, &[Lane]),
         view: (f64, f64),
         play: i64,
     ) {
@@ -2196,6 +2172,9 @@ impl Workspace {
         let mut fit = false;
         let mut detail = false;
         let mut open = None;
+        let marks = self.key_editor.selected.clone();
+        let (_, takes) = marks_eases(clip, lanes, &marks);
+        let mut eased = None;
         let editor = &mut self.key_editor;
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2248,6 +2227,11 @@ impl Workspace {
                 {
                     detail = true;
                 }
+                for e in [Ease::EaseOut, Ease::EaseInOut, Ease::EaseIn, Ease::Linear] {
+                    if ease_button(ui, e, takes.contains(&e)).clicked() {
+                        eased = Some(e);
+                    }
+                }
                 if ui
                     .add(egui::Button::selectable(editor.graph, CHART_LINE))
                     .on_hover_text("Graph")
@@ -2277,6 +2261,9 @@ impl Workspace {
             Some(true) => editor.closed.clear(),
             Some(false) => editor.closed = groups_of(clip),
             None => {}
+        }
+        if let Some(e) = eased {
+            send_parts(self, ease_parts(clip, lanes, &marks, e));
         }
     }
 
@@ -3523,6 +3510,32 @@ impl Workspace {
     }
 }
 
+fn ease_button(ui: &mut egui::Ui, e: Ease, on: bool) -> egui::Response {
+    let side = ui.spacing().interact_size.y;
+    let r = ui
+        .add_enabled(on, egui::Button::new("").min_size(vec2(side, side)))
+        .on_hover_text(ease_label(e))
+        .on_disabled_hover_text(ease_label(e));
+    let color = if on {
+        ui.style().interact(&r).fg_stroke.color
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    let area = r.rect.shrink(side * 0.25);
+    let points = (0..=12)
+        .map(|i| {
+            let t = f64::from(i) / 12.0;
+            pos2(
+                area.left() + area.width() * t as f32,
+                area.bottom() - area.height() * e.of(t) as f32,
+            )
+        })
+        .collect();
+    ui.painter()
+        .add(Shape::line(points, Stroke::new(1.5, color)));
+    r
+}
+
 fn ease_combo(
     ui: &mut egui::Ui,
     salt: impl egui::AsIdSalt,
@@ -3894,7 +3907,7 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
     let near = drag
         .snap
         .filter(|_| drag.lock != Some(Lock::Value))
-        .and_then(|play| snapped(clip, lanes, &drag.marks, moved, play, drag.ppf));
+        .and_then(|play| snapped(clip, &drag.marks, moved, play, drag.ppf));
     let by = near.map_or(moved, |(by, _)| by);
     let dt = fitted(lanes, &drag.marks, by);
     let dv = if drag.axis == Axis::None {
@@ -4071,26 +4084,6 @@ mod tests {
     fn a_shift_drag_keeps_the_direction_it_started_in() {
         let first = locked(None, true, vec2(1.0, 8.0));
         assert_eq!(locked(first, true, vec2(40.0, 2.0)), Some(Lock::Value));
-    }
-
-    #[test]
-    fn a_drag_snaps_to_the_nearest_keyframe_of_another_value() {
-        let lanes = [
-            lane(KeyParam::Volume, &[10]),
-            lane(KeyParam::Opacity, &[23, 40]),
-        ];
-        let marks = [mark(KeyParam::Volume, 10)];
-        assert_eq!(
-            snapped(&clip(), &lanes, &marks, 12, 80, 2.0),
-            Some((13, 23))
-        );
-    }
-
-    #[test]
-    fn a_drag_does_not_snap_to_a_keyframe_of_its_own_value() {
-        let lanes = [lane(KeyParam::Volume, &[10, 23])];
-        let marks = [mark(KeyParam::Volume, 10)];
-        assert_eq!(snapped(&clip(), &lanes, &marks, 12, 80, 2.0), None);
     }
 
     #[test]

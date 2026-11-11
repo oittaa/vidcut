@@ -1654,6 +1654,10 @@ pub enum Request {
         /// 0 is the middle.
         #[serde(default)]
         pan: Option<f64>,
+        /// The switch of the pan. Off keeps the pan, and the sound plays as
+        /// at 0. On brings the pan back.
+        #[serde(default)]
+        pan_on: Option<bool>,
         /// The equalizer: each field given replaces its own, and null takes
         /// it off with its settings. `{}` puts on a flat one.
         #[serde(
@@ -3339,9 +3343,10 @@ pub enum Request {
         center: Option<bool>,
     },
     /// The scopes of the viewer: a waveform, a parade and a vectorscope of
-    /// its picture, in the timeline color space. Stored in preferences, not
-    /// the project. A field that is left out stays as it is. With no fields,
-    /// tells which scopes are on.
+    /// its picture, in the timeline color space, and the scale of the
+    /// waveform and the parade. Stored in preferences, not the project. A
+    /// field that is left out stays as it is. With no fields, tells which
+    /// scopes are on.
     #[serde(rename = "viewer.scopes")]
     ViewerScopes {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3350,6 +3355,8 @@ pub enum Request {
         parade: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         vectorscope: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<crate::preferences::ScopeScale>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).

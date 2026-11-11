@@ -279,7 +279,9 @@ impl eframe::App for App {
             self.viewer
                 .sync(&self.render, self.ws.want, self.ws.snap.show_super_scale);
         self.ws.picture = Picture { texture, has_frame };
-        self.ws.scope_pictures = self.viewer.sync_scopes(&self.render, &self.ws.scope_want);
+        self.ws.scope_pictures =
+            self.viewer
+                .sync_scopes(&self.render, &self.ws.scope_want, self.ws.snap.scopes.scale);
         self.ws.levels = self.viewer.levels();
         let ctx = ui.ctx().clone();
         let snap = &self.ws.snap;

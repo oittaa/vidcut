@@ -356,6 +356,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             gain_keys: Vec::new(),
             muted: false,
             pan: 0.0,
+            pan_on: true,
             equalizer: None,
             dialogue_leveler: None,
             compressor: None,
@@ -2068,6 +2069,7 @@ pub struct ClipProps {
     pub muted: Option<bool>,
     pub gain_db: Option<f64>,
     pub pan: Option<f64>,
+    pub pan_on: Option<bool>,
     pub equalizer: Option<Option<crate::request::EqualizerSet>>,
     pub dialogue_leveler: Option<Option<crate::request::DialogueLevelerSet>>,
     pub compressor: Option<Option<crate::request::CompressorSet>>,
@@ -2172,6 +2174,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
         if props.muted.is_some()
             || props.gain_db.is_some()
             || props.pan.is_some()
+            || props.pan_on.is_some()
             || props.equalizer.is_some()
             || props.dialogue_leveler.is_some()
             || props.compressor.is_some()
@@ -2188,6 +2191,9 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
             }
             if let Some(pan) = props.pan {
                 a.pan = pan;
+            }
+            if let Some(on) = props.pan_on {
+                a.pan_on = on;
             }
             if let Some(change) = &props.equalizer {
                 a.equalizer = change

@@ -186,13 +186,14 @@ pub fn scope(
     let mut screen = Screen::new();
     screen.scoping(true);
     frame.draw(&mut screen, p.settings.width, p.settings.height);
-    screen.scopes(gpu, &[(scope, size)]);
+    let scale = crate::preferences::load()?.viewer.scopes.scale;
+    screen.scopes(gpu, &[(scope, size)], scale);
     let image = screen
         .read_scope(gpu, scope)
         .ok_or_else(|| failed("the GPU gave no scope back"))?;
     write_png(out, &image)?;
     let colors = frame.shown.colors;
-    let marks: Vec<Value> = marks(scope, colors, size)
+    let marks: Vec<Value> = marks(scope, (colors, scale), size)
         .into_iter()
         .map(|m| json!({ "label": m.label, "x": m.at[0], "y": m.at[1] }))
         .collect();
@@ -207,6 +208,7 @@ pub fn scope(
             Some(Hdr::Pq) => "pq",
             Some(Hdr::Hlg) => "hlg",
         },
+        "scale": scale,
         "marks": marks,
         "renderer": frame.renderer(),
     }))
