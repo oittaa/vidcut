@@ -788,6 +788,24 @@ impl Workspace {
         };
         ui.separator();
         let pic = clip.as_ref().map(|(_, p)| p.clone()).unwrap_or_default();
+        let switch = match tool {
+            PictureTool::Transform => Some(("transform_off", pic.transform_off)),
+            PictureTool::Crop => Some(("crop_off", pic.crop_off)),
+            PictureTool::DynamicZoom | PictureTool::Composite => None,
+        };
+        if let Some((key, off)) = switch {
+            let mut on = !off;
+            if ui
+                .add_enabled(found, egui::Checkbox::without_text(&mut on))
+                .clicked()
+                && let Some((id, _)) = &clip
+            {
+                let mut params = json!({ "clips": id });
+                params[key] = json!(!on);
+                self.end_picture_wheel();
+                self.send("picture.set", params);
+            }
+        }
         if tool == PictureTool::Transform {
             use egui_phosphor::regular::{FLIP_HORIZONTAL, FLIP_VERTICAL};
             for (icon, label, key, on) in [
@@ -1305,6 +1323,12 @@ pub(super) fn changed(clip: &str, a: &Picture, b: &Picture) -> Option<Value> {
     }
     if a.flip_vertical != b.flip_vertical {
         params["flip_vertical"] = json!(b.flip_vertical);
+    }
+    if a.transform_off != b.transform_off {
+        params["transform_off"] = json!(b.transform_off);
+    }
+    if a.crop_off != b.crop_off {
+        params["crop_off"] = json!(b.crop_off);
     }
     if a.mode() != b.mode() {
         params["composite_mode"] = json!(b.mode());

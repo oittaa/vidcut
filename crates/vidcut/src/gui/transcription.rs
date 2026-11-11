@@ -260,6 +260,7 @@ pub(super) struct TranscriptionUi {
     saving: Option<(Scope, Ask)>,
     edit_error: Option<String>,
     naming: String,
+    renaming: Option<usize>,
     difference: Option<usize>,
     picking: Option<usize>,
     typing: Option<Typing>,
@@ -688,30 +689,45 @@ fn at_frame(items: &[Item], frame: i64) -> Option<usize> {
     (i > 0 && frame < items[i - 1].end).then(|| i - 1)
 }
 
-fn speaker_menu(
+struct Naming<'a> {
+    at: usize,
+    renaming: &'a mut Option<usize>,
+    text: &'a mut String,
+}
+
+fn speaker_name(
     ui: &mut egui::Ui,
     w: &Who,
     heard: &Heard,
     everyone: &[(String, String)],
-    naming: &mut String,
+    naming: Naming,
     acts: &mut Vec<Act>,
 ) {
+    let id = egui::Id::unique(("speaker-name", naming.at));
+    if *naming.renaming == Some(naming.at) {
+        let field = ui.add(
+            egui::TextEdit::singleline(naming.text)
+                .id(id)
+                .desired_width(140.0),
+        );
+        if !field.has_focus() {
+            if !ui.input(|i| i.key_pressed(Key::Escape)) {
+                acts.push(Act::Name(w.person.clone(), naming.text.trim().to_string()));
+            }
+            *naming.renaming = None;
+        }
+        return;
+    }
     let c = theme::colors();
     let r = ui.add(
         egui::Button::new(RichText::new(&w.name).small().strong().color(c.accent)).frame(false),
     );
-    if r.clicked() {
-        *naming = w.name.clone();
-    }
-    egui::Popup::menu(&r).show(|ui| {
-        ui.horizontal(|ui| {
-            let field = ui.add(egui::TextEdit::singleline(naming).desired_width(140.0));
-            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-            if ui.button("Rename").clicked() || enter {
-                acts.push(Act::Name(w.person.clone(), naming.trim().to_string()));
-                ui.close();
-            }
-        });
+    let mut rename = r.double_clicked();
+    r.context_menu(|ui| {
+        if ui.button("Rename").clicked() {
+            rename = true;
+            ui.close();
+        }
         if w.speaker == 0 {
             return;
         }
@@ -732,6 +748,11 @@ fn speaker_menu(
             ui.close();
         }
     });
+    if rename {
+        *naming.renaming = Some(naming.at);
+        *naming.text = w.name.clone();
+        ui.memory_mut(|m| m.request_focus(id));
+    }
 }
 
 impl Workspace {
@@ -1204,13 +1225,13 @@ impl Workspace {
                                         .filter(|w| speaking != Some(w.person.as_str()));
                                     ui.horizontal(|ui| {
                                         if let (Some(w), Some(heard)) = (new, &first.heard) {
-                                            speaker_menu(
-                                                ui,
-                                                w,
-                                                heard,
-                                                &everyone,
-                                                &mut t.naming,
-                                                &mut acts,
+                                            let naming = Naming {
+                                                at: k,
+                                                renaming: &mut t.renaming,
+                                                text: &mut t.naming,
+                                            };
+                                            speaker_name(
+                                                ui, w, heard, &everyone, naming, &mut acts,
                                             );
                                         }
                                         ui.label(

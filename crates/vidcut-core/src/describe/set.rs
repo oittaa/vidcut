@@ -620,6 +620,10 @@ impl Words<'_> {
         s.put("flip_vertical", "Flip Vertical", &raw, |q| {
             json!(q.flip_vertical)
         });
+        s.put("transform_off", "Transform Off", &raw, |q| {
+            json!(q.transform_off)
+        });
+        s.put("crop_off", "Crop Off", &raw, |q| json!(q.crop_off));
         s.put("crop_left", "Crop Left", &percent, |q| json!(q.crop.left));
         s.put("crop_right", "Crop Right", &percent, |q| {
             json!(q.crop.right)
@@ -751,6 +755,7 @@ impl Words<'_> {
             _ => audio(c, |a| json!(a.gain_db)),
         });
         s.put("pan", "Pan", &number, |c| audio(c, |a| json!(a.pan)));
+        s.put("pan_on", "Pan On", &raw, |c| audio(c, |a| json!(a.pan_on)));
         s.put("equalizer", "Equalizer", &raw, |c| {
             audio(c, |a| json!(a.equalizer))
         });

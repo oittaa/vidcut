@@ -652,22 +652,34 @@ impl Workspace {
         self.send_batch(p, commands);
     }
 
-    pub(super) fn subtitle_header(&mut self, ui: &mut egui::Ui, rect: Rect, t: &SubtitleTrack) {
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-        child.set_clip_rect(rect.intersect(child.clip_rect()));
-        child.spacing_mut().button_padding.x = 3.0;
-        let parts = header_parts(rect);
-        let mut name = child.new_child(
-            egui::UiBuilder::new()
-                .max_rect(parts.name.with_min_x(parts.enlarge.left()))
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    fn track_name_field(&mut self, ui: &mut egui::Ui, t: &SubtitleTrack, field: egui::Id) {
+        let Some((_, text)) = self.timeline.track_naming.as_mut() else {
+            return;
+        };
+        let r = ui.add(
+            egui::TextEdit::singleline(text)
+                .id(field)
+                .font(egui::TextStyle::Small)
+                .desired_width(f32::INFINITY),
         );
-        let r = name.add(
+        if r.has_focus() {
+            return;
+        }
+        let text = text.trim().to_string();
+        self.timeline.track_naming = None;
+        if !ui.input(|i| i.key_pressed(egui::Key::Escape)) && text != t.display_name() {
+            self.send("track.set", json!({ "track": t.id, "name": text }));
+        }
+    }
+
+    fn track_name_button(&mut self, ui: &mut egui::Ui, t: &SubtitleTrack, field: egui::Id) {
+        let r = ui.add(
             egui::Button::selectable(false, RichText::new(t.display_name()).strong().small())
                 .truncate(),
         );
         if r.double_clicked() {
-            self.open_track_dialog(t);
+            self.timeline.track_naming = Some((t.id.clone(), t.display_name()));
+            ui.memory_mut(|m| m.request_focus(field));
         }
         r.context_menu(|ui| {
             self.subtitle_track_items(ui, &t.id);
@@ -691,6 +703,29 @@ impl Workspace {
                 ui.close();
             }
         });
+    }
+
+    pub(super) fn subtitle_header(&mut self, ui: &mut egui::Ui, rect: Rect, t: &SubtitleTrack) {
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        child.set_clip_rect(rect.intersect(child.clip_rect()));
+        child.spacing_mut().button_padding.x = 3.0;
+        let parts = header_parts(rect);
+        let mut name = child.new_child(
+            egui::UiBuilder::new()
+                .max_rect(parts.name.with_min_x(parts.enlarge.left()))
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        let field = egui::Id::unique(("subtitle-track-name", &t.id));
+        if self
+            .timeline
+            .track_naming
+            .as_ref()
+            .is_some_and(|(id, _)| *id == t.id)
+        {
+            self.track_name_field(&mut name, t, field);
+        } else {
+            self.track_name_button(&mut name, t, field);
+        }
         let lock = if t.locked {
             icon::LOCKED
         } else {

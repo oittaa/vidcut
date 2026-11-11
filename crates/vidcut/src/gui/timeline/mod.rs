@@ -256,6 +256,7 @@ pub struct TimelineView {
     pub normalize: Option<super::normalize::NormalizeDialog>,
     pub normalize_last: Option<super::normalize::Choice>,
     pub equalizer: Option<super::equalizer::EqualizerDialog>,
+    pub track_naming: Option<(String, String)>,
     pub leveler: Option<super::leveler::LevelerDialog>,
     pub compressor: Option<super::compressor::CompressorDialog>,
     pub noise: Option<super::noise::NoiseDialog>,
@@ -319,6 +320,7 @@ impl Default for TimelineView {
             silence: None,
             normalize: None,
             equalizer: None,
+            track_naming: None,
             leveler: None,
             compressor: None,
             noise: None,
@@ -2871,7 +2873,7 @@ impl Workspace {
         }
         ui.separator();
         if ui
-            .button(bindings.named("Change Duration…", Action::ChangeDuration))
+            .button(bindings.named("Change Clip Duration…", Action::ChangeDuration))
             .clicked()
         {
             self.timeline.duration_dialog = Some(String::new());
@@ -4214,6 +4216,7 @@ mod tests {
                 gain_keys: Vec::new(),
                 muted: false,
                 pan: 0.0,
+                pan_on: true,
                 equalizer: None,
                 dialogue_leveler: None,
                 compressor: None,

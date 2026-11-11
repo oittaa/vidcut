@@ -66,8 +66,8 @@ pub enum Request {
         /// Count record timecode drop-frame (29.97, 59.94 and 119.88; decision D47).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         drop_frame: Option<bool>,
-        /// Record timecode of the first frame: `00:00:00:00` (the default),
-        /// `01:00:00:00`, `10:00:00:00` or any other (deviation X7).
+        /// Record timecode of the first frame: `01:00:00:00` (the default),
+        /// `00:00:00:00`, `10:00:00:00` or any other.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start_tc: Option<TimeSpec>,
     },
@@ -1654,6 +1654,10 @@ pub enum Request {
         /// 0 is the middle.
         #[serde(default)]
         pan: Option<f64>,
+        /// The switch of the pan. Off keeps the pan, and the sound plays as
+        /// at 0. On brings the pan back.
+        #[serde(default)]
+        pan_on: Option<bool>,
         /// The equalizer: each field given replaces its own, and null takes
         /// it off with its settings. `{}` puts on a flat one.
         #[serde(
@@ -2621,6 +2625,15 @@ pub enum Request {
         /// Mirrored top to bottom.
         #[serde(default)]
         flip_vertical: Option<bool>,
+        /// True turns the transform off: the position, zoom, rotation,
+        /// anchor, pitch, yaw and flips stay and do nothing. False turns
+        /// it on again.
+        #[serde(default)]
+        transform_off: Option<bool>,
+        /// True turns the crop off: the crop and its softness stay and do
+        /// nothing. False turns it on again.
+        #[serde(default)]
+        crop_off: Option<bool>,
         /// What is cut off its left side, as a fraction of its width, from
         /// 0 to 1. When it meets `crop_right`, the picture does not show.
         #[serde(default)]
