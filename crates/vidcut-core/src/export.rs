@@ -795,6 +795,20 @@ pub fn builtin_presets() -> Vec<Preset> {
     };
     vec![
         preset(
+            "av1",
+            "AV1",
+            "MP4, 10-bit AV1, AAC: small files for YouTube and the web",
+            true,
+            av(
+                C::Mp4,
+                VideoSettings {
+                    bit_depth: Some(10),
+                    ..video(V::Av1, Some(30))
+                },
+                audio(A::Aac, Some(320)),
+            ),
+        ),
+        preset(
             "h264-master",
             "H.264 Master",
             "QuickTime, high-quality H.264, AAC 320 kb/s",
@@ -862,20 +876,6 @@ pub fn builtin_presets() -> Vec<Preset> {
                     ..sized(1080, 1920, 20)
                 },
                 audio(A::Aac, Some(256)),
-            ),
-        ),
-        preset(
-            "av1",
-            "AV1",
-            "MP4, 10-bit AV1, AAC: small files for YouTube and the web",
-            false,
-            av(
-                C::Mp4,
-                VideoSettings {
-                    bit_depth: Some(10),
-                    ..video(V::Av1, Some(30))
-                },
-                audio(A::Aac, Some(320)),
             ),
         ),
         preset(
