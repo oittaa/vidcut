@@ -43,7 +43,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Quick Export shows a progress bar dialog while it exports (p. 789).
   - The Deliver page has the render settings and the Render Queue (pp. 4103–4132).
   - In Resolve Studio 21.2, the Quick Export row is H.264 Master, HyperDeck, H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok, Presentations, Dropbox and Replay.
-  - YouTube has a menu of four sizes, 720p to 2160p (p. 4104).
+  - YouTube has a menu of four sizes, 720p to 2160p (p. 4105).
   - HyperDeck makes H.264 files for a Blackmagic HyperDeck (p. 4108). Presentations uploads to Blackmagic Cloud (p. 4106).
 - **vidcut:**
   - The Quick Export row is H.264 Master, H.265 Master, ProRes 422 HQ, YouTube 1080p, YouTube 2160p, Vimeo 1080p and TikTok.
