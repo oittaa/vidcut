@@ -306,8 +306,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - None. Resolve has one dark gray look.
 - **vidcut:**
   - vidcut has ten built-in themes. The user can add themes as TOML files.
-  - Native, the default, follows the light or dark mode and the accent color of the computer.
-  - Classic is a flat dark gray, as on the Cut page.
+  - Classic, the default, is a flat dark gray, as on the Cut page.
+  - Native follows the light or dark mode and the accent color of the computer.
   - Preferences or `preferences set appearance.theme=…` change the theme at once.
 - **Why:**
   - Users expect a desktop app to offer a few looks for long sessions.

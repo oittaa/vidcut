@@ -1,5 +1,5 @@
-# Classic: flat dark gray panels edge to edge, an orange accent and the
-# built-in font.
+# Classic, the default: flat dark gray panels edge to edge, an orange
+# accent and the built-in font.
 
 title = "Classic"
 light = false
