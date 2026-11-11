@@ -171,6 +171,11 @@ impl MotionPath {
         })
     }
 
+    pub fn held_at(&self, frame: f64) -> Option<Area> {
+        let (first, last) = self.span()?;
+        self.area_at(frame.clamp(first as f64, last as f64))
+    }
+
     pub fn span(&self) -> Option<(i64, i64)> {
         Some((self.samples.first()?.frame, self.samples.last()?.frame))
     }

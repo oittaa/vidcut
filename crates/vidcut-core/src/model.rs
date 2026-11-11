@@ -2424,6 +2424,16 @@ impl Generator {
     }
 }
 
+/// The motion path that a title follows: a path of another clip of the same
+/// timeline.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub struct Follow {
+    /// The clip that has the path, for example `c3`.
+    pub clip: String,
+    /// The id of the path on that clip, for example `p2`.
+    pub path: String,
+}
+
 /// A title: text drawn over the picture (decision D65). A field left out
 /// keeps the usual look.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -2514,6 +2524,15 @@ pub struct Title {
     /// out when the two lines go together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper: Option<TitleLine>,
+    /// The motion path that it follows (`motion.follow`). Each `position` of
+    /// the title then counts from the middle of the thing on that path:
+    /// `[0.5, 0.5]` puts the `anchor` on that middle. Before the first sample
+    /// of the path and after its last, the thing is where that sample has it.
+    /// Before and after the clip of the path, it is where the first or the
+    /// last frame of that clip has it. A scroll follows no path. Left out
+    /// when it follows none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follows: Option<Follow>,
 }
 
 /// One line of a lower third: `upper` or `lower`.
@@ -2861,6 +2880,7 @@ impl Title {
             opacity: None,
             opacity_keys: Vec::new(),
             upper: None,
+            follows: None,
         }
     }
 
@@ -3139,6 +3159,20 @@ impl Title {
         let [x, y] = Self::usual_position(self.kind, self.align());
         t.position.get_or_insert([x, y + Self::UPPER_DROP]);
         t
+    }
+
+    pub fn moved(&mut self, [dx, dy]: [f64; 2]) {
+        let [x, y] = self.place();
+        let [ux, uy] = Self::usual_position(self.kind, self.align());
+        self.position = Some([x + dx, y + dy]);
+        self.position_keys.iter_mut().for_each(|k| k.value += dx);
+        self.position_y.iter_mut().for_each(|v| *v += dy);
+        if let Some(upper) = self.upper.as_mut() {
+            let [x, y] = upper.position.unwrap_or([ux, uy + Self::UPPER_DROP]);
+            upper.position = Some([x + dx, y + dy]);
+            upper.position_keys.iter_mut().for_each(|k| k.value += dx);
+            upper.position_y.iter_mut().for_each(|v| *v += dy);
+        }
     }
 
     pub fn each_line(&mut self, mut change: impl FnMut(&mut Title)) {
@@ -6706,9 +6740,10 @@ impl Hash for Title {
             rotation,
             opacity,
             upper,
+            follows,
             ..
         } = self;
-        (kind, align, anchor, text, style).hash(h);
+        (kind, align, anchor, text, style, follows).hash(h);
         pair_bits(*position).hash(h);
         (
             floats_bits(*zoom),

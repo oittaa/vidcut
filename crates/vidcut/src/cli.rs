@@ -99,6 +99,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("motion.remove", &["clip"]),
     ("motion.find", &["clips"]),
     ("motion.track", &["clip", "effect"]),
+    ("motion.follow", &["clip"]),
     ("edit.append", &["media"]),
     ("edit.smart_insert", &["media"]),
     ("edit.insert", &["media"]),
@@ -482,6 +483,11 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "motion.track",
         "vidcut motion track c3 0 --download\n  vidcut motion track c3 1 --at 12s --way forward",
+    ),
+    (
+        "motion.follow",
+        "vidcut motion follow c5 --of c3 --path p1\n  vidcut motion follow c5 --of c3 --path p1 --keep --at 12s\n  \
+         vidcut motion follow c5",
     ),
     (
         "export.start",

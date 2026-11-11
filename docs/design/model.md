@@ -554,6 +554,17 @@ Writing:
 - `motion::problem` is the check that the requests, `ops::paste` and `validate::violations` share.
 - `timeline.get` names the paths of a clip in `motion`.
 - The area of an effect can follow a path ([pictures](#pictures)). `ops::motion::violation` refuses an area that follows a path that the clip does not have.
+- A title can follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)). `Title.follows` holds a `Follow`: the id of that clip and the id of the path.
+  - `ops::motion::follow` sets it for `motion.follow`. With `keep`, it moves the positions of the title by the difference of the two places (`Title::moved`).
+  - `motion.remove` and `motion.find` with `replace` refuse a path that a title follows (`led`).
+  - `ops::motion::settle` runs after each request:
+    - A title whose clip or path is gone follows no path, with a warning.
+    - The clip of the path can play on no frame of the title. Another clip there can have the same samples under that path id, from the same media. The title then follows that clip.
+      - Why: a split gives the second part a new id, and a paste gives each clip a new id.
+    - A title inside a compound clip follows no path, with a warning. Why: `Project::clip` finds only the clips of the timeline.
+  - `ops::motion::follow_violation` is the check of `validate::violations`.
+  - `otio::titles::read` gives a title no `follows`. Why: an import can give the clips new ids.
+  - The [export design](export.md#titles) tells how the plan places such a title.
 - An OTIO file keeps the paths of a clip in the `vidcut` metadata of its video item, on the same source frames.
   - An import reads them back only when `motion::problem` accepts them (`our_motion`).
   - An import at another frame rate moves the samples to the project's rate (`motion::rescale`). Two samples that land on one frame leave the first.

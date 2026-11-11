@@ -273,6 +273,7 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         opacity: kept(&d.title_opacity, stored.opacity, "title opacity")?,
         opacity_keys: stored.opacity_keys.clone(),
         upper: (lines && apart).then_some(upper),
+        follows: stored.follows.clone(),
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
 }
