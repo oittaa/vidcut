@@ -154,7 +154,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do this.
     - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
-    - vidcut: a right-click on a keyframe sets Linear, Ease In, Ease Out or Ease In and Out, the curves of the volume line (X74). On a selected keyframe, it sets the ease of all the selected keyframes ([X158](deviations.md#x158-an-ease-on-all-selected-keyframes-comes-from-a-right-click-or-the-bar)). The anchor point's keyframes take no ease (D92).
+    - The header has the buttons Linear, Ease In, Ease In and Out, and Ease Out (pp. 1262–1263). Each sets its ease on all the selected keyframes.
+      - A button is off when no selected keyframe takes its ease.
+      - The eases are the curves of the volume line (X74). The anchor point's keyframes take no ease (D92).
+    - vidcut: a right-click on a keyframe also sets the ease. On a selected keyframe, it sets the ease of all the selected keyframes.
+    - vidcut: with two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
       - In a selection, Ease In removes the Out handle of a first keyframe, and it gets no In handle. Ease Out on a last keyframe does the opposite (measured in Resolve Studio 21.2).
     - In Resolve Studio 21.1.2, a double-click on a row adds nothing, inside or outside the clip.
     - The Add Keyframes tool of its Curve Editor adds a keyframe with a click, inside the clip or before its start (measured).

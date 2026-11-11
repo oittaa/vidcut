@@ -1877,19 +1877,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The effect has no public rules. A spectral gate is the usual way to lower steady noise and it runs in real time.
   - The default effect lowered the noise by 0.4 dB and the quiet lines by up to 6.0 dB (spec). Meeting recordings need the opposite.
 
-## X158. An ease on all selected keyframes comes from a right-click or the bar
-
-- **Resolve:**
-  - The title bar of the Curve Editor has four buttons: Linear, Ease In, Ease In and Out, and Ease Out. They change all the selected keyframes (pp. 1262–1263).
-  - A right-click on a keyframe in the Keyframe Editor opens no menu.
-- **vidcut:**
-  - A right-click on a selected keyframe keeps the selection. The ease goes on all the selected keyframes.
-  - A right-click on another keyframe selects that keyframe alone.
-  - With two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
-- **Why:**
-  - The ease menu is already on the keyframe ([spec §2](cut-page-spec.md#2-layout-pp-636637)). A second place in a title bar adds nothing.
-  - A selection across several values takes one ease in one undo step.
-
 ## X159. Snapping also goes to other keyframes
 
 - **Resolve:**
