@@ -46,7 +46,7 @@ impl Default for Format {
             height: 1080,
             rate: "30".into(),
             drop_frame: false,
-            start: "00:00:00:00".into(),
+            start: "01:00:00:00".into(),
             colors: TimelineColors::Auto,
             auto: None,
             retime: ProjectRetime::Auto,
@@ -183,8 +183,8 @@ impl Format {
         matches!(TimeSpec::parse(t), Ok(TimeSpec::Timecode(..))).then_some(t)
     }
 
-    fn starts_at_zero(&self) -> bool {
-        self.start().and_then(timecode_fields) == Some((0, 0, 0, 0))
+    fn starts_at_default(&self) -> bool {
+        self.start().and_then(timecode_fields) == Some((1, 0, 0, 0))
     }
 
     fn edit_start(&mut self, ui: &mut egui::Ui) {
@@ -619,7 +619,7 @@ impl Workspace {
                         };
                         let start = match new.from {
                             Some(_) => new.choose,
-                            None => !new.format.starts_at_zero(),
+                            None => !new.format.starts_at_default(),
                         };
                         if start {
                             format["start_tc"] = json!(new.format.start());
