@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use vidcut_core::keyframes::{PictureValue, ease_of, eases};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
 use vidcut_core::model::{
-    Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine,
-    TitlePart,
+    Clip, Ease, Follow, LowerThirdLine, MotionPath, Project, Title, TitleAlign, TitleAnchor,
+    TitleCase, TitleKind, TitleLine, TitlePart,
 };
 
 use super::export::Ask;
@@ -188,6 +188,58 @@ fn unstyled(text: &str, (a, b): (usize, usize)) -> String {
 
 fn sampled_at(c: &Clip, t: &Title, at: i64) -> Title {
     t.sampled(c.content_at(at) as f64)
+}
+
+fn leads(p: &Project, c: &Clip, now: Option<&Follow>) -> Vec<(Follow, String)> {
+    let meets = |x: &Clip| x.start < c.end() && c.start < x.end();
+    let led = |x: &Clip| now.is_some_and(|f| f.clip == x.id);
+    let has = |x: &&Clip| {
+        vidcut_core::ops::motion::takes(x) && !x.motion.is_empty() && (meets(x) || led(x))
+    };
+    let clips: Vec<&Clip> = p.tracks.iter().flat_map(|t| &t.clips).filter(has).collect();
+    let several = clips.len() > 1;
+    let entry = |x: &Clip, m: &MotionPath| {
+        let follow = Follow {
+            clip: x.id.clone(),
+            path: m.id.clone(),
+        };
+        let name = m.name.as_deref().unwrap_or(&m.id);
+        if several {
+            (follow, format!("{name} ({})", x.id))
+        } else {
+            (follow, name.to_string())
+        }
+    };
+    let paths = clips.iter().flat_map(|x| x.motion.iter().map(|m| (*x, m)));
+    paths.map(|(x, m)| entry(x, m)).collect()
+}
+
+fn follow_row(
+    ui: &mut egui::Ui,
+    leads: &[(Follow, String)],
+    now: Option<&Follow>,
+) -> Option<Option<Follow>> {
+    let mut picked = None;
+    let shown = leads.iter().find(|(f, _)| Some(f) == now);
+    ui.label("Follow");
+    ui.add_enabled_ui(!leads.is_empty() || now.is_some(), |ui| {
+        egui::ComboBox::from_id_salt("title-follow")
+            .selected_text(shown.map_or("None", |(_, label)| label.as_str()))
+            .width(240.0)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(now.is_none(), "None").clicked() && now.is_some() {
+                    picked = Some(None);
+                }
+                for (f, label) in leads {
+                    let on = Some(f) == now;
+                    if ui.selectable_label(on, label.as_str()).clicked() && !on {
+                        picked = Some(Some(f.clone()));
+                    }
+                }
+            });
+    });
+    ui.end_row();
+    picked
 }
 
 fn key_eases(c: &Clip, t: &Title, v: PictureValue, at: i64) -> (Vec<Ease>, Option<Ease>) {
@@ -654,6 +706,9 @@ impl Workspace {
         let across_hint = format!("{}%", percent(Some(usual[0])));
         let down_hint = format!("{}%", percent(Some(usual[1])));
         let upper_hint = format!("{}%", percent(Some(usual[1] + Title::UPPER_DROP)));
+        let following = found.and_then(|(_, _, t)| t.follows.as_ref());
+        let paths = found.map_or_else(Vec::new, |(_, clip, _)| leads(&p, clip, following));
+        let mut follow = None;
         let mut clicks = Vec::new();
         egui::Grid::new("title-style-fields").show(ui, |ui| {
             changed |= d
@@ -732,6 +787,9 @@ impl Workspace {
             } else {
                 changed |= line_rows(ui, &mut d.line, None);
             }
+            if !scroll {
+                follow = follow_row(ui, &paths, following);
+            }
             changed |= row(ui, "Title opacity", &mut d.title_opacity, "100%");
             keys(ui, PictureValue::Opacity, None);
             ui.end_row();
@@ -746,7 +804,7 @@ impl Workspace {
         }
         d.dirty |= changed;
         if d.dirty
-            && self.inspector_commits()
+            && (self.inspector_commits() || follow.is_some())
             && let Some(s) = stored.as_ref()
         {
             match title_of(&d, s) {
@@ -765,6 +823,14 @@ impl Workspace {
                 }
                 Err(e) => d.error = e,
             }
+        }
+        if let Some(to) = follow.filter(|_| !d.dirty) {
+            let mut params = json!({ "clip": d.clip, "keep": true, "at": position });
+            if let Some(f) = to {
+                params["of"] = json!(f.clip);
+                params["path"] = json!(f.path);
+            }
+            self.send("motion.follow", params);
         }
         ui.separator();
         if changed && let Some(s) = &stored {
