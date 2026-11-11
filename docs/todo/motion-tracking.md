@@ -36,12 +36,12 @@ In this file, a path is never a track of the timeline.
 
 **In the code:**
 
-- A clip holds motion paths, and `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read them.
+- A clip holds motion paths, and `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read them ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
 - Transform, Crop and the values of the effects have keyframes ([keyframes.md](keyframes.md)).
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
-- An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path.
-- `motion.find` finds the faces and the text of a clip with detector models.
-- `motion.track` follows the thing under the area of an effect.
+- An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path ([deviation X166](../deviations.md#x166-an-effect-has-an-area)).
+- `motion.find` finds the faces and the text of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+- `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
 - `motion.follow` makes a title follow a path of another clip.
 - No request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.

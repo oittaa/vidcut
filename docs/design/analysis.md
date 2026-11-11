@@ -53,7 +53,7 @@ flowchart TD
 
 ## Subjects
 
-- `motion.find` gives each thing of one `Subject` in a clip a motion path ([model](model.md#motion-paths)).
+- `motion.find` gives each thing of one `Subject` in a clip a motion path ([model](model.md#motion-paths), [deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
   - `Subject::Face` is a face. `Subject::Text` is a line or a block of text. `Subject::ALL` lists the subjects.
   - The subjects differ in two places only: `subjects::Net` holds the model of each, and `Join::of` holds the rules of its paths.
 - `subjects::find` in vidcut-av measures. It reads only the range that the clip shows:
@@ -114,7 +114,7 @@ flowchart TD
 
 ## Tracks
 
-- `motion.track` follows the thing under the area of an effect.
+- `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
 - `ops::motion::start` gives the box to follow: the bounds of the area on the first frame of the track (`Area::within`, `Area::bounds`).
 - `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:
   - It reads the pictures that `subjects::find` reads: the first decoded frame at or after each time of the `Look`.

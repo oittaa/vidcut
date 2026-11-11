@@ -2523,3 +2523,105 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The mode of one picture always mixes with the tracks below.
 - **Why:**
   - A move of 1 pixel must not change a black frame to the correct picture. This behavior of Resolve is a fault.
+
+## X165. A clip has motion paths
+
+- **Resolve:**
+  - The Cut page makes no track of a thing in the picture. Its chapters name the Tracker palette only under Stabilization (pp. 738, 770).
+  - The Tracker palette of the Color page moves a window or an effect with a feature of the frame (pp. 3308, 3494).
+  - Its tracking data is apart from the values of the window, and those values can have keyframes (p. 3309).
+  - On a frame with no tracking data, the window stays where the first or the last tracked frame put it (p. 3310).
+    - For a subject that disappears, the manual tells the user to fade the correction out with keyframes (p. 3310).
+  - Magic Mask takes a stroke out of the tracking at the frame where its subject is fully off screen (p. 3305).
+  - The scripting API of Resolve Studio 21.2 has no call that makes or reads a track.
+- **vidcut:**
+  - A clip of footage, a still or an image sequence has motion paths. A motion path tells where one area of the source picture is on each source frame.
+  - `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths. A script gives the samples.
+  - A path lasts from its first sample to its last. Before and after them it has no area.
+  - The area of an effect can follow a path ([X166](#x166-an-effect-has-an-area)). `motion.find` makes a path for each face or each block of text ([X167](#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+  - The Inspector has a Motion section for a clip that takes paths, above the effects. Its first row has a Subject menu, Find and Blur.
+- **Why:**
+  - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
+  - The path is apart from the keyframes, as the tracking data of the Color page is. Thus a new path keeps the keyframes that the user set.
+
+## X166. An effect has an area
+
+- **Resolve:**
+  - A search of the Cut page chapters (pp. 635–791) finds no window and no mask for an effect of a clip.
+  - The Color page has Power Windows: Circular, Linear, Polygonal, Curve and Gradient (p. 3308).
+  - A Polygonal window starts as a rectangle with four corner points. A click on it adds a control point, up to 128 (p. 3272).
+  - A key adds a node with a window (p. 3268). A Circular, Linear or Polygonal window starts in the middle of the picture, with its controls in the Viewer (21.2).
+  - A Curve window starts with no shape. Each click in the Viewer adds a point, and a click on the first point closes the shape (pp. 3273–3274).
+  - The blur of the node is in the Blur palette. It shows only inside the windows of the node (21.2).
+  - The Viewer shows the outline of a window only while the Window palette or the Tracker palette is open (21.2).
+    - With the Blur palette open, it shows no outline. The Cut page shows no outline, and nothing there marks a clip with a window.
+- **vidcut:**
+  - An effect of a clip can have an area: an ellipse, a box or a polygon. The effect then shows only inside it. With `invert`, it shows only outside it.
+  - The area stays on the content of the picture through the transform, the crop, the flips, a Dynamic Zoom and a compound clip around it.
+  - With `follows`, the area follows a motion path of the clip ([X165](#x165-a-clip-has-motion-paths)).
+    - `follows` can also name a subject, as `face`. The effect then works in the area of each path of that subject.
+    - With `invert`, the effect works outside each area. While no path lasts, it then works on the whole picture.
+    - `motion.remove` refuses a path that an area follows by its id. A path that an area follows by its subject can go.
+  - Each effect in the Inspector has Area rows: Off, Ellipse, Box or Polygon, then Edit Shape, Track, Invert Area, Area Softness and Follow.
+    - Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
+  - The viewer shows a thin outline of each area of the selected clip at the playhead.
+    - A click on an outline, or inside it, shows the handles of that area. A click outside the areas hides the handles.
+    - With no clip selected, the viewer shows no outline. Thus it shows the picture of an export.
+  - Edit Shape shows the handles of the area in the viewer.
+    - A drag inside the area moves it. On an ellipse or a box, a corner changes its size, and the top handle turns it.
+    - On a polygon, Alt and a click also removes a point. Why: a trackpad has no middle button.
+  - The Tools row under the viewer has Blur ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).
+    - The right-click menu of a clip has Blur. It shows the Tools row with Blur on, for that clip.
+    - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
+    - With Free Shape, each click adds a point. A click on the first point, or a double-click, closes the shape. Escape drops it.
+    - A drag on the outline of another area shows its handles and moves it.
+  - The area has no keyframes ([todo](todo/motion-tracking.md)).
+- **Why:**
+  - The user draws the area on the thing to hide, and sees the blur at once. Resolve needs a node, the Window palette and the Blur palette for that.
+  - The outline of an area tells where an effect works, with no tool open.
+  - A blur over a face or a number plate must cover only that part of the picture.
+  - A blur must not stay on the picture after its subject is gone. Thus a path ends, as the tracking of Magic Mask does, and not as a tracked window.
+  - One effect can cover each face of a clip. The user then changes one blur, not one for each face.
+  - One rule gives each of the six effects an area.
+
+## X167. vidcut finds the faces and the text of a clip
+
+- **Resolve:**
+  - The Close Up edit of the Cut page does a face detection, and puts a face that it finds in the frame (p. 699).
+  - On the Media page, Analyze Clips for People finds faces to make People keywords (p. 418).
+  - Face Refinement is a Resolve FX of Resolve Studio. Detect Faces in Frame draws a box on each face (p. 3615).
+    - The user chooses one face. The tracking controls of the effect then follow it through the clip (pp. 3615–3616).
+  - The manual names no way to make tracking data for each face of a clip on the Cut page ([X165](#x165-a-clip-has-motion-paths)).
+  - A search of the whole manual finds no tool that finds text in a picture.
+    - A number plate is only an example for the Planar Tracker node of the Fusion page, where the user sets the track (p. 2820).
+- **vidcut:**
+  - `motion.find` finds the things of one subject on the source frames that a clip shows. The subjects are `face` and `text`.
+  - Each thing gets a motion path of its own.
+  - A shot change inside a clip ends each path. For a file with another frame rate than the project, `motion.find` and Detect Scene Cuts can find different shot changes.
+  - The text model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
+  - While the Inspector is open, the viewer shows a box with its name on each path of the selected clip.
+  - After a Find, the status line tells how many things it found.
+- **Why:**
+  - A blur must cover each face of a clip, and the user must not draw each one.
+  - Text is the next thing that people hide: names, addresses, documents and screens.
+  - One request gives the paths. The area of an effect then follows a path ([X166](#x166-an-effect-has-an-area)).
+
+## X168. The area of an effect follows a thing
+
+- **Resolve:**
+  - The Cut page has no tracker for an effect of a clip. The Tracker palette of the Color page follows a thing with a window (p. 3308).
+  - One click on Track Forward tracks from the playhead. The track holds Pan, Tilt, Zoom, Rotate and Perspective 3D (pp. 3312–3313).
+  - The tracker does not stop at a shot change. In a clip with a cut, it ran 7 frames into the next shot, and then stopped (21.2).
+  - After the track stops, the window stays at its last place for the rest of the clip (21.2).
+  - One button tracks forward and reverse from the playhead. A second track from a later frame keeps the track before that frame (21.2).
+- **vidcut:**
+  - `motion.track` follows the thing under the area of an effect, backward and forward from one frame.
+  - Track follows the thing under an area. It is in the Area rows of each effect, and under the viewer while the handles of an area show.
+    - A second Track keeps the track before the playhead, and goes forward from the playhead.
+    - On the first frame of a track, Track goes backward, and keeps the track after that frame.
+  - The track stops at a shot change. Where the track ends, the effect ends.
+  - The track follows the place and the size of the thing. It does not follow a turn or a change of perspective.
+- **Why:**
+  - A blur must not go on a thing of the next shot. It must not stay on the picture after its thing is gone ([X166](#x166-an-effect-has-an-area)).
+  - The user sees where a track ends, goes to that frame, and tracks again from there.
+  - The model gives a box, and a box has no turn.
