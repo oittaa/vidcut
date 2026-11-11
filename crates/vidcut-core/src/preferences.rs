@@ -506,10 +506,10 @@ pub struct Transcripts {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Appearance {
-    /// The theme, by name: a built-in one (`native`, the default, light or
-    /// dark as the computer is set, `omarchy`, which follows the current
-    /// Omarchy theme, `starship`, `neon`, `cybertruck`, `midnight`, `studio`,
-    /// `native-dark`, `native-light`, `classic`) or a theme file's in the
+    /// The theme, by name: a built-in one (`classic`, the default, `native`,
+    /// light or dark as the computer is set, `omarchy`, which follows the
+    /// current Omarchy theme, `starship`, `neon`, `cybertruck`, `midnight`,
+    /// `studio`, `native-dark`, `native-light`) or a theme file's in the
     /// themes folder. A path to a `.toml` file copies it into that folder
     /// and uses it.
     pub theme: String,
@@ -518,7 +518,7 @@ pub struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
-            theme: "native".into(),
+            theme: "classic".into(),
         }
     }
 }
