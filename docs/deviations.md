@@ -2613,8 +2613,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - One click on Track Forward tracks from the playhead. The track holds Pan, Tilt, Zoom, Rotate and Perspective 3D (pp. 3312–3313).
   - The tracker does not stop at a shot change. In a clip with a cut, it ran 7 frames into the next shot, and then stopped (21.2).
   - After the track stops, the window stays at its last place for the rest of the clip (21.2).
+  - One button tracks forward and reverse from the playhead. A second track from a later frame keeps the track before that frame (21.2).
 - **vidcut:**
   - `motion.track` follows the thing under the area of an effect, backward and forward from one frame.
+  - With the Blur tool on, Track follows the thing under the area whose handles show.
+    - A second Track keeps the track before the playhead, and goes forward from the playhead.
   - The track stops at a shot change. Where the track ends, the effect ends.
   - The track follows the place and the size of the thing. It does not follow a turn or a change of perspective.
 - **Why:**

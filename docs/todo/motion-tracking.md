@@ -97,7 +97,6 @@ In this file, a path is never a track of the timeline.
   - Text that comes into the picture has no blur on its first frames, as a face has not.
   - The detector takes most of the time of a text find. Try the model on the GPU.
 - **The track of an area, what is left:**
-  - A Track button in the viewer, for the area whose handles show.
   - Measure `tracking::LOST` on a clip where the thing leaves the picture, or goes behind another thing. No test clip has one.
   - The way backward keeps its pictures in memory. Read a long shot in parts.
   - A track follows no turn and no change of perspective.

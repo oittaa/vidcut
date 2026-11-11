@@ -847,6 +847,13 @@ impl Workspace {
                 effect.is_some_and(|e| e.area.is_some())
             });
         if ui
+            .add_enabled(chosen.is_some(), egui::Button::new("Track"))
+            .clicked()
+            && let Some(((id, _), n)) = chosen
+        {
+            self.track(id, n);
+        }
+        if ui
             .add_enabled(chosen.is_some(), egui::Button::new("Delete"))
             .clicked()
             && let Some(((id, _), n)) = chosen
