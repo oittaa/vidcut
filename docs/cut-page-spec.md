@@ -1312,6 +1312,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Add Subtitle Track adds a subtitle track above the video tracks. It is in Timeline Actions, and in the right-click menu of a track header.
   - The names of the tracks are Subtitle 1, Subtitle 2, and so on.
   - A double-click on the name renames the track. Exports use the name.
+    - vidcut: Enter or a click elsewhere keeps the new name. Escape drops it.
+  - The Track panel of the Inspector sets the style of the track (p. 1237).
+    - vidcut: Name and Style… in the right-click menu of the name opens it as the Subtitle Track section.
+    - The section has the name, the language and the style.
   - A subtitle track locks like any track.
   - One subtitle track shows at a time. When one shows, the others are hidden (p. 1228).
   - Minimize Subtitle Track (Timeline Options, p. 645) makes them shorter.
@@ -1428,7 +1432,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The usual anchor is the middle of the block.
     - An IMSC1 file has a region as large as the block, centered on the position, with `tts:textAlign` start.
     - An SRT or WebVTT file has no alignment and no position.
-  - Details: D61; deviation X51.
+  - Details: D61.
 - **Style of one cue** (p. 1238):
   - A cue stores its own style when you set one.
   - A field left out of that style keeps the track's style.
@@ -3441,7 +3445,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A duration of less than one frame is refused.
   - A source Out past the end of the media is refused.
   - `marks.set` and `media.marks.set` take the same values as `duration`.
-- **D61. Burned-in subtitles** (§8.12; p. 1247; deviations X45, X51).
+- **D61. Burned-in subtitles** (§8.12; p. 1247; deviation X45).
   - The manual does not say how a track looks burned in before it has a style.
   - The usual look is Resolve's default, measured in Resolve Studio 21.1.2:
     - White Open Sans Regular at Size 58: 58/1080 of the picture height.

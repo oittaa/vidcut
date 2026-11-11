@@ -539,16 +539,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Parakeet Ultra is the default because it gives real word times.
   - Jobs keeps long work beside the editing, as for exports (X3).
 
-## X51. A double-click on a subtitle track's name opens its style
-
-- **Resolve:**
-  - The user sets the style of a track in the Track panel of the Inspector (p. 1237).
-  - A double-click on the name renames the track (spec §8.12).
-- **vidcut:**
-  - A double-click on the name of a subtitle track, or Name and Style… in its right-click menu, opens the Subtitle Track section in the Inspector.
-  - The section has the name, the language and the style of the track.
-- **Why:** no reason is recorded.
-
 ## X52. Titles come from a Titles tab and are edited in the Inspector
 
 - **Resolve:**
