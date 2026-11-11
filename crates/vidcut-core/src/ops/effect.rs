@@ -213,6 +213,9 @@ fn applied(e: &Effect, change: &EffectChange) -> Result<Effect> {
     taken(&mut left.render_cache, &mut next.render_cache);
     if let Some(area) = left.area.take() {
         next.area = area.map(|change| change.on(next.area.take().unwrap_or_default()));
+        if next.area.is_none() {
+            next.keys.retain(|k| !k.value.of_area());
+        }
     }
     match &mut next.kind {
         EffectKind::GaussianBlur(b) => gaussian_values(&mut left, b)?,
@@ -240,7 +243,7 @@ fn named_values(e: &Effect, change: &EffectChange) -> Result<Vec<EffectValue>> {
     let probe = applied(&probe, change)?;
     Ok(values
         .into_iter()
-        .filter(|v| !probe.plain(*v).is_nan())
+        .filter(|v| probe.takes(*v) && !probe.plain(*v).is_nan())
         .collect())
 }
 
@@ -294,20 +297,33 @@ pub fn set(
     Ok(())
 }
 
-pub fn key(p: &mut Project, id: &str, n: usize, at: i64, ease: Option<Ease>) -> Result<Value> {
+pub fn key(
+    p: &mut Project,
+    id: &str,
+    n: usize,
+    at: i64,
+    ease: Option<Ease>,
+    area: bool,
+) -> Result<Value> {
     let frame = source_frame(p, id, at)?;
     let e = &mut effects_of(p, id, n)?[n];
+    if area && e.area.is_none() {
+        return Err(Error::invalid(format!(
+            "effect {n} of {id} has no area: first give it one (effects.set)"
+        )));
+    }
     let keyed = match ease {
-        Some(ease) if e.has_key_at(frame) => {
-            e.ease_keys(frame, ease);
+        Some(ease) if e.has_key_at(frame, area) => {
+            e.ease_keys(frame, ease, area);
             true
         }
         Some(_) => {
+            let what = if area { "the area of effect" } else { "effect" };
             return Err(Error::invalid(format!(
-                "effect {n} of {id} has no keyframes on source frame {frame}"
+                "{what} {n} of {id} has no keyframes on source frame {frame}"
             )));
         }
-        None => e.toggle_keys(frame),
+        None => e.toggle_keys(frame, area),
     };
     *e = effect_checked(e)?;
     Ok(json!({ "clip": id, "effect": n, "frame": frame, "keyed": keyed }))
@@ -318,6 +334,7 @@ pub fn reset(p: &mut Project, id: &str, n: usize) -> Result<()> {
     if e.on {
         *e = Effect {
             render_cache: e.render_cache,
+            keys: e.area_keys().cloned().collect(),
             area: e.area.take(),
             ..e.kind().made()
         };

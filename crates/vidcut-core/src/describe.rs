@@ -303,6 +303,11 @@ pub fn describe_at(
         "picture.set" => d.picture_set(),
         "effects.add" => format!("Add {} to {}", d.effect_name(), d.clips("clips")),
         "effects.set" => format!("Change effect {} of {}", d.effect(), d.clips("clip")),
+        "effects.key" if d.flag("area") => format!(
+            "Key the area of effect {} of {}",
+            d.effect(),
+            d.clips("clip")
+        ),
         "effects.key" => format!("Key effect {} of {}", d.effect(), d.clips("clip")),
         "effects.reset" => format!("Reset effect {} of {}", d.effect(), d.clips("clip")),
         "effects.remove" => format!("Remove effect {} of {}", d.effect(), d.clips("clip")),

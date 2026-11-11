@@ -367,6 +367,7 @@ The bar and the Jobs button:
 - The boxes of a Dynamic Zoom are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
 - `Workspace::area_controls` draws the handles of the area of one effect (`AreaShown`), before `Workspace::picture_controls`.
   - `AreaShown::grip` gives what a press holds (`AreaHold`). `area_moved` gives the area of a drag, and `Workspace::land_area` sends one `effects.set`.
+  - The handles show the area at the playhead (`Effect::adopted`). An effect with keyframes sends `at`, as the Inspector does.
   - `AreaShown::cursor` gives the pointer of a hold. `paint_area` puts a ring on the handle under the pointer.
   - On a polygon, `Workspace::area_points` adds a point on a click on a side. It removes a point on a middle-click, or on a click with Alt.
 - The Blur tool (`Workspace::blur_tool`, `Grab::blurring`) draws a new area in the viewer (`Workspace::blur_controls`).
@@ -405,6 +406,7 @@ The bar and the Jobs button:
   - The section shows the values of the playhead's frame (`Effect::adopted`).
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.
   - The Keyframe button and its ease menu send `effects.key`. Previous and Next seek (`step_effect`).
+    - The button and the seeks leave out the keyframes of the area (`effect_marks`, `effect_key_times`). Why: `effects.key` without `area` does not change them.
   - Each effect has the same Area rows (`area_rows`). Each change is one `effects.set` with `area`. Off sends a null `area`.
     - The numbers of the area are knobs (`AreaKnob`), so a drag previews and lands as the other values do.
     - The Follow menu lists None, one entry for each `Subject` (`Subject::ALL`, `all_of`) and the motion paths of the clip (`follow_row`, `PathRow`).

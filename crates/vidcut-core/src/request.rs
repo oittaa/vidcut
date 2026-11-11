@@ -2689,7 +2689,10 @@ pub enum Request {
     /// an error.
     ///
     /// A value with keyframes takes a keyframe on `at` and keeps its plain
-    /// value. Without `at`, or a playhead, that is an error.
+    /// value. Without `at`, or a playhead, that is an error. The `center`,
+    /// the `size`, the `rotation` and the `softness` of the `area` do the
+    /// same: `center` names both of its values, and `size` both. A null
+    /// `area` also removes the keyframes of the area, and needs no `at`.
     #[serde(rename = "effects.set")]
     EffectsSet {
         clip: ClipRef,
@@ -2703,6 +2706,11 @@ pub enum Request {
     /// it removes each keyframe of the effect on that frame. Without one, it
     /// puts a keyframe on `at` on each value of the effect. With `ease`, it
     /// only gives the keyframes on `at` that ease. `effect` counts from 0.
+    ///
+    /// Without `area`, it works on each value except those of the area.
+    /// With `area`, it works only on the values of the area: its center,
+    /// its size, its rotation and its softness. The points of a polygon take
+    /// no keyframes.
     #[serde(rename = "effects.key")]
     EffectsKey {
         clip: ClipRef,
@@ -2710,10 +2718,14 @@ pub enum Request {
         at: TimeSpec,
         #[serde(default)]
         ease: Option<Ease>,
+        /// Work on the keyframes of the area of the effect. An effect with
+        /// no area is an error.
+        #[serde(default)]
+        area: bool,
     },
     /// Put one effect of a clip back at its usual values. It stays on, and
-    /// keeps its `render_cache` and its `area`. An effect that is off does
-    /// not change.
+    /// keeps its `render_cache`, its `area` and the keyframes of the area.
+    /// An effect that is off does not change.
     /// `effect` counts from 0.
     #[serde(rename = "effects.reset")]
     EffectsReset { clip: ClipRef, effect: usize },
@@ -2845,6 +2857,10 @@ pub enum Request {
     /// A path that an earlier track made for this area gets the new samples,
     /// and keeps its id and its name. Another path stays as it is, and the
     /// area gets a new path.
+    ///
+    /// The track puts the center, the size and the rotation of the area
+    /// back at their usual values. An area with keyframes on one of them is
+    /// an error: first remove those keyframes (`keyframes.remove`).
     ///
     /// Returns the path: its `id`, its `name`, the `count` of its samples
     /// and their source frames `first` and `last`. It also gives the
@@ -4090,7 +4106,9 @@ pub enum KeyParam {
     CenterY,
     /// A value of an effect, as `{"effect": 0, "value": "strength"}`. Its
     /// numbers are those of `effects.set`. One number of a color or a
-    /// position has a value of its own, for example `color_red`.
+    /// position has a value of its own, for example `color_red`. The area
+    /// of an effect has `area_center_x`, `area_center_y`, `area_width`,
+    /// `area_height`, `area_rotation` and `area_softness`.
     /// `keyframes.list` names it in the same form.
     #[serde(untagged)]
     Effect(EffectParam),
@@ -4791,8 +4809,8 @@ pub struct EffectChange {
     /// `{"shape": "box", "center": [0.3, 0.4], "size": [0.2, 0.2]}`, or of
     /// the area of a motion path, as `{"follows": "p1"}`. Each field given
     /// replaces its own, and `{}` gives an effect with no area the ellipse
-    /// that touches the four sides of the picture. Null takes the area off,
-    /// and the effect works on the whole picture again.
+    /// that touches the four sides of the picture. Null takes the area off
+    /// with its keyframes, and the effect works on the whole picture again.
     #[serde(
         default,
         deserialize_with = "given",
@@ -5073,7 +5091,9 @@ pub struct EffectChange {
 /// the rest stay as they are. The area is a part of a base box: the whole
 /// source picture, or with `follows` the area of a motion path at each
 /// frame. It stays on the content of the picture through its transform, its
-/// crop and its flips.
+/// crop and its flips. A `center`, a `size`, a `rotation` or a `softness`
+/// that has keyframes (`effects.key` with `area`) takes a keyframe on the
+/// `at` of `effects.set`. The other fields take no keyframes.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AreaChange {

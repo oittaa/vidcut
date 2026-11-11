@@ -1,7 +1,7 @@
 use crate::keyframes::{ease_mark, hold, reshape, retimed, scaled_by, split_inside, value_at};
 use crate::model::{
-    Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FilmGrain, GaussianBlur, Glow,
-    Keyframe, MosaicBlur, Sharpen, Vignette,
+    Clip, Ease, Effect, EffectArea, EffectKeys, EffectKind, EffectValue, FilmGrain, GaussianBlur,
+    Glow, Keyframe, MosaicBlur, Sharpen, Vignette,
 };
 
 type Range = (f64, f64);
@@ -244,8 +244,53 @@ fn slot(kind: &mut EffectKind, value: EffectValue) -> Slot<'_> {
     }
 }
 
+fn area_slot(a: &mut EffectArea, value: EffectValue) -> Slot<'_> {
+    use EffectValue as V;
+    Some(match value {
+        V::AreaCenterX => (
+            &mut a.center.get_or_insert(EffectArea::MIDDLE)[0],
+            EffectArea::PLACES,
+        ),
+        V::AreaCenterY => (
+            &mut a.center.get_or_insert(EffectArea::MIDDLE)[1],
+            EffectArea::PLACES,
+        ),
+        V::AreaWidth => (
+            &mut a.size.get_or_insert(EffectArea::WHOLE)[0],
+            EffectArea::SIZES,
+        ),
+        V::AreaHeight => (
+            &mut a.size.get_or_insert(EffectArea::WHOLE)[1],
+            EffectArea::SIZES,
+        ),
+        V::AreaRotation => (a.rotation.get_or_insert(0.0), EffectArea::TURNS),
+        V::AreaSoftness => (a.softness.get_or_insert(0.0), EffectArea::SHARES),
+        _ => return None,
+    })
+}
+
+fn area_read(a: &EffectArea, value: EffectValue) -> Option<(f64, Range)> {
+    let mut numbers = EffectArea {
+        center: a.center,
+        size: a.size,
+        rotation: a.rotation,
+        softness: a.softness,
+        ..EffectArea::default()
+    };
+    area_slot(&mut numbers, value).map(|(n, range)| (*n, range))
+}
+
 impl EffectValue {
-    pub const ALL: [EffectValue; 74] = [
+    pub const AREA: [EffectValue; 6] = [
+        EffectValue::AreaCenterX,
+        EffectValue::AreaCenterY,
+        EffectValue::AreaWidth,
+        EffectValue::AreaHeight,
+        EffectValue::AreaRotation,
+        EffectValue::AreaSoftness,
+    ];
+
+    pub const ALL: [EffectValue; 80] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -320,6 +365,12 @@ impl EffectValue {
         EffectValue::MediumDetails,
         EffectValue::LargeDetails,
         EffectValue::SharpenChroma,
+        EffectValue::AreaCenterX,
+        EffectValue::AreaCenterY,
+        EffectValue::AreaWidth,
+        EffectValue::AreaHeight,
+        EffectValue::AreaRotation,
+        EffectValue::AreaSoftness,
     ];
 
     pub fn name(self) -> String {
@@ -328,14 +379,32 @@ impl EffectValue {
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_default()
     }
+
+    pub fn of_area(self) -> bool {
+        Self::AREA.contains(&self)
+    }
 }
 
 impl Effect {
+    fn read(&self, value: EffectValue) -> Option<(f64, Range)> {
+        if value == EffectValue::Blend {
+            return Some((self.mixed(), BLEND));
+        }
+        if value.of_area() {
+            return area_read(self.area.as_ref()?, value);
+        }
+        slot(&mut self.kind.clone(), value).map(|(n, range)| (*n, range))
+    }
+
     pub fn values(&self) -> Vec<EffectValue> {
         let mut kind = self.kind.clone();
         EffectValue::ALL
             .into_iter()
-            .filter(|v| *v == EffectValue::Blend || slot(&mut kind, *v).is_some())
+            .filter(|v| match *v {
+                EffectValue::Blend => true,
+                v if v.of_area() => self.area.is_some(),
+                v => slot(&mut kind, v).is_some(),
+            })
             .collect()
     }
 
@@ -344,10 +413,7 @@ impl Effect {
     }
 
     pub fn range_of(&self, value: EffectValue) -> Option<(f64, f64)> {
-        if value == EffectValue::Blend {
-            return Some(BLEND);
-        }
-        slot(&mut self.kind.clone(), value).map(|(_, range)| range)
+        self.read(value).map(|(_, range)| range)
     }
 
     pub fn has_keys(&self) -> bool {
@@ -382,18 +448,22 @@ impl Effect {
     }
 
     pub fn plain(&self, value: EffectValue) -> f64 {
-        if value == EffectValue::Blend {
-            return self.mixed();
-        }
-        slot(&mut self.kind.clone(), value).map_or(0.0, |(n, _)| *n)
+        self.read(value).map_or(0.0, |(n, _)| n)
     }
 
     pub fn write(&mut self, value: EffectValue, to: f64) {
-        if value == EffectValue::Blend {
-            self.blend = Some(to);
-        } else if let Some((n, _)) = slot(&mut self.kind, value) {
+        let place = match value {
+            EffectValue::Blend => Some((self.blend.get_or_insert(to), BLEND)),
+            v if v.of_area() => self.area.as_mut().and_then(|a| area_slot(a, v)),
+            v => slot(&mut self.kind, v),
+        };
+        if let Some((n, _)) = place {
             *n = to;
         }
+    }
+
+    pub fn area_keys(&self) -> impl Iterator<Item = &EffectKeys> {
+        self.keys.iter().filter(|k| k.value.of_area())
     }
 
     pub fn value_at(&self, value: EffectValue, frame: f64) -> f64 {
@@ -434,15 +504,16 @@ impl Effect {
         out
     }
 
-    pub fn has_key_at(&self, frame: i64) -> bool {
+    pub fn has_key_at(&self, frame: i64, area: bool) -> bool {
         self.keys
             .iter()
+            .filter(|k| k.value.of_area() == area)
             .any(|k| k.keys.iter().any(|key| key.frame == frame))
     }
 
-    pub fn toggle_keys(&mut self, frame: i64) -> bool {
-        if self.has_key_at(frame) {
-            for k in &mut self.keys {
+    pub fn toggle_keys(&mut self, frame: i64, area: bool) -> bool {
+        if self.has_key_at(frame, area) {
+            for k in self.keys.iter_mut().filter(|k| k.value.of_area() == area) {
                 reshape(&mut k.keys, |marked| {
                     marked.retain(|(key, _)| key.frame != frame);
                 });
@@ -450,15 +521,15 @@ impl Effect {
             self.keys.retain(|k| !k.keys.is_empty());
             return false;
         }
-        for value in self.values() {
+        for value in self.values().into_iter().filter(|v| v.of_area() == area) {
             let to = self.value_at(value, frame as f64);
             self.put(value, frame, to);
         }
         true
     }
 
-    pub fn ease_keys(&mut self, frame: i64, ease: Ease) {
-        for k in &mut self.keys {
+    pub fn ease_keys(&mut self, frame: i64, ease: Ease, area: bool) {
+        for k in self.keys.iter_mut().filter(|k| k.value.of_area() == area) {
             ease_mark(&mut k.keys, frame, ease);
         }
     }
@@ -585,14 +656,14 @@ mod tests {
     #[test]
     fn toggle_on_a_key_removes_the_keys_of_that_frame() {
         let mut e = blur_with_keys();
-        e.toggle_keys(10);
+        e.toggle_keys(10, false);
         assert_eq!(e.keys_of(EffectValue::Strength), [key(0, 0.2)]);
     }
 
     #[test]
     fn toggle_off_a_key_keys_every_value_at_its_value() {
         let mut e = blur_with_keys();
-        e.toggle_keys(5);
+        e.toggle_keys(5, false);
         assert_eq!(e.keys.iter().filter(|k| !k.keys.is_empty()).count(), 11);
     }
 

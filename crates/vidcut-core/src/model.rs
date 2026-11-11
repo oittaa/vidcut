@@ -3422,7 +3422,9 @@ pub struct Effect {
 /// a base box. The base box is the whole source picture, or with `follows`
 /// the area of a motion path of the clip at each frame. The area stays on
 /// the content of the picture through its transform, its crop and its flips.
-/// A field left out is at its usual value.
+/// A field left out is at its usual value. Its `center`, `size`, `rotation`
+/// and `softness` can have keyframes, in the `keys` of the effect. Each of
+/// them then follows its keyframes at a frame.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EffectArea {
     /// Its shape. Usual: `ellipse`.
@@ -3489,6 +3491,10 @@ impl EffectArea {
     pub const WHOLE: [f64; 2] = [1.0, 1.0];
     pub const CORNERS: [[f64; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     pub const POINTS_KEPT: usize = 128;
+    pub const PLACES: (f64, f64) = (-crate::motion::REACH, crate::motion::REACH);
+    pub const SIZES: (f64, f64) = (0.0, crate::motion::REACH);
+    pub const TURNS: (f64, f64) = (-crate::motion::TURN, crate::motion::TURN);
+    pub const SHARES: (f64, f64) = (0.0, 1.0);
 
     pub fn corners(&self) -> &[[f64; 2]] {
         if self.points.is_empty() {
@@ -3525,7 +3531,9 @@ pub struct EffectKeys {
 /// A value of an effect that can have keyframes. A color or a list of
 /// channels has one value for each of its numbers, and a position or a center
 /// has one for x and one for y. `softness`, `opacity` and `saturation` are
-/// values of more than one kind of effect.
+/// values of more than one kind of effect. The six `area_` values are the
+/// center, the size, the rotation and the softness of the area of an effect.
+/// An effect of any kind has them while it has an area.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -3605,6 +3613,12 @@ pub enum EffectValue {
     MediumDetails,
     LargeDetails,
     SharpenChroma,
+    AreaCenterX,
+    AreaCenterY,
+    AreaWidth,
+    AreaHeight,
+    AreaRotation,
+    AreaSoftness,
 }
 
 /// What an effect does, with its own values.

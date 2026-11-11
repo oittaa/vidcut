@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, EffectArea, Follow, MotionPath, PathSample, Project, Subject, Title, TitleKind, Track,
-    TrackWay,
+    Clip, Effect, EffectArea, EffectValue, Follow, MotionPath, PathSample, Project, Subject, Title,
+    TitleKind, Track, TrackWay,
 };
 use crate::motion::{self, Area};
 
@@ -432,16 +432,14 @@ pub fn start(p: &Project, id: &str, effect: usize, at: i64) -> Result<Start> {
         )));
     }
     let effects = c.picture.iter().flat_map(|x| &x.effects);
-    let area = effects
-        .into_iter()
-        .nth(effect)
-        .and_then(|e| e.area.as_ref());
-    let Some(area) = area else {
+    let found = effects.into_iter().nth(effect);
+    let Some((e, area)) = found.and_then(|e| Some((e, e.area.as_ref()?))) else {
         return Err(Error::invalid(format!(
             "effect {effect} of {id} has no area: a track follows the thing under an area \
              (effects.set)"
         )));
     };
+    unkeyed(e, effect, id)?;
     let frame = c.source_at(at);
     let base = match area.follows.as_deref() {
         None => Area::WHOLE,
@@ -470,6 +468,25 @@ pub fn start(p: &Project, id: &str, effect: usize, at: i64) -> Result<Start> {
 
 const TRACK: &str = "Track";
 
+fn unkeyed(e: &Effect, effect: usize, id: &str) -> Result<()> {
+    let set = [
+        EffectValue::AreaCenterX,
+        EffectValue::AreaCenterY,
+        EffectValue::AreaWidth,
+        EffectValue::AreaHeight,
+        EffectValue::AreaRotation,
+    ];
+    match set.into_iter().find(|v| !e.keys_of(*v).is_empty()) {
+        Some(value) => Err(Error::invalid(format!(
+            "the area of effect {effect} of {id} has {} keyframes, and a track sets its center, \
+             its size and its rotation: first remove the keyframes of those values \
+             (keyframes.remove)",
+            value.name().replace('_', " ")
+        ))),
+        None => Ok(()),
+    }
+}
+
 pub fn tracked(
     p: &mut Project,
     id: &str,
@@ -479,12 +496,13 @@ pub fn tracked(
 ) -> Result<Value> {
     let c = clip_of(p, id)?;
     let effects = c.picture.iter().flat_map(|x| &x.effects);
-    let area = effects.into_iter().nth(effect).and_then(|e| e.area.clone());
-    let Some(area) = area else {
+    let found = effects.into_iter().nth(effect);
+    let Some((e, area)) = found.and_then(|e| Some((e, e.area.clone()?))) else {
         return Err(Error::invalid(format!(
             "effect {effect} of {id} has no area"
         )));
     };
+    unkeyed(e, effect, id)?;
     let old = (area.follows.as_ref()).and_then(|f| c.motion.iter().find(|m| m.id == *f));
     if let Some(old) = old {
         let stays = |s: &&PathSample| match way {

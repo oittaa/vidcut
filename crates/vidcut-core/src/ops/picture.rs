@@ -515,28 +515,30 @@ fn plain_effect_checked(e: &Effect) -> Result<Effect> {
 }
 
 fn area_checked(a: &EffectArea) -> Result<EffectArea> {
-    let reach = crate::motion::REACH;
-    let turn = crate::motion::TURN;
     for v in a.center.into_iter().flatten() {
         within(
             Some(v),
-            (-reach, reach),
+            EffectArea::PLACES,
             "an area's center is two fractions, each from -10 to 10",
         )?;
     }
     for v in a.size.into_iter().flatten() {
         within(
             Some(v),
-            (0.0, reach),
+            EffectArea::SIZES,
             "an area's size is two fractions, each from 0 to 10",
         )?;
     }
     within(
         a.rotation,
-        (-turn, turn),
+        EffectArea::TURNS,
         "an area's rotation is from -100000 to 100000 degrees",
     )?;
-    within(a.softness, (0.0, 1.0), "an area's softness is from 0 to 1")?;
+    within(
+        a.softness,
+        EffectArea::SHARES,
+        "an area's softness is from 0 to 1",
+    )?;
     let most = EffectArea::POINTS_KEPT;
     if !a.points.is_empty() && !(3..=most).contains(&a.points.len()) {
         return Err(Error::invalid(format!(
@@ -547,7 +549,7 @@ fn area_checked(a: &EffectArea) -> Result<EffectArea> {
     for v in a.points.iter().flatten() {
         within(
             Some(*v),
-            (-reach, reach),
+            EffectArea::PLACES,
             "an area's points are fractions, each from -10 to 10",
         )?;
     }

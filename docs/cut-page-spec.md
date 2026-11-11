@@ -1930,6 +1930,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A paste puts a keyframe of an effect value only on an effect of the same kind.
   - When the last keyframe of a value goes, the value returns to its plain value.
   - Reset removes the keyframes of the effect, as the reset button of a group does.
+  - The area of an effect has its own keyframes ([deviation X166](deviations.md#x166-an-effect-has-an-area)). The Keyframe button and Reset do not change them.
   - The Keyframes tab has a group for each effect with a track for each value. A group name has a number when the clip has two effects of a kind.
   - `keyframes.add` and the other `keyframes` methods take `{"effect": 0, "value": "strength"}` in `param`.
   - `effects.set` with `at` puts a keyframe on a value with keyframes. `effects.key` is the Keyframe button.
