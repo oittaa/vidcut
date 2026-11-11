@@ -148,7 +148,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - The Frame Display Mode decides whether numbered images are one sequence or stills.
-  - Auto decides by file type (p. 366).
+  - Auto decides by file type: DPX and EXR files come in as one clip, and JPG files as stills (p. 366).
 - **vidcut:**
   - Each image is a still, unless `media add --sequence` asks for the numbered run around it.
   - `media add-folder --sequence` asks for the runs in a folder ([D39](spec.md#12-decisions-on-gaps-and-contradictions)).
