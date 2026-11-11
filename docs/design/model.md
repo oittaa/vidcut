@@ -511,7 +511,7 @@ Writing:
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
   - `ops::picture::effect_checked` checks an effect. It is part of `ops::picture::checked`.
 - `ops::effect` holds the edits of the effects: `effects.add`, `effects.set`, `effects.key`, `effects.reset`, `effects.remove` and `effects.move`.
-- An `Effect` can have an `EffectArea` ([deviation X166](../deviations.md#x166-an-effect-has-an-area)). The effect then works only in that part of the picture.
+- An `Effect` can have an `EffectArea`. The effect then works only in that part of the picture.
   - The area holds an `AreaShape`, a `center`, a `size`, a `rotation`, a `softness` and `invert`.
   - A `polygon` also holds its `points`, as fractions of the box of the area (`EffectArea::corners`). At most `POINTS_KEPT` points.
   - The area is a part of a base box. The base box is the whole source picture (`Area::WHOLE`), or the area of a motion path.
@@ -534,7 +534,7 @@ Writing:
 
 ## Motion paths
 
-- A clip of footage, a still or an image sequence can carry motion paths in `Clip.motion` ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
+- A clip of footage, a still or an image sequence can carry motion paths in `Clip.motion`.
   - `ops::motion::takes` tells which clips take them: not titles, generators, compound clips or sound.
 - A `MotionPath` tells where one area of the source picture is on the source frames of the clip. It has an id, a name and its samples.
   - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). `motion.find` with `replace` takes off the paths of that subject.
