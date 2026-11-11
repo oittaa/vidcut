@@ -2890,7 +2890,8 @@ pub enum Request {
     /// deleted, the title follows no path, with a warning. When that clip
     /// plays on no frame of the title, and another clip there has the same
     /// path of the same media, the title follows that clip: the two parts of
-    /// a split clip are an example.
+    /// a split clip are an example. `of` takes that clip in the same way,
+    /// and `follows` in the answer names it.
     ///
     /// Returns the `clip` of the title, its `follows` and its `position`.
     #[serde(rename = "motion.follow")]
