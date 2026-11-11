@@ -198,7 +198,7 @@ pub struct Detections {
 }
 
 impl Detections {
-    const TAG: &'static [u8; 4] = b"vcd3";
+    const TAG: &'static [u8; 4] = b"vcd4";
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Self::TAG.to_vec();

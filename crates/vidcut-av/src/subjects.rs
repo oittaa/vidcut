@@ -294,14 +294,16 @@ pub fn find(
     let step = reader
         .frame_rate()
         .map_or(0.04, |r| 1.0 / f64::from(r).max(1.0));
-    reader.seek((look.from / tick).floor() as i64)?;
+    let every = look.every.max(1e-9);
+    let seed = crate::analysis::SEED;
+    reader.seek(((look.from - seed as f64 * every) / tick).floor() as i64)?;
     let turn = reader.rotation();
     let started = Instant::now();
     let batch = crate::pool::threads().max(1);
     let mut out = Detections::default();
     let mut looking: Option<Looking> = None;
     let mut waiting: Vec<Vec<f32>> = Vec::new();
-    let (mut ended, mut last, mut wanted) = (false, None, 0u64);
+    let (mut ended, mut last, mut wanted) = (false, None, -seed);
     let (mut frames, mut in_model) = (0u64, Duration::ZERO);
     while !ended {
         crate::cancel::stop()?;
@@ -312,7 +314,7 @@ pub fn find(
                 let pts = pts.unwrap_or_else(|| last.map_or(look.from, |p: f64| p + step));
                 last = Some(pts);
                 ended = pts >= look.to;
-                let due = look.from + wanted as f64 * look.every;
+                let due = look.from + wanted as f64 * every;
                 if pts >= due {
                     let seeing = match &mut looking {
                         Some(seeing) => seeing,
@@ -322,10 +324,12 @@ pub fn find(
                         }
                     };
                     let (picture, scene) = seeing.picture(&decoded)?;
-                    waiting.push(picture);
-                    out.pts.push(pts);
-                    out.scene.push(scene);
-                    wanted = ((pts - look.from) / look.every.max(1e-9)).floor() as u64 + 1;
+                    wanted = wanted.max(((pts - look.from) / every).floor() as i64) + 1;
+                    if wanted > 0 {
+                        waiting.push(picture);
+                        out.pts.push(pts);
+                        out.scene.push(scene);
+                    }
                 }
             }
             None => ended = true,
