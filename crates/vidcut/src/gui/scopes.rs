@@ -2,7 +2,7 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, pos2
 use eframe::emath::GuiRounding;
 use serde_json::json;
 use vidcut_av::screen::scope::marks;
-use vidcut_core::preferences::Scope;
+use vidcut_core::preferences::{Scope, ScopeScale};
 
 use super::theme;
 use super::workspace::Workspace;
@@ -57,6 +57,14 @@ impl Workspace {
                 self.send("viewer.scopes", json!({ field(scope): on }));
             }
         }
+        ui.menu_button("Waveform Scale Style", |ui| {
+            let now = self.snap.scopes.scale;
+            for scale in ScopeScale::ALL {
+                if ui.radio(now == scale, scale.name()).clicked() && now != scale {
+                    self.send("viewer.scopes", json!({ "scale": scale }));
+                }
+            }
+        });
     }
 
     pub(super) fn scope_column(
@@ -91,6 +99,7 @@ impl Workspace {
         let colors = self.scope_pictures.colors;
         let dim = theme::colors().text_dim;
         let font = FontId::proportional(MARK_FONT);
+        let scale = self.snap.scopes.scale;
         for &(scope, rect) in plots {
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, CornerRadius::ZERO, Color32::BLACK);
@@ -111,7 +120,7 @@ impl Workspace {
                 (rect.width() * ppp).round() as u32,
                 (rect.height() * ppp).round() as u32,
             );
-            for mark in marks(scope, colors, size.max((1, 1))) {
+            for mark in marks(scope, (colors, scale), size.max((1, 1))) {
                 let at = rect.min + vec2(mark.at[0] * rect.width(), mark.at[1] * rect.height());
                 let (at, align) = match scope {
                     Scope::Vectorscope => {

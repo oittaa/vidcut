@@ -157,7 +157,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do this.
     - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
-    - vidcut: a right-click on a keyframe sets Linear, Ease In, Ease Out or Ease In and Out, the curves of the volume line (X74). On a selected keyframe, it sets the ease of all the selected keyframes ([X158](deviations.md#x158-an-ease-on-all-selected-keyframes-comes-from-a-right-click-or-the-bar)). The anchor point's keyframes take no ease (D92).
+    - The header has the buttons Linear, Ease In, Ease In and Out, and Ease Out (pp. 1262–1263). Each sets its ease on all the selected keyframes.
+      - A button is off when no selected keyframe takes its ease.
+      - The eases are the curves of the volume line (X74). The anchor point's keyframes take no ease (D92).
+    - vidcut: a right-click on a keyframe also sets the ease. On a selected keyframe, it sets the ease of all the selected keyframes.
+    - vidcut: with two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
       - In a selection, Ease In removes the Out handle of a first keyframe, and it gets no In handle. Ease Out on a last keyframe does the opposite (measured in Resolve Studio 21.2).
     - In Resolve Studio 21.1.2, a double-click on a row adds nothing, inside or outside the clip.
     - The Add Keyframes tool of its Curve Editor adds a keyframe with a click, inside the clip or before its start (measured).
@@ -212,6 +216,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - The Add Tracks window of Resolve Studio 21.1.2 takes 0 to 99 video tracks and 0 to 999 audio tracks. `track.add` takes the same.
     - vidcut has these items in this order, except the four in [the gaps](todo/cut-page-gaps.md).
     - After them, vidcut has Add Title (D66), Add Subtitle (X44), Re-time Subtitles to Speech (§8.12) and Ripple Delete Silence (§9).
+  - **Timeline** in the menu bar: Create Subtitles from Audio is under AI Tools (p. 1234).
+    - vidcut: the menu also has Keyframes and Audio Scrubbing. The other items of Timeline Actions follow.
   - **Edit Actions:** Trim Start to Playhead, Trim End to Playhead.
 - **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker. After them is the Keyframes button, which shows the keyframe tray (p. 1259).
   - vidcut also has a Snap button among them.
@@ -618,6 +624,16 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Audio scrubbing (Shift+S; on by default, p. 876):
   - A drag of the playhead, and frame steps, play the sound under it (D42).
   - Timeline > Audio Scrubbing also switches it.
+- Scopes: Resolve shows them on the Color, Media and Deliver pages (pp. 3092–3093).
+  - vidcut: the View menu and the header of the viewer turn on the Waveform, the Parade and the Vectorscope, each one by itself.
+  - vidcut: they are in a column at the right of the viewer picture. The Trim Editor, Dynamic Trim, Multi Source and a synced grid show none.
+  - vidcut: the Waveform shows luma. The Parade shows red, green and blue, each in its color.
+  - Waveform Scale Style sets the scale of the Waveform and the Parade (p. 3093). `viewer.scopes` with `scale` sets it too.
+  - The choices are 10-bit, 12-bit, Percentage, mV and HDR (ST.2084/HLG). 10-bit is the default.
+  - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.
+  - Measured: 10-bit has a line each 128, 12-bit each 512, Percentage each 10, and mV each 100.
+  - Measured: HDR has lines at 0, 1, 10, 100, 1000 and 10000 nits on the PQ curve.
+  - On an HLG timeline, HDR uses the nits of the HLG curve. This is not measured in Resolve.
 
 ## 5. Dual timeline (pp. 66, 643–646, 689–692, 716–718)
 
@@ -630,7 +646,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 
 **Lower timeline:**
 - It is a detail view around the playhead (p. 644).
-- Ctrl+wheel (deviation X21), a trackpad pinch and the − and + buttons zoom it.
+- Alt+wheel (Option+wheel on a Mac) and the − and + buttons zoom it. Alt+wheel is the zoom of the Edit page timeline (p. 853).
+- vidcut: Ctrl+wheel (deviation X21) and a trackpad pinch zoom it too.
 - The manual calls its zoom fixed, but Resolve zooms it too.
 - A sideways swipe scrolls it (p. 66).
 - **Fixed Playhead on (default, D1):**
@@ -1363,6 +1380,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: an OpenTimelineIO export writes an SRT beside it for each subtitle track with cues.
   - Details: D58, D61, D64.
 - **Create Subtitles from Audio** (pp. 1234–1235):
+  - Only Resolve Studio has it (p. 1234).
+  - It is in Timeline > AI Tools (p. 1234), and it is the first item of Timeline Actions (p. 646).
+  - A dialog box shows its progress (p. 1235).
+  - More languages come in a package of the Extras Downloads Manager (p. 1235).
   - It transcribes the speech of the timeline's In–Out range, or of the whole timeline.
   - The cues go onto the highest subtitle track. If there is no subtitle track, it makes one.
   - Its options:
@@ -1371,7 +1392,20 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - the characters per line (42), and one or two lines
     - the frames between subtitles (0)
   - A muted track is not heard.
-  - Details: D62; deviations X46 and X56.
+  - Details: D62; deviations X3 and X56.
+- **Local speech models** (vidcut):
+  - Every build has Create Subtitles from Audio. `subtitles.transcribe` runs transcribe.cpp on this computer.
+  - It runs on the GPU, unless GPU acceleration is off.
+  - Parakeet Ultra is the default model. It has 25 European languages and times for each word.
+  - Qwen3-ASR 1.7B has 30 languages. Whisper large-v3 has 100 languages and times for each phrase.
+  - The request can also name a GGUF file.
+  - vidcut downloads the library of transcribe.cpp, Silero VAD and the speech models into the cache folder.
+  - In the GUI, a question that gives their size comes before the download.
+  - The dialog also has the model, Speakers, the GPU, the range, the tracks that it hears and the track.
+  - The model list gives the languages of each model, how it times the words, and its size or price.
+  - A box for each track with sound is ticked when playback hears that track.
+  - Under Advanced are the lines, the characters per line, the gap, where the words come from, and how the speech is found.
+  - While it runs, Jobs and `jobs.get` name the model, the device, the language and the speaker model, when each is known.
 - **Paid speech models** (vidcut):
   - Two more models run on the servers of their companies: `grok-voice-transcribe-2.0` of xAI and `gemini-3.5-transcribe` of Google.
   - Under Advanced, each model has those of its options that keep word times.
@@ -2764,7 +2798,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
 | Click an edit | Trim Editor (D52) |
 | W | Dynamic Trim on/off |
 | Shift+S | Audio scrubbing on/off |
-| Ctrl+wheel | Zoom the lower timeline (X21) |
+| Alt+wheel, Ctrl+wheel | Zoom the lower timeline (X21) |
 | Wheel over the lower timeline's tracks | Scroll them, when they do not fit (X57) |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+I | Import media |

@@ -41,6 +41,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - Quick Export shows a progress bar dialog while it exports (p. 789).
+  - Create Subtitles from Audio shows its progress in a dialog box (p. 1235).
   - The Deliver page has the render settings and the Render Queue (pp. 4103–4132).
   - In Resolve Studio 21.2, the Quick Export row is H.264 Master, HyperDeck, H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok, Presentations, Dropbox and Replay.
   - YouTube has a menu of four sizes, 720p to 2160p (p. 4105).
@@ -50,7 +51,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - It has no HyperDeck, Presentations, Dropbox or Replay.
   - The Export dialog also shows the live plan, and gives the export as a shell command.
   - In a running GUI, exports are jobs ([design/export.md](design/export.md#the-guis-exports), [design/live.md](design/live.md#jobs)).
-  - No progress dialog opens. Jobs shows the progress of each job.
+  - Create Subtitles from Audio is a job too. It downloads its models as a job.
+  - No progress dialog opens. Jobs shows the progress of each job, and can cancel it.
 - **Why:**
   - The plan and the command let scripts reproduce GUI exports.
   - An export runs beside the editing. A dialog over the timeline for each export interrupts that editing.
@@ -185,7 +187,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Option+wheel zooms the timeline, and Command+wheel moves through it (Edit page, p. 853).
   - The lower timeline of the Cut page also zooms with Option+wheel.
 - **vidcut:**
-  - Ctrl+wheel (Cmd on a Mac) and a pinch on a trackpad zoom the lower timeline.
+  - Alt+wheel (Option on a Mac) zooms the lower timeline, as in Resolve.
+  - Ctrl+wheel (Cmd on a Mac) zooms it too, and does not move through it.
 - **Why:**
   - Ctrl+wheel and Cmd+wheel zoom in browsers and most programs.
   - egui gives them and a pinch as one zoom.
@@ -415,31 +418,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The track that the viewer shows is the track that the user works on. Thus one control does both.
 
-## X46. Create Subtitles from Audio with open models on this computer
-
-- **Resolve:**
-  - Only Resolve Studio has it, with its built-in AI.
-  - It is the first item of Timeline Actions on the Cut page (p. 646), and in Timeline > AI Tools (p. 1234).
-  - More languages come as an Extras download (pp. 1234–1235).
-  - Its dialog shows the progress.
-- **vidcut:**
-  - `subtitles.transcribe` runs transcribe.cpp on this computer. It runs on the GPU, unless GPU acceleration is off.
-  - Parakeet Ultra is the default model. It has 25 European languages and times for each word.
-  - Qwen3-ASR 1.7B has 30 languages. Whisper large-v3 has 100 languages and times for each phrase.
-  - The request can also name a GGUF file.
-  - vidcut downloads the library of transcribe.cpp, Silero VAD and the speech models into the cache folder. In the GUI, a question that gives their size comes first.
-  - In the GUI, Create Subtitles from Audio… is the first item of Timeline Actions. The Timeline menu shows these items after Keyframes and Audio Scrubbing.
-  - Its dialog also has the model, Speakers, the GPU, the range, the tracks that it hears and the track.
-  - The model list gives the languages of each model, how it times the words, and its size or price ([spec §8.12](cut-page-spec.md#812-subtitles-pp-645646-702-12271248)).
-  - A box for each track with sound is ticked when playback hears that track.
-  - Under Advanced are the lines, the characters per line, the gap, where the words come from, and how the speech is found.
-  - The run is a job. No progress dialog opens. Jobs shows its progress and the progress of the download, and can cancel it.
-  - While it runs, Jobs and `jobs.get` name the model, the device, the language and the speaker model, when each is known.
-- **Why:**
-  - The speech never leaves the computer. Every build has it.
-  - Parakeet Ultra is the default because it gives real word times.
-  - Jobs keeps long work beside the editing, as for exports (X3).
-
 ## X52. Titles come from a Titles tab and are edited in the Inspector
 
 - **Resolve:**
@@ -569,7 +547,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - The highlighted word is then not the word that is spoken, until the word timings are updated.
 - **vidcut:**
   - The animation is part of the style of a track (D69). The user sets it in the Subtitle Track section of the Inspector or with `track.set`.
-  - The looks of Create Subtitles from Audio ([X46](#x46-create-subtitles-from-audio-with-open-models-on-this-computer)) put the speech on a new track that is already animated.
+  - The looks of Create Subtitles from Audio ([spec §8.12](cut-page-spec.md#812-subtitles-pp-645646-702-12271248)) put the speech on a new track that is already animated.
   - Word times follow edits and new text automatically (D70).
 - **Why:**
   - It is one step from the speech to animated subtitles.
@@ -1317,29 +1295,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - Source Overwrite makes a synced cutaway. A clip that is out of sync is the fault that this edit is there to prevent.
 
-## X127. The viewer has scopes
-
-- **Resolve:**
-  - The Cut page has no scope. The video scopes open on the Color, Media and Deliver pages (pp. 3092–3093).
-  - By default, the Waveform and the Parade have a 10-bit scale from 0 to 1023, whatever the data levels of the project are (p. 3093).
-  - A menu changes that scale to 12-bit, percent, millivolts or nits (p. 3093).
-  - The Vectorscope has targets for 75 percent color bars, and a skin tone line that the user can turn on (p. 3098).
-  - The Waveform overlays Y, CbCr or RGB (p. 3097).
-  - The Parade shows RGB, YRGB or YCbCr. It has options for color, extents, brightness and reference levels (p. 3102).
-  - There are five scopes (p. 3097). The Histogram is one of the others (p. 3093).
-- **vidcut:**
-  - The View menu and the header of the viewer turn on the Waveform, the Parade and the Vectorscope, each one by itself.
-  - The scopes are in a column at the right of the viewer picture, one above the other.
-  - The Trim Editor, Dynamic Trim, Multi Source and the grid of a synced group show no scopes.
-  - The Waveform shows luma. The Parade shows red, green and blue, each in its color.
-  - The scale follows the timeline color space: 10-bit in SDR, and nits in HDR PQ and HDR HLG. There is no menu for the scale.
-  - The Vectorscope has no skin tone line.
-  - vidcut has only these three scopes, and none of the options of a scope.
-- **Why:**
-  - vidcut has no Color, Media or Deliver page. Thus the viewer is the place for the scopes.
-  - A cut that vidcut delivers does not go through another page. The scopes let the user see the levels of that cut.
-  - The scale follows the timeline, because the same color space then gives the same scale with no setting to change.
-
 ## X128. Removing a file takes it out of its groups
 
 - **Resolve:**
@@ -1714,19 +1669,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The effect has no public rules. A spectral gate is the usual way to lower steady noise and it runs in real time.
   - The default effect lowered the noise by 0.4 dB and the quiet lines by up to 6.0 dB (spec). Meeting recordings need the opposite.
-
-## X158. An ease on all selected keyframes comes from a right-click or the bar
-
-- **Resolve:**
-  - The title bar of the Curve Editor has four buttons: Linear, Ease In, Ease In and Out, and Ease Out. They change all the selected keyframes (pp. 1262–1263).
-  - A right-click on a keyframe in the Keyframe Editor opens no menu.
-- **vidcut:**
-  - A right-click on a selected keyframe keeps the selection. The ease goes on all the selected keyframes.
-  - A right-click on another keyframe selects that keyframe alone.
-  - With two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
-- **Why:**
-  - The ease menu is already on the keyframe ([spec §2](cut-page-spec.md#2-layout-pp-636637)). A second place in a title bar adds nothing.
-  - A selection across several values takes one ease in one undo step.
 
 ## X160. The graph sits above the tracks with a scale for each curve
 

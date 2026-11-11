@@ -317,6 +317,7 @@ const EXAMPLES: &[(&str, &str)] = &[
         "viewer.scopes",
         "vidcut viewer scopes\n  \
          vidcut viewer scopes --waveform true --vectorscope true\n  \
+         vidcut viewer scopes --scale percent\n  \
          vidcut preferences set viewer.scopes.parade=false",
     ),
     ("media.set", "vidcut media set m1 m2 --color teal"),

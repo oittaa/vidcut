@@ -1571,7 +1571,7 @@ impl Workspace {
         self.expire_pending(&clip, rev);
         let play = self.snap.timeline.position;
         let view = self.key_editor.view.unwrap_or_else(|| clip_span(&clip));
-        self.key_header(ui, &p, &clip, view, play);
+        self.key_header(ui, &p, (&clip, &lanes), view, play);
         if lanes.is_empty() {
             ui.label(dim("No Keyframes"));
             return;
@@ -2159,7 +2159,7 @@ impl Workspace {
         &mut self,
         ui: &mut egui::Ui,
         p: &Project,
-        clip: &Clip,
+        (clip, lanes): (&Clip, &[Lane]),
         view: (f64, f64),
         play: i64,
     ) {
@@ -2172,6 +2172,9 @@ impl Workspace {
         let mut fit = false;
         let mut detail = false;
         let mut open = None;
+        let marks = self.key_editor.selected.clone();
+        let (_, takes) = marks_eases(clip, lanes, &marks);
+        let mut eased = None;
         let editor = &mut self.key_editor;
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2224,6 +2227,11 @@ impl Workspace {
                 {
                     detail = true;
                 }
+                for e in [Ease::EaseOut, Ease::EaseInOut, Ease::EaseIn, Ease::Linear] {
+                    if ease_button(ui, e, takes.contains(&e)).clicked() {
+                        eased = Some(e);
+                    }
+                }
                 if ui
                     .add(egui::Button::selectable(editor.graph, CHART_LINE))
                     .on_hover_text("Graph")
@@ -2253,6 +2261,9 @@ impl Workspace {
             Some(true) => editor.closed.clear(),
             Some(false) => editor.closed = groups_of(clip),
             None => {}
+        }
+        if let Some(e) = eased {
+            send_parts(self, ease_parts(clip, lanes, &marks, e));
         }
     }
 
@@ -3497,6 +3508,32 @@ impl Workspace {
             self.key_editor.menu = None;
         }
     }
+}
+
+fn ease_button(ui: &mut egui::Ui, e: Ease, on: bool) -> egui::Response {
+    let side = ui.spacing().interact_size.y;
+    let r = ui
+        .add_enabled(on, egui::Button::new("").min_size(vec2(side, side)))
+        .on_hover_text(ease_label(e))
+        .on_disabled_hover_text(ease_label(e));
+    let color = if on {
+        ui.style().interact(&r).fg_stroke.color
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    let area = r.rect.shrink(side * 0.25);
+    let points = (0..=12)
+        .map(|i| {
+            let t = f64::from(i) / 12.0;
+            pos2(
+                area.left() + area.width() * t as f32,
+                area.bottom() - area.height() * e.of(t) as f32,
+            )
+        })
+        .collect();
+    ui.painter()
+        .add(Shape::line(points, Stroke::new(1.5, color)));
+    r
 }
 
 fn ease_combo(
