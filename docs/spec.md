@@ -3128,7 +3128,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The rate can change only with no clips on the timeline and no compound clips in the pool, because positions are whole frames.
 - **D38. Stills** (§3; pp. 114, 1194).
   - The manual gives two standard still durations: 5 s (p. 114) and 10 s (p. 1194).
-  - vidcut takes 5 s, as a project setting (deviation X16).
+  - vidcut takes 5 s by default. Preferences > Editing > Standard Still Duration sets it, in seconds or frames (p. 114).
+  - Each still gets that duration when it comes into the pool. A later change of the preference keeps the duration of the stills in the pool.
   - A still edited without a range has that duration.
   - A range or a trim makes it up to 17 h 40 min (p. 1194).
   - Every source frame of a still shows its picture. Thus only that length limits its clips, the frames of a dissolve too.

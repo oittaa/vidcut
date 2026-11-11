@@ -144,16 +144,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - An idle animation repaints the window all the time. On a laptop, this costs CPU time and battery.
   - The color gives the same information.
 
-## X16. The still duration is a project setting
-
-- **Resolve:**
-  - The standard still duration is a user preference (Preferences > User > Editing, p. 114).
-- **vidcut:**
-  - It is a project setting (`project set --still-duration 3s`; [D38](spec.md#12-decisions-on-gaps-and-contradictions)).
-- **Why:**
-  - An edit is the same in every run on every computer.
-  - An agent that appends a still gets the duration that the project sets.
-
 ## X17. Image sequences are asked for, not guessed
 
 - **Resolve:**

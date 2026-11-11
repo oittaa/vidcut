@@ -1646,6 +1646,7 @@ mod tests {
             words: Vec::new(),
             fingerprint: None,
             subtitles: None,
+            still_secs: None,
         }
     }
 

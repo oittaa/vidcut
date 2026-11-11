@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use super::{Words, db};
 use crate::duck::{AMOUNT_DB, HOLD_MS, LOOKAHEAD_MS, RECOVERY_MS, RISE_MS, THRESHOLD_DB};
 use crate::model::{Clip, DynamicZoom, Marks, Picture, Project, SubtitleStyle, Title, TitleKind};
-use crate::time::{Rational, TimeContext, TimeSpec};
+use crate::time::{Rational, TimeSpec};
 
 type Show<'a> = &'a dyn Fn(&Value) -> String;
 
@@ -324,11 +324,6 @@ fn rate(v: &Value) -> String {
     v.as_str()
         .and_then(|s| s.parse::<Rational>().ok())
         .map_or_else(|| raw(v), Rational::decimal)
-}
-
-fn seconds(v: &Value) -> String {
-    v.as_f64()
-        .map_or_else(|| raw(v), |n| format!("{}s", trim(n)))
 }
 
 const STYLE: [(&str, &str); 32] = [
@@ -921,23 +916,6 @@ impl Words<'_> {
             let new = new.unwrap_or_else(|| p["start_tc"].clone());
             s.add("Start Timecode", &new, &raw, Value::Null, |x| {
                 json!(x.timecode(0))
-            });
-        }
-        if !p["still_duration"].is_null() {
-            let new = self
-                .project
-                .zip(spec("still_duration"))
-                .and_then(|(pr, t)| {
-                    let c = TimeContext {
-                        start_tc: 0,
-                        ..pr.time_context(None)
-                    };
-                    let frames = c.resolve(&t).ok()?;
-                    Some(json!(pr.settings.fps.frames_to_secs(frames)))
-                });
-            let new = new.unwrap_or_else(|| p["still_duration"].clone());
-            s.add("Still Duration", &new, &seconds, Value::Null, |x| {
-                json!(x.still_secs)
             });
         }
         let list = |v: &Value| match v.as_array().map(Vec::len) {
