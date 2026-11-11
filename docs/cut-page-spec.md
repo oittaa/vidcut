@@ -1325,6 +1325,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A click on a cue in the list loads it into the Inspector to edit (p. 1236).
   - Add New, above the list, adds a cue at the playhead on the track of the list (p. 1233).
   - Prev and Next in the Inspector move to the cue before or after on the track (pp. 1231, 1233).
+  - vidcut: the text of a row shows on two lines at most. The list scrolls the row of a newly opened cue to its middle.
+  - vidcut: the line with Add New also has the name of the track. The Delete button of the section deletes the open cue.
   - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. A value inside the cue next to it changes nothing (D79). Else the new range overwrites the other cues of the track.
   - Cues move, trim, split and delete like clips.
   - Details: D56, D57, D78, D79; deviations X43, X44.
