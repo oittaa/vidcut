@@ -110,7 +110,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A drag on the line between two keyframes bends that part of the curve ([X162](deviations.md#x162-a-drag-on-the-line-bends-the-curve)).
     - A click on the line clears the selection (measured in Resolve Studio 21.2). A double-click on it adds a keyframe.
     - Alt and a click on the line adds a keyframe at that point (measured in Resolve Studio 21.2).
-    - The ⋯ menu has Enable Snapping (p. 1264). It is on by default (measured in Resolve Studio 21.2). With it on, a dragged keyframe goes to the playhead and to the keyframes of other values ([X159](deviations.md#x159-snapping-also-goes-to-other-keyframes)).
+    - The ⋯ menu has Enable Snapping (p. 1264). It is on by default (measured in Resolve Studio 21.2). With it on, a dragged control point goes to the playhead.
+      - In Resolve Studio 21.2, a keyframe of another curve and a timeline marker are not targets.
+      - vidcut: a dragged keyframe also goes to a keyframe of another value when one is near. Snapping acts on a track, a group track and a curve.
+      - vidcut: it does not act on a handle, or on a Shift-drag that changes only the value.
     - A drag on a group track moves that group's keyframes at that time.
     - A drag on an In or Out handle changes that handle. A handle value moves the key's own value.
     - On Position, Zoom and the anchor point, Y keeps the handle frames and uses a value offset of 0.
@@ -1046,7 +1049,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A slide right stops in the same way at a later clip. The measurements show this only with a gap of one frame.
     - A clip with a gap on both sides also slides. No measurement shows this case.
   - L slides the clip right. It also slips its content right, to earlier frames, as a drag does.
-  - Space plays around the playhead, and Up/Down go to another edit (D32, deviations X28, X29).
+  - Space plays around the playhead, and Up/Down go to another edit (D32, deviation X28).
   - W again deselects the edit.
 
 ### 8.7 J/L cuts (p. 728)
@@ -2405,7 +2408,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - Shift gives finer steps (p. 1109). The overlay is flat at first (p. 1112).
   - The volume commands of the Edit page change several selected clips together. The clips keep the differences between their levels (p. 1110).
   - vidcut: Volume and Mute in the Audio section of the Inspector (X70). `clip.set` sets `gain_db` and `muted`. D12 gives the range.
-  - vidcut: a line on each clip with sound that is tall enough. A drag on it sets `gain_db` with `clip.set` (X71).
+  - vidcut: a line on each clip with sound that is tall enough. A drag on it sets `gain_db` with `clip.set` (D77).
   - The scale of the line and the step of Shift are in D77.
 - **Clip pan** (pp. 743, 3909):
   - Resolve Studio 21.2 gave these results, with renders of a clip to 24-bit WAV files at 48 kHz.
@@ -2987,7 +2990,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - While no run occurs, the Trim Editor shows for an edit, and the viewer shows for clips.
   - K, Space, W, Up/Down and the end of the media stop a run.
   - They apply the run as one request, and one undo step.
-  - Where the media or a neighbor ran out, the cut turns red, and the viewer tells why (deviation X29).
+  - In Resolve Studio 21.1.1, a run that reaches the end of the media or of a neighbor just stops, and nothing tells why.
+  - vidcut: there the cut turns red, and the viewer tells why until the next trim. The message is in the line of the Trim Editor or under the picture.
   - K held with a tap of J or L trims one frame.
   - K held with J or L held trims at half speed, until one key is released (D54).
   - `,`/`.` trim as usual (D20).
@@ -3336,7 +3340,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Thus the first video in that order sets the format (D37).
   - A file is media by its extension.
   - The other files, and media that do not open, are skipped, as in Resolve.
-  - But the result and the notice of the GUI name them, and a folder without media is an error (deviation X32).
+  - Resolve Studio 21.1.1 shows no message for them. A folder without media imports nothing.
+  - vidcut: the result names each skipped file and why vidcut skipped it. The notice of the GUI counts them, and names up to five of each kind.
+  - vidcut: a folder without media is an error.
   - A bin that exists takes the media of the folder.
   - Media already in the pool keep their ids, and move into the bin of their folder (deviation X31).
   - Thus a second import of a folder brings in only its new files.
@@ -4339,8 +4345,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - This was checked with two active Duckers. A render showed their dips of 10 dB, and the exported file had no trace of them.
     - The ducking goes in the `vidcut` metadata of the track.
     - The notes of an OTIO export say that other editors will not hear it.
-- **D77. The volume line** (§9; pp. 1109, 1112; deviation X71).
+- **D77. The volume line** (§9; pp. 1109, 1112).
   - The manual does not give the scale of the volume overlay. It does not tell how much finer Shift makes a drag.
+  - On the Edit page, a drag up or down on the volume overlay sets the level of the clip (p. 1109).
+  - The volume commands of the Edit page change several selected clips together, and keep the differences between their levels (p. 1110).
+  - The manual does not tell whether a drag on the overlay changes the other selected clips.
+  - A drag on a clip that is not selected changes only that clip. It does not select the clip.
+  - A drag on a selected clip changes all the selected clips with sound by the same number of dB. Thus they keep the differences between their gains.
+  - A line on a locked track does not take a drag. A selected clip on a locked track does not change.
   - The line is in the sound part of the clip, 2 px in from its top and its bottom.
   - It shows only where the sound part is 20 px high or more.
   - **Scale:**
@@ -4475,7 +4487,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Without `at` and a playhead, a clip with keyframes keeps its volume. If no clip takes the value, the request fails.
   - The Inspector shows the volume of the curve at the playhead. The Reset of Volume removes the keyframes and sets 0 dB.
   - A drag on the flat volume line of a selected clip also moves all the keyframes of the other selected clips by the same dB.
-  - Reason: a change at one point keeps the rest of the curve, as in Resolve. A drag of several lines keeps the differences between the clips (X71).
+  - Reason: a change at one point keeps the rest of the curve, as in Resolve. A drag of several lines keeps the differences between the clips (D77).
 - **D83. Normalize Audio Levels on a clip with volume keyframes** (§9).
   - The manual does not tell what Normalize does with keyframes.
   - Resolve Studio 21.1.1 moved each of four volume keyframes of a clip by the same −3.4 dB. Thus the curve kept its shape.

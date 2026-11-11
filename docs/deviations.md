@@ -310,19 +310,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Then the keyboard selects the next edit to trim, as the manual tells.
   - No clip disappears.
 
-## X29. A Dynamic Trim run says why it stopped
-
-- **Resolve:**
-  - A run that reaches the last frame of a neighbor clip or the end of the media just stops.
-  - The Trim Editor comes back with green handles, and nothing tells why (21.1.1).
-- **vidcut:**
-  - The run stops there and applies.
-  - The cut becomes red, and the viewer tells why until the next trim ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - The message is in the line of the Trim Editor or under the picture.
-- **Why:**
-  - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
-  - The user cannot tell whether a key press was missed or the media ran out.
-
 ## X30. Slowed sound keeps its pitch on every system
 
 - **Resolve:**
@@ -350,20 +337,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Scripts, the command log and OTIO files name media by id.
   - Two items for one file would split its marks, color and proxy.
   - An agent that imports a folder again would double the pool.
-
-## X32. Import Media Folder names what it left out
-
-- **Resolve:**
-  - Import Media Folder leaves out a file that it cannot read, and shows no message. Examples are a text file, or a file that only looks like a video.
-  - A folder without media imports nothing.
-  - These results are from Resolve Studio 21.1.1.
-- **vidcut:**
-  - The result names each skipped file and why vidcut skipped it.
-  - The notice in the GUI counts the skipped files, and names up to five of each kind.
-  - A folder without media is an error ([D53](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-- **Why:**
-  - The reason is the same as in [X29](#x29-a-dynamic-trim-run-says-why-it-stopped).
-  - An agent can cut a card or a render folder that the user imports. No clip of it must go missing without a message.
 
 ## X35. The History window docks
 
@@ -874,21 +847,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A Reset for each value puts back one value and keeps the others of its group.
   - Resolve's Inspector has only Ease and Swap for Dynamic Zoom. Numbers show each box exactly, and bring back a box that is out of the viewer.
   - Mute is beside Volume, as in the strip of the Mixer. Thus the user does not need the right-click menu to mute a clip.
-
-## X71. A drag on the volume line of a selected clip changes all the selected clips
-
-- **Resolve:**
-  - On the Edit page, each clip with sound has a volume overlay. A drag up or down on it sets the level of the clip (p. 1109).
-  - The volume commands of the Edit page change several selected clips together. The clips keep the differences between their levels (p. 1110).
-  - The manual does not tell whether a drag on the overlay changes the other selected clips.
-- **vidcut:**
-  - The scale and the steps of the volume line are in [D77](cut-page-spec.md#12-decisions-on-gaps-and-contradictions).
-  - A drag on a clip that is not selected changes only that clip. It does not select the clip.
-  - A drag on a selected clip changes all the selected clips with sound by the same number of dB. Thus they keep the differences between their gains.
-  - A line on a locked track does not take a drag. A selected clip on a locked track does not change.
-- **Why:**
-  - A drag changes a value by an amount. A move of several clips also moves each clip by the same amount.
-  - Resolve's volume commands also keep the differences between the selected clips.
 
 ## X73. The volume line takes the keyframe controls of the Edit page
 
@@ -1889,19 +1847,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The ease menu is already on the keyframe ([spec §2](cut-page-spec.md#2-layout-pp-636637)). A second place in a title bar adds nothing.
   - A selection across several values takes one ease in one undo step.
-
-## X159. Snapping also goes to other keyframes
-
-- **Resolve:**
-  - Enable Snapping snaps the control points of the Curve Editor to the playhead (pp. 1259, 1264).
-  - A keyframe of another curve and a timeline marker are not targets (measured in Resolve Studio 21.2).
-- **vidcut:**
-  - Enable Snapping acts on each drag of keyframes: on a track, on a group track and on a curve.
-  - A dragged keyframe goes to the playhead or to a keyframe of another value when one is near.
-  - It does not act on a handle, or on a Shift-drag that changes only the value.
-- **Why:**
-  - Two values often change on the same frame. A snap to the keyframes of the other values does this without a look at the timecode.
-  - Two keyframes of one value cannot share a frame. Thus the keyframes of the same value are not targets.
 
 ## X160. The graph sits above the tracks with a scale for each curve
 
