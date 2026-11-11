@@ -154,13 +154,15 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do this.
     - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
-    - A right-click on a keyframe sets its ease: Linear, Ease In, Ease Out or Ease In and Out, the curves of the volume line (X74). On a selected keyframe, it sets the ease of all the selected keyframes ([X158](deviations.md#x158-an-ease-on-all-selected-keyframes-comes-from-a-right-click-or-the-bar)). The anchor point's keyframes take no ease (D92).
+    - vidcut: a right-click on a keyframe sets Linear, Ease In, Ease Out or Ease In and Out, the curves of the volume line (X74). On a selected keyframe, it sets the ease of all the selected keyframes ([X158](deviations.md#x158-an-ease-on-all-selected-keyframes-comes-from-a-right-click-or-the-bar)). The anchor point's keyframes take no ease (D92).
       - In a selection, Ease In removes the Out handle of a first keyframe, and it gets no In handle. Ease Out on a last keyframe does the opposite (measured in Resolve Studio 21.2).
-    - A double-click on an empty part of a track or its curve adds a keyframe at the frame under the pointer, inside the clip.
+    - In Resolve Studio 21.1.2, a double-click on a row adds nothing, inside or outside the clip.
+    - The Add Keyframes tool of its Curve Editor adds a keyframe with a click, inside the clip or before its start (measured).
+    - vidcut: a double-click on an empty part of a track or its curve adds a keyframe at the frame under the pointer, inside the clip.
       - A double-click outside the clip adds nothing.
       - The playhead moves to the new keyframe.
     - The curve of a value shows under its track (X90).
-    - The bar under the tracks shows the selected keyframe: the name of the value, the time, the value, the ease and Delete.
+    - vidcut: the bar under the tracks shows the selected keyframe: the name of the value, the time, the value, the ease and Delete.
       - The value is in the units of the Inspector.
       - With two or more keyframes selected, the bar shows their number, their ease and Delete.
     - A keyframe that the Keyframe button or a double-click adds is selected. Thus the bar shows it at once.
@@ -176,7 +178,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - With no clip selected, the clip under the playhead. With more than one clip selected, a group for each clip.
   - The Sync Bin tab ([§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
   - vidcut's bar also has Import and Import Folder (deviation X25), Export and Jobs (deviation X3), and Help.
-  - F1, or Help in the top bar, opens the Help window.
+  - vidcut: F1, or Help in the top bar, opens the Help window.
     - It lists every shortcut, with one action in each row.
     - A ? beside a less obvious action explains it in a few plain words.
     - Under the shortcuts, it tells in a few words what each upscaler of Super Scale and each Retime Process does.
@@ -226,7 +228,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Resolve Studio 21.1.1's Cut page has no File-menu or right-click item for it.
     - Keyboard Customization lists no command with that name.
     - vidcut adds both items.
-  - File dialogs for media, projects and exports each start in the folder that the user last used for them.
+  - vidcut: file dialogs for media, projects and exports each start in the folder that the user last used for them.
   - **Drag and drop:**
     - Clips dragged from the file system go into the Media Pool, or into a bin in the Bin list (p. 364).
     - For the Cut page, the manual says macOS only (p. 372).
@@ -279,7 +281,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - vidcut also sorts by Duration.
   - This order is also the Source Tape order.
   - The search field filters live, through the open bin and the bins inside it.
-- **Clip Info:**
+- **Clip Info** (vidcut):
   - Clip Info shows all that vidcut knows of a file.
   - The info button of the metadata strip or of a thumbnail corner opens it. The menu of a pool item also opens it.
   - It reads the file again for its container and streams: codecs and profiles, bit rates, color tags, channel layouts, languages and tags (`media.details`).
@@ -540,7 +542,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - That default is Auto (D91).
   - A right-click chooses another count (D91).
   - There is no KeyKode (X81).
-- **Stats for Nerds:**
+- **Stats for Nerds** (vidcut):
   - The right-click menu of the viewer opens a panel over the picture.
   - The panel has a group for each of these:
     - decoding, the picture and how it was made
@@ -1084,12 +1086,16 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The current step has a dot.
   - The steps that can be redone are grey.
   - A click on a step goes to it immediately.
-- A new change discards the steps that could be redone. vidcut keeps them as a version (Versions, below).
+- Resolve clears the undo history when the project closes (p. 651).
+- In Resolve Studio 21.1.1, only Append names the media in a step. Edit > Undo and Redo do not tell what they would undo or redo. Ctrl+Z shows nothing.
+- The History window of Resolve Studio 21.1.1 lists only labels.
+- Resolve Studio 20.3 and later have named timeline backups, as copies beside the project.
+- A new change discards the steps that could be redone. vidcut keeps them as a version (vidcut's versions, below).
 - Details: D55.
-- **The history file:**
+- **vidcut's history file:**
   - The history is a file in the state folder. Thus it stays after a restart and between separate CLI runs.
   - It keeps up to 131,072 steps ([design/requests.md](design/requests.md#undo-history)).
-- **Step labels:**
+- **vidcut's step labels:**
   - A step tells what it did and by how much. It gives the place as a timecode and a track.
   - It names the clip by its name, else by the name of its media. An example: "Trim the end of Interview.mp4 by -12 frames at 00:01:02:10 on V1".
   - A request that sets values names each field that changed, with its old and new value. An example: "Title “Intro”: Size 10% → 14%, Color usual → #ffd700".
@@ -1103,7 +1109,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - An `apply` batch lists its commands under it. Each command is named against the project after the commands before it.
   - Edit > Undo and Redo name the step.
   - Ctrl+Z and Ctrl+Shift+Z tell what they undid or redid. For a short time, they also outline where it was in the timeline (D55).
-- **Who made a step, and when:**
+- **vidcut: who made a step, and when:**
   - Each step keeps who made it, and when.
   - The maker can be the GUI, the CLI, or an MCP client by its own name.
   - The maker can also be another program over IPC, or a program that wrote the project file.
@@ -1113,7 +1119,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Steps that one client made in a sequence fold into one row, for example the forty edits of an agent.
   - The row opens to show the steps. Its Undo all button goes back to before the first step.
   - `history.get` gives all of this. `history.go` goes to any step.
-- **The History window:**
+- **vidcut's History window:**
   - It docks at the right side of the window (deviation X35). Edit > History > Open History Window, or History in the top bar, opens it.
   - When the pointer is on a step, the timeline shows the state after that step. This works in the panel and in Edit > History.
     - The project does not change.
@@ -1123,20 +1129,20 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Copy as Command in the right-click menu of a step copies its request as a `vidcut rpc` command.
   - A step that another program made by writing the project file has no request, and no Copy as Command.
   - When the current step is older than the newest twenty, Edit > History lists the twenty steps around the current step.
-- **Versions:**
+- **vidcut's versions:**
   - The steps that a new change discards stay in the history as a version.
   - The version shows under the step that it branched from ("2 undone steps, replaced 5 min ago"), with Restore this version.
   - Restore brings the steps back. It keeps the steps that replaced them as a version of their own.
   - A version replaced inside another version comes back with it in one step.
   - When the pointer is on a step of a version, the timeline shows the state at that step.
   - `history.get` lists the versions. `history.restore` restores one.
-- **Names:**
+- **vidcut's names:**
   - Mark This Version… gives a name to a step of the history ("Before the silence cut").
   - It is in Edit > History, on the Mark… button of the History window, and in the right-click menu of a step.
   - The name shows on its step as a flag. Find finds it, and a click goes to it.
   - Names stay with the history across runs. They do not change the project.
   - `history.mark` and `history.unmark` do the same.
-- **Find, filter and revert:**
+- **vidcut's find, filter and revert:**
   - The History window finds steps by their words or names.
   - It filters steps by kind (trims, deletes, dissolves…) and by who made them, also in the versions.
   - The right-click menu of a step has Revert This Step (`history.revert`).
@@ -1312,7 +1318,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Details: D56; deviation X44.
 - **Cues** (pp. 1231–1233, 1236–1237):
   - Add Subtitle, in the right-click menu of a subtitle track, puts a cue at the playhead.
-  - With no subtitle track, Add Subtitle in Timeline Actions first makes Subtitle 1.
+  - vidcut: with no subtitle track, Add Subtitle in Timeline Actions first makes Subtitle 1.
   - You type its text in the Inspector. The text shows on the cue as you type it.
   - The Captions list, at the bottom of the Inspector, shows every cue of the track (pp. 1231, 1233).
   - Each row of the list has its number, its In above its Out, its text and its characters per second (CPS).
@@ -1343,6 +1349,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - File > Export Subtitle, or Export Subtitle on a subtitle track header, writes a track as SRT or WebVTT.
   - On the Deliver page, a render can write each selected track as a file beside it (IMSC1, DFXP, SRT, WebVTT).
   - A render can also burn in the shown track, or embed it.
+  - Resolve Studio 21.1.1 leaves the subtitle tracks out of its OpenTimelineIO, FCPXML, FCP 7 XML, EDL and CSV exports.
+  - A subtitle file in an OpenTimelineIO file makes the import of Resolve Studio 21.1.1 fail.
   - vidcut: an OpenTimelineIO export writes an SRT beside it for each subtitle track with cues.
   - Details: D58, D61, D64; deviation X45.
 - **Create Subtitles from Audio** (pp. 1234–1235):
@@ -1355,7 +1363,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - the frames between subtitles (0)
   - A muted track is not heard.
   - Details: D62; deviations X46 and X56.
-- **Paid speech models:**
+- **Paid speech models** (vidcut):
   - Two more models run on the servers of their companies: `grok-voice-transcribe-2.0` of xAI and `gemini-3.5-transcribe` of Google.
   - Under Advanced, each model has those of its options that keep word times.
   - Before vidcut sends audio, the GUI asks. It shows the company, the length, the size and the estimated cost at the published rate.
@@ -1366,7 +1374,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A key is never in a file that vidcut writes.
   - Local models stay the default.
 - **Speakers of cues:**
-  - Each cue keeps the person who says it. Create Subtitles from Audio with speakers sets it. Splits, joins and edits keep it.
+  - In Resolve, a cue has no speaker, and Create Subtitles from Audio gives none (pp. 1234–1235). Speakers show in the Transcription window (pp. 1000–1002).
+  - vidcut: each cue keeps the person who says it. Create Subtitles from Audio with speakers sets it. Splits, joins and edits keep it.
   - A person can have a color. A cue can have its own color, which overrides the color of the person.
   - The Speakers setting of the subtitle track tells what the color paints.
   - It paints the spoken word on a track that shows words as spoken, else all of the text. Or it paints nothing.
@@ -1478,6 +1487,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Neural Engine transcribes a Media Pool clip or a timeline.
   - The Transcription window shows the text with its timecodes, the speakers, and the silences as (...).
   - Its search highlights the matches.
+  - Resolve Studio keeps one transcription for each clip. A new one replaces it, and Clear Transcription removes it (pp. 995–996).
 - **Editing from the text** (pp. 999–1000, 1004–1008), on the Cut page too:
   - A click on a word moves the playhead to the end of the word.
   - A drag over words sets In and Out. X selects a sentence.
@@ -1598,9 +1608,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
-  - The Keyframes tab of a title has the rows Position, Zoom, Rotation and Opacity. A scroll has only Position and Opacity.
-  - A lower third with its lines apart has the rows Upper Position, Upper Zoom, Upper Rotation, Lower Position, Lower Zoom, Lower Rotation and Opacity.
-  - A title has no rows for Transform and Cropping, because a title has no such values.
+  - vidcut: the Keyframes tab of a title has the rows Position, Zoom, Rotation and Opacity. A scroll has only Position and Opacity.
+    - A lower third with its lines apart has the rows Upper Position, Upper Zoom, Upper Rotation, Lower Position, Lower Zoom, Lower Rotation and Opacity.
+    - A title has no rows for Transform and Cropping, because a title has no such values.
   - Its Position keyframes take handles. The title moves at one speed along the cubic path between two keys. The details are in the [todo](todo/keyframes.md#titles).
   - A right-click on a key of Position, Zoom, Rotation or Opacity opens a menu of eases, by the place of the key:
     - The first key has Linear and Ease Out. The last key has Linear and Ease In.
@@ -2355,13 +2365,14 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A clip's stored Amount comes back when the switch goes on again.
   - vidcut: `clip.set` and `track.set` take the switch (`voice_isolation_on`) and the Amount (`voice_isolation`).
   - vidcut: at Amount 0 the sound equals the source, and the model does not run.
-  - vidcut runs DPDFNet (Apache-2.0) on the CPU of this computer. It runs live in playback, and the same in an export.
-  - It works on any number of channels, each channel alone.
-  - A clip left unset follows its track. A clip that is off stays off on a track that is on.
-  - Voice Isolation in the right-click menu of a clip, or Alt + V, turns the switch on or off for the selected clips.
-  - The strip of the Mixer does it for a track. An Amount field beside each one sets the Amount.
-  - The model, 10 MB, is downloaded the first time, after a question.
-  - An OTIO file keeps the switches and the Amounts in the metadata of vidcut. Its export tells that other editors do not hear them.
+  - vidcut's Voice Isolation:
+    - It runs DPDFNet (Apache-2.0) on the CPU of this computer. It runs live in playback, and the same in an export.
+    - It works on any number of channels, each channel alone.
+    - A clip left unset follows its track. A clip that is off stays off on a track that is on.
+    - Voice Isolation in the right-click menu of a clip, or Alt + V, turns the switch on or off for the selected clips.
+    - The strip of the Mixer does it for a track. An Amount field beside each one sets the Amount.
+    - The model, 10 MB, is downloaded the first time, after a question.
+    - An OTIO file keeps the switches and the Amounts in the metadata of vidcut. Its export tells that other editors do not hear them.
 - **Ducking** (pp. 744, 778–779):
   - The Ducker Track FX lowers a target track, such as music, where one or more source tracks, such as dialogue, are active.
   - It changes the level only. It compresses nothing.
@@ -2558,9 +2569,9 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - Normalization Mode: several loudness standards, Sample Peak or True Peak.
   - Set Level: Relative treats the clips as one clip. Independent gives each clip its own change.
   - vidcut: `clip.normalize`, in Audio Operations of the right-click menu, acts on the selected clips with sound.
-  - Normalize in the header of the Inspector's Audio section opens the same window for the clips of the section.
-  - While it measures, the window shows Measuring. Cancel stops the measurement, and nothing changes.
-  - A short message tells how many clips stopped at the volume limit or at the peak limit.
+    - Normalize in the header of the Inspector's Audio section opens the same window for the clips of the section.
+    - While it measures, the window shows Measuring. Cancel stops the measurement, and nothing changes.
+    - A short message tells how many clips stopped at the volume limit or at the peak limit.
   - The defaults, the range and the measured part of a clip are in D80.
 
 ## 10. Quick Export (Ch. 39, pp. 788–790, 4095–4096, 4104–4109)
