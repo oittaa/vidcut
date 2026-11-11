@@ -7,6 +7,11 @@
 - Position, zoom, rotation and opacity take keyframes ([keyframes](keyframes.md#titles)).
 - vidcut reads and writes them in OTIO in Resolve's shape ([D67](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
+## Text in the viewer
+
+- Edit the text of a title in place in the viewer, inside a plain outline, as Resolve does ([X52](../deviations.md#x52-titles-come-from-a-titles-tab-and-are-edited-in-the-inspector)).
+- vidcut opens a text field over the title until then.
+
 ## Tracking
 
 - Measure a tracking with a fraction of a pixel at a zoom. vidcut takes the step of 1/64 of a pixel before the zoom.

@@ -413,6 +413,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:**
   - The user drags titles from the Titles browser onto the timeline (pp. 762–763, 1176).
   - The user edits the text of a title with a double-click in the Timeline Viewer. There, onscreen controls also move, scale and rotate the title (pp. 763–764, 1176).
+  - The text is edited in place, inside a plain outline (measured in Resolve Studio 21.2).
   - The Video Inspector sets its fonts, colors, drop shadows, backgrounds and transform (p. 764).
 - **vidcut:**
   - A double-click on a title in the Titles tab adds it at the playhead and opens the Title section of the Inspector tab.
@@ -426,11 +427,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Over them, the pointer becomes a move, resize or hand cursor. The corners zoom the title, and the pointer shows the zoom.
   - A scroll moves only across.
   - The title shows during the drag. One `titles.set` follows on release.
-  - A double-click on the title in the viewer edits its text in a box there, as in Resolve. It also opens the section.
+  - A double-click on the title in the viewer opens a text field over the title. The title changes as the user types. The double-click also opens the section.
 - **Why:**
   - One change for each title keeps typing out of the undo history.
   - Handles that show on hover, and a cursor that changes over them, show that the user can drag them.
   - The zoom by the pointer shows when the zoom stops at its limit, 400%.
+  - The text field is there until vidcut edits the text in place ([todo](todo/titles.md#text-in-the-viewer)).
 
 ## X53. Titles are Text, the three lower thirds and Scroll, styled by markup
 
@@ -537,8 +539,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - The highlighted word is then not the word that is spoken, until the word timings are updated.
 - **vidcut:**
   - The animation is part of the style of a track (D69). The user sets it in the Subtitle Track section of the Inspector or with `track.set`.
-  - The Animated Subtitles section of the Titles tab shows the animated looks.
-  - A drag of a look onto the header of a subtitle track sets the style of the track, as in Resolve.
   - The looks of Create Subtitles from Audio ([spec §8.12](spec.md#812-subtitles-pp-645646-702-12271248)) put the speech on a new track that is already animated.
   - Word times follow edits and new text automatically (D70).
 - **Why:**
