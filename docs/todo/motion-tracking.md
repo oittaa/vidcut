@@ -2,7 +2,7 @@
 
 **When:** now, one pull request for each step below.
 
-A motion path is the path of an area of the picture through the frames of a clip. A clip stores motion paths, and the area of an effect follows a path ([model](../design/model.md#motion-paths)). `motion.find` makes a path for each face of a clip ([analysis](../design/analysis.md#subjects)). vidcut follows no other thing.
+A motion path is the path of an area of the picture through the frames of a clip. A clip stores motion paths, and the area of an effect follows a path ([model](../design/model.md#motion-paths)). `motion.find` makes a path for each face and each block of text of a clip ([analysis](../design/analysis.md#subjects)). `motion.track` makes a path for a drawn area.
 
 In this file, a path is never a track of the timeline.
 
@@ -42,6 +42,7 @@ In this file, a path is never a track of the timeline.
 - An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path ([deviation X166](../deviations.md#x166-an-effect-has-an-area)).
 - `motion.find` finds the faces and the text of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
 - `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
+- `motion.follow` makes a title follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)).
 - No request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
 
@@ -100,7 +101,13 @@ In this file, a path is never a track of the timeline.
   - Measure `tracking::LOST` on a clip where the thing leaves the picture, or goes behind another thing. No test clip has one.
   - A track follows no turn and no change of perspective.
 - **The Motion section in the app:** click Blur in a window, and take a find that asks for the download of its model. Find ran from its button.
-- **Titles and clips follow a path** of another clip.
+- **A clip follows a path** of another clip: a picture in a picture, or a sticker.
+- **A title that follows a path, what is left:**
+  - Follow in the Inspector of a title, and the handles of such a title in the viewer.
+  - The size and the angle of the thing do not move the title.
+  - A title inside a compound clip follows no path.
+  - An OpenTimelineIO file does not keep what a title follows.
+  - Measure on the Fusion page where a connected node stays after the last frame of a track.
 - **A subject with its matte:** with [subject masks](subject-masks.md).
 - **Resolve measurement:**
   - Measure the lines of the manual above in Resolve. The manual and the application can differ.

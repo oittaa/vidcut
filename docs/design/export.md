@@ -495,6 +495,13 @@ Cancel:
   - Its kind aligns it, and title safe wraps it. It has one box behind the block, and its anchor places it.
 - Each title in the plan carries its clip, and where the piece is in that clip (`ShownTitle`, its `Run`). `Run::top` places a scrolling title on each frame.
 - `titles_of` gives a title with keyframes the values of its frame (`ShownTitle::sampled`). Thus the viewer and the export get plain values.
+- A title that follows a motion path carries the picture of the clip of that path (`ShownTitle::lead`, a `Lead`) ([model](model.md#motion-paths)).
+  - A `Lead` holds the `Placed` of that clip, the path, the fit of its picture and the frames on which it plays.
+  - `Lead::spot` gives the middle of the thing on a frame, as fractions of the frame of the project.
+    - `Followed::held` reads the path. Before its first sample and after its last, it gives that sample.
+    - `place::level` puts the point through the transform of that clip. Outside the frames of that clip, `Lead::spot` takes its first or its last frame.
+  - `ShownTitle::led` moves the title by that spot less the middle of the frame (`Title::moved`). `ShownTitle::sampled` calls it after the keyframes.
+  - `plain_title` works the move out for a piece of one frame. Thus the key of that piece in the render cache does not hold the whole path.
 - A title in a dissolve at the edge of its clip fades by the `Ramp` of the dissolve (`fade`), on both sides of the edge. `ShownTitle::alpha` gives its level, with its opacity.
 - A title in a wipe has no level. `TitleOver` holds the edge of the wipe, and the draw shows the title only in its own part of the frame.
 - The player's `Titles` draws a title once for the size of the output, and keeps it while it shows. The shader moves and fades it.

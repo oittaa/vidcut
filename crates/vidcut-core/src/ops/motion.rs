@@ -4,7 +4,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, EffectArea, Follow, MotionPath, PathSample, Project, Subject, Title, TitleKind, TrackWay,
+    Clip, EffectArea, Follow, MotionPath, PathSample, Project, Subject, Title, TitleKind, Track,
+    TrackWay,
 };
 use crate::motion::{self, Area};
 
@@ -201,6 +202,14 @@ pub fn follow(
         };
         let (was, now) = (off(&old), off(&next));
         next.moved([was[0] - now[0], was[1] - now[1]]);
+        let round = |v: f64| (v * 1e5).round() / 1e5;
+        next.each_line(|line| {
+            line.position = line.position.map(|at| at.map(round));
+            line.position_keys
+                .iter_mut()
+                .for_each(|k| k.value = round(k.value));
+            line.position_y.iter_mut().for_each(|v| *v = round(*v));
+        });
     }
     let next = super::titles::checked(&next)?;
     let shown = json!({ "clip": id, "follows": next.follows, "position": next.place() });
@@ -250,7 +259,29 @@ pub fn settle(p: &mut Project) -> Vec<String> {
             _ => title.follows = None,
         }
     }
+    for c in p.tracks.iter_mut().flat_map(|t| &mut t.clips) {
+        let inside = c.compound.as_mut();
+        if inside.is_some_and(|k| unled(&mut k.tracks) | unled(&mut k.made_from)) {
+            warnings.push(format!(
+                "{}: a title inside a compound clip follows no motion path",
+                c.id
+            ));
+        }
+    }
     warnings
+}
+
+fn unled(tracks: &mut [Track]) -> bool {
+    let mut any = false;
+    for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
+        if let Some(title) = c.title.as_mut() {
+            any |= title.follows.take().is_some();
+        }
+        if let Some(k) = c.compound.as_mut() {
+            any |= unled(&mut k.tracks) | unled(&mut k.made_from);
+        }
+    }
+    any
 }
 
 pub fn follow_violation(p: &Project, c: &Clip) -> Option<String> {

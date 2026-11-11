@@ -1231,7 +1231,7 @@ pub fn read(item: &Value, reference: &Value, height: u32, origin: i64) -> Option
         && let Ok(t) = serde_json::from_value::<Title>(raw.clone())
         && let Ok(t) = crate::ops::titles::checked(&t)
     {
-        return Some(t);
+        return Some(Title { follows: None, ..t });
     }
     let mut t = from_editor(reference, height)?;
     let all = groups(reference);

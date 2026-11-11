@@ -187,6 +187,7 @@ flowchart TD
   - `burn` draws the letters of a Text title or a lower third one at a time on a `Canvas`. The exact place comes from `Title::seated_left` ([spec D65](../cut-page-spec.md)).
   - A drawing's top is on a whole pixel. A moved block goes by whole pixels between the rounded middles. Thus it lands on the same row as a new drawing at that place.
 - `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
+  - A previewed title that follows a motion path gets the same move as the plan's title (`ShownTitle::led`, [export](export.md#titles)).
 - `Player::present` hands each block of a title of a frame as a `TitleOver`:
   - the picture, in premultiplied RGBA, and how many layers go under it. A picture larger than the largest texture of the GPU goes in parts (`LetterTile`), for example a long scroll.
     - The picture is 8-bit. With its `float` field set, it is in 32-bit floats (`TitlePicture`, [export](export.md#titles)).
