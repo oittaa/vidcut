@@ -806,7 +806,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing selected that it can show, it shows one line.
   - With several clips selected, a section shows the first clip that it acts on. Its header gives the number of these clips.
-  - The Transform and Crop sections have a switch at the left of their names. Dynamic Zoom, Composite, Speed and Audio have none.
+  - The Transform, Crop and Dialogue Leveler sections have a switch at the left of their names. Dynamic Zoom, Composite, Speed and Audio have none.
   - Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
   - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has no accent color, and its Reset does nothing.
@@ -825,7 +825,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([spec §9](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
     - Pan sets the pan of the selected clips ([X153](#x153-every-clip-pans-as-on-a-stereo-track)).
     - The Equalizer row has a switch and a button that opens the Equalizer window ([X154](#x154-the-equalizer-is-a-window)).
-    - The Dialogue Leveler row has a switch and a button that opens the Dialogue Leveler window ([X155](#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
     - The Compressor row has a switch and a button that opens the Compressor window ([X156](#x156-the-compressor-is-on-a-clip)).
     - The Noise Reduction row has a switch and a button that opens the Noise Reduction window ([X157](#x157-noise-reduction-is-our-own-spectral-gate)).
     - The Audio section has no Pitch or Music Remixer.
@@ -1795,21 +1794,18 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:**
   - The Dialogue Leveler finds dialogue with its own analysis (pp. 774–775). Its rules are not public.
   - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives what the renders show.
-  - Its switch starts off (measured in Resolve Studio 21.2).
   - The scripting API sets an Output Gain outside 0 to 6 dB to the nearest limit.
   - It does not work on a track with more than two channels (p. 775).
 - **vidcut:**
   - It does not separate dialogue from other sound. A part that is 10 dB above the lowest recent level is dialogue.
   - Background Reduction lowers all the sound between lines. The amount is 1.2 to 5 dB for each preset.
   - On the spoken test clip with Allow Wider Dynamics, each line is within 1.3 dB of Resolve's level. With the other presets, a line is up to 5.1 dB away.
-  - The Dialogue Leveler is a window with Apply and Cancel. The window of a clip with no Dialogue Leveler opens with On checked.
   - An OTIO export keeps it in vidcut's own metadata. The export gives the note `dialogue_leveler_kept`.
   - `clip.set` refuses an Output Gain outside 0 to 6 dB.
   - It works on a clip with any number of channels.
 - **Why:**
   - The player runs the same code as the export. Level rules with a short look ahead run in real time.
   - Background Reduction in the renders was uneven. A fixed amount is predictable.
-  - The user opens the window to turn the Dialogue Leveler on.
   - A value outside the range is an error in the script. A refusal shows the error.
   - A track of vidcut has no channel type. Thus a clip with many channels gets what the user asks for.
 

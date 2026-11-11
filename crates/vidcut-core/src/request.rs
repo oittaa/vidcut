@@ -1663,7 +1663,8 @@ pub enum Request {
         )]
         equalizer: Option<Option<EqualizerSet>>,
         /// The Dialogue Leveler: each field given replaces its own, and null
-        /// takes it off with its settings.
+        /// takes it off with its settings. `{"on": true}` turns it on, and
+        /// `{"on": false}` turns it off and keeps its settings.
         #[serde(
             default,
             deserialize_with = "given",
@@ -5263,8 +5264,11 @@ pub struct DuckSet {
 }
 
 /// A change to a clip's Dialogue Leveler: each field given replaces its own,
-/// and the rest stay as they are. A new one is on, with the preset
-/// `allow_wider_dynamics`, its three processes off and an output gain of 0.
+/// and the rest stay as they are. A clip has none until it gets a change.
+/// With `on` true, a new one has the preset `allow_wider_dynamics`, its three
+/// processes on and an output gain of 2, as the Inspector's switch gives.
+/// Else a new one has that preset, its three processes off and an output
+/// gain of 0, and it is on unless `on` is false.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DialogueLevelerSet {

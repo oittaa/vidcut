@@ -6,6 +6,7 @@ use crate::model::{DialogueLeveler, LevelerPreset};
 use crate::request::DialogueLevelerSet;
 
 pub const OUTPUT_DB: RangeInclusive<f64> = 0.0..=6.0;
+const SWITCHED_ON_GAIN_DB: f64 = 2.0;
 pub const PRESETS: [LevelerPreset; 4] = [
     LevelerPreset::AllowWiderDynamics,
     LevelerPreset::OptimizeModerateLevels,
@@ -47,6 +48,16 @@ pub fn first() -> DialogueLeveler {
     }
 }
 
+fn switched_on() -> DialogueLeveler {
+    DialogueLeveler {
+        reduce_loud: true,
+        lift_soft: true,
+        background_reduction: true,
+        output_gain_db: SWITCHED_ON_GAIN_DB,
+        ..first()
+    }
+}
+
 fn out_of_range(v: f64) -> Result<()> {
     if OUTPUT_DB.contains(&v) {
         return Ok(());
@@ -64,7 +75,10 @@ pub fn check(set: &DialogueLevelerSet) -> Result<()> {
 
 pub fn patched(old: Option<DialogueLeveler>, set: &DialogueLevelerSet) -> Result<DialogueLeveler> {
     check(set)?;
-    let mut l = old.unwrap_or_else(first);
+    let mut l = old.unwrap_or_else(|| match set.on {
+        Some(true) => switched_on(),
+        _ => first(),
+    });
     l.on = set.on.unwrap_or(l.on);
     l.preset = set.preset.unwrap_or(l.preset);
     l.reduce_loud = set.reduce_loud.unwrap_or(l.reduce_loud);
