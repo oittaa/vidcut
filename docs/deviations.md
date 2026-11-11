@@ -10,15 +10,19 @@ Each entry has three parts:
 
 This file also lists the features that vidcut adds. Where the manual does not tell what to do, the spec records a decision ([spec §12](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). A decision is not a deviation.
 
-## X1. Media paths are relative, and relinking checks the file
+## X1. A project is one file, and its media paths are relative
 
 - **Resolve:**
+  - A Project Library is a database that holds one or more projects. The Project Manager creates and loads projects from it (p. 4223).
   - Media that move go offline until the user relinks them (pp. 668–669).
   - Relink Selected Clips matches clips to files by file name and timecode (p. 669).
 - **vidcut:**
+  - A project is one `.vidcut` JSON file. There is no library of projects.
   - The project file stores the paths of media in or under the project's folder relative to that folder.
   - Relink Media finds missing files by name. It relinks only the same file ([design/model.md](design/model.md#fingerprints-and-relinking)).
 - **Why:**
+  - Scripts and agents edit projects through the CLI while the GUI can have them open. One file keeps all of them in agreement.
+  - JSON is easy to read and to diff.
   - The user can move the project folder, also to another computer, and keep its media.
   - A different file with the same name does not take the place of the media.
 
