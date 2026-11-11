@@ -293,11 +293,12 @@ fn with_picture(
     let Some(x) = &c.picture else {
         return effects;
     };
+    let x = crate::ops::picture::working(x.clone());
     let kept = effects
         .into_iter()
         .filter(|e| !picture::is_placing(e))
         .collect();
-    picture::joined(kept, picture::effects(x, shape, g, source))
+    picture::joined(kept, picture::effects(&x, shape, g, source))
 }
 
 pub fn out_of_reach(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
@@ -307,9 +308,10 @@ pub fn out_of_reach(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
         .flat_map(|t| &t.clips)
         .filter(|c| c.video && exported(c, a, b))
         .filter(|c| {
-            c.picture
-                .as_ref()
-                .is_some_and(|x| !picture::reaches(x, &shape_of(p, c, p.media(&c.media))))
+            c.picture.as_ref().is_some_and(|x| {
+                let x = crate::ops::picture::working(x.clone());
+                !picture::reaches(&x, &shape_of(p, c, p.media(&c.media)))
+            })
         })
         .map(|c| c.id.clone())
         .collect()

@@ -3338,6 +3338,10 @@ pub struct Picture {
     /// Mirrored top to bottom.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flip_vertical: bool,
+    /// Turned off, the position, zoom, rotation, anchor, pitch, yaw and
+    /// flips stay on the clip and do nothing. Usual: on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub transform_off: bool,
     /// What is cut off each side, as fractions of the source picture; the
     /// rest stays where it was. A side with keyframes takes its curve at
     /// the frame (`crop_left_keys` and the three beside it).
@@ -3366,6 +3370,10 @@ pub struct Picture {
     /// Crop Softness keyframes, from -100 to 100 (decision D75).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub crop_softness_keys: Vec<Keyframe>,
+    /// Turned off, the crop and its softness stay on the clip and do
+    /// nothing. Usual: on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub crop_off: bool,
     /// A slow push or pull and pan across the clip, from a start box to an
     /// end box. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]

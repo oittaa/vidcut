@@ -1505,6 +1505,7 @@ enum Act {
     Mode(CompositeMode),
     Swap,
     Clear(PictureTool),
+    Switch(PictureTool, bool),
     Unkey,
     Step(Key, i64),
     Toggle(Key),
@@ -1893,12 +1894,26 @@ fn group<R>(
     header: impl FnOnce(&mut egui::Ui) -> R,
     rows: impl FnOnce(&mut egui::Ui),
 ) -> R {
+    switched_group(ui, name, None, header, rows).1
+}
+
+fn switched_group<R>(
+    ui: &mut egui::Ui,
+    name: &str,
+    switch: Option<bool>,
+    header: impl FnOnce(&mut egui::Ui) -> R,
+    rows: impl FnOnce(&mut egui::Ui),
+) -> (Option<bool>, R) {
     let id = ui.make_persistent_id(("inspector", name));
     let (_, header, _) =
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
             .show_header(ui, |ui| {
+                let flipped = switch.and_then(|now| {
+                    let mut on = now;
+                    ui.checkbox(&mut on, "").clicked().then_some(on)
+                });
                 ui.label(RichText::new(name).strong());
-                header(ui)
+                (flipped, header(ui))
             })
             .body(|ui| {
                 egui::Grid::new(("inspector-rows", name))
@@ -1913,7 +1928,7 @@ fn group<R>(
 fn section(
     ui: &mut egui::Ui,
     (name, tool): (&str, PictureTool),
-    set: bool,
+    (set, switch): (bool, Option<bool>),
     acts: &mut Vec<Act>,
     rows: impl FnOnce(&mut egui::Ui, &mut Vec<Act>),
 ) {
@@ -1923,7 +1938,11 @@ fn section(
         })
         .inner
     };
-    if group(ui, name, reset, |ui| rows(ui, acts)) {
+    let (flipped, cleared) = switched_group(ui, name, switch, reset, |ui| rows(ui, acts));
+    if let Some(on) = flipped {
+        acts.push(Act::Switch(tool, on));
+    }
+    if cleared {
         acts.push(Act::Clear(tool));
     }
 }
@@ -1943,7 +1962,7 @@ fn transform(
     section(
         ui,
         ("Transform", PictureTool::Transform),
-        set,
+        (set, Some(!first.shown.transform_off)),
         acts,
         |ui, acts| {
             let [zx, zy] = first.shown.sampled(first.frame as f64).scale();
@@ -2000,17 +2019,24 @@ fn crop(
     acts: &mut Vec<Act>,
 ) {
     let set = chosen.iter().any(|c| uses(&c.shown, PictureTool::Crop));
-    section(ui, ("Crop", PictureTool::Crop), set, acts, |ui, acts| {
-        for f in [
-            Field::Left,
-            Field::Right,
-            Field::Top,
-            Field::Bottom,
-            Field::Softness,
-        ] {
-            number(ui, f, i, p, at, chosen, acts);
-        }
-    });
+    let switch = Some(!chosen[0].shown.crop_off);
+    section(
+        ui,
+        ("Crop", PictureTool::Crop),
+        (set, switch),
+        acts,
+        |ui, acts| {
+            for f in [
+                Field::Left,
+                Field::Right,
+                Field::Top,
+                Field::Bottom,
+                Field::Softness,
+            ] {
+                number(ui, f, i, p, at, chosen, acts);
+            }
+        },
+    );
 }
 
 fn composite(
@@ -2025,7 +2051,7 @@ fn composite(
         .iter()
         .any(|c| uses(&c.shown, PictureTool::Composite));
     let section_name = ("Composite", PictureTool::Composite);
-    section(ui, section_name, set, acts, |ui, acts| {
+    section(ui, section_name, (set, None), acts, |ui, acts| {
         let now = chosen[0].shown.mode();
         let mixed = chosen
             .iter()
@@ -2061,7 +2087,7 @@ fn dynamic_zoom(
     let on = !zooms.is_empty();
     let first = chosen[0].shown.dynamic_zoom;
     let section_name = ("Dynamic Zoom", PictureTool::DynamicZoom);
-    section(ui, section_name, on, acts, |ui, acts| {
+    section(ui, section_name, (on, None), acts, |ui, acts| {
         label(ui, "Dynamic Zoom", on);
         dialog::switch(ui, |ui| {
             if ui
@@ -4451,6 +4477,15 @@ impl Workspace {
                     flip_vertical: down.unwrap_or(c.shown.flip_vertical),
                     ..c.shown.clone()
                 })
+            }),
+            Act::Switch(tool, on) => self.send_pictures(chosen, |c| {
+                let mut p = c.shown.clone();
+                match tool {
+                    PictureTool::Transform => p.transform_off = !on,
+                    PictureTool::Crop => p.crop_off = !on,
+                    PictureTool::DynamicZoom | PictureTool::Composite => return None,
+                }
+                Some(p)
             }),
             Act::Zooming(on) => {
                 self.send_pictures(chosen, |c| {

@@ -308,7 +308,7 @@ pub(crate) fn previewed(
         .iter()
         .map(|p| match preview.iter().find(|(clip, _)| *clip == p.clip) {
             Some((_, picture)) => Placed {
-                picture: picture.clone(),
+                picture: vidcut_core::ops::picture::working(picture.clone()),
                 ..p.clone()
             },
             None => p.clone(),

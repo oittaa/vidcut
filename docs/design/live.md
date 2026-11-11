@@ -359,7 +359,7 @@ The bar and the Jobs button:
 - `viewer.scopes` changes `ViewerPrefs` too, and the snapshot carries `scopes`.
   - `Workspace::scopes_menu` is in the View menu and in the header of the viewer. Each button sends `viewer.scopes`.
   - `Workspace::scope_column` takes a column at the right of the viewer's area. `Workspace::paint_scopes` paints each scope with its marks in egui ([gpu](gpu.md#the-scopes)).
-- `Workspace::picture_controls` boxes the handles through the `place::Placing` of the picture ([deviation X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles)).
+- `Workspace::picture_controls` boxes the handles through the `place::Placing` of the picture ([spec §8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768)).
   - The handles work about the anchor point (`Shown::pivot`, from `place::anchored`).
   - A move snaps the middle of the picture as drawn, not its `position`.
 - A drag, or a run of wheel notches (`Wheeled`, `Workspace::settle_picture_wheel`), ends in one `picture.set`.

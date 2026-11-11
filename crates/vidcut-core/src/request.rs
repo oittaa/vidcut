@@ -2621,6 +2621,15 @@ pub enum Request {
         /// Mirrored top to bottom.
         #[serde(default)]
         flip_vertical: Option<bool>,
+        /// True turns the transform off: the position, zoom, rotation,
+        /// anchor, pitch, yaw and flips stay and do nothing. False turns
+        /// it on again.
+        #[serde(default)]
+        transform_off: Option<bool>,
+        /// True turns the crop off: the crop and its softness stay and do
+        /// nothing. False turns it on again.
+        #[serde(default)]
+        crop_off: Option<bool>,
         /// What is cut off its left side, as a fraction of its width, from
         /// 0 to 1. When it meets `crop_right`, the picture does not show.
         #[serde(default)]
