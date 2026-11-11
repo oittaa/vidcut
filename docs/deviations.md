@@ -1507,7 +1507,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
 ## X94. Speed keyframes and the Mark menu's keyframe items
 
 - **Resolve:**
-  - The clip's right-click menu calls a speed keyframe a speed point. Its item is Add Speed Point.
   - Add Keyframe, Delete Keyframe and Delete All Keyframes act on the selected values of the Keyframes panel or the keyframe tray (p. 4343).
   - With the panel and the tray closed, they act on the speed keyframes of the selected clips.
   - Then Delete Keyframe and Delete All Keyframes do the same thing in Resolve Studio 21.1.2.
@@ -1519,7 +1518,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - In one check, the question named no value. After Delete, a Position X with no keyframes also went back to 0.
   - The keyframe tray has a Speed group with two rows, Retime Frame and Retime Speed. Each row has a key at each speed keyframe.
 - **vidcut:**
-  - A point where the speed changes is a speed keyframe. The GUI, the requests and the docs use this one name. The right-click menu has Add Speed Keyframe.
   - The Keyframes tab and the keyframe tray have one Speed row, in a Speed group.
   - With the Keyframes tab or the tray open, the three items act only on the selected rows and keyframes. Thus with the tray open and no row selected, Add Keyframe is off.
   - With both closed, they act on the speed keyframes of the selected clips ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -1530,7 +1528,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The question of Delete All Keyframes names the values, the number of keyframes and the clip.
   - Delete All Keyframes removes only the keyframes of the selected rows. A value with no keyframes keeps its value.
 - **Why:**
-  - One thing has one name. Retime Frame and Retime Speed show the same speed keyframes, so one row is sufficient.
+  - Retime Frame and Retime Speed show the same speed keyframes, so one row is sufficient.
   - An item that does nothing gives the user no clue. The user sees which keyframes go, and how many, before they go.
   - A Delete All that removes one speed keyframe is a fault in Resolve. The reset of a value with no keyframes is a fault too. vidcut does not copy them.
 

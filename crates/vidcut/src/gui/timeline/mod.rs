@@ -2879,7 +2879,7 @@ impl Workspace {
         let change_speed = bindings.named("Change Speed…", Action::ChangeSpeed);
         if c.generator.is_some() {
             ui.add_enabled(false, egui::Button::new(change_speed));
-            ui.add_enabled(false, egui::Button::new("Add Speed Keyframe"));
+            ui.add_enabled(false, egui::Button::new("Add Speed Point"));
         } else if !c.is_generator() && ui.button(change_speed).clicked() {
             self.open_speed_dialog();
             ui.close();
@@ -2887,7 +2887,7 @@ impl Workspace {
         if super::keyframe_editor::takes_speed(c) {
             let play = self.snap.timeline.position;
             let why = super::keyframe_editor::add_speed_key_why(&[c], play);
-            let r = ui.add_enabled(why.is_none(), egui::Button::new("Add Speed Keyframe"));
+            let r = ui.add_enabled(why.is_none(), egui::Button::new("Add Speed Point"));
             let r = match why {
                 Some(why) => r.on_disabled_hover_text(why),
                 None => r,
