@@ -732,7 +732,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 
 - **Resolve:**
   - Only Resolve Studio has it, with its built-in AI.
-  - It is the first item of Timeline Actions on the Cut page (p. 645), and in Timeline > AI Tools (p. 1234).
+  - It is the first item of Timeline Actions on the Cut page (p. 646), and in Timeline > AI Tools (p. 1234).
   - More languages come as an Extras download (pp. 1234–1235).
   - Its dialog shows the progress.
 - **vidcut:**
@@ -741,7 +741,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Qwen3-ASR 1.7B has 30 languages. Whisper large-v3 has 100 languages and times for each phrase.
   - The request can also name a GGUF file.
   - vidcut downloads the library of transcribe.cpp, Silero VAD and the speech models into the cache folder. In the GUI, a question that gives their size comes first.
-  - In the GUI, Create Subtitles from Audio… is the first item of Timeline Actions. The Timeline menu holds the same items.
+  - In the GUI, Create Subtitles from Audio… is the first item of Timeline Actions. The Timeline menu shows these items after Keyframes and Audio Scrubbing.
   - Its dialog also has the model, Speakers, the GPU, the range, the tracks that it hears and the track.
   - The model list gives the languages of each model, how it times the words, and its size or price ([X62](#x62-paid-speech-recognition-asked-before-the-audio-leaves)).
   - A box for each track with sound is ticked when playback hears that track.
