@@ -3055,7 +3055,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Speed takes a typed value under 0.01%. On clips with no speed keyframes, it sends `speed.set` at the playhead.
       - On a clip with speed keyframes, that value becomes 0.01%. A drag of Speed stops at 0.01%.
     - The diamond adds or removes a speed keyframe at the playhead. The arrows move the playhead to the previous or next speed keyframe.
-    - The diamond is orange on a speed keyframe ([X107](deviations.md#x107-the-diamond-of-speed-change-is-orange)).
+    - The diamond is red on a speed keyframe (measured in Resolve Studio 21.1.2). The other Keyframe buttons are orange on a keyframe (p. 1250).
     - The list opens only on a section that plays forward. `speed.set` changes only such a section.
     - Add Speed Keyframe in the right-click menu adds a speed keyframe at the playhead.
     - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
