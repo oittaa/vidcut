@@ -364,6 +364,7 @@ The bar and the Jobs button:
 - The boxes of a Dynamic Zoom are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
 - `Workspace::area_controls` draws the handles of the area of one effect (`AreaShown`), before `Workspace::picture_controls`.
   - `AreaShown::grip` gives what a press holds (`AreaHold`). `area_moved` gives the area of a drag, and `Workspace::land_area` sends one `effects.set`.
+  - The handles show the area at the playhead (`Effect::adopted`). An effect with keyframes sends `at`, as the Inspector does.
   - `AreaShown::cursor` gives the pointer of a hold. `paint_area` puts a ring on the handle under the pointer.
   - On a polygon, `Workspace::area_points` adds a point on a click on a side. It removes a point on a middle-click, or on a click with Alt.
 - The Blur tool (`Workspace::blur_tool`, `Grab::blurring`) draws a new area in the viewer (`Workspace::blur_controls`).

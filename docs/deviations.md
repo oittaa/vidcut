@@ -2575,7 +2575,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
     - With Free Shape, each click adds a point. A click on the first point, or a double-click, closes the shape. Escape drops it.
     - A drag on the outline of another area shows its handles and moves it.
-  - The center, the size, the rotation and the softness of the area take keyframes. The points of a polygon take none ([todo](todo/motion-tracking.md)).
 - **Why:**
   - The user draws the area on the thing to hide, and sees the blur at once. Resolve needs a node, the Window palette and the Blur palette for that.
   - The outline of an area tells where an effect works, with no tool open.

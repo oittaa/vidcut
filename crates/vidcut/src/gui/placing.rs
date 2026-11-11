@@ -1786,11 +1786,13 @@ impl Workspace {
             let mut wanted = self.picture_wanted().into_iter();
             wanted.find(|(id, _)| *id == c.id).map(|(_, x)| x)
         };
-        let shown = match held {
+        let mut shown = match held {
             Some(h) if h.clip == c.id => h.start.clone(),
             _ => wanted().unwrap_or_else(|| c.picture.clone().unwrap_or_default()),
         };
-        let area = shown.effects.get(n)?.area.clone()?;
+        let effect = shown.effects.get_mut(n)?;
+        *effect = effect.adopted(c.content_at(at) as f64);
+        let area = effect.area.clone()?;
         let source = c.source_at(at) as f64;
         let base = match area.follows.as_deref() {
             None => Area::WHOLE,
@@ -1815,13 +1817,20 @@ impl Workspace {
             return;
         };
         if let Some(change) = area_change(&from, &to) {
-            let params = json!({ "clip": held.clip, "effect": held.effect, "area": change });
+            let mut params = json!({ "clip": held.clip, "effect": held.effect, "area": change });
+            let keyed = held.start.effects.get(held.effect);
+            if keyed.is_some_and(|e| e.has_keys()) {
+                params["at"] = json!(self.snap.player(crate::live::PlayerId::Timeline).position);
+            }
             self.send("effects.set", params);
+            let stored = self
+                .project()
+                .and_then(|p| p.clip(&held.clip)?.picture.clone());
             self.timeline.picture_grab.landing = Some((
                 held.clip.clone(),
                 held.now.clone(),
                 Instant::now(),
-                held.start.clone(),
+                stored.unwrap_or_else(|| held.start.clone()),
             ));
         }
     }

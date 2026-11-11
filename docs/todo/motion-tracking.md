@@ -79,9 +79,8 @@ In this file, a path is never a track of the timeline.
 
 - **Area keyframes, what is left:**
   - The Inspector has no Keyframe button for the area of an effect. `effects.key` with `area` is the request for it.
-  - The viewer shows the outline and the handles of an area at its plain values. They must show its values at the playhead.
-  - The points of a polygon take no keyframes.
-  - `motion.track` refuses an area with keyframes on its center, its size or its rotation. A track must keep those keyframes as an offset from the path.
+  - The points of a polygon take no keyframes. Resolve animates a polygon window (manual p. 3273).
+  - `motion.track` refuses an area with keyframes on its center, its size or its rotation. In Resolve, the keyframed transform of a window is an offset from the track (p. 3309).
 - **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
   - Try how many frames a found path must start early and end late.
 - **Faces, what is left:**
