@@ -2,24 +2,25 @@
 
 vidcut copies the behavior of DaVinci Resolve by default. This document describes that behavior in our own words.
 
-It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most pages are in its Cut chapters (33–39, pp. 635–790). Pages of other chapters are marked. The printed page numbers are equal to the PDF page numbers.
+It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The printed page numbers are equal to the PDF page numbers.
 
 [deviations.md](deviations.md) lists where vidcut is different. §12 decides the points that the manual leaves open. §13 gives the order in which a picture is processed.
 
 **Reading the manual:**
-- Extract the text with `pdftotext -f 635 -l 790 <manual>.pdf -`.
+- Extract the text of pages with `pdftotext -f <first page> -l <last page> <manual>.pdf -`.
 - The developer's copy is in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`).
 - Do not copy its text into the repository.
 
-**Legend:** **(later)** is not built yet, and comes after the work in progress. [todo/gaps.md](todo/gaps.md) lists the Cut-page behavior that vidcut does not have.
+**Legend:** **(later)** is not built yet, and comes after the work in progress. [todo/gaps.md](todo/gaps.md) lists the Resolve behavior that vidcut does not have.
 
 ## 1. Scope
 
 **In scope:**
 - media pool, viewer, dual timeline
 - editing and trimming, speed changes and speed keyframes (D48)
-- dissolves: cross dissolves, fades to and from black, audio cross fades (§8.11)
+- transitions: Cross Dissolve, Dip to Color, Edge Wipe, Smooth Cut, Push and Slide, fades to and from black, audio cross fades (§8.11)
 - clip/track audio levels and waveforms
+- the Equalizer and the Dialogue Leveler of a clip (§9)
 - volume keyframes of a clip (§9, D81)
 - keyframes of Transform, Crop and Composite (§8.15, D75)
 - Voice Isolation, on a clip or a track (§9)
@@ -27,6 +28,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
+- video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
 - compound clips (§8.18)
 - the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
@@ -34,7 +36,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 
 **Later (later):**
 - other effects, other transitions, other titles, other generators
-- keyframes other than Transform, Crop, the clip volume and the Position, Zoom, Rotation and Opacity of a title
+- keyframes other than Transform, Crop, Composite, speed, the clip volume, effect values and the Position, Zoom, Rotation and Opacity of a title
 - color ([todo](todo/auto-color.md)), Fusion
 - the display LUT, and LUT files other than `.cube` ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))

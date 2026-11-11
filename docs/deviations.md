@@ -1,6 +1,6 @@
-# Deviations from the Resolve Cut page
+# Deviations from Resolve
 
-vidcut follows the Cut page ([spec.md](spec.md)), except where an entry in this file tells otherwise.
+vidcut follows DaVinci Resolve ([spec.md](spec.md)), except where an entry in this file tells otherwise.
 
 Each entry has three parts:
 
