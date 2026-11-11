@@ -1,6 +1,6 @@
-# Deviations from the Resolve Cut page
+# Deviations from Resolve
 
-vidcut follows the Cut page ([cut-page-spec.md](cut-page-spec.md)), except where an entry in this file tells otherwise.
+vidcut follows DaVinci Resolve ([spec.md](spec.md)), except where an entry in this file tells otherwise.
 
 Each entry has three parts:
 
@@ -8,7 +8,7 @@ Each entry has three parts:
 - **vidcut:** what vidcut does.
 - **Why:** the reason.
 
-A feature that vidcut adds, and that Resolve does not have, is not a deviation. The spec describes it. Where the manual does not tell what to do, the spec records a decision ([spec §12](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). A decision is not a deviation.
+A feature that vidcut adds, and that Resolve does not have, is not a deviation. The spec describes it. Where the manual does not tell what to do, the spec records a decision ([spec §12](spec.md#12-decisions-on-gaps-and-contradictions)). A decision is not a deviation.
 
 ## X1. A project is one file, and its media paths are relative
 
@@ -82,7 +82,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **vidcut:**
   - Source viewers step through project frames. They count from the first frame of the clip.
   - They sample frames as the export samples them ([design/export.md](design/export.md#which-source-frame)). For media at the project rate, these are the frames of the media.
-  - Source Timecode adds the start timecode of the file, as project frames ([spec D91](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Source Timecode adds the start timecode of the file, as project frames ([spec D91](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - All positions, also source positions, are in project frames ([design/model.md](design/model.md#time)).
   - Thus what the user marks is exactly what goes into the timeline and the export.
@@ -93,18 +93,18 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Timelines move between applications as EDL, AAF, XML or OTIO files. File > Import Timeline and File > Export do this, off the Cut page (pp. 527–530, 4159–4160).
   - An import makes a new timeline.
 - **vidcut:**
-  - vidcut uses only OpenTimelineIO, for import and for export, in the shapes that Resolve uses ([D40](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - vidcut uses only OpenTimelineIO, for import and for export, in the shapes that Resolve uses ([D40](spec.md#12-decisions-on-gaps-and-contradictions)).
   - File > Export Timeline is `export start cut.otio`. With Media, the export is a bundle ([design/model.md](design/model.md#opentimelineio)).
   - A project holds one timeline (X2). Thus File > Import Timeline (`timeline import`) appends, replaces the timeline, adds one compound clip, or brings in only the media.
   - An OTIO file also opens as a new project.
   - OTIO has no drop-frame flag. An imported timeline takes the frame rate and the drop-frame setting of the project.
   - An import into a project with no media turns drop-frame off.
   - Clip effects, transitions, generators that vidcut does not draw, compound clips and speed changes come in as data. vidcut writes them back while they fit.
-  - Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), wipes and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play.
-  - The generators of [spec §8.17](cut-page-spec.md#817-generators-p-766) play.
+  - Dissolves, cross fades ([D50](spec.md#12-decisions-on-gaps-and-contradictions)), wipes and speeds ([D48](spec.md#12-decisions-on-gaps-and-contradictions)) play.
+  - The generators of [spec §8.17](spec.md#817-generators-p-766) play.
   - Other transitions play as cuts, and other generators play as gaps. Other effects do not play.
-  - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - The Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling of Resolve come in as the picture of a clip. The picture of a clip goes out as these effects ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling of Resolve come in as the picture of a clip. The picture of a clip goes out as these effects ([D75](spec.md#12-decisions-on-gaps-and-contradictions)).
   - Resolve Studio 21.1.1 imports `.otio` and `.otioz` files. It imports an `.otiod` folder by its `content.otio`.
   - It keeps tracks and their names, J/L cuts, clip gain, markers, stills, image sequences and the timecode of sources.
   - It also keeps clip effects and their keyframes, transitions, generators, speeds, and compound clips with their picture and sound linked.
@@ -122,10 +122,10 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - With color management, every mix occurs before the output transform. The timeline color space changes the mix.
   - In a Rec.2100 ST2084 timeline, a dissolve is not a straight line in the PQ code values. Its working space is not known (measured in 21.1.1).
 - **vidcut:**
-  - The Timeline Color Space is Auto, SDR, HDR PQ or HDR HLG ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - Each clip goes into it from the tags of the clip. Where the tags are wrong, it uses the Input Color Space of the media ([D35](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The Timeline Color Space is Auto, SDR, HDR PQ or HDR HLG ([D50](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Each clip goes into it from the tags of the clip. Where the tags are wrong, it uses the Input Color Space of the media ([D35](spec.md#12-decisions-on-gaps-and-contradictions)).
   - Every mix is a straight line in the code values of the timeline.
-  - Each export converts the mixed frame to the colors that it selects ([D44](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). The viewer uses the same math.
+  - Each export converts the mixed frame to the colors that it selects ([D44](spec.md#12-decisions-on-gaps-and-contradictions)). The viewer uses the same math.
   - There is no grading.
 - **Why:**
   - vidcut cuts. Grading belongs in other tools.
@@ -149,7 +149,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:**
   - The standard still duration is a user preference (Preferences > User > Editing, p. 114).
 - **vidcut:**
-  - It is a project setting (`project set --still-duration 3s`; [D38](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - It is a project setting (`project set --still-duration 3s`; [D38](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - An edit is the same in every run on every computer.
   - An agent that appends a still gets the duration that the project sets.
@@ -161,7 +161,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Auto decides by file type (p. 366).
 - **vidcut:**
   - Each image is a still, unless `media add --sequence` asks for the numbered run around it.
-  - `media add-folder --sequence` asks for the runs in a folder ([D39](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - `media add-folder --sequence` asks for the runs in a folder ([D39](spec.md#12-decisions-on-gaps-and-contradictions)).
   - When the user imports numbered images in the GUI, picked or in a folder, vidcut asks which they are.
   - For frame formats (PNG, TIFF, EXR, DPX, TGA, BMP), the question has one clip for each run already selected.
 - **Why:**
@@ -176,7 +176,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - It also carries Dolby Vision and HDR10+ from the grade (pp. 151, 259–260).
   - Resolve Studio measures MaxCLL and MaxFALL (p. 282).
 - **vidcut:**
-  - There is no grade. Thus an export carries what its sources tell, or measures it from their frames ([D46](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - There is no grade. Thus an export carries what its sources tell, or measures it from their frames ([D46](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - Phone, camera and graded HDR footage looks on TVs as its sources do.
   - This needs no setup by a colorist.
@@ -200,7 +200,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The points are the first sample, every 1000th sample from there and from the edit, and the last sample (at 48 kHz).
   - Early in a +3 dB fade, the gain is up to 0.06 off.
 - **vidcut:**
-  - The gain of each sample is the value of the curve ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The gain of each sample is the value of the curve ([D50](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - The curve gives the transition its name. The curve needs no points from an editor.
   - The two differ by more than 1% only in the 20 ms where a curve leaves silence or reaches it.
@@ -239,7 +239,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The manual says that a transition is as long as the media of the clips allow (p. 1159).
   - On the Edit page, Ctrl+T asks whether to trim the clips or skip the edit (p. 1160).
 - **vidcut:**
-  - vidcut shortens the dissolve to the media that each side has, as the manual says ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - vidcut shortens the dissolve to the media that each side has, as the manual says ([D50](spec.md#12-decisions-on-gaps-and-contradictions)).
   - When neither side has media past the cut, the Dissolve button and Ctrl+T tell this and add nothing.
 - **Why:**
   - A key that does nothing without a message makes the user guess.
@@ -266,7 +266,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - K held with J plays backward with slowed sound.
   - Resolve Studio 21.1.1 on Windows plays the sound slowed. The pitch of that sound is not checked.
 - **vidcut:**
-  - Sound at any speed other than 1× keeps its pitch on every system ([D54](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Sound at any speed other than 1× keeps its pitch on every system ([D54](spec.md#12-decisions-on-gaps-and-contradictions)).
   - This includes slow play and playback backward.
 - **Why:**
   - The behavior is the same on all systems.
@@ -281,7 +281,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **vidcut:**
   - A file, or an image sequence, is one pool item.
   - When the user imports it again, it keeps its id.
-  - Import Media Folder, or an import into a bin, moves it into that bin ([D53](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Import Media Folder, or an import into a bin, moves it into that bin ([D53](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - Scripts, the command log and OTIO files name media by id.
   - Two items for one file would split its marks, color and proxy.
@@ -292,7 +292,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:**
   - The History window floats over the page (21.1.1).
 - **vidcut:**
-  - The history docks at the right side of the window ([spec §8.10](cut-page-spec.md#810-undo-pp-651652)).
+  - The history docks at the right side of the window ([spec §8.10](spec.md#810-undo-pp-651652)).
 - **Why:**
   - A window over the picture hides what the history is about.
 
@@ -304,7 +304,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A WebP of one frame is a still, whatever the duration of its frame.
   - These results are from Resolve Studio 21.1.1.
 - **vidcut:**
-  - A GIF or WebP of one frame is a still ([D38](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A GIF or WebP of one frame is a still ([D38](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - The delay is how long a viewer shows the picture. It is not the length of a clip.
   - A clip of a few frames of one picture is a blink that the user cannot trim longer.
@@ -354,7 +354,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Insert Selected Subtitles to Timeline Using Timecode (`subtitles.import` with `media`) puts the cues of each file on a new subtitle track. The track has the name of the file.
   - vidcut reads a file as timecode when all its cues start at or after the start timecode of the timeline.
   - A second rule is for a timeline that starts at zero and is shorter than an hour. There, vidcut reads a file as timecode when all its cues start after 01:00:00:00.
-  - Both rules use the time base of the file: real time or timecode labels ([D58](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Both rules use the time base of the file: real time or timecode labels ([D58](spec.md#12-decisions-on-gaps-and-contradictions)).
   - When neither rule applies, times count from the start of the timeline. On a timeline with a start timecode, the GUI tells this.
   - When the user drops a subtitle item on the timeline but not on a subtitle track, it makes a new subtitle track.
 - **Why:**
@@ -428,7 +428,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A double-click on a title in the Titles tab adds it at the playhead and opens the Title section of the Inspector tab.
   - A double-click on a title clip, or Edit Title… in its right-click menu, also opens the section.
   - While the Inspector tab shows, a click on a title clip also shows its section.
-  - The section has the text, the kind of the title, the alignment and a Look list ([D71](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The section has the text, the kind of the title, the alignment and a Look list ([D71](spec.md#12-decisions-on-gaps-and-contradictions)).
   - It shows the place of the title, or of each line of a lower third, as percents across and down (X54).
   - A change goes in as one `titles.set` when the user leaves the field. A button puts it in at once. Ctrl+Z undoes it.
   - A value at its usual number shows an empty box with that number as a hint. A number in the other box of a pair keeps this usual number.
@@ -547,7 +547,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - The highlighted word is then not the word that is spoken, until the word timings are updated.
 - **vidcut:**
   - The animation is part of the style of a track (D69). The user sets it in the Subtitle Track section of the Inspector or with `track.set`.
-  - The looks of Create Subtitles from Audio ([spec §8.12](cut-page-spec.md#812-subtitles-pp-645646-702-12271248)) put the speech on a new track that is already animated.
+  - The looks of Create Subtitles from Audio ([spec §8.12](spec.md#812-subtitles-pp-645646-702-12271248)) put the speech on a new track that is already animated.
   - Word times follow edits and new text automatically (D70).
 - **Why:**
   - It is one step from the speech to animated subtitles.
@@ -565,7 +565,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The tag icon shows a strip at the top of the pool. The strip stays on until the user turns it off.
   - The strip shows the size, frame rate, codec, bits and chroma subsampling, SDR or HDR, and length of the selected clip.
   - It also shows the start timecode, the sound and the file size.
-  - The info button of the strip or of a thumbnail corner opens Clip Info, a window in the place of an overlay ([spec §3](cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
+  - The info button of the strip or of a thumbnail corner opens Clip Info, a window in the place of an overlay ([spec §3](spec.md#3-media-pool-ch-34-pp-653675)).
 - **Why:**
   - Every file has a format. Thus the strip tells something also when the camera name, scene, shot and take are empty.
   - One window with all the information, read fresh from the file, tells the format without a separate tool.
@@ -620,7 +620,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X68. Ducking times every track as a mono track
 
 - **Resolve:**
-  - The Ducker times a mono target track by its controls (pp. 778–779; [D76](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The Ducker times a mono target track by its controls (pp. 778–779; [D76](spec.md#12-decisions-on-gaps-and-contradictions)).
   - On a stereo target track, Rise Time, Hold and Recovery Time act at half their values.
   - The fall starts at the same time as on a mono track.
   - The two channels get different gains while the gain changes.
@@ -637,7 +637,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - The Ducker follows the level of its sources (pp. 778–779).
-  - A fixed threshold, measured between −48 and −36 dBFS peak, makes a source active ([D76](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A fixed threshold, measured between −48 and −36 dBFS peak, makes a source active ([D76](spec.md#12-decisions-on-gaps-and-contradictions)).
   - With a Rise Time of 10 ms, the fall is a one-pole curve on the linear gain, not a half cosine.
   - With a Rise Time of 200 ms, the fall is a half cosine of 202 ms.
   - Each fall starts at a whole multiple of 10 ms from the start of the timeline.
@@ -664,7 +664,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X70. The Inspector is a tab beside the Media Pool, in frame pixels
 
 - **Resolve:**
-  - The Inspector button at the top right of the UI toolbar opens the Inspector (pp. 734–744; [spec §8.15](cut-page-spec.md#815-transform-and-crop-pp-766768)).
+  - The Inspector button at the top right of the UI toolbar opens the Inspector (pp. 734–744; [spec §8.15](spec.md#815-transform-and-crop-pp-766768)).
   - Its Video panel has Transform, Cropping and Dynamic Zoom. Each group has an on/off toggle and a Reset of all its values.
   - There is no Reset for one value.
   - Position X and Y are timeline pixels from the middle, with Y up.
@@ -698,8 +698,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - Mute does what Mute and Unmute in the right-click menu of the clip do.
     - A drag on Volume sends one change on release. The sound does not change during the drag.
     - The Audio section has no Reset of the whole section.
-    - Normalize in the header opens Normalize Audio Levels for the clips of the section ([spec §9](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
-    - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([spec §9](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
+    - Normalize in the header opens Normalize Audio Levels for the clips of the section ([spec §9](spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
+    - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([spec §9](spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
     - Pan sets the pan of the selected clips ([X153](#x153-every-clip-pans-as-on-a-stereo-track)).
     - The Compressor row has a switch and a button that opens the Compressor window ([X156](#x156-the-compressor-is-on-a-clip)).
     - The Noise Reduction row has a switch and a button that opens the Noise Reduction window ([X157](#x157-noise-reduction-is-our-own-spectral-gate)).
@@ -711,7 +711,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - The zoom of a Dynamic Zoom box is in percent. The X and Y of a box are where the middle of the picture is at the start or at the end.
     - They are in pixels of the fitted picture from the middle of the clip, with Y up. A new zoom of a box keeps the middle of the picture in place.
 - **Why:**
-  - The switches of the other sections are not made yet ([gaps](todo/cut-page-gaps.md)).
+  - The switches of the other sections are not made yet ([gaps](todo/gaps.md)).
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
   - A number in frame pixels does the same thing to every picture. The viewer shows the zoom in percent. Thus one value does not show in two forms in vidcut.
   - A Reset for each value puts back one value and keeps the others of its group.
@@ -747,7 +747,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The manual says that an ease starts or stops a change slowly (p. 1112).
   - The handles drag in the Curve Editor (p. 1261), not on the volume overlay.
 - **vidcut:**
-  - The curve between two keyframes is always the Bezier curve of the keyframes and their handles ([D81](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The curve between two keyframes is always the Bezier curve of the keyframes and their handles ([D81](spec.md#12-decisions-on-gaps-and-contradictions)).
   - Thus Ease Out followed by Ease In gives a smooth S-curve.
   - A selected keyframe with a handle shows the handle on the volume line. A drag on the handle changes its time and its value.
 - **Why:**
@@ -892,7 +892,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - With the Keyframes tab or the tray open, the three items act on the selected rows and keyframes.
   - With the tray open, the Keyframes tab closed, and no row or keyframe selected, Add Keyframe adds a speed keyframe, as in Resolve.
   - With the Keyframes tab open and no row selected, Add Keyframe stays off.
-  - With both closed, they act on the speed keyframes of the selected clips ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - With both closed, they act on the speed keyframes of the selected clips ([D48](spec.md#12-decisions-on-gaps-and-contradictions)).
     - Delete All Keyframes then asks first, for example "Delete 3 Speed keyframes of Clip 2?". Then it removes all the speed keyframes.
   - An item that cannot act is off. Its tooltip tells the next click, for example "Click a parameter name, such as Opacity".
   - When the three items are off for one reason, a line in the menu tells the next step, for example "Select a clip first".
@@ -912,7 +912,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Example in Resolve Studio 21.1.2: a 900-frame clip, a speed keyframe at frame 30, and 50% after it. The clip shows source frames 0 to 898.
   - The manual does not tell this.
 - **vidcut:**
-  - The last section shows each source frame to the end of the media, the last frame too ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The last section shows each source frame to the end of the media, the last frame too ([D48](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - A speed change does not remove pictures from a clip. The lost frame is a fault in Resolve. vidcut does not copy it.
 
@@ -926,7 +926,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The manual does not tell this.
 - **vidcut:**
   - The first section has no speed keyframe at its start. Reverse turns it at the speed keyframe where it ends.
-  - The sections after the turned section go on from where it stops, at their own speeds. The speed keyframes and the clip's length stay (`speed.reverse`, [D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The sections after the turned section go on from where it stops, at their own speeds. The speed keyframes and the clip's length stay (`speed.reverse`, [D48](spec.md#12-decisions-on-gaps-and-contradictions)).
   - When the turn needs frames that the media does not have, Reverse refuses.
 - **Why:**
   - The user changes the direction of one section. The other sections keep their speeds.
@@ -942,7 +942,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The manual does not tell this. Its Speed Change controls of the Cut page have no Ease list.
 - **vidcut:**
   - Ease In eases the speed keyframe where the section starts. Ease Out eases the one where it ends. Ease In and Out eases both, and Linear neither.
-  - The list shows the eases of the two speed keyframes of the section (`speed.ease`, [D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The list shows the eases of the two speed keyframes of the section (`speed.ease`, [D48](spec.md#12-decisions-on-gaps-and-contradictions)).
   - The first section has no speed keyframe at its start, and the last none at its end. Their lists offer only the eases that apply.
   - The Speed row of the Keyframes tab and the tray offers Linear and Ease In and Out for one speed keyframe.
 - **Why:**
@@ -1009,7 +1009,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X102. A portrait timeline blurs by the width rule
 
 - **Resolve:**
-  - The sigma of a Gaussian Blur is 0.05625 × Strength² × the timeline width in pixels ([spec §8.16](cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - The sigma of a Gaussian Blur is 0.05625 × Strength² × the timeline width in pixels ([spec §8.16](spec.md#816-effects-pp-765-3526-3536)).
   - Timelines of 1920×1080, 1920×1440 and 3840×2160 fit this rule within 0.1%.
   - On a 1080×1920 timeline, Strength 0.4 gives a sigma of 9.46 pixels. The rule gives 9.72.
 - **vidcut:** all timelines use the rule. On a 1080×1920 timeline, the blur is thus 3% larger than Resolve's.
@@ -1025,7 +1025,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Smart caches clips in formats that are slow to decode: H.264, H.265, DCP, JPEG 2000 and camera raw.
   - Smart caches speed effects and Fusion effects. The manual does not name the upscaler or frame rate conversion for Smart.
 - **vidcut:**
-  - Playback does not write the cache. Only the background render writes it ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Playback does not write the cache. Only the background render writes it ([D98](spec.md#12-decisions-on-gaps-and-contradictions)).
   - The render cache is outside the cache dir. It does not count in the limit of the disk cache. No preference deletes old files. Delete Render Cache removes them.
   - Preferences hold the codec, the background render, its time and the kinds of User mode. They are the settings of this computer.
   - The codecs are the ProRes and DNxHR grades, HEVC and AV1, and Automatic. There is no uncompressed format.
@@ -1033,7 +1033,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - with GPU decoding on, media of a codec with long groups of pictures that the GPU does not decode
     - media that the proxy rules pick (spec D41), while the original plays
   - Smart also renders AI Super Scale, and each Retime Process other than Nearest.
-  - Smart also renders the parts where frames drop steadily during play ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Smart also renders the parts where frames drop steadily during play ([D98](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - The writes of playback would take GPU time from the frames on the screen.
   - The codec, the kinds of User mode and the time depend on the computer, not on the project. Its encoders, its decoders and its disk set them.
@@ -1064,7 +1064,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Uncompressed 10-bit, Uncompressed 16-bit Float, ProRes 4444, ProRes 4444 XQ and DNxHR 444 keep the alpha channel of a cached clip (p. 201).
   - Thus Resolve can cache a clip with an alpha channel at the clip level in these formats.
 - **vidcut:**
-  - Only ProRes 4444 and ProRes 4444 XQ keep the alpha channel. Media with an alpha channel is at the clip level only with these codecs ([spec D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Only ProRes 4444 and ProRes 4444 XQ keep the alpha channel. Media with an alpha channel is at the clip level only with these codecs ([spec D98](spec.md#12-decisions-on-gaps-and-contradictions)).
   - DNxHR 444 keeps no alpha channel. vidcut has no uncompressed codec ([X103](#x103-the-render-cache-is-made-in-the-background)).
   - At the timeline level, the cache holds the frame after the tracks mix. The frame looks the same.
   - The name of such a frame comes from all its layers, not from its time (`Cache::keys`). Thus its cache stays while its layers stay the same.
@@ -1076,7 +1076,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X110. A shrink above 8:1 reads each source pixel
 
 - **Resolve:**
-  - The scaling filter reads 16 source pixels across and 16 down at each scale ([spec §13](cut-page-spec.md#the-scaling-filter)).
+  - The scaling filter reads 16 source pixels across and 16 down at each scale ([spec §13](spec.md#the-scaling-filter)).
   - The formula is measured down to a shrink of 18.6:1.
   - At a shrink of 24:1, one-pixel lines every 3 source pixels read 64, where their mean is 117.3 (measured in Resolve Studio 21.1.2).
 - **vidcut:**
@@ -1158,7 +1158,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X116. The Ripple Overwrite button treats other tracks as a drop does
 
 - **Resolve:**
-  - A drop of a file onto a Track 1 clip follows the rule in [D21](cut-page-spec.md#12-decisions-on-gaps-and-contradictions). These are measurements in Resolve Studio 21.1.2.
+  - A drop of a file onto a Track 1 clip follows the rule in [D21](spec.md#12-decisions-on-gaps-and-contradictions). These are measurements in Resolve Studio 21.1.2.
   - The button and Shift+F10 act differently, on the Cut page and the Edit page.
   - They cut each other track at the start of the replaced part. Everything from there on moves by the change in length.
   - With a shorter clip, the frames just before that start also go away. The edit does not replace these frames.
@@ -1176,7 +1176,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A later cue that moves back cuts the cue that it lands on. It removes the replaced clip's cues from its landing on.
   - The user then has to re-time the cues.
 - **vidcut:**
-  - Cues keep the frames of Track 1 under them ([D57](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Cues keep the frames of Track 1 under them ([D57](spec.md#12-decisions-on-gaps-and-contradictions)).
   - A cue loses its part over the frames that the edit takes out. A cue with no frames left goes away.
   - A longer clip splits a cue across the end of the replaced part. Both parts keep the text.
   - Later cues move with their picture.
@@ -1431,7 +1431,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Atmosphere multiplies the glow by a noise.
   - The renders show the statistics and the size of the noise at 1920×1080. They do not show the rule that makes its pattern.
 - **vidcut:**
-  - vidcut makes the noise itself ([spec §8.16](cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - vidcut makes the noise itself ([spec §8.16](spec.md#816-effects-pp-765-3526-3536)).
   - The noise has the statistics of the renders at the measured values. Its pattern is not the pattern of Resolve.
 - **Why:**
   - No render shows how Resolve makes the pattern. Thus no frame can be the same.
@@ -1468,7 +1468,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - These are measurements in Resolve Studio 21.1.2 (Film Grain, p. 3559).
   - The renders show the spectrum and the statistics of the noise. They do not show the rule that makes its pattern.
 - **vidcut:**
-  - vidcut makes the noise itself from the measured spectrum ([spec §8.16](cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - vidcut makes the noise itself from the measured spectrum ([spec §8.16](spec.md#816-effects-pp-765-3526-3536)).
   - The noise has the spectrum and the statistics of the renders. Its pattern on each frame is not the pattern of Resolve.
 - **Why:**
   - No render shows how Resolve makes the pattern. Thus no frame can be the same.
@@ -1480,7 +1480,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - These are measurements in Resolve Studio 21.1.2 (Film Grain, p. 3559), with Grain Only and Softness 0, at each 0.02 of Symmetry.
   - At exactly 0.4 and 0.6, the standard deviation of the noise is 0.0109 and 0.0855. At the values on each side, it is about 0.026.
 - **vidcut:**
-  - Symmetry follows a table of the measured curves and blends between them ([spec §8.16](cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - Symmetry follows a table of the measured curves and blends between them ([spec §8.16](spec.md#816-effects-pp-765-3526-3536)).
   - The table has no curve at 0.4 and 0.6. There, vidcut blends the curves at 0.38 and 0.42, and at 0.58 and 0.62.
 - **Why:**
   - The jumps are a fault in Resolve. A small change of Symmetry does not make a large change of the grain.
@@ -1568,7 +1568,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - The law of the Pan is different on a stereo track and on a mono track (measured in Resolve Studio 21.2).
-  - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives both laws.
+  - The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives both laws.
   - The scripting API takes a Pan outside −100 to 100, and sets the nearest limit.
 - **vidcut:**
   - A track has no channel type. Each clip uses the law of a stereo track.
@@ -1583,7 +1583,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - The Dialogue Leveler finds dialogue with its own analysis (pp. 774–775). Its rules are not public.
-  - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives what the renders show.
+  - The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives what the renders show.
   - The scripting API sets an Output Gain outside 0 to 6 dB to the nearest limit.
   - It does not work on a track with more than two channels (p. 775).
 - **vidcut:**
@@ -1685,7 +1685,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 ## X163. A compound clip takes its clips whole
 
-- **Resolve:** ([spec §8.18](cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
+- **Resolve:** ([spec §8.18](spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
   - The window of New Compound Clip has a name and a start timecode (p. 1052).
   - A selection can hold only the picture or only the sound of a linked clip.
   - A selected item on a locked track stays out, and the other items go in.
@@ -1717,7 +1717,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X164. A mode inside a compound clip always mixes with the tracks below
 
 - **Resolve:** (measured in Resolve Studio 21.2.0)
-  - One picture in a compound clip mixes its composite mode with the tracks below ([spec](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - One picture in a compound clip mixes its composite mode with the tracks below ([spec](spec.md#12-decisions-on-gaps-and-contradictions)).
   - In one case the mode mixes with black. The compound clip has its usual values, and the picture has an opacity of 100%.
   - In that case Multiply gives a black frame. Screen, Add and Difference give the picture with no change.
   - Each of these changes brings back the rule of the spec:
@@ -1778,7 +1778,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Edit Shape shows the handles of the area in the viewer.
     - A drag inside the area moves it. On an ellipse or a box, a corner changes its size, and the top handle turns it.
     - On a polygon, Alt and a click also removes a point. Why: a trackpad has no middle button.
-  - The Tools row under the viewer has Blur ([spec §8.15](cut-page-spec.md#815-transform-and-crop-pp-766768)).
+  - The Tools row under the viewer has Blur ([spec §8.15](spec.md#815-transform-and-crop-pp-766768)).
     - The right-click menu of a clip has Blur. It shows the Tools row with Blur on, for that clip.
     - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
     - With Free Shape, each click adds a point. A click on the first point, or a double-click, closes the shape. Escape drops it.
@@ -1861,7 +1861,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X170. The clip Equalizer differs in three ways
 
 - **Resolve:**
-  - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the ranges, defaults and curves of the clip equalizer.
+  - The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the ranges, defaults and curves of the clip equalizer.
   - The curve shows a Notch filter, but a render does not change the sound.
   - A Bell filter is wider than its Q near the top of the range.
   - Q 1 acts as Q 0.94 at 8000 Hz and as Q 0.75 at 16000 Hz. Q 4 acts as Q 2 at 16000 Hz.

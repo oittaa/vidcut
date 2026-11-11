@@ -21,7 +21,7 @@ A plugin is an effect that the code of another maker gives. vidcut loads no plug
   - Resolve skips a plugin that made a crash or a hang at the last start.
 - The Audio Plugins preferences list the folders of the VST plugins (p. 104).
   - Resolve turns off a VST plugin that makes it crash at startup. The user can turn it on again.
-- The Open FX of the Cut page and the Edit page work before the clip grade ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+- The Open FX of the Cut page and the Edit page work before the clip grade ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
 
 **In the code:**
 

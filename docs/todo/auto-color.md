@@ -8,12 +8,12 @@ The Color section of the Cut page viewer Tools has one control, Auto Color. vidc
 
 - Auto Color balances the blacks and the whites of the current clip.
 - It uses the frame at the playhead.
-- It is the color item in the Cut page scope ([spec §1](../cut-page-spec.md#1-scope)).
+- It is the color item in the Cut page scope ([spec §1](../spec.md#1-scope)).
 - A five-slider primary is a different control ([primary-grade.md](primary-grade.md)).
 
 **In the code:**
 
-- The viewer Tools row has Transform, Crop and Dynamic Zoom ([spec §8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768)).
+- The viewer Tools row has Transform, Crop and Dynamic Zoom ([spec §8.15](../spec.md#815-transform-and-crop-pp-766768)).
 - That row has no Color section.
 - vidcut has no grade ([deviation X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)).
 

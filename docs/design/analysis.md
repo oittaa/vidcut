@@ -47,7 +47,7 @@ flowchart TD
 - What is between the speech is cut, less Pre Head and Post Tail, as for silence (`analysis::silent_parts`).
 - Ducking by speech uses the same probabilities. `analysis::speech_frames` gives the speech of a source clip in timeline frames, by the defaults of Silero (`retime::SPEECH`, `retime::SHORTEST_SPEECH`, `retime::SHORTEST_PAUSE`).
 - Ducking by level uses the levels. `analysis::loud_frames` gives where the peak of a clip, with its gains, reaches the threshold ([export](export.md#sound)).
-- `keyframes::Gain` gives the gain of a clip with volume keyframes at each level. Silence, ducking and the quiet edges of `edit.ripple_delete_words` use it ([spec D84](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `keyframes::Gain` gives the gain of a clip with volume keyframes at each level. Silence, ducking and the quiet edges of `edit.ripple_delete_words` use it ([spec D84](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 **Why** probabilities, not the segments of transcribe.cpp: the segments depend on the threshold and the lengths. Thus each change in the dialog would run the VAD over the whole file again. The probabilities are measured once and cached, and each change is decided again at once.
 
@@ -245,12 +245,12 @@ flowchart TD
 **Cues:**
 
 - `transcript::cues` breaks the words into sentences and at pauses. It splits a sentence that is too long for one cue into even parts, and wraps the lines.
-- Words carry the times of the model. For a model without times, `transcript::spread` spreads its text over the speech of its piece ([spec D62](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- Words carry the times of the model. For a model without times, `transcript::spread` spreads its text over the speech of its piece ([spec D62](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `transcript::cues` keeps the start of each word in its cue (`Made`).
 - Synchronize Word Timings (`subtitles.time_words`) hears the span of the cues, as Create Subtitles from Audio does.
   - `retime::word_starts` matches the words of the cues to the words heard, in order, by their longest common runs.
   - `subtitles::fill_times` spreads the words left between their matched neighbors, by characters.
-- `subtitles.set` can give new text with another number of words. Then its words come again from the transcripts of the files of the clips (`clip_speech`, without a new transcription). Else they spread ([spec D70](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `subtitles.set` can give new text with another number of words. Then its words come again from the transcripts of the files of the clips (`clip_speech`, without a new transcription). Else they spread ([spec D70](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - Parakeet Ultra is the default (`SpeechModel`). It gives real word times. The word times of Qwen3-ASR are estimates.
 
 **Transcripts of media:**
@@ -342,7 +342,7 @@ flowchart TD
   - A word lands on a clip through its source range and speed when its middle is inside the clip (`analysis::words_in`).
 - Without `media` or `clips`, it hears the mix of the timeline, as `subtitles.transcribe` does. It returns each word that `transcript::spoken` kept, at its frames (`transcript::word_frames`).
 - It refuses a model whose times are phrases or none. Why: spread estimates are not word times.
-- `edit.ripple_delete_words` takes the spans of the words out through `ops::cut_ranges`. This closes the gap, with ripple on or off ([spec D63](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `edit.ripple_delete_words` takes the spans of the words out through `ops::cut_ranges`. This closes the gap, with ripple on or off ([spec D63](../spec.md#12-decisions-on-gaps-and-contradictions)).
   - With `quiet`, each edge first moves to the quietest frame boundary nearby (`analysis::quietest`), from the levels of the clips heard there.
   - The words around bound this move: no further than a third into a word inside the cut, and outward only to the next word.
   - The core first measures the levels that it does not keep yet, on a job (`Live::measuring`).

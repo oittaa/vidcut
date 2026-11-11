@@ -136,10 +136,10 @@ flowchart TD
 **Dissolves and placed pictures**
 
 - The engine does not mix. A `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) for each layer on top. Each layer is as decoded.
-- The viewer blends the layers as it draws, in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), as an export does ([export](export.md#timeline-colors)). `Shown::colors` carries that space (`RenderPlan::colors`).
+- The viewer blends the layers as it draws, in the timeline color space ([spec D50](../spec.md#12-decisions-on-gaps-and-contradictions)), as an export does ([export](export.md#timeline-colors)). `Shown::colors` carries that space (`RenderPlan::colors`).
 - A wipe, a Push or a Slide gives the crossing of its two sides the frame of its move (`Placed::moving`, `Move::at`). The viewer wipes or moves the two sides as it draws, in the timeline color space too.
 - A Smooth Cut gives its incoming layer the morphed frame, at full weight (`VideoFrames::smooth_frame`). Thus it covers the outgoing layer.
-- Placed pictures ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`. Their placement is not in the kept pictures.
+- Placed pictures ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`. Their placement is not in the kept pictures.
   - `Player::present` hands the `Placed` pictures of each layer with the frame (`Shown`, `Plan::placed_at`). Thus a move or a zoom keeps the frames decoded.
   - For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame.
 - While pictures are dragged, `Player::preview_pictures` puts each dragged picture in place of the picture of its clip.
@@ -184,7 +184,7 @@ flowchart TD
   - Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
   - A title whose box goes past the picture's edge keeps its place in the drawing, because that edge cuts the box before it turns (`Title::shape_past_edge`).
   - A lower third with a level under 1 is one drawing of all its blocks (`burn::title`), with their places. Thus text over the box does not show the box. A new place of a line draws it again.
-  - `burn` draws the letters of a Text title or a lower third one at a time on a `Canvas`. The exact place comes from `Title::seated_left` ([spec D65](../cut-page-spec.md)).
+  - `burn` draws the letters of a Text title or a lower third one at a time on a `Canvas`. The exact place comes from `Title::seated_left` ([spec D65](../spec.md)).
   - A drawing's top is on a whole pixel. A moved block goes by whole pixels between the rounded middles. Thus it lands on the same row as a new drawing at that place.
 - `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
   - A previewed title that follows a motion path gets the same move as the plan's title (`ShownTitle::led`, [export](export.md#titles)).
@@ -267,21 +267,21 @@ The audio device:
 - An export, a proxy and a thumbnail draw with the same `Screen`, always into `Wide` (`Screen::for_export`). They write the planes of the output from there ([export](export.md#timeline-colors)).
 - The drawing:
   - It fits the picture and turns it upright.
-    - `place::fitted` gives the place of the picture in the frame, in parts of a pixel ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)).
+    - `place::fitted` gives the place of the picture in the frame, in parts of a pixel ([spec §13](../spec.md#the-fit-to-the-timeline)).
     - `fs` covers a pixel at the edge of that place in part.
-    - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../cut-page-spec.md#the-limit-for-a-thin-bar)).
+    - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../spec.md#the-limit-for-a-thin-bar)).
     - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
-    - `Placing::new` counts a crop in whole pixels of the frame that it draws (`Fit::pixels`, [spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+    - `Placing::new` counts a crop in whole pixels of the frame that it draws (`Fit::pixels`, [spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
     - The rule works at the size of the draw. The size of the viewer is in whole pixels of the screen, so its shape can differ a little from the timeline. Thus a picture that fills the timeline can leave a part of a pixel in the viewer.
     - A thumbnail, a proxy and a picture for an AI upscaler draw into a size that is already rounded (`Sampling::Rounded`, `place::rounded_place`). Why: the picture must fill that size, with no bar.
   - It first converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `shader_colors`). In an SDR timeline, it tone-maps HDR.
     - A picture with an input LUT takes `fs_convert_lut` (`Picture::with_lut`, [the LUT files](README.md#lut-files)).
     - Then it deinterlaces an interlaced picture (`fs_bwdif`, [gpu](gpu.md#deinterlacing-and-hdr)).
     - The converted picture is 32-bit floats. The scaling below reads it.
-    - Why: the spec converts the input before the sizing ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)). A conversion that is not linear gives other edges after a scale.
+    - Why: the spec converts the input before the sizing ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)). A conversion that is not linear gives other edges after a scale.
   - It reads the chroma of each frame at the site that the frame's chroma location gives (`chroma_site`). An H.264 or HEVC 4:2:0 frame with no chroma location is sited left, the default of these formats (`color::default_site`). Another frame with no chroma location is read as centered.
   - The viewer enlarges with one bilinear sample, and shrinks with a box of bilinear samples.
-  - An export, a proxy and a thumbnail scale with the filter of the spec (`resized`, [spec §13](../cut-page-spec.md#the-scaling-filter)).
+  - An export, a proxy and a thumbnail scale with the filter of the spec (`resized`, [spec §13](../spec.md#the-scaling-filter)).
     - Each pixel reads the same number of samples at any scale.
     - A pixel with no scale and a whole-pixel place reads one sample (`resamples`).
     - A scale that differs from 1 only by a rounding error counts as no scale.
@@ -351,7 +351,7 @@ The audio device:
   - Why a copy for gray: the shader then reads one float layout. Gray float files are rare.
 - vidcut reads the transfer of a picture only to find PQ and HLG (`hdr_of_transfer`).
   - Thus a picture with the linear transfer of an OpenEXR goes into an SDR timeline with its values as they are.
-  - Resolve does the same with no color management ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+  - Resolve does the same with no color management ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
   - An HDR timeline converts the picture as an SDR picture. A value above 1 then gives more light than SDR white, and a value below 0 gives 0.
 - Another picture in memory with alpha is `yuva444p12le`. Another picture in memory in RGB or 4:4:4 is `yuv444p12le`, and a 4:2:2 picture stays 4:2:2 (`Relayout`). Why: 4:2:0 loses color detail.
 
@@ -380,7 +380,7 @@ Faders:
 - A dragged mixer fader sends `mixer.preview`. `Player::preview_fader` makes the value a lane gain (`Player::set_lane_gain`). The user hears it at once, with no new plan.
 - At the bottom of the fader (`fader_silent`), the lane gain silences the lane.
 
-[Audio scrubbing](../cut-page-spec.md#45-other-viewer-features) (spec D42):
+[Audio scrubbing](../spec.md#45-other-viewer-features) (spec D42):
 
 - A step, or a requested seek while paused, plays a short faded snippet of the sound of the frame. The newest snippet replaces a snippet that still waits.
 - The moves that the session makes itself use `Player::seek_quietly`.

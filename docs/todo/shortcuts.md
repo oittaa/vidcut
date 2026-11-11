@@ -2,7 +2,7 @@
 
 **When:** not decided.
 
-The user can change the keys ([spec §11](../cut-page-spec.md#11-keyboard-shortcuts)). These parts of the manual are still to do.
+The user can change the keys ([spec §11](../spec.md#11-keyboard-shortcuts)). These parts of the manual are still to do.
 
 **Key sets and panels:**
 

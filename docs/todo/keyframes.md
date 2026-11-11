@@ -5,10 +5,10 @@
 A keyframe is a value of a clip at one frame. Between two keyframes, the value goes from one to the other. In this file, a keyframe is never a video keyframe of a codec.
 
 - **In vidcut:**
-  - A clip has volume keyframes on its volume line ([spec §9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
+  - A clip has volume keyframes on its volume line ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
-  - Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
-  - The values of the effects of a clip have keyframes on `Effect` ([§8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536), [X152](../deviations.md#x152-effect-keyframes-have-one-number-each)).
+  - Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../spec.md#815-transform-and-crop-pp-766768), D75).
+  - The values of the effects of a clip have keyframes on `Effect` ([§8.16](../spec.md#816-effects-pp-765-3526-3536), [X152](../deviations.md#x152-effect-keyframes-have-one-number-each)).
   - The Keyframes tab shows each value of the item selected first that can have keyframes.
   - Each value has a track. Its curve shows when the user turns it on. A drag moves a keyframe, a group or a handle.
   - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. The anchor point is one keyframe for X and Y.
@@ -117,14 +117,14 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 **Better than Resolve** (proposals for the stages):
 
 - The ease menu is on each keyframe: on the Keyframe button and in the Keyframe Editor.
-- A bar shows the value, time and ease of the selected keyframe ([spec §2](../cut-page-spec.md#2-layout-pp-636637)).
-- A double-click on a track adds a keyframe there ([spec §2](../cut-page-spec.md#2-layout-pp-636637)).
+- A bar shows the value, time and ease of the selected keyframe ([spec §2](../spec.md#2-layout-pp-636637)).
+- A double-click on a track adds a keyframe there ([spec §2](../spec.md#2-layout-pp-636637)).
 
 ## Scope
 
-**The values.** Transform, Crop and the volume line use `Keyframe`. The spec is [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768) and D75. The buttons are in [X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels).
+**The values.** Transform, Crop and the volume line use `Keyframe`. The spec is [§8.15](../spec.md#815-transform-and-crop-pp-766768) and D75. The buttons are in [X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels).
 
-**The Keyframes tab** sits beside the Inspector. The Timeline menu opens it. The spec is [§2](../cut-page-spec.md#2-layout-pp-636637).
+**The Keyframes tab** sits beside the Inspector. The Timeline menu opens it. The spec is [§2](../spec.md#2-layout-pp-636637).
 
 - One track for each value that can have keyframes, in a group for its section. The ⋯ menu can hide the values without keyframes.
 - Each track has the curve button, the Keyframe button with its arrows, and Reset Keyframes.
@@ -141,7 +141,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - Mark > Move Selected Keyframes moves the selection by one frame, or changes its values by one step.
 - A click on the name of a value selects its row. Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the selected rows.
 - Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the selection. A paste puts the keyframes on the selected clips, the first at the playhead.
-- [§2](../cut-page-spec.md#2-layout-pp-636637) gives the measured rules of the clicks, the box, the steps, the paste and the clipboard.
+- [§2](../spec.md#2-layout-pp-636637) gives the measured rules of the clicks, the box, the steps, the paste and the clipboard.
 - A right-click sets the ease of that keyframe, or of all the selected keyframes, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
 - A bar shows the value, time and ease of the selected keyframe (X90).
 - The time ruler moves the playhead. Full Extend Zoom, Detail Zoom, the zoom slider and Ctrl with the mouse wheel zoom.
@@ -155,13 +155,13 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - the Lock and Track Color controls (p. 1257)
   - the ruler in frames, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
   - Select all (Ctrl+A) and deselect all (Ctrl+Shift+A) in the Keyframes tab and the tray
-  - the parts of Resolve's tray that vidcut does not have ([§2](../cut-page-spec.md#2-layout-pp-636637), Keyframe tray)
+  - the parts of Resolve's tray that vidcut does not have ([§2](../spec.md#2-layout-pp-636637), Keyframe tray)
   - Zoom X and Zoom Y as two keyframes when the zoom is not linked
     - Resolve then selects and steps Zoom X alone. vidcut's zoom is one keyframe for X and Y.
 
 ## Model
 
-The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)): the same source frames, handles, curve, eases and edits.
+The picture uses the `Keyframe` of the volume ([D81](../spec.md#12-decisions-on-gaps-and-contradictions)): the same source frames, handles, curve, eases and edits.
 
 - **Where:** the keyframes of each value are in `Picture`, beside the plain values.
 - **Checks:**
@@ -196,7 +196,7 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
   - Resolve writes them at −s and 1000 − s. s is the first source frame of the clip ([Measured](#measured-in-resolve-studio-2111)).
   - Resolve reads the earlier key as the start, whatever the times ([gotchas](../gotchas.md#resolves-otio-files)). Thus both forms play the same.
 - vidcut writes the keyframes of each keyed value in the `Key Frames` of its parameter. It writes the other picture parameters with an empty `Key Frames`.
-  - It writes the anchor point keys without Bezier handles. Resolve's anchor point keys are linear too ([D92](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - It writes the anchor point keys without Bezier handles. Resolve's anchor point keys are linear too ([D92](../spec.md#12-decisions-on-gaps-and-contradictions)).
   - Resolve Studio 21.1.2 imports its own file with anchor point, Pitch and Yaw keys and gives the same keys.
   - Resolve's import of a file that vidcut writes with these keys is not measured.
 
@@ -286,7 +286,7 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - On Position, the check mark is on the item that the sides of the key's handles give (`Title::position_ease`).
 - On Zoom, Rotation and Title opacity, the check mark is on the item that `ease_of` gives. A key with other handles has no check mark.
 - A scroll's Position key has no menu, and `keyframes.set` gives it no handles. Nothing measures them.
-- The Keyframes tab shows these values of a selected title ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)). In that tab, Position has no curve button and no ease.
+- The Keyframes tab shows these values of a selected title ([spec §8.14](../spec.md#814-titles-pp-762764-11761178)). In that tab, Position has no curve button and no ease.
 - Play and export draw a title's position along the path of its handles (`Title::sampled`). A new key takes the point of the path at its frame. It has no handles, and its neighbors keep theirs.
 - `keyframes.set` and `keyframes.add` with `ease` write the measured values on the chosen position keys (`Title::ease_position`). `keyframes.list` shows the handles as `in` and `out`, with Y from the top.
 - An ease that the place of the key does not offer follows the rule of the other values. The side with no neighbor gets no handle, and the old handles of the key go.
@@ -315,7 +315,7 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 
 ## Subtitles
 
-A subtitle has keyframes. [§8.12](../cut-page-spec.md#812-subtitles-pp-645646-702-12271248) tells how they work.
+A subtitle has keyframes. [§8.12](../spec.md#812-subtitles-pp-645646-702-12271248) tells how they work.
 
 **Measured in Resolve Studio 21.1.2:**
 
@@ -357,7 +357,7 @@ A subtitle has keyframes. [§8.12](../cut-page-spec.md#812-subtitles-pp-645646-7
 Rule 3: each GUI action has a request.
 
 - `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take the values of the picture in `param`.
-- `picture.set` takes an `at`. On a value with keyframes, it sets a keyframe at `at`, or at the playhead, as `clip.set` does for the volume ([D82](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `picture.set` takes an `at`. On a value with keyframes, it sets a keyframe at `at`, or at the playhead, as `clip.set` does for the volume ([D82](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `timeline.get` names the values of a clip that have keyframes, as it names `volume`.
 - `keyframes.copy` returns the selected keyframes with their offsets. `keyframes.paste` puts them on clips. `keyframes.cut` copies, then removes.
 - `gui.show keyframes` opens the Keyframes tab. `gui.close keyframes` closes it.
