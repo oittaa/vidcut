@@ -1658,8 +1658,9 @@ pub enum Request {
         /// at 0. On brings the pan back.
         #[serde(default)]
         pan_on: Option<bool>,
-        /// The equalizer: each field given replaces its own, and null takes
-        /// it off with its settings. `{}` puts on a flat one.
+        /// The equalizer: each field given replaces its own. A clip starts
+        /// with none, and its sound plays as with the equalizer off. `{}`
+        /// puts on a flat one. null makes it off again, with the usual bands.
         #[serde(
             default,
             deserialize_with = "given",
@@ -5375,14 +5376,17 @@ pub struct NoiseReductionSet {
 }
 
 /// A change to a clip's equalizer: each field given replaces its own, and
-/// the rest stay as they are. A new one is on and flat. Band 1 is a
-/// `hi_pass` at 97 Hz and band 6 a `lo_pass` at 19000 Hz, both off. Band 2 is
-/// a `lo_shelf` at 117 Hz, bands 3 and 4 are `bell` filters at 239 and
-/// 1200 Hz, and band 5 is a `hi_shelf` at 6000 Hz.
+/// the rest stay as they are. A new one is flat, and on unless `on` is
+/// false. Band 1 is a `hi_pass` at 97 Hz and band 6 a `lo_pass` at
+/// 19000 Hz, both off. Band 2 is a `lo_shelf` at 117 Hz, bands 3 and 4 are
+/// `bell` filters at 239 and 1200 Hz, and band 5 is a `hi_shelf` at
+/// 6000 Hz.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EqualizerSet {
-    /// On or off. Off keeps the bands.
+    /// The switch. Off keeps the bands, and the sound plays without them.
+    /// On brings them back. The first time on, bands 2 to 5 are on and
+    /// bands 1 and 6 are off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
     /// The bands to change.
