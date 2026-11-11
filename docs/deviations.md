@@ -113,40 +113,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The EDL of Resolve keeps one video track, and no audio tracks or markers. Its FCPXML (1.10) keeps no markers.
   - vidcut carries what it does not model. Thus a cut that is finished in Resolve can come back for a recut and go back intact.
 
-## X12. Preferences hold only what vidcut needs
-
-- **Resolve:**
-  - Preferences has System and User panels with many settings (p. 94).
-  - The project settings and the preferences set up caches and proxies (pp. 191–218).
-- **vidcut:**
-  - File > Preferences (Ctrl+,) holds the settings of `preferences.toml` ([design/model.md](design/model.md#preferences)).
-  - These are the theme, GPU use, and the memory and the audio device of the player.
-  - They also include the limit of the disk cache, the thumbnails, the proxy rules and folder, the filler words and the keys ([X138](#x138-the-keys-are-a-page-of-preferences)).
-  - They also include the keys of the paid services, and whether to ask before vidcut sends audio.
-  - A sidebar selects one page at a time.
-  - `preferences get|set|reset` give scripts access to them.
-  - When vidcut cannot read the file, the window shows why, with Show in Folder and Reset Preferences.
-  - Reset Preferences restores the defaults. It keeps the old file as a backup. It never replaces a backup.
-  - Reset vidcut… on the General page, and `vidcut reset`, restore the state of a fresh install. A confirmation comes first.
-  - They do not remove the kept speech models and paid replies while Keep downloaded models and paid replies is on. This setting is on by default.
-- **Why:**
-  - A preference is here only when vidcut has a behavior to choose.
-  - The user can edit a plain TOML file by hand and keep it in dotfiles. Agents can change it.
-  - A reset gives a clean start in one step, also for tests. The user does not have to find each file.
-
-## X13. Deinterlacing has one quality
-
-- **Resolve:**
-  - Each interlaced clip has a Deinterlace Quality (Normal, High, Neural Engine) in the Inspector.
-  - Playback always uses Normal (p. 741).
-  - Clip Attributes turn deinterlacing on or off for each clip (p. 451).
-- **vidcut:**
-  - vidcut always deinterlaces frames flagged as interlaced by the method of `bwdif`, in the preview and in the export ([D34](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-- **Why:**
-  - One method keeps the preview and the export frame-exact.
-  - `bwdif` is the better of the CPU deinterlacers of FFmpeg.
-  - Thus the Inspector needs no Deinterlace Quality for each clip ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
-
 ## X14. The timeline color space has no grading
 
 - **Resolve:**
@@ -202,18 +168,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The file type does not tell the frames of a render from numbered photos.
   - A wrong guess turns a slideshow into a blink, or a render into thousands of stills.
   - A flag keeps scripts predictable.
-
-## X18. Only the pictures of the preview use proxies
-
-- **Resolve:**
-  - The user generates proxies from the Media Pool.
-  - Playback switches between the proxies and the originals (pp. 207–218).
-  - Export reads the originals. The "Use proxy media" render setting makes it read the proxies (p. 214).
-- **vidcut:**
-  - Only the pictures of the preview use proxies.
-  - The sound of the preview, the export, frames, analysis and OTIO read the originals ([D41](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-- **Why:**
-  - The preview cannot drift from the mix or from the delivered frames.
 
 ## X19. HDR metadata comes from the sources
 
@@ -464,24 +418,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The track that the viewer shows is the track that the user works on. Thus one control does both.
 
-## X45. Subtitles go into any container
-
-- **Resolve:**
-  - The subtitle Format on the Deliver page has three choices.
-  - They are a separate file, Burn into video (the selected track), and As embedded captions.
-  - Embedded captions are CEA-608 in MXF OP1A and QuickTime.
-  - Or several tracks go in QuickTime and MXF as subtitle streams, or as CEA-608 or EAS708 captions.
-  - The Codec pop-up (Text, CEA-608) selects which (pp. 1247–1248).
-- **vidcut:**
-  - `subtitles_as` on `export.start`, and Subtitles in the Export dialog, have three values: `file`, `stream` or `burn`.
-  - A stream is text in each container that vidcut writes and that can hold text.
-  - There is a stream for each named track. The default is the shown track.
-  - vidcut does not write CEA-608 or MXF.
-- **Why:**
-  - Players read text streams in the containers that vidcut writes.
-  - CEA-608 is a broadcast format with lines of 32 characters.
-  - vidcut writes no MXF.
-
 ## X52. Titles come from a Titles tab and are edited in the Inspector
 
 - **Resolve:**
@@ -618,16 +554,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The user does not make subtitles, find a template and drop it on the track. Fusion is not necessary.
   - Word times stay correct after an edit or a correction, and there is no button to remember.
 
-## X59. Looks have no export or import
-
-- **Resolve:**
-  - The user can export or import a subtitle preset as a `.preset` file (pp. 1239–1240).
-- **vidcut:**
-  - There is no export or import of looks ([D71](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - Each look is a TOML file in the config folder. The file copies to another computer as it is.
-- **Why:**
-  - A file for each look, as for export presets, is its own export and import.
-
 ## X60. The pool's metadata strip shows a file's format
 
 - **Resolve:**
@@ -753,11 +679,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - With several clips selected, its header is Multiple Clips, and a value that differs between them shows a dash (measured in Resolve Studio 21.1.2).
 - **vidcut:**
   - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
-  - It shows the Title section of a title, the Subtitle section of a subtitle, and the picture, Speed and Audio sections of other clips.
+  - It shows the Title section of a title, the Subtitle section of a subtitle, and the picture, Speed, Audio and Equalizer sections of other clips.
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing selected that it can show, it shows one line.
   - With several clips selected, a section shows the first clip that it acts on. Its header gives the number of these clips.
-  - The Transform and Crop sections have a switch at the left of their names. The Pan row has a switch too. Dynamic Zoom, Composite, Speed and the other Audio rows have none.
+  - The Transform, Crop and Equalizer sections have a switch at the left of their names. The Pan row has a switch too. Dynamic Zoom, Composite, Speed and the other Audio rows have none.
   - Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
   - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has no accent color, and its Reset does nothing.
@@ -775,7 +701,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - Normalize in the header opens Normalize Audio Levels for the clips of the section ([spec §9](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
     - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([spec §9](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
     - Pan sets the pan of the selected clips ([X153](#x153-every-clip-pans-as-on-a-stereo-track)).
-    - The Equalizer row has a switch and a button that opens the Equalizer window ([X154](#x154-the-equalizer-is-a-window)).
     - The Dialogue Leveler row has a switch and a button that opens the Dialogue Leveler window ([X155](#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
     - The Compressor row has a switch and a button that opens the Compressor window ([X156](#x156-the-compressor-is-on-a-clip)).
     - The Noise Reduction row has a switch and a button that opens the Noise Reduction window ([X157](#x157-noise-reduction-is-our-own-spectral-gate)).
@@ -842,16 +767,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The guides belong on the one picture fitted to the timeline.
   - One box over two pictures marks neither picture. vidcut does not copy it.
   - A two-up view has no single frame for one crop.
-
-## X81. No KeyKode in the timecode menu
-
-- **Resolve:**
-  - A right-click on the viewer timecode offers KeyKode (pp. 713–714).
-- **vidcut:**
-  - The menu has no KeyKode.
-  - vidcut does not read film edge numbers.
-- **Why:**
-  - vidcut has no film-scan metadata to show.
 
 ## X83. Pitch and yaw are Inspector values
 
@@ -1665,27 +1580,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Resolve puts a mono clip on a stereo track by default. Thus the law of a stereo track is what most clips get.
   - A value outside the range is an error in the script. A refusal shows the error.
 
-## X154. The Equalizer is a window
-
-- **Resolve:**
-  - The Equalizer is a section of the Inspector, and a change applies at once (pp. 745–746).
-  - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives its ranges, defaults and curves.
-  - Its switch starts off.
-  - The curve shows a Notch filter, but a render does not change the sound.
-  - A Bell filter is wider than its Q near the top of the range.
-  - Q 1 acts as Q 0.94 at 8000 Hz and as Q 0.75 at 16000 Hz. Q 4 acts as Q 2 at 16000 Hz.
-- **vidcut:**
-  - The Equalizer window opens from the Audio section. Apply changes the clips. Cancel changes nothing.
-  - The window opens with its switch on. A clip that has no equalizer keeps its sound.
-  - A Notch filter removes its frequency. Its width is fixed.
-  - A Bell filter has the given Q at each frequency.
-  - An OTIO export keeps the Equalizer in vidcut's own metadata. The export gives the note `equalizer_kept`.
-- **Why:**
-  - The Inspector is too narrow for six bands of four values. A window with Apply makes one undo step for one set of changes.
-  - With the switch on, the first Apply changes the sound as the user expects.
-  - A Notch filter that shows a cut and does not make it is a fault.
-  - The measurements do not give one rule for the width of a Bell filter near the top of the range. The difference is small below 8000 Hz.
-
 ## X155. The Dialogue Leveler follows the levels with its own rules
 
 - **Resolve:**
@@ -1967,3 +1861,20 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A name or a label must stay with a person or a thing that moves.
   - One setting does the work of a tracker node and a connection.
   - A title with keyframes, and a title that stops following, wait for a measurement in Resolve ([todo](todo/motion-tracking.md)).
+
+## X170. The clip Equalizer differs in three ways
+
+- **Resolve:**
+  - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the ranges, defaults and curves of the clip equalizer.
+  - The curve shows a Notch filter, but a render does not change the sound.
+  - A Bell filter is wider than its Q near the top of the range.
+  - Q 1 acts as Q 0.94 at 8000 Hz and as Q 0.75 at 16000 Hz. Q 4 acts as Q 2 at 16000 Hz.
+  - An OTIO export writes the effect `Fairlight Clip Equaliser` and six band effects.
+- **vidcut:**
+  - A Notch filter removes its frequency. Its width is fixed.
+  - A Bell filter has the given Q at each frequency.
+  - An OTIO export keeps the Equalizer in vidcut's own metadata. The export gives the note `equalizer_kept`.
+- **Why:**
+  - A Notch filter that shows a cut and does not make it is a fault.
+  - The measurements do not give one rule for the width of a Bell filter near the top of the range. The difference is small below 8000 Hz.
+  - The Equalizer effects of Resolve in OTIO are open work ([todo](todo/effects-library.md)).

@@ -898,7 +898,7 @@ impl TimelineColors {
 }
 
 /// A playback proxy of a pool item: an easy-to-play file whose frames carry
-/// the source's presentation timestamps (decision D41, deviation X18).
+/// the source's presentation timestamps (decision D41).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Proxy {
     /// The proxy file's name. Each computer looks for it in its own proxy
@@ -5415,7 +5415,8 @@ pub struct ClipAudio {
     /// 0. Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub pan_on: bool,
-    /// The equalizer. Left out when the clip has none.
+    /// The equalizer. Left out when the clip has none, as a new clip:
+    /// then it is off, with the usual bands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equalizer: Option<Equalizer>,
     /// The Dialogue Leveler. Left out when the clip has none.

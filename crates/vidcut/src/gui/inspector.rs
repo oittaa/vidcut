@@ -1486,7 +1486,6 @@ enum Act {
     Put(Key, f64),
     Edit(Key, f64),
     Release(Key),
-    Equalize(bool),
     Level(bool),
     Compress(bool),
     Denoise(bool),
@@ -1918,6 +1917,22 @@ fn switched_group<R>(
     header: impl FnOnce(&mut egui::Ui) -> R,
     rows: impl FnOnce(&mut egui::Ui),
 ) -> (Option<bool>, R) {
+    switched_fold(ui, name, switch, header, |ui| {
+        egui::Grid::new(("inspector-rows", name))
+            .num_columns(3)
+            .min_col_width(84.0)
+            .spacing([8.0, 6.0])
+            .show(ui, rows);
+    })
+}
+
+pub(super) fn switched_fold<R>(
+    ui: &mut egui::Ui,
+    name: &str,
+    switch: Option<bool>,
+    header: impl FnOnce(&mut egui::Ui) -> R,
+    body: impl FnOnce(&mut egui::Ui),
+) -> (Option<bool>, R) {
     let id = ui.make_persistent_id(("inspector", name));
     let (_, header, _) =
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
@@ -1929,13 +1944,7 @@ fn switched_group<R>(
                 ui.label(RichText::new(name).strong());
                 (flipped, header(ui))
             })
-            .body(|ui| {
-                egui::Grid::new(("inspector-rows", name))
-                    .num_columns(3)
-                    .min_col_width(84.0)
-                    .spacing([8.0, 6.0])
-                    .show(ui, rows);
-            });
+            .body(body);
     header.inner
 }
 
@@ -4223,7 +4232,6 @@ impl Workspace {
             })
             .inner
         };
-        let mut edit_equalizer = false;
         let mut edit_leveler = false;
         let mut edit_compressor = false;
         let mut edit_noise = false;
@@ -4272,26 +4280,6 @@ impl Workspace {
             if ui.checkbox(&mut on, "").clicked() {
                 acts.push(Act::Mute(on));
             }
-            ui.end_row();
-            let equalizer = |id: &str| {
-                p.clip(id)
-                    .and_then(|c| c.audio.as_ref())
-                    .and_then(|a| a.equalizer.as_ref())
-            };
-            label(
-                ui,
-                "Equalizer",
-                sounds
-                    .iter()
-                    .any(|s| equalizer(&s.id).is_some_and(|e| e.heard())),
-            );
-            ui.horizontal(|ui| {
-                let mut on = equalizer(&first.id).is_some_and(|e| e.on);
-                if ui.checkbox(&mut on, "").clicked() {
-                    acts.push(Act::Equalize(on));
-                }
-                edit_equalizer = ui.button("Edit…").clicked();
-            });
             ui.end_row();
             let leveler = |id: &str| {
                 p.clip(id)
@@ -4355,9 +4343,6 @@ impl Workspace {
         if normalize {
             self.open_normalize(sounds.iter().map(|s| s.id.clone()).collect());
         }
-        if edit_equalizer {
-            self.open_equalizer(sounds.iter().map(|s| s.id.clone()).collect());
-        }
         if edit_leveler {
             self.open_leveler(sounds.iter().map(|s| s.id.clone()).collect());
         }
@@ -4405,13 +4390,6 @@ impl Workspace {
                 self.send(
                     "clip.set",
                     json!({ "clips": ids, "dialogue_leveler": { "on": on } }),
-                );
-            }
-            Act::Equalize(on) => {
-                let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
-                self.send(
-                    "clip.set",
-                    json!({ "clips": ids, "equalizer": { "on": on } }),
                 );
             }
             Act::Hold(field, value) => {
@@ -4777,6 +4755,8 @@ impl Workspace {
                 }
                 if !sounds.is_empty() {
                     self.audio_section(ui, &p, &sounds, &mut acts);
+                    let ids: Vec<String> = sounds.iter().map(|s| s.id.clone()).collect();
+                    self.equalizer_section(ui, &p, &ids);
                 }
             });
         for act in acts {

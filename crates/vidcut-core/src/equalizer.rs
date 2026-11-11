@@ -63,6 +63,13 @@ pub fn first() -> Equalizer {
     }
 }
 
+pub fn usual() -> Equalizer {
+    Equalizer {
+        on: false,
+        ..first()
+    }
+}
+
 fn in_range(name: &str, v: f64, range: &RangeInclusive<f64>) -> Result<()> {
     if range.contains(&v) {
         return Ok(());
