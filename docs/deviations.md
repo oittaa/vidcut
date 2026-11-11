@@ -544,20 +544,14 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The user does not make subtitles, find a template and drop it on the track. Fusion is not necessary.
   - Word times stay correct after an edit or a correction, and there is no button to remember.
 
-## X60. The pool's metadata strip shows a file's format
+## X60. Clip Info is a window
 
 - **Resolve:**
-  - A tag icon beside the search field of the pool opens the Metadata Display palette.
-  - The palette shows the camera name, scene, shot and take, frame rate and resolution of the selected clip (p. 665).
   - The lower-right corner of a thumbnail opens an overlay of its information (p. 353).
   - The File tab of the Inspector shows the clip details and edits the logging fields (p. 412).
 - **vidcut:**
-  - The tag icon shows a strip at the top of the pool. The strip stays on until the user turns it off.
-  - The strip shows the size, frame rate, codec, bits and chroma subsampling, SDR or HDR, and length of the selected clip.
-  - It also shows the start timecode, the sound and the file size.
-  - The info button of the strip or of a thumbnail corner opens Clip Info, a window in the place of an overlay ([spec §3](spec.md#3-media-pool-ch-34-pp-653675)).
+  - The info button of the metadata strip or of a thumbnail corner opens Clip Info, a window in the place of an overlay ([spec §3](spec.md#3-media-pool-ch-34-pp-653675)).
 - **Why:**
-  - Every file has a format. Thus the strip tells something also when the camera name, scene, shot and take are empty.
   - One window with all the information, read fresh from the file, tells the format without a separate tool.
 
 ## X61. Speakers are numbered per file or per run, and joined by hand
