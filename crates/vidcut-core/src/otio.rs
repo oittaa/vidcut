@@ -293,11 +293,12 @@ fn with_picture(
     let Some(x) = &c.picture else {
         return effects;
     };
+    let x = crate::ops::picture::working(x.clone());
     let kept = effects
         .into_iter()
         .filter(|e| !picture::is_placing(e))
         .collect();
-    picture::joined(kept, picture::effects(x, shape, g, source))
+    picture::joined(kept, picture::effects(&x, shape, g, source))
 }
 
 pub fn out_of_reach(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
@@ -307,9 +308,10 @@ pub fn out_of_reach(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
         .flat_map(|t| &t.clips)
         .filter(|c| c.video && exported(c, a, b))
         .filter(|c| {
-            c.picture
-                .as_ref()
-                .is_some_and(|x| !picture::reaches(x, &shape_of(p, c, p.media(&c.media))))
+            c.picture.as_ref().is_some_and(|x| {
+                let x = crate::ops::picture::working(x.clone());
+                !picture::reaches(&x, &shape_of(p, c, p.media(&c.media)))
+            })
         })
         .map(|c| c.id.clone())
         .collect()
@@ -838,8 +840,8 @@ pub fn export_drawn(
                             json!(effects::relative(&au.gain_keys, c.content_at(s)));
                     }
                     meta["muted"] = json!(au.muted);
-                    if au.pan != 0.0 {
-                        meta["pan"] = json!(au.pan);
+                    if au.heard_pan() != 0.0 {
+                        meta["pan"] = json!(au.heard_pan());
                     }
                     if let Some(eq) = &au.equalizer {
                         meta["equalizer"] = json!(eq);
@@ -956,8 +958,8 @@ pub fn export_drawn(
                     "clip": c.id, "media": c.media, "color": c.color, "stream": au.stream,
                     "gain_db": au.gain_db,
                 });
-                if au.pan != 0.0 {
-                    meta["pan"] = json!(au.pan);
+                if au.heard_pan() != 0.0 {
+                    meta["pan"] = json!(au.heard_pan());
                 }
                 if let Some(eq) = &au.equalizer {
                     meta["equalizer"] = json!(eq);

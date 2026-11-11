@@ -102,7 +102,7 @@ pub struct Settings {
     pub channels: u16,
     /// Track 1 ripples on insert, delete, move and trim (Ripple On).
     pub ripple_on: bool,
-    /// Record timecode of timeline frame 0, in frames (deviation X7: 0, not 01:00:00:00).
+    /// Record timecode of timeline frame 0, in frames: 01:00:00:00 by default.
     pub start_tc: i64,
     /// Record timecode counts drop-frame (decision D47): at 29.97, 59.94 and
     /// 119.88, and nothing at other rates.
@@ -150,7 +150,7 @@ impl Default for Settings {
             sample_rate: 48_000,
             channels: 2,
             ripple_on: true,
-            start_tc: 0,
+            start_tc: 30 * 3600,
             drop_frame: false,
             auto_format: true,
             still_secs: 5.0,
@@ -204,9 +204,11 @@ impl Settings {
     pub fn with_format(fps: Option<&str>, size: Option<(u32, u32)>) -> crate::error::Result<Self> {
         let mut s = Self::default();
         if let Some(f) = fps {
-            s.fps = f
-                .parse()
-                .map_err(|e: crate::time::TimeError| crate::error::Error::usage(e.to_string()))?;
+            s.set_fps(
+                f.parse().map_err(|e: crate::time::TimeError| {
+                    crate::error::Error::usage(e.to_string())
+                })?,
+            );
             s.auto_format = false;
         }
         if let Some((w, h)) = size {
@@ -3338,6 +3340,10 @@ pub struct Picture {
     /// Mirrored top to bottom.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flip_vertical: bool,
+    /// Turned off, the position, zoom, rotation, anchor, pitch, yaw and
+    /// flips stay on the clip and do nothing. Usual: on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub transform_off: bool,
     /// What is cut off each side, as fractions of the source picture; the
     /// rest stays where it was. A side with keyframes takes its curve at
     /// the frame (`crop_left_keys` and the three beside it).
@@ -3366,6 +3372,10 @@ pub struct Picture {
     /// Crop Softness keyframes, from -100 to 100 (decision D75).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub crop_softness_keys: Vec<Keyframe>,
+    /// Turned off, the crop and its softness stay on the clip and do
+    /// nothing. Usual: on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub crop_off: bool,
     /// A slow push or pull and pan across the clip, from a start box to an
     /// end box. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5365,6 +5375,10 @@ pub struct ClipAudio {
     /// Left out at 0, the middle.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub pan: f64,
+    /// The switch of the pan. Off keeps the pan, and the sound plays as at
+    /// 0. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub pan_on: bool,
     /// The equalizer. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equalizer: Option<Equalizer>,

@@ -619,7 +619,9 @@ pub struct PictureChange {
     pub yaw: Option<f64>,
     pub flip_horizontal: Option<bool>,
     pub flip_vertical: Option<bool>,
+    pub transform_off: Option<bool>,
     pub crop: [Option<f64>; 4],
+    pub crop_off: Option<bool>,
     pub crop_softness: Option<f64>,
     pub dynamic_zoom: Option<Option<DynamicZoomSet>>,
     pub composite_mode: Option<CompositeMode>,
@@ -675,6 +677,12 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
     if let Some(f) = change.flip_vertical {
         p.flip_vertical = f;
     }
+    if let Some(off) = change.transform_off {
+        p.transform_off = off;
+    }
+    if let Some(off) = change.crop_off {
+        p.crop_off = off;
+    }
     let [left, right, top, bottom] = change.crop;
     let c = &mut p.crop;
     for (side, to) in [
@@ -702,7 +710,7 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
     p
 }
 
-const NEEDS: &str = "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop, crop softness, Dynamic Zoom, composite mode or opacity";
+const NEEDS: &str = "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop, crop softness, switch, Dynamic Zoom, composite mode or opacity";
 
 pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i64>) -> Result<()> {
     if change.is_empty() {
@@ -746,6 +754,11 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
         }
         if next.flip_vertical != old.flip_vertical {
             picture.flip_vertical = next.flip_vertical;
+            wrote = true;
+        }
+        if (next.transform_off, next.crop_off) != (old.transform_off, old.crop_off) {
+            picture.transform_off = next.transform_off;
+            picture.crop_off = next.crop_off;
             wrote = true;
         }
         if next.dynamic_zoom != old.dynamic_zoom {
@@ -796,6 +809,8 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
     let old = old.clone();
     match tool {
         PictureTool::Transform => Picture {
+            transform_off: old.transform_off,
+            crop_off: old.crop_off,
             crop: old.crop,
             crop_left_keys: old.crop_left_keys,
             crop_right_keys: old.crop_right_keys,
@@ -832,6 +847,19 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
     }
 }
 
+pub fn working(p: Picture) -> Picture {
+    let mut p = p;
+    if p.crop_off {
+        p = cleared(&p, PictureTool::Crop);
+    }
+    if p.transform_off {
+        p = cleared(&p, PictureTool::Transform);
+    }
+    p.transform_off = false;
+    p.crop_off = false;
+    p
+}
+
 pub fn shown(c: &Clip) -> Value {
     let p = c.picture.clone().unwrap_or_default();
     let crop = p.crop;
@@ -845,10 +873,12 @@ pub fn shown(c: &Clip) -> Value {
         "yaw": p.yaw(),
         "flip_horizontal": p.flip_horizontal,
         "flip_vertical": p.flip_vertical,
+        "transform_off": p.transform_off,
         "crop": {
             "left": crop.left, "right": crop.right, "top": crop.top, "bottom": crop.bottom,
             "softness": p.softness(),
         },
+        "crop_off": p.crop_off,
         "dynamic_zoom": p.dynamic_zoom.as_ref().map(zoom_shown),
         "composite_mode": p.mode(),
         "opacity": p.opaque(),
