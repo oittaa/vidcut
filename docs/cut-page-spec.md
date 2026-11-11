@@ -2151,7 +2151,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: Speed Change on a generator has a dim dot and does not open. A still acts the same.
   - Measured: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
   - Measured: the scripting API refuses a speed. An import of a time warp on a Solid Color keeps the length and drops the warp.
-  - vidcut: the speed requests refuse a generator. The right-click menu has Change Speed and Add Speed Keyframe grey, and Change Duration on.
+  - vidcut: the speed requests refuse a generator. The right-click menu has Change Speed and Add Speed Point grey, and Change Duration on.
   - vidcut: an import of a time warp on a Solid Color keeps the length and drops the warp.
 - **Solid Color:**
   - It has one value, Color. Black is the default (measured).
@@ -3211,7 +3211,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The strip shows the speed of each section, and a line at each speed keyframe.
     - A click on a speed opens a list: 20%, 30%, 40%, 50%, 60%, 70%, 100% and Set.
     - Set opens the Set Speed Change window, with a Speed field.
-    - The clip's right-click menu adds a speed keyframe ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
+    - Add Speed Point in the clip's right-click menu adds a speed keyframe.
     - With the Keyframes tab and the keyframe tray closed, the keyframe items of the Mark menu act on speed keyframes.
   - **Inspector:** these facts come from Resolve Studio 21.1.2:
     - The header of the Speed Change group has a keyframe diamond between < and > buttons. The diamond is red with the playhead on a speed keyframe.
@@ -3239,7 +3239,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The diamond adds or removes a speed keyframe at the playhead. The arrows move the playhead to the previous or next speed keyframe.
     - The diamond is red on a speed keyframe (measured in Resolve Studio 21.1.2). The other Keyframe buttons are orange on a keyframe (p. 1250).
     - The list opens only on a section that plays forward. `speed.set` changes only such a section.
-    - Add Speed Keyframe in the right-click menu adds a speed keyframe at the playhead.
+    - Add Speed Point in the right-click menu adds a speed keyframe at the playhead.
     - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
       - A speed keyframe does not move or copy. Its value is the speed of the section after it.
       - Its ease menu has Linear and Ease In and Out ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
