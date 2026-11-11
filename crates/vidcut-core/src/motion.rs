@@ -376,6 +376,7 @@ pub fn look(origin: f64, fps: f64, (first, end): (i64, i64)) -> Look {
         from: shown_time(origin, fps, first),
         to: shown_time(origin, fps, end - 1),
         every: 1.0 / fps,
+        side: None,
     }
 }
 

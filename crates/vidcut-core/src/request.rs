@@ -2861,6 +2861,12 @@ pub enum Request {
         /// Without it, a missing model is an error that tells its size.
         #[serde(default)]
         download: bool,
+        /// The longer side, in pixels, of the picture that the model sees,
+        /// from 320 to 3840. Left out, it is 640 for `face`, `person` and
+        /// `vehicle`, and 960 for `text`. A larger size finds smaller things
+        /// and takes more time. The picture is never larger than its source.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<u32>,
     },
     /// Follow the thing under the area of one effect of a clip (`c3`, or
     /// `V2@15s`). `effect` counts from 0, in the order of the clip's

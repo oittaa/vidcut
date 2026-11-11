@@ -64,6 +64,9 @@ flowchart TD
   - `subjects::find` looks only at the first decoded frame at or after each time of the `Look`.
     - Why: a file of 60 fps in a project of 24 fps shows two frames of each five.
   - It scales each picture to the longer side that the model takes (`yunet::SIDE`, `ppocr::SIDE`, `yolox::SIDE`), upright, with square pixels.
+    - `motion.find` can give another longer side with `size` (`Look::side`), within `analysis::SIDES`. A larger picture shows the model smaller things, and takes more time.
+    - With a given size, the picture is never larger than its source.
+    - `AvEnv` puts a given size in the name of the cached find.
   - The model runs with tract on the CPU, one picture on each thread of the pool (`pool::run`).
   - `Detections` holds the time of each picture and its `Found` boxes: the center, the size, the rotation and the score. The center and the size are fractions of the picture.
   - `Detections` also holds the scene score of each picture against the picture before it (`scene`).

@@ -482,7 +482,7 @@ const EXAMPLES: &[(&str, &str)] = &[
         "vidcut motion find c3 --download\n  vidcut motion find V1@10s,c7 --subject face\n  \
          vidcut motion find c3 --subject text --download\n  \
          vidcut motion find c3 --subject person --download\n  \
-         vidcut motion find c3 --subject vehicle\n  vidcut motion find c3 --replace",
+         vidcut motion find c3 --subject vehicle\n  vidcut motion find c3 --replace\n  vidcut motion find c3 --subject vehicle --size 1920 --replace",
     ),
     (
         "motion.track",
