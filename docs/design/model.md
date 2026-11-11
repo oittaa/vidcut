@@ -555,11 +555,11 @@ Writing:
 - `timeline.get` names the paths of a clip in `motion`.
 - The area of an effect can follow a path ([pictures](#pictures)). `ops::motion::violation` refuses an area that follows a path that the clip does not have.
 - A title can follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)). `Title.follows` holds a `Follow`: the id of that clip and the id of the path.
-  - `ops::motion::follow` sets it for `motion.follow`. With `keep`, it moves the positions of the title by the difference of the two places (`Title::moved`).
+  - `ops::motion::follow` sets it for `motion.follow`. It names the clip that `under` gives, as `ops::motion::settle` does. With `keep`, it moves the positions of the title by the difference of the two places (`Title::moved`).
   - `motion.remove` and `motion.find` with `replace` refuse a path that a title follows (`led`).
   - `ops::motion::settle` runs after each request:
     - A title whose clip or path is gone follows no path, with a warning.
-    - The clip of the path can play on no frame of the title. Another clip there can have the same samples under that path id, from the same media. The title then follows that clip.
+    - The clip of the path can play on no frame of the title. Another clip there can have the same samples under that path id, from the same media. The title then follows that clip (`under`).
       - Why: a split gives the second part a new id, and a paste gives each clip a new id.
     - A title inside a compound clip follows no path, with a warning. Why: `Project::clip` finds only the clips of the timeline.
   - `ops::motion::follow_violation` is the check of `validate::violations`.

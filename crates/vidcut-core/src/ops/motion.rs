@@ -178,11 +178,11 @@ pub fn follow(
                      an image sequence"
                 )));
             }
-            if !a.motion.iter().any(|m| m.id == path) {
+            let Some(m) = a.motion.iter().find(|m| m.id == path) else {
                 return Err(Error::not_found(format!("{of} has no motion path {path}")));
-            }
+            };
             Some(Follow {
-                clip: of.to_string(),
+                clip: under(p, c, a, m).id.clone(),
                 path: path.to_string(),
             })
         }
@@ -217,6 +217,20 @@ pub fn follow(
     Ok(shown)
 }
 
+fn under<'a>(p: &'a Project, c: &Clip, x: &'a Clip, path: &MotionPath) -> &'a Clip {
+    let meets = |y: &Clip| y.start < c.end() && c.start < y.end();
+    if meets(x) {
+        return x;
+    }
+    let same = |y: &&Clip| {
+        let part = y.id != x.id && takes(y) && meets(y) && y.media == x.media;
+        let has = |m: &MotionPath| m.id == path.id && m.samples == path.samples;
+        part && y.motion.iter().any(has)
+    };
+    let clips = p.tracks.iter().flat_map(|t| &t.clips);
+    clips.filter(same).min_by_key(|y| y.start).unwrap_or(x)
+}
+
 pub fn settle(p: &mut Project) -> Vec<String> {
     let mut warnings = Vec::new();
     let mut changes = Vec::new();
@@ -225,18 +239,12 @@ pub fn settle(p: &mut Project) -> Vec<String> {
             let Some(f) = c.title.as_ref().and_then(|t| t.follows.as_ref()) else {
                 continue;
             };
-            let meets = |x: &Clip| x.start < c.end() && c.start < x.end();
-            let path_of = |x: &Clip| x.motion.iter().find(|m| m.id == f.path).cloned();
             let led = p.clip(&f.clip).filter(|x| takes(x));
-            match led.and_then(|x| Some((x, path_of(x)?))) {
-                Some((x, _)) if meets(x) => {}
+            let path = led.and_then(|x| x.motion.iter().find(|m| m.id == f.path));
+            match led.zip(path) {
                 Some((x, path)) => {
-                    let same = |y: &&Clip| {
-                        let part = y.id != x.id && takes(y) && meets(y) && y.media == x.media;
-                        part && path_of(y).is_some_and(|m| m.samples == path.samples)
-                    };
-                    let clips = p.tracks.iter().flat_map(|t| &t.clips);
-                    if let Some(y) = clips.filter(same).min_by_key(|y| y.start) {
+                    let y = under(p, c, x, path);
+                    if y.id != x.id {
                         changes.push((ti, ci, Some(y.id.clone())));
                     }
                 }
