@@ -419,7 +419,7 @@ Voice Isolation:
 
 - GUI media exports are `background`.
 - Quick Export lists the presets marked `quick_export`. It sends one with `overwrite` and no range.
-- The Export dialog ([deviation X3](../deviations.md#x3-export-dialog-beyond-quick-export)) starts from a preset. It sends the changes as `set` overrides, with a range, per-clip names and `overwrite`.
+- The Export dialog ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)) starts from a preset. It sends the changes as `set` overrides, with a range, per-clip names and `overwrite`.
 - The dialog shows `export.plan` as its params change.
 
 Cancel:
@@ -437,7 +437,7 @@ Cancel:
 
 ## Subtitles
 
-- `subtitles_as` tells how the tracks that `subtitles` names go out with media ([deviation X45](../deviations.md#x45-subtitles-go-into-any-container-and-burn-in-from-any-track)). They go as files beside it (the default), as streams in it, or into the picture.
+- `subtitles_as` tells how the tracks that `subtitles` names go out with media ([deviation X45](../deviations.md#x45-subtitles-go-into-any-container)). They go as files beside it (the default), as streams in it, or into the picture.
 - Streams and burn-in take the shown track, unless `subtitles` names other tracks.
 - `export::prepare` refuses a container without subtitle streams, burn-in without video, and more than one track to burn.
 - It gives each output the cues of its range, in its own frames (`subtitles::Subtitles`).

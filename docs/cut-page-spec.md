@@ -1007,7 +1007,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A slide right stops in the same way at a later clip. The measurements show this only with a gap of one frame.
     - A clip with a gap on both sides also slides. No measurement shows this case.
   - L slides the clip right. It also slips its content right, to earlier frames, as a drag does.
-  - Space plays around the playhead, and Up/Down go to another edit (D32, deviations X11, X28, X29).
+  - Space plays around the playhead, and Up/Down go to another edit (D32, deviations X28, X29).
   - W again deselects the edit.
 
 ### 8.7 J/L cuts (p. 728)
@@ -1106,7 +1106,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It has one direction: left, right, up or down.
   - A left wipe reveals the incoming picture from the left edge toward the right.
   - The other directions start at their own edge.
-  - The edge moves in fractions of the duration (deviation X89).
+  - The edge moves in fractions of the duration.
   - A request can make a wipe.
   - A request can change a dissolve into a wipe, and a wipe into a dissolve.
 - **A Push and a Slide** (pp. 1166–1167):
@@ -1452,7 +1452,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Scroll moves its text from the bottom of the picture to the top. The length of the clip sets its speed.
   - vidcut has these five kinds:
     - Markup in the text styles words separately (X53).
-    - A point in fractions of the picture places a title (X54).
+    - The place of a title shows as percents from the top left (X54).
     - A scroll has its own motion and line spacing (X55).
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
@@ -1493,7 +1493,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Shift keeps a move on one axis.
   - Its values are Zoom (width and height, linked or not), Position X and Y, and Rotation Angle about the anchor point.
   - Its other values are Pitch, Yaw, and Flip Horizontal and Vertical.
-  - vidcut: the shape and snapping of the title handles (X52), and the values of a picture in fractions of the frame (X65).
+  - vidcut: the shape and snapping of the title handles (X52).
   - vidcut: the Inspector shows lengths in pixels, zoom in percent and rotation in degrees (X70).
   - vidcut: the zoom and the rotation work about the anchor point, and a cross marks it in the viewer (D92, X82).
   - vidcut: Pitch and Yaw are in the Inspector, and the viewer does not set them (D93, X83).
@@ -2804,7 +2804,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - During the run, the timeline shows the clips as the trim leaves them.
   - While no run occurs, the Trim Editor shows for an edit, and the viewer shows for clips.
   - K, Space, W, Up/Down and the end of the media stop a run.
-  - They apply the run as one request, and one undo step (deviation X11).
+  - They apply the run as one request, and one undo step.
   - Where the media or a neighbor ran out, the cut turns red, and the viewer tells why (deviation X29).
   - K held with a tap of J or L trims one frame.
   - K held with J or L held trims at half speed, until one key is released (D54).
@@ -3893,7 +3893,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The manual's words do not match the renders for some modes, for example Subtract and Hard Mix (pp. 1200–1202). vidcut follows the renders.
     - vidcut also keeps these values between the layers, in 32-bit floats.
     - In an export, a title between layers cuts them ([todo](todo/composite-masks.md)).
-  - **Units** (vidcut's, X65):
+  - **Units** (vidcut's):
     - `position` is where the middle of the picture goes before the zoom and the turn: `[x, y]` in fractions of the frame from its top left.
     - Each value of `position` is from −3.5 to 4.5: 4 frames either way from the middle. `[0.5, 0.5]` leaves the picture in place.
     - `zoom` is how much larger the picture is drawn across and down, each from 0 to 100. One number sets both. A zoom of 0 shows nothing of the picture.
@@ -4499,7 +4499,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - DNxHR LB, SQ and HQ have 8 bits. Thus an HDR timeline gets no cache with them.
     - DNxHR 444 files keep no alpha channel. The DNxHR encoder of FFmpeg has no pixel format with alpha.
     - A change of the codec renders the cache again. The files of the other codec stay until Delete Render Cache > Unused removes them.
-  - The cache files are in `render-cache` in the folder of playback files, beside the proxies (X26, X103).
+  - The cache files are in `render-cache` in the folder of playback files, beside the proxies (X26).
     - Proxies and Render Cache > Folder sets that folder for proxies and the render cache.
     - Proxies and Render Cache > Advanced > Folder sets a folder for the render cache only (`playback_files.render_cache`).
     - Outside the cache dir, the files do not count in the limit of the disk cache. Delete Render Cache removes them.
