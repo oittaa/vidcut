@@ -13,7 +13,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 ## X1. A project is one file, and its media paths are relative
 
 - **Resolve:**
-  - A Project Library is a database that holds one or more projects. The Project Manager creates and loads projects from it (p. 4223).
+  - A Project Library is a database that holds one or more projects. The Project Manager creates and loads projects from it (p. 4224).
   - Media that move go offline until the user relinks them (pp. 668–669).
   - Relink Selected Clips matches clips to files by file name and timecode (p. 669).
 - **vidcut:**
@@ -2616,6 +2616,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - `motion.follow` refuses a title with keyframes on its position.
   - A title that stops following keeps its numbers. Thus it leaves the thing.
   - The title keeps its size and its angle.
+  - Before the first sample of the path and after its last, the title stays where that sample puts it.
   - Before and after the clip of the path, the title stays where the first or the last frame of that clip puts it.
   - A scroll follows no path. A title inside a compound clip follows none.
   - An OpenTimelineIO file holds the own position of the title. An import does not read what the title follows.
