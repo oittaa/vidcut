@@ -2684,11 +2684,13 @@ impl Live {
                 waveform,
                 parade,
                 vectorscope,
+                scale,
             } => {
                 let patch = vidcut_core::preferences::ScopesPatch {
                     waveform,
                     parade,
                     vectorscope,
+                    scale,
                 };
                 match crate::preferences::set_scopes(patch, envelope.dry_run) {
                     Ok(v) => {

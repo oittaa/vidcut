@@ -5,3 +5,7 @@ What [the spec](../cut-page-spec.md) describes and vidcut does not do.
 - Date Imported clusters by day: vidcut keeps no date of import ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))
 - Zoom of the waveform in the Source Clip scroll area, once measured ([§4.1](../cut-page-spec.md#41-modes))
 - Audio Assistant, Voice Convert, Set Color and Add Marker, and Add Transition to All Edits in Timeline Actions ([§2](../cut-page-spec.md#2-layout-pp-636637))
+- The Histogram and the other scopes (pp. 3093, 3097)
+- The Y, CbCr and RGB overlays of the Waveform (p. 3097), and RGB, YRGB and YCbCr in the Parade (p. 3102)
+- The skin tone line of the Vectorscope (p. 3098), and Video Level Scopes in the scale menu
+- The unlabeled dashed lines of the HDR scale

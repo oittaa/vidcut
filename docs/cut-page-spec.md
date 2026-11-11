@@ -615,6 +615,16 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Audio scrubbing (Shift+S; on by default, p. 876):
   - A drag of the playhead, and frame steps, play the sound under it (D42).
   - Timeline > Audio Scrubbing also switches it.
+- Scopes: Resolve shows them on the Color, Media and Deliver pages (pp. 3092–3093).
+  - vidcut: the View menu and the header of the viewer turn on the Waveform, the Parade and the Vectorscope, each one by itself.
+  - vidcut: they are in a column at the right of the viewer picture. The Trim Editor, Dynamic Trim, Multi Source and a synced grid show none.
+  - The Waveform shows luma. The Parade shows red, green and blue, each in its color.
+  - Waveform Scale Style sets the scale of the Waveform and the Parade (p. 3093). `viewer.scopes` with `scale` sets it too.
+  - The choices are 10-bit, 12-bit, Percentage, mV and HDR (ST.2084/HLG). 10-bit is the default.
+  - Measured in Resolve Studio 21.2: each scale spans the full range of the code values.
+  - Measured: 10-bit has a line each 128, 12-bit each 512, Percentage each 10, and mV each 100.
+  - Measured: HDR has lines at 0, 1, 10, 100, 1000 and 10000 nits on the PQ curve.
+  - On an HLG timeline, HDR uses the nits of the HLG curve. This is not measured in Resolve.
 
 ## 5. Dual timeline (pp. 66, 643–646, 689–692, 716–718)
 

@@ -300,11 +300,13 @@ pub fn run_with(
             waveform,
             parade,
             vectorscope,
+            scale,
         } => {
             let patch = vidcut_core::preferences::ScopesPatch {
                 waveform: *waveform,
                 parade: *parade,
                 vectorscope: *vectorscope,
+                scale: *scale,
             };
             answer(crate::preferences::set_scopes(patch, envelope.dry_run)?)
         }

@@ -174,6 +174,46 @@ pub struct Scopes {
     pub parade: bool,
     /// The hue and the saturation of the picture: Cb across, Cr up.
     pub vectorscope: bool,
+    /// The scale at the left of the Waveform and the Parade.
+    pub scale: ScopeScale,
+}
+
+/// The scale of the Waveform and the Parade. Each one spans the full range
+/// of the code values.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScopeScale {
+    /// Code values from 0 to 1023.
+    #[default]
+    TenBit,
+    /// Code values from 0 to 4095.
+    TwelveBit,
+    /// 0 to 100 percent.
+    Percent,
+    /// 0 to 700 millivolts.
+    Millivolts,
+    /// Nits of the PQ curve. On an HLG timeline, nits of the HLG curve.
+    Hdr,
+}
+
+impl ScopeScale {
+    pub const ALL: [Self; 5] = [
+        Self::TenBit,
+        Self::TwelveBit,
+        Self::Percent,
+        Self::Millivolts,
+        Self::Hdr,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::TenBit => "10-bit",
+            Self::TwelveBit => "12-bit",
+            Self::Percent => "Percentage",
+            Self::Millivolts => "mV",
+            Self::Hdr => "HDR (ST.2084/HLG)",
+        }
+    }
 }
 
 /// One scope of the viewer picture.
@@ -215,6 +255,7 @@ impl Scopes {
             waveform: patch.waveform.unwrap_or(self.waveform),
             parade: patch.parade.unwrap_or(self.parade),
             vectorscope: patch.vectorscope.unwrap_or(self.vectorscope),
+            scale: patch.scale.unwrap_or(self.scale),
         }
     }
 }
@@ -229,6 +270,8 @@ pub struct ScopesPatch {
     pub parade: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vectorscope: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<ScopeScale>,
 }
 
 /// Framing and safe-area overlay choices for the viewer.
