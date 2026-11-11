@@ -1028,38 +1028,14 @@ fn locked(now: Option<Lock>, shift: bool, moved: Vec2) -> Option<Lock> {
     )
 }
 
-fn snapped(
-    clip: &Clip,
-    lanes: &[Lane],
-    marks: &[Mark],
-    by: i64,
-    play: i64,
-    ppf: f32,
-) -> Option<(i64, i64)> {
+fn snapped(clip: &Clip, marks: &[Mark], by: i64, play: i64, ppf: f32) -> Option<(i64, i64)> {
     let reach = f64::from(SNAP_PX / ppf.max(1e-3));
-    let mut best: Option<(i64, i64, i64)> = None;
-    for m in marks {
-        let from = clip.key_time(m.frame);
-        let others = lanes
-            .iter()
-            .filter(|l| l.param != m.param)
-            .flat_map(|l| l.keys.iter().map(move |k| (l.param, k.frame)))
-            .filter(|(param, frame)| {
-                !marks.contains(&Mark {
-                    param: *param,
-                    frame: *frame,
-                })
-            })
-            .map(|(_, frame)| clip.key_time(frame));
-        for to in std::iter::once(play as f64).chain(others) {
-            let wanted = (to - from).round() as i64;
-            let gap = (wanted - by).abs();
-            if gap as f64 <= reach && best.is_none_or(|b| gap < b.0) {
-                best = Some((gap, wanted, to.round() as i64));
-            }
-        }
-    }
-    best.map(|(_, by, at)| (by, at))
+    marks
+        .iter()
+        .map(|m| (play as f64 - clip.key_time(m.frame)).round() as i64)
+        .filter(|wanted| ((wanted - by).abs() as f64) <= reach)
+        .min_by_key(|wanted| (wanted - by).abs())
+        .map(|wanted| (wanted, play))
 }
 
 fn handle_body(id: &str, mark: Mark, out: bool, handle: Handle) -> Value {
@@ -3931,7 +3907,7 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
     let near = drag
         .snap
         .filter(|_| drag.lock != Some(Lock::Value))
-        .and_then(|play| snapped(clip, lanes, &drag.marks, moved, play, drag.ppf));
+        .and_then(|play| snapped(clip, &drag.marks, moved, play, drag.ppf));
     let by = near.map_or(moved, |(by, _)| by);
     let dt = fitted(lanes, &drag.marks, by);
     let dv = if drag.axis == Axis::None {
@@ -4108,26 +4084,6 @@ mod tests {
     fn a_shift_drag_keeps_the_direction_it_started_in() {
         let first = locked(None, true, vec2(1.0, 8.0));
         assert_eq!(locked(first, true, vec2(40.0, 2.0)), Some(Lock::Value));
-    }
-
-    #[test]
-    fn a_drag_snaps_to_the_nearest_keyframe_of_another_value() {
-        let lanes = [
-            lane(KeyParam::Volume, &[10]),
-            lane(KeyParam::Opacity, &[23, 40]),
-        ];
-        let marks = [mark(KeyParam::Volume, 10)];
-        assert_eq!(
-            snapped(&clip(), &lanes, &marks, 12, 80, 2.0),
-            Some((13, 23))
-        );
-    }
-
-    #[test]
-    fn a_drag_does_not_snap_to_a_keyframe_of_its_own_value() {
-        let lanes = [lane(KeyParam::Volume, &[10, 23])];
-        let marks = [mark(KeyParam::Volume, 10)];
-        assert_eq!(snapped(&clip(), &lanes, &marks, 12, 80, 2.0), None);
     }
 
     #[test]

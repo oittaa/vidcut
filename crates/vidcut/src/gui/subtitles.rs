@@ -551,8 +551,12 @@ fn list_heading(ui: &mut egui::Ui, width: f32, cols: &Columns, font: &egui::Font
     };
     let left = rect.left() + PAD;
     at("#", left + cols.number, true);
-    at("In/Out", left + cols.number + GAP, false);
-    at("Text", cols.text_span(rect.left(), rect.right()).0, false);
+    at("Time In/Out", left + cols.number + GAP, false);
+    at(
+        "Caption",
+        cols.text_span(rect.left(), rect.right()).0,
+        false,
+    );
     at("CPS", rect.right() - PAD, true);
 }
 
@@ -1223,20 +1227,7 @@ impl Workspace {
         let everyone = people(&p);
         let mut done = false;
         let mut step = None;
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Subtitle").strong());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                for (label, by) in [("Next", 1), ("Previous", -1)] {
-                    let to = beside(&p, &d.cue, by);
-                    if ui
-                        .add_enabled(to.is_some(), egui::Button::new(label))
-                        .clicked()
-                    {
-                        step = to;
-                    }
-                }
-            });
-        });
+        ui.label(RichText::new("Subtitle").strong());
         match found {
             Some((_, cue)) => self.cue_times(ui, &mut d, &p, cue, waiting),
             None => {
@@ -1510,6 +1501,15 @@ impl Workspace {
                     self.add_subtitle(ui.ctx(), Some(&track.id));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    for (label, by) in [("Next", 1), ("Prev", -1)] {
+                        let to = beside(&p, &d.cue, by);
+                        if ui
+                            .add_enabled(to.is_some(), egui::Button::new(label))
+                            .clicked()
+                        {
+                            step = to;
+                        }
+                    }
                     ui.label(dim(track.display_name()));
                 });
             });
@@ -1652,7 +1652,7 @@ impl Workspace {
             times: cues
                 .last()
                 .map_or(0.0, |c| wide(self.tc(c.end())))
-                .max(wide("In/Out".into())),
+                .max(wide("Time In/Out".into())),
             cps: wide("000".into()).max(wide("CPS".into())),
         };
         let fps = p.settings.fps;

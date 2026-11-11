@@ -284,9 +284,10 @@ impl State {
         if create {
             let mut settings = Settings::default();
             if let Some(fps) = args["fps"].as_str() {
-                settings.fps = fps
-                    .parse::<Rational>()
-                    .map_err(|e| Error::usage(e.to_string()))?;
+                settings.set_fps(
+                    fps.parse::<Rational>()
+                        .map_err(|e| Error::usage(e.to_string()))?,
+                );
                 settings.auto_format = false;
             }
             if let Some(size) = args["size"].as_str() {

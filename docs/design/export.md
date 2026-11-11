@@ -518,6 +518,7 @@ Titles in a compound clip:
 The plan:
 
 - A placed clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) is a source piece with `placed` pictures (`render::Placed`). They are the picture of its clip, then the pictures of the compound clips around it.
+- `Placed::of` and `Placed::at` take the picture through `ops::picture::working`. It puts a transform or a crop that is off back at its usual values. Thus the export, the viewer and the OpenTimelineIO export draw the same picture.
 - `render::flatten_lanes` lays it over the tracks below, as an `Over` of a `VideoPiece::Mix` without a ramp.
 - A clip at its usual values goes over the same way where its fitted picture leaves bars. Black is under it when no other layer is. A bar can be a part of a pixel ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)).
 - Where its fitted picture leaves no bar ([spec §13](../cut-page-spec.md#the-limit-for-a-thin-bar)), it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.

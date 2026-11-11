@@ -3595,6 +3595,7 @@ fn mutate(
             muted,
             gain_db,
             pan,
+            pan_on,
             equalizer,
             dialogue_leveler,
             compressor,
@@ -3624,6 +3625,7 @@ fn mutate(
                 muted: *muted,
                 gain_db: *gain_db,
                 pan: *pan,
+                pan_on: *pan_on,
                 equalizer: equalizer.clone(),
                 dialogue_leveler: dialogue_leveler.clone(),
                 compressor: compressor.clone(),
@@ -4224,6 +4226,8 @@ fn mutate(
             yaw,
             flip_horizontal,
             flip_vertical,
+            transform_off,
+            crop_off,
             crop_left,
             crop_right,
             crop_top,
@@ -4258,7 +4262,9 @@ fn mutate(
                 yaw: *yaw,
                 flip_horizontal: *flip_horizontal,
                 flip_vertical: *flip_vertical,
+                transform_off: *transform_off,
                 crop: [*crop_left, *crop_right, *crop_top, *crop_bottom],
+                crop_off: *crop_off,
                 crop_softness: *crop_softness,
                 composite_mode: *composite_mode,
                 opacity: *opacity,
@@ -5836,6 +5842,7 @@ fn place_imported(
                         .collect(),
                     muted: c.muted,
                     pan: c.pan.clamp(*PAN.start(), *PAN.end()),
+                    pan_on: true,
                     equalizer: c
                         .equalizer
                         .clone()
