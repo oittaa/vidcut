@@ -120,7 +120,9 @@ flowchart TD
   - `Tracker::start` cuts the template around the box. `Tracker::step` cuts the search area around the last box, and takes the place with the best score.
     - The crops, the values of the picture and the window are those of the tracker of OpenCV for this model.
   - A score under `tracking::LOST` ends the track. A shot change ends it too (`SCENE_SCORE`, as in `motion.find`).
-  - For the way backward, it keeps the pictures before the first frame, at most `KEPT_BYTES` of them. Then `backward` steps through them from the last to the first.
+  - For the way backward, `backward` reads the pictures before the first frame in parts, from the last part to the first. A part holds at most `PART_BYTES` of pictures.
+    - `Shots::go` seeks to a part, and reads `SEED` pictures before it. Thus the scene score of its first picture is right.
+    - Why: a track holds only one part in memory, however long the shot is.
   - `Follow` holds the `Look`, the first time, the box and the ways.
 - The result is a `Detections` with one box on each picture of the track, and no box on the other pictures (`laid`).
   - Thus a track shares the disk cache of `motion.find` (`AvEnv::tracked`). `tracking::name` gives the model file and `LOST` to the name of the file.
