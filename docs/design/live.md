@@ -455,9 +455,9 @@ The bar and the Jobs button:
   - `dim_curve` draws a dimmed line and returns its points. `dim_at` finds the line at a click.
   - `Editor::graph_h` is the height, from the drag in `graph_grip`.
 - A drag on a handle also sets the other handle of the keyframe (`HandleFix`, `lined_up`). `Drag::apart` is true while Alt is down.
-- A drag on the line between two keyframes is `Kind::Bend`. `CurveSpots::bend_at` finds the part of the curve and `BendFix` holds it. `keyframes::bent` gives the new handles.
-- `Workspace::add_on_line` adds a keyframe at an Alt-click on the line.
-- `Drag::frozen` keeps the value scale of the curve during a drag of a handle or a bend. Why: the handle stays under the pointer.
+- A drag on the line between two keyframes is `Kind::Line`. `CurveSpots::part_at` finds the part of the curve. The drag moves the values of its two keyframes, and `shift_of` keeps their frames.
+- `Workspace::add_on_line` adds a keyframe at an Alt-press on the line.
+- `Drag::frozen` keeps the value scale of the curve during a drag of a handle or of the line. Why: the point under the pointer stays under it.
 - The selected rows are a list of values (`Editor::rows`). A click on a row's name or on a keyframe changes them.
 - Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes (`KeyCmd`, `Workspace::key_cmd`) act on the selected marks or the selected rows.
   - `Workspace::key_target` takes only the rows that the open tab or tray shows.

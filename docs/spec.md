@@ -114,9 +114,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - The other handle goes to the opposite direction on the screen and keeps its length on the screen.
       - The value scale of the curve stays during the drag.
       - With Alt, the handle moves alone ([X161](deviations.md#x161-alt-moves-a-handle-alone-and-the-other-handle-stops-at-a-keyframe)).
-    - A drag on the line between two keyframes bends that part of the curve ([X162](deviations.md#x162-a-drag-on-the-line-bends-the-curve)).
+    - A drag on the line between two keyframes moves the two keyframes together (measured in Resolve Studio 21.2).
+      - It changes only their values, and the two become the selection.
     - A click on the line clears the selection (measured in Resolve Studio 21.2). A double-click on it adds a keyframe.
     - Alt and a click on the line adds a keyframe at that point (measured in Resolve Studio 21.2).
+    - Alt and a press on the line also adds a keyframe. The new keyframe does not follow the drag (measured in Resolve Studio 21.2).
     - The ⋯ menu has Enable Snapping (p. 1264). It is on by default (measured in Resolve Studio 21.2). With it on, a dragged control point goes to the playhead.
       - A keyframe of another curve and a timeline marker are not targets (measured in Resolve Studio 21.2).
       - vidcut: snapping acts on a track, a group track and a curve.

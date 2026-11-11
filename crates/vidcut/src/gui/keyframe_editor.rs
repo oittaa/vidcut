@@ -11,7 +11,7 @@ use egui_phosphor::regular::{
 use serde_json::{Value, json};
 use vidcut_core::generators::{self, CENTER};
 use vidcut_core::keyframes::{
-    PictureValue, bent, ease_of, eases, handle_point, value_mapped, value_paired,
+    PictureValue, ease_of, eases, handle_point, value_mapped, value_paired,
 };
 use vidcut_core::model::{
     Clip, Ease, EffectValue, Generator, Handle, Keyframe, LowerThirdLine, Picture, Project, Speed,
@@ -103,7 +103,7 @@ enum Kind {
     Keys,
     Group,
     Handle,
-    Bend,
+    Line,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -134,7 +134,6 @@ struct Drag {
     marks: Vec<Mark>,
     axis: Axis,
     fix: Option<HandleFix>,
-    bend: Option<BendFix>,
     frozen: Option<(KeyParam, f64, f64)>,
     apart: bool,
     lock: Option<Lock>,
@@ -153,7 +152,6 @@ impl Drag {
             marks,
             axis: Axis::None,
             fix: None,
-            bend: None,
             frozen: None,
             apart: false,
             lock: None,
@@ -171,16 +169,6 @@ struct HandleFix {
     key_value: f64,
     neighbor: i64,
     across: Option<(Handle, f64)>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct BendFix {
-    param: KeyParam,
-    a: Keyframe,
-    b: Keyframe,
-    frame: f64,
-    before: Option<(Handle, f64)>,
-    after: Option<(Handle, f64)>,
 }
 
 #[derive(Clone, Debug)]
@@ -2845,8 +2833,9 @@ impl Workspace {
         let alt = ui.input(|i| i.modifiers.alt);
         if let Some(pos) = resp
             .interact_pointer_pos()
-            .filter(|_| alt && resp.clicked())
-            && at.bend_at(clip, lane, pos).is_some()
+            .filter(|_| alt && (resp.clicked() || resp.drag_started()))
+            .map(|pos| pressed_at(ui, resp, pos))
+            && at.part_at(clip, lane, pos).is_some()
         {
             self.add_key_at(clip, lane.param, at.map.time(pos.x).round() as i64);
         }
@@ -3187,7 +3176,7 @@ impl Workspace {
         let CurveArea { resp, clip, .. } = *area;
         if resp
             .hover_pos()
-            .is_some_and(|p| at.bend_at(clip, lane, p).is_some())
+            .is_some_and(|p| at.part_at(clip, lane, p).is_some())
         {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
         }
@@ -3523,14 +3512,25 @@ impl Workspace {
             return;
         }
         if resp.drag_started()
-            && let Some((i, frame)) = at.bend_at(clip, lane, from)
+            && let Some(i) = at.part_at(clip, lane, from)
         {
+            if ui.input(|i| i.modifiers.alt) || fixed(lane.param) {
+                return;
+            }
+            let marks: Vec<Mark> = lane.keys[i..=i + 1]
+                .iter()
+                .map(|k| Mark {
+                    param: lane.param,
+                    frame: k.frame,
+                })
+                .collect();
+            self.key_editor.selected = marks.clone();
             self.key_editor.drag = Some(Drag {
                 v_span: values.span(),
                 v_height: values.height,
-                bend: Some(bend_of(lane, i, frame)),
+                axis: Axis::X,
                 frozen,
-                ..Drag::new(clip, Kind::Bend, pos, map, Vec::new())
+                ..Drag::new(clip, Kind::Line, pos, map, marks)
             });
             return;
         }
@@ -3728,12 +3728,11 @@ struct CurveSpots {
 }
 
 impl CurveSpots {
-    fn bend_at(&self, clip: &Clip, lane: &Lane, pos: Pos2) -> Option<(usize, f64)> {
+    fn part_at(&self, clip: &Clip, lane: &Lane, pos: Pos2) -> Option<usize> {
         if self.hit(pos) || line_distance(&self.line, pos) > LINE_HIT {
             return None;
         }
-        let frame = clip.key_at(self.map.time(pos.x));
-        segment_at(&lane.keys, frame).map(|i| (i, frame))
+        segment_at(&lane.keys, clip.key_at(self.map.time(pos.x)))
     }
 
     fn hit(&self, pos: Pos2) -> bool {
@@ -3919,56 +3918,6 @@ fn segment_at(keys: &[Keyframe], frame: f64) -> Option<usize> {
         .position(|w| (w[0].frame as f64) < frame && frame < w[1].frame as f64)
 }
 
-fn bend_of(lane: &Lane, i: usize, frame: f64) -> BendFix {
-    let (a, b) = (lane.keys[i], lane.keys[i + 1]);
-    BendFix {
-        param: lane.param,
-        a,
-        b,
-        frame,
-        before: across_of(&lane.keys, a.frame, true),
-        after: across_of(&lane.keys, b.frame, false),
-    }
-}
-
-fn bend_shift(fix: BendFix, by: f64, apart: bool, px: [f64; 2]) -> Shift {
-    let mut handles = Vec::new();
-    if by != 0.0 {
-        let (out, into) = bent(&fix.a, &fix.b, fix.frame, by);
-        let mark = |frame: i64| Mark {
-            param: fix.param,
-            frame,
-        };
-        let pair = |across: Option<(Handle, f64)>| across.filter(|_| !apart);
-        if let Some(h) = out {
-            handles.extend(edits_with_pair(
-                mark(fix.a.frame),
-                true,
-                h,
-                pair(fix.before),
-                px,
-            ));
-        }
-        if let Some(h) = into {
-            handles.extend(edits_with_pair(
-                mark(fix.b.frame),
-                false,
-                h,
-                pair(fix.after),
-                px,
-            ));
-        }
-    }
-    Shift {
-        marks: Vec::new(),
-        dt: 0,
-        dv: 0.0,
-        axis: Axis::None,
-        handles,
-        snap: None,
-    }
-}
-
 fn line_distance(line: &[Pos2], pos: Pos2) -> f32 {
     line.windows(2)
         .map(|w| {
@@ -3994,10 +3943,6 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
         f64::from(drag.ppf),
         f64::from(drag.v_height) / drag.v_span.max(f64::MIN_POSITIVE),
     ];
-    if let Some(fix) = drag.bend {
-        let by = d_value(drag.v_span, drag.v_height, dy);
-        return bend_shift(fix, by, drag.apart, px);
-    }
     if drag.kind == Kind::Handle
         && let Some(fix) = drag.fix
     {
@@ -4018,10 +3963,10 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
             snap: None,
         };
     }
-    let (dx, dy) = match drag.lock {
-        Some(Lock::Time) => (dx, 0.0),
-        Some(Lock::Value) => (0.0, dy),
-        None => (dx, dy),
+    let (dx, dy) = match (drag.kind, drag.lock) {
+        (Kind::Line, _) | (_, Some(Lock::Value)) => (0.0, dy),
+        (_, Some(Lock::Time)) => (dx, 0.0),
+        (_, None) => (dx, dy),
     };
     let moved = frames_moved(dx, drag.ppf);
     let near = drag
@@ -4159,30 +4104,6 @@ mod tests {
         };
         let done = lined_up(zero, other, 20.0, [1.0, 1.0]);
         assert_eq!((done.frames, done.value), (-7.0, 2.0));
-    }
-
-    #[test]
-    fn a_bend_realigns_the_handle_across_the_key() {
-        let mut lane = lane(KeyParam::Rotation, &[0, 30, 60]);
-        lane.keys[1].in_handle = Some(Handle {
-            frames: -10.0,
-            value: 0.0,
-        });
-        lane.keys[1].out_handle = Some(Handle {
-            frames: 10.0,
-            value: 0.0,
-        });
-        lane.keys[2].in_handle = Some(Handle {
-            frames: -10.0,
-            value: 0.0,
-        });
-        let shift = bend_shift(bend_of(&lane, 1, 40.0), 6.0, false, [1.0, 1.0]);
-        let across = shift
-            .handles
-            .iter()
-            .find(|e| e.mark.frame == 30 && !e.out)
-            .expect("the In handle moves too");
-        assert!(across.handle.value < 0.0);
     }
 
     #[test]
