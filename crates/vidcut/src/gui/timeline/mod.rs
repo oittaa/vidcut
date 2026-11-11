@@ -2871,7 +2871,7 @@ impl Workspace {
         }
         ui.separator();
         if ui
-            .button(bindings.named("Change Duration…", Action::ChangeDuration))
+            .button(bindings.named("Change Clip Duration…", Action::ChangeDuration))
             .clicked()
         {
             self.timeline.duration_dialog = Some(String::new());
