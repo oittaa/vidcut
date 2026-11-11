@@ -4214,6 +4214,7 @@ mod tests {
                 gain_keys: Vec::new(),
                 muted: false,
                 pan: 0.0,
+                pan_on: true,
                 equalizer: None,
                 dialogue_leveler: None,
                 compressor: None,

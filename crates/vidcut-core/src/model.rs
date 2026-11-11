@@ -5373,6 +5373,10 @@ pub struct ClipAudio {
     /// Left out at 0, the middle.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub pan: f64,
+    /// The switch of the pan. Off keeps the pan, and the sound plays as at
+    /// 0. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub pan_on: bool,
     /// The equalizer. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equalizer: Option<Equalizer>,

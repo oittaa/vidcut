@@ -1654,6 +1654,10 @@ pub enum Request {
         /// 0 is the middle.
         #[serde(default)]
         pan: Option<f64>,
+        /// The switch of the pan. Off keeps the pan, and the sound plays as
+        /// at 0. On brings the pan back.
+        #[serde(default)]
+        pan_on: Option<bool>,
         /// The equalizer: each field given replaces its own, and null takes
         /// it off with its settings. `{}` puts on a flat one.
         #[serde(

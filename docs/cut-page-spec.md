@@ -2433,6 +2433,8 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Its parameter `pan` has its range and `Key Frames`.
     - An OTIO import sets the Pan from it.
   - vidcut: the Pan row of the Audio section (X70) and `clip.set` set `pan`.
+  - vidcut: the switch at the left of the Pan row, and `pan_on` in `clip.set`, turn the Pan off and keep its value.
+  - vidcut: an OpenTimelineIO export writes a Pan that is off as 0.
   - vidcut: a clip pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
   - vidcut: a source of one channel plays at its full level on each side of a stereo mix.
   - vidcut: `clip.set` refuses a Pan outside the range ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
