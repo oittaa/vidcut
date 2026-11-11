@@ -1484,7 +1484,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Speed Warp uses the DaVinci Neural Engine. AI Speed Warp Metal is a version of it for macOS only.
 - **vidcut:**
   - The Speed section of the Inspector tab and `clip.set` set Retime Process.
-  - The Change Clip Speed window (R) also sets it, for the selected clips with a picture.
   - Its values are Project Settings, the default, Nearest, Frame Blend, AI Fast and AI Slow.
   - The Retime Process of the project is Auto, the default, Nearest, Frame Blend, AI Fast or AI Slow.
     - Auto gives slow motion the AI of the computer that plays or exports: AI on macOS, AI Fast elsewhere.

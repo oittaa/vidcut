@@ -14,7 +14,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sen
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    Clip, ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project, Speed, Track,
+    Clip, ClipCache, Ease, PictureTool, PictureTransition, Project, Speed, Track,
 };
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
@@ -410,7 +410,6 @@ pub struct SpeedDialog {
     pub reverse: bool,
     pub freeze: bool,
     pub ripple: bool,
-    pub retime: ClipRetime,
 }
 
 impl SpeedDialog {
@@ -427,7 +426,6 @@ impl SpeedDialog {
             reverse: speed < 0.0,
             freeze: speed == 0.0,
             ripple,
-            retime: ClipRetime::Project,
         }
     }
 
@@ -3542,15 +3540,7 @@ impl Workspace {
             .first()
             .and_then(|id| p.clip(id))
             .map_or(1.0, |c| c.speed_at(c.start));
-        let retime = self
-            .pictured(&self.snap.selection.clips)
-            .first()
-            .and_then(|id| p.clip(id))
-            .map_or(ClipRetime::Project, |c| c.retime);
-        self.timeline.speed_dialog = Some(SpeedDialog {
-            retime,
-            ..SpeedDialog::of(speed, p.settings.ripple_on)
-        });
+        self.timeline.speed_dialog = Some(SpeedDialog::of(speed, p.settings.ripple_on));
     }
 
     fn section_list(&mut self, ui: &egui::Ui) {
@@ -3628,23 +3618,11 @@ impl Workspace {
         }
     }
 
-    fn pictured(&self, clips: &[String]) -> Vec<String> {
-        let Some(p) = self.project() else {
-            return Vec::new();
-        };
-        clips
-            .iter()
-            .filter(|id| p.clip(id).is_some_and(|c| c.video && !c.media.is_empty()))
-            .cloned()
-            .collect()
-    }
-
     fn speed_window(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.timeline.speed_dialog.take() else {
             return;
         };
         let clips = self.snap.selection.clips.clone();
-        let pictured = self.pictured(&clips);
         let mut open = !clips.is_empty();
         let mut done = false;
         super::dialog::window(ctx, "Change Clip Speed", &mut open, |ui| {
@@ -3664,55 +3642,13 @@ impl Workspace {
                     }
                 });
                 super::dialog::row(ui, "Freeze Frame", |ui| ui.checkbox(&mut d.freeze, ""));
-                if !pictured.is_empty() {
-                    let project = self.project().and_then(|p| {
-                        let c = p.clip(&pictured[0])?;
-                        let m = p.media(&c.media)?;
-                        let chosen = ClipRetime::Project;
-                        Some(vidcut_core::render::retime_at(
-                            chosen,
-                            d.speed(),
-                            m,
-                            &p.settings,
-                        ))
-                    });
-                    let project = project.unwrap_or(vidcut_core::model::Retime::Nearest);
-                    let text = |r| super::retime_process::clip_text(r, project);
-                    super::dialog::row(ui, "Retime Process", |ui| {
-                        ui.add_enabled_ui(!d.freeze, |ui| {
-                            egui::ComboBox::from_id_salt("speed-retime")
-                                .selected_text(text(d.retime))
-                                .show_ui(ui, |ui| {
-                                    for r in super::retime_process::PROCESSES {
-                                        ui.selectable_value(&mut d.retime, r, text(r));
-                                    }
-                                });
-                        });
-                    });
-                }
                 super::dialog::row(ui, "Ripple Timeline", |ui| ui.checkbox(&mut d.ripple, ""));
             });
             super::dialog::footer(ui, |ui| {
                 let change = super::dialog::main_button(ui, "Change", true)
                     || ui.input(|i| i.key_pressed(Key::Enter));
                 if change {
-                    let retimed: Vec<String> = self.project().map_or(Vec::new(), |p| {
-                        pictured
-                            .iter()
-                            .filter(|id| p.clip(id).is_some_and(|c| c.retime != d.retime))
-                            .cloned()
-                            .collect()
-                    });
-                    if d.freeze || retimed.is_empty() {
-                        self.send_asking("edit.change_speed", d.params(&clips));
-                    } else {
-                        let set = json!({ "clips": retimed, "retime": d.retime });
-                        let commands = json!([
-                            { "method": "edit.change_speed", "params": d.params(&clips) },
-                            { "method": "clip.set", "params": set },
-                        ]);
-                        self.send_asking("apply", json!({ "commands": commands }));
-                    }
+                    self.send_asking("edit.change_speed", d.params(&clips));
                     done = true;
                 }
                 if ui.button("Cancel").clicked() {
