@@ -2868,11 +2868,11 @@ pub enum Request {
         download: bool,
     },
     /// Make a title follow a motion path of another clip, or stop that. The
-    /// title (`c5`, or `V2s`) then moves with the thing on the path. Each
-    /// `position` of the title counts from the middle of that thing:
-    /// `[0.5, 0.5]` puts the `anchor` of the title on it. The keyframes of
-    /// the position still work, from that middle. The title keeps its size
-    /// and its angle.
+    /// title (`c5`, or `V2@15s`) goes onto the thing on the path, and moves
+    /// with it: its `position` becomes `[0.5, 0.5]`. Each `position` of the
+    /// title counts from the middle of that thing, and `[0.5, 0.5]` puts the
+    /// `anchor` of the title on it. A title with keyframes on its position
+    /// is refused. The title keeps its size and its angle.
     ///
     /// `of` is the clip that has the path, and `path` is the id of the path
     /// (`motion.list`). That clip is footage, a still or an image sequence
@@ -2881,9 +2881,6 @@ pub enum Request {
     /// that clip, the thing is where the first or the last frame of that
     /// clip has it. Without `of` and `path`, the title follows no path. A
     /// scroll follows none.
-    ///
-    /// With `keep`, the title stays where it is on the frame at `at`: its
-    /// position and the keyframes of its position move by the difference.
     ///
     /// While a title follows a path, `motion.remove` and `motion.find` with
     /// `replace` do not take that path off. When the clip of the path is
@@ -2904,12 +2901,6 @@ pub enum Request {
         /// The id of the path on that clip, for example `p2`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<String>,
-        /// The title stays where it is on the frame at `at`.
-        #[serde(default)]
-        keep: bool,
-        /// The frame for `keep`. Default: the playhead.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        at: Option<TimeSpec>,
     },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.

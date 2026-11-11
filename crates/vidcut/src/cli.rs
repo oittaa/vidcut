@@ -486,8 +486,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "motion.follow",
-        "vidcut motion follow c5 --of c3 --path p1\n  vidcut motion follow c5 --of c3 --path p1 --keep --at 12s\n  \
-         vidcut motion follow c5",
+        "vidcut motion follow c5 --of c3 --path p1\n  vidcut motion follow c5",
     ),
     (
         "export.start",

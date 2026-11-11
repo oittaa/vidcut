@@ -794,10 +794,18 @@ impl Workspace {
             keys(ui, PictureValue::Opacity, None);
             ui.end_row();
         });
-        ui.label(dim(match d.kind {
-            TitleKind::LowerThird => "Across and Down: each line's anchor, in percents.",
-            TitleKind::Scroll => "Across: the anchor's column, in percents of the picture.",
-            TitleKind::Text => "Across and Down: the anchor's place, in percents of the picture.",
+        ui.label(dim(match (d.kind, following.is_some()) {
+            (TitleKind::LowerThird, false) => "Across and Down: each line's anchor, in percents.",
+            (TitleKind::LowerThird, true) => {
+                "Across and Down: each line's anchor from the followed thing, in percents."
+            }
+            (TitleKind::Scroll, _) => "Across: the anchor's column, in percents of the picture.",
+            (TitleKind::Text, false) => {
+                "Across and Down: the anchor's place, in percents of the picture."
+            }
+            (TitleKind::Text, true) => {
+                "Across and Down: the anchor's place from the followed thing, in percents."
+            }
         }));
         if !d.error.is_empty() {
             ui.colored_label(ui.visuals().error_fg_color, &d.error);
@@ -825,7 +833,7 @@ impl Workspace {
             }
         }
         if let Some(to) = follow.filter(|_| !d.dirty) {
-            let mut params = json!({ "clip": d.clip, "keep": true, "at": position });
+            let mut params = json!({ "clip": d.clip });
             if let Some(f) = to {
                 params["of"] = json!(f.clip);
                 params["path"] = json!(f.path);
