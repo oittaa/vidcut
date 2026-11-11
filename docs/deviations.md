@@ -707,14 +707,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - Speaker Detection (Studio) remembers each voice across the clips of a project. Thus it finds a speaker from one clip again in the next clip.
-  - Display Speakers shows the speakers. A double-click on a name changes it.
-  - Assign To moves text to another speaker.
   - Reset Speaker Data forgets the speakers (pp. 997–1001).
 - **vidcut:**
   - On this computer, speakers come numbered for each file.
   - With a paid request, speakers are numbered across all files of the request.
-  - In the Transcription window, the name of a person is a menu: Rename, Same Person As and Separate.
-  - Same Person As joins the speaker of this file with another person.
+  - Same Person As, in the right-click menu of a name in the Transcription window, joins the speaker of this file with another person.
   - vidcut cannot join speakers by their voices yet, in a project or across projects. This waits for transcribe.cpp ([to do](todo/voice-signatures.md)).
 - **Why:**
   - No model that vidcut runs gives the signature of a voice yet.
