@@ -68,7 +68,8 @@ flowchart TD
 - It also holds the fader `trims`, the mute, a `scrub` request, a followed position (`Player::follow`) and the `prepared` frame.
 - A `looping` range (`Player::set_loop`, spec D51) keeps `Mode::Playing` going past its end. The audio thread reads on from the start, and queues the `Marker` of the jump. Thus the ring and the clock run on.
 - `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, color reading, source position, layers over it), not where it shows. Thus kept pictures survive edits that move them.
-  - Each layer over it adds its level, the edge of its wipe and the frame of its move (`Moving::key`). Why: a change of a wipe's edge or of a Border keeps the level, and the picture is a new one.
+  - Each layer over it adds its level.
+  - A wipe, a Push or a Slide is not in the `Id`. The `Placed` pictures of the frame hold it (`Placed::moving`). The viewer draws again when they change.
   - The incoming layer of a Smooth Cut also adds the point and the process of its morph (`Smooth::at`). Why: a change of the Ease or the Process keeps the level.
   - A generator with keyframes adds its frame in the piece. Why: its picture changes on each frame, and it has no source position.
 
@@ -136,8 +137,7 @@ flowchart TD
 
 - The engine does not mix. A `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) for each layer on top. Each layer is as decoded.
 - The viewer blends the layers as it draws, in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), as an export does ([export](export.md#timeline-colors)). `Shown::colors` carries that space (`RenderPlan::colors`).
-- A wipe draws a part of each side (`shown_part`), in the timeline color space too.
-- A Push or a Slide gives each layer the frame of its move (`Move::at`, `Over::moving`). The viewer moves the two sides as it draws.
+- A wipe, a Push or a Slide gives the crossing of its two sides the frame of its move (`Placed::moving`, `Move::at`). The viewer wipes or moves the two sides as it draws, in the timeline color space too.
 - A Smooth Cut gives its incoming layer the morphed frame, at full weight (`VideoFrames::smooth_frame`). Thus it covers the outgoing layer.
 - Placed pictures ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`. Their placement is not in the kept pictures.
   - `Player::present` hands the `Placed` pictures of each layer with the frame (`Shown`, `Plan::placed_at`). Thus a move or a zoom keeps the frames decoded.
@@ -299,9 +299,12 @@ The audio device:
   - The two sides of a transition add into a picture of their own (`place::Mix`). Thus a mix below 0 is not clipped before it goes over.
   - A title on a side of a transition adds in the same way (`lettering_adding`).
   - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
-  - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
-  - The two sides of a Push or a Slide draw into two pictures of their own (`Moves`), each over transparent.
+  - The two sides of a wipe, a Push or a Slide draw into two pictures of their own (`Moves`), each over transparent.
     - `fs_motion` then lays them over the canvas, premultiplied. `Moving::shift` gives where each side is, in pixels of the frame.
+    - For a wipe, `Moving::shift` gives the way of the edge and the middle of its band along that way (`Shift::wipe`).
+    - A pixel of a wipe shows the incoming side behind the band, the color inside the band, and the outgoing side ahead of it.
+    - The middle of the pixel decides. Thus the edge has no smoothing, as the edges of a Push and a Slide have none.
+    - A feather of a wipe mixes the two sides linearly across the band, from the incoming side to the outgoing side.
     - The sides draw without their composite modes. The `Placed` of the crossing holds one mode. It mixes the moved result with the canvas, as for any `place::Mix`.
     - Why: thus the tracks below do not move, and the motion blur does not blur them, as in Resolve ([gotchas](../gotchas.md#resolves-otio-files)).
     - Each side moves by whole pixels. The band comes from the exact edges, on top.

@@ -1,11 +1,10 @@
 use eframe::egui::{
-    self, Align, Layout, Mesh, Painter, Rect, RichText, Sense, Shape, Stroke, StrokeKind,
+    self, Align, Layout, Mesh, Painter, Pos2, Rect, RichText, Sense, Shape, Stroke, StrokeKind,
     TextStyle, pos2, vec2,
 };
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    Course, Motion, PictureTransition, PushPreset, SlidePreset, SmoothMode, SmoothProcess,
-    WipeDirection,
+    Course, EdgeWipe, Motion, PictureTransition, PushPreset, SlidePreset, SmoothMode, SmoothProcess,
 };
 
 use super::theme;
@@ -38,7 +37,7 @@ pub const GROUPS: [(&str, &[Card]); 3] = [
         &[(
             "Edge Wipe",
             PictureTransition::Wipe {
-                direction: WipeDirection::Down,
+                wipe: EdgeWipe::PLAIN,
             },
         )],
     ),
@@ -108,16 +107,29 @@ fn paint(painter: &Painter, rect: Rect, kind: &PictureTransition) {
             }
             painter.add(Shape::mesh(mesh));
         }
-        PictureTransition::Wipe { direction } => {
+        PictureTransition::Wipe { wipe } => {
             painter.rect_filled(rect, 0.0, from);
-            let c = rect.center();
-            let incoming = match direction {
-                WipeDirection::Left => Rect::from_min_max(rect.min, pos2(c.x, rect.bottom())),
-                WipeDirection::Right => Rect::from_min_max(pos2(c.x, rect.top()), rect.max),
-                WipeDirection::Up => Rect::from_min_max(rect.min, pos2(rect.right(), c.y)),
-                WipeDirection::Down => Rect::from_min_max(pos2(rect.left(), c.y), rect.max),
-            };
-            painter.rect_filled(incoming, 0.0, to);
+            let (sin, cos) = f64::from(wipe.angle).to_radians().sin_cos();
+            let way = vec2(sin as f32, -cos as f32);
+            let ahead = |p: Pos2| (p - rect.center()).dot(way);
+            let corners = [
+                rect.left_top(),
+                rect.right_top(),
+                rect.right_bottom(),
+                rect.left_bottom(),
+            ];
+            let mut incoming = Vec::new();
+            for (i, &a) in corners.iter().enumerate() {
+                let b = corners[(i + 1) % corners.len()];
+                let (da, db) = (ahead(a), ahead(b));
+                if da < 0.0 {
+                    incoming.push(a);
+                }
+                if (da < 0.0) != (db < 0.0) {
+                    incoming.push(a + (b - a) * (da / (da - db)));
+                }
+            }
+            painter.add(Shape::convex_polygon(incoming, to, Stroke::NONE));
         }
         PictureTransition::Push { .. } | PictureTransition::Slide { .. } => {
             painter.rect_filled(rect, 0.0, from);

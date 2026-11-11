@@ -5,9 +5,9 @@ use serde_json::{Value, json};
 
 use super::{EDITOR, VIDCUT, gap, rt, schema};
 use crate::model::{
-    Clip, Course, Handle, Keyframe, MAX_BORDER, Media, Motion, MotionEase, PictureTransition,
-    Project, PushPreset, SlidePreset, SmoothMode, SmoothProcess, Track, Transition, WHITE,
-    WipeDirection,
+    Clip, Course, EdgeWipe, Handle, Keyframe, MAX_ANGLE, MAX_BORDER, Media, Motion, MotionEase,
+    PictureTransition, Project, PushPreset, SlidePreset, SmoothMode, SmoothProcess, Track,
+    Transition, WHITE,
 };
 use crate::render::Curve;
 
@@ -32,7 +32,7 @@ pub fn dissolves(t: &Transition) -> bool {
     dissolves_in(&t.otio)
 }
 
-pub fn wipe_of(t: &Transition) -> Option<WipeDirection> {
+pub fn wipe_of(t: &Transition) -> Option<EdgeWipe> {
     (!t.sound).then(|| wipe_in(&t.otio)).flatten()
 }
 
@@ -49,8 +49,8 @@ pub fn smooth_of(t: &Transition) -> Option<PictureTransition> {
 }
 
 pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
-    if let Some(direction) = wipe_of(t) {
-        return Some(PictureTransition::Wipe { direction });
+    if let Some(wipe) = wipe_of(t) {
+        return Some(PictureTransition::Wipe { wipe });
     }
     if let Some(color) = dip_of(t) {
         return Some(PictureTransition::DipToColor { color });
@@ -358,10 +358,20 @@ fn moving_otio(
         parameters.push(style);
     }
     parameters.extend(way);
-    if motion.border != 0.0 {
-        parameters.push(double("border", motion.border, MAX_BORDER));
+    parameters.extend(band_otio(motion.border, motion.feather, motion.color));
+    if motion.motion_blur != 0.0 {
+        parameters.push(double("motion blur", motion.motion_blur, 1.0));
     }
-    if motion.feather {
+    parameters.extend(course_otio(&motion.course, frames));
+    custom(name, type_of, parameters)
+}
+
+fn band_otio(border: f64, feather: bool, c: [u8; 3]) -> Vec<Value> {
+    let mut parameters = Vec::new();
+    if border != 0.0 {
+        parameters.push(double("border", border, MAX_BORDER));
+    }
+    if feather {
         parameters.push(json!({
             "Default Parameter Value": false,
             "Parameter ID": "feather",
@@ -369,14 +379,22 @@ fn moving_otio(
             "Variant Type": "Bool",
         }));
     }
-    if motion.color != WHITE {
-        parameters.push(color(motion.color, WHITE));
+    if c != WHITE {
+        parameters.push(color(c, WHITE));
     }
-    if motion.motion_blur != 0.0 {
-        parameters.push(double("motion blur", motion.motion_blur, 1.0));
-    }
-    parameters.extend(course_otio(&motion.course, frames));
-    custom(name, type_of, parameters)
+    parameters
+}
+
+fn band_in(values: &[Value]) -> (f64, bool, [u8; 3]) {
+    let border = value(values, "border").and_then(Value::as_f64);
+    let color = value(values, "color")
+        .and_then(Value::as_str)
+        .and_then(crate::subtitles::rgb);
+    (
+        border.unwrap_or(0.0),
+        value(values, "feather").and_then(Value::as_bool) == Some(true),
+        color.unwrap_or(WHITE),
+    )
 }
 
 fn course_otio(course: &Course, frames: i64) -> Vec<Value> {
@@ -469,7 +487,8 @@ fn smooth_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
 }
 
 fn curved_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
-    moving_values(o).or_else(|| smooth_values(o))
+    let wiped = || wipe_values(o).map(|(wipe, values)| (PictureTransition::Wipe { wipe }, values));
+    moving_values(o).or_else(|| smooth_values(o)).or_else(wiped)
 }
 
 fn moving_in(o: &Value) -> Option<PictureTransition> {
@@ -478,15 +497,14 @@ fn moving_in(o: &Value) -> Option<PictureTransition> {
 
 fn moving_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
     let motion = |values: &[Value]| -> Option<Motion> {
-        let number = |id: &str| value(values, id).and_then(Value::as_f64).unwrap_or(0.0);
+        let (border, feather, color) = band_in(values);
         Some(Motion {
-            border: number("border"),
-            feather: value(values, "feather").and_then(Value::as_bool) == Some(true),
-            color: value(values, "color")
-                .and_then(Value::as_str)
-                .and_then(crate::subtitles::rgb)
-                .unwrap_or(WHITE),
-            motion_blur: number("motion blur"),
+            border,
+            feather,
+            color,
+            motion_blur: value(values, "motion blur")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0),
             course: course_in(values)?,
         })
     };
@@ -528,49 +546,52 @@ pub fn course_played(t: &Transition, frames: i64) -> Option<(PictureTransition, 
 
 const EDGE_WIPE: &str = "Edge Wipe";
 
-pub fn wipe_otio(direction: WipeDirection) -> Value {
-    let parameters = match edge_angle(direction) {
-        0 => Vec::new(),
-        angle => vec![json!({
+pub fn wipe_otio(wipe: &EdgeWipe, frames: i64) -> Value {
+    let mut parameters = Vec::new();
+    if wipe.angle != 0 {
+        parameters.push(json!({
             "Default Parameter Value": 0,
+            "Key Frames": {},
             "Parameter ID": "angle",
-            "Parameter Value": angle,
+            "Parameter Value": wipe.angle,
             "Variant Type": "Int",
-            "maxValue": 360.0,
-            "minValue": -360.0,
-        })],
-    };
+            "maxValue": f64::from(MAX_ANGLE),
+            "minValue": -f64::from(MAX_ANGLE),
+        }));
+    }
+    parameters.extend(band_otio(wipe.border, wipe.feather, wipe.color));
+    parameters.extend(course_otio(&wipe.course, frames));
     custom(EDGE_WIPE, 13, parameters)
 }
 
-fn edge_angle(direction: WipeDirection) -> i64 {
-    match direction {
-        WipeDirection::Down => 0,
-        WipeDirection::Left => 90,
-        WipeDirection::Up => 180,
-        WipeDirection::Right => -90,
-    }
+fn wipe_in(o: &Value) -> Option<EdgeWipe> {
+    wipe_values(o).map(|(wipe, _)| wipe)
 }
 
-fn wipe_in(o: &Value) -> Option<WipeDirection> {
+fn wipe_values(o: &Value) -> Option<(EdgeWipe, &[Value])> {
     let editor = &o["metadata"][EDITOR];
     if editor["Transition Type"] != EDGE_WIPE {
         return None;
     }
-    let angle = match editor["Effects"]["Parameters"]
+    let values = editor["Effects"]["Parameters"]
         .as_array()
-        .and_then(|ps| ps.iter().find(|p| p["Parameter ID"] == "angle"))
-    {
-        Some(p) => p["Parameter Value"].as_i64()?,
+        .map_or(&[][..], Vec::as_slice);
+    let angle = match value(values, "angle") {
         None => 0,
+        Some(v) => i32::try_from(v.as_i64()?).ok()?,
     };
-    match angle.rem_euclid(360) {
-        0 => Some(WipeDirection::Down),
-        90 => Some(WipeDirection::Left),
-        180 => Some(WipeDirection::Up),
-        270 => Some(WipeDirection::Right),
-        _ => None,
+    if angle.abs() > MAX_ANGLE {
+        return None;
     }
+    let (border, feather, color) = band_in(values);
+    let wipe = EdgeWipe {
+        angle,
+        border,
+        feather,
+        color,
+        course: course_in(values)?,
+    };
+    Some((wipe, values))
 }
 
 fn dissolves_in(o: &Value) -> bool {

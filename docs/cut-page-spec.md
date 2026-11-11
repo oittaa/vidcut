@@ -1202,15 +1202,23 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Its zoom, its opacity and its composite mode then place that picture. Thus the tracks below do not fade around it or under it.
   - A request makes it: `{"type": "dip_to_color", "color": "#rrggbb"}`.
   - An OTIO file holds it as a Dip To Color Dissolve, with the color as its `color` value ([gotchas](gotchas.md#resolves-otio-files)).
-- **A wipe:**
-  - A wipe is another transition on an edit.
+- **An Edge Wipe** (p. 1170, measured in Resolve Studio 21.2):
   - It uses the same length rules as a dissolve.
-  - It has one direction: left, right, up or down.
-  - A left wipe reveals the incoming picture from the left edge toward the right.
-  - The other directions start at their own edge.
-  - The edge moves in fractions of the duration.
-  - A request can make a wipe.
+  - A straight edge crosses the frame. Behind the edge, the incoming picture shows. Ahead of it, the outgoing picture shows.
+  - Angle gives the edge, in degrees from −360 to 360. It is 0 unless set.
+    - At 0, the incoming picture comes in from the bottom. At 90, it comes in from the left. At 30, it comes in from the bottom-left.
+    - The edge is a straight line at that angle, in pixels of the frame.
+  - The edge moves evenly from the first corner of the frame that it touches to the far corner. It moves by the progress of the transition.
+  - Ease and Transition Curve give the progress, as for a Push. With Ease None, frame f of N frames is at f/N of the way.
+  - Border puts a band of Color on the edge, centered on it. Its width is a part of the timeline width. Color is white unless set.
+  - The band makes the way of the edge longer by the width of the band. Thus no band shows on the first frame.
+    - vidcut: the middle of the band starts half a band before the first corner. It ends half a band past the far corner.
+  - Feather fades the incoming picture into the outgoing picture linearly across the band. The band then shows no color.
+  - vidcut: a pixel shows the incoming picture when its middle is behind the band. The edge has no smoothing.
+  - vidcut: at a gap, the missing side shows the tracks below.
+  - A request makes one: `{"type": "wipe", "angle": 30, "border": 0.01, "feather": true}`.
   - A request can change a dissolve into a wipe, and a wipe into a dissolve.
+  - An OTIO file holds it as Resolve's Edge Wipe, with its values ([gotchas](gotchas.md#resolves-otio-files)).
 - **A Push and a Slide** (pp. 1166–1167):
   - They use the same length rules as a dissolve.
   - In a Push, the incoming picture pushes the outgoing picture out of the frame.
@@ -1261,7 +1269,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **The Transitions tab** (pp. 759–761):
   - It has cards for Cross Dissolve, Dip To Color Dissolve and Smooth Cut under Dissolve.
   - It has a card for Edge Wipe under Wipe, and cards for Push and Slide under Motion.
-  - The Edge Wipe of the card comes in from the bottom, as Resolve's Edge Wipe at 0 degrees (X89).
+  - The Edge Wipe of the card has the Angle 0. It comes in from the bottom.
   - The Push of the card is Push Left. The Slide of the card is Left-Right, In. The Smooth Cut of the card is the Smooth Cut of the button.
   - A drag of a card onto an edit of a video track adds that transition there, one second long. A Smooth Cut is 0.2 seconds long (X100).
     - Left of the edit, it ends on the edit. Right of the edit, it starts on it. On the edit, it is centered.
@@ -1277,13 +1285,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Inspector shows the selected transition: Transition Type, Duration and Alignment.
   - Duration is in frames, with the time beside it. A change keeps the alignment. The length is shortened to the media (X27).
   - Alignment is Start on Edit, Center on Edit or End on Edit.
-  - An Edge Wipe also has Edge: Left, Right, Top or Bottom (X89).
+  - An Edge Wipe also has Angle, Border, Feather, Color and Ease.
   - A Dip To Color Dissolve also has Color. A change goes to the project when the color picker closes.
   - A Push and a Slide also have Preset, Border, Feather, Color, Motion Blur and Ease. A Slide also has Direction: In or Out.
-  - Border shows the band in pixels of the timeline width, as Resolve shows it. A change of Border or Motion Blur goes to the project when the drag ends.
+  - Border shows the band in pixels of the timeline width, as Resolve shows it. A change of Angle, Border or Motion Blur goes to the project when the drag ends.
   - A Smooth Cut also has Mode, Process and Ease. Mode is Faster or Better. Process is AI Fast, AI Slow or Frame Blend (X99).
   - A Process with an AI model that is not on the computer asks for its download first, as Retime Process does.
-  - A Push, a Slide and a Smooth Cut also have Transition Curve: the curve at the playhead, from 0 to 1. The row has the value, the previous-key and next-key arrows, a keyframe button and Reset.
+  - An Edge Wipe, a Push, a Slide and a Smooth Cut also have Transition Curve: the curve at the playhead, from 0 to 1. The row has the value, the previous-key and next-key arrows, a keyframe button and Reset.
     - The frame of a key counts from the first frame of the transition. A key can be outside the transition, as in Resolve.
     - A change of the value with keys puts a key at the playhead. With no keys, it changes the fixed value.
     - The keyframe button removes the key at the playhead. Else it adds a key with the value at the playhead.
@@ -1294,7 +1302,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Each change is a request: `edit.transition` for the type and its values, `edit.dissolve` for the length and the alignment.
 - **Later:**
   - Hover Scrub Preview of a transition, and favorites
-  - the other values of each type, such as the Style of a dissolve and the border of a wipe
+  - the other values of each type, such as the Style of a dissolve
+  - keyframes of the Angle and the Border of an Edge Wipe
   - moving a transition to another edit
   - Change Transition Type, Set as Default Transition
   - cutting, copying and pasting transitions

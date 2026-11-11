@@ -840,6 +840,7 @@ struct Motion {
     edge: vec4<f32>,
     blur: vec4<f32>,
     color: vec4<f32>,
+    wipe: vec4<f32>,
     flags: vec4<u32>,
 };
 
@@ -892,8 +893,41 @@ struct Tap {
     cover: f32,
 };
 
+fn band_color() -> vec4<f32> {
+    let transfer = u32(motion.color.w + 0.5);
+    var band = motion.color.rgb;
+    if transfer != 0u {
+        band = widened(band, transfer);
+    }
+    return vec4<f32>(band, 1.0);
+}
+
+fn wiped(q: vec2<f32>) -> vec4<f32> {
+    let s = dot(q + vec2<f32>(0.5), motion.wipe.xy) - motion.wipe.z;
+    let b = motion.blur.w;
+    if motion.flags.y == 1u {
+        var m = select(0.0, 1.0, s < 0.0);
+        if b > 0.0 {
+            m = clamp(0.5 - s / b, 0.0, 1.0);
+        }
+        return incoming_at(q) * m + outgoing_at(q) * (1.0 - m);
+    }
+    if s < -0.5 * b {
+        return incoming_at(q);
+    }
+    if s < 0.5 * b {
+        return band_color();
+    }
+    return outgoing_at(q);
+}
+
 fn tap(q: vec2<f32>) -> Tap {
     var t: Tap;
+    if motion.wipe.w > 0.5 {
+        t.color = wiped(q);
+        t.cover = 1.0;
+        return t;
+    }
     if motion.flags.w == 1u {
         t.color = outgoing_at(q);
         t.cover = 0.0;
@@ -919,12 +953,7 @@ fn tap(q: vec2<f32>) -> Tap {
         upper *= f;
         block *= f;
     } else if inside(c, motion.band) && !inside(c, motion.picture) {
-        let transfer = u32(motion.color.w + 0.5);
-        var band = motion.color.rgb;
-        if transfer != 0u {
-            band = widened(band, transfer);
-        }
-        t.color = vec4<f32>(band, 1.0);
+        t.color = band_color();
         t.cover = 1.0;
         return t;
     }

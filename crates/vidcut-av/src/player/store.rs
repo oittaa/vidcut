@@ -678,7 +678,6 @@ mod tests {
         let over = Over {
             picture: of_pool(pool),
             weight: 1,
-            wipe: None,
         };
         Arc::new(on_gpu().with_over(vec![over]))
     }

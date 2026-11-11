@@ -1447,8 +1447,12 @@ pub enum PictureTransition {
         #[schemars(with = "String")]
         color: [u8; 3],
     },
-    /// One wipe, from `direction`.
-    Wipe { direction: WipeDirection },
+    /// An edge wipe: a straight edge crosses the frame, and the incoming
+    /// picture shows behind it.
+    Wipe {
+        #[serde(flatten)]
+        wipe: EdgeWipe,
+    },
     /// The outgoing picture morphs into the incoming picture, which hides a
     /// jump cut.
     SmoothCut {
@@ -1544,6 +1548,46 @@ pub struct Motion {
     pub course: Course,
 }
 
+/// The values of an edge wipe.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct EdgeWipe {
+    /// The angle of the edge in degrees, from -360 to 360. At 0 the
+    /// incoming picture comes in from the bottom, at 90 from the left, at
+    /// 30 from the bottom-left.
+    #[serde(default, skip_serializing_if = "is_zero_angle")]
+    pub angle: i32,
+    /// A band of `color` centered on the edge, as a part of the timeline
+    /// width, from 0 to 0.25.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub border: f64,
+    /// The band fades the incoming picture into the outgoing picture and
+    /// shows no color.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub feather: bool,
+    /// The color of the band, `#rrggbb`. White if left out.
+    #[serde(default = "white", with = "hex_rgb", skip_serializing_if = "is_white")]
+    #[schemars(with = "String")]
+    pub color: [u8; 3],
+    #[serde(flatten)]
+    pub course: Course,
+}
+
+impl EdgeWipe {
+    pub const PLAIN: EdgeWipe = EdgeWipe {
+        angle: 0,
+        border: 0.0,
+        feather: false,
+        color: WHITE,
+        course: Course::PLAIN,
+    };
+}
+
+pub const MAX_ANGLE: i32 = 360;
+
+fn is_zero_angle(a: &i32) -> bool {
+    *a == 0
+}
+
 impl Motion {
     pub const PLAIN: Motion = Motion {
         border: 0.0,
@@ -1554,8 +1598,8 @@ impl Motion {
     };
 }
 
-/// How a Push, a Slide or a Smooth Cut goes from the outgoing picture to
-/// the incoming picture over its frames.
+/// How a wipe, a Push, a Slide or a Smooth Cut goes from the outgoing
+/// picture to the incoming picture over its frames.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct Course {
     /// How the transition speeds up and slows down.
@@ -1671,7 +1715,7 @@ fn is_white(c: &[u8; 3]) -> bool {
     *c == WHITE
 }
 
-/// How a Push, a Slide or a Smooth Cut goes over its frames.
+/// How a wipe, a Push, a Slide or a Smooth Cut goes over its frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MotionEase {
@@ -1732,31 +1776,23 @@ impl PictureTransition {
 
     pub fn course(&self) -> Option<&Course> {
         match self {
-            Self::SmoothCut { course, .. } => Some(course),
+            Self::SmoothCut { course, .. }
+            | Self::Wipe {
+                wipe: EdgeWipe { course, .. },
+            } => Some(course),
             k => k.motion().map(|m| &m.course),
         }
     }
 
     pub fn course_mut(&mut self) -> Option<&mut Course> {
         match self {
-            Self::SmoothCut { course, .. } => Some(course),
+            Self::SmoothCut { course, .. }
+            | Self::Wipe {
+                wipe: EdgeWipe { course, .. },
+            } => Some(course),
             k => k.motion_mut().map(|m| &mut m.course),
         }
     }
-}
-
-/// The edge a wipe starts from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum WipeDirection {
-    /// From the left edge toward the right.
-    Left,
-    /// From the right edge toward the left.
-    Right,
-    /// From the top edge toward the bottom.
-    Up,
-    /// From the bottom edge toward the top.
-    Down,
 }
 
 /// A clip on the timeline.

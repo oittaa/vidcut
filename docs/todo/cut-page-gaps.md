@@ -6,3 +6,4 @@ What [the spec](../cut-page-spec.md) describes and vidcut does not do.
 - Zoom of the waveform in the Source Clip scroll area, once measured ([§4.1](../cut-page-spec.md#41-modes))
 - Audio Assistant, Voice Convert, Set Color and Add Marker, and Add Transition to All Edits in Timeline Actions ([§2](../cut-page-spec.md#2-layout-pp-636637))
 - The switch of Dynamic Zoom, Composite, Speed and the Audio groups, which turns a group off (p. 734; [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768))
+- Keyframes of the Angle and the Border of an Edge Wipe. Resolve can keyframe them. vidcut keeps one value of each ([§8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173))

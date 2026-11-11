@@ -11,7 +11,7 @@ use crate::model::{
     AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, Compound, DuckDetect,
     Generator, Gradient, Hdr, Keyframe, Media, MediaSuperScale, MotionPath, PathSample, Picture,
     PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode,
-    SuperScale, TimelineColors, Title, Track, TrackKind, Transition, WipeDirection,
+    SuperScale, TimelineColors, Title, Track, TrackKind, Transition,
 };
 use crate::motion::Area;
 use crate::otio::transitions;
@@ -488,7 +488,7 @@ impl ShownTitle {
     }
 
     pub fn alpha(&self) -> f64 {
-        self.title.opaque() * self.fade.map_or(1.0, |r| r.shown(0))
+        self.title.opaque() * self.fade.map_or(1.0, |r| r.level(0))
     }
 }
 
@@ -609,8 +609,8 @@ pub struct Placed {
     /// Set once `after` has placed this picture on a timeline frame.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ready: bool,
-    /// The level of a dissolve or the edge of a wipe, at an edge of this
-    /// compound clip.
+    /// The level or the move of a transition at an edge of this compound
+    /// clip.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ramp: Option<Ramp>,
     /// This is no picture. It joins the two sides of a transition at an edge
@@ -836,13 +836,10 @@ pub struct Ramp {
     pub of: i64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub falling: bool,
-    /// A wipe's edge, from this direction. Left out, the level is a dissolve.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wipe: Option<WipeDirection>,
     /// The level stays at frame `at`, as in a frozen compound clip.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub held: bool,
-    /// A Push or a Slide moves this picture, and its level stays 1.
+    /// A wipe, a Push or a Slide moves this picture, and its level stays 1.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub moved: bool,
 }
@@ -874,13 +871,6 @@ impl Ramp {
         n as f64 / d as f64
     }
 
-    pub fn shown(&self, k: i64) -> f64 {
-        match self.wipe {
-            Some(_) => 1.0,
-            None => self.level(k),
-        }
-    }
-
     pub fn weight(&self, k: i64) -> u32 {
         let (n, d) = self.fraction(k);
         let w = (i128::from(n) * i128::from(WHOLE) * 2 + i128::from(d)) / (2 * i128::from(d));
@@ -893,52 +883,9 @@ impl Ramp {
             ..*self
         }
     }
-
-    pub fn mask(&self, k: i64) -> Option<Wipe> {
-        self.wipe.map(|direction| Wipe {
-            direction,
-            along: self.rising(k),
-            falling: self.falling,
-        })
-    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Wipe {
-    pub direction: WipeDirection,
-    pub along: (i64, i64),
-    pub falling: bool,
-}
-
-pub fn wipe_shows_incoming(
-    direction: WipeDirection,
-    along: (i64, i64),
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-) -> bool {
-    let (n, d) = along;
-    if d <= 0 || width == 0 || height == 0 {
-        return false;
-    }
-    let n = n.clamp(0, d);
-    let (x, y, w, h) = (
-        i128::from(x),
-        i128::from(y),
-        i128::from(width),
-        i128::from(height),
-    );
-    let (n, d) = (i128::from(n), i128::from(d));
-    match direction {
-        WipeDirection::Left => x * d < n * w,
-        WipeDirection::Right => x * d >= (d - n) * w,
-        WipeDirection::Up => y * d < n * h,
-        WipeDirection::Down => y * d >= (d - n) * h,
-    }
-}
-
-/// The way the pictures of a Push or a Slide go.
+/// The way the pictures of a wipe, a Push or a Slide go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Way {
@@ -947,14 +894,17 @@ pub enum Way {
     Slide(SlidePreset),
     /// The outgoing picture slides out.
     SlideOut(SlidePreset),
+    /// An edge at this angle in degrees crosses the frame. The incoming
+    /// picture shows behind it.
+    Wipe(i32),
 }
 
-/// How a Push or a Slide moves its two pictures.
+/// How a wipe, a Push or a Slide moves its two pictures.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Move {
     pub way: Way,
-    /// The band on the moving edge, as a part of the shorter side of the
-    /// frame.
+    /// The band on the moving edge: for a Push or a Slide as a part of the
+    /// shorter side of the frame, for a wipe as a part of its width.
     #[serde(default, skip_serializing_if = "zero_f64")]
     pub border: f64,
     /// The band fades one picture into the other.
@@ -977,6 +927,16 @@ impl Move {
     fn of(d: &transitions::Playing) -> Option<Self> {
         let (kind, keys) = transitions::course_played(d.transition, d.frames.1 - d.frames.0)?;
         let (way, motion) = match kind {
+            PictureTransition::Wipe { wipe } => (
+                Way::Wipe(wipe.angle),
+                crate::model::Motion {
+                    border: wipe.border,
+                    feather: wipe.feather,
+                    color: wipe.color,
+                    motion_blur: 0.0,
+                    course: wipe.course,
+                },
+            ),
             PictureTransition::Push { preset, motion } => (Way::Push(preset), motion),
             PictureTransition::Slide {
                 preset,
@@ -1042,6 +1002,7 @@ pub struct Shift {
     pub blur: [f64; 3],
     pub mixes_blur: bool,
     pub still: bool,
+    pub wipe: Option<[f64; 3]>,
 }
 
 fn push_sign(preset: PushPreset) -> [f64; 2] {
@@ -1067,13 +1028,14 @@ fn slide_sign(preset: SlidePreset) -> [f64; 2] {
 impl Moving {
     pub fn shift(&self, (w, h): (u32, u32)) -> Shift {
         let size = [f64::from(w), f64::from(h)];
-        let b = self.border * size[0].min(size[1]);
-        let p = self.progress;
         let (sign, push, out) = match self.way {
             Way::Push(preset) => (push_sign(preset), true, false),
             Way::Slide(preset) => (slide_sign(preset), false, false),
             Way::SlideOut(preset) => (slide_sign(preset), false, true),
+            Way::Wipe(angle) => return self.wiped(angle, size),
         };
+        let b = self.border * size[0].min(size[1]);
+        let p = self.progress;
         let (mut upper, mut lower, mut facing) = ([0.0; 2], [0.0; 2], [0.0; 2]);
         for a in 0..2 {
             let s = sign[a];
@@ -1131,6 +1093,34 @@ impl Moving {
             ],
             mixes_blur: !push,
             still: self.feather && p <= 0.0,
+            wipe: None,
+        }
+    }
+
+    fn wiped(&self, angle: i32, size: [f64; 2]) -> Shift {
+        let (sin, cos) = f64::from(angle).to_radians().sin_cos();
+        let way = [sin, -cos];
+        let reach = [[0.0, 0.0], [size[0], 0.0], [0.0, size[1]], size]
+            .map(|c| c[0] * way[0] + c[1] * way[1]);
+        let first = reach.into_iter().fold(f64::INFINITY, f64::min);
+        let last = reach.into_iter().fold(f64::NEG_INFINITY, f64::max);
+        let b = self.border * size[0];
+        let edge = first - b / 2.0 + self.progress * (last - first + b);
+        let whole = [0.0, 0.0, size[0], size[1]];
+        Shift {
+            upper_in: true,
+            upper: [0.0; 2],
+            lower: [0.0; 2],
+            picture: whole,
+            band: whole,
+            facing: [0.0; 2],
+            edge: [0.0; 2],
+            border: b,
+            feather: self.feather,
+            blur: [0.0; 3],
+            mixes_blur: false,
+            still: false,
+            wipe: Some([way[0], way[1], edge]),
         }
     }
 }
@@ -2093,7 +2083,6 @@ pub(crate) fn plays_inside(c: &Clip) -> bool {
 struct Edge {
     frames: (i64, i64),
     falling: bool,
-    wipe: Option<WipeDirection>,
     smooth: bool,
     crossing: Option<Placed>,
     modes: (i64, Vec<CompositeMode>),
@@ -2112,7 +2101,6 @@ impl Edge {
         Self {
             frames: span_of(d, falling),
             falling,
-            wipe: transitions::wipe_of(d.transition),
             smooth: matches!(
                 transitions::kind_of(d.transition),
                 Some(PictureTransition::SmoothCut { .. })
@@ -2127,7 +2115,6 @@ impl Edge {
             at: now - self.frames.0,
             of: self.frames.1 - self.frames.0,
             falling: self.falling,
-            wipe: self.wipe,
             held,
             moved: self.crossing.as_ref().is_some_and(|c| c.moving.is_some()),
         }
@@ -4774,7 +4761,6 @@ mod tests {
             at: 0,
             of: 4,
             falling: false,
-            wipe: None,
             held: false,
             moved: false,
         };
@@ -4788,7 +4774,6 @@ mod tests {
             at: 0,
             of: 4,
             falling: true,
-            wipe: None,
             held: false,
             moved: false,
         };
@@ -4801,43 +4786,10 @@ mod tests {
             at: 0,
             of: 3,
             falling: false,
-            wipe: None,
             held: false,
             moved: false,
         };
         assert_eq!(ramp.weight(0), 10923);
-    }
-
-    #[test]
-    fn a_left_wipe_at_its_middle_splits_the_frame_in_half() {
-        let incoming: Vec<bool> = (0..4)
-            .map(|x| wipe_shows_incoming(WipeDirection::Left, (1, 2), x, 0, 4, 1))
-            .collect();
-        assert_eq!(incoming, vec![true, true, false, false]);
-    }
-
-    #[test]
-    fn a_left_wipe_is_on_the_incoming_ramp() {
-        let mut f = fixture();
-        f.append("m1", 0, 50);
-        f.append("m2", 10, 60);
-        req(
-            &mut f,
-            "edit.dissolve",
-            json!({"at": 50, "transition": {"type": "wipe", "direction": "left"}}),
-        );
-        let plan = flatten(f.editor.project(), 0, 100).unwrap();
-        let ramp = plan
-            .video
-            .iter()
-            .find_map(|p| match p {
-                VideoPiece::Mix { over, .. } => {
-                    over.iter().find_map(|o| o.ramp.filter(|r| !r.falling))
-                }
-                _ => None,
-            })
-            .unwrap();
-        assert_eq!(ramp.wipe, Some(WipeDirection::Left));
     }
 
     #[test]

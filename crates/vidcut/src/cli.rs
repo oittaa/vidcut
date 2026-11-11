@@ -351,7 +351,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "edit.transition",
-        "vidcut edit transition --at 1m --transition '{\"type\":\"wipe\",\"direction\":\"left\"}'\n  \
+        "vidcut edit transition --at 1m --transition '{\"type\":\"wipe\",\"angle\":90}'\n  \
          vidcut edit transition --at 1m --transition '{\"type\":\"push\",\"preset\":\"up\",\"border\":0.02}'\n  \
          vidcut edit transition --at 1m --transition '{\"type\":\"dissolve\"}'",
     ),

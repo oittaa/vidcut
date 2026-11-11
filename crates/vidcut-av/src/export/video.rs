@@ -9,7 +9,7 @@ use vidcut_core::generators::Pattern;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{AlphaMode, ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
-use vidcut_core::render::{Image, Placed, Ramp, Shape, Smooth, VideoPiece, WHOLE, Wipe};
+use vidcut_core::render::{Image, Placed, Shape, Smooth, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -840,7 +840,6 @@ pub(crate) struct Layer {
     pub(crate) decoder: Option<crate::hw::Kind>,
     pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
     pub(crate) went: Option<crate::route::Went>,
-    pub(crate) wipe: Option<Wipe>,
     pub(crate) share: f64,
     pub(crate) woven: Option<Weave>,
     pub(crate) origin: Option<Origin>,
@@ -848,10 +847,6 @@ pub(crate) struct Layer {
     pub(crate) alpha_use: AlphaUse,
     pub(crate) matte: Option<frame::Video>,
     pub(crate) lut: Option<crate::screen::Lut>,
-}
-
-fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
-    ramp.and_then(|r| r.mask(k))
 }
 
 const PLACED_MOST: f64 = 16384.0;
@@ -2586,7 +2581,6 @@ impl VideoFrames {
             for (i, (layer, ramp)) in layers.into_iter().enumerate() {
                 let started = Instant::now();
                 let weight = ramp.map(|r| r.weight(k));
-                let wipe = mask_of(ramp, k);
                 let smooth = smooths[i].zip(ramp).map(|(s, r)| (s, s.at(&r, k)));
                 let VideoPiece::Source {
                     image,
@@ -2626,7 +2620,6 @@ impl VideoFrames {
                             decoder: None,
                             decoding: None,
                             went: None,
-                            wipe,
                             share: 1.0,
                             woven: None,
                             lut: None,
@@ -2722,7 +2715,6 @@ impl VideoFrames {
                     decoder,
                     decoding: Some(decoding),
                     went: self.open[s].fitting.went(),
-                    wipe,
                     share: self.share_of(s, rotation, placed.get(i)),
                     woven,
                     lut: match self.open[s].lut_in {
@@ -2778,7 +2770,6 @@ impl VideoFrames {
         last.weight = None;
         last.rotation = 0;
         last.sampling = Sampling::Own;
-        last.wipe = None;
         last.share = 1.0;
         last.woven = None;
         last.alpha_mode = match matte {

@@ -1827,7 +1827,7 @@ mod tests {
         )
         .unwrap();
         let wipe = PictureTransition::Wipe {
-            direction: vidcut_core::model::WipeDirection::Down,
+            wipe: vidcut_core::model::EdgeWipe::PLAIN,
         };
         let r = w.drag(
             Gesture::Transition {
@@ -1843,7 +1843,7 @@ mod tests {
             Some(json!({"method": "edit.transition", "params": {
                 "at": 100,
                 "track": "V1",
-                "transition": {"type": "wipe", "direction": "down"},
+                "transition": {"type": "wipe"},
             }}))
         );
     }
@@ -1852,7 +1852,10 @@ mod tests {
     fn dragging_the_edge_of_a_wipe_keeps_it_a_wipe() {
         let mut w = World::new();
         let wipe = PictureTransition::Wipe {
-            direction: vidcut_core::model::WipeDirection::Left,
+            wipe: vidcut_core::model::EdgeWipe {
+                angle: 90,
+                ..vidcut_core::model::EdgeWipe::PLAIN
+            },
         };
         let shape = vidcut_core::ops::Shape::Length(20, vidcut_core::ops::Align::Center);
         vidcut_core::ops::dissolve(&mut w.p, "V1", 100, shape, true, false, false, &wipe).unwrap();
@@ -1871,7 +1874,7 @@ mod tests {
         );
         assert_eq!(
             r.map(|r| r["params"]["transition"].clone()),
-            Some(json!({"type": "wipe", "direction": "left"}))
+            Some(json!({"type": "wipe", "angle": 90}))
         );
     }
 
