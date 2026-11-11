@@ -99,7 +99,6 @@ In this file, a path is never a track of the timeline.
 - **The track of an area, what is left:**
   - A Track button in the viewer, for the area whose handles show.
   - Measure `tracking::LOST` on a clip where the thing leaves the picture, or goes behind another thing. No test clip has one.
-  - The way backward keeps its pictures in memory. Read a long shot in parts.
   - A track follows no turn and no change of perspective.
 - **The Motion section in the app:** click Blur in a window, and take a find that asks for the download of its model. Find ran from its button.
 - **Titles and clips follow a path** of another clip.

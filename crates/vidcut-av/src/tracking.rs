@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Instant;
 
@@ -22,7 +22,8 @@ const MEAN: [f32; 3] = [0.485, 0.456, 0.406];
 const SPREAD: [f32; 3] = [0.229, 0.224, 0.225];
 const SIDES: (f64, f64) = (320.0, 1280.0);
 const EDGE: f64 = 10.0;
-const KEPT_BYTES: usize = 512 << 20;
+const PART_BYTES: usize = 64 << 20;
+const SEED: u64 = 2;
 pub const LOST: f32 = 0.3;
 
 pub fn name() -> String {
@@ -281,9 +282,68 @@ impl<'a> Tracker<'a> {
 
 struct Seen {
     slot: u64,
+    last: u64,
     pts: f64,
     scene: f32,
     picture: Picture,
+}
+
+struct Shots {
+    reader: VideoReader,
+    tick: f64,
+    step: f64,
+    turn: u16,
+    from: f64,
+    every: f64,
+    area: [f32; 4],
+    seeing: Option<Seeing>,
+    wanted: u64,
+    read: Option<f64>,
+}
+
+impl Shots {
+    fn go(&mut self, slot: u64) -> Result<()> {
+        let time = self.from + slot as f64 * self.every;
+        self.reader.seek((time / self.tick).floor() as i64)?;
+        (self.wanted, self.read) = (slot, None);
+        if let Some(seeing) = &mut self.seeing {
+            seeing.before = None;
+        }
+        Ok(())
+    }
+
+    fn next_if(&mut self, on: bool) -> Result<Option<Seen>> {
+        if on { self.next() } else { Ok(None) }
+    }
+
+    fn next(&mut self) -> Result<Option<Seen>> {
+        loop {
+            crate::cancel::stop()?;
+            let Some(decoded) = self.reader.next_frame()? else {
+                return Ok(None);
+            };
+            let pts = decoded.pts().map(|p| p as f64 * self.tick);
+            let pts = pts.unwrap_or_else(|| self.read.map_or(self.from, |p| p + self.step));
+            self.read = Some(pts);
+            if pts < self.from + self.wanted as f64 * self.every {
+                continue;
+            }
+            let slot = self.wanted;
+            let last = ((pts - self.from) / self.every).floor().max(0.0) as u64;
+            let last = last.max(slot);
+            self.wanted = last + 1;
+            let (turn, area) = (self.turn, self.area);
+            let seeing = (self.seeing).get_or_insert_with(|| Seeing::start(&decoded, turn, area));
+            let (picture, scene) = seeing.picture(&decoded)?;
+            return Ok(Some(Seen {
+                slot,
+                last,
+                pts,
+                scene,
+                picture,
+            }));
+        }
+    }
 }
 
 struct Seeing {
@@ -334,25 +394,38 @@ impl Seeing {
 
 type Kept = BTreeMap<u64, (f64, Vec<Found>, f32)>;
 
-fn backward(model: &Model, home: &Seen, area: [f64; 4], before: &VecDeque<Seen>) -> Result<Kept> {
-    let mut kept = Kept::new();
-    let mut tracker = Tracker::start(model, &home.picture, area);
-    let mut cut = home.scene;
-    for seen in before.iter().rev() {
-        crate::cancel::stop()?;
-        if f64::from(cut) >= SCENE_SCORE {
-            kept.insert(seen.slot, (seen.pts, Vec::new(), cut));
-            break;
+fn backward(shots: &mut Shots, mut tracker: Tracker, home: &Seen, kept: &mut Kept) -> Result<()> {
+    let size = home.picture.size;
+    let most = (PART_BYTES / (size.0 * size.1 * 3).max(1)).max(1) as u64;
+    let (mut end, mut cut) = (home.slot, home.scene);
+    while end > 0 {
+        let start = end.saturating_sub(most);
+        shots.go(start.saturating_sub(SEED))?;
+        let mut part = Vec::new();
+        while let Some(seen) = shots.next()? {
+            if seen.slot >= end {
+                break;
+            }
+            if seen.slot >= start {
+                part.push(seen);
+            }
         }
-        let Some(score) = tracker.step(&seen.picture)? else {
-            kept.insert(seen.slot, (seen.pts, Vec::new(), 0.0));
-            break;
-        };
-        let found = tracker.found(seen.picture.size, score);
-        kept.insert(seen.slot, (seen.pts, vec![found], seen.scene));
-        cut = seen.scene;
+        for seen in part.iter().rev() {
+            if f64::from(cut) >= SCENE_SCORE {
+                kept.insert(seen.slot, (seen.pts, Vec::new(), cut));
+                return Ok(());
+            }
+            let Some(score) = tracker.step(&seen.picture)? else {
+                kept.insert(seen.slot, (seen.pts, Vec::new(), 0.0));
+                return Ok(());
+            };
+            let found = tracker.found(size, score);
+            kept.insert(seen.slot, (seen.pts, vec![found], seen.scene));
+            cut = seen.scene;
+        }
+        end = start;
     }
-    Ok(kept)
+    Ok(())
 }
 
 fn laid(kept: &Kept, from: f64, to: f64, every: f64) -> Detections {
@@ -386,91 +459,61 @@ pub fn track(
     let _turn = crate::turns::cpu_analysis()?;
     let look = follow.look;
     let every = look.every.max(1e-9);
-    let slot_of = |time: f64| ((time - look.from) / every).floor().max(0.0) as u64;
     let home = ((follow.at - look.from) / every).round().max(0.0) as u64;
-    let first = if follow.backward {
-        0
-    } else {
-        home.saturating_sub(2)
+    let reader = VideoReader::open_as(source, gpu, Reading::Stream)?;
+    let rate = reader.frame_rate();
+    let mut shots = Shots {
+        tick: f64::from(reader.time_base()),
+        step: rate.map_or(0.04, |r| 1.0 / f64::from(r).max(1.0)),
+        turn: reader.rotation(),
+        reader,
+        from: look.from,
+        every,
+        area: follow.area,
+        seeing: None,
+        wanted: 0,
+        read: None,
     };
-    let mut reader = VideoReader::open_as(source, gpu, Reading::Stream)?;
-    let tick = f64::from(reader.time_base());
-    let step = reader
-        .frame_rate()
-        .map_or(0.04, |r| 1.0 / f64::from(r).max(1.0));
-    reader.seek(((look.from + first as f64 * every) / tick).floor() as i64)?;
-    let turn = reader.rotation();
     let started = Instant::now();
-    let mut seeing: Option<Seeing> = None;
-    let mut before: VecDeque<Seen> = VecDeque::new();
-    let mut tracker: Option<Tracker> = None;
     let mut kept = Kept::new();
-    let (mut last, mut wanted) = (None, first);
-    loop {
-        crate::cancel::stop()?;
-        let Some(decoded) = reader.next_frame()? else {
+    shots.go(home.saturating_sub(SEED))?;
+    let first = loop {
+        match shots.next()? {
+            Some(seen) if seen.last < home => {}
+            seen => break seen,
+        }
+    };
+    let Some(first) = first else {
+        return Ok(laid(&kept, look.from, look.to, every));
+    };
+    let size = first.picture.size;
+    let (w, h) = (size.0 as f64, size.1 as f64);
+    let [cx, cy, bw, bh] = follow.area.map(f64::from);
+    let area = clipped([cx * w, cy * h, bw * w, bh * h], size);
+    let mut tracker = Tracker::start(&model, &first.picture, area);
+    let found = tracker.found(size, 1.0);
+    kept.insert(first.slot, (first.pts, vec![found], first.scene));
+    let length = (look.to - look.from).max(shots.step);
+    while let Some(seen) = shots.next_if(follow.forward)? {
+        if f64::from(seen.scene) >= SCENE_SCORE {
+            kept.insert(seen.slot, (seen.pts, Vec::new(), seen.scene));
+            break;
+        }
+        let Some(score) = tracker.step(&seen.picture)? else {
+            kept.insert(seen.slot, (seen.pts, Vec::new(), 0.0));
             break;
         };
-        let pts = decoded.pts().map(|p| p as f64 * tick);
-        let pts = pts.unwrap_or_else(|| last.map_or(look.from, |p: f64| p + step));
-        last = Some(pts);
-        if pts < look.from + wanted as f64 * every {
-            continue;
-        }
-        let slot = wanted;
-        wanted = slot_of(pts) + 1;
-        let seeing = seeing.get_or_insert_with(|| Seeing::start(&decoded, turn, follow.area));
-        let (picture, scene) = seeing.picture(&decoded)?;
-        let size = picture.size;
-        let seen = Seen {
-            slot,
-            pts,
-            scene,
-            picture,
-        };
-        if let Some(tracker) = tracker.as_mut() {
-            if f64::from(scene) >= SCENE_SCORE {
-                kept.insert(slot, (pts, Vec::new(), scene));
-                break;
-            }
-            let Some(score) = tracker.step(&seen.picture)? else {
-                kept.insert(slot, (pts, Vec::new(), 0.0));
-                break;
-            };
-            kept.insert(slot, (pts, vec![tracker.found(size, score)], scene));
-        } else if slot_of(pts).max(slot) < home {
-            before.push_back(seen);
-            let bytes = size.0 * size.1 * 3;
-            let most = if follow.backward {
-                (KEPT_BYTES / bytes.max(1)).max(1)
-            } else {
-                0
-            };
-            while before.len() > most {
-                before.pop_front();
-            }
-        } else {
-            let (w, h) = (size.0 as f64, size.1 as f64);
-            let [cx, cy, bw, bh] = follow.area.map(f64::from);
-            let area = clipped([cx * w, cy * h, bw * w, bh * h], size);
-            if follow.backward {
-                let mut back = backward(&model, &seen, area, &before)?;
-                kept.append(&mut back);
-            }
-            before.clear();
-            let start = Tracker::start(&model, &seen.picture, area);
-            kept.insert(slot, (pts, vec![start.found(size, 1.0)], scene));
-            if !follow.forward {
-                break;
-            }
-            tracker = Some(start);
-        }
-        let length = (look.to - look.from).max(step);
-        let share = (pts - look.from) / length;
+        let found = tracker.found(size, score);
+        kept.insert(seen.slot, (seen.pts, vec![found], seen.scene));
+        let share = (seen.pts - look.from) / length;
         crate::progress::report(source.path(), Progress::measuring(share, started.elapsed()));
-        if pts >= look.to {
+        if seen.pts >= look.to {
             break;
         }
+    }
+    if follow.backward {
+        let tracker = Tracker::start(&model, &first.picture, area);
+        backward(&mut shots, tracker, &first, &mut kept)?;
     }
     crate::debug!(
         "subjects",
