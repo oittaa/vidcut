@@ -2,7 +2,7 @@
 
 **When:** not decided.
 
-The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are in vidcut ([spec §7.4](../cut-page-spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112), [§7.5](../cut-page-spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). This file lists what is still open.
+The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are in vidcut ([spec §7.4](../spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112), [§7.5](../spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). This file lists what is still open.
 
 **Why:** the Edit page opens a multicam clip as a timeline, and a cut chooses an angle.
 
@@ -51,7 +51,7 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
 - An angle switch replaces the picture and keeps the sound the user chose.
 - The switch is one timeline edit.
 - The CLI, IPC and MCP perform the same action as the GUI.
-- Measure the Source Overwrite cases that [spec §7.2](../cut-page-spec.md#72-edit-functions) lists as not measured.
+- Measure the Source Overwrite cases that [spec §7.2](../spec.md#72-edit-functions) lists as not measured.
   - Several selected pool items: one try placed one file of two, while the source viewer held that file (measured.md, T1).
   - The playhead on a new track with the Timeline viewer on: one try stopped at the clip's end, past the old timeline end (measured.md, T1).
 - Measure how Source Overwrite treats hidden tracks, titles and compound clips.

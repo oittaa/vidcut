@@ -263,7 +263,7 @@ The scaler of macOS (`macos`):
 - It takes pictures up to `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
 - The draw puts each frame into a VideoToolbox frame in the timeline color space, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
-  - The frame is P416, as for Retime Process. Why: Super Scale gets the picture in full color ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+  - The frame is P416, as for Retime Process. Why: Super Scale gets the picture in full color ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
 - The drawn frames come from a few VideoToolbox pools of vidcut's own, one for each size (`Surfaces`).
   - In an SDR timeline, the draw tone-maps an HDR frame. It deinterlaces an interlaced frame.
 - It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
@@ -303,7 +303,7 @@ Each kept picture tells its own process, source frames and position (`Origin`, [
 
 ## Deinterlacing and HDR
 
-The viewer, the exports and the AI stages deinterlace in the draw, after the conversion ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)):
+The viewer, the exports and the AI stages deinterlace in the draw, after the conversion ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)):
 
 - Their readers keep the fields (`VideoReader::keep_fields`). An interlaced frame goes to the draw with the frames before and after it (`Woven`).
 - `fs_convert` converts each of the three frames. It reads the chroma of 4:2:0 in the rows of the same field.
@@ -353,7 +353,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 
 ## The scopes
 
-The Waveform, the Parade and the Vectorscope show the picture that the viewer draws ([spec §4.5](../cut-page-spec.md#45-other-viewer-features)).
+The Waveform, the Parade and the Vectorscope show the picture that the viewer draws ([spec §4.5](../spec.md#45-other-viewer-features)).
 
 What they read:
 

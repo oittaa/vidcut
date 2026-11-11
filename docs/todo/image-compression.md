@@ -2,7 +2,7 @@
 
 **When:** not decided.
 
-**Why:** the Deliver page has these, and vidcut does not ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109), measured in Resolve Studio 21.2):
+**Why:** the Deliver page has these, and vidcut does not ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109), measured in Resolve Studio 21.2):
 
 - OpenEXR: the Compression Level of ZIP and ZIP1, from 0 to 9. The default is 4.
 - OpenEXR: HTJ2K 32 lines and HTJ2K 256 lines.

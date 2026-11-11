@@ -2,7 +2,7 @@
 
 **When:** not decided.
 
-Smart Reframe and Close Up are later Cut page work ([spec §1](../cut-page-spec.md#1-scope), [§7.2](../cut-page-spec.md#72-edit-functions)). vidcut has neither.
+Smart Reframe and Close Up are later Cut page work ([spec §1](../spec.md#1-scope), [§7.2](../spec.md#72-edit-functions)). vidcut has neither.
 
 **Why:**
 

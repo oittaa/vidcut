@@ -225,10 +225,10 @@ The bar and the Jobs button:
   - Why a thread: a stalled network drive can hold a file check for long.
 - It sends `Msg::Missing` when either set changes. The end of a proxy job makes it look again at once.
 - Missing means absent, or a path from another system.
-- The UI marks missing media in the pool and the timeline. It offers Relink Media (`media.relink`), and the viewer shows Media Offline ([spec §3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
+- The UI marks missing media in the pool and the timeline. It offers Relink Media (`media.relink`), and the viewer shows Media Offline ([spec §3](../spec.md#3-media-pool-ch-34-pp-653675)).
 - The pool marks a lost proxy LOST PROXY.
 - While proxies play, a proxy that is lost or back reloads the plans of the viewers. Thus they play the original or the proxy again.
-- `Live::make_proxies` makes a lost proxy again when the automatic rules pick its media ([spec D41](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `Live::make_proxies` makes a lost proxy again when the automatic rules pick its media ([spec D41](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 ## IPC and the registry
 
@@ -296,14 +296,14 @@ The bar and the Jobs button:
 - `Rows::layout` lays out the rows of the lower timeline from the bottom, and shrinks them to fit, down to a minimum.
 - When they still overflow, the wheel (`scroll_rows`) and the scrollbar (`row_scrollbar`) lift them (`TimelineView::rows_lift`, `Rows::overflow`).
 
-**Clip volume** ([spec D77](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
+**Clip volume** ([spec D77](../spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
 
 - `paint::volume_line` draws the volume line of each clip with sound. With volume keyframes, the line is the curve (`geometry::curve_y`), with a mark on each keyframe.
 - `geometry::volume_target` finds the handle, keyframe or line under the pointer (`OnVolume`).
 - The drags are `Gesture::Volume`, `Gesture::Key` and `Gesture::KeyHandle`. They send `keyframes.set` and `keyframes.move`, in one `apply`.
 - `Preview::gains` draws the dragged gains. On release, `Workspace::trim_sent` shows them until the project has them.
 
-**Speed keyframes** ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+**Speed keyframes** ([spec D48](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 - `paint::speed_marks` draws the strip of a clip with speed keyframes (`geometry::speed_strip`): a line at each speed keyframe and the speed of each section.
 - `geometry::speed_labels` places the speeds. The paint, the pointer and the clicks use the same places (`geometry::speed_label_at`).
@@ -359,7 +359,7 @@ The bar and the Jobs button:
 - `viewer.scopes` changes `ViewerPrefs` too, and the snapshot carries `scopes`.
   - `Workspace::scopes_menu` is in the View menu and in the header of the viewer. Each button sends `viewer.scopes`.
   - `Workspace::scope_column` takes a column at the right of the viewer's area. `Workspace::paint_scopes` paints each scope with its marks in egui ([gpu](gpu.md#the-scopes)).
-- `Workspace::picture_controls` boxes the handles through the `place::Placing` of the picture ([spec §8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768)).
+- `Workspace::picture_controls` boxes the handles through the `place::Placing` of the picture ([spec §8.15](../spec.md#815-transform-and-crop-pp-766768)).
   - The handles work about the anchor point (`Shown::pivot`, from `place::anchored`).
   - A move snaps the middle of the picture as drawn, not its `position`.
 - A drag, or a run of wheel notches (`Wheeled`, `Workspace::settle_picture_wheel`), ends in one `picture.set`.
@@ -481,7 +481,7 @@ The bar and the Jobs button:
   - The tray and the tab share one `Editor`. Thus a selection in one shows in the other.
   - `Editor::tray` tells which of the two draws. A box and the ease menu stay in the one where they started.
 
-**Silence stripes** ([spec §9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
+**Silence stripes** ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
 
 - `SilenceDialog` keeps the dry run of Ripple Delete Silence as `Stripe`s, and the user's edits to them (`stripe_press`, `stripe_drag`, `silence_keys`).
 - A changed setting runs the dry run again, and replaces the stripes and their edits.
@@ -545,7 +545,7 @@ The bar and the Jobs button:
 - `Boxing` keeps the start of the box from the top of the content. Thus the start stays on its clip when the wheel scrolls the pool.
 - On release, one `selection.set` carries the new selection (`boxed`).
 
-**The pool's cards** ([spec §3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
+**The pool's cards** ([spec §3](../spec.md#3-media-pool-ch-34-pp-653675)).
 
 - `Workspace::cards` draws the Metadata view. `cluster` gives the heading of each card, and `main_description` gives its first line. `card_row` draws each other line. Each run of one heading is a block of rows, and only the rows in view are drawn.
 - `Workspace::tile_picture` draws the picture of a tile and of a card.
@@ -568,7 +568,7 @@ The bar and the Jobs button:
 - Its changes go as requests, for example `media.leave_out`, `edit.ripple_delete_words` and `media.words.set`. Its cuts on the timeline ask for `quiet` edges.
 - On the timeline, Cut, Copy and Paste send `edit.cut`, `edit.copy` and `edit.paste` with the range of the words. The core keeps the clips that come back as its clipboard.
 
-**Rows that do not fit** ([spec D72](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+**Rows that do not fit** ([spec D72](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 - The bars of the window are each a `Row` that `Workspace::fit_row` lays out.
 - It draws the items once a frame in an invisible sizing pass, to measure them. Why: the font and padding of the theme count, and a label like Jobs (2) counts.
@@ -584,7 +584,7 @@ The bar and the Jobs button:
 
 **The two-up and Multi Source**: `Cells` owns their players on the UI thread. `Screens` draws them.
 
-**Multi Source** ([spec §4.1](../cut-page-spec.md#41-modes)).
+**Multi Source** ([spec §4.1](../spec.md#41-modes)).
 
 - `multicam::source_grid` works out the cameras of the pool's files and closes the gaps between the files.
 - `SourceContent::Multi` loads `render::camera_tape` in the source player. The plan has the active camera's files at their places and black around them. Thus the transport and the sound work as in the other source modes.
@@ -597,7 +597,7 @@ The bar and the Jobs button:
 - `SourceLining::Grid` is the reference rule of Source Overwrite in the grid. Why: it is not the rule of the Media Pool view.
 - `Workspace::multi_view` gives each cell the frame of its file. `Workspace::camera_grid` draws the grid.
 
-**The Sync Bin** ([spec §7.4](../cut-page-spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
+**The Sync Bin** ([spec §7.4](../spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
 
 - `LeftTab::SyncBin` is only a state of the GUI. Live has no Sync Bin mode. Thus the grid runs on `ViewerMode::Timeline`, and the transport and the sound stay the timeline's.
 - `multicam::sync_rows` works out the rows at a time, from the stored rows of a group or by `ruled_rows` on the timecodes. A `SyncRow` holds its files, and `media` and `frame` name the file at that time.
@@ -607,7 +607,7 @@ The bar and the Jobs button:
 - The player stops at the end of its plan. Thus `SyncBin` holds a playhead past the timeline's end for the GUI, and the requests take it as `at`.
 - `Workspace::sync_overwrite` waits for the answer of the edit with `Ask`, because only a done edit returns to the grid.
 
-**The Sync Clips window** ([spec §7.5](../cut-page-spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)).
+**The Sync Clips window** ([spec §7.5](../spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)).
 
 - `SyncClips` holds the rows in the GUI, as `GroupRow` values. Only Save Sync writes to the project, so Cancel has nothing to undo and the history has one entry.
 - Auto Sync sends `multicam.layout` with `Ask`, because a sync by sound can take long and must not hold the window. `SyncClips` keeps `files`, all files at open, so a file that a drag dropped comes back.
@@ -624,7 +624,7 @@ The bar and the Jobs button:
 - The clock of that `Player` is the window's playhead. Live does not know it, so the transport and the timeline's playhead do not move.
 - `nudge_of` finds the action of each key event with `owner`, as the other shortcuts do.
 
-**J and L with K held** ([spec D54](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `Shuttle` tells a tap from a hold by the time between the press and the release of a key. It gives a frame step, slow play or its stop, for the player or for Dynamic Trim.
+**J and L with K held** ([spec D54](../spec.md#12-decisions-on-gaps-and-contradictions)). `Shuttle` tells a tap from a hold by the time between the press and the release of a key. It gives a frame step, slow play or its stop, for the player or for Dynamic Trim.
 
 ## Themes and keys
 
@@ -685,7 +685,7 @@ The Keys page of Preferences:
 
 ## From a key press to a frame
 
-Ctrl+B splits at the playhead ([spec §8.5](../cut-page-spec.md#85-split-pp-646-723-950)):
+Ctrl+B splits at the playhead ([spec §8.5](../spec.md#85-split-pp-646-723-950)):
 
 ```mermaid
 sequenceDiagram

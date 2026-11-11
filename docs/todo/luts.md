@@ -12,7 +12,7 @@ vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../desi
 
 **In the code:**
 
-- `fs_lut` runs the output LUT on the canvas. The display LUT is a separate branch after that ([§13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+- `fs_lut` runs the output LUT on the canvas. The display LUT is a separate branch after that ([§13](../spec.md#13-order-of-operations-pp-287296-3407)).
 - `choose_through_lut` gives the HDR metadata of an export with a LUT.
 - `Lights::analysis` measures the source files only.
 

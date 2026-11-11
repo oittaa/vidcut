@@ -1,6 +1,6 @@
-# Cut page behavioral spec
+# Behavior spec
 
-vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This document describes that behavior in our own words.
+vidcut copies the behavior of DaVinci Resolve by default. This document describes that behavior in our own words.
 
 It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most pages are in its Cut chapters (33–39, pp. 635–790). Pages of other chapters are marked. The printed page numbers are equal to the PDF page numbers.
 
@@ -11,7 +11,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - The developer's copy is in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`).
 - Do not copy its text into the repository.
 
-**Legend:** **(later)** is not built yet, and comes after the work in progress. [todo/cut-page-gaps.md](todo/cut-page-gaps.md) lists the Cut-page behavior that vidcut does not have.
+**Legend:** **(later)** is not built yet, and comes after the work in progress. [todo/gaps.md](todo/gaps.md) lists the Cut-page behavior that vidcut does not have.
 
 ## 1. Scope
 
@@ -214,7 +214,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker, Set Color and Add Marker.
     - Clear Transition from All Edits, Add Dissolve to All Edits, Add Transition to All Edits.
     - The Add Tracks window of Resolve Studio 21.1.2 takes 0 to 99 video tracks and 0 to 999 audio tracks. `track.add` takes the same.
-    - vidcut has these items in this order, except the four in [the gaps](todo/cut-page-gaps.md).
+    - vidcut has these items in this order, except the four in [the gaps](todo/gaps.md).
     - After them, vidcut has Add Title (D66), Add Subtitle (X44), Re-time Subtitles to Speech (§8.12) and Ripple Delete Silence (§9).
   - **Timeline** in the menu bar: Create Subtitles from Audio is under AI Tools (p. 1234).
     - vidcut: the menu also has Keyframes and Audio Scrubbing. The other items of Timeline Actions follow.
@@ -280,7 +280,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Sorted by Clip Color, the clusters are the color names (p. 662). The order is by color and then by timecode.
     - Sorted by Online Status, the clusters are Original and Proxy (p. 662). A clip is in Proxy when it has a proxy that fits its file.
     - A clip with no value for the sort has no heading. In ascending order, these clips come first.
-    - Sorted by Date Imported or Duration, there are no clusters. vidcut keeps no date of import ([todo](todo/cut-page-gaps.md)).
+    - Sorted by Date Imported or Duration, there are no clusters. vidcut keeps no date of import ([todo](todo/gaps.md)).
     - Descending reverses the whole order (p. 663).
     - `pool.set` with `view` `metadata` opens this view.
   - A sound file shows its waveform.
@@ -456,7 +456,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - vidcut draws the waveform of the whole clip across the scroll area, from the bottom edge up.
     - With marks, the waveform is green between In and Out, and gray outside them.
     - Without marks, the waveform is green.
-    - The waveform does not zoom ([gaps](todo/cut-page-gaps.md)).
+    - The waveform does not zoom ([gaps](todo/gaps.md)).
   - Jog In and Jog Out controls at its ends move the marks frame by frame (p. 692).
     - Jog In is at the left of the scroll area. Jog Out is at the right.
     - A drag moves that mark. 8 pixels is one frame (D97).
@@ -550,7 +550,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The timecode is drop-frame where the project counts drop-frame (D47).
   - That default is Auto (D91).
   - A right-click chooses another count (D91).
-  - There is no KeyKode ([gaps](todo/cut-page-gaps.md)).
+  - There is no KeyKode ([gaps](todo/gaps.md)).
 - **Stats for Nerds** (vidcut):
   - The right-click menu of the viewer opens a panel over the picture.
   - The panel has a group for each of these:

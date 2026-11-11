@@ -15,7 +15,7 @@ The Cut page color control is Auto Color ([auto-color.md](auto-color.md)). These
 **In the code:**
 
 - vidcut has no grade ([deviation X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)).
-- The mix is `Wide`, format `Rgba32Float`, in the code values of the timeline ([decision D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- The mix is `Wide`, format `Rgba32Float`, in the code values of the timeline ([decision D50](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `to_linear` and `encode` run inside `fs_convert`. They are not the stored mix.
 - An `Effect` runs on the placed picture, before composite mode and opacity (`fs_blur`).
 - The spec puts a clip grade after those effects and before the speed change (§13).

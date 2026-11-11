@@ -363,12 +363,12 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - The anchor point is from the middle of the picture, in fractions of the picture, y up.
   - Resolve flips about the middle.
   - The middle lands at A − R·S·A, plus the move of Pan and Tilt. A is the anchor, S the zoom and R the turn.
-  - vidcut reads the anchor point as `anchor`, and writes it back ([D92](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - vidcut reads the anchor point as `anchor`, and writes it back ([D92](spec.md#12-decisions-on-gaps-and-contradictions)).
   - vidcut keeps the same fraction of the picture. Thus the anchor point stays on the same point of the source.
   - Resolve scales its picture to P about the middle. Then it zooms about the anchor point. P is the size of Resolve's picture.
   - vidcut does both in its `zoom`, about the anchor point. Thus it adds the difference, A·(P − F), to `position`. F is the fitted size.
   - With fit, P is F, and `position` is Pan and Tilt alone.
-- **Resolve's Pitch and Yaw are a projective divide about the middle of the picture,** `transformationPitch` and `transformationYaw` ([D93](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Resolve's Pitch and Yaw are a projective divide about the middle of the picture,** `transformationPitch` and `transformationYaw` ([D93](spec.md#12-decisions-on-gaps-and-contradictions)).
   - The scripting API and OTIO both use −1.5 to 1.5. Usual: 0. The file leaves 0 out.
   - They lean the picture in its own axes, before the zoom and the turn about the anchor, and before Pan and Tilt. Y grows down.
   - Let `(X, Y)` be the offset of a leaned point from the middle of the picture, divided by half the size of the picture.
@@ -415,7 +415,7 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - The renders had values from 0 to 1. Thus the caps of Color Dodge, Color Burn and Divide are not measured for values above 1.
 - **Resolve's Crop Softness is `cropSoftness` (Double) in Cropping,** from −100 to 100.
   - Its keyframes have the form of the keyframes of the crop sides.
-  - The renders that fix the fade are in [spec D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions).
+  - The renders that fix the fade are in [spec D75](spec.md#12-decisions-on-gaps-and-contradictions).
   - At some whole products, Resolve's fade is one pixel shorter. Softness 5 on a 1920-pixel picture gives 23 pixels, not 24.
   - vidcut rounds down |Softness| × width / 400. Thus it can be one pixel longer than Resolve's fade.
 - **Resolve's Pan and Tilt go from −4 to 4.**

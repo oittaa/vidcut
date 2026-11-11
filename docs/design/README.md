@@ -1,7 +1,7 @@
 # vidcut design
 
 - These pages tell how vidcut is built, from its code. Start here, then follow the links.
-- The [spec](../cut-page-spec.md) and the [deviations](../deviations.md) tell what vidcut does for the user.
+- The [spec](../spec.md) and the [deviations](../deviations.md) tell what vidcut does for the user.
 - vidcut is one binary in three crates. Each action of a user, a script or an agent is a request, and each request ends in the same editor.
 - Media work (decoding, playback, export, measuring) is in its own crate, on the FFmpeg libraries.
 
@@ -56,7 +56,7 @@ flowchart LR
 
 ## Picture order
 
-One output frame takes one route. The [spec](../cut-page-spec.md#13-order-of-operations-pp-287296-3407) gives the order of the picture. [Deviation X98](../deviations.md#x98-in-an-hdr-timeline-ai-slow-works-before-the-conversion) is where vidcut differs.
+One output frame takes one route. The [spec](../spec.md#13-order-of-operations-pp-287296-3407) gives the order of the picture. [Deviation X98](../deviations.md#x98-in-an-hdr-timeline-ai-slow-works-before-the-conversion) is where vidcut differs.
 
 ```mermaid
 flowchart TD
@@ -143,7 +143,7 @@ vidcut has none of the other stages of the spec:
 
 ### LUT files
 
-The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut reads a `.cube` file with `cube::read` and draws it on the GPU.
+The [spec](../spec.md#the-lut-tables) gives the math of a table. vidcut reads a `.cube` file with `cube::read` and draws it on the GPU.
 
 - A media item holds its `input_lut`, and the project settings hold the `output_lut`. The project file stores each path as it stores a media path ([model](model.md)).
 - Each clip of a media item gets its `input_lut` in the render plan (`VideoPiece::Source`).
@@ -164,7 +164,7 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
 - A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.
 - `fs_lut` works on colors that are not premultiplied. It leaves a pixel with no alpha as it is.
 - The canvas of a frame with no alpha starts as opaque black. Thus the output LUT also changes a gap, and the part of a clip that its alpha lets through.
-- The input LUT follows the Alpha Mode of the clip's media ([spec §13](../cut-page-spec.md#the-lut-tables)). A LUT does not change alpha.
+- The input LUT follows the Alpha Mode of the clip's media ([spec §13](../spec.md#the-lut-tables)). A LUT does not change alpha.
   - In Premultiplied, `fs_convert_lut` takes the alpha out of the color, looks up the color, and multiplies by the alpha again. It gives 0 where the alpha is 0.
   - In the other modes, it looks up the color as it is, before the alpha. Straight and Invert then multiply by their alpha when the picture is placed.
   - Before an AI upscaler, `Source::push` reads a Premultiplied picture in the same way (`PictureId`).

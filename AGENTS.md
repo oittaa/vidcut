@@ -6,12 +6,12 @@ vidcut is a video editor in Rust. It aims to be the best open source video edito
 
 ## Ground rules
 
-1. **Resolve is the model.** By default, vidcut does what DaVinci Resolve does. Any page of Resolve that has a feature is its model, not only the Cut page. [docs/cut-page-spec.md](docs/cut-page-spec.md) records the behavior, with the manual's page numbers.
+1. **Resolve is the model.** By default, vidcut does what DaVinci Resolve does. Any page of Resolve that has a feature is its model, not only the Cut page. [docs/spec.md](docs/spec.md) records the behavior, with the manual's page numbers.
    - Do a different thing only when Resolve has a bug, or when a more modern way is clearly better. Example: Smooth Cut has better defaults and gives a cleaner result.
    - A feature that Resolve does not have is an extra, not a deviation.
    - OTIO files go between vidcut and Resolve with as little loss as possible.
-   - The same applies to the order in which a picture is processed: [spec §13](docs/cut-page-spec.md#13-order-of-operations-pp-287296-3407).
-   - The picture path is a pipeline ([spec §13](docs/cut-page-spec.md#13-order-of-operations-pp-287296-3407), Chapter 144 of the manual). Each stage takes the output of the stage before it.
+   - The same applies to the order in which a picture is processed: [spec §13](docs/spec.md#13-order-of-operations-pp-287296-3407).
+   - The picture path is a pipeline ([spec §13](docs/spec.md#13-order-of-operations-pp-287296-3407), Chapter 144 of the manual). Each stage takes the output of the stage before it.
    - A stage does not branch on the kind of its input: compound or plain, placed or whole, with a composite mode or without.
    - A difference from a measurement shows a fault in a stage. Fix that stage. Do not add a case for the input that failed.
    - Only the owner adds a deviation. Ask first. Tell the owner what Resolve does and what a match costs.
@@ -107,7 +107,7 @@ The design docs name the things that a reader searches for: types, modules, requ
 
 - [README.md](README.md): what vidcut does, the requirements, the build.
 - [docs/cli.md](docs/cli.md): the CLI guide (times, JSON output, exit codes, scripts, running GUIs). `vidcut --help` gives each command and flag.
-- [docs/cut-page-spec.md](docs/cut-page-spec.md): the behavior spec. [docs/deviations.md](docs/deviations.md): where vidcut is different.
+- [docs/spec.md](docs/spec.md): the behavior spec. [docs/deviations.md](docs/deviations.md): where vidcut is different.
 - [docs/design/](docs/design/README.md): how vidcut is built, with charts. Start there.
 - [docs/tools.md](docs/tools.md): debug and test tools. [docs/gotchas.md](docs/gotchas.md): FFmpeg, driver and library behavior that vidcut works around.
 - [docs/roadmap.md](docs/roadmap.md): what comes next. [docs/todo/](docs/todo/): open work, one file for each item.

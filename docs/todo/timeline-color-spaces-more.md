@@ -2,7 +2,7 @@
 
 **When:** not decided.
 
-The timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) has SDR (BT.709), HDR PQ and HDR HLG. Exports write only these colors.
+The timeline color space ([spec D50](../spec.md#12-decisions-on-gaps-and-contradictions)) has SDR (BT.709), HDR PQ and HDR HLG. Exports write only these colors.
 
 ## What Resolve has
 

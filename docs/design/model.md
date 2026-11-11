@@ -137,14 +137,14 @@ classDiagram
 - `MediaInfo` keeps what the probe found: streams, duration, start timecode.
 - One project is one timeline ([deviation X2](../deviations.md#x2-one-timeline-per-project-file)).
 
-Volume keyframes ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+Volume keyframes ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)):
 
 - `ClipAudio::gain_keys` holds the volume keyframes of a clip, in order, on whole source frames. On a clip with a speed, they are on its retimed source.
 - With keyframes, the volume is their curve (`keyframes::value_at`), and `gain_db` is not heard.
 - `keyframes::reshape` makes each change. It keeps the order, one keyframe on a frame, and the ease of each keyframe.
 - `ops::keyframes` holds the requests. `ops::change_speed` moves the keyframes with `keyframes::retimed`.
 
-Speeds ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+Speeds ([spec D48](../spec.md#12-decisions-on-gaps-and-contradictions)):
 
 - `Speed` holds the `sections` of a clip's speed, and `skip`.
 - A `Section` starts at a frame of the clip's retimed source (`at`), at a source position (`from`). It has one `speed`.
@@ -172,7 +172,7 @@ Speeds ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
   - A freeze section gets a keyframe at each end with the same value (`Picture::hold_keys`).
   - A stretch with no motion keeps the value of its frame.
 
-Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+Stills ([D38](../spec.md#12-decisions-on-gaps-and-contradictions)):
 
 - A file is a still when an image demuxer reads it (`image2`, the `_pipe` demuxers).
 - A GIF or animated WebP (`gif`, `webp_anim`) of one frame is also a still.
@@ -276,13 +276,13 @@ Ranges and resolution:
 - A `RangeSpec` is half-open: "A..B" or "A..+D".
 - The editor resolves times with a `TimeContext` from the project:
   - "15s" is the nearest frame (`Rational::secs_to_frames`).
-  - Timecode counts from `start_tc` ([spec §4.3](../cut-page-spec.md#43-timecode-pp-640-688-713714)).
+  - Timecode counts from `start_tc` ([spec §4.3](../spec.md#43-timecode-pp-640-688-713714)).
   - The playhead keyword resolves only when the caller gives a frame. The live core gives the frame of the timeline. Thus a command that the GUI runs can use the playhead, and a headless command cannot.
 - A clip reference is an id, or "V1@15s": the clip under that frame on V1 (`resolve_clip`).
 
 ## Source Overwrite
 
-`ops::source_overwrite` holds `edit.source_overwrite`. The behavior is in [spec §7.2](../cut-page-spec.md#72-edit-functions).
+`ops::source_overwrite` holds `edit.source_overwrite`. The behavior is in [spec §7.2](../spec.md#72-edit-functions).
 
 - `origin` turns `MediaInfo.timecode` into project frames with `StartTimecode::frames_at`. A file with no tag counts as 0.
 - A generator as the source has `origin` 0 and the length of `ops::titles::default_length`.
@@ -359,25 +359,25 @@ Relinking:
 - `Project::subtitles` holds the subtitle tracks. S1 is nearest the video. One track is `shown` at a time.
 - A `Cue` spans whole frames, as a clip does. The cues of a track are sorted by start, and can overlap.
 - Its `text` is lines, with `<i>`, `<b>`, `<u>` and `<font color>` around words. `Place` tells where on the picture it goes.
-- `speaker` is the person who says it. `color` is its own color, over the color of the person (`Speakers::color_of`, [spec §8.12](../cut-page-spec.md#812-subtitles-pp-645646-702-12271248)).
+- `speaker` is the person who says it. `color` is its own color, over the color of the person (`Speakers::color_of`, [spec §8.12](../spec.md#812-subtitles-pp-645646-702-12271248)).
 - `picture` is a `Picture` for a picture as large as the frame.
   - Its keyframes count frames from the start of the cue. Thus `Cue::as_clip` makes a `Clip` with `source_in` 0, and the keyframe code uses that clip for the time.
   - `Project::key_holder` finds a clip or a cue by id for the `keyframes.*` requests.
   - `Cue::move_keys` keeps keyframes on their timeline frames when the start of the cue changes. A timeline edit moves them with the frames of each part (`remap`).
 - `words` holds a `CueWord` for each word of the text, in order. The cue leaves `words` out when no word has a start frame or a style.
-  - The `at` of a word is its start frame, from the start of the cue ([spec D70](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The `at` of a word is its start frame, from the start of the cue ([spec D70](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - Styles nest: the track style, then the `style` of a cue, then the `style` of a word. `SubtitleStyle::for_cue` merges each over the one under it. A field left out keeps the style under it.
 - The `SubtitleStyle` of a track holds:
-  - its font, size, color, outline, background and margin ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
+  - its font, size, color, outline, background and margin ([spec D61](../spec.md#12-decisions-on-gaps-and-contradictions))
   - its bold face, letter case and shadow
-  - `SubtitleWords`: how its words show as they are spoken ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
+  - `SubtitleWords`: how its words show as they are spoken ([spec D69](../spec.md#12-decisions-on-gaps-and-contradictions))
   - `SpeakerPaint`: what the color of a cue paints (`SubtitleStyle::paints`)
   - `SubtitleAlign`: `left`, `center` or `right`. It lines up the lines with the longest line. Left out, the lines are centered.
   - `position`: `[x, y]` as fractions of the picture from the top left. It is the point that `anchor` names, else the middle of the longest line. Left out, the block stays in the place of the cue.
   - `anchor`: a `TitleAnchor`, the point of the block that goes to the position. `SubtitleStyle::anchor` gives the point down, and `SubtitleStyle::anchor_across` the point across.
 - `ops::subtitles` holds the edits. `editor::resolve_cue` reads a cue reference: its id, or a track and a time (S1@15s).
 
-**Cues follow Track 1** ([spec D57](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+**Cues follow Track 1** ([spec D57](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 - `follow::follow` moves the clips of the other tracks after an edit on Track 1. It also calls `ops::subtitles::remap` with its frame mapping. `ops::delete_range` calls `remap` with the mapping of its range.
 - `remap` maps each frame of a cue. A frame survives when it has a place, and the next frame does not land on the same place.
@@ -413,16 +413,16 @@ Placing:
 
 Writing:
 
-- `ops::subtitles::collect` gives the cues of a track in a range, in seconds: from zero, or in timecode. `subtitles::origin` gives the frames of the start timecode ([spec D58](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `ops::subtitles::collect` gives the cues of a track in a range, in seconds: from zero, or in timecode. `subtitles::origin` gives the frames of the start timecode ([spec D58](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `subtitles::write` writes the cues as SRT, WebVTT or IMSC1.
   - WebVTT writes colors other than its eight named colors as STYLE classes.
-  - The IMSC1 file carries the `SubtitleStyle` of the track, and regions sized from its cues ([spec D64](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). What does not fit goes in `Written::warnings`.
+  - The IMSC1 file carries the `SubtitleStyle` of the track, and regions sized from its cues ([spec D64](../spec.md#12-decisions-on-gaps-and-contradictions)). What does not fit goes in `Written::warnings`.
 - `subtitles.export` writes the file through a partial file beside it (`Env::write_file`).
 - `subtitles::beside` makes the files that an export writes beside its output ([export](export.md#subtitles)).
 
 ## Titles
 
-- A clip with a `title` is a title ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)): no media, no audio, no speed, any length, on a video track.
+- A clip with a `title` is a title ([spec §8.14](../spec.md#814-titles-pp-762764-11761178)): no media, no audio, no speed, any length, on a video track.
 - `Clip::is_generator` and `Clip::is_block` count it. Thus edits treat it as a generator.
 - Its `Title` holds:
   - a `TitleKind`: `text`, `lower_third` or `scroll`
@@ -430,7 +430,7 @@ Writing:
   - an optional `TitleAnchor`. Without one, the block takes the usual anchor of its kind, alignment and part (`Title::usual_anchor`). `Title::anchor_of` gives the anchor in force.
   - its lines, with markup that `rich::spans` reads into `Span`s
   - a `TitleStyle`
-  - an optional `position`: the point that its anchor goes to (`Title::place`, [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
+  - an optional `position`: the point that its anchor goes to (`Title::place`, [spec D65](../spec.md#12-decisions-on-gaps-and-contradictions))
   - `position_keys` with `position_y`, `zoom_keys`, `rotation_keys` and `opacity_keys`: `Keyframe`s on source frames, beside the plain values
   - `position_handles`: the `PositionHandles` of the position keys that have any, each with the frame of its key
 - `Title::takes_keys` tells which values take keyframes. A scroll has no zoom or rotation.
@@ -459,7 +459,7 @@ Writing:
 
 ## Generators
 
-- A clip with a `generator` makes its own picture ([spec §8.17](../cut-page-spec.md#817-generators-p-766)): no media, no audio, no speed, no effects, any length, on a video track.
+- A clip with a `generator` makes its own picture ([spec §8.17](../spec.md#817-generators-p-766)): no media, no audio, no speed, no effects, any length, on a video track.
 - `Clip::is_generator` and `Clip::is_block` count it.
 - A left trim of a generator changes `source_in`, as on any clip. Its keyframes stay on their source frames.
   - Thus they stay on the same timeline frames, and the picture does not move.
@@ -488,7 +488,7 @@ Writing:
 
 ## Pictures
 
-- A clip of footage, a still, an image sequence, a compound clip or a generator that draws can carry a `Picture` ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+- A clip of footage, a still, an image sequence, a compound clip or a generator that draws can carry a `Picture` ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)):
   - `position`: where the middle of the whole picture goes, before the zoom and the rotation
   - its `zoom` across and down, and its `rotation`
   - its `anchor`: the point that the zoom and the turn work about (`Picture::pivot`)
@@ -506,7 +506,7 @@ Writing:
 - `ops::picture` holds the edits:
   - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share.
   - `ops::picture::has_picture` tells which clips take a picture: not titles, sound or generators that do not draw.
-  - `ops::picture::takes_effects` tells which of them take effects: not generators ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - `ops::picture::takes_effects` tells which of them take effects: not generators ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
   - `ops::picture::clear` puts back one `PictureTool`, or all of them. `ops::picture::cleared` is the reset of one `PictureTool`, which the Inspector also uses.
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
   - `ops::picture::effect_checked` checks an effect. It is part of `ops::picture::checked`.
@@ -538,7 +538,7 @@ Writing:
 - `place::Placing` turns the picture of a clip, with the pictures of the compound clips around it, into maps.
   - Each `place::Level` maps a pixel of the frame back to a picture, with the part shown, its soft edges and its opacity.
   - Each map zooms and turns the picture about its anchor point. `place::anchored` gives the pixel where the anchor point lands.
-  - Pitch and yaw lean the picture about its middle, in its own axes, before the zoom and the turn ([spec D93](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Thus `Level.back` is a projective map. Without a lean, it is affine.
+  - Pitch and yaw lean the picture about its middle, in its own axes, before the zoom and the turn ([spec D93](../spec.md#12-decisions-on-gaps-and-contradictions)). Thus `Level.back` is a projective map. Without a lean, it is affine.
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
 - The shader of the viewer and the export holds the sums of the composite modes (D75, `mixed` in `picture.wgsl`).
 
@@ -587,7 +587,7 @@ Writing:
 
 ## Ducking
 
-- A track can carry a `Duck` ([spec D76](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It holds `on`, its `sources` by track id, the Duck Amount, the four times, `detect` (`DuckDetect`) and `threshold_db`.
+- A track can carry a `Duck` ([spec D76](../spec.md#12-decisions-on-gaps-and-contradictions)). It holds `on`, its `sources` by track id, the Duck Amount, the four times, `detect` (`DuckDetect`) and `threshold_db`.
 - Each value is left out at its usual value. `on` is written only when it is off.
 - `track.set` takes a `DuckSet`. Its fields replace their own (`duck::patched`). A new `Duck` takes `duck::default_sources`.
 - `duck::checked` is the check that `track.set`, `validate::violations` and the import of an OTIO file share.
@@ -597,7 +597,7 @@ Writing:
 
 ## Looks
 
-- Looks are named styles ([spec D71](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). They are not in the project.
+- Looks are named styles ([spec D71](../spec.md#12-decisions-on-gaps-and-contradictions)). They are not in the project.
 - `looks::Styled` is a `SubtitleLook` (a `SubtitleStyle` with `chars` and `lines`) or a `TitleLook` (a `Title` without its text: `TitleLook::of`, `TitleLook::on`).
 - `looks::checked` runs each look through the check of its kind (`checked_style`, `ops::titles::checked`).
 - `looks::built_in` holds the built-in looks. The user's looks are TOML files under `looks::dir`, one folder for each `LookKind`.
@@ -622,7 +622,7 @@ flowchart LR
 - `export.start` to an `.otio`, `.otioz` or `.otiod` path writes the timeline, or the range given. `otio::export` builds the document, and `export::timeline` writes it.
 - A file that vidcut wrote of a whole timeline holds the rest of the project too (`otio::holds_project`). `editor::open_otio` gives it back.
 - The file of another editor goes into the project (`timeline.import`), or into a new project (`editor::project_from_otio`).
-- [deviation X9](../deviations.md#x9-opentimelineio-interchange) tells why. [spec D40](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions) has the conventions.
+- [deviation X9](../deviations.md#x9-opentimelineio-interchange) tells why. [spec D40](../spec.md#12-decisions-on-gaps-and-contradictions) has the conventions.
 
 **Bundles** (`bundle::plan`):
 
@@ -643,8 +643,8 @@ flowchart LR
 | clip | `Clip.2`, its source range from the media's start timecode |
 | media | `ExternalReference` by plain path, relative in a bundle; a still one frame long, its clips from source 0; an image sequence an `ImageSequenceReference` at its rate |
 | Clip Color | the item's `color` |
-| title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
-| generator | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../cut-page-spec.md#817-generators-p-766)) |
+| title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../spec.md#12-decisions-on-gaps-and-contradictions)) |
+| generator | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../spec.md#817-generators-p-766)) |
 | clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. Clips with the same kept link, start and length stay in one link group (`no_media_ties`). A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
 | markers | the top-level stack's, with their lengths |
 
@@ -673,10 +673,10 @@ Import:
 - Video tracks become V1, V2, …. An audio clip that lines up with a video clip of the same media (and link group) becomes its sound. Other audio clips go on A1, A2, ….
 - Names other than the defaults (`default_track_name`) name tracks. Markers on clips, tracks and the stack become timeline markers.
 - Nested tracks, unknown items, clips with no reference and clips that overlap are left out, with a warning.
-- A multicam `Stack`, and a `MissingReference` with no `Media Url`, become a clip with no media on their track (`plain_reference`, [spec D40](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- A multicam `Stack`, and a `MissingReference` with no `Media Url`, become a clip with no media on their track (`plain_reference`, [spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - A clip and its sound keep only the frames inside their media, at the clip's speed and direction. A warning tells how many frames went.
 - `otio::tied` finds the other parts of a clip with no media or of a compound clip. It uses the rules of `no_media_tie` and `compound_links`. The model holds no link field, because the parts of a block are separate clips only while they have one place.
-- `ops::linked` makes an edit act on each part ([spec D40](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+- `ops::linked` makes an edit act on each part ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)):
   - `linked::parts` selects one part as the lead: the part on V1, else the part that the request names.
   - `linked::take` removes the other parts before the edit, so `follow::follow` does not move them.
   - `linked::put` writes them back at the place of the lead.
@@ -707,7 +707,7 @@ Modes:
 
 - `ImportMode` is `append`, `replace`, `compound` (`otio::as_compound`) or `media`. `flatten` decomposes compound clips.
 - An empty timeline takes the rate, start timecode and track settings of the file.
-- `replace` and `project_from_otio` take a file with tracks and no clips, and make its tracks ([spec D40](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). The other modes refuse it.
+- `replace` and `project_from_otio` take a file with tracks and no clips, and make its tracks ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)). The other modes refuse it.
 - A file that vidcut wrote brings its pool items (`join_pool`) into a bin named after it, with new ids, without proxies.
 
 Kept data:
@@ -718,11 +718,11 @@ Kept data:
 |---|---|
 | clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`. Keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`), and fades stay at the clip's ends through splits; the clip volume's level is the gain |
 | the `Key Frames` of the clip volume (`effects::gain_keys`) | `ClipAudio::gain_keys`, taken out of the kept effect (`effects::drop_gain_keys`) |
-| `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
+| `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). A `Generator` when it is a kind that vidcut draws (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
 | multicam `Stack`, or a `MissingReference` with no `Media Url` | `Generator::Carried` with a `MissingReference`: a block with no media that plays as a gap (`Clip::is_offline`). Its `channels` and `link` stay in the reference (`keep_ties`). On an audio track, `Clip::is_sound_block` is true |
-| `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
+| `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `TimeEffect` with `Key Frames` | `Speed`, a section for each key (`ramp`). It is written back while the sections stay, else made again (`ramp_effect`) |
 
 Which kept transitions play (`otio::transitions`):

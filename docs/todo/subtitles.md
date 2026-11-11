@@ -2,7 +2,7 @@
 
 **When:** next.
 
-Open for subtitles ([spec §8.12](../cut-page-spec.md#812-subtitles-pp-645646-702-12271248)):
+Open for subtitles ([spec §8.12](../spec.md#812-subtitles-pp-645646-702-12271248)):
 
 - **Nemotron 3 Diarization** in Sortformer's place, when transcribe.cpp releases it ([#175](https://github.com/handy-computer/transcribe.cpp/pull/175)).
   - It is the same kind of model as Sortformer, for every language.

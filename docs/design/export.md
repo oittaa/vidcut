@@ -41,7 +41,7 @@ flowchart TD
   - The presets are `builtin_presets` and the user's TOML files (`export::presets`).
   - A preset's name is any text that is not empty. The file holds the name.
   - The file name is the preset's name when that name is short, lowercase ASCII and safe on each system (`user_preset_path`). Otherwise it is a digest of the name. Why: two names that differ only in case stay two files.
-- **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
+- **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
   - `render::flatten` works in stages. `planned_video` makes the pictures and `planned_audio` makes the sound.
   - `cuts_of` finds the frames where the picture changes. A `render::Span` is one track between two cuts. It gives the layers of that track and what they hide (`Drawn`).
@@ -130,7 +130,7 @@ The plan:
   - Each frame needs it. Thus a black or generated frame takes the metadata of the frame before it.
   - Black or generated frames at the start have no frame before them. Then the export has no Dolby Vision.
 
-**Export Alpha** ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
+**Export Alpha** ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
 
 - `VideoSettings::holds_alpha` tells which settings have alpha. `validate` refuses `video.alpha` for the others.
 - With it off, the canvas starts black, and each frame is opaque. Thus the file has no alpha channel. The pixel formats are:
@@ -148,7 +148,7 @@ The plan:
   - `VideoSettings::alpha_modes` gives the modes of a format. OpenEXR takes only `AlphaOut::Premultiplied`, and `validate` refuses Straight with it.
 - A composite mode over a part with alpha (`mode_mixed`) mixes with the color below as far as that part shows. Over nothing, the color stays as it is.
 
-**Image sequences** ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
+**Image sequences** ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
 
 - `Container::image_sequence` is true for TIFF and OpenEXR.
 - A packet of FFmpeg's `tiff` encoder is one whole file.
@@ -165,7 +165,7 @@ The plan:
 - For a Premultiplied TIFF, `FrameFiles` changes the ExtraSamples tag of each file to associated alpha ([gotchas](../gotchas.md#ffmpeg-encoding-and-muxing)).
 - `openexr::Writer` puts the timecode of the frame on the timeline and the frame rate (`frames_per_second`) in the header of each OpenEXR.
   - `packed_timecode` packs the timecode, as two digits for each field.
-  - The frame digits count at most 30 numbers in each second. Above 30 fps, 2, 3 or 4 frames in a row share one number. Why: Resolve writes this ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
+  - The frame digits count at most 30 numbers in each second. Above 30 fps, 2, 3 or 4 frames in a row share one number. Why: Resolve writes this ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
   - Bit 15 marks the second frame only where 2 frames share a number.
 - The muxer is `null`. Why: FFmpeg's image muxer takes a pattern, and a percent sign in a folder name would break the pattern.
 - `ExportSettings::frame_file` makes each name. `ExportSettings::numbering` makes the `Numbering` of an output: the first number, and the frame on the timeline for the timecode.
@@ -183,7 +183,7 @@ Sources:
   - `Generated::at` gives the `generators::Pattern` of a frame. A gradient with keyframes gives a new pattern on each frame.
   - A Solid Color in an SDR timeline is RGB24.
   - Each other frame is RGBAF32LE, in 32-bit floats with an alpha of 1. It holds the code values from `generators::draw`, with the tag of the timeline colors (`screen::held::tag`).
-  - Why: Resolve draws its generators in 32-bit floats ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
+  - Why: Resolve draws its generators in 32-bit floats ([spec §8.17](../spec.md#817-generators-p-766)).
   - The screen takes the frame as one `Rgba32Float` texture (`Layout::Rgbaf32`). Thus the shader reads it as RGB, with no unpack pass.
   - `VideoFrames` keeps the last patterns. Why: two generators under a dissolve need two frames.
 
@@ -232,7 +232,7 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - Two enlarged pictures of a pair mix with no alpha in them ([todo](../todo/super-scale.md)). Where the alpha changes between the two frames, the edge is then darker or brighter than the pair with no upscaler.
 - With the frame rate conversion of macOS, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
   - The draw puts both frames into P416 VideoToolbox frames in the timeline color space first (`Source::frame_of`). They are sized and placed as the RGB pair is.
-- The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+- The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
   - A clip with no placed picture: each frame becomes RGB on the GPU, upright. The size of the RGB is the size that it fills in the frame, rounded up to even (`fitted_size`).
     - The picture has its exact fit in that RGB (`Look::fitted`). Thus the part of a pixel at its edge is in the RGB, and the RGB goes into the frame at a whole pixel.
   - A placed clip: the draw places each frame into RGB with its Transform, Crop and Dynamic Zoom (`Sampling::Colors`). The RGB covers only the bounds of the placed picture (`placed_look`).
@@ -276,7 +276,7 @@ Pictures:
 
 ## Smooth Cuts
 
-A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173), [deviation X99](../deviations.md#x99-smooth-cut-has-a-process-row-in-the-place-of-speed-warp)).
+A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11](../spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173), [deviation X99](../deviations.md#x99-smooth-cut-has-a-process-row-in-the-place-of-speed-warp)).
 
 - `render::flatten` puts the incoming side over the outgoing side. Its `Over` holds a `render::Smooth`: the `Retime` of the Process and the keys of the curve.
 - Each side takes Nearest. With Faster, each side stays on one source frame (`Pace::of` at the speed 0).
@@ -284,7 +284,7 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - A side with a placed picture or played backward is one side as a compound clip is (`VideoPiece::Flat`). A gap is a flat side of black, and it is clear over the layers below.
 - In a frozen compound clip, a flat side holds one frame of its track (`Span::flat`).
 - A composite mode alone does not make a placed picture here (`without_mode`). `Smooth::mode` holds the mode of the outgoing clip.
-- A side is a file, a generator's picture or a compound clip (`Side`). Why: a Solid Color acts as a still in a Smooth Cut ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
+- A side is a file, a generator's picture or a compound clip (`Side`). Why: a Solid Color acts as a still in a Smooth Cut ([spec §8.11](../spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
 - A compound clip is one side (`VideoPiece::Flat`). `flat_pieces` makes the plan of that clip alone, and its inner tracks draw nothing in those frames.
 - `FlatSide` draws these pieces with a `VideoFrames` of its own, into a float frame of the timeline size. Thus its tracks, transitions and titles take the usual path.
 - `FlatSide` keeps the alpha of the side, premultiplied. `VideoFrames::smooth_frame` mixes the alpha of the two sides at `Smooth::at` (`interpolate::matte_between`). A side that is a file or a generator is opaque.
@@ -303,11 +303,11 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 
 ## Timeline colors
 
-Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+Each mix occurs in the timeline color space ([spec D50](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 - `Screen::for_export` draws each frame into `Wide`: 32-bit floats in the code values of the timeline (`VideoFrames::with_timeline`).
   - Each layer, title and subtitle goes there as in the viewer.
-  - Why: a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Why: a color above 1 or below 0 stays between the layers ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `fs_lut` then runs the output LUT on `Wide` (`VideoFrames::with_output_lut`, [the LUT files](README.md#lut-files)). A black piece of the plan goes through it too. The render cache holds no output LUT.
 - Then `fs_encode` writes each plane of the encoder's pixel format from `Wide` (`Screen::encoded`).
   - It converts the timeline colors to the colors of the output. An SDR output is BT.709 and an HDR output is BT.2020.
@@ -336,15 +336,15 @@ To the encoder:
 - When a hand-off to the encoder fails, the frames go through memory to the end of the export. The report tells why (`through_memory`).
 - Why: a frame stays in GPU memory from the decoder to the encoder where this is possible (AGENTS.md rule 9).
 
-The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
+The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
 
 - `VideoSettings::written_size` gives the size that the encoder gets. H.264 and HEVC round an odd side up. DNxHR rounds an odd width up, but DNxHR 444 keeps it. The other codecs keep the side.
 - `VideoSettings::drawn_size` gives the size of the draw: the written size with a `video.width` and `video.height`, or else the size of the timeline.
-  - Why: a custom size fits the picture into the file's size with one draw ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
+  - Why: a custom size fits the picture into the file's size with one draw ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - `export::validate` refuses a `video.width` or `video.height` outside `TIMELINE_SIDE`.
 - With a rounded side of the timeline, the draw stays at the size of the timeline (`VideoFrames::written_at`, `Screen::write_at`).
 - `Screen::encoded` then draws that `Wide` as one picture into a second `Wide` at the written size (`scale_whole`). `fs_encode` reads the second `Wide`.
-  - Why: the fit of a layer is at the size of the timeline ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)). A draw at the written size gives another factor and other bars.
+  - Why: the fit of a layer is at the size of the timeline ([spec §13](../spec.md#the-fit-to-the-timeline)). A draw at the written size gives another factor and other bars.
   - `Level::centered` gives one factor for both axes and centers the picture. It takes the smaller factor, so that the whole picture fits.
   - 1281 x 720 into 1282 x 720 has the factor 1. Thus the picture moves by half a pixel and has half a pixel of black at each side.
   - The draw is the shader of the layers (`fs`), with the export's kernel for a change of size (`RESIZE`, `WIDENS`). Colors outside 0 to 1 stay between the two `Wide` pictures.
@@ -358,7 +358,7 @@ The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-7
 - `AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, and clips at other speeds, stretched with their pitch kept.
 - A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` holds only the fader of the track.
   - `AudioMix` multiplies each sample by `Keyed::gain` at the place of the sample on the keyframes' frames (`Keyed::at`).
-  - Thus the player and the export play the same curve ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Thus the player and the export play the same curve ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `Resampler::new` converts each source to the layout of the mix. The export and the player get this conversion through `AudioMix`.
   - A source of one channel goes to each side of a mix of two channels at its full level (`swr_set_matrix`).
 - A piece has the Pan of its clip (`pan` of an `AudioPiece`). `render::pan_gains` gives the gain of each side.
@@ -387,7 +387,7 @@ The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-7
   - Thus a speed keyframe makes no de-click dip, and the pitch stays.
 - With `audio.loudness`, `analysis::mix_loudness` first measures the mix with its ducking. `loudness_gain` gives one gain (`AudioMix::set_gain_db`) that reaches the target, with the true peak under a ceiling.
 
-Ducking ([spec D76](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+Ducking ([spec D76](../spec.md#12-decisions-on-gaps-and-contradictions)):
 
 - `render::flatten_lanes` adds a `Ducking` to the plan for each ducked track with lanes (`duck::planned`).
 - A `Ducking` names the lanes of its track, its `Dip`, and a `DuckSource` for each source clip near the range.
@@ -446,10 +446,10 @@ Cancel:
 
 - The files are SRT, unless `subtitle_format` tells otherwise. Without `subtitles`, a timeline export writes each track that has cues.
 - `subtitles::beside` names each file after the output, with the language of the track. With several tracks, a track without a language adds its name.
-- Beside media, the cues start from zero (`export::subtitles_beside`). Beside a timeline file, they keep the timecode of the timeline ([spec D58](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- Beside media, the cues start from zero (`export::subtitles_beside`). Beside a timeline file, they keep the timecode of the timeline ([spec D58](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - An existing file stops the export before it starts, unless `overwrite` is set (`export::refuse_existing`).
 - `export::write_subtitles` writes the files through partial paths after the output is done.
-- An IMSC1 file warns of cues with more lines than their region holds ([spec D64](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). The warnings go in the notes (`export::subtitle_notes`).
+- An IMSC1 file warns of cues with more lines than their region holds ([spec D64](../spec.md#12-decisions-on-gaps-and-contradictions)). The warnings go in the notes (`export::subtitle_notes`).
 
 **Streams.**
 
@@ -460,11 +460,11 @@ Cancel:
 - The place of a cue goes to SubRip as a tag (`subtitles::ass_tag`), and to WebVTT as a `line` setting. mov_text has no place.
 - The alignment of the lines does not go into a stream. Why: the SubRip tag moves the block with its lines, and WebVTT centers the block on its position.
 
-**Burning in** ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+**Burning in** ([spec D61](../spec.md#12-decisions-on-gaps-and-contradictions)).
 
 - `VideoFrames::with_burn` draws the cues over each picture that they span, in both runs of a two-pass encode.
 - `SubtitleStyle::for_cue` gives a cue its style, and a word its style on top of that. A field that a style leaves out keeps the style of the level above.
-- `subtitles::shown` gives what each cue draws at the frame ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It gives the pieces, the spoken word in its color, the words not yet spoken, and the size of a pop.
+- `subtitles::shown` gives what each cue draws at the frame ([spec D69](../spec.md#12-decisions-on-gaps-and-contradictions)). It gives the pieces, the spoken word in its color, the words not yet spoken, and the size of a pop.
 - `burn::draw` lays out the cues with cosmic-text: shaping, right-to-left text, and system fonts for the scripts that the first font does not have.
 - `burn::paint` draws one picture for each run of cues that share a place and a style. A popping word is a picture of its own over it.
 - `SubtitleStyle::block_box` places the block. The point of the longest line that `anchor` names goes to the `position`, else to the middle of the picture. Without an anchor, it is the middle. The width comes from the `widest` field of `Laid`. The alignment moves only the shorter lines.
@@ -474,7 +474,7 @@ Cancel:
 
 ## Titles
 
-- A title is in the plan as `VideoPiece::Titled`: a picture and the titles over it, in track order ([spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- A title is in the plan as `VideoPiece::Titled`: a picture and the titles over it, in track order ([spec D65](../spec.md#12-decisions-on-gaps-and-contradictions)).
   - The picture is a source, black, or a `VideoPiece::Mix`.
   - A clip that fades in or out above a title nests the other way: its `Mix` is over the titled picture.
   - `VideoPiece::titles` tells how many of the `VideoPiece::layers` each title goes over.
@@ -485,7 +485,7 @@ Cancel:
     - The `drop` field of `Look` brings the top of the box down to where the upper line starts.
   - `lay_out` strokes the outlines of the glyphs with zeno. When a glyph has no outline, it grows the drawn letters instead (`dilate`).
   - A stroke goes over the letters. An `outside` stroke goes behind them, at the same width.
-  - A title or a subtitle with a shadow or a box keeps its layers in floats (`Look` and `Sprite`, their `float` field). This is what Resolve does ([spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A title or a subtitle with a shadow or a box keeps its layers in floats (`Look` and `Sprite`, their `float` field). This is what Resolve does ([spec D65](../spec.md#12-decisions-on-gaps-and-contradictions)).
     - `lay_out` rounds the letters with their stroke to 8 bits, and the box to 8 bits. The shadow stays in floats.
     - It then lays the box, the shadow and the letters over each other in floats.
     - A title or a subtitle with no shadow and no box rounds to 8 bits once, at the end.
@@ -517,11 +517,11 @@ Titles in a compound clip:
 
 The plan:
 
-- A placed clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) is a source piece with `placed` pictures (`render::Placed`). They are the picture of its clip, then the pictures of the compound clips around it.
+- A placed clip ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)) is a source piece with `placed` pictures (`render::Placed`). They are the picture of its clip, then the pictures of the compound clips around it.
 - `Placed::of` and `Placed::at` take the picture through `ops::picture::working`. It puts a transform or a crop that is off back at its usual values. Thus the export, the viewer and the OpenTimelineIO export draw the same picture.
 - `render::flatten_lanes` lays it over the tracks below, as an `Over` of a `VideoPiece::Mix` without a ramp.
-- A clip at its usual values goes over the same way where its fitted picture leaves bars. Black is under it when no other layer is. A bar can be a part of a pixel ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)).
-- Where its fitted picture leaves no bar ([spec §13](../cut-page-spec.md#the-limit-for-a-thin-bar)), it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
+- A clip at its usual values goes over the same way where its fitted picture leaves bars. Black is under it when no other layer is. A bar can be a part of a pixel ([spec §13](../spec.md#the-fit-to-the-timeline)).
+- Where its fitted picture leaves no bar ([spec §13](../spec.md#the-limit-for-a-thin-bar)), it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
 - A picture with an alpha channel (`VideoInfo::alpha`) fills the frame only with the Alpha Mode None (`Media::opaque`). Otherwise it goes over the layers below by its Alpha Mode ([playback](playback.md#gpu-pictures)).
 
 The pictures:
@@ -537,7 +537,7 @@ The pictures:
 - A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
 - A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
 
-A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+A compound clip ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)):
 
 - A compound clip is one picture of the frame size. `render::expanded` puts the compound clip in the `Placed` list of each clip inside it.
 - `place::Mixes` makes one `place::Mix` for each compound clip in the frame.
@@ -551,7 +551,7 @@ A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contrad
 - A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded. A Smooth Cut with a flat side keeps them (`Smooth::clear`).
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
-A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120)):
+A transition at an edge of a compound clip ([spec §8.18](../spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120)):
 
 - `render::expanded` keeps the compound clip on its track as a clip with no tracks (`hollow`). Thus `transitions::playing` still finds the transition, and the other side plays as usual.
 - `edges_on` gives the compound clip its edges. A dissolve gives its frames, and a dip to color the half of its side.
@@ -595,7 +595,7 @@ Soft crop edges:
 
 ## Effects
 
-The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)):
+The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)):
 
 - `place::Placing` holds the effects of the picture and of the compound clips around it, the inner ones first (`Placing.effects`).
   - The effects of a compound clip that mixes first are on its `place::Mix` ([placed pictures](#placed-pictures)).
@@ -656,7 +656,7 @@ The draw:
   - `glow_atmosphere` makes the noise in the shader, with no picture of its own.
 - `fs_grain` makes the last pass of a Film Grain (`blur::grain_into`):
   - `grain::tile_bytes` makes a picture of noise at the size of the canvas, with an inverse Fourier transform. Why: a filter of that spectrum in the shader costs more at each frame.
-  - `grain::amplitudes` adds the folds of the spectrum at each frequency of the canvas ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - `grain::amplitudes` adds the folds of the spectrum at each frequency of the canvas ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
     - A ring that is wide in cycles for each pixel of the frame gives a flat sum. Then it uses a flat spectrum. Why: that sum has many folds, and they change nothing.
     - A canvas with fewer pixels than the frame keeps the mean of the frame's pixels in each of its pixels (`grain::Shrunk`). `Screen::set_frame_size` gives the frame.
     - On such a canvas the spectrum also holds Softness, and `fs_blur` does not soften the noise. Why: a Gaussian curve of less than one pixel blurs too little.

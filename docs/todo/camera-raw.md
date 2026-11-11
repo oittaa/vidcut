@@ -11,7 +11,7 @@ A camera RAW file holds the values of the sensor, before the camera makes a pict
 
 **What the manual says:**
 
-- Raw decoding is the first image processing operation (p. 166, [spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+- Raw decoding is the first image processing operation (p. 166, [spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
 - Chapter 7 gives the settings of each format (pp. 165–190).
   - The formats are ARRI, Blackmagic RAW, Canon RAW, CinemaDNG, Nikon RAW, Panasonic Varicam RAW, Phantom Cine, RED and Sony RAW.
 - The settings are in three places (p. 165):
