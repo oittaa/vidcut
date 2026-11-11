@@ -2462,7 +2462,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - The scripting API of Resolve Studio 21.2 cannot read or set the equalizer of a clip.
   - On the Cut page of Resolve Studio 21.2, the Equalizer is a section of the Audio tab of the Inspector (measured):
     - It has a switch at the left of its name, a reset button, the graph and the bands 1 to 6.
-    - Each band has a switch, a filter menu, and a Frequency, a Gain and a Q field.
+    - Each band has a switch, a filter menu, a Frequency and a Gain. A Bell band also has a Q.
     - While the switch is off, the fields of the bands cannot be edited.
     - The switch turned on makes bands 2 to 5 active. Bands 1 and 6 stay off.
     - With the switch off, the curve shows dimmed.
