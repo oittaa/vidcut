@@ -286,7 +286,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Descending reverses the whole order (p. 663).
     - `pool.set` with `view` `metadata` opens this view.
   - A sound file shows its waveform.
-  - **Metadata Display** (p. 665): a tag icon beside the search field shows metadata of the selected clip at the top of the pool (deviation X60). The metadata is the camera name, scene, shot and take, frame rate and resolution.
+  - **Metadata Display** (p. 665): a tag icon beside the search field shows metadata of the selected clip at the top of the pool. The metadata is the camera name, scene, shot and take, frame rate and resolution.
+    - vidcut: the strip also shows the codec, the bits and chroma subsampling, SDR or HDR, and the length.
+    - It also shows the start timecode, the sound and the file size.
 - **Sort and search** (pp. 666–667):
   - Sort Media By has Clip Name, Date Imported, Date Modified, Timecode (D59), Camera, Date Time, Bin, Scene Shot, Clip Color and Online Status. Each is ascending or descending.
   - vidcut also sorts by Duration.
