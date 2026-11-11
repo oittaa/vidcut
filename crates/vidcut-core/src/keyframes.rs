@@ -196,58 +196,6 @@ pub fn handle_point(a: &Keyframe, b: &Keyframe, out: bool) -> Option<(f64, f64)>
     }
 }
 
-fn bend_share(u: f64) -> f64 {
-    if u <= 1.0 / 6.0 {
-        0.0
-    } else if u <= 0.5 {
-        ((6.0 * u - 1.0) / 2.0).powi(3) / 2.0
-    } else if u <= 5.0 / 6.0 {
-        (1.0 - ((6.0 * (1.0 - u) - 1.0) / 2.0).powi(3)) / 2.0 + 0.5
-    } else {
-        1.0
-    }
-}
-
-pub fn bent(a: &Keyframe, b: &Keyframe, frame: f64, by: f64) -> (Option<Handle>, Option<Handle>) {
-    let len = (b.frame - a.frame) as f64;
-    let straight = a.out_handle.is_none() && b.in_handle.is_none();
-    let third = |sign: f64| Handle {
-        frames: sign * len / 3.0,
-        value: sign * (b.value - a.value) / 3.0,
-    };
-    let (start, end) = if straight {
-        (third(1.0), third(-1.0))
-    } else {
-        (FLAT, FLAT)
-    };
-    let (out, into) = (a.out_handle.unwrap_or(start), b.in_handle.unwrap_or(end));
-    let has_out = straight || a.out_handle.is_some();
-    let has_in = straight || b.in_handle.is_some();
-    let xs = [
-        0.0,
-        out.frames.clamp(0.0, len),
-        len + into.frames.clamp(-len, 0.0),
-        len,
-    ];
-    let low = if has_out { 0.1 } else { 0.3 };
-    let high = if has_in { 0.9 } else { 0.7 };
-    let u = solve(|u| cubic(xs, u), frame - a.frame as f64).clamp(low, high);
-    let v = 1.0 - u;
-    let share = match (has_out, has_in) {
-        (true, true) => bend_share(u),
-        (true, false) => 0.0,
-        _ => 1.0,
-    };
-    let raised = |h: Handle, d: f64| Handle {
-        frames: h.frames,
-        value: ((h.value + d) * 1e6).round() / 1e6,
-    };
-    (
-        has_out.then(|| raised(out, (1.0 - share) * by / (3.0 * u * v * v))),
-        has_in.then(|| raised(into, share * by / (3.0 * u * u * v))),
-    )
-}
-
 fn sides(ease: Ease) -> (bool, bool) {
     match ease {
         Ease::Linear => (false, false),
@@ -1420,40 +1368,6 @@ mod tests {
             in_handle: None,
             out_handle: None,
         }
-    }
-
-    #[test]
-    fn a_bend_of_a_straight_part_moves_its_middle_by_the_drag() {
-        let (a, mut b) = (key(0, 0.0), key(30, 30.0));
-        let (out, into) = bent(&a, &b, 15.0, 6.0);
-        let (out, into) = (out.unwrap(), into.unwrap());
-        assert_eq!((out.frames, out.value), (10.0, 18.0));
-        assert_eq!((into.frames, into.value), (-10.0, -2.0));
-        let mut a = a;
-        a.out_handle = Some(out);
-        b.in_handle = Some(into);
-        let middle = value_at(&[a, b], 15.0).unwrap();
-        assert!((middle - 21.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn a_bend_near_the_first_key_moves_only_its_handle() {
-        let (a, b) = (key(0, 0.0), key(30, 0.0));
-        let (out, into) = bent(&a, &b, 3.0, 1.0);
-        assert!(out.unwrap().value > 0.0);
-        assert_eq!(into.unwrap().value, 0.0);
-    }
-
-    #[test]
-    fn a_bend_leaves_a_side_with_no_handle_without_one() {
-        let (mut a, b) = (key(0, 0.0), key(30, 30.0));
-        a.out_handle = Some(Handle {
-            frames: 10.0,
-            value: 0.0,
-        });
-        let (out, into) = bent(&a, &b, 15.0, 3.0);
-        assert!(out.is_some());
-        assert!(into.is_none());
     }
 
     #[test]
