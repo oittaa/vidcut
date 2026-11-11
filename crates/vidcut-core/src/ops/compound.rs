@@ -204,14 +204,25 @@ fn given_name(p: &Project, name: Option<&str>) -> String {
 
 pub fn nest(p: &mut Project, ids: &[String], name: Option<&str>, bin: &str) -> Result<Nested> {
     checked_bin(p, bin)?;
-    let ids: HashSet<String> = linked::with_ties(p, ids).into_iter().collect();
-    if ids.is_empty() {
+    let named: HashSet<String> = linked::with_ties(p, ids).into_iter().collect();
+    if named.is_empty() {
         return Err(Error::usage("name the clips to make a compound clip of"));
     }
-    for ti in 0..p.tracks.len() {
-        if holds(&p.tracks[ti], &ids) {
-            unlocked(p, ti)?;
+    let ids: HashSet<String> = p
+        .tracks
+        .iter()
+        .filter(|t| !t.locked)
+        .flat_map(|t| &t.clips)
+        .filter(|c| named.contains(&c.id))
+        .map(|c| c.id.clone())
+        .collect();
+    if ids.is_empty() {
+        for ti in 0..p.tracks.len() {
+            if holds(&p.tracks[ti], &named) {
+                unlocked(p, ti)?;
+            }
         }
+        return Err(Error::usage("name the clips to make a compound clip of"));
     }
     let span = span_of(p, &ids);
     let nested = build(p, &ids, span, name)?;

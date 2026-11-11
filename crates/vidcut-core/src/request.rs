@@ -1185,7 +1185,8 @@ pub enum Request {
     /// included. Its picture stays on the lowest of their video tracks; a
     /// clip that was left out there puts it on a new track above. Its sound
     /// goes on the first audio track free there, and the two stay linked.
-    /// `name` is optional. Returns its clips.
+    /// A clip on a locked track stays out. `name` is optional. Returns its
+    /// clips.
     #[serde(rename = "edit.compound")]
     EditCompound {
         clips: OneOrMany<ClipRef>,
