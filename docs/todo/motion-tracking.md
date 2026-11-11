@@ -104,8 +104,8 @@ In this file, a path is never a track of the timeline.
   - The model can give one person two boxes, for example with a thing that the person holds. Then one person can get two paths.
   - The model runs on a square of 640 pixels, as the code of its maker does. Try a model input with the shape of the picture.
     - Measured on 2026-11-11, on 16 threads, with the file decoded on the GPU:
-    - A 720p file at 24 fps gives 21 pictures in a second. The model takes 95 % of that time.
-    - A 2160p file at 59.94 fps in a project of 24 fps gives 17 pictures in a second. The model takes 72 % of that time.
+    - A 720p file at 24 fps gives from 21 to 24 pictures in a second. The model takes 94 % of that time.
+    - A 2160p file at 59.94 fps in a project of 24 fps gives from 16 to 17 pictures in a second. The model takes 70 % of that time.
 - **Text, the open parts:**
   - Very small text: try a longer side above 960 pixels for a large source, and measure the time.
   - Text that comes into the picture has no blur on its first frames, as a face has not.

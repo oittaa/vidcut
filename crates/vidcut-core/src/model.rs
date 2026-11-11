@@ -1925,8 +1925,9 @@ pub enum Subject {
     /// neural network (PP-OCRv5) on the CPU finds them. Its file (4.8 MB)
     /// downloads at its first use.
     Text,
-    /// People, each as a whole body. A neural network (YOLOX-S) on the CPU
-    /// finds them. Its file (35.9 MB) downloads at its first use.
+    /// People. The area of a person is the box around all of the person
+    /// that shows. A neural network (YOLOX-S) on the CPU finds them. Its
+    /// file (35.9 MB) downloads at its first use.
     Person,
     /// Vehicles: bicycles, cars, motorcycles, buses, trains and trucks. The
     /// neural network of `person` finds them, from the same file.
