@@ -18,3 +18,4 @@ What [the spec](../cut-page-spec.md) describes and vidcut does not do.
 - The unlabeled dashed lines of the HDR scale
 - Copy and paste of the Equalizer settings of a clip (p. 745; [§9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779))
 - Keyframes of the Angle and the Border of an Edge Wipe. Resolve can keyframe them. vidcut keeps one value of each ([§8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173))
+- The Reset of the Dialogue Leveler section, once its values are measured (p. 734; [§9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779))

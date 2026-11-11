@@ -1486,7 +1486,6 @@ enum Act {
     Put(Key, f64),
     Edit(Key, f64),
     Release(Key),
-    Level(bool),
     Compress(bool),
     Denoise(bool),
     Direction(Direction),
@@ -1580,7 +1579,7 @@ fn key_times(c: &Clip, key: Key) -> Vec<i64> {
         .collect()
 }
 
-fn label(ui: &mut egui::Ui, text: &str, set: bool) {
+pub(super) fn label(ui: &mut egui::Ui, text: &str, set: bool) {
     let c = theme::colors();
     ui.label(RichText::new(text).color(if set { c.accent } else { c.text_dim }));
 }
@@ -1910,7 +1909,7 @@ fn group<R>(
     switched_group(ui, name, None, header, rows).1
 }
 
-fn switched_group<R>(
+pub(super) fn switched_group<R>(
     ui: &mut egui::Ui,
     name: &str,
     switch: Option<bool>,
@@ -4232,7 +4231,6 @@ impl Workspace {
             })
             .inner
         };
-        let mut edit_leveler = false;
         let mut edit_compressor = false;
         let mut edit_noise = false;
         let normalize = group(ui, "Audio", header, |ui| {
@@ -4281,23 +4279,6 @@ impl Workspace {
                 acts.push(Act::Mute(on));
             }
             ui.end_row();
-            let leveler = |id: &str| {
-                p.clip(id)
-                    .and_then(|c| c.audio.as_ref())
-                    .and_then(|a| a.dialogue_leveler)
-            };
-            let leveled = sounds
-                .iter()
-                .any(|s| leveler(&s.id).is_some_and(|l| l.heard()));
-            label(ui, "Dialogue Leveler", leveled);
-            ui.horizontal(|ui| {
-                let mut on = leveler(&first.id).is_some_and(|l| l.on);
-                if ui.checkbox(&mut on, "").clicked() {
-                    acts.push(Act::Level(on));
-                }
-                edit_leveler = ui.button("Edit…").clicked();
-            });
-            ui.end_row();
             let compressor = |id: &str| {
                 p.clip(id)
                     .and_then(|c| c.audio.as_ref())
@@ -4343,9 +4324,6 @@ impl Workspace {
         if normalize {
             self.open_normalize(sounds.iter().map(|s| s.id.clone()).collect());
         }
-        if edit_leveler {
-            self.open_leveler(sounds.iter().map(|s| s.id.clone()).collect());
-        }
         if edit_compressor {
             self.open_compressor(sounds.iter().map(|s| s.id.clone()).collect());
         }
@@ -4383,13 +4361,6 @@ impl Workspace {
                 self.send(
                     "clip.set",
                     json!({ "clips": ids, "compressor": { "on": on } }),
-                );
-            }
-            Act::Level(on) => {
-                let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
-                self.send(
-                    "clip.set",
-                    json!({ "clips": ids, "dialogue_leveler": { "on": on } }),
                 );
             }
             Act::Hold(field, value) => {
@@ -4757,6 +4728,7 @@ impl Workspace {
                     self.audio_section(ui, &p, &sounds, &mut acts);
                     let ids: Vec<String> = sounds.iter().map(|s| s.id.clone()).collect();
                     self.equalizer_section(ui, &p, &ids);
+                    self.leveler_section(ui, &p, &ids);
                 }
             });
         for act in acts {

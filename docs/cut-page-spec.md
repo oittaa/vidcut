@@ -1760,8 +1760,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
-  - vidcut: its Audio section has Volume, Pan, Mute, Dialogue Leveler, Compressor, Noise Reduction and Voice Isolation for the selected clips with sound (X70).
-  - vidcut: an Equalizer section follows the Audio section ([§9](#9-audio-pp-642-649650-743744-771-773-778779)).
+  - vidcut: its Audio section has Volume, Pan, Mute, Compressor, Noise Reduction and Voice Isolation for the selected clips with sound (X70).
+  - vidcut: an Equalizer section and then a Dialogue Leveler section follow the Audio section ([§9](#9-audio-pp-642-649650-743744-771-773-778779)).
   - vidcut: its Crop section has Softness, and its Composite section has Composite Mode and Opacity.
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
@@ -2557,6 +2557,13 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - The presets are Allow Wider Dynamics, More Lift For Low Levels, Lift Soft Whispery Sources and Optimize Moderate Levels (p. 775).
   - The processes are Reduce Loud Dialogue, Lift Soft Dialogue and Background Reduction (p. 775).
   - It works on a track of one or two channels, and not on a track with more (p. 775).
+  - In the Inspector, it is a section of the Audio panel, with a switch at the left of its name (pp. 734, 743).
+  - These are measurements on the Cut page of Resolve Studio 21.2:
+    - The switch of a new clip is off. The controls of the section show only while the switch is on.
+    - The first switch-on of a clip gives the preset Allow Wider Dynamics, the three processes on and an Output Gain of 2 dB.
+    - A later look at the same clip showed an Output Gain of 3 dB. The cause is not known.
+    - The section calls the preset menu Mode. It calls Background Reduction "Reduce Background".
+    - Off collapses the section and keeps the values.
   - Resolve Studio 21.2 gave these results, with renders of a spoken clip at six levels to 24-bit WAV files at 48 kHz.
   - The scripting API starts with the switch off, the first preset, all three processes off and an Output Gain of 0.
   - The Output Gain goes from 0 to 6 dB. The API sets the nearest limit, and it keeps one decimal.
@@ -2576,8 +2583,15 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - Background Reduction changes only the sound between lines. It lowered the noise by 1 to 11 dB there, and only in the first gaps of the clip.
   - The Output Gain changes the sound only with Reduce Loud Dialogue on. With it, it adds its full value.
   - An OTIO export writes no effect for the Dialogue Leveler.
-  - vidcut: the Dialogue Leveler row of the Audio section (X70) and `clip.set` set `dialogue_leveler` ([X155](deviations.md#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
-  - vidcut: the window of a clip with no Dialogue Leveler opens with On checked ([X155](deviations.md#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
+  - vidcut: the Dialogue Leveler section of the Inspector comes after the Equalizer section (X70).
+    - It has the switch, Mode, Reduce Loud Dialogue, Lift Soft Dialogue, Reduce Background and Output Gain.
+    - A new clip has no Dialogue Leveler. Its switch is off.
+    - The first switch-on gives the same values as in Resolve, with an Output Gain of 2 dB.
+    - Off keeps the values. The playback and the export then do not use them.
+    - Output Gain is gray while Reduce Loud Dialogue is off.
+  - vidcut: `clip.set` sets `dialogue_leveler`.
+    - On a clip with none, `{"on": true}` gives the values of the first switch-on.
+    - Another change on a clip with none starts from the switch on, the first preset, no process and 0 dB.
   - vidcut: `clip.set` refuses an Output Gain outside the range. A clip with more than two channels takes the Dialogue Leveler too ([X155](deviations.md#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
 - **Compressor** (pp. 3946–3947):
   - The Dynamics of a track have a Compressor module, with a switch (p. 3946).

@@ -371,7 +371,7 @@ The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-7
 - A piece has the `compressor` of its clip when it changes the sound.
   - `Dynamics` runs after the equalizer and before the gain and the Pan. It adds no delay.
   - Each channel gets the same gain, from the highest peak of the channels.
-- A piece has the `leveler` of its clip when a process of its Dialogue Leveler is on.
+- A piece has the `leveler` of its clip when the switch and a process of its Dialogue Leveler are on.
   - `Leveler` reads ahead of the piece, as `Isolator` does, so the look ahead adds no delay.
   - It gets the sound after Voice Isolation, and the equalizer gets the sound after it.
   - At the start of a piece that does not continue the one before, a new `Leveler` starts with no history.
