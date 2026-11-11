@@ -231,7 +231,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Option+wheel zooms the timeline, and Command+wheel moves through it (Edit page, p. 853).
   - The lower timeline of the Cut page also zooms with Option+wheel.
 - **vidcut:**
-  - Ctrl+wheel (Cmd on a Mac) and a pinch on a trackpad zoom the lower timeline.
+  - Alt+wheel (Option on a Mac) zooms the lower timeline, as in Resolve.
+  - Ctrl+wheel (Cmd on a Mac) zooms it too, and does not move through it.
 - **Why:**
   - Ctrl+wheel and Cmd+wheel zoom in browsers and most programs.
   - egui gives them and a pinch as one zoom.
