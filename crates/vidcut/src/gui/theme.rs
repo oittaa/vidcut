@@ -11,6 +11,7 @@ use eframe::egui::{
 use crate::themes::{Buttons, Colors, Fonts, Style, Theme};
 
 pub const KEY_ON: Color32 = Color32::from_rgb(240, 140, 0);
+pub const SPEED_KEY_ON: Color32 = Color32::from_rgb(230, 50, 50);
 pub const WAVEFORM: Color32 = Color32::from_rgb(170, 230, 190);
 
 thread_local! {

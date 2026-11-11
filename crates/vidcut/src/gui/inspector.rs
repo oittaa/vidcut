@@ -1705,8 +1705,12 @@ pub(super) enum KeyClick {
 }
 
 pub(super) fn key_diamond(on: bool) -> egui::Button<'static> {
+    tinted_diamond(on, theme::KEY_ON)
+}
+
+fn tinted_diamond(on: bool, color: egui::Color32) -> egui::Button<'static> {
     let icon = RichText::new(DIAMOND);
-    let icon = if on { icon.color(theme::KEY_ON) } else { icon };
+    let icon = if on { icon.color(color) } else { icon };
     egui::Button::selectable(on, icon).frame(false)
 }
 
@@ -2995,7 +2999,7 @@ fn speed_keys(ui: &mut egui::Ui, (keys, inside): (KeyMark, bool)) -> Option<Act>
     if prev.clicked() {
         act = Some(Act::Step(Key::Speed, -1));
     }
-    let diamond = key_diamond(keys.on);
+    let diamond = tinted_diamond(keys.on, theme::SPEED_KEY_ON);
     if ui.add_enabled(inside || keys.on, diamond).clicked() {
         act = Some(Act::Toggle(Key::Speed));
     }
