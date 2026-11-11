@@ -620,6 +620,10 @@ impl Words<'_> {
         s.put("flip_vertical", "Flip Vertical", &raw, |q| {
             json!(q.flip_vertical)
         });
+        s.put("transform_off", "Transform Off", &raw, |q| {
+            json!(q.transform_off)
+        });
+        s.put("crop_off", "Crop Off", &raw, |q| json!(q.crop_off));
         s.put("crop_left", "Crop Left", &percent, |q| json!(q.crop.left));
         s.put("crop_right", "Crop Right", &percent, |q| {
             json!(q.crop.right)

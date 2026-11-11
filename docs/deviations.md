@@ -708,25 +708,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - To join the numbers by hand once in a project is quick.
   - An automatic join that is wrong would be worse than no join.
 
-## X65. Transform and Crop are keys and viewer handles
-
-- **Resolve:**
-  - The Tools button of the viewer opens a bar of effects for the current clip.
-  - Transform and Crop each have onscreen controls in the viewer and a Reset (pp. 766–768).
-  - Each also has a toggle that turns it off and keeps its settings.
-  - Crop is in pixels (p. 768).
-- **vidcut:**
-  - The Tools button under the viewer shows a row: Transform, Crop, the two flips and a Reset for each of the two.
-  - There is no toggle.
-  - The handles are those of a title (X52), with the same snapping.
-  - A drag just outside a corner turns the picture.
-  - The Inspector tab shows the place, zoom and crop of a picture in pixels, percent and degrees ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
-  - The Tools row has Dynamic Zoom, lit while its boxes show. With it come Swap, a menu of the four eases and Reset.
-  - The right-click menu of the clip has Dynamic Zoom and Reset Dynamic Zoom.
-- **Why:**
-  - Undo puts a picture back, as a toggle would.
-  - Image and design editors turn a layer with a drag outside a corner.
-
 ## X66. Files and folders dropped on the window go into the open bin
 
 - **Resolve:**
@@ -825,7 +806,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing selected that it can show, it shows one line.
   - With several clips selected, a section shows the first clip that it acts on. Its header gives the number of these clips.
-  - A section has no on/off toggle ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
+  - The Transform and Crop sections have a switch at the left of their names. Dynamic Zoom, Composite, Speed and Audio have none.
+  - Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
   - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has no accent color, and its Reset does nothing.
   - The link button of Zoom turns the link on again, and makes Zoom Y equal to Zoom X. A picture with two different zooms shows the link off.
@@ -854,6 +836,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - The zoom of a Dynamic Zoom box is in percent. The X and Y of a box are where the middle of the picture is at the start or at the end.
     - They are in pixels of the fitted picture from the middle of the clip, with Y up. A new zoom of a box keeps the middle of the picture in place.
 - **Why:**
+  - The switches of the other sections are not made yet ([gaps](todo/cut-page-gaps.md)).
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
   - A number in frame pixels does the same thing to every picture. The viewer shows the zoom in percent. Thus one value does not show in two forms in vidcut.
   - A Reset for each value puts back one value and keeps the others of its group.
@@ -1783,7 +1766,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - `clip.set` refuses a Pan outside −100 to 100.
 - **Why:**
   - Resolve puts a mono clip on a stereo track by default. Thus the law of a stereo track is what most clips get.
-  - One slider is simpler. A section has no switch ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles)).
+  - One slider is simpler.
   - A value outside the range is an error in the script. A refusal shows the error.
 
 ## X154. The Equalizer is a window
@@ -2035,7 +2018,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Edit Shape shows the handles of the area in the viewer.
     - A drag inside the area moves it. On an ellipse or a box, a corner changes its size, and the top handle turns it.
     - On a polygon, Alt and a click also removes a point. Why: a trackpad has no middle button.
-  - The Tools row under the viewer has Blur ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles)).
+  - The Tools row under the viewer has Blur ([spec §8.15](cut-page-spec.md#815-transform-and-crop-pp-766768)).
     - The right-click menu of a clip has Blur. It shows the Tools row with Blur on, for that clip.
     - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
     - With Free Shape, each click adds a point. A click on the first point, or a double-click, closes the shape. Escape drops it.

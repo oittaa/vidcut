@@ -1641,12 +1641,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Tools button of the viewer opens a bar of effects for the current clip, with onscreen controls in the viewer.
   - Each effect has a toggle that turns it off and keeps its settings.
   - Each effect has a Reset of all its values (p. 767).
-  - vidcut: the Tools button under the viewer shows a row (deviation X65):
+  - vidcut: the Tools button under the viewer shows a row:
     - Transform and Crop show and hide their handles on the selected clip, as T and Shift+T do.
     - Each of these two buttons is lit while its handles show.
-    - With Transform come Flip Horizontal, Flip Vertical and Reset. With Crop comes a Reset.
+    - With Transform come its switch, Flip Horizontal, Flip Vertical and Reset. With Crop come its switch and Reset.
+    - A switch that is off keeps the values of the tool, and they do nothing. The Inspector has the same switch (X70).
+    - An OpenTimelineIO export writes a tool that is off at its usual values.
     - The right-click menu of the clip has Transform, Crop, Reset Transform and Reset Crop.
-    - There is no toggle.
+    - Dynamic Zoom has no switch (X70).
 - **Transform** (p. 767):
   - A drag inside the box of the clip moves it.
   - A drag on a corner resizes it in proportion. A drag on a side stretches or squeezes it in one direction.
@@ -1670,7 +1672,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Each box is moved and resized in the viewer, and a path shows the motion.
   - Swap reverses the boxes. The ease is Linear, Ease In, Ease Out or Ease In and Out.
   - Shift keeps a drag on one axis.
-  - vidcut: Alt+T shows the boxes, and the Tools row has Dynamic Zoom (X65). The eases are curves of their own (X67).
+  - vidcut: Alt+T shows the boxes. The eases are curves of their own (X67).
+  - vidcut: the Tools row has Dynamic Zoom, lit while its boxes show. With it come Swap, a menu of the four eases and Reset.
+  - vidcut: the right-click menu of the clip has Dynamic Zoom and Reset Dynamic Zoom.
   - Details: D75.
 - **Composite** (p. 769):
   - Opacity goes from 0 to 100. The tracks below show through the rest.
@@ -2746,8 +2750,8 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
 | Alt+D | Ducking of the selected clip's track on or off (X69) |
 | Ctrl+D | Change clip or dissolve duration |
 | R† | Change clip speed (D48) |
-| T / Shift+T | Transform / Crop handles on the selected clip, on or off (X65) |
-| Wheel / Alt+wheel over the picture, with T's handles | Zoom / turn it (X65) |
+| T / Shift+T | Transform / Crop handles on the selected clip, on or off (§8.15) |
+| Wheel / Alt+wheel over the picture, with T's handles | Zoom / turn it (§8.15) |
 | Enter | Edit the selected subtitle (X43) |
 | N | Snapping on/off |
 | M / Alt+M | Add or edit / delete marker |
@@ -4014,7 +4018,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Over a mark, the pointer becomes a left-right arrow.
   - The rest of the ruler, and the space under the tracks of the lower timeline, move the playhead.
   - A dragged mark is drawn where it goes. The change occurs on release.
-- **D75. Transform and Crop** (§8.15; pp. 766–768; deviation X65).
+- **D75. Transform and Crop** (§8.15; pp. 766–768).
   - The manual gives the controls.
   - It does not give the units, the order in which they work, or how a placed clip plays over the tracks below.
   - The order, and how a placed clip plays, match Resolve's renders.
@@ -4234,7 +4238,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - In a compound clip, t follows the frame of the inner clip that shows. A reversed compound plays the zoom backward, and a frozen one holds it.
     - **Turned on**, it is a pull out from 125%, with Linear. The start box has the size 0.8 and the end box the size 1, both in the middle.
     - **How it plays:** a clip with a Dynamic Zoom is placed over the tracks below it. The viewer and the export draw the same frame.
-    - **In the viewer**, Alt+T shows the boxes on the clip that T uses (X65).
+    - **In the viewer**, Alt+T shows the boxes on the clip that T uses (§8.15).
     - The viewer still draws that clip with its Dynamic Zoom, as the output shows it.
     - The boxes on the screen are not the `start` and `end` boxes of the data. They show where these boxes put the picture.
     - The green box shows where the picture is at the start of the clip. The red box shows where it is at the end.
