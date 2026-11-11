@@ -760,6 +760,7 @@ impl Followed {
 
 impl Placed {
     pub fn of(clip: &Clip, picture: Picture, run: Run) -> Self {
+        let picture = crate::ops::picture::working(picture);
         let followed = Followed::of(clip, &picture);
         Self {
             clip: clip.id.clone(),
@@ -777,6 +778,7 @@ impl Placed {
     }
 
     pub fn at(clip: &Clip, picture: Picture, run: Run, time: i64) -> Self {
+        let picture = crate::ops::picture::working(picture);
         let run = picture.dynamic_zoom.map(|_| run);
         let followed = Followed::of(clip, &picture);
         Self {
@@ -3898,7 +3900,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         edges: Box::default(),
         isolation: None,
         keyed,
-        pan: audio.pan,
+        pan: audio.heard_pan(),
         equalizer: audio
             .equalizer
             .clone()

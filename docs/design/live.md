@@ -296,7 +296,7 @@ The bar and the Jobs button:
 - `Rows::layout` lays out the rows of the lower timeline from the bottom, and shrinks them to fit, down to a minimum.
 - When they still overflow, the wheel (`scroll_rows`) and the scrollbar (`row_scrollbar`) lift them (`TimelineView::rows_lift`, `Rows::overflow`).
 
-**Clip volume** ([deviation X71](../deviations.md#x71-a-drag-on-the-volume-line-of-a-selected-clip-changes-all-the-selected-clips), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
+**Clip volume** ([spec D77](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions), [deviation X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page)).
 
 - `paint::volume_line` draws the volume line of each clip with sound. With volume keyframes, the line is the curve (`geometry::curve_y`), with a mark on each keyframe.
 - `geometry::volume_target` finds the handle, keyframe or line under the pointer (`OnVolume`).
@@ -359,7 +359,7 @@ The bar and the Jobs button:
 - `viewer.scopes` changes `ViewerPrefs` too, and the snapshot carries `scopes`.
   - `Workspace::scopes_menu` is in the View menu and in the header of the viewer. Each button sends `viewer.scopes`.
   - `Workspace::scope_column` takes a column at the right of the viewer's area. `Workspace::paint_scopes` paints each scope with its marks in egui ([gpu](gpu.md#the-scopes)).
-- `Workspace::picture_controls` boxes the handles through the `place::Placing` of the picture ([deviation X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles)).
+- `Workspace::picture_controls` boxes the handles through the `place::Placing` of the picture ([spec §8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768)).
   - The handles work about the anchor point (`Shown::pivot`, from `place::anchored`).
   - A move snaps the middle of the picture as drawn, not its `position`.
 - A drag, or a run of wheel notches (`Wheeled`, `Workspace::settle_picture_wheel`), ends in one `picture.set`.

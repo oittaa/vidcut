@@ -472,8 +472,8 @@ pub(super) fn sound(
         }
         None => {}
     }
-    if au.pan != 0.0 {
-        list.push(pan_effect(au.pan));
+    if au.heard_pan() != 0.0 {
+        list.push(pan_effect(au.heard_pan()));
     }
     list
 }

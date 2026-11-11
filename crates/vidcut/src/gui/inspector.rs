@@ -1341,6 +1341,7 @@ struct Sound {
     muted: bool,
     keyed: bool,
     pan: f64,
+    pan_on: bool,
 }
 
 type Lists<'a> = (&'a [Chosen], &'a [Sound], &'a [Paced]);
@@ -1495,6 +1496,7 @@ enum Act {
     FullSpeed,
     Retime(ClipRetime),
     Mute(bool),
+    PanOn(bool),
     Link(bool),
     Flips([Option<bool>; 2]),
     Zooming(bool),
@@ -1505,6 +1507,7 @@ enum Act {
     Mode(CompositeMode),
     Swap,
     Clear(PictureTool),
+    Switch(PictureTool, bool),
     Unkey,
     Step(Key, i64),
     Toggle(Key),
@@ -1867,6 +1870,18 @@ fn field(
     acts: &mut Vec<Act>,
 ) {
     label(ui, f.label(), set);
+    field_rest(ui, f, i, (set, shown, range), look, keys, acts);
+}
+
+fn field_rest(
+    ui: &mut egui::Ui,
+    f: Key,
+    i: &Inspector,
+    (set, shown, range): (bool, f64, RangeInclusive<f64>),
+    look: Look<'_>,
+    keys: Option<KeyMark>,
+    acts: &mut Vec<Act>,
+) {
     ui.horizontal(|ui| {
         if look.off {
             ui.disable();
@@ -1893,12 +1908,26 @@ fn group<R>(
     header: impl FnOnce(&mut egui::Ui) -> R,
     rows: impl FnOnce(&mut egui::Ui),
 ) -> R {
+    switched_group(ui, name, None, header, rows).1
+}
+
+fn switched_group<R>(
+    ui: &mut egui::Ui,
+    name: &str,
+    switch: Option<bool>,
+    header: impl FnOnce(&mut egui::Ui) -> R,
+    rows: impl FnOnce(&mut egui::Ui),
+) -> (Option<bool>, R) {
     let id = ui.make_persistent_id(("inspector", name));
     let (_, header, _) =
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
             .show_header(ui, |ui| {
+                let flipped = switch.and_then(|now| {
+                    let mut on = now;
+                    ui.checkbox(&mut on, "").clicked().then_some(on)
+                });
                 ui.label(RichText::new(name).strong());
-                header(ui)
+                (flipped, header(ui))
             })
             .body(|ui| {
                 egui::Grid::new(("inspector-rows", name))
@@ -1913,7 +1942,7 @@ fn group<R>(
 fn section(
     ui: &mut egui::Ui,
     (name, tool): (&str, PictureTool),
-    set: bool,
+    (set, switch): (bool, Option<bool>),
     acts: &mut Vec<Act>,
     rows: impl FnOnce(&mut egui::Ui, &mut Vec<Act>),
 ) {
@@ -1923,7 +1952,11 @@ fn section(
         })
         .inner
     };
-    if group(ui, name, reset, |ui| rows(ui, acts)) {
+    let (flipped, cleared) = switched_group(ui, name, switch, reset, |ui| rows(ui, acts));
+    if let Some(on) = flipped {
+        acts.push(Act::Switch(tool, on));
+    }
+    if cleared {
         acts.push(Act::Clear(tool));
     }
 }
@@ -1943,7 +1976,7 @@ fn transform(
     section(
         ui,
         ("Transform", PictureTool::Transform),
-        set,
+        (set, Some(!first.shown.transform_off)),
         acts,
         |ui, acts| {
             let [zx, zy] = first.shown.sampled(first.frame as f64).scale();
@@ -2000,17 +2033,24 @@ fn crop(
     acts: &mut Vec<Act>,
 ) {
     let set = chosen.iter().any(|c| uses(&c.shown, PictureTool::Crop));
-    section(ui, ("Crop", PictureTool::Crop), set, acts, |ui, acts| {
-        for f in [
-            Field::Left,
-            Field::Right,
-            Field::Top,
-            Field::Bottom,
-            Field::Softness,
-        ] {
-            number(ui, f, i, p, at, chosen, acts);
-        }
-    });
+    let switch = Some(!chosen[0].shown.crop_off);
+    section(
+        ui,
+        ("Crop", PictureTool::Crop),
+        (set, switch),
+        acts,
+        |ui, acts| {
+            for f in [
+                Field::Left,
+                Field::Right,
+                Field::Top,
+                Field::Bottom,
+                Field::Softness,
+            ] {
+                number(ui, f, i, p, at, chosen, acts);
+            }
+        },
+    );
 }
 
 fn composite(
@@ -2025,7 +2065,7 @@ fn composite(
         .iter()
         .any(|c| uses(&c.shown, PictureTool::Composite));
     let section_name = ("Composite", PictureTool::Composite);
-    section(ui, section_name, set, acts, |ui, acts| {
+    section(ui, section_name, (set, None), acts, |ui, acts| {
         let now = chosen[0].shown.mode();
         let mixed = chosen
             .iter()
@@ -2061,7 +2101,7 @@ fn dynamic_zoom(
     let on = !zooms.is_empty();
     let first = chosen[0].shown.dynamic_zoom;
     let section_name = ("Dynamic Zoom", PictureTool::DynamicZoom);
-    section(ui, section_name, on, acts, |ui, acts| {
+    section(ui, section_name, (on, None), acts, |ui, acts| {
         label(ui, "Dynamic Zoom", on);
         dialog::switch(ui, |ui| {
             if ui
@@ -3220,6 +3260,7 @@ impl Workspace {
                     muted: a.muted,
                     keyed: a.is_keyed(),
                     pan: a.pan,
+                    pan_on: a.pan_on,
                 })
             })
             .collect()
@@ -4210,7 +4251,14 @@ impl Workspace {
             );
             let panned = sounds.iter().any(|s| s.pan != Key::Pan.usual());
             let pan = (panned, first.pan, *PAN.start()..=*PAN.end());
-            field(
+            ui.horizontal(|ui| {
+                let mut on = first.pan_on;
+                if ui.checkbox(&mut on, "").clicked() {
+                    acts.push(Act::PanOn(on));
+                }
+                label(ui, Key::Pan.label(), panned);
+            });
+            field_rest(
                 ui,
                 Key::Pan,
                 &self.inspector,
@@ -4452,6 +4500,15 @@ impl Workspace {
                     ..c.shown.clone()
                 })
             }),
+            Act::Switch(tool, on) => self.send_pictures(chosen, |c| {
+                let mut p = c.shown.clone();
+                match tool {
+                    PictureTool::Transform => p.transform_off = !on,
+                    PictureTool::Crop => p.crop_off = !on,
+                    PictureTool::DynamicZoom | PictureTool::Composite => return None,
+                }
+                Some(p)
+            }),
             Act::Zooming(on) => {
                 self.send_pictures(chosen, |c| {
                     let z = c.shown.dynamic_zoom;
@@ -4507,6 +4564,16 @@ impl Workspace {
                 })
             }),
             Act::Clear(tool) => self.clear_pictures(chosen, tool),
+            Act::PanOn(on) => {
+                let ids: Vec<&str> = sounds
+                    .iter()
+                    .filter(|s| s.pan_on != on)
+                    .map(|s| s.id.as_str())
+                    .collect();
+                if !ids.is_empty() {
+                    self.send("clip.set", json!({ "clips": ids, "pan_on": on }));
+                }
+            }
             Act::Mute(on) => {
                 let ids: Vec<&str> = sounds
                     .iter()
