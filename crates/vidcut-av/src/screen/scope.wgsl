@@ -4,7 +4,7 @@ struct Params {
     luma: vec4<f32>,
     chroma: vec4<f32>,
     range: vec4<f32>,
-    rows: array<vec4<f32>, 2>,
+    rows: array<vec4<f32>, 3>,
     hues: array<vec4<f32>, 3>,
     how: vec4<u32>,
 }
