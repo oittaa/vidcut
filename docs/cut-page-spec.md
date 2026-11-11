@@ -145,7 +145,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - The question names the values, the number of keyframes and the clip ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)). Cancel has the focus.
     - These three items act on the clip that the tab shows.
     - With the tab and the tray closed, they act on the speed keyframes of the selected clips (D48, X94).
-    - With the tray open and no row or keyframe selected, Add Keyframe adds a speed keyframe (X94).
+    - With the tray open, the tab closed, and no row or keyframe selected, Add Keyframe adds a speed keyframe (X94).
     - After a click in the Keyframes tab or the keyframe tray, Ctrl+C and Ctrl+X copy or cut the selected keyframes (p. 1258).
     - Ctrl+V there pastes them on the selected clips (p. 1258).
       - The first keyframe goes at the playhead. The others keep their distance from it.
@@ -3066,7 +3066,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A change of its value in the tab sends `speed.set`. The field takes 0.01% to 100000%.
       - The field is off when the section is frozen or plays backward.
     - With the tab and the tray closed, Mark > Add Keyframe (Ctrl+[) adds a speed keyframe at the playhead to each selected clip under it.
-      - With the tray open and no row or keyframe selected, it does the same.
+      - With the tray open, the tab closed, and no row or keyframe selected, it does the same.
     - Then Mark > Delete Keyframe (Alt+]) removes the speed keyframe at the playhead, or else the nearest one before it.
     - Then Mark > Delete All Keyframes asks first. Then it removes all the speed keyframes of the selected clips.
   - **Requests:** `keyframes.add` and `keyframes.remove` with the `param` `speed` add and remove speed keyframes.
