@@ -29,6 +29,7 @@ pub(super) struct PreferencesUi {
     mbps: String,
     size: String,
     after_secs: String,
+    still: String,
     folders: [String; 2],
     player_memory: String,
     video_memory: String,
@@ -88,6 +89,7 @@ impl Folder {
 enum Page {
     #[default]
     General,
+    Editing,
     Gpu,
     Memory,
     Sound,
@@ -98,8 +100,9 @@ enum Page {
     Keys,
 }
 
-const PAGES: [(Page, &str, &str); 9] = [
+const PAGES: [(Page, &str, &str); 10] = [
     (Page::General, icon::GEAR_SIX, "General"),
+    (Page::Editing, icon::SCISSORS, "Editing"),
     (Page::Gpu, icon::GRAPHICS_CARD, "GPU"),
     (Page::Memory, icon::MEMORY, "Memory"),
     (Page::Sound, icon::SPEAKER_HIGH, "Sound"),
@@ -466,6 +469,7 @@ impl Workspace {
                     ui_state.mbps = n(&p["proxies"]["above_mbps"]);
                     ui_state.size = n(&p["proxies"]["size"]);
                     ui_state.after_secs = n(&p["render_cache"]["after_secs"]);
+                    ui_state.still = still_number(p).to_string();
                     ui_state.folders = Folder::ALL.map(|f| f.saved(p).to_string());
                     ui_state.state = Some(r.result);
                     ui_state.error = None;
@@ -474,6 +478,7 @@ impl Workspace {
                     if let Some(state) = &ui_state.state {
                         let p = &state["preferences"];
                         ui_state.folders = Folder::ALL.map(|f| f.saved(p).to_string());
+                        ui_state.still = still_number(p).to_string();
                     }
                     ui_state.error = Some(e.message);
                 }
@@ -563,6 +568,9 @@ impl Workspace {
                                 match ui_state.page {
                                     Page::General => {
                                         general(ui, &state, busy, ui_state, &dialogs, &mut patch)
+                                    }
+                                    Page::Editing => {
+                                        editing(ui, &state, busy, ui_state, &mut patch)
                                     }
                                     Page::Gpu => {
                                         gpu(ui, &state, busy, display.as_deref(), &mut patch)
@@ -799,6 +807,65 @@ fn general(
                 ),
             );
         }
+    });
+}
+
+fn still_number(preferences: &Value) -> &str {
+    preferences["editing"]["still_duration"]
+        .as_str()
+        .unwrap_or_default()
+        .trim_end_matches(['s', 'f'])
+}
+
+fn editing(
+    ui: &mut egui::Ui,
+    state: &Value,
+    busy: bool,
+    ui_state: &mut PreferencesUi,
+    patch: &mut Option<Value>,
+) {
+    let p = &state["preferences"];
+    let saved = p["editing"]["still_duration"].as_str().unwrap_or_default();
+    let frames = saved.ends_with('f');
+    page(ui, "Editing", "", |ui| {
+        grid(ui, "preferences-editing", |ui| {
+            let named = label(ui, "Standard Still Duration");
+            ui.horizontal(|ui| {
+                let r = ui
+                    .add_enabled(
+                        !busy,
+                        egui::TextEdit::singleline(&mut ui_state.still).desired_width(56.0),
+                    )
+                    .labelled_by(named.id);
+                if r.changed() {
+                    ui_state
+                        .still
+                        .retain(|c| c.is_ascii_digit() || (!frames && c == '.'));
+                }
+                let unit = if frames { "f" } else { "s" };
+                let typed = format!("{}{unit}", ui_state.still);
+                if r.lost_focus() && typed != saved {
+                    *patch = Some(json!({ "editing": { "still_duration": typed } }));
+                }
+                dialog::switch(ui, |ui| {
+                    for (to_frames, name) in [(false, "Seconds"), (true, "Frames")] {
+                        if ui
+                            .add_enabled(!busy, egui::Button::selectable(frames == to_frames, name))
+                            .clicked()
+                            && frames != to_frames
+                        {
+                            let n: f64 = still_number(p).parse().unwrap_or(1.0);
+                            let value = match to_frames {
+                                true => format!("{}f", n.round().max(1.0)),
+                                false => format!("{n}s"),
+                            };
+                            *patch = Some(json!({ "editing": { "still_duration": value } }));
+                        }
+                    }
+                });
+            });
+            ui.end_row();
+        });
     });
 }
 
