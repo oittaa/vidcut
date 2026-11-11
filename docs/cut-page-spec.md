@@ -1560,7 +1560,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Follow keeps the word under the playhead in view during playback.
   - While the pointer is over the window, Delete, X, Ctrl+A, Ctrl+C and Esc act on the window. On the timeline, Ctrl+X and Ctrl+V do too.
   - With speakers, a paragraph starts at each person, under the name of the person.
-  - The speaker commands are Rename, Same Person As and Separate.
+  - A double-click on the name of a speaker opens a field for a new name (p. 1001).
+  - vidcut: the right-click menu of the name has Rename, Same Person As and Separate.
   - Assign To gives the selected words to another person.
   - Several transcripts of a file:
     - Transcribe Audio keeps the transcript with the file. It does not keep it in the project.
