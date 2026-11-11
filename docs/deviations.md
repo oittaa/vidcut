@@ -1630,26 +1630,20 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The effect has no public rules. A spectral gate is the usual way to lower steady noise and it runs in real time.
   - The default effect lowered the noise by 0.4 dB and the quiet lines by up to 6.0 dB (spec). Meeting recordings need the opposite.
 
-## X160. The graph sits above the tracks with a scale for each curve
+## X160. The graph sits above the tracks
 
 - **Resolve:**
   - The Curve Editor takes the place of the tracks. One keyframe track for the selected curve is at its bottom (p. 1261).
   - A Parameters menu with checkboxes selects the curves (p. 1262).
-  - Auto Zoom Graph Height sets the scale of the graph from the active keyframes (p. 1264).
-  - Its menu has Off, On and Normalized. A new project uses Normalized (measured in Resolve Studio 21.2).
-    - Normalized gives each curve the full height with its own range, and the labels show the active curve.
-    - On and Off give all the curves one scale.
   - After a click on an empty part of the graph, no curve is active (measured in Resolve Studio 21.2).
   - A larger editor is a window of its own (p. 1260).
 - **vidcut:**
   - The Graph button shows the graph above all the tracks. The tracks stay under it.
   - The curve button of each track turns its line on or off in the graph.
-  - Each curve fills the height of the graph with its own scale, as Normalized does. There is no choice of scale.
   - One curve is always active. A click on an empty part of the graph clears only the selection.
   - A drag on the line under the graph changes its height. No window opens.
 - **Why:**
   - The tracks keep the diamonds of all the values. A box and a group drag still work there.
-  - Opacity and Rotation have very different ranges. With one scale, one of the two is almost flat.
   - With one active curve, its points and handles stay ready to use.
   - Each track already has a curve button. Checkboxes in a menu repeat it.
 
