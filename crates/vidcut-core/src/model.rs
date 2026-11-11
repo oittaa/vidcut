@@ -5375,7 +5375,8 @@ pub struct ClipAudio {
     /// Left out at 0, the middle.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub pan: f64,
-    /// The equalizer. Left out when the clip has none.
+    /// The equalizer. Left out when the clip has none, as a new clip:
+    /// then it is off, with the usual bands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equalizer: Option<Equalizer>,
     /// The Dialogue Leveler. Left out when the clip has none.

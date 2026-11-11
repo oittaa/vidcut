@@ -255,7 +255,7 @@ pub struct TimelineView {
     pub silence: Option<tools::SilenceDialog>,
     pub normalize: Option<super::normalize::NormalizeDialog>,
     pub normalize_last: Option<super::normalize::Choice>,
-    pub equalizer: Option<super::equalizer::EqualizerDialog>,
+    pub equalizer: Option<super::equalizer::Draft>,
     pub track_naming: Option<(String, String)>,
     pub leveler: Option<super::leveler::LevelerDialog>,
     pub compressor: Option<super::compressor::CompressorDialog>,
@@ -1296,7 +1296,6 @@ impl Workspace {
         self.section_window(ui.ctx());
         self.silence_window(ui.ctx());
         self.normalize_window(ui.ctx());
-        self.equalizer_window(ui.ctx());
         self.leveler_window(ui.ctx());
         self.compressor_window(ui.ctx());
         self.noise_window(ui.ctx());
