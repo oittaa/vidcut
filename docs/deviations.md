@@ -119,40 +119,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The EDL of Resolve keeps one video track, and no audio tracks or markers. Its FCPXML (1.10) keeps no markers.
   - vidcut carries what it does not model. Thus a cut that is finished in Resolve can come back for a recut and go back intact.
 
-## X12. Preferences hold only what vidcut needs
-
-- **Resolve:**
-  - Preferences has System and User panels with many settings (p. 94).
-  - The project settings and the preferences set up caches and proxies (pp. 191–218).
-- **vidcut:**
-  - File > Preferences (Ctrl+,) holds the settings of `preferences.toml` ([design/model.md](design/model.md#preferences)).
-  - These are the theme, GPU use, and the memory and the audio device of the player.
-  - They also include the limit of the disk cache, the thumbnails, the proxy rules and folder, the filler words and the keys ([X138](#x138-the-keys-are-a-page-of-preferences)).
-  - They also include the keys of the paid services, and whether to ask before vidcut sends audio.
-  - A sidebar selects one page at a time.
-  - `preferences get|set|reset` give scripts access to them.
-  - When vidcut cannot read the file, the window shows why, with Show in Folder and Reset Preferences.
-  - Reset Preferences restores the defaults. It keeps the old file as a backup. It never replaces a backup.
-  - Reset vidcut… on the General page, and `vidcut reset`, restore the state of a fresh install. A confirmation comes first.
-  - They do not remove the kept speech models and paid replies while Keep downloaded models and paid replies is on. This setting is on by default.
-- **Why:**
-  - A preference is here only when vidcut has a behavior to choose.
-  - The user can edit a plain TOML file by hand and keep it in dotfiles. Agents can change it.
-  - A reset gives a clean start in one step, also for tests. The user does not have to find each file.
-
-## X13. Deinterlacing has one quality
-
-- **Resolve:**
-  - Each interlaced clip has a Deinterlace Quality (Normal, High, Neural Engine) in the Inspector.
-  - Playback always uses Normal (p. 741).
-  - Clip Attributes turn deinterlacing on or off for each clip (p. 451).
-- **vidcut:**
-  - vidcut always deinterlaces frames flagged as interlaced by the method of `bwdif`, in the preview and in the export ([D34](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-- **Why:**
-  - One method keeps the preview and the export frame-exact.
-  - `bwdif` is the better of the CPU deinterlacers of FFmpeg.
-  - Thus the Inspector needs no Deinterlace Quality for each clip ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
-
 ## X14. The timeline color space has no grading
 
 - **Resolve:**
@@ -208,18 +174,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The file type does not tell the frames of a render from numbered photos.
   - A wrong guess turns a slideshow into a blink, or a render into thousands of stills.
   - A flag keeps scripts predictable.
-
-## X18. Only the pictures of the preview use proxies
-
-- **Resolve:**
-  - The user generates proxies from the Media Pool.
-  - Playback switches between the proxies and the originals (pp. 207–218).
-  - Export reads the originals. The "Use proxy media" render setting makes it read the proxies (p. 214).
-- **vidcut:**
-  - Only the pictures of the preview use proxies.
-  - The sound of the preview, the export, frames, analysis and OTIO read the originals ([D41](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-- **Why:**
-  - The preview cannot drift from the mix or from the delivered frames.
 
 ## X19. HDR metadata comes from the sources
 
@@ -496,24 +450,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The track that the viewer shows is the track that the user works on. Thus one control does both.
 
-## X45. Subtitles go into any container
-
-- **Resolve:**
-  - The subtitle Format on the Deliver page has three choices.
-  - They are a separate file, Burn into video (the selected track), and As embedded captions.
-  - Embedded captions are CEA-608 in MXF OP1A and QuickTime.
-  - Or several tracks go in QuickTime and MXF as subtitle streams, or as CEA-608 or EAS708 captions.
-  - The Codec pop-up (Text, CEA-608) selects which (pp. 1247–1248).
-- **vidcut:**
-  - `subtitles_as` on `export.start`, and Subtitles in the Export dialog, have three values: `file`, `stream` or `burn`.
-  - A stream is text in each container that vidcut writes and that can hold text.
-  - There is a stream for each named track. The default is the shown track.
-  - vidcut does not write CEA-608 or MXF.
-- **Why:**
-  - Players read text streams in the containers that vidcut writes.
-  - CEA-608 is a broadcast format with lines of 32 characters.
-  - vidcut writes no MXF.
-
 ## X46. Create Subtitles from Audio with open models on this computer
 
 - **Resolve:**
@@ -681,16 +617,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - It is one step from the speech to animated subtitles.
   - The user does not make subtitles, find a template and drop it on the track. Fusion is not necessary.
   - Word times stay correct after an edit or a correction, and there is no button to remember.
-
-## X59. Looks have no export or import
-
-- **Resolve:**
-  - The user can export or import a subtitle preset as a `.preset` file (pp. 1239–1240).
-- **vidcut:**
-  - There is no export or import of looks ([D71](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - Each look is a TOML file in the config folder. The file copies to another computer as it is.
-- **Why:**
-  - A file for each look, as for export presets, is its own export and import.
 
 ## X60. The pool's metadata strip shows a file's format
 
@@ -937,16 +863,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The guides belong on the one picture fitted to the timeline.
   - A two-up view has no single frame for one crop.
-
-## X81. No KeyKode in the timecode menu
-
-- **Resolve:**
-  - A right-click on the viewer timecode offers KeyKode (pp. 713–714).
-- **vidcut:**
-  - The menu has no KeyKode.
-  - vidcut does not read film edge numbers.
-- **Why:**
-  - vidcut has no film-scan metadata to show.
 
 ## X83. Pitch and yaw are Inspector values
 
@@ -1254,21 +1170,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Without libraries, the projects that vidcut opened are the projects that it knows.
   - The folder of a project file is the nearest thing to a library.
   - The files of a cache folder have names from their content. Thus two projects can share a file, and vidcut can clear only the full folder.
-
-## X106. A clip with an alpha channel is cached with the tracks mixed
-
-- **Resolve:**
-  - Uncompressed 10-bit, Uncompressed 16-bit Float, ProRes 4444, ProRes 4444 XQ and DNxHR 444 keep the alpha channel of a cached clip (p. 201).
-  - Thus Resolve can cache a clip with an alpha channel at the clip level in these formats.
-- **vidcut:**
-  - Only ProRes 4444 and ProRes 4444 XQ keep the alpha channel. Media with an alpha channel is at the clip level only with these codecs ([spec D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - DNxHR 444 keeps no alpha channel. vidcut has no uncompressed codec ([X103](#x103-the-render-cache-is-made-in-the-background)).
-  - At the timeline level, the cache holds the frame after the tracks mix. The frame looks the same.
-  - The name of such a frame comes from all its layers, not from its time (`Cache::keys`). Thus its cache stays while its layers stay the same.
-  - A change on another track at the time of the frame renders it again. A move of the clip renders it again where other frames are under the clip.
-- **Why:**
-  - The DNxHR encoder of FFmpeg has no pixel format with alpha.
-  - The timeline level gives the same picture with one simple path. The cost is only more renders after edits.
 
 ## X110. A shrink above 8:1 reads each source pixel
 

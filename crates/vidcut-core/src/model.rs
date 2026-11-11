@@ -896,7 +896,7 @@ impl TimelineColors {
 }
 
 /// A playback proxy of a pool item: an easy-to-play file whose frames carry
-/// the source's presentation timestamps (decision D41, deviation X18).
+/// the source's presentation timestamps (decision D41).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Proxy {
     /// The proxy file's name. Each computer looks for it in its own proxy

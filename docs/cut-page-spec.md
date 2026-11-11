@@ -541,7 +541,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The timecode is drop-frame where the project counts drop-frame (D47).
   - That default is Auto (D91).
   - A right-click chooses another count (D91).
-  - There is no KeyKode (X81).
+  - There is no KeyKode ([gaps](todo/cut-page-gaps.md)).
 - **Stats for Nerds** (vidcut):
   - The right-click menu of the viewer opens a panel over the picture.
   - The panel has a group for each of these:
@@ -1352,7 +1352,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Resolve Studio 21.1.1 leaves the subtitle tracks out of its OpenTimelineIO, FCPXML, FCP 7 XML, EDL and CSV exports.
   - A subtitle file in an OpenTimelineIO file makes the import of Resolve Studio 21.1.1 fail.
   - vidcut: an OpenTimelineIO export writes an SRT beside it for each subtitle track with cues.
-  - Details: D58, D61, D64; deviation X45.
+  - Details: D58, D61, D64.
 - **Create Subtitles from Audio** (pp. 1234–1235):
   - It transcribes the speech of the timeline's In–Out range, or of the whole timeline.
   - The cues go onto the highest subtitle track. If there is no subtitle track, it makes one.
@@ -1469,7 +1469,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It loads a preset onto a track as one change that you can undo.
   - It replaces a preset and deletes a preset, each after a confirmation.
   - It exports or imports a preset as a `.preset` file.
-  - vidcut: looks, for titles too. Some looks are built in (X59). Details: D71.
+  - vidcut: looks, for titles too. Some looks are built in. Details: D71.
 - **Later:**
   - the faces of a track style other than regular and bold, line spacing, kerning, zoom, opacity (p. 1237)
   - caption presets (p. 1235)
@@ -2999,7 +2999,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Mirrored matrices count only as rotations.
 - **D34. Interlaced sources** (p. 741).
   - A stream is interlaced if its field order says so, or if its first frame has the interlaced flag.
-  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`, one frame for each frame (deviation X13).
+  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`, one frame for each frame.
   - The deinterlacer keeps the first field.
   - Output is never interlaced, and never at the field rate.
 - **D35. HDR and color** (pp. 230–239).
@@ -3087,7 +3087,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - After such an edit the parts can differ in place or length. Then they are separate clips, and an export gives them no link group.
     - A timeline drag shows only the part under the pointer. The other parts move when the drag ends.
     - Resolve was not measured for a locked part, or for a move to another track.
-- **D41. Proxies** (deviation X18; the proxy chapters, pp. 207–218, are outside the Cut page).
+- **D41. Proxies** (the proxy chapters, pp. 207–218, are outside the Cut page).
   - Videos and image sequences get proxies on demand (Generate Proxy).
   - A running GUI also makes proxies for media that are hard to play (preferences `proxies.*`):
     - image sequences
@@ -3441,7 +3441,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A duration of less than one frame is refused.
   - A source Out past the end of the media is refused.
   - `marks.set` and `media.marks.set` take the same values as `duration`.
-- **D61. Burned-in subtitles** (§8.12; p. 1247; deviations X45, X51).
+- **D61. Burned-in subtitles** (§8.12; p. 1247; deviation X51).
   - The manual does not say how a track looks burned in before it has a style.
   - The usual look is Resolve's default, measured in Resolve Studio 21.1.2:
     - White Open Sans Regular at Size 58: 58/1080 of the picture height.
@@ -3920,7 +3920,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Thus captions that are off from the speech still find their words.
   - A matched word starts where it was heard, kept inside its cue.
   - The other words are spread between their matched neighbors by their characters.
-- **D71. Looks** (§8.12, §8.14; pp. 1239–1240; deviation X59).
+- **D71. Looks** (§8.12, §8.14; pp. 1239–1240).
   - The manual saves the style of a subtitle track as a named preset, and loads it onto a track.
   - It does not say where presets are kept, or tell of any built-in presets.
   - A look is a named style for a subtitle track or a title.
@@ -4506,7 +4506,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - These are the values in SMPTE ST 2046-1 and EBU R 95.
   - Title layout still uses 90% of the picture (D65). The overlay uses the same share of the extents.
   - The extents are the framing box. Default framing uses the picture.
-- **D91. The viewer timecode menu** (§4.3; pp. 713–714; deviation X81).
+- **D91. The viewer timecode menu** (§4.3; pp. 713–714).
   - Auto is the default. It follows the viewer.
   - Source modes show Source Timecode.
   - Timeline mode shows record timecode.
@@ -4587,7 +4587,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
   - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
   - Each can have keyframes (D75). Their keys have the form of the keys of the rotation, in the units of the plain value.
-- **D98. Render cache** (deviations X103, X105, X106; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
+- **D98. Render cache** (deviations X103, X105; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
   - The render cache keeps on disk the frames that are slow to make. The viewer plays them from there. Exports do not use it.
   - The project has a mode (`render_cache`): Off, Smart or User. A new project has Off, as in Resolve.
     - Playback > Render Cache sets it. `project.set` with `render_cache` also sets it.
@@ -4645,7 +4645,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A move, a split, a trim or an edit on another track keeps it.
     - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Super Scale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
-    - Media with an alpha channel is at the clip level only with ProRes 4444 or 4444 XQ (p. 201, X106). Its file then keeps the alpha channel.
+    - Media with an alpha channel is at the clip level only with ProRes 4444 or 4444 XQ (p. 201). Its file then keeps the alpha channel.
       - With an Alpha Mode of None, it counts as media with no alpha channel.
       - With an Alpha Mode of Premultiplied, it stays at the timeline level. Why: a file keeps straight alpha, which cannot hold a color above its alpha.
       - With a checked effect, or with a Retime Process while it plays forward, it stays at the timeline level. Why: its file holds only the colors of the placed clip.
