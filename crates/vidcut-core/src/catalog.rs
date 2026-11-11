@@ -697,6 +697,25 @@ pub static PPOCR_DET: Model = Model {
     price: None,
 };
 
+pub const YOLOX_ONNX: File = File {
+    name: "yolox/object_detection_yolox_2022nov.onnx",
+    title: "YOLOX-S object detection",
+    url: "https://huggingface.co/opencv/object_detection_yolox/resolve/78c368f74ce73ee28fc7a1be418a598c71b58b52/object_detection_yolox_2022nov.onnx",
+    bytes: 35_858_002,
+    sha256: "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063",
+};
+
+pub static YOLOX: Model = Model {
+    id: "yolox",
+    times: None,
+    title: "YOLOX-S object detection",
+    files: &[YOLOX_ONNX],
+    service: None,
+    languages: &[],
+    limits: &[],
+    price: None,
+};
+
 pub const VITTRACK_ONNX: File = File {
     name: "vittrack/object_tracking_vittrack_2023sep.onnx",
     title: "VitTrack object tracking",
@@ -842,7 +861,7 @@ pub static EMA_VFI: Model = Model {
     price: None,
 };
 
-pub static ALL: [&Model; 16] = [
+pub static ALL: [&Model; 17] = [
     &PARAKEET_ULTRA,
     &QWEN3_ASR,
     &WHISPER_LARGE_V3,
@@ -854,6 +873,7 @@ pub static ALL: [&Model; 16] = [
     &DPDFNET,
     &YUNET,
     &PPOCR_DET,
+    &YOLOX,
     &VITTRACK,
     &NANOVSR,
     &FLASHVSR,

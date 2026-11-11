@@ -3,6 +3,7 @@ use std::path::Path;
 use tract_onnx::prelude::*;
 use vidcut_core::analysis::Found;
 
+use super::bad;
 use crate::error::{Error, Result};
 
 pub use vidcut_core::catalog::YUNET_ONNX as FILE;
@@ -21,21 +22,6 @@ pub(crate) struct Model {
 pub fn name() -> String {
     let hundredths = |v: f32| (v * 100.0).round();
     format!("yunet-{SIDE}-{}-{}", hundredths(LEAST), hundredths(SAME))
-}
-
-fn bad(path: &Path, what: impl std::fmt::Display) -> Error {
-    Error::Invalid(format!("{}: {what}", path.display()))
-}
-
-fn overlap(a: &Found, b: &Found) -> f32 {
-    let side = |i: usize| {
-        let (a0, a1) = (a.center[i] - a.size[i] / 2.0, a.center[i] + a.size[i] / 2.0);
-        let (b0, b1) = (b.center[i] - b.size[i] / 2.0, b.center[i] + b.size[i] / 2.0);
-        (a1.min(b1) - a0.max(b0)).max(0.0)
-    };
-    let both = side(0) * side(1);
-    let all = a.size[0] * a.size[1] + b.size[0] * b.size[1] - both;
-    if all > 0.0 { both / all } else { 0.0 }
 }
 
 impl Model {
@@ -114,13 +100,6 @@ impl Model {
                 });
             }
         }
-        found.sort_by(|a, b| b.score.total_cmp(&a.score));
-        let mut kept: Vec<Found> = Vec::new();
-        for f in found {
-            if kept.iter().all(|k| overlap(k, &f) <= SAME) {
-                kept.push(f);
-            }
-        }
-        Ok(kept)
+        Ok(super::apart(found, SAME))
     }
 }

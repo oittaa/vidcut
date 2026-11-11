@@ -13,6 +13,7 @@ use crate::ffmpeg::{format, frame, software::scaling};
 use crate::models::{self, Fetch, Need};
 
 pub mod ppocr;
+pub mod yolox;
 pub mod yunet;
 
 const STEP: u32 = 32;
@@ -21,10 +22,37 @@ fn padded(side: u32) -> u32 {
     side.div_ceil(STEP) * STEP
 }
 
+fn bad(path: &Path, what: impl std::fmt::Display) -> Error {
+    Error::Invalid(format!("{}: {what}", path.display()))
+}
+
+fn overlap(a: &Found, b: &Found) -> f32 {
+    let side = |i: usize| {
+        let (a0, a1) = (a.center[i] - a.size[i] / 2.0, a.center[i] + a.size[i] / 2.0);
+        let (b0, b1) = (b.center[i] - b.size[i] / 2.0, b.center[i] + b.size[i] / 2.0);
+        (a1.min(b1) - a0.max(b0)).max(0.0)
+    };
+    let both = side(0) * side(1);
+    let all = a.size[0] * a.size[1] + b.size[0] * b.size[1] - both;
+    if all > 0.0 { both / all } else { 0.0 }
+}
+
+fn apart(mut found: Vec<Found>, same: f32) -> Vec<Found> {
+    found.sort_by(|a, b| b.score.total_cmp(&a.score));
+    let mut kept: Vec<Found> = Vec::new();
+    for f in found {
+        if kept.iter().all(|k| overlap(k, &f) <= same) {
+            kept.push(f);
+        }
+    }
+    kept
+}
+
 fn model(subject: Subject) -> &'static catalog::Model {
     match subject {
         Subject::Face => &catalog::YUNET,
         Subject::Text => &catalog::PPOCR_DET,
+        Subject::Person | Subject::Vehicle => &catalog::YOLOX,
     }
 }
 
@@ -32,6 +60,7 @@ fn file(subject: Subject) -> catalog::File {
     match subject {
         Subject::Face => yunet::FILE,
         Subject::Text => ppocr::FILE,
+        Subject::Person | Subject::Vehicle => yolox::FILE,
     }
 }
 
@@ -39,6 +68,7 @@ fn side(subject: Subject) -> u32 {
     match subject {
         Subject::Face => yunet::SIDE,
         Subject::Text => ppocr::SIDE,
+        Subject::Person | Subject::Vehicle => yolox::SIDE,
     }
 }
 
@@ -46,12 +76,15 @@ fn rules(subject: Subject) -> String {
     match subject {
         Subject::Face => yunet::name(),
         Subject::Text => ppocr::name(),
+        Subject::Person => yolox::name(yolox::PEOPLE),
+        Subject::Vehicle => yolox::name(yolox::VEHICLES),
     }
 }
 
 enum Net {
     Face(yunet::Model),
     Text(ppocr::Model),
+    Things(yolox::Model),
 }
 
 impl Net {
@@ -59,6 +92,8 @@ impl Net {
         Ok(match subject {
             Subject::Face => Self::Face(yunet::Model::load(path, size)?),
             Subject::Text => Self::Text(ppocr::Model::load(path, size)?),
+            Subject::Person => Self::Things(yolox::Model::load(path, yolox::PEOPLE)?),
+            Subject::Vehicle => Self::Things(yolox::Model::load(path, yolox::VEHICLES)?),
         })
     }
 
@@ -66,6 +101,7 @@ impl Net {
         match self {
             Self::Face(m) => m.size(),
             Self::Text(m) => m.size(),
+            Self::Things(m) => m.size(),
         }
     }
 
@@ -73,6 +109,7 @@ impl Net {
         match self {
             Self::Face(m) => m.find(picture),
             Self::Text(m) => m.find(picture, content),
+            Self::Things(m) => m.find(picture, content),
         }
     }
 }

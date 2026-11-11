@@ -1925,15 +1925,23 @@ pub enum Subject {
     /// neural network (PP-OCRv5) on the CPU finds them. Its file (4.8 MB)
     /// downloads at its first use.
     Text,
+    /// People, each as a whole body. A neural network (YOLOX-S) on the CPU
+    /// finds them. Its file (35.9 MB) downloads at its first use.
+    Person,
+    /// Vehicles: bicycles, cars, motorcycles, buses, trains and trucks. The
+    /// neural network of `person` finds them, from the same file.
+    Vehicle,
 }
 
 impl Subject {
-    pub const ALL: [Self; 2] = [Self::Face, Self::Text];
+    pub const ALL: [Self; 4] = [Self::Face, Self::Text, Self::Person, Self::Vehicle];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Face => "face",
             Self::Text => "text",
+            Self::Person => "person",
+            Self::Vehicle => "vehicle",
         }
     }
 
@@ -1941,6 +1949,8 @@ impl Subject {
         match self {
             Self::Face => "Face",
             Self::Text => "Text",
+            Self::Person => "Person",
+            Self::Vehicle => "Vehicle",
         }
     }
 
@@ -1948,6 +1958,8 @@ impl Subject {
         match self {
             Self::Face => "Faces",
             Self::Text => "Text",
+            Self::Person => "People",
+            Self::Vehicle => "Vehicles",
         }
     }
 

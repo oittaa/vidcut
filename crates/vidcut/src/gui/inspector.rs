@@ -38,6 +38,7 @@ const SAME: f64 = 1e-9;
 const FIELD_WIDTH: f32 = 76.0;
 const NAME_WIDTH: f32 = 140.0;
 const BLUR_SIZE: [f64; 2] = [1.3, 1.3];
+pub(super) const SUBJECTS: [Subject; 2] = [Subject::Face, Subject::Text];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Field {
@@ -2855,7 +2856,7 @@ fn follow_row(
             if ui.selectable_label(now.is_none(), "None").clicked() && now.is_some() {
                 acts.push(area_set(n, json!({ "follows": null })));
             }
-            for s in Subject::ALL {
+            for s in SUBJECTS {
                 let on = subject == Some(s);
                 if ui.selectable_label(on, all_of(s)).clicked() && !on {
                     acts.push(area_set(n, json!({ "follows": s.name() })));
@@ -4067,7 +4068,7 @@ impl Workspace {
                     egui::ComboBox::from_id_salt("inspector-motion-subject")
                         .selected_text(subject.many())
                         .show_ui(ui, |ui| {
-                            for s in Subject::ALL {
+                            for s in SUBJECTS {
                                 ui.selectable_value(&mut subject, s, s.many());
                             }
                         });
