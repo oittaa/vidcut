@@ -12,6 +12,7 @@ const SNAP: f32 = 8.0;
 const LIFT: f32 = 26.0;
 const LINES: [f64; 3] = [1.0 / 3.0, 0.5, 2.0 / 3.0];
 const KEPT: usize = 8;
+const TEXT_W: f32 = 120.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Hold {
@@ -35,6 +36,7 @@ struct Held {
 pub struct Grab {
     selected: Option<String>,
     held: Option<Held>,
+    editing: Option<(String, bool)>,
     landing: Option<(String, Title, std::time::Instant, Title)>,
     sent: Option<(String, Title)>,
     boxes: Lru<(Title, (u32, u32)), [f32; 5], KEPT>,
@@ -454,7 +456,9 @@ impl Workspace {
                 .map(|s| s.clip.clone())
         {
             self.open_title(&id);
+            self.timeline.title_grab.editing = Some((id, true));
         }
+        self.title_text_box(ui.ctx(), &shapes);
         if let Some(h) = &self.timeline.title_grab.held
             && h.hold == Hold::Zoom
         {
@@ -470,6 +474,43 @@ impl Workspace {
         }
         self.sync_title_preview();
         self.paint_title_controls(ui, picture, &shapes, pointer);
+    }
+
+    fn title_text_box(&mut self, ctx: &egui::Context, shapes: &[Shown]) {
+        let Some((clip, fresh)) = self.timeline.title_grab.editing.clone() else {
+            return;
+        };
+        let shown = shapes.iter().find(|s| s.clip == clip);
+        let dialog = self
+            .timeline
+            .title_dialog
+            .as_mut()
+            .filter(|d| d.clip() == clip);
+        let (Some(s), Some(d)) = (shown, dialog) else {
+            self.timeline.title_grab.editing = None;
+            return;
+        };
+        let rect = Rect::from_points(&s.corners);
+        let r = egui::Area::new(egui::Id::unique("title-text-box"))
+            .fixed_pos(rect.min)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(d.text_mut())
+                        .desired_width(rect.width().max(TEXT_W))
+                        .desired_rows(1),
+                )
+            })
+            .inner;
+        if r.changed() {
+            d.typed();
+        }
+        if fresh {
+            r.request_focus();
+            self.timeline.title_grab.editing = Some((clip, false));
+        } else if !r.has_focus() {
+            self.timeline.title_grab.editing = None;
+        }
     }
 
     fn paint_title_controls(
