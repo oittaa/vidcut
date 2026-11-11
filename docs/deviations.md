@@ -86,6 +86,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
 
 - **Resolve:**
   - Delete Bin deletes the bin, the bins in it and their clips (p. 377).
+  - These are measurements in Resolve Studio 21.2:
+    - Remove Selected Clip on media that timeline clips use asks no question. The pool item goes.
+    - The clips of that media on the timeline stay, offline.
+    - A compound clip that holds a clip of that media stays in the pool and on the timeline.
 - **vidcut:**
   - `bins.remove` removes the bin and the bins in it. Their media move up to its parent bin.
   - `media.remove` removes media. It needs `force` when clips or compound clips use the media.
@@ -625,6 +629,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Insert Selected Subtitles to Timeline Using Timecode places its cues by timecode. From a file timed from zero, it inserts nothing.
   - The user can drag the file onto a subtitle track. Then its first cue goes where the user drops it.
   - A drop on the gray area above the video tracks makes a new subtitle track. There too, the first cue goes where the user drops it (p. 1230).
+  - These are measurements in Resolve Studio 21.2, on a timeline with one subtitle track:
+    - A drop of a subtitle item on video track 1 makes no new track. Video track 1 does not change.
+    - The cues go on the subtitle track from the drop point. They overwrite the cues there.
 - **vidcut:**
   - Import Media, Import Media Folder and File > Import Subtitle bring in SRT, WebVTT and TTML files. vidcut does not read `.srtx`.
   - A subtitle item in the pool shows the text of its first cue, and how many cues it holds.
@@ -657,6 +664,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A list at the bottom of the Captions panel shows every subtitle of the track (p. 1231).
   - Prev and Next move through the list (p. 1233).
   - The manual does not tell where the playhead goes.
+  - These are measurements in Resolve Studio 21.2:
+    - Next, and a click on a row of the list, select the cue and put the playhead at its In.
+    - A click on a subtitle on the track does not move the playhead.
+    - The typed text shows in the viewer at once. After a click at another place, one Ctrl+Z removes all of the typed text.
+    - Insert Selected Subtitles to Timeline Using Timecode cuts the head of a later cue that overlaps. Cues at 11–13 s and 12–14 s become 11–13 s and 13–14 s.
   - In Resolve Studio 21.1.1, the panel is as the screenshots on pp. 1231 and 1233 show it:
     - Above the text box, a line has an In field and an Out field. At its right, a dim "11 Characters" counts the characters of the text.
     - Add New is at the left of the line above the list. Prev and Next are at its right.
@@ -900,6 +912,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Position in the Inspector also moves it (p. 764).
   - A lower third is at a corner or at the middle of the bottom of title safe (p. 1178).
   - A position goes from 4 picture sizes before its bottom left to 4 picture sizes after it, on each axis (measured in Resolve Studio 21.1.2).
+  - The Position of a Text title in the Inspector is in frame pixels from the bottom left, with Y up (measured in Resolve Studio 21.2).
+    - In a 3840 × 2160 timeline, the middle of the picture is X 1920, Y 1080.
 - **vidcut:**
   - The Title section of the Inspector shows the place of a title from the top left of the picture.
   - It shows the place in percents of the width and the height of the picture.
@@ -973,6 +987,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - AI Animated Subtitles are only in Resolve Studio. They are Fusion title templates in the Animated section of the Titles tab.
   - After the subtitles are made, the user drags a template onto the header of a subtitle track. The user sets it in the Inspector (p. 1240).
   - After a correction, Update Word Timings times the words of a cue again. Synchronize Word Timings does this for a track (p. 1241).
+  - Synchronize Word Timings is in the right-click menu of the header of a subtitle track on the Edit page (Resolve Studio 21.2).
   - Measured in Resolve Studio 21.1.2:
     - The word times of a cue count from its start. A ripple delete, a razor cut and a trim do not change them.
     - The highlighted word is then not the word that is spoken, until the word timings are updated.
@@ -1215,6 +1230,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Audio panel has Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (pp. 743–744).
   - The manual names no Mute in the Audio panel (pp. 742–744).
   - Its Video panel also has Speed Change: Direction, Speed %, Frames Per Second, Duration, Ripple Sequence and Pitch Correction (pp. 736–737).
+  - These are measurements on the Cut page of Resolve Studio 21.2:
+    - The Speed Change rows are Direction, Ease, Change Speed, Frames per Second, Duration and Pitch Correction. There is no Ripple Sequence box.
+    - Pitch Correction is on. A speed change ripples the clips after the clip.
   - With several clips selected, its header is Multiple Clips, and a value that differs between them shows a dash (measured in Resolve Studio 21.1.2).
 - **vidcut:**
   - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
@@ -1327,12 +1345,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
 
 - **Resolve:**
   - The Safe Area button and View > Safe Area set overlays on the viewer (pp. 682–683, 1177).
-  - The viewer keeps one picture while you trim.
+  - In Resolve Studio 21.2, the Trim Editor also shows the title-safe guide. It is one box over the whole two-up view, fitted to the viewer. It is not one box for each picture.
 - **vidcut:**
   - The Trim Editor and Dynamic Trim show no guides. Those views are two pictures, or four.
   - A viewer screenshot is the picture without the guides.
 - **Why:**
   - The guides belong on the one picture fitted to the timeline.
+  - One box over two pictures marks neither picture. vidcut does not copy it.
   - A two-up view has no single frame for one crop.
 
 ## X81. No KeyKode in the timecode menu
