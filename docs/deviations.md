@@ -1848,6 +1848,19 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The ease menu is already on the keyframe ([spec §2](cut-page-spec.md#2-layout-pp-636637)). A second place in a title bar adds nothing.
   - A selection across several values takes one ease in one undo step.
 
+## X159. Snapping also goes to other keyframes
+
+- **Resolve:**
+  - Enable Snapping snaps the control points of the Curve Editor to the playhead (pp. 1259, 1264).
+  - A keyframe of another curve and a timeline marker are not targets (measured in Resolve Studio 21.2).
+- **vidcut:**
+  - Enable Snapping acts on each drag of keyframes: on a track, on a group track and on a curve.
+  - A dragged keyframe goes to the playhead or to a keyframe of another value when one is near.
+  - It does not act on a handle, or on a Shift-drag that changes only the value.
+- **Why:**
+  - Two values often change on the same frame. A snap to the keyframes of the other values does this without a look at the timecode.
+  - Two keyframes of one value cannot share a frame. Thus the keyframes of the same value are not targets.
+
 ## X160. The graph sits above the tracks with a scale for each curve
 
 - **Resolve:**
