@@ -2605,3 +2605,19 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A blur must cover each face of a clip, and the user must not draw each one.
   - Text is the next thing that people hide: names, addresses, documents and screens.
   - One request gives the paths. The area of an effect then follows a path ([X166](#x166-an-effect-has-an-area)).
+
+## X168. The area of an effect follows a thing
+
+- **Resolve:**
+  - The Cut page has no tracker for an effect of a clip. The Tracker palette of the Color page follows a thing with a window (p. 3308).
+  - One click on Track Forward tracks from the playhead. The track holds Pan, Tilt, Zoom, Rotate and Perspective 3D (pp. 3312–3313).
+  - The tracker does not stop at a shot change. In a clip with a cut, it ran 7 frames into the next shot, and then stopped (21.2).
+  - After the track stops, the window stays at its last place for the rest of the clip (21.2).
+- **vidcut:**
+  - `motion.track` follows the thing under the area of an effect, backward and forward from one frame.
+  - The track stops at a shot change. Where the track ends, the effect ends.
+  - The track follows the place and the size of the thing. It does not follow a turn or a change of perspective.
+- **Why:**
+  - A blur must not go on a thing of the next shot. It must not stay on the picture after its thing is gone ([X166](#x166-an-effect-has-an-area)).
+  - The user sees where a track ends, goes to that frame, and tracks again from there.
+  - The model gives a box, and a box has no turn.

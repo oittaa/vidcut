@@ -124,7 +124,7 @@ pub fn inspect(dir: &Path, subject: Subject, download: bool) -> Result<()> {
     Net::load(subject, &dir.join(file(subject).name), side).map(drop)
 }
 
-fn fitted(decoded: &frame::Video, turn: u16, most: u32) -> (u32, u32) {
+pub(crate) fn fitted(decoded: &frame::Video, turn: u16, most: u32) -> (u32, u32) {
     let sar = decoded.aspect_ratio();
     let wide = match (sar.numerator(), sar.denominator()) {
         (n, d) if n > 0 && d > 0 => f64::from(n) / f64::from(d),
@@ -140,7 +140,7 @@ fn fitted(decoded: &frame::Video, turn: u16, most: u32) -> (u32, u32) {
     (side(w), side(h))
 }
 
-fn small(
+pub(crate) fn small(
     scaler: &mut Option<scaling::Context>,
     decoded: &frame::Video,
     (w, h): (u32, u32),

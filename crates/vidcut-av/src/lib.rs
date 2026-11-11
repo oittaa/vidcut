@@ -47,6 +47,7 @@ pub mod subjects;
 pub mod super_scale;
 pub mod testdata;
 pub mod thumbs;
+pub mod tracking;
 pub mod transcribe;
 pub(crate) mod turns;
 pub mod waveform;

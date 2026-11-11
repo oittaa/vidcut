@@ -12,7 +12,7 @@ use crate::model::{
     EffectArea, EffectType, EffectValue, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput,
     GrainComposite, GrainPreset, Handle, LowerThirdLine, PathSample, PictureTool,
     PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
-    TitleStyle, TrackClip, VignetteMode, VignetteShape, ZoomBox,
+    TitleStyle, TrackClip, TrackWay, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2825,6 +2825,39 @@ pub enum Request {
         #[serde(default)]
         replace: bool,
         /// Download the model of the subject when it is not on this
+        /// computer, checked against its SHA-256. Without it, a missing
+        /// model is an error that tells its size.
+        #[serde(default)]
+        download: bool,
+    },
+    /// Follow the thing under the area of one effect of a clip (`c3`, or
+    /// `V2@15s`). `effect` counts from 0, in the order of the clip's
+    /// effects. The track starts on the frame at `at`, which the clip must
+    /// show, and goes backward and forward from there. It follows the place
+    /// and the size of the thing. It stops at a shot change, where it loses
+    /// the thing, and at the ends of the clip.
+    ///
+    /// The clip gets a motion path named `Track 1`, `Track 2`, and so on.
+    /// The area then follows that path with its own shape, so the effect
+    /// works only where the path lasts. When the area follows a track
+    /// already, a track of one `way` keeps the samples of the other side.
+    ///
+    /// Returns the path: its `id`, its `name`, the `count` of its samples
+    /// and their source frames `first` and `last`. It also gives the
+    /// `score` (how sure the model is, from 0 to 1, the mean of the
+    /// frames), and why the track stopped `backward` and `forward`: `cut`,
+    /// `lost`, `clip` (an end of the clip) or `off`.
+    #[serde(rename = "motion.track")]
+    MotionTrack {
+        clip: ClipRef,
+        effect: usize,
+        /// The frame where the track starts. Default: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+        /// The ways the track goes from that frame. Usual: `both`.
+        #[serde(default)]
+        way: TrackWay,
+        /// Download the tracking model (715 kB) when it is not on this
         /// computer, checked against its SHA-256. Without it, a missing
         /// model is an error that tells its size.
         #[serde(default)]

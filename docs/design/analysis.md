@@ -31,6 +31,7 @@ flowchart TD
 | `clip.normalize` | `Env::loudness` of each clip alone (`render::sound_alone`), without its volume keyframes | `normalize::gains`; the edit then sets each `gain_db`, or moves all the keyframes of a clip (`ClipAudio::raise`) |
 | `timeline.boring` | none: clip lengths | `analysis::boring` |
 | `motion.find` | `Env::subjects`: the boxes of one kind of thing on each picture that the clip shows, each with a score | `motion::joined`; the edit then calls `ops::motion::found` |
+| `motion.track` | `Env::tracked`: the box of one thing on each picture of the track, with a score | `motion::followed`; the edit then calls `ops::motion::tracked` |
 
 - Given `parts`, `edit.ripple_delete_silence` measures nothing. It checks that each part is inside its clip and apart from the other parts, and cuts them.
 
@@ -108,6 +109,26 @@ flowchart TD
 - In a GUI, `Live::measuring` measures on `vidcut-measure` first (`editor::subject_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model files are `catalog::YUNET_ONNX` and `catalog::PPOCR_DET_ONNX`. `subjects::get_ready` fetches the file of the subject when the request has `download`.
 - `models.check` finds the subject of a model id with `subjects::of`.
+
+## Tracks
+
+- `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
+- `ops::motion::start` gives the box to follow: the bounds of the area on the first frame of the track (`Area::within`, `Area::bounds`).
+- `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:
+  - It reads the pictures that `subjects::find` reads: the first decoded frame at or after each time of the `Look`.
+  - `Seeing::start` chooses the size of the pictures: the search area of the model then has about its own size. The longer side is from 320 to 1280 pixels.
+  - `Tracker::start` cuts the template around the box. `Tracker::step` cuts the search area around the last box, and takes the place with the best score.
+    - The crops, the values of the picture and the window are those of the tracker of OpenCV for this model.
+  - A score under `tracking::LOST` ends the track. A shot change ends it too (`SCENE_SCORE`, as in `motion.find`).
+  - For the way backward, it keeps the pictures before the first frame, at most `KEPT_BYTES` of them. Then `backward` steps through them from the last to the first.
+  - `Follow` holds the `Look`, the first time, the box and the ways.
+- The result is a `Detections` with one box on each picture of the track, and no box on the other pictures (`laid`).
+  - Thus a track shares the disk cache of `motion.find` (`AvEnv::tracked`). `tracking::name` gives the model file and `LOST` to the name of the file.
+- `motion::followed` makes the samples: the box of the area, moved and scaled with the box of the track. `motion::stopped` tells why a track ended.
+- `ops::motion::tracked` stores the path, with the name Track and a number. The area then follows the path by its id, with no offset.
+  - A track of one way keeps the samples of the other side of a track that the area followed (`TrackWay`).
+- In a GUI, `Live::measuring` measures first (`editor::track_looks`). Headless, `work_first` measures on `vidcut-subjects`.
+- The model file is `catalog::VITTRACK_ONNX`. `tracking::get_ready` fetches it when the request has `download`.
 
 ## In a GUI
 

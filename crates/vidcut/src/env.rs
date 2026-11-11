@@ -409,6 +409,44 @@ impl Env for AvEnv {
         )
     }
 
+    fn tracked(
+        &self,
+        media: &Media,
+        follow: vidcut_core::analysis::Follow,
+        download: bool,
+    ) -> Result<Arc<Detections>> {
+        let dir = paths::models_dir();
+        vidcut_av::tracking::get_ready(&dir, download).map_err(av_error)?;
+        let us = |secs: f64| (secs * 1e6).round() as i64;
+        let look = follow.look;
+        let area = follow.area.map(|v| (v * 1e5).round() as i64);
+        let key = format!(
+            "{}-{}-{}-{}-{}-{}-{}-{}-{}-{}{}",
+            vidcut_av::tracking::name(),
+            us(look.from),
+            us(look.to),
+            us(look.every),
+            us(follow.at),
+            area[0],
+            area[1],
+            area[2],
+            area[3],
+            u8::from(follow.backward),
+            u8::from(follow.forward),
+        );
+        measured(
+            &self.memos.subjects,
+            analysis_file(media, &key),
+            || {
+                let decoder = crate::preferences::gpu_decoding().own_decoder();
+                let input = input_of(media);
+                vidcut_av::tracking::track(&input, &follow, decoder.as_ref(), &dir)
+            },
+            Detections::to_bytes,
+            Detections::from_bytes,
+        )
+    }
+
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {
         let lock = || LOUD.lock().unwrap_or_else(PoisonError::into_inner);
         let key = loud_key(plan);

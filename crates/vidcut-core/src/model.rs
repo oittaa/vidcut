@@ -1845,6 +1845,29 @@ pub struct MotionPath {
     pub samples: Arc<Vec<PathSample>>,
 }
 
+/// The ways that `motion.track` goes from its first frame.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackWay {
+    /// Backward and forward.
+    #[default]
+    Both,
+    /// Only forward.
+    Forward,
+    /// Only backward.
+    Backward,
+}
+
+impl TrackWay {
+    pub fn backward(self) -> bool {
+        self != Self::Forward
+    }
+
+    pub fn forward(self) -> bool {
+        self != Self::Backward
+    }
+}
+
 /// A kind of thing that `motion.find` finds in a picture.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

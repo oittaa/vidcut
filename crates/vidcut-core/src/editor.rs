@@ -172,6 +172,18 @@ pub trait Env {
         ))
     }
 
+    fn tracked(
+        &self,
+        media: &Media,
+        follow: crate::analysis::Follow,
+        download: bool,
+    ) -> Result<Arc<Detections>> {
+        let _ = (media, follow, download);
+        Err(Error::usage(
+            "a thing in a picture is followed by the vidcut program",
+        ))
+    }
+
     fn ai_upscaler(&self, upscaler: crate::model::Upscaler, download: bool) -> Result<()> {
         let _ = (upscaler, download);
         Err(Error::usage("the AI upscalers run in the vidcut program"))
@@ -4355,6 +4367,39 @@ fn mutate(
             }
             json!({ "subject": subject, "clips": out })
         }
+        Request::MotionTrack {
+            clip,
+            effect,
+            at,
+            way,
+            download,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let (media, start, follow) = track_start(p, &id, *effect, at.as_ref(), playhead, *way)?;
+            let found = env.tracked(&media, follow, *download)?;
+            let fps = p.settings.fps.as_f64();
+            let (origin, frames) = (media.origin(), start.frames);
+            let (samples, score) =
+                crate::motion::followed(&found, origin, fps, frames, &start.own, start.bounds);
+            let ends = samples.first().zip(samples.last());
+            let (first, last) =
+                ends.map_or((start.frame, start.frame), |(a, b)| (a.frame, b.frame));
+            let stop = |on: bool, frame: i64| match on {
+                false => "off",
+                true if frame < frames.0 || frame >= frames.1 => "clip",
+                true => crate::motion::stopped(&found, origin, fps, frame),
+            };
+            let stops = (
+                stop(way.backward(), first - 1),
+                stop(way.forward(), last + 1),
+            );
+            let mut out = ops::motion::tracked(p, &id, *effect, (&start, *way), samples)?;
+            out["clip"] = json!(id);
+            out["score"] = json!(score);
+            out["backward"] = json!(stops.0);
+            out["forward"] = json!(stops.1);
+            out
+        }
         Request::SubtitlesSet {
             cue,
             text,
@@ -6758,6 +6803,54 @@ pub type SubjectLook = (Media, Subject, Look, bool);
 fn subject_look(media: &Media, fps: f64, frames: (i64, i64)) -> Look {
     let seen = if media.is_still() { (0, 1) } else { frames };
     crate::motion::look(media.origin(), fps, seen)
+}
+
+fn track_start(
+    p: &Project,
+    id: &str,
+    effect: usize,
+    at: Option<&TimeSpec>,
+    playhead: Option<i64>,
+    way: crate::model::TrackWay,
+) -> Result<(Media, ops::motion::Start, crate::analysis::Follow)> {
+    let at = match at {
+        Some(t) => resolve(p, t, playhead)?,
+        None => playhead
+            .ok_or_else(|| Error::usage("motion.track needs `at` (--at): there is no playhead"))?,
+    };
+    let start = ops::motion::start(p, id, effect, at)?;
+    let media = p.clip(id).and_then(|c| p.media(&c.media)).cloned();
+    let media = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
+    let fps = p.settings.fps.as_f64();
+    let follow = crate::analysis::Follow {
+        look: crate::motion::look(media.origin(), fps, start.frames),
+        at: crate::motion::shown_time(media.origin(), fps, start.frame),
+        area: start.bounds.map(|v| v as f32),
+        backward: way.backward(),
+        forward: way.forward(),
+    };
+    Ok((media, start, follow))
+}
+
+pub type TrackLook = (Media, crate::analysis::Follow, bool);
+
+pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackLook> {
+    let Request::MotionTrack {
+        clip,
+        effect,
+        at,
+        way,
+        download,
+    } = request
+    else {
+        return Vec::new();
+    };
+    let id = resolve_clip(p, clip, playhead).ok();
+    let start = id.and_then(|id| track_start(p, &id, *effect, at.as_ref(), playhead, *way).ok());
+    start
+        .map(|(media, _, follow)| (media, follow, *download))
+        .into_iter()
+        .collect()
 }
 
 pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<SubjectLook> {

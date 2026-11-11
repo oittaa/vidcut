@@ -697,6 +697,25 @@ pub static PPOCR_DET: Model = Model {
     price: None,
 };
 
+pub const VITTRACK_ONNX: File = File {
+    name: "vittrack/object_tracking_vittrack_2023sep.onnx",
+    title: "VitTrack object tracking",
+    url: "https://huggingface.co/opencv/opencv_zoo/resolve/d4938dfc9d4ec5d098bfa33e98b3f3345a236586/models/object_tracking_vittrack/object_tracking_vittrack_2023sep.onnx",
+    bytes: 714_726,
+    sha256: "2990f0b7cd44d92afa48cd97db6de7be113fc1d9594fddb74e2725c10478e91d",
+};
+
+pub static VITTRACK: Model = Model {
+    id: "vittrack",
+    times: None,
+    title: "VitTrack object tracking",
+    files: &[VITTRACK_ONNX],
+    service: None,
+    languages: &[],
+    limits: &[],
+    price: None,
+};
+
 pub const NANOVSR_SCALE: u32 = 4;
 pub const NANOVSR_FRAMES: usize = 15;
 
@@ -823,7 +842,7 @@ pub static EMA_VFI: Model = Model {
     price: None,
 };
 
-pub static ALL: [&Model; 15] = [
+pub static ALL: [&Model; 16] = [
     &PARAKEET_ULTRA,
     &QWEN3_ASR,
     &WHISPER_LARGE_V3,
@@ -835,6 +854,7 @@ pub static ALL: [&Model; 15] = [
     &DPDFNET,
     &YUNET,
     &PPOCR_DET,
+    &VITTRACK,
     &NANOVSR,
     &FLASHVSR,
     &RIFE,

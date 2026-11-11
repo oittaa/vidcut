@@ -41,7 +41,8 @@ In this file, a path is never a track of the timeline.
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path ([deviation X166](../deviations.md#x166-an-effect-has-an-area)).
 - `motion.find` finds the faces and the text of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
-- No request follows a point or a drawn box, and no request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
+- `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
+- No request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
 
 **How:**
@@ -95,8 +96,11 @@ In this file, a path is never a track of the timeline.
   - Very small text: try a longer side above 960 pixels for a large source, and measure the time.
   - Text that comes into the picture has no blur on its first frames, as a face has not.
   - The detector takes most of the time of a text find. Try the model on the GPU.
-- **A drawn box:** one request tracks a box of the selected clip from the playhead, forward or backward.
-  - The request tells the frame where it loses the subject. The user starts again from that frame.
+- **The track of an area, what is left:**
+  - A Track button in the viewer, for the area whose handles show.
+  - Measure `tracking::LOST` on a clip where the thing leaves the picture, or goes behind another thing. No test clip has one.
+  - The way backward keeps its pictures in memory. Read a long shot in parts.
+  - A track follows no turn and no change of perspective.
 - **The Motion section in the app:** click Blur in a window, and take a find that asks for the download of its model. Find ran from its button.
 - **Titles and clips follow a path** of another clip.
 - **A subject with its matte:** with [subject masks](subject-masks.md).
