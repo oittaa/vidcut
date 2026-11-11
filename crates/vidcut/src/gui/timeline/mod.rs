@@ -1408,7 +1408,7 @@ impl Workspace {
                 self.options_menu(ui, p)
             });
             ui.menu_button(RichText::new("Actions").small(), |ui| {
-                self.timeline_actions_menu(ui, p)
+                self.timeline_actions_menu(ui, p, true)
             });
             ui.menu_button(RichText::new("Edit").small(), |ui| {
                 self.edit_actions_menu(ui)
@@ -1546,14 +1546,20 @@ impl Workspace {
         }
     }
 
-    pub(super) fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
+    pub(super) fn speech_item(&mut self, ui: &mut egui::Ui) {
+        if ui.button("Create Subtitles from Audio…").clicked() {
+            self.open_speech();
+            ui.close();
+        }
+    }
+
+    pub(super) fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project, speech: bool) {
         let selected = self.snap.selection.clips.clone();
         let with = |want: fn(&vidcut_core::model::Clip) -> bool| {
             selected.iter().any(|id| p.clip(id).is_some_and(want))
         };
-        if ui.button("Create Subtitles from Audio…").clicked() {
-            self.open_speech();
-            ui.close();
+        if speech {
+            self.speech_item(ui);
         }
         let video = with(|c| c.video);
         if ui
