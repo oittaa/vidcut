@@ -437,7 +437,7 @@ Cancel:
 
 ## Subtitles
 
-- `subtitles_as` tells how the tracks that `subtitles` names go out with media ([deviation X45](../deviations.md#x45-subtitles-go-into-any-container)). They go as files beside it (the default), as streams in it, or into the picture.
+- `subtitles_as` tells how the tracks that `subtitles` names go out with media. They go as files beside it (the default), as streams in it, or into the picture.
 - Streams and burn-in take the shown track, unless `subtitles` names other tracks.
 - `export::prepare` refuses a container without subtitle streams, burn-in without video, and more than one track to burn.
 - It gives each output the cues of its range, in its own frames (`subtitles::Subtitles`).
