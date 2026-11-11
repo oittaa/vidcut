@@ -42,7 +42,7 @@ In this file, a path is never a track of the timeline.
 - An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path ([deviation X166](../deviations.md#x166-an-effect-has-an-area)).
 - `motion.find` finds the faces and the text of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
 - `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
-- `motion.follow` makes a title follow a path of another clip.
+- `motion.follow` makes a title follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)).
 - No request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
 
