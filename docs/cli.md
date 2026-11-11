@@ -122,7 +122,7 @@ When a GUI has the project open (`vidcut -p FILE` starts one), the commands for 
 
 ## MCP
 
-`vidcut mcp` serves the Model Context Protocol on stdin/stdout ([deviation X10](deviations.md#x10-an-mcp-server-for-ai-agents)). With Claude Code:
+`vidcut mcp` serves the Model Context Protocol on stdin/stdout. With Claude Code:
 
 ```bash
 claude mcp add vidcut -- vidcut mcp -p /abs/talk.vidcut

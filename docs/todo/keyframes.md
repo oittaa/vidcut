@@ -117,14 +117,14 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 **Better than Resolve** (proposals for the stages):
 
 - The ease menu is on each keyframe: on the Keyframe button and in the Keyframe Editor.
-- A bar shows the value, time and ease of the selected keyframe ([X90](../deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
-- A double-click on a track adds a keyframe there ([X108](../deviations.md#x108-a-double-click-on-a-row-of-the-keyframes-tab-adds-a-keyframe)).
+- A bar shows the value, time and ease of the selected keyframe ([spec §2](../cut-page-spec.md#2-layout-pp-636637)).
+- A double-click on a track adds a keyframe there ([spec §2](../cut-page-spec.md#2-layout-pp-636637)).
 
 ## Scope
 
 **The values.** Transform, Crop and the volume line use `Keyframe`. The spec is [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768) and D75. The buttons are in [X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels).
 
-**The Keyframes tab** sits beside the Inspector. The Timeline menu opens it. The spec is [§2](../cut-page-spec.md#2-layout-pp-636637) and [X87](../deviations.md#x87-the-keyframes-tab-has-an-ease-menu).
+**The Keyframes tab** sits beside the Inspector. The Timeline menu opens it. The spec is [§2](../cut-page-spec.md#2-layout-pp-636637).
 
 - One track for each value that can have keyframes, in a group for its section. The ⋯ menu can hide the values without keyframes.
 - Each track has the curve button, the Keyframe button with its arrows, and Reset Keyframes.
@@ -286,7 +286,7 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - On Position, the check mark is on the item that the sides of the key's handles give (`Title::position_ease`).
 - On Zoom, Rotation and Title opacity, the check mark is on the item that `ease_of` gives. A key with other handles has no check mark.
 - A scroll's Position key has no menu, and `keyframes.set` gives it no handles. Nothing measures them.
-- The Keyframes tab shows these values of a selected title ([X109](../deviations.md#x109-the-keyframes-tab-shows-the-values-of-a-title)). In that tab, Position has no curve button and no ease.
+- The Keyframes tab shows these values of a selected title ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)). In that tab, Position has no curve button and no ease.
 - Play and export draw a title's position along the path of its handles (`Title::sampled`). A new key takes the point of the path at its frame. It has no handles, and its neighbors keep theirs.
 - `keyframes.set` and `keyframes.add` with `ease` write the measured values on the chosen position keys (`Title::ease_position`). `keyframes.list` shows the handles as `in` and `out`, with Y from the top.
 - An ease that the place of the key does not offer follows the rule of the other values. The side with no neighbor gets no handle, and the old handles of the key go.
