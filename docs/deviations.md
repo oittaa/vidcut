@@ -153,7 +153,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Each image is a still, unless `media add --sequence` asks for the numbered run around it.
   - `media add-folder --sequence` asks for the runs in a folder ([D39](spec.md#12-decisions-on-gaps-and-contradictions)).
   - When the user imports numbered images in the GUI, picked or in a folder, vidcut asks which they are.
-  - For frame formats (PNG, TIFF, EXR, DPX, TGA, BMP), the question has one clip for each run already selected.
+  - The question has one clip for each run already selected, for every image type.
 - **Why:**
   - The file type does not tell the frames of a render from numbered photos.
   - A wrong guess turns a slideshow into a blink, or a render into thousands of stills.

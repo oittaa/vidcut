@@ -14,8 +14,6 @@ pub const IMAGE_TYPES: &[&str] = &[
     "png", "jpg", "jpeg", "tif", "tiff", "exr", "dpx", "tga", "bmp", "webp",
 ];
 
-pub const FRAME_TYPES: &[&str] = &["png", "tif", "tiff", "exr", "dpx", "tga", "bmp"];
-
 pub const SUBTITLE_TYPES: &[&str] = &["srt", "vtt", "webvtt", "ttml", "dfxp", "xml"];
 
 pub const NOT_MEDIA: &str = "not a media file";

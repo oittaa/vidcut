@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use serde_json::{Value, json};
-use vidcut_core::folder::{FRAME_TYPES, IMAGE_TYPES, MEDIA_TYPES, SUBTITLE_TYPES, extension};
+use vidcut_core::folder::{IMAGE_TYPES, MEDIA_TYPES, SUBTITLE_TYPES, is_image};
 use vidcut_core::model::ImageSequence;
 use vidcut_core::time::Rational;
 
@@ -87,16 +87,14 @@ struct Run {
     file: PathBuf,
 }
 
-fn runs(files: &[PathBuf]) -> (Vec<Run>, Vec<PathBuf>, bool) {
-    let (mut runs, mut others, mut frames) = (Vec::new(), Vec::new(), false);
+fn runs(files: &[PathBuf]) -> (Vec<Run>, Vec<PathBuf>) {
+    let (mut runs, mut others) = (Vec::new(), Vec::new());
     let mut taken: HashSet<&Path> = HashSet::new();
     for f in files {
         if taken.contains(f.as_path()) {
             continue;
         }
-        let ext = extension(f);
-        let run = IMAGE_TYPES
-            .contains(&ext.as_str())
+        let run = is_image(f)
             .then(|| vidcut_core::sequence::find(f).ok())
             .flatten()
             .filter(|s| s.count >= 2);
@@ -113,14 +111,13 @@ fn runs(files: &[PathBuf]) -> (Vec<Run>, Vec<PathBuf>, bool) {
                 taken.insert(g);
             }
         }
-        frames |= FRAME_TYPES.contains(&ext.as_str());
         runs.push(Run {
             name: s.display(),
             count: s.count,
             file: f.clone(),
         });
     }
-    (runs, others, frames)
+    (runs, others)
 }
 
 fn request(choice: &Choice) -> Result<(&'static str, Value), String> {
@@ -296,10 +293,6 @@ impl Workspace {
             self.send("media.add_folder", json!({ "path": f.path, "bin": f.bin }));
             return;
         }
-        let frames = f
-            .runs
-            .iter()
-            .any(|(file, _)| FRAME_TYPES.contains(&extension(file).as_str()));
         let runs = f
             .runs
             .into_iter()
@@ -315,7 +308,7 @@ impl Workspace {
             files: Vec::new(),
             folder: Some(f.path),
             bin: f.bin,
-            sequences: frames,
+            sequences: true,
             fps: self.fps().decimal(),
             error: None,
         });
@@ -324,7 +317,7 @@ impl Workspace {
     fn picked_files(&mut self, files: Vec<PathBuf>, bin: Option<String>) {
         self.folders
             .remember(super::folders::Kind::Media, &files[0]);
-        let (runs, others, frames) = runs(&files);
+        let (runs, others) = runs(&files);
         if runs.is_empty() {
             self.send("media.add", json!({ "paths": files, "bin": bin }));
             return;
@@ -335,7 +328,7 @@ impl Workspace {
             files,
             folder: None,
             bin,
-            sequences: frames,
+            sequences: true,
             fps: self.fps().decimal(),
             error: None,
         });
