@@ -5,6 +5,7 @@ use std::time::Instant;
 use tract_onnx::prelude::*;
 use vidcut_core::analysis::{Detections, Follow, Found, SCENE_SCORE};
 
+use crate::analysis::SEED;
 use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
 use crate::export::Progress;
@@ -23,7 +24,6 @@ const SPREAD: [f32; 3] = [0.229, 0.224, 0.225];
 const SIDES: (f64, f64) = (320.0, 1280.0);
 const EDGE: f64 = 10.0;
 const PART_BYTES: usize = 64 << 20;
-const SEED: u64 = 2;
 pub const LOST: f32 = 0.3;
 
 pub fn name() -> String {
@@ -281,8 +281,8 @@ impl<'a> Tracker<'a> {
 }
 
 struct Seen {
-    slot: u64,
-    last: u64,
+    slot: i64,
+    last: i64,
     pts: f64,
     scene: f32,
     picture: Picture,
@@ -297,12 +297,12 @@ struct Shots {
     every: f64,
     area: [f32; 4],
     seeing: Option<Seeing>,
-    wanted: u64,
+    wanted: i64,
     read: Option<f64>,
 }
 
 impl Shots {
-    fn go(&mut self, slot: u64) -> Result<()> {
+    fn go(&mut self, slot: i64) -> Result<()> {
         let time = self.from + slot as f64 * self.every;
         self.reader.seek((time / self.tick).floor() as i64)?;
         (self.wanted, self.read) = (slot, None);
@@ -328,9 +328,13 @@ impl Shots {
             if pts < self.from + self.wanted as f64 * self.every {
                 continue;
             }
-            let slot = self.wanted;
-            let last = ((pts - self.from) / self.every).floor().max(0.0) as u64;
-            let last = last.max(slot);
+            let last = ((pts - self.from) / self.every).floor() as i64;
+            let last = last.max(self.wanted);
+            let slot = if last < 0 {
+                self.wanted
+            } else {
+                self.wanted.max(0)
+            };
             self.wanted = last + 1;
             let (turn, area) = (self.turn, self.area);
             let seeing = (self.seeing).get_or_insert_with(|| Seeing::start(&decoded, turn, area));
@@ -392,15 +396,40 @@ impl Seeing {
     }
 }
 
-type Kept = BTreeMap<u64, (f64, Vec<Found>, f32)>;
+type Kept = BTreeMap<i64, (f64, Vec<Found>, f32)>;
 
-fn backward(shots: &mut Shots, mut tracker: Tracker, home: &Seen, kept: &mut Kept) -> Result<()> {
+struct Shown<'a> {
+    path: &'a Path,
+    started: Instant,
+    home: f64,
+    ahead: f64,
+    all: f64,
+}
+
+impl Shown<'_> {
+    fn report(&self, pts: f64) {
+        let done = if pts >= self.home {
+            pts - self.home
+        } else {
+            self.ahead + self.home - pts
+        };
+        let seen = Progress::measuring(done / self.all, self.started.elapsed());
+        crate::progress::report(self.path, seen);
+    }
+}
+
+fn backward(
+    shots: &mut Shots,
+    mut tracker: Tracker,
+    (home, shown): (&Seen, &Shown),
+    kept: &mut Kept,
+) -> Result<()> {
     let size = home.picture.size;
-    let most = (PART_BYTES / (size.0 * size.1 * 3).max(1)).max(1) as u64;
+    let most = (PART_BYTES / (size.0 * size.1 * 3).max(1)).max(1) as i64;
     let (mut end, mut cut) = (home.slot, home.scene);
     while end > 0 {
-        let start = end.saturating_sub(most);
-        shots.go(start.saturating_sub(SEED))?;
+        let start = (end - most).max(0);
+        shots.go(start - SEED)?;
         let mut part = Vec::new();
         while let Some(seen) = shots.next()? {
             if seen.slot >= end {
@@ -422,6 +451,7 @@ fn backward(shots: &mut Shots, mut tracker: Tracker, home: &Seen, kept: &mut Kep
             let found = tracker.found(size, score);
             kept.insert(seen.slot, (seen.pts, vec![found], seen.scene));
             cut = seen.scene;
+            shown.report(seen.pts);
         }
         end = start;
     }
@@ -431,7 +461,7 @@ fn backward(shots: &mut Shots, mut tracker: Tracker, home: &Seen, kept: &mut Kep
 fn laid(kept: &Kept, from: f64, to: f64, every: f64) -> Detections {
     let mut out = Detections::default();
     let mut last = f64::NEG_INFINITY;
-    let slots = ((to - from) / every).floor().max(0.0) as u64;
+    let slots = ((to - from) / every).floor().max(0.0) as i64;
     for slot in 0..=slots {
         let due = from + slot as f64 * every;
         let (pts, found, scene) = match kept.get(&slot) {
@@ -459,7 +489,7 @@ pub fn track(
     let _turn = crate::turns::cpu_analysis()?;
     let look = follow.look;
     let every = look.every.max(1e-9);
-    let home = ((follow.at - look.from) / every).round().max(0.0) as u64;
+    let home = ((follow.at - look.from) / every).round().max(0.0) as i64;
     let reader = VideoReader::open_as(source, gpu, Reading::Stream)?;
     let rate = reader.frame_rate();
     let mut shots = Shots {
@@ -476,7 +506,7 @@ pub fn track(
     };
     let started = Instant::now();
     let mut kept = Kept::new();
-    shots.go(home.saturating_sub(SEED))?;
+    shots.go(home - SEED)?;
     let first = loop {
         match shots.next()? {
             Some(seen) if seen.last < home => {}
@@ -493,7 +523,16 @@ pub fn track(
     let mut tracker = Tracker::start(&model, &first.picture, area);
     let found = tracker.found(size, 1.0);
     kept.insert(first.slot, (first.pts, vec![found], first.scene));
-    let length = (look.to - look.from).max(shots.step);
+    let span = |on: bool, length: f64| if on { length.max(0.0) } else { 0.0 };
+    let ahead = span(follow.forward, look.to - first.pts);
+    let behind = span(follow.backward, first.pts - look.from);
+    let shown = Shown {
+        path: source.path(),
+        started,
+        home: first.pts,
+        ahead,
+        all: (ahead + behind).max(shots.step),
+    };
     while let Some(seen) = shots.next_if(follow.forward)? {
         if f64::from(seen.scene) >= SCENE_SCORE {
             kept.insert(seen.slot, (seen.pts, Vec::new(), seen.scene));
@@ -505,15 +544,14 @@ pub fn track(
         };
         let found = tracker.found(size, score);
         kept.insert(seen.slot, (seen.pts, vec![found], seen.scene));
-        let share = (seen.pts - look.from) / length;
-        crate::progress::report(source.path(), Progress::measuring(share, started.elapsed()));
+        shown.report(seen.pts);
         if seen.pts >= look.to {
             break;
         }
     }
     if follow.backward {
         let tracker = Tracker::start(&model, &first.picture, area);
-        backward(&mut shots, tracker, &first, &mut kept)?;
+        backward(&mut shots, tracker, (&first, &shown), &mut kept)?;
     }
     crate::debug!(
         "subjects",

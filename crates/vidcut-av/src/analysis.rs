@@ -187,6 +187,7 @@ pub fn sound_match(a: &AudioLevels, b: &AudioLevels) -> Option<SoundMatch> {
 }
 
 pub(crate) const MEASURE: (u32, u32) = (96, 54);
+pub(crate) const SEED: i64 = 2;
 
 pub fn picture_stats(
     source: &crate::decode::Input,

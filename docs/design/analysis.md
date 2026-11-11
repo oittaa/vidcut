@@ -66,6 +66,8 @@ flowchart TD
   - `Detections` holds the time of each picture and its `Found` boxes: the center, the size, the rotation and the score. The center and the size are fractions of the picture.
   - `Detections` also holds the scene score of each picture against the picture before it (`scene`).
     - `Looking::picture` measures it on the small picture, with `small_luma`, `mafd` and `scene_score` of `analyze.scenes`. Thus the file is not decoded a second time.
+    - `subjects::find` also measures `SEED` pictures before the first time, where the file has them. `Detections` does not hold them.
+      - Why: the scene score of a picture uses the two pictures before it. Without them, a fast move at the start of a clip scores as a shot change.
   - It keeps each box with a score of `yunet::LEAST` or `ppocr::LEAST` or more. Why: the core can then decide again with other scores, and nothing is measured again.
 - `yunet` prepares the picture and decodes the outputs of the model:
   - The picture goes in as blue, green and red values from 0 to 255. Its right side and its bottom are padded to a multiple of 32.
@@ -122,7 +124,9 @@ flowchart TD
   - A score under `tracking::LOST` ends the track. A shot change ends it too (`SCENE_SCORE`, as in `motion.find`).
   - For the way backward, `backward` reads the pictures before the first frame in parts, from the last part to the first. A part holds at most `PART_BYTES` of pictures.
     - `Shots::go` seeks to a part, and reads `SEED` pictures before it. Thus the scene score of its first picture is right.
+      - The pictures before the first time of the `Look` have slots below 0. A track does not keep them.
     - Why: a track holds only one part in memory, however long the shot is.
+  - `Shown` reports the progress of both ways: the time that the track covered, as a share of the time that it can cover.
   - `Follow` holds the `Look`, the first time, the box and the ways.
 - The result is a `Detections` with one box on each picture of the track, and no box on the other pictures (`laid`).
   - Thus a track shares the disk cache of `motion.find` (`AvEnv::tracked`). `tracking::name` gives the model file and `LOST` to the name of the file.
