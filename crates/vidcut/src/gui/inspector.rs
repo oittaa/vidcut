@@ -1499,6 +1499,7 @@ enum Act {
     Zooming(bool),
     Boxes,
     AreaEdit(usize),
+    AreaTrack(usize),
     Ease(Ease),
     Mode(CompositeMode),
     Swap,
@@ -2854,6 +2855,12 @@ fn area_rows(
             if ui.add_enabled(now.is_some(), edit).clicked() {
                 acts.push(Act::AreaEdit(n));
             }
+            if ui
+                .add_enabled(now.is_some(), egui::Button::new("Track"))
+                .clicked()
+            {
+                acts.push(Act::AreaTrack(n));
+            }
         });
         if reset(ui, now.is_some()) {
             acts.push(area_set(n, Value::Null));
@@ -3943,12 +3950,14 @@ impl Workspace {
             .nth(effect)
             .and_then(|e| e.area.as_ref());
         let follows = area.and_then(|a| a.follows.as_ref());
-        let tracked = c.motion.iter().filter(|m| m.subject.is_none());
-        let way = match tracked.map(|m| &m.id).any(|id| Some(id) == follows) {
-            true => "forward",
-            false => "both",
-        };
         let at = self.snap.timeline.position;
+        let followed = c.motion.iter().find(|m| Some(&m.id) == follows);
+        let first = followed.and_then(|m| m.span()).map(|(first, _)| first);
+        let way = match first {
+            None => "both",
+            Some(first) if c.source_at(at) <= first => "backward",
+            Some(_) => "forward",
+        };
         let params = json!({ "clip": clip, "effect": effect, "at": at, "way": way });
         if model_needs(None).is_empty() {
             self.send("motion.track", params);
@@ -4456,6 +4465,12 @@ impl Workspace {
                 let grab = &mut self.timeline.picture_grab;
                 grab.area = (grab.area != Some(n)).then_some(n);
                 grab.tool = None;
+            }
+            Act::AreaTrack(n) => {
+                if let Some(c) = chosen.first() {
+                    let id = c.id.clone();
+                    self.track(&id, n);
+                }
             }
             Act::Boxes => {
                 if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {

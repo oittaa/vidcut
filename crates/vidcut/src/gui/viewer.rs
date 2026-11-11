@@ -299,7 +299,7 @@ impl Workspace {
         let trim = self.trim_editor_edit();
         let sync_grid = self.sync_grid_on() && !self.sync_clips.open;
         let tools = mode == ViewerMode::Timeline
-            && self.timeline.picture_grab.row
+            && self.timeline.picture_grab.rowed()
             && !dynamic
             && trim.is_none()
             && !sync_grid;

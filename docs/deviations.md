@@ -2562,7 +2562,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - `follows` can also name a subject, as `face`. The effect then works in the area of each path of that subject.
     - With `invert`, the effect works outside each area. While no path lasts, it then works on the whole picture.
     - `motion.remove` refuses a path that an area follows by its id. A path that an area follows by its subject can go.
-  - Each effect in the Inspector has Area rows: Off, Ellipse, Box or Polygon, then Edit Shape, Invert Area, Area Softness and Follow.
+  - Each effect in the Inspector has Area rows: Off, Ellipse, Box or Polygon, then Edit Shape, Track, Invert Area, Area Softness and Follow.
     - Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
   - The viewer shows a thin outline of each area of the selected clip at the playhead.
     - A click on an outline, or inside it, shows the handles of that area. A click outside the areas hides the handles.
@@ -2616,8 +2616,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - One button tracks forward and reverse from the playhead. A second track from a later frame keeps the track before that frame (21.2).
 - **vidcut:**
   - `motion.track` follows the thing under the area of an effect, backward and forward from one frame.
-  - With the Blur tool on, Track follows the thing under the area whose handles show.
+  - Track follows the thing under an area. It is in the Area rows of each effect, and under the viewer while the handles of an area show.
     - A second Track keeps the track before the playhead, and goes forward from the playhead.
+    - On the first frame of a track, Track goes backward, and keeps the track after that frame.
   - The track stops at a shot change. Where the track ends, the effect ends.
   - The track follows the place and the size of the thing. It does not follow a turn or a change of perspective.
 - **Why:**
