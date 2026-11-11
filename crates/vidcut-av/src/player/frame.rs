@@ -204,7 +204,6 @@ impl Woven {
 pub struct Over {
     pub picture: Arc<Picture>,
     pub weight: u32,
-    pub wipe: Option<vidcut_core::render::Wipe>,
 }
 
 impl Over {
@@ -420,7 +419,6 @@ impl Picture {
                 Ok(Over {
                     picture: Arc::new(o.picture.copied_down()?),
                     weight: o.weight,
-                    wipe: o.wipe,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -577,7 +575,6 @@ pub struct TitleOver {
     pub dy: i32,
     pub turn: [f32; 4],
     pub alpha: f32,
-    pub wipe: Option<vidcut_core::render::Wipe>,
     pub placed: Vec<vidcut_core::render::Placed>,
     pub nth: usize,
 }

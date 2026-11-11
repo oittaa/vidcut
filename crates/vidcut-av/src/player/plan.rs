@@ -1,6 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
-use vidcut_core::model::{Retime, WipeDirection};
+use vidcut_core::model::Retime;
 use vidcut_core::render::{Image, Placed, RenderPlan, Run, ShownTitle, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -15,13 +15,7 @@ type Pos = (i64, Option<Keyed>);
 
 type Keyed = Arc<[(Option<i64>, Option<Run>, u64)]>;
 
-type Layer = (
-    Arc<str>,
-    Pos,
-    u32,
-    Option<WipeDirection>,
-    Option<(u64, Retime)>,
-);
+type Layer = (Arc<str>, Pos, u32, Option<(u64, Retime)>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Fill {
@@ -191,11 +185,11 @@ impl Plan {
             .zip(&smooths[1..])
             .zip(&keys[1..])
             .map(|(((l, ramp), smooth), key)| {
-                let (weight, wipe) = ramp.map_or((0, None), |r| (r.weight(k), r.wipe));
+                let weight = ramp.map_or(0, |r| r.weight(k));
                 let smoothed = smooth
                     .zip(*ramp)
                     .map(|(s, r)| (s.at(&r, k).to_bits(), s.retime));
-                (key.clone(), pos(l), weight, wipe, smoothed)
+                (key.clone(), pos(l), weight, smoothed)
             })
             .collect();
         Id {
@@ -474,8 +468,8 @@ pub(crate) fn scales_of(piece: &VideoPiece) -> Vec<Option<vidcut_core::model::Sh
 
 #[cfg(test)]
 mod tests {
-    use vidcut_core::model::{Picture, Retime, SuperScale, Upscaler, WipeDirection};
-    use vidcut_core::render::{Over, Placed, Ramp, RenderPlan, VideoPiece};
+    use vidcut_core::model::{Picture, Retime, SuperScale, Upscaler};
+    use vidcut_core::render::{Placed, RenderPlan, VideoPiece};
     use vidcut_core::time::Rational;
 
     use super::source_key;
@@ -532,35 +526,6 @@ mod tests {
             made: None,
             input_lut: None,
         }
-    }
-
-    fn wiped_in(direction: WipeDirection) -> super::Id {
-        let off = SuperScale::default();
-        let mixed = VideoPiece::Mix {
-            under: Box::new(VideoPiece::black(10)),
-            over: vec![Over {
-                piece: piece(off, Retime::Nearest, 1.0, 0),
-                ramp: Some(Ramp {
-                    at: 0,
-                    of: 10,
-                    falling: false,
-                    wipe: Some(direction),
-                    held: false,
-                    moved: false,
-                }),
-                smooth: None,
-            }],
-        };
-        super::Plan::new(RenderPlan {
-            video: vec![mixed],
-            ..plan()
-        })
-        .id(5)
-    }
-
-    #[test]
-    fn a_frame_of_a_wipe_misses_after_a_change_of_its_edge() {
-        assert_ne!(wiped_in(WipeDirection::Down), wiped_in(WipeDirection::Left));
     }
 
     #[test]

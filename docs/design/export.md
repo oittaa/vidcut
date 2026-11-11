@@ -503,7 +503,7 @@ Cancel:
   - `ShownTitle::led` moves the title by that spot less the middle of the frame (`Title::moved`). `ShownTitle::sampled` calls it after the keyframes.
   - `plain_title` works the move out for a piece of one frame. Thus the key of that piece in the render cache does not hold the whole path.
 - A title in a dissolve at the edge of its clip fades by the `Ramp` of the dissolve (`fade`), on both sides of the edge. `ShownTitle::alpha` gives its level, with its opacity.
-- A title in a wipe has no level. `TitleOver` holds the edge of the wipe, and the draw shows the title only in its own part of the frame.
+- A title in a wipe, a Push or a Slide has no level. It draws into the picture of its side, and `fs_motion` shows that side.
 - The player's `Titles` draws a title once for the size of the output, and keeps it while it shows. The shader moves and fades it.
   - Each new zoom of a title with zoom keyframes draws it again. The viewer scales the last drawing until the new one is ready.
 - Titles draw in each export and in `frame.render`, whatever the subtitle settings are.
@@ -534,8 +534,7 @@ The pictures:
   - The two sides add up. Neither side has its own composite mode.
   - The `Placed` holds the mode of the outgoing side on that frame, or of the incoming side if there is no outgoing clip (`mode_at`). That mode mixes the `place::Mix` with the layers below.
   - Where both sides fill the frame and the crossing has no mode, the plan leaves out the layers below. Inside a placed compound clip, it leaves out only the layers of that compound clip. Nothing of them shows.
-- A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
-- A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
+- A wipe, a Push or a Slide draws each side into its own picture. `fs_motion` wipes or moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
 
 A compound clip ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)):
 
@@ -557,8 +556,7 @@ A transition at an edge of a compound clip ([spec §8.18](../spec.md#818-compoun
 - `edges_on` gives the compound clip its edges. A dissolve gives its frames, and a dip to color the half of its side.
 - `expanded` widens the compound clip to reach those frames. Thus the hidden frames play (`inner_layout`).
 - `Around::at` gives the picture of the compound clip for a frame. `Placed::ramp` is the level of the dissolve. `place::level` multiplies it with the opacity.
-- A wipe has no level. `Mix::wipe` is its edge, and `MixDraw::lay` draws the side only in its own part of the frame. A layer of a mix has its edge in `MixDraw::wipes`.
-- A Push or a Slide has `Mix::moving`. Each part of that mix is one side, and `Mix::outgoing` tells which side.
+- A wipe, a Push or a Slide has `Mix::moving`. Each part of that mix is one side, and `Mix::outgoing` tells which side.
 - `MixDraw::moved` draws each side into `Moves` and moves the two sides onto the canvas. A side that is missing is a gap.
 - The outgoing side's composite mode goes on the mix. `Ramp::moved` keeps the level of a side at 1.
 - A Smooth Cut needs each side as one picture ([Smooth Cuts](#smooth-cuts)). `Nest::flat` holds the widened compound clip for it. A side that cannot morph plays as a dissolve.

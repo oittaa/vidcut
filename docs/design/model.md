@@ -728,7 +728,7 @@ Kept data:
 Which kept transitions play (`otio::transitions`):
 
 - On picture: an `SMPTE_Dissolve` whose editor metadata names no effect but a cross dissolve.
-- On picture: an Edge Wipe at 0, 90, 180 or −90 degrees (`transitions::wipe_otio`), as a wipe from the bottom, left, top or right edge. vidcut writes its wipes in this form. Other parameters, such as a border, are kept but do not play.
+- On picture: an Edge Wipe with its angle, border, feather, color, ease and curve (`transitions::wipe_otio`). vidcut writes its wipes in this form.
 - On sound: a cross fade found by its effect type or name (+3, 0 or −3 dB), or a plain `SMPTE_Dissolve` at 0 dB.
 - A transition plays only where its two clips cover its frames, and no other clip of the track reaches into them. Of two transitions that overlap, the first plays.
 

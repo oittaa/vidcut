@@ -448,11 +448,24 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - vidcut's eases are curves ([X67](deviations.md#x67-the-eases-of-dynamic-zoom-are-curves)). Thus a clip with an ease other than Linear plays differently in Resolve.
 - **Resolve reads a wipe only as its Edge Wipe effect.**
   - It writes a `Custom_Transition` named `Edge Wipe`, with `"Transition Type": "Edge Wipe"` and an effect of type 13 in its metadata.
-  - The `angle` parameter (`Int`, −360 to 360) gives the edge. 0 is the bottom, 90 the left, 180 the top and −90 the right.
-  - Resolve leaves out an angle of 0. The incoming picture comes in from that edge, and the edge moves at an even speed.
+  - The `angle` parameter (`Int`, −360 to 360, with `Key Frames`) gives the edge. 0 is the bottom, 90 the left, 180 the top and −90 the right.
+  - The incoming picture comes in from that edge, and the edge moves at an even speed.
+  - `border` is a `Double` from 0 to 0.25, as for a Push. The Inspector shows it times the width of the timeline. `feather` is a `Bool`.
+  - Resolve's export also writes `transitionCustomCurvesKeyframes`, as for a Push. With Ease None, it is a straight curve from 0 to 1.
+  - Resolve leaves out each value at its default: an angle of 0, no border and no feather.
+  - The parameters of the color and the ease of an Edge Wipe are not measured. vidcut writes them as for a Push: `color` and `ease`.
   - Without `Transition Type`, or with the name alone, Resolve makes a cross dissolve. It also does so for a transition with metadata it does not know.
   - Resolve refuses the whole timeline when an `Int` has a decimal point, for example `90.0`.
-  - Measured with renders of 24-frame wipes at 0, 90, 180 and −90 degrees.
+  - Measured with renders of 24-frame wipes at 0, 90, 180 and −90 degrees, and with an export of Resolve Studio 21.2.
+- **The edge of an Edge Wipe is a straight line at its angle.**
+  - With y down, the edge moves toward (sin a, −cos a), with a the angle. The incoming picture shows behind the edge.
+  - Thus 30 degrees brings the incoming picture in from the bottom-left.
+  - The edge moves evenly from the first corner of the frame that it touches to the far corner, by the progress of the transition.
+  - With Ease None, the progress at frame f of N frames is f/N, as for a Push.
+  - The border is a band of its color, centered on the edge. It is b = `border` × the width of the timeline, in pixels.
+  - The band makes the way of the edge b longer. On the first frame, no band shows.
+  - With Feather, the band shows no color. It mixes the two pictures linearly, from the incoming picture to the outgoing picture.
+  - Measured in Resolve Studio 21.2.
 - **Resolve reads the values of Push, Slide and Dip To Color Dissolve only with the type of their effect.**
   - Each is a `Custom_Transition` with the name and the `Transition Type` of the transition.
   - The `Type` of the effect is 50 for Push, 49 for Slide and 11 for Dip To Color Dissolve.

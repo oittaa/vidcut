@@ -2,8 +2,8 @@ use eframe::egui::{self, Key, RichText};
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, CARET_LEFT, CARET_RIGHT};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    MAX_BORDER, MotionEase, PictureTransition, Project, PushPreset, SlidePreset, SmoothMode,
-    SmoothProcess, Transition, WipeDirection,
+    MAX_ANGLE, MAX_BORDER, MotionEase, PictureTransition, Project, PushPreset, SlidePreset,
+    SmoothMode, SmoothProcess, Transition,
 };
 use vidcut_core::ops;
 use vidcut_core::otio::transitions;
@@ -20,13 +20,6 @@ pub struct FadeDialog {
     pub at: i64,
     pub text: String,
 }
-
-const EDGES: [(WipeDirection, &str); 4] = [
-    (WipeDirection::Left, "Left"),
-    (WipeDirection::Right, "Right"),
-    (WipeDirection::Up, "Top"),
-    (WipeDirection::Down, "Bottom"),
-];
 
 fn push_label(p: PushPreset) -> &'static str {
     match p {
@@ -301,6 +294,7 @@ impl Workspace {
         };
         match &mut now {
             PictureTransition::DipToColor { color: c } => *c = color,
+            PictureTransition::Wipe { wipe } => wipe.color = color,
             k => match k.motion_mut() {
                 Some(m) => m.color = color,
                 None => return,
@@ -387,13 +381,6 @@ impl Workspace {
                     picker = Some(ui.auto_id_with("popup"));
                     if ui.color_edit_button_srgb(&mut rgb).changed() {
                         picked = Some(rgb);
-                    }
-                });
-            }
-            if let Some(PictureTransition::Wipe { direction }) = &kind {
-                dialog::row(ui, "Edge", |ui| {
-                    if let Some(d) = menu(ui, "transition-edge", *direction, &EDGES) {
-                        set = Some(PictureTransition::Wipe { direction: d });
                     }
                 });
             }
@@ -558,6 +545,11 @@ fn motion_rows(
                 });
             });
         }
+        PictureTransition::Wipe { wipe } => dialog::row(ui, "Angle", |ui| {
+            let r = ui.add(egui::DragValue::new(&mut wipe.angle).range(-MAX_ANGLE..=MAX_ANGLE));
+            changed |= r.changed();
+            done |= r.drag_stopped() || r.lost_focus();
+        }),
         _ => {}
     }
     if let PictureTransition::Slide { out, .. } = k {
@@ -571,24 +563,32 @@ fn motion_rows(
             });
         });
     }
-    if let Some(m) = k.motion_mut() {
+    let band = match &mut *k {
+        PictureTransition::Wipe { wipe } => Some((&mut wipe.border, &mut wipe.feather, wipe.color)),
+        other => other
+            .motion_mut()
+            .map(|m| (&mut m.border, &mut m.feather, m.color)),
+    };
+    if let Some((border, feather, now)) = band {
         dialog::row(ui, "Border", |ui| {
-            let mut shown = m.border * width;
+            let mut shown = *border * width;
             let r = ui.add(
                 egui::DragValue::new(&mut shown)
                     .range(0.0..=MAX_BORDER * width)
                     .max_decimals(1),
             );
             if r.changed() {
-                m.border = shown / width;
+                *border = shown / width;
                 changed = true;
             }
             done |= r.drag_stopped() || r.lost_focus();
         });
         dialog::row(ui, "Feather", |ui| {
-            done |= ui.checkbox(&mut m.feather, "").changed();
+            done |= ui.checkbox(feather, "").changed();
         });
-        dialog::row(ui, "Color", |ui| color(ui, m.color));
+        dialog::row(ui, "Color", |ui| color(ui, now));
+    }
+    if let Some(m) = k.motion_mut() {
         dialog::row(ui, "Motion Blur", |ui| {
             let r = ui.add(
                 egui::DragValue::new(&mut m.motion_blur)
@@ -663,7 +663,11 @@ mod tests {
 
     #[test]
     fn realigning_a_wipe_keeps_it_a_wipe() {
-        use vidcut_core::model::{Transition, WipeDirection};
+        use vidcut_core::model::{EdgeWipe, Transition};
+        let wipe = EdgeWipe {
+            angle: 90,
+            ..EdgeWipe::PLAIN
+        };
         let x = Transition {
             id: "t1".into(),
             sound: false,
@@ -671,12 +675,12 @@ mod tests {
             to: Some("c2".into()),
             before: 10,
             after: 10,
-            otio: vidcut_core::otio::transitions::wipe_otio(WipeDirection::Left).into(),
+            otio: vidcut_core::otio::transitions::wipe_otio(&wipe, 20).into(),
         };
         let track = super::TrackRef::MAIN;
         assert_eq!(
             super::realigned(track, 100, (&x, false), "end")["transition"],
-            serde_json::json!({"type": "wipe", "direction": "left"})
+            serde_json::json!({"type": "wipe", "angle": 90})
         );
     }
 
