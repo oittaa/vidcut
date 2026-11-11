@@ -2076,16 +2076,19 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - One setting does the work of a tracker node and a connection.
   - A title with keyframes, and a title that stops following, wait for a measurement in Resolve ([todo](todo/motion-tracking.md)).
 
-## X170. A Notch filter cuts, and a Bell filter keeps its Q
+## X170. The clip Equalizer differs in three ways
 
 - **Resolve:**
   - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the ranges, defaults and curves of the clip equalizer.
   - The curve shows a Notch filter, but a render does not change the sound.
   - A Bell filter is wider than its Q near the top of the range.
   - Q 1 acts as Q 0.94 at 8000 Hz and as Q 0.75 at 16000 Hz. Q 4 acts as Q 2 at 16000 Hz.
+  - An OTIO export writes the effect `Fairlight Clip Equaliser` and six band effects.
 - **vidcut:**
   - A Notch filter removes its frequency. Its width is fixed.
   - A Bell filter has the given Q at each frequency.
+  - An OTIO export keeps the Equalizer in vidcut's own metadata. The export gives the note `equalizer_kept`.
 - **Why:**
   - A Notch filter that shows a cut and does not make it is a fault.
   - The measurements do not give one rule for the width of a Bell filter near the top of the range. The difference is small below 8000 Hz.
+  - The Equalizer effects of Resolve in OTIO are open work ([todo](todo/effects-library.md)).
