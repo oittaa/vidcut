@@ -100,7 +100,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - OTIO has no drop-frame flag. An imported timeline takes the frame rate and the drop-frame setting of the project.
   - An import into a project with no media turns drop-frame off.
   - Clip effects, transitions, generators that vidcut does not draw, compound clips and speed changes come in as data. vidcut writes them back while they fit.
-  - Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), wipes ([X89](#x89-a-wipe-reveals-from-one-edge)) and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play.
+  - Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), wipes and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play.
   - The generators of [spec §8.17](cut-page-spec.md#817-generators-p-766) play.
   - Other transitions play as cuts, and other generators play as gaps. Other effects do not play.
   - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -831,20 +831,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - vidcut makes a picture only as large as the output shows it. A factor would only limit placed pictures. Thus On is sufficient.
   - The owner chose the scaler of macOS as the default on macOS. The owner also decided that AI Fast and AI Slow stay off there. Thus an export has different pixels on macOS and on other systems, and the owner accepts this.
   - The owner approved the defaults of Super Scale as better than those of Resolve.
-
-## X89. A wipe reveals from one edge
-
-- **Resolve:**
-  - Wipes are transitions (pp. 758–761).
-  - The spec gives no edge for a wipe.
-  - Its Edge Wipe has an angle, a border, a feather and an ease. At 0 degrees the incoming picture comes in from the bottom ([gotchas](gotchas.md#resolves-otio-files)).
-- **vidcut:**
-  - A wipe has one direction: left, right, up or down.
-  - The Inspector shows the direction as Edge: Left, Right, Top or Bottom.
-  - A left wipe reveals the incoming picture from the left edge toward the right.
-- **Why:**
-  - The spec gives no wipe geometry.
-  - One edge covers the four directions.
 
 ## X92. Deleting words on the timeline cuts at quiet points
 

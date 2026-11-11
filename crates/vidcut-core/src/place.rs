@@ -4,7 +4,7 @@ use crate::model::{
     VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
-use crate::render::{Moving, Placed, Wipe};
+use crate::render::{Moving, Placed};
 
 const LEAST_ZOOM: f64 = 1e-9;
 const LEAST_BAR: f64 = 0.2;
@@ -704,7 +704,7 @@ pub(crate) fn level(
         opacity: match gone {
             true => 0.0,
             false => {
-                let dissolve = placed.ramp.filter(|r| r.wipe.is_none() && !r.moved);
+                let dissolve = placed.ramp.filter(|r| !r.moved);
                 p.opaque() * dissolve.map_or(1.0, |r| r.level(0))
             }
         },
@@ -946,7 +946,6 @@ pub struct Mix {
     pub parts: Vec<MixPart>,
     pub placing: Placing,
     pub added: bool,
-    pub wipe: Option<Wipe>,
     pub moving: Option<Moving>,
     pub outgoing: Option<bool>,
 }
@@ -1018,7 +1017,6 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixP
             parts: inner,
             placing,
             added: outer.crossing,
-            wipe: outer.ramp.and_then(|r| r.mask(0)),
             moving: outer
                 .moving
                 .as_ref()

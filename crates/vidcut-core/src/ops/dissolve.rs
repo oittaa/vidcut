@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Handle, Keyframe, MAX_BORDER, MotionEase, PictureTransition, Project, TrackKind,
-    Transition,
+    Clip, Handle, Keyframe, MAX_ANGLE, MAX_BORDER, MotionEase, PictureTransition, Project,
+    TrackKind, Transition,
 };
 use crate::otio::{
     self,
@@ -123,7 +123,7 @@ fn otio(sound: bool, frames: i64, kind: &PictureTransition) -> Value {
     match kind {
         PictureTransition::Dissolve => dissolve,
         PictureTransition::DipToColor { color } => transitions::dip_otio(*color),
-        PictureTransition::Wipe { direction } => transitions::wipe_otio(*direction),
+        PictureTransition::Wipe { wipe } => transitions::wipe_otio(wipe, frames),
         PictureTransition::SmoothCut {
             mode,
             process,
@@ -141,15 +141,26 @@ fn otio(sound: bool, frames: i64, kind: &PictureTransition) -> Value {
 }
 
 fn checked(kind: &PictureTransition) -> Result<()> {
-    if let Some(m) = kind.motion() {
-        if !(0.0..=MAX_BORDER).contains(&m.border) {
-            return Err(Error::invalid(format!(
-                "a border is from 0 to {MAX_BORDER}"
-            )));
-        }
-        if !(0.0..=1.0).contains(&m.motion_blur) {
-            return Err(Error::invalid("a motion blur is from 0 to 1"));
-        }
+    let border = match kind {
+        PictureTransition::Wipe { wipe } => Some(wipe.border),
+        k => k.motion().map(|m| m.border),
+    };
+    if border.is_some_and(|b| !(0.0..=MAX_BORDER).contains(&b)) {
+        return Err(Error::invalid(format!(
+            "a border is from 0 to {MAX_BORDER}"
+        )));
+    }
+    if let PictureTransition::Wipe { wipe } = kind
+        && wipe.angle.abs() > MAX_ANGLE
+    {
+        return Err(Error::invalid(format!(
+            "an angle is from -{MAX_ANGLE} to {MAX_ANGLE}"
+        )));
+    }
+    if let Some(m) = kind.motion()
+        && !(0.0..=1.0).contains(&m.motion_blur)
+    {
+        return Err(Error::invalid("a motion blur is from 0 to 1"));
     }
     let Some(m) = kind.course() else {
         return Ok(());
@@ -667,7 +678,7 @@ mod tests {
         let mut f = fixture();
         f.append("m1", 0, 50);
         f.append("m2", 10, 60);
-        let wipe = json!({"type": "wipe", "direction": "left"});
+        let wipe = json!({"type": "wipe", "angle": 90});
         req(
             &mut f,
             "edit.dissolve",
@@ -678,7 +689,10 @@ mod tests {
         assert_eq!(
             t.and_then(crate::otio::transitions::kind_of),
             Some(crate::model::PictureTransition::Wipe {
-                direction: crate::model::WipeDirection::Left
+                wipe: crate::model::EdgeWipe {
+                    angle: 90,
+                    ..crate::model::EdgeWipe::PLAIN
+                }
             })
         );
     }
@@ -1024,7 +1038,7 @@ mod tests {
         req(
             &mut f,
             "edit.dissolve",
-            json!({"at": 50, "transition": {"type": "wipe", "direction": "left"}}),
+            json!({"at": 50, "transition": {"type": "wipe", "angle": 90}}),
         );
         let p = f.editor.project();
         let t = p
@@ -1035,8 +1049,8 @@ mod tests {
             .find(|t| !t.sound)
             .unwrap();
         assert_eq!(
-            crate::otio::transitions::wipe_of(t),
-            Some(crate::model::WipeDirection::Left)
+            crate::otio::transitions::wipe_of(t).map(|w| w.angle),
+            Some(90)
         );
     }
 
@@ -1054,13 +1068,17 @@ mod tests {
         req(
             &mut f,
             "edit.transition",
-            json!({"at": 50, "transition": {"type": "wipe", "direction": "left"}}),
+            json!({"at": 50, "transition": {"type": "wipe", "angle": 90}}),
         );
         let p = f.editor.project();
         let t = &p.track("V1").unwrap().transitions[0];
         assert_eq!(
-            (t.before, t.after, crate::otio::transitions::wipe_of(t)),
-            (before, after, Some(crate::model::WipeDirection::Left))
+            (
+                t.before,
+                t.after,
+                crate::otio::transitions::wipe_of(t).map(|w| w.angle)
+            ),
+            (before, after, Some(90))
         );
     }
 
@@ -1072,7 +1090,7 @@ mod tests {
         req(
             &mut f,
             "edit.dissolve",
-            json!({"at": 50, "sound": false, "transition": {"type": "wipe", "direction": "right"}}),
+            json!({"at": 50, "sound": false, "transition": {"type": "wipe", "angle": -90}}),
         );
         let (before, after) = {
             let p = f.editor.project();

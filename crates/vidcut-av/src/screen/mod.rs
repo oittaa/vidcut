@@ -8,10 +8,10 @@ use crate::cuda::{CudaDevice, PlaneCopy};
 use crate::hw::Kind;
 use crate::player::{AlphaUse, Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
-use vidcut_core::model::{AlphaMode, Hdr, WipeDirection};
+use vidcut_core::model::{AlphaMode, Hdr};
 use vidcut_core::place::{Level, Mix, MixPart, Mixes, Placing, Working, chain, lettered};
 use vidcut_core::preferences::{Scope, ScopeScale};
-use vidcut_core::render::{Moving, Placed, Shift, Wipe};
+use vidcut_core::render::{Moving, Placed, Shift};
 
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
@@ -983,34 +983,6 @@ impl Below {
     }
 }
 
-fn shown_part(wipe: Wipe, (w, h): (u32, u32)) -> (u32, u32, u32, u32) {
-    let (n, d) = wipe.along;
-    if d <= 0 {
-        return if wipe.falling {
-            (0, 0, w, h)
-        } else {
-            (0, 0, 0, 0)
-        };
-    }
-    let n = n.clamp(0, d);
-    let edge = |size: u32, k: i64| {
-        ((i128::from(size) * i128::from(k) + i128::from(d) - 1) / i128::from(d)) as u32
-    };
-    let ((x0, x1), (y0, y1)) = match wipe.direction {
-        WipeDirection::Left => ((0, edge(w, n)), (0, h)),
-        WipeDirection::Right => ((edge(w, d - n), w), (0, h)),
-        WipeDirection::Up => ((0, w), (0, edge(h, n))),
-        WipeDirection::Down => ((0, w), (edge(h, d - n), h)),
-    };
-    let flip = |(a, b): (u32, u32), size: u32| if a == 0 { (b, size) } else { (0, a) };
-    let ((x0, x1), (y0, y1)) = match (wipe.falling, wipe.direction) {
-        (false, _) => ((x0, x1), (y0, y1)),
-        (true, WipeDirection::Left | WipeDirection::Right) => (flip((x0, x1), w), (y0, y1)),
-        (true, WipeDirection::Up | WipeDirection::Down) => ((x0, x1), flip((y0, y1), h)),
-    };
-    (x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0))
-}
-
 fn transfer_of(colors: Option<Hdr>) -> f64 {
     match colors {
         None => 0.0,
@@ -1129,7 +1101,7 @@ impl Moves {
     }
 }
 
-const MOVING: usize = 7 * 16;
+const MOVING: usize = 8 * 16;
 
 fn motion_bytes(m: &Moving, size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
     let Shift {
@@ -1145,15 +1117,18 @@ fn motion_bytes(m: &Moving, size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
         blur,
         mixes_blur,
         still,
+        wipe,
     } = m.shift(size);
     let [r, g, b] = m.color.map(|c| f64::from(c) / 255.0);
-    let floats: [[f64; 4]; 6] = [
+    let wipe = wipe.map_or([0.0; 4], |[x, y, at]| [x, y, at, 1.0]);
+    let floats: [[f64; 4]; 7] = [
         [upper[0], upper[1], lower[0], lower[1]],
         picture,
         band,
         [edge[0], edge[1], facing[0], facing[1]],
         [blur[0], blur[1], blur[2], border],
         [r, g, b, transfer_of(colors)],
+        wipe,
     ];
     let flags = [upper_in, feather, mixes_blur, still].map(u32::from);
     floats
@@ -1193,13 +1168,12 @@ fn letter(
     letters: &[Letters],
     titles: &[TitleOver],
     (after, layers): (usize, usize),
-    size: (u32, u32),
 ) {
     for t in titles
         .iter()
         .filter(|t| t.above == after || (after == layers && t.above > after))
     {
-        lettered_over(pass, lettering, letters, t, size);
+        lettered_over(pass, lettering, letters, t);
     }
 }
 
@@ -1208,25 +1182,14 @@ fn lettered_over(
     lettering: &wgpu::RenderPipeline,
     letters: &[Letters],
     t: &TitleOver,
-    size: (u32, u32),
 ) {
     let Some(l) = letters.iter().find(|l| l.shows(t)) else {
         return;
     };
-    let shown = t.wipe.map(|w| shown_part(w, size));
-    if shown.is_some_and(|p| p.2 == 0 || p.3 == 0) {
-        return;
-    }
-    if let Some((x, y, w, h)) = shown {
-        pass.set_scissor_rect(x, y, w, h);
-    }
     pass.set_pipeline(lettering);
     for tile in &l.tiles {
         pass.set_bind_group(0, &tile.bind, &[]);
         pass.draw(0..3, 0..1);
-    }
-    if shown.is_some() {
-        pass.set_scissor_rect(0, 0, size.0, size.1);
     }
 }
 
@@ -1243,7 +1206,6 @@ struct MixDraw<'a, 'm> {
     below: Option<&'a Below>,
     letters: &'a [Letters],
     titles: &'a [TitleOver],
-    wipes: &'a [Option<Wipe>],
     size: (u32, u32),
     moves: &'a mut std::slice::Iter<'m, Moves>,
     colors: Option<Hdr>,
@@ -1251,10 +1213,6 @@ struct MixDraw<'a, 'm> {
 }
 
 impl MixDraw<'_, '_> {
-    fn part(&self, wipe: Option<Wipe>) -> Option<(u32, u32, u32, u32)> {
-        wipe.map(|w| shown_part(w, self.size))
-    }
-
     fn moved(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1306,8 +1264,7 @@ impl MixDraw<'_, '_> {
             match part {
                 MixPart::Layer(i) => {
                     let (bind, _, _, mode) = &self.binds[*i];
-                    let shown = self.part(self.wipes[*i]);
-                    self.lay(encoder, depth, bind, (*mode, mix.added), shown);
+                    self.lay(encoder, depth, bind, (*mode, mix.added));
                 }
                 MixPart::Title(j) => {
                     let mut pass = begin(encoder, canvas, None);
@@ -1315,19 +1272,13 @@ impl MixDraw<'_, '_> {
                         true => &self.gpu.lettering_adding,
                         false => &self.gpu.lettering_wide,
                     };
-                    lettered_over(
-                        &mut pass,
-                        lettering,
-                        self.letters,
-                        &self.titles[*j],
-                        self.size,
-                    );
+                    lettered_over(&mut pass, lettering, self.letters, &self.titles[*j]);
                 }
                 MixPart::Mix(inner) => {
                     self.mix(encoder, inner, depth + 1);
                     let bind = self.finished(encoder, inner, depth + 1, IN_MIX);
                     let how = (inner.placing.mode.code(), mix.added);
-                    self.lay(encoder, depth, &bind, how, self.part(inner.wipe));
+                    self.lay(encoder, depth, &bind, how);
                 }
             }
         }
@@ -1364,11 +1315,7 @@ impl MixDraw<'_, '_> {
         depth: usize,
         bind: &wgpu::BindGroup,
         (mode, added): (u32, bool),
-        shown: Option<(u32, u32, u32, u32)>,
     ) {
-        if shown.is_some_and(|p| p.2 == 0 || p.3 == 0) {
-            return;
-        }
         let mode = match added {
             true => 0,
             false => mode,
@@ -1383,9 +1330,6 @@ impl MixDraw<'_, '_> {
             );
         }
         let mut pass = begin(encoder, &canvas.view, None);
-        if let Some((x, y, w, h)) = shown {
-            pass.set_scissor_rect(x, y, w, h);
-        }
         match self.below.filter(|_| mode != 0) {
             Some(below) => {
                 pass.set_pipeline(&self.gpu.placed_mode);
@@ -1682,18 +1626,15 @@ impl Screen {
         let limit = gpu.device.limits().max_texture_dimension_2d;
         let fits = |p: &Arc<Picture>| p.width() <= limit && p.height() <= limit;
         let picture = picture.filter(|p| fits(p));
-        type Shown<'a> = (&'a Arc<Picture>, Option<f64>, Option<Wipe>);
+        type Shown<'a> = (&'a Arc<Picture>, Option<f64>);
         let layers: Vec<Shown> = picture
             .into_iter()
-            .map(|p| (p, None, None))
+            .map(|p| (p, None))
             .chain(picture.into_iter().flat_map(|p| {
                 p.over()
                     .iter()
                     .filter(|o| fits(&o.picture))
-                    .map(|o| match o.wipe {
-                        Some(w) => (&o.picture, None, Some(w)),
-                        None => (&o.picture, Some(f64::from(o.level())), None),
-                    })
+                    .map(|o| (&o.picture, Some(f64::from(o.level()))))
             }))
             .collect();
         if self.slots.len() < layers.len() {
@@ -1734,8 +1675,6 @@ impl Screen {
                 Mixes::of(&chains, &over, frame)
             }
         };
-        let wipes: Vec<Option<Wipe>> = layers.iter().map(|l| l.2).collect();
-        let part = |i: usize| wipes.get(i).copied().flatten().map(|w| shown_part(w, size));
         let exported = self.exported;
         let alpha = self.alpha;
         let clock = std::time::Instant::now();
@@ -1919,7 +1858,6 @@ impl Screen {
                     below,
                     letters: &self.letters,
                     titles,
-                    wipes: &wipes,
                     size,
                     moves: &mut moves,
                     colors,
@@ -1944,22 +1882,13 @@ impl Screen {
                     None => pass.set_pipeline(&drawing.placed),
                 }
                 pass.set_bind_group(0, &bind, &[]);
-                let shown = outer.mix.wipe.map(|w| shown_part(w, size));
-                if shown.is_none_or(|p| p.2 > 0 && p.3 > 0) {
-                    if let Some((x, y, w, h)) = shown {
-                        pass.set_scissor_rect(x, y, w, h);
-                    }
-                    pass.draw(0..3, 0..1);
-                    if shown.is_some() {
-                        pass.set_scissor_rect(0, 0, size.0, size.1);
-                    }
-                }
+                pass.draw(0..3, 0..1);
                 for (t, _) in titles
                     .iter()
                     .zip(&nests.follows)
                     .filter(|(_, follows)| **follows == Some(next_mix))
                 {
-                    lettered_over(&mut pass, lettering, &self.letters, t, size);
+                    lettered_over(&mut pass, lettering, &self.letters, t);
                 }
                 i = i.max(outer.layers.1);
                 next_mix += 1;
@@ -1986,31 +1915,22 @@ impl Screen {
             let first = i;
             while i < n && (i == first || !starts(i)) {
                 let (bind, level, placed, mode) = &binds[i];
-                let shown = part(i);
-                if shown.is_none_or(|p| p.2 > 0 && p.3 > 0) {
-                    if let Some((x, y, w, h)) = shown {
-                        pass.set_scissor_rect(x, y, w, h);
+                match level {
+                    _ if *mode != 0 => {
+                        let below = self.below.as_ref().expect("made for a composite mode");
+                        pass.set_pipeline(&drawing.mode);
+                        pass.set_bind_group(1, &below.bind, &[]);
                     }
-                    match level {
-                        _ if *mode != 0 => {
-                            let below = self.below.as_ref().expect("made for a composite mode");
-                            pass.set_pipeline(&drawing.mode);
-                            pass.set_bind_group(1, &below.bind, &[]);
-                        }
-                        _ if *placed => pass.set_pipeline(&drawing.placed),
-                        None => pass.set_pipeline(&drawing.pipeline),
-                        Some(l) => {
-                            pass.set_pipeline(&drawing.blended);
-                            pass.set_blend_constant(level_of(*l));
-                        }
-                    }
-                    pass.set_bind_group(0, bind, &[]);
-                    pass.draw(0..3, 0..1);
-                    if shown.is_some() {
-                        pass.set_scissor_rect(0, 0, size.0, size.1);
+                    _ if *placed => pass.set_pipeline(&drawing.placed),
+                    None => pass.set_pipeline(&drawing.pipeline),
+                    Some(l) => {
+                        pass.set_pipeline(&drawing.blended);
+                        pass.set_blend_constant(level_of(*l));
                     }
                 }
-                letter(&mut pass, lettering, &self.letters, &free, (i + 1, n), size);
+                pass.set_bind_group(0, bind, &[]);
+                pass.draw(0..3, 0..1);
+                letter(&mut pass, lettering, &self.letters, &free, (i + 1, n));
                 i += 1;
             }
         }
@@ -4012,7 +3932,6 @@ mod tests {
             dy: 0,
             turn: [0.0, 0.0, 1.0, 0.0],
             alpha: 1.0,
-            wipe: None,
             placed: Vec::new(),
             nth: 0,
         }
