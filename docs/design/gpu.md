@@ -353,7 +353,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 
 ## The scopes
 
-The Waveform, the Parade and the Vectorscope show the picture that the viewer draws ([deviation X127](../deviations.md#x127-the-viewer-has-scopes)).
+The Waveform, the Parade and the Vectorscope show the picture that the viewer draws ([spec §4.5](../cut-page-spec.md#45-other-viewer-features)).
 
 What they read:
 
@@ -378,7 +378,9 @@ The scales (`marks`):
 
 - `luma_of` takes the weights of the luma from `shader_colors`. They are BT.709 in SDR, and BT.2020 in HDR PQ and HDR HLG.
 - The Waveform and the Parade have the same room above and below the full range (`LOW`, `HIGH`). Thus a value out of range still shows.
-- SDR marks are 10-bit codes. HDR marks are nits, through `pq_code` and `hlg_code`.
+- The marks come from `ScopeScale` (`levels`): 10-bit codes, 12-bit codes, percent, millivolts or nits. Each scale spans the full range.
+- The nits go through `pq_code`, and through `hlg_code` on an HLG timeline.
+- A change of the scale draws each `Plot` again.
 - The Vectorscope has Cb across and Cr up, with a circle, crossing lines and a box at each 75 percent color bar.
 
 A scope that is off:

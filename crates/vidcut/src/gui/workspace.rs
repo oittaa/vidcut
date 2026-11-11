@@ -1062,8 +1062,9 @@ impl Workspace {
                 }
                 match self.project_shared() {
                     Some(p) => {
+                        ui.menu_button("AI Tools", |ui| self.speech_item(ui));
                         ui.separator();
-                        self.timeline_actions_menu(ui, &p);
+                        self.timeline_actions_menu(ui, &p, false);
                     }
                     None => super::dialog::why(ui, "open a project for the rest"),
                 }
