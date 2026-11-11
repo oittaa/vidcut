@@ -1521,7 +1521,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - A point where the speed changes is a speed keyframe. The GUI, the requests and the docs use this one name. The right-click menu has Add Speed Keyframe.
   - The Keyframes tab and the keyframe tray have one Speed row, in a Speed group.
-  - With the Keyframes tab or the tray open, the three items act only on the selected rows and keyframes. Thus with the tray open and no row selected, Add Keyframe is off.
+  - With the Keyframes tab or the tray open, the three items act on the selected rows and keyframes.
+  - With the tray open, the Keyframes tab closed, and no row or keyframe selected, Add Keyframe adds a speed keyframe, as in Resolve.
+  - With the Keyframes tab open and no row selected, Add Keyframe stays off.
   - With both closed, they act on the speed keyframes of the selected clips ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - Delete All Keyframes then asks first, for example "Delete 3 Speed keyframes of Clip 2?". Then it removes all the speed keyframes.
   - An item that cannot act is off. Its tooltip tells the next click, for example "Click a parameter name, such as Opacity".

@@ -1917,6 +1917,14 @@ impl Workspace {
         })
     }
 
+    fn tray_adds_speed(&self, cmd: KeyCmd, t: &Target) -> bool {
+        cmd == KeyCmd::Add
+            && t.rows.is_empty()
+            && t.marks.is_empty()
+            && self.left != LeftTab::Keyframes
+            && self.speed_clips().is_ok()
+    }
+
     fn speed_clips(&self) -> Result<Vec<Clip>, &'static str> {
         let p = self.project_shared().ok_or("Open a project first")?;
         let picked: Vec<Clip> = self
@@ -2032,6 +2040,9 @@ impl Workspace {
             Ok(t) => t,
             Err(why) => return Some(why),
         };
+        if self.tray_adds_speed(cmd, &t) {
+            return self.speed_cmd_why(cmd);
+        }
         if cmd != KeyCmd::Add && !t.marks.is_empty() {
             return None;
         }
@@ -2076,6 +2087,10 @@ impl Workspace {
         let Ok(t) = self.key_target() else {
             return;
         };
+        if self.tray_adds_speed(cmd, &t) {
+            self.speed_cmd(cmd);
+            return;
+        }
         let id = t.clip.id.clone();
         if cmd != KeyCmd::Add && !t.marks.is_empty() {
             self.key_editor.selected.clear();
