@@ -548,7 +548,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **vidcut:**
   - The animation is part of the style of a track (D69). The user sets it in the Subtitle Track section of the Inspector or with `track.set`.
   - The Animated Subtitles section of the Titles tab shows the animated looks.
-  - A drag of a look onto a subtitle track or its header sets the style of the track, as in Resolve.
+  - A drag of a look onto the header of a subtitle track sets the style of the track, as in Resolve.
   - The looks of Create Subtitles from Audio ([spec §8.12](spec.md#812-subtitles-pp-645646-702-12271248)) put the speech on a new track that is already animated.
   - Word times follow edits and new text automatically (D70).
 - **Why:**

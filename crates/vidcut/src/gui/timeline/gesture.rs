@@ -878,7 +878,7 @@ fn effect_preview(ctx: &Ctx, pos: Pos2, kind: EffectType) -> Preview {
 fn look_preview(ctx: &Ctx, pos: Pos2, name: &str) -> Preview {
     let Some(row) = ctx.rows.at(pos.y).filter(|r| {
         is_subtitle(&r.track)
-            && (ctx.rows.area.left() - super::HEADER..=ctx.rows.area.right()).contains(&pos.x)
+            && (ctx.rows.area.left() - super::HEADER..ctx.rows.area.left()).contains(&pos.x)
     }) else {
         return Preview::default();
     };

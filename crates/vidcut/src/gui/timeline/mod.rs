@@ -3298,7 +3298,7 @@ impl Workspace {
                 at + vec2(0.0, 20.0),
                 Align2::LEFT_TOP,
                 match (&d.drag.gesture, range) {
-                    (Gesture::Look { .. }, _) => "drop on a subtitle track",
+                    (Gesture::Look { .. }, _) => "drop on a subtitle track header",
                     (_, Some(_)) => "drop on the timeline",
                     (_, None) => "drop on a clip",
                 },
