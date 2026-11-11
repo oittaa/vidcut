@@ -8,7 +8,7 @@ Each entry has three parts:
 - **vidcut:** what vidcut does.
 - **Why:** the reason.
 
-This file also lists the features that vidcut adds. Where the manual does not tell what to do, the spec records a decision ([spec §12](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). A decision is not a deviation.
+A feature that vidcut adds, and that Resolve does not have, is not a deviation. The spec describes it. Where the manual does not tell what to do, the spec records a decision ([spec §12](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). A decision is not a deviation.
 
 ## X1. A project is one file, and its media paths are relative
 
@@ -42,50 +42,29 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - Quick Export shows a progress bar dialog while it exports (p. 789).
   - The Deliver page has the render settings and the Render Queue (pp. 4103–4132).
+  - In Resolve Studio 21.2, the Quick Export row is H.264 Master, HyperDeck, H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok, Presentations, Dropbox and Replay.
+  - YouTube has a menu of four sizes, 720p to 2160p (p. 4105).
+  - HyperDeck makes H.264 files for a Blackmagic HyperDeck (p. 4108). Presentations uploads to Blackmagic Cloud (p. 4106).
 - **vidcut:**
-  - Quick Export has a shorter row: H.265 Master, AV1, ProRes 422 HQ, YouTube 1080p and 2160p, TikTok.
+  - The Quick Export row is AV1, H.264 Master, H.265 Master, ProRes 422 HQ, YouTube 1080p, YouTube 2160p, Vimeo 1080p and TikTok.
+  - It has no HyperDeck, Presentations, Dropbox or Replay.
   - The Export dialog also shows the live plan, and gives the export as a shell command.
   - In a running GUI, exports are jobs ([design/export.md](design/export.md#the-guis-exports), [design/live.md](design/live.md#jobs)).
   - No progress dialog opens. Jobs shows the progress of each job.
 - **Why:**
   - The plan and the command let scripts reproduce GUI exports.
   - An export runs beside the editing. A dialog over the timeline for each export interrupts that editing.
-  - A short row is quicker to choose from. AV1 makes the smallest files, and current GPUs encode it. For masters, H.265 replaces H.264.
-
-## X4. Undo history persists across sessions and CLI runs
-
-- **Resolve:**
-  - Undo is unlimited in a session. Resolve clears it when the project closes (p. 651).
-- **vidcut:**
-  - The history is a file in the state folder. Thus it stays after a restart and between separate CLI runs.
-  - It keeps up to 131,072 steps ([design/requests.md](design/requests.md#undo-history)).
-- **Why:**
-  - An agent can undo its own edits from a later CLI call.
-  - The user can undo the batch of an agent from the GUI.
-
-## X5. Scripting additions (no Cut-page behavior changes)
-
-- **Resolve:**
-  - The Cut page has none.
-- **vidcut:**
-  - `edit insert --at` and `edit overwrite --at` place at an exact frame. Smart Insert inserts only at an edit point (p. 697).
-  - `gui log` gives scripts the recent requests of every client, from the GUI or from an agent.
-  - Commands for a project that is open in a GUI run inside that GUI. Live-only commands drive the GUI ([cli.md](cli.md), [design/live.md](design/live.md)).
-  - `edit copy` returns clips as JSON for `edit paste --clips` into any project. In the GUI, Ctrl+C also puts this JSON on the system clipboard.
-  - `--track` can name the next new track ([D27](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - `track set` and `markers set` do what the track header, the mixer and the marker dialog do.
-  - In a running GUI, `export start --background` returns a job id for `jobs list|get|wait|cancel`. `export plan` writes nothing.
-  - Other additions are `presets save|delete` and `gui show|close`.
-  - `analyze silence|scenes|black|loudness` and `timeline boring` report silences, shots, black, loudness and the clips of the Boring Detector. They do not edit.
-  - `storyboard render` draws every shot into one PNG.
-- **Why:**
-  - Scripts and agents need frame-exact edits without a playhead.
-  - They also need measurements to make a plan.
+  - vidcut does not upload, and it has no settings for a Blackmagic HyperDeck. The Export dialog has H.264 for other needs.
+  - One item in the row is one preset, with no menu. Thus YouTube shows as two items, 1080p and 2160p.
 
 ## X6. Removing a bin keeps its clips
 
 - **Resolve:**
   - Delete Bin deletes the bin, the bins in it and their clips (p. 377).
+  - These are measurements in Resolve Studio 21.2:
+    - Remove Selected Clip on media that timeline clips use asks no question. The pool item goes.
+    - The clips of that media on the timeline stay, offline.
+    - A compound clip that holds a clip of that media stays in the pool and on the timeline.
 - **vidcut:**
   - `bins.remove` removes the bin and the bins in it. Their media move up to its parent bin.
   - `media.remove` removes media. It needs `force` when clips or compound clips use the media.
@@ -125,9 +104,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - An import makes a new timeline.
 - **vidcut:**
   - vidcut uses only OpenTimelineIO, for import and for export, in the shapes that Resolve uses ([D40](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - It reads and writes `.otio` files, `.otioz` bundles and `.otiod` bundle folders ([design/model.md](design/model.md#opentimelineio)).
-  - File > Export Timeline is `export start cut.otio`. With Media, the export is a bundle.
-  - Marks, faders and the rest of the project go in the metadata of vidcut. Resolve does not keep this metadata.
+  - File > Export Timeline is `export start cut.otio`. With Media, the export is a bundle ([design/model.md](design/model.md#opentimelineio)).
   - A project holds one timeline (X2). Thus File > Import Timeline (`timeline import`) appends, replaces the timeline, adds one compound clip, or brings in only the media.
   - An OTIO file also opens as a new project.
   - OTIO has no drop-frame flag. An imported timeline takes the frame rate and the drop-frame setting of the project.
@@ -145,18 +122,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - OTIO is an open standard that Resolve and other editors read and write. Thus a cut can go to a finishing tool and come back.
   - The EDL of Resolve keeps one video track, and no audio tracks or markers. Its FCPXML (1.10) keeps no markers.
   - vidcut carries what it does not model. Thus a cut that is finished in Resolve can come back for a recut and go back intact.
-
-## X10. An MCP server for AI agents
-
-- **Resolve:**
-  - The Cut page has none.
-  - Resolve Studio has a Python and Lua scripting API (Workspace > Scripts).
-- **vidcut:**
-  - `vidcut mcp` serves the Model Context Protocol on stdin and stdout.
-  - Each request method is a tool ([design/requests.md](design/requests.md), [cli.md](cli.md)).
-- **Why:**
-  - Agents use MCP to find and call tools.
-  - vidcut makes the tools from the request schema. Thus the tools stay complete and the same as the CLI.
 
 ## X12. Preferences hold only what vidcut needs
 
@@ -272,23 +237,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Phone, camera and graded HDR footage looks on TVs as its sources do.
   - This needs no setup by a colorist.
 
-## X20. Stats for nerds
-
-- **Resolve:**
-  - None. The viewer shows nothing about how it plays.
-- **vidcut:**
-  - The right-click menu of the viewer opens a panel over the picture.
-  - The panel has a group for each of these:
-    - decoding, the picture and how it was made
-    - Super Scale and Retime Process
-    - the viewer, playback, the kept pictures and the sound
-  - The group "How It Was Made" tells about the picture on the screen, also when playback is paused.
-  - The Super Scale group shows when the clip under the playhead has Super Scale on. It names the upscaler and the factor.
-  - `player stats` shows or hides the panel.
-- **Why:**
-  - Where the GPU decodes and draws is different on different machines.
-  - The panel shows it without a debug log.
-
 ## X21. Ctrl+wheel zooms the timeline
 
 - **Resolve:**
@@ -299,35 +247,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Ctrl+wheel and Cmd+wheel zoom in browsers and most programs.
   - egui gives them and a pinch as one zoom.
-
-## X22. Themes
-
-- **Resolve:**
-  - None. Resolve has one dark gray look.
-- **vidcut:**
-  - vidcut has ten built-in themes. The user can add themes as TOML files.
-  - Native, the default, follows the light or dark mode and the accent color of the computer.
-  - Classic is a flat dark gray, as on the Cut page.
-  - Preferences or `preferences set appearance.theme=…` change the theme at once.
-- **Why:**
-  - Users expect a desktop app to offer a few looks for long sessions.
-  - Each theme keeps the layout of the Cut page and the meanings of its colors.
-
-## X23. A Help window
-
-- **Resolve:**
-  - The Cut page has none.
-  - The Keyboard Customization window lists and changes keys, without explanations.
-- **vidcut:**
-  - F1, or Help in the top bar, opens the Help window. It lists every shortcut, with one action in each row.
-  - A ? beside a less obvious action explains it in a few plain words.
-  - Under the shortcuts, Help tells in a few words what each upscaler of Super Scale does ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
-  - It also tells what each Retime Process does ([X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
-  - It lists only the choices that this computer has.
-  - It does not list Auto and Project Settings. Their lists already show what they give, as in Auto (AI Fast).
-- **Why:**
-  - New users learn the keys and the ideas behind them in one place, in the app.
-  - The names AI Fast and AI Slow tell the speed only. The user also needs to know how the pictures are different.
 
 ## X24. Cross fades follow their curves exactly
 
@@ -341,27 +260,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The curve gives the transition its name. The curve needs no points from an editor.
   - The two differ by more than 1% only in the 20 ms where a curve leaves silence or reaches it.
 
-## X25. Small additions to the layout
+## X25. Import is in the top bar
 
 - **Resolve:**
   - The Import Media and Import Media Folder buttons are in the Media Pool (p. 654).
-  - On the Cut page, Import Media Folder has no menu item (Resolve Studio 21.1.1).
-  - The transport bar has no Clear.
-  - Timeline Options (p. 645) have no filmstrip or waveform toggles.
-  - Snap is in Timeline Options, not among the timeline buttons (p. 649).
-  - The pool does not sort by duration.
 - **vidcut:**
   - Import and Import Folder are in the top bar.
-  - Import Media Folder… is in the File menu and in the right-click menu of the pool.
-  - Clear in the transport bar clears the marks (Alt+X).
-  - Timeline Options have Filmstrips and Waveforms.
-  - A Snap button is among the timeline buttons.
-  - Duration is one of the sorts of the pool.
-  - File dialogs for media, projects and exports each start in the folder that the user last used for them.
 - **Why:**
-  - Each addition puts one click on something that the Cut page hides in a menu or leaves out.
-  - Or it adds a menu item where the Cut page has only a button.
-  - No addition changes how an edit works.
+  - The top bar shows on every tab, also while Titles or the Inspector replaces the pool.
 
 ## X26. One folder for proxies and the render cache is a preference
 
@@ -463,118 +369,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The reason is the same as in [X29](#x29-a-dynamic-trim-run-says-why-it-stopped).
   - An agent can cut a card or a render folder that the user imports. No clip of it must go missing without a message.
 
-## X33. Each undo step says what, where and how much
+## X35. The History window docks
 
 - **Resolve:**
-  - Resolve Studio 21.1.1 names a step by its kind: "Split Clips", "Remove clips", "Add Transition to Edit Points".
-  - Only Append names the media.
-  - Edit > Undo and Redo do not tell what they would undo or redo.
-  - Ctrl+Z shows nothing.
+  - The History window floats over the page (21.1.1).
 - **vidcut:**
-  - A step tells what it did and by how much. It gives the place as a timecode and a track.
-  - It names the clip by its name, else by the name of its media. An example: "Trim the end of Interview.mp4 by -12 frames at 00:01:02:10 on V1".
-  - A request that sets values names each field that changed, with its old and new value. An example: "Title “Intro”: Size 10% → 14%, Color usual → #ffd700".
-    - "usual" is the value of a field that has no value of its own. "none" is a mark that is not set.
-    - A `style` replaces the whole style. Thus the step also names a style field that the request leaves out, which goes back to "usual".
-    - Word Times and a `look` show only their name. A list of filler words shows its number of words.
-    - With three changed fields or more, the step names only the fields. A field that shows only its name does not count.
-    - When the old values of the clips or media are not all the same, the field shows only its new value.
-    - The boxes of a Dynamic Zoom show their old values only when the clip had a Dynamic Zoom. Else the step says "Dynamic Zoom off → on".
-    - `tape.marks.set` shows only the new marks. The label of `preferences.set` lists the new values.
-  - An `apply` batch lists its commands under it. Each command is named against the project after the commands before it.
-  - Edit > Undo and Redo name the step.
-  - Ctrl+Z and Ctrl+Shift+Z tell what they undid or redid. For a short time, they also outline where it was in the timeline ([D55](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The history docks at the right side of the window ([spec §8.10](cut-page-spec.md#810-undo-pp-651652)).
 - **Why:**
-  - Ten lines of "Split Clips" do not tell the user which step to go back to. A step that only says "Change title" does not tell what an undo puts back.
-  - A step never shows an old value that the project did not have.
-  - An undo can change something off screen, or something that an agent did. Then it looks as if nothing occurred.
-
-## X34. The undo history says who made each step, and when
-
-- **Resolve:**
-  - One editor makes every step.
-  - The History window lists only labels (21.1.1).
-- **vidcut:**
-  - Each step keeps who made it, and when.
-  - The maker can be the GUI, the CLI, or an MCP client by its own name.
-  - The maker can also be another program over IPC, or a program that wrote the project file.
-  - The History window puts a badge on the steps that the GUI did not make. It tells how long ago each step was made.
-  - The history lasts longer than one session ([X4](#x4-undo-history-persists-across-sessions-and-cli-runs)). Thus the window marks where each GUI session started ("Opened Tue 14:02").
-  - Steps that one client made in a sequence fold into one row, for example the forty edits of an agent.
-  - The row opens to show the steps. Its Undo all button goes back to before the first step.
-  - A script or an agent on the CLI names itself with `--client` (`VIDCUT_CLIENT`).
-  - `history.get` gives all of this. `history.go` goes to any step.
-- **Why:**
-  - Agents and scripts edit the project that the user has open ([X5](#x5-scripting-additions-no-cut-page-behavior-changes)).
-  - The user can see which steps were theirs and undo them as one. This makes it safe.
-
-## X35. The History window docks, and shows a step before going there
-
-- **Resolve:**
-  - The History window floats over the page.
-  - When the pointer is on a row, the row becomes bold. A click goes to that step at once.
-  - Up and Down do not move in the list (21.1.1).
-- **vidcut:**
-  - The history docks at the right side of the window (Edit > History > Open History Window, or History in the top bar).
-  - When the pointer is on a step, the timeline shows the state after that step. This works in the panel and in Edit > History.
-    - The project does not change.
-    - The timeline also outlines what the step changed. If that part is off screen, the lower timeline scrolls to it.
-    - When the user goes to such a step, the playhead moves to it.
-  - In the panel, Up and Down step through the history in the same way. Enter goes to the step. Esc comes back to the current state of the project.
-  - Copy as Command in the right-click menu of a step copies its request as a `vidcut rpc` command.
-  - A step that another program made by writing the project file has no request, and no Copy as Command.
-  - When the current step is older than the newest twenty, Edit > History lists the twenty steps around the current step.
-- **Why:**
-  - A window over the picture hides what the history is about. A label cannot show a cut as the timeline shows it.
-  - A look costs nothing, because the project changes only on a click or Enter.
-  - A menu that has scrolled past the current step cannot show the current state of the project. Such a menu also cannot move the project one step in either direction.
-
-## X36. Nothing is lost: undone steps a new change replaces stay as a version
-
-- **Resolve:**
-  - A new change after an undo discards the steps that the user could redo (p. 652; checked on 21.1.1).
-- **vidcut:**
-  - These steps stay in the history as a version.
-  - The version shows under the step that it branched from ("2 undone steps, replaced 5 min ago"), with Restore this version.
-  - Restore brings the steps back. It keeps the steps that replaced them as a version of their own.
-  - A version replaced inside another version comes back with it in one step.
-  - When the pointer is on a step of a version, the timeline shows the state at that step.
-  - `history.get` lists the versions. `history.restore` restores one.
-- **Why:**
-  - An undo followed by an edit by mistake must not throw away work.
-  - This is most important for the work of an agent that the user undid to look at an earlier state.
-
-## X37. Named versions
-
-- **Resolve:**
-  - The undo history has no names.
-  - Resolve Studio 20.3 and later have named timeline backups. The backups are copies beside the project.
-- **vidcut:**
-  - Mark This Version… gives a name to a step of the history ("Before the silence cut").
-  - It is in Edit > History, on the Mark… button of the History window, and in the right-click menu of a step.
-  - The name shows on its step as a flag. Find finds it, and a click goes to it.
-  - Names stay with the history across runs. They do not change the project.
-  - `history.mark` and `history.unmark` do the same.
-- **Why:**
-  - The history already holds every version. Thus a name is all that a backup needs here.
-  - A name costs nothing to make or to keep.
-
-## X38. Find, revert one step, and what changed since
-
-- **Resolve:**
-  - The History window is a list of labels (21.1.1).
-- **vidcut:**
-  - The History window finds steps by their words or names.
-  - It filters steps by kind (trims, deletes, dissolves…) and by who made them, also in the versions.
-  - The right-click menu of a step has Revert This Step (`history.revert`).
-  - Revert This Step undoes only the change of that step, as a new step. It keeps the steps after it.
-  - It refuses when a later step changed what the step changed. The refusal names the later step.
-  - When the pointer is on a step, the window tells what changed since that step. An example: "Since this step: 5 clips moved, 2 deleted, 3 dissolves added".
-  - For a step still to redo, it tells what a redo to that step brings ("Redoing to here: 1 clip added").
-  - For a step of a version, it tells what a move there brings ("Restoring to here: …").
-- **Why:**
-  - In a long history from several authors, the user must find the step to go back to.
-  - The user must also undo one mistake and keep the edits after it.
+  - A window over the picture hides what the history is about.
 
 ## X39. A GIF of one frame is a still, whatever its delay
 
@@ -625,6 +427,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Insert Selected Subtitles to Timeline Using Timecode places its cues by timecode. From a file timed from zero, it inserts nothing.
   - The user can drag the file onto a subtitle track. Then its first cue goes where the user drops it.
   - A drop on the gray area above the video tracks makes a new subtitle track. There too, the first cue goes where the user drops it (p. 1230).
+  - These are measurements in Resolve Studio 21.2, on a timeline with one subtitle track:
+    - A drop of a subtitle item on video track 1 makes no new track. Video track 1 does not change.
+    - The cues go on the subtitle track from the drop point. They overwrite the cues there.
 - **vidcut:**
   - Import Media, Import Media Folder and File > Import Subtitle bring in SRT, WebVTT and TTML files. vidcut does not read `.srtx`.
   - A subtitle item in the pool shows the text of its first cue, and how many cues it holds.
@@ -638,17 +443,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A file timed from zero also goes on the timeline.
   - A subtitle file can only go on a subtitle track. Thus a drop at another place can only mean a new subtitle track.
 
-## X42. Exported timelines keep their subtitles
-
-- **Resolve:**
-  - Its OpenTimelineIO, FCPXML, FCP 7 XML, EDL and CSV exports leave out the subtitle tracks (Resolve Studio 21.1.1).
-  - A subtitle file in an OpenTimelineIO file that it imports makes the import fail.
-- **vidcut:**
-  - An OpenTimelineIO export writes an SRT beside it for each subtitle track with cues.
-  - The SRT is in the timecode of the timeline, ready for Insert Selected Subtitles to Timeline Using Timecode.
-- **Why:**
-  - Subtitles made in vidcut must go to the editor that finishes the program.
-
 ## X43. A subtitle's text goes in as one change when the user leaves it
 
 - **Resolve:**
@@ -657,6 +451,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A list at the bottom of the Captions panel shows every subtitle of the track (p. 1231).
   - Prev and Next move through the list (p. 1233).
   - The manual does not tell where the playhead goes.
+  - These are measurements in Resolve Studio 21.2:
+    - Next, and a click on a row of the list, select the cue and put the playhead at its In.
+    - A click on a subtitle on the track does not move the playhead.
+    - The typed text shows in the viewer at once. After a click at another place, one Ctrl+Z removes all of the typed text.
+    - Insert Selected Subtitles to Timeline Using Timecode cuts the head of a later cue that overlaps. Cues at 11–13 s and 12–14 s become 11–13 s and 13–14 s.
   - In Resolve Studio 21.1.1, the panel is as the screenshots on pp. 1231 and 1233 show it:
     - Above the text box, a line has an In field and an Out field. At its right, a dim "11 Characters" counts the characters of the text.
     - Add New is at the left of the line above the list. Prev and Next are at its right.
@@ -703,12 +502,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - This control selects the track that Add Subtitle puts new subtitles on (p. 1232).
   - Add Subtitle is in the right-click menu of a subtitle track (p. 1233).
 - **vidcut:**
-  - Add Subtitle in Timeline Actions puts the subtitle on the shown subtitle track. When there is no subtitle track, it makes Subtitle 1.
+  - Add Subtitle in Timeline Actions puts the subtitle on the shown subtitle track.
   - Add Subtitle in the right-click menu of a subtitle track puts the subtitle on that track.
   - The header has no destination control.
 - **Why:**
   - The track that the viewer shows is the track that the user works on. Thus one control does both.
-  - Timeline Actions gives Add Subtitle before there is a track to right-click.
 
 ## X45. Subtitles go into any container
 
@@ -731,7 +529,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
 ## X46. Create Subtitles from Audio with open models on this computer
 
 - **Resolve:**
-  - Only Resolve Studio has it, in Timeline > AI Tools on the Edit page, with its built-in AI.
+  - Only Resolve Studio has it, with its built-in AI.
+  - It is the first item of Timeline Actions on the Cut page (p. 646), and in Timeline > AI Tools (p. 1234).
   - More languages come as an Extras download (pp. 1234–1235).
   - Its dialog shows the progress.
 - **vidcut:**
@@ -740,9 +539,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Qwen3-ASR 1.7B has 30 languages. Whisper large-v3 has 100 languages and times for each phrase.
   - The request can also name a GGUF file.
   - vidcut downloads the library of transcribe.cpp, Silero VAD and the speech models into the cache folder. In the GUI, a question that gives their size comes first.
-  - In the GUI, Create Subtitles from Audio… is in the Timeline menu beside Add Subtitle, and in Timeline Actions.
+  - In the GUI, Create Subtitles from Audio… is the first item of Timeline Actions. The Timeline menu shows these items after Keyframes and Audio Scrubbing.
   - Its dialog also has the model, Speakers, the GPU, the range, the tracks that it hears and the track.
-  - The model list gives the languages of each model, how it times the words, and its size or price ([X62](#x62-paid-speech-recognition-asked-before-the-audio-leaves)).
+  - The model list gives the languages of each model, how it times the words, and its size or price ([spec §8.12](cut-page-spec.md#812-subtitles-pp-645646-702-12271248)).
   - A box for each track with sound is ticked when playback hears that track.
   - Under Advanced are the lines, the characters per line, the gap, where the words come from, and how the speech is found.
   - The run is a job. No progress dialog opens. Jobs shows its progress and the progress of the download, and can cancel it.
@@ -752,106 +551,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Parakeet Ultra is the default because it gives real word times.
   - Jobs keeps long work beside the editing, as for exports (X3).
 
-## X47. Ripple Delete Silence can keep only speech
-
-- **Resolve:**
-  - Ripple Delete Silence finds silence by sound level: a threshold in dB, pre-head, post-tail and minimum to trip (p. 773).
-- **vidcut:**
-  - Detect selects Sound level ([D29](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) or Speech.
-  - Speech cuts all that Silero VAD does not hear as speech, also applause and room noise.
-  - Its Threshold is the speech probability (0.5).
-  - Shortest Speech leaves out shorter speech (0.25 s, the default of Silero).
-  - Pre Head and Post Tail keep 0.15 s around each spoken part. Non-speech shorter than Minimum (0.5 s) stays.
-  - The request is `detect` on `edit.ripple_delete_silence` and `analyze.silence`.
-- **Why:**
-  - A level threshold keeps applause, laughter and room noise that are louder than the threshold.
-  - A speech detector tells them apart from speech.
-
-## X48. Ripple Delete Silence's stripes can be edited before Remove
-
-- **Resolve:**
-  - Ripple Delete Silence shows the parts that it will remove as red stripes.
-  - Remove removes all of them (p. 773).
-- **vidcut:**
-  - In the lower timeline, a click on a stripe keeps that part. The stripe becomes gray and hatched. Another click cuts the part again.
-  - The user can drag the edges of a stripe, in whole frames. An edge stays in its clip and short of the next stripe.
-  - Keep All and Cut All do this to all stripes.
-  - The dialog counts what Remove takes ("Removes 160 of 162 parts, …").
-  - While the dialog is open, these work:
-    - `]` and `[` (or the two keys right of P) go to the next and the previous stripe.
-    - X keeps or cuts the stripe at the playhead.
-    - Playback of the timeline (the play buttons, Space, J and L) plays it as Remove would leave it. It changes nothing.
-    - The playhead jumps over what Remove closes up: the red stripes on Track 1 or past its end.
-    - Ctrl+Z and Ctrl+Shift+Z undo and redo the changes to the stripes and the settings, one at a time. Edit > Undo and Redo do the same.
-  - A change is a click, the drag of an edge, X, Keep All, Cut All, or a changed setting.
-  - A changed setting finds the stripes again. Its undo brings back the edited stripes.
-  - Remove stays one undo step of the project.
-  - Scripts send `parts` on `edit.ripple_delete_silence`: the `removed` of the dry run, edited.
-- **Why:**
-  - No threshold gets every pause right.
-  - A breath, a pause for effect or a word cut short needs a look and a listen.
-  - To fix them after Remove, the user must undo it or trim dozens of clips.
-
-## X49. Subtitles re-time to the speech
-
-- **Resolve:**
-  - The Cut page cannot move a subtitle track to its audio.
-  - Imported cues keep the times of their file (pp. 1230–1231).
-  - Create Subtitles from Audio makes new cues (pp. 1234–1235).
-- **vidcut:**
-  - Re-time to Speech is in the right-click menu of a subtitle track.
-  - Re-time Subtitles to Speech in Timeline Actions does the same for the shown track. The request is `subtitles.retime`.
-  - It hears the tracks ticked in its dialog. By default, these are the tracks that playback hears.
-  - It aligns where Silero VAD hears speech with where the cues show.
-  - It finds one offset, up to 60 s in either direction. Where a speed change from 0.95 to 1.05 fits better, it also finds that speed.
-  - Also match words reads the words of the speech with Parakeet Ultra, as Create Subtitles from Audio does ([X56](#x56-create-subtitles-from-audio-reads-each-clips-file)).
-  - Find shows a preview: the offset, or one offset for each section, the speed and how many cues move.
-  - Under Details, Find shows how clear the peak was. With words, Details also shows which cues matched.
-  - For the matched cues, it shows their errors after the offset of the speech and after the correction.
-  - Apply is one undo step.
-  - vidcut removes the cues that would end before zero, with a warning.
-- **Why:**
-  - A subtitle file is often timed for another cut or another frame rate of the video.
-  - Alignment by where speech is, not by what is said, works for translations and any language.
-  - Where the words match, they check the result. They also fix what one offset cannot fix.
-
-## X50. Several transcripts of a file
-
-- **Resolve:**
-  - Resolve Studio keeps one transcription for each clip (pp. 995–996).
-  - A new transcription replaces it. Clear Transcription removes it (p. 996).
-- **vidcut:**
-  - Transcribe Audio (`media.transcribe`) keeps the transcript with the file. It does not keep it in the project.
-  - A file has one transcript for each model and group of settings.
-  - A transcription with the same model and settings replaces the transcript that they made.
-  - The project takes its words from the newest transcript. The Transcript menu of the Transcription window selects another one.
-  - Remove, beside the menu, removes a transcript from the list.
-  - Where the transcripts do not agree, the words have a dotted line under them.
-  - A click on these words shows what each transcript heard. A click on a choice, or its number key, takes those words with their times.
-  - First, Previous, Next and Last go to the differences.
-  - The project keeps the words that it took. They stay when their transcript is removed.
-- **Why:**
-  - Each model hears some words better than the other models do. With several transcripts, you take the best words of each.
-  - You can compare models and settings on your own media. Then you remove the transcripts that you do not need.
-  - When the words are kept with the file, they serve every project that uses the file. The project file also stays small.
-
-## X51. A subtitle track's style has a margin and shows the spoken words
+## X51. A double-click on a subtitle track's name opens its style
 
 - **Resolve:**
   - The user sets the style of a track in the Track panel of the Inspector (p. 1237).
-  - The style includes the font, face, case, color, size, alignment, position and text anchoring.
-  - It also includes a drop shadow, a stroke and a background.
+  - A double-click on the name renames the track (spec §8.12).
 - **vidcut:**
   - A double-click on the name of a subtitle track, or Name and Style… in its right-click menu, opens the Subtitle Track section in the Inspector.
-  - The section has the name, the language and the style of the track. The style also has these controls:
-    - a Look list ([X59](#x59-looks-for-titles-too-some-built-in))
-    - the margin
-    - how the words show as they are spoken
-  - The margin is the inset from the edges of the picture. Only vidcut has this control.
-- **Why:**
-  - Subtitle guidelines and IMSC1 regions speak of a margin.
+  - The section has the name, the language and the style of the track.
+- **Why:** no reason is recorded.
 
-## X52. Titles come from a Titles tab or Add Title and are edited in the Inspector
+## X52. Titles come from a Titles tab and are edited in the Inspector
 
 - **Resolve:**
   - The user drags titles from the Titles browser onto the timeline (pp. 762–763, 1176).
@@ -859,10 +569,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Video Inspector sets its fonts, colors, drop shadows, backgrounds and transform (p. 764).
 - **vidcut:**
   - A double-click on a title in the Titles tab adds it at the playhead and opens the Title section of the Inspector tab.
-  - Add Title, in Timeline Actions and the Timeline menu, puts a 5 s Text title at the playhead (D66). It opens the Title section.
   - A double-click on a title clip, or Edit Title… in its right-click menu, also opens the section.
   - While the Inspector tab shows, a click on a title clip also shows its section.
-  - The section has the text, the kind of the title, the alignment and a Look list ([X59](#x59-looks-for-titles-too-some-built-in)).
+  - The section has the text, the kind of the title, the alignment and a Look list ([D71](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - It shows the place of the title, or of each line of a lower third, as percents across and down (X54).
   - A change goes in as one `titles.set` when the user leaves the field. A button puts it in at once. Ctrl+Z undoes it.
   - A value at its usual number shows an empty box with that number as a hint. A number in the other box of a pair keeps this usual number.
@@ -900,6 +609,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Position in the Inspector also moves it (p. 764).
   - A lower third is at a corner or at the middle of the bottom of title safe (p. 1178).
   - A position goes from 4 picture sizes before its bottom left to 4 picture sizes after it, on each axis (measured in Resolve Studio 21.1.2).
+  - The Position of a Text title in the Inspector is in frame pixels from the bottom left, with Y up (measured in Resolve Studio 21.2).
+    - In a 3840 × 2160 timeline, the middle of the picture is X 1920, Y 1080.
 - **vidcut:**
   - The Title section of the Inspector shows the place of a title from the top left of the picture.
   - It shows the place in percents of the width and the height of the picture.
@@ -973,6 +684,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - AI Animated Subtitles are only in Resolve Studio. They are Fusion title templates in the Animated section of the Titles tab.
   - After the subtitles are made, the user drags a template onto the header of a subtitle track. The user sets it in the Inspector (p. 1240).
   - After a correction, Update Word Timings times the words of a cue again. Synchronize Word Timings does this for a track (p. 1241).
+  - Synchronize Word Timings is in the right-click menu of the header of a subtitle track on the Edit page (Resolve Studio 21.2).
   - Measured in Resolve Studio 21.1.2:
     - The word times of a cue count from its start. A ripple delete, a razor cut and a trim do not change them.
     - The highlighted word is then not the word that is spoken, until the word timings are updated.
@@ -985,25 +697,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The user does not make subtitles, find a template and drop it on the track. Fusion is not necessary.
   - Word times stay correct after an edit or a correction, and there is no button to remember.
 
-## X59. Looks for titles too, some built in
+## X59. Looks have no export or import
 
 - **Resolve:**
-  - The user saves the style of a subtitle track as a preset from the option menu of the Subtitle Inspector.
-  - The user can load a preset onto a track, update it and delete it.
-  - The user can also export or import it as a `.preset` file (pp. 1239–1240).
-  - Titles have no presets. The manual names no built-in presets.
+  - The user can export or import a subtitle preset as a `.preset` file (pp. 1239–1240).
 - **vidcut:**
-  - Looks are for subtitle tracks and titles ([D71](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - The user drags title looks from the Titles tab as cards.
-  - Built-in looks come first, and the user cannot change them.
-  - There is no export or import.
+  - There is no export or import of looks ([D71](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - Each look is a TOML file in the config folder. The file copies to another computer as it is.
 - **Why:**
-  - The user uses a title look again as often as a subtitle track look.
-  - A list with good looks in it gives a start.
   - A file for each look, as for export presets, is its own export and import.
 
-## X60. The pool's metadata shows a file's format, and Clip Info shows all of it
+## X60. The pool's metadata strip shows a file's format
 
 - **Resolve:**
   - A tag icon beside the search field of the pool opens the Metadata Display palette.
@@ -1014,10 +718,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The tag icon shows a strip at the top of the pool. The strip stays on until the user turns it off.
   - The strip shows the size, frame rate, codec, bits and chroma subsampling, SDR or HDR, and length of the selected clip.
   - It also shows the start timecode, the sound and the file size.
-  - Clip Info shows all that vidcut knows of the file.
-  - The info button of the strip or of a thumbnail corner opens it. The menu of a pool item also opens it.
-  - It reads the file again for its container and streams: codecs and profiles, bit rates, color tags, channel layouts, languages and tags (`media.details`).
-  - Copy puts all of it on the clipboard as text.
+  - The info button of the strip or of a thumbnail corner opens Clip Info, a window in the place of an overlay ([spec §3](cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
 - **Why:**
   - Every file has a format. Thus the strip tells something also when the camera name, scene, shot and take are empty.
   - One window with all the information, read fresh from the file, tells the format without a separate tool.
@@ -1040,68 +741,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - To join the numbers by hand once in a project is quick.
   - An automatic join that is wrong would be worse than no join.
 
-## X62. Paid speech recognition, asked before the audio leaves
-
-- **Resolve:**
-  - Transcription runs on the computer with its own AI (pp. 994–1002, 1234–1235).
-  - There is no outside service.
-- **vidcut:**
-  - Two more models run on the servers of their companies: `grok-voice-transcribe-2.0` of xAI and `gemini-3.5-transcribe` of Google.
-  - Under Advanced, each model has those of its options that keep word times.
-  - Before vidcut sends audio, the GUI asks. It shows the company, the length, the size and the estimated cost at the published rate.
-  - The GUI does not ask when the question for that service is off. Scripts pass `send`.
-  - The request of xAI takes up to 500 MB. The request of Gemini takes up to 30 minutes of speech, and vidcut refuses more.
-  - vidcut keeps each reply. Thus the same run again reads the reply and costs nothing.
-  - A key comes from `XAI_API_KEY` or `GEMINI_API_KEY`, or from the keychain of the system (Preferences > Services).
-  - A key is never in a file that vidcut writes.
-  - Local models stay the default.
-- **Why:**
-  - The paid models hear some languages and voices better than the local models.
-  - vidcut asks first and keeps what the user paid for. Thus nothing is sent or charged without warning.
-  - A key is never in a file that a backup or a dotfiles repository copies.
-
-## X63. Subtitles keep their speaker, painted in the person's color
-
-- **Resolve:**
-  - Speakers show in the Transcription window and in an exported transcript, with names and timecodes (pp. 1000–1002).
-  - A subtitle cue has no speaker. Create Subtitles from Audio gives none (pp. 1234–1235).
-- **vidcut:**
-  - Each cue keeps the person who says it. Create Subtitles from Audio with speakers sets it. Splits, joins and edits keep it.
-  - A person can have a color. A cue can have its own color, which overrides the color of the person.
-  - The Speakers setting of the subtitle track tells what the color paints.
-  - It paints the spoken word on a track that shows words as spoken, else all of the text. Or it paints nothing.
-  - In the Subtitle section, every row except the Name of the person changes only that cue. These rows are its Speaker, its Color and its Position.
-  - The Speaker list also has All of the person's. This makes the person into another person everywhere.
-  - This changes their cues, the speakers of the files, and the words that were theirs.
-  - Apply to All of the person's gives the color of the person to the cue. It also gives the position of the cue to all their cues on the track.
-  - The block of a cue on the timeline has a stripe in its color.
-  - WebVTT files carry the speaker as a voice (`<v Nikki>`). vidcut reads it back.
-- **Why:**
-  - Captions show speakers apart by color. A cue that knows its speaker can take that color, without an edit to every cue.
-  - A one-off cue keeps its own color.
-  - A WebVTT voice is the standard way to name the speaker. Players and caption tools read it.
-
-## X64. Voice Isolation is free, on a clip or a track
-
-- **Resolve:**
-  - Voice Isolation is only in the Studio version. It is a plugin on a mono, stereo or dual-mono track.
-  - It runs in real time, but not on live input or on more than two channels.
-  - Its Amount mixes the source with the isolated voice. At 50, they are about equal. At 70 to 80, it sounds natural (p. 774).
-  - Measured in Resolve Studio 21.1.2, a clip has a switch and an Amount from 0 to 100.
-- **vidcut:**
-  - It runs DPDFNet (Apache-2.0) on the CPU of this computer.
-  - It runs live in playback, and the same in an export.
-  - It works on any number of channels, each channel alone.
-  - A clip left unset follows its track. A clip that is off stays off on a track that is on.
-  - Voice Isolation in the right-click menu of a clip, or Alt + V, turns the switch on or off for the selected clips.
-  - The strip of the Mixer does it for a track. An Amount field beside each one sets the Amount.
-  - The model, 10 MB, is downloaded the first time, after a question.
-  - An OTIO file keeps the switches and the Amounts in the metadata of vidcut. Its export tells that other editors do not hear them.
-- **Why:**
-  - After the cut of its silences, a Meet recording needs noise removal more than anything else (use case 2).
-  - A model that runs on one CPU thread at a tenth of real time needs no paid version.
-  - On a clip, it cleans one noisy recording and does not change the rest of its track.
-
 ## X65. Transform and Crop are keys and viewer handles
 
 - **Resolve:**
@@ -1110,20 +749,16 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Each also has a toggle that turns it off and keeps its settings.
   - Crop is in pixels (p. 768).
 - **vidcut:**
-  - T shows the Transform handles of the selected clip in the viewer. Shift+T shows its Crop handles. The same key hides them. F1 lists both.
   - The Tools button under the viewer shows a row: Transform, Crop, the two flips and a Reset for each of the two.
   - There is no toggle.
   - The handles are those of a title (X52), with the same snapping.
-  - While the Transform handles show, the wheel or a pinch over the picture zooms it.
-  - Alt+wheel turns it, and a drag just outside a corner turns it.
+  - A drag just outside a corner turns the picture.
   - The Inspector tab shows the place, zoom and crop of a picture in pixels, percent and degrees ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
-  - Dynamic Zoom: Alt+T shows the start box and the end box of the clip in the viewer. Alt+T again hides them.
-  - T, Shift+T and Alt+T change between the three tools. F1 lists Alt+T.
   - The Tools row has Dynamic Zoom, lit while its boxes show. With it come Swap, a menu of the four eases and Reset.
   - The right-click menu of the clip has Dynamic Zoom and Reset Dynamic Zoom.
 - **Why:**
-  - There is a key for everything. Undo puts a picture back, as a toggle would.
-  - Image and design editors zoom and turn a layer with the wheel and with a drag outside a corner.
+  - Undo puts a picture back, as a toggle would.
+  - Image and design editors turn a layer with a drag outside a corner.
 
 ## X66. Files and folders dropped on the window go into the open bin
 
@@ -1138,11 +773,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Each folder comes in as Import Media Folder brings it in: a bin, with a bin for each folder in it.
   - While they are over the window, the Media Pool shows Drop to Import.
   - With no project open, a drop does nothing, because Import is not available then.
-  - Drops work on Windows, macOS and X11. A Wayland window gets no drops ([design](design/live.md#what-the-gui-computes-itself)).
 - **Why:**
   - The window does not get the place where files are dropped. Thus a drop cannot aim at a bin or the timeline. The open bin is where Import puts media.
   - A folder keeps its folders as bins, as the Bin list of the manual does. The Cut page has a Bin dropdown, not a Bin list (p. 655).
-  - Nothing about a drop needs macOS.
 
 ## X67. The eases of Dynamic Zoom are curves
 
@@ -1215,6 +848,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Audio panel has Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (pp. 743–744).
   - The manual names no Mute in the Audio panel (pp. 742–744).
   - Its Video panel also has Speed Change: Direction, Speed %, Frames Per Second, Duration, Ripple Sequence and Pitch Correction (pp. 736–737).
+  - These are measurements on the Cut page of Resolve Studio 21.2:
+    - The Speed Change rows are Direction, Ease, Change Speed, Frames per Second, Duration and Pitch Correction. There is no Ripple Sequence box.
+    - Pitch Correction is on. A speed change ripples the clips after the clip.
   - With several clips selected, its header is Multiple Clips, and a value that differs between them shows a dash (measured in Resolve Studio 21.1.2).
 - **vidcut:**
   - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
@@ -1236,8 +872,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Mute does what Mute and Unmute in the right-click menu of the clip do.
     - A drag on Volume sends one change on release. The sound does not change during the drag.
     - The Audio section has no Reset of the whole section.
-    - Normalize in the header opens Normalize Audio Levels for the clips of the section ([X72](#x72-normalize-audio-levels-on-the-cut-page)).
-    - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([X64](#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
+    - Normalize in the header opens Normalize Audio Levels for the clips of the section ([spec §9](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
+    - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([spec §9](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
     - Pan sets the pan of the selected clips ([X153](#x153-every-clip-pans-as-on-a-stereo-track)).
     - The Equalizer row has a switch and a button that opens the Equalizer window ([X154](#x154-the-equalizer-is-a-window)).
     - The Dialogue Leveler row has a switch and a button that opens the Dialogue Leveler window ([X155](#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
@@ -1271,21 +907,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A drag changes a value by an amount. A move of several clips also moves each clip by the same amount.
   - Resolve's volume commands also keep the differences between the selected clips.
-
-## X72. Normalize Audio Levels on the Cut page
-
-- **Resolve:**
-  - The Edit page and the Fairlight page have Normalize Audio Levels in the right-click menu of clips (pp. 1110–1111).
-  - The Cut chapters do not name it.
-- **vidcut:**
-  - Audio Operations in the right-click menu of a clip has Normalize Audio Levels. It acts on the selected clips with sound.
-  - The header of the Inspector's Audio section ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)) has Normalize. It opens the same window for the clips of the section.
-  - `clip.normalize` sets the volume of the clips so that their level reaches the target ([D80](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - While it measures, the window shows Measuring. Cancel stops the measurement, and nothing changes.
-  - A short message tells how many clips stopped at the volume limit or at the peak limit.
-- **Why:**
-  - Without it, the Cut page has no way to match the levels of clips.
-  - The loudness modes use the integrated loudness that the export's loudness setting measures. Thus the two agree.
 
 ## X73. The volume line takes the keyframe controls of the Edit page
 
@@ -1327,12 +948,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
 
 - **Resolve:**
   - The Safe Area button and View > Safe Area set overlays on the viewer (pp. 682–683, 1177).
-  - The viewer keeps one picture while you trim.
+  - In Resolve Studio 21.2, the Trim Editor also shows the title-safe guide. It is one box over the whole two-up view, fitted to the viewer. It is not one box for each picture.
 - **vidcut:**
   - The Trim Editor and Dynamic Trim show no guides. Those views are two pictures, or four.
   - A viewer screenshot is the picture without the guides.
 - **Why:**
   - The guides belong on the one picture fitted to the timeline.
+  - One box over two pictures marks neither picture. vidcut does not copy it.
   - A two-up view has no single frame for one crop.
 
 ## X81. No KeyKode in the timecode menu
@@ -1344,18 +966,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - vidcut does not read film edge numbers.
 - **Why:**
   - vidcut has no film-scan metadata to show.
-
-## X82. The viewer marks the anchor point
-
-- **Resolve:**
-  - Anchor Point X and Y in the Inspector set the point that all transforms are centered on (p. 735).
-  - The onscreen Transform controls set Zoom, Position, Rotation, Pitch, Yaw and Flip (p. 767). The anchor point is not one of them.
-- **vidcut:**
-  - While the Transform handles show, a small cross marks the anchor point in the viewer.
-  - The cross has no drag.
-- **Why:**
-  - The corners, the sides, the turn handle and the wheel work about the anchor point. Thus the user sees that point.
-  - A drag inside the box already moves the picture.
 
 ## X83. Pitch and yaw are Inspector values
 
@@ -1379,40 +989,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Full screen and the enhanced viewer cover the top bar.
   - The button stays on the viewer, so it can be clicked while they are on.
 
-## X87. The Keyframes tab has an ease menu
+## X90. The curve of a value shows under its track
 
 - **Resolve:**
-  - The Cut page has a Keyframe Editor tab on the left (p. 636).
-  - A Timeline control at the upper left opens it (p. 649).
-  - A right-click on a keyframe in that editor opens no menu.
+  - The Curve Editor is a separate view (p. 1255).
 - **vidcut:**
-  - A Keyframes tab sits beside the Inspector.
-  - The Timeline menu opens that tab. `gui.show keyframes` also opens it.
-  - A right-click on a keyframe sets Linear, Ease In, Ease Out or Ease In and Out.
-  - The ease is the volume Bezier curve ([X74](#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
+  - The curve of a value shows under its track in the Keyframes tab.
 - **Why:**
-  - The ease belongs on the keyframe the user is editing.
-  - The same four eases already play on the volume line.
-  - One tab row holds the Keyframes tab, as it holds the Inspector.
-
-## X90. The Keyframes tab edits a keyframe in place
-
-- **Resolve:**
-  - The track controls of the Keyframe Editor have no value field (p. 1257). The Curve Editor is a separate view (p. 1255).
-  - Full Extend Zoom shows the whole clip. Detail Zoom zooms in around the playhead. A zoom slider sets the zoom (p. 1258).
-- **vidcut:**
-  - A bar under the tracks shows the selected keyframe. It has the name of the value, the time, the value, the ease and Delete.
-  - The bar shows the value in the units of the Inspector.
-  - A new keyframe is selected. Thus the bar shows its value at once.
-  - With two or more keyframes selected, the bar shows their number, their ease and Delete.
-  - The curve of a value shows under its track.
-  - Fit Clip is the name of Full Extend Zoom.
-  - Ctrl and the mouse wheel zoom at the pointer. Shift and the mouse wheel move the range.
-  - A scroll bar under the tracks shows and moves the range.
-- **Why:**
-  - The user sees and sets the exact value of a keyframe without a change to the Inspector.
   - The curve stays in line with the keyframes that it joins.
-  - The mouse wheel zooms at the point of interest, which a slider cannot do.
 
 ## X91. Super Scale uses the upscaler of the GPU
 
@@ -1519,7 +1103,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The keyframe tray has a Speed group with two rows, Retime Frame and Retime Speed. Each row has a key at each speed keyframe.
 - **vidcut:**
   - The Keyframes tab and the keyframe tray have one Speed row, in a Speed group.
-  - With the Keyframes tab or the tray open, the three items act only on the selected rows and keyframes. Thus with the tray open and no row selected, Add Keyframe is off.
+  - With the Keyframes tab or the tray open, the three items act on the selected rows and keyframes.
+  - With the tray open, the Keyframes tab closed, and no row or keyframe selected, Add Keyframe adds a speed keyframe, as in Resolve.
+  - With the Keyframes tab open and no row selected, Add Keyframe stays off.
   - With both closed, they act on the speed keyframes of the selected clips ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - Delete All Keyframes then asks first, for example "Delete 3 Speed keyframes of Clip 2?". Then it removes all the speed keyframes.
   - An item that cannot act is off. Its tooltip tells the next click, for example "Click a parameter name, such as Opacity".
@@ -1667,18 +1253,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The codec, the kinds of User mode and the time depend on the computer, not on the project. Its encoders, its decoders and its disk set them.
   - vidcut decodes H.264 and H.265 on the GPU. With the list of Resolve, Smart renders most clips of a camera or a phone.
 
-## X104. The render cache line shows its reasons
-
-- **Resolve:**
-  - Cache indicators along the bottom of the ruler show the state of the cache (p. 203).
-  - Red means "to be cached", and blue means "has been cached".
-  - Resolve does not show the reason of a red part.
-- **vidcut:**
-  - The pointer over the line shows why the mode renders the part, for example Transition or AI Super Scale.
-  - Stats for Nerds has a Render Cache row: Cached, To render with the reasons, or Not needed.
-  - For a picture from the cache, How It Was Made shows how each layer was made, and when the cache file was written.
-- **Why:** the reasons tell the user which setting makes a part slow.
-
 ## X105. Manage Render Cache lists the projects that vidcut opened
 
 - **Resolve:**
@@ -1712,35 +1286,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The DNxHR encoder of FFmpeg has no pixel format with alpha.
   - The timeline level gives the same picture with one simple path. The cost is only more renders after edits.
-
-## X108. A double-click on a row of the Keyframes tab adds a keyframe
-
-- **Resolve:**
-  - The Keyframe Editor adds a keyframe with the Keyframe button or Ctrl+[, at the playhead (p. 1257).
-  - A double-click on a row of the Keyframes panel adds nothing, inside or outside the clip (measured in Resolve Studio 21.1.2).
-  - The Add Keyframes tool of the Curve Editor adds a keyframe with a click on a curve.
-  - That click can be inside the clip or before its start (measured in Resolve Studio 21.1.2).
-- **vidcut:**
-  - A double-click on an empty part of a row or its curve adds a keyframe at the frame under the pointer, inside the clip.
-  - A double-click outside the clip adds nothing.
-  - The playhead moves to the new keyframe, and the keyframe is selected ([X90](#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
-  - The rows of the keyframe tray do the same.
-- **Why:**
-  - The user adds a keyframe at the frame under the pointer, and does not first move the playhead to that frame.
-
-## X109. The Keyframes tab shows the values of a title
-
-- **Resolve:**
-  - The Keyframes panel of a title has only the rows of the clip: Transform, Cropping and Composite (measured in Resolve Studio 21.1.2).
-  - A keyframe on the Position of the Title tab has no row.
-- **vidcut:**
-  - The Keyframes tab of a title has the rows Position, Zoom, Rotation and Opacity. A scroll has only Position and Opacity ([todo](todo/keyframes.md#titles)).
-  - A lower third with its lines apart has the rows Upper Position, Upper Zoom, Upper Rotation, Lower Position, Lower Zoom, Lower Rotation and Opacity.
-  - A title has no rows for Transform and Cropping. A title has no such values ([spec §8.14](cut-page-spec.md#814-titles-pp-762764-11761178)).
-- **Why:**
-  - All the keyframes of a title show on rows over time, in one tab, as the keyframes of a clip do.
-  - The user moves and deletes them in that tab.
-  - The Title section of the Inspector shows only the keyframe at the playhead, with arrows to the others.
 
 ## X110. A shrink above 8:1 reads each source pixel
 
@@ -2178,16 +1723,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The jumps are a fault in Resolve. A small change of Symmetry does not make a large change of the grain.
   - The owner approved this difference.
 
-## X145. A TIFF can hold straight colors
-
-- **Resolve:**
-  - With TIFF, Alpha Mode shows Premultiplied and is greyed out (measured in Resolve Studio 21.2).
-- **vidcut:**
-  - A TIFF takes `video.alpha_mode` `straight`. The file then holds straight colors.
-- **Why:**
-  - ExtraSamples 2 marks the colors as straight. Thus another program reads the file correctly.
-  - The owner approved this difference.
-
 ## X146. Straight ProRes 4444 holds straight colors
 
 - **Resolve:**
@@ -2363,13 +1898,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
 
 - **Resolve:**
   - The title bar of the Curve Editor has four buttons: Linear, Ease In, Ease In and Out, and Ease Out. They change all the selected keyframes (pp. 1262–1263).
-  - A right-click on a keyframe in the Keyframe Editor opens no menu ([X87](#x87-the-keyframes-tab-has-an-ease-menu)).
+  - A right-click on a keyframe in the Keyframe Editor opens no menu.
 - **vidcut:**
   - A right-click on a selected keyframe keeps the selection. The ease goes on all the selected keyframes.
   - A right-click on another keyframe selects that keyframe alone.
   - With two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
 - **Why:**
-  - The ease menu is already on the keyframe (X87). A second place in a title bar adds nothing.
+  - The ease menu is already on the keyframe ([spec §2](cut-page-spec.md#2-layout-pp-636637)). A second place in a title bar adds nothing.
   - A selection across several values takes one ease in one undo step.
 
 ## X159. Snapping also goes to other keyframes

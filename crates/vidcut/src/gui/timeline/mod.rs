@@ -1544,6 +1544,26 @@ impl Workspace {
     }
 
     pub(super) fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
+        let selected = self.snap.selection.clips.clone();
+        let with = |want: fn(&vidcut_core::model::Clip) -> bool| {
+            selected.iter().any(|id| p.clip(id).is_some_and(want))
+        };
+        if ui.button("Create Subtitles from Audio…").clicked() {
+            self.open_speech();
+            ui.close();
+        }
+        let video = with(|c| c.video);
+        if ui
+            .add_enabled(video, egui::Button::new("Detect Scene Cuts"))
+            .clicked()
+        {
+            self.send("edit.detect_scene_cuts", json!({ "clips": selected }));
+            ui.close();
+        }
+        if !video {
+            super::dialog::why(ui, "select clips with video");
+        }
+        ui.separator();
         if ui.button("Add Video Track").clicked() {
             self.send("track.add", json!({ "kind": "video" }));
             ui.close();
@@ -1580,16 +1600,22 @@ impl Workspace {
             self.send("markers.add", json!({ "at": at }));
             ui.close();
         }
+        ui.separator();
+        if ui.button("Clear Transition from All Edits").clicked() {
+            self.send("edit.remove_transition", json!({ "all": true }));
+            ui.close();
+        }
+        if ui.button("Add Dissolve to All Edits").clicked() {
+            self.send("edit.dissolve", json!({ "all": true }));
+            ui.close();
+        }
+        ui.separator();
         if ui.button("Add Title").clicked() {
             self.add_title(ui.ctx());
             ui.close();
         }
         if ui.button("Add Subtitle").clicked() {
             self.add_subtitle(ui.ctx(), None);
-            ui.close();
-        }
-        if ui.button("Create Subtitles from Audio…").clicked() {
-            self.open_speech();
             ui.close();
         }
         let shown = vidcut_core::ops::subtitles::shown(p)
@@ -1610,20 +1636,6 @@ impl Workspace {
         if shown.is_none() {
             super::dialog::why(ui, "the shown subtitle track has no subtitles");
         }
-        ui.separator();
-        if ui.button("Clear Transition from All Edits").clicked() {
-            self.send("edit.remove_transition", json!({ "all": true }));
-            ui.close();
-        }
-        if ui.button("Add Dissolve to All Edits").clicked() {
-            self.send("edit.dissolve", json!({ "all": true }));
-            ui.close();
-        }
-        ui.separator();
-        let selected = self.snap.selection.clips.clone();
-        let with = |want: fn(&vidcut_core::model::Clip) -> bool| {
-            selected.iter().any(|id| p.clip(id).is_some_and(want))
-        };
         let sound = with(|c| c.audio.is_some());
         if ui
             .add_enabled(sound, egui::Button::new("Ripple Delete Silence…"))
@@ -1634,17 +1646,6 @@ impl Workspace {
         }
         if !sound {
             super::dialog::why(ui, "select clips with sound");
-        }
-        let video = with(|c| c.video);
-        if ui
-            .add_enabled(video, egui::Button::new("Detect Scene Cuts"))
-            .clicked()
-        {
-            self.send("edit.detect_scene_cuts", json!({ "clips": selected }));
-            ui.close();
-        }
-        if !video {
-            super::dialog::why(ui, "select clips with video");
         }
     }
 

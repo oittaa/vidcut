@@ -8,7 +8,7 @@ use vidcut_core::{Error, Result};
 use crate::look::Look;
 use crate::paths::config_dir;
 
-pub const DEFAULT: &str = "native";
+pub const DEFAULT: &str = "classic";
 
 const BUILT_IN: &[(&str, &str)] = &[
     ("starship", include_str!("../themes/starship.toml")),

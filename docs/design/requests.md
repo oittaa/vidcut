@@ -126,7 +126,7 @@ sequenceDiagram
 - A dry run stops here and reports the `Changes`.
 - An edit that changes nothing makes no revision and no undo step.
 - Else the clone becomes the project, and `rev` goes up by one. The history gets an `Entry`: a label (`describe`) and the `Change`.
-- The label of a request that sets fields names each field that changed (`describe::set`). [Deviation X33](../deviations.md#x33-each-undo-step-says-what-where-and-how-much) lists these requests and the exceptions.
+- The label of a request that sets fields names each field that changed (`describe::set`). [Spec §8.10](../cut-page-spec.md#810-undo-pp-651652) lists these requests and the exceptions.
   - The old value comes from the project before the edit, and the new value from the params.
   - A value that the project does not have shows as "usual". A field shows no old value when the things that it changes have different old values.
   - A quiet field shows only its name, and does not count toward the limit of fields with values.
@@ -158,7 +158,7 @@ The history file:
   - Then the editor keeps the steps of the session in memory and tells why (`Editor::history_trouble`: a GUI notice, the warnings of `history.get`).
   - It appends these steps when the file reads again where it left off (`Store::save`, `Store::recover`).
 - A GUI sees such writes through its file watcher (`Msg::FileChanged`, `OpenProject::reload`).
-- [spec §8.10](../cut-page-spec.md#810-undo-pp-651652) and [deviation X4](../deviations.md#x4-undo-history-persists-across-sessions-and-cli-runs) tell the behavior.
+- [spec §8.10](../cut-page-spec.md#810-undo-pp-651652) tells the behavior.
 
 Steps:
 
@@ -219,7 +219,7 @@ The History panel (`HistoryUi`):
   - The snapshot publishes the result (`HistoryPreview`). The timeline draws it in place of the project, and outlines what the step changed.
 - While a past state is drawn, a press on the timeline only ends the preview (`Workspace::history_swallows`).
 - An undo, redo or `history.go` from the GUI publishes a `Flash` of what it moved through.
-- [deviations X33–X38](../deviations.md#x33-each-undo-step-says-what-where-and-how-much) tell the behavior.
+- [spec §8.10](../cut-page-spec.md#810-undo-pp-651652) tells the behavior.
 
 **Why** the lock, the revision and the reload: the CLI, agents and the GUI edit one file at the same time.
 
