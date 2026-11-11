@@ -1235,7 +1235,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The middle of the band starts half a band before the first corner. It ends half a band past the far corner.
   - Feather fades the incoming picture into the outgoing picture linearly across the band. The band then shows no color.
   - The edge has no smoothing. Each pixel shows one side.
-    - vidcut: a pixel shows the incoming picture when its middle is behind the band.
   - At a gap, the missing side shows the tracks below.
   - A request makes one: `{"type": "wipe", "angle": 30, "border": 0.01, "feather": true}`.
   - A request can change a dissolve into a wipe, and a wipe into a dissolve.
