@@ -2750,7 +2750,7 @@ pub enum Request {
     MotionList {
         #[serde(default)]
         clips: Option<OneOrMany<ClipRef>>,
-        /// Each path that lasts at this time also gives its `area` there: the
+        /// Each path with an area at this time also gives its `area` there: the
         /// source `frame` of its clip, and the `center`, `size` and `rotation`
         /// of the area on it.
         #[serde(default)]
@@ -2851,8 +2851,9 @@ pub enum Request {
     /// the thing, and at the ends of the clip.
     ///
     /// The clip gets a motion path named `Track 1`, `Track 2`, and so on.
-    /// The area then follows that path with its own shape, so the effect
-    /// works only where the path lasts. When the area follows a path
+    /// The area then follows that path with its own shape. Before the first
+    /// sample of the path and after its last, the area stays where that
+    /// sample puts it. When the area follows a path
     /// already, a track of one `way` keeps the samples of the other side.
     /// A path that an earlier track made for this area gets the new samples,
     /// and keeps its id and its name. Another path stays as it is, and the
@@ -5130,7 +5131,8 @@ pub struct AreaChange {
     /// a subject, as `face`: then each path that `motion.find` made for that
     /// subject. The base box is then the area of a path at each frame, so
     /// the area moves with the path, and the effect works in the area of
-    /// each path while that path lasts. With a `size` of `[1.2, 1.2]`, the
+    /// each path on each frame where that path has an area. With a `size` of
+    /// `[1.2, 1.2]`, the
     /// area is the path's box, a fifth larger. Null stops it, and the base
     /// box is the whole source picture again.
     #[serde(

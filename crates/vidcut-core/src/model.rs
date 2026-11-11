@@ -1827,8 +1827,10 @@ pub struct Clip {
 
 /// A motion path of a clip: where one area of its picture is on its source
 /// frames. A face, a number plate or another thing in the picture has one.
-/// The path lasts from its first sample to its last: before and after them
-/// it has no area. Between two samples the area moves in a straight line.
+/// A path that `motion.track` made holds its place: before its first sample
+/// and after its last, the area is where that sample puts it. Another path
+/// lasts from its first sample to its last: before and after them it has no
+/// area. Between two samples the area moves in a straight line.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MotionPath {
     /// `p<N>`, its own among the paths of the clip.
