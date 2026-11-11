@@ -2,7 +2,7 @@
 
 **When:** now, one pull request for each step below.
 
-A motion path is the path of an area of the picture through the frames of a clip. A clip stores motion paths, and the area of an effect follows a path ([model](../design/model.md#motion-paths)). `motion.find` makes a path for each face and each block of text of a clip ([analysis](../design/analysis.md#subjects)). `motion.track` makes a path for a drawn area.
+A motion path is the path of an area of the picture through the frames of a clip. A clip stores motion paths, and the area of an effect follows a path ([model](../design/model.md#motion-paths)). `motion.find` makes a path for each thing of one kind in a clip ([analysis](../design/analysis.md#subjects)). `motion.track` makes a path for a drawn area.
 
 In this file, a path is never a track of the timeline.
 
@@ -41,7 +41,7 @@ In this file, a path is never a track of the timeline.
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
 - An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path ([deviation X166](../deviations.md#x166-an-effect-has-an-area)).
   - The center, the size, the rotation and the softness of the area have keyframes ([model](../design/model.md#pictures)).
-- `motion.find` finds the faces and the text of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+- `motion.find` finds the faces, the text, the people and the vehicles of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
 - `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
 - `motion.follow` makes a title follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)).
 - No request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
@@ -62,7 +62,7 @@ In this file, a path is never a track of the timeline.
 |---|---|---|---|
 | A face | YuNet, from OpenCV Zoo | 233 kB | MIT |
 | A number plate | LPD-YuNet, from OpenCV Zoo | 4.15 MB | Apache 2.0 |
-| A person, a vehicle, an animal and the other COCO classes | YOLOX-S, from OpenCV Zoo | 35.9 MB | Apache 2.0 |
+| A person and a vehicle. The model also has an animal and the other COCO classes. | YOLOX-S, from OpenCV Zoo | 35.9 MB | Apache 2.0 |
 | A drawn box | VitTrack, from OpenCV Zoo | 715 kB | Apache 2.0 |
 | A subject with its matte | EdgeTAM, or SAM 2.1 tiny | not read | Apache 2.0 |
 
@@ -92,11 +92,20 @@ In this file, a path is never a track of the timeline.
   - The maker of YuNet gives face sizes from about 10 to 300 pixels. The model sees a picture with a longer side of 640 pixels.
     - Check a close shot where a face is larger than 300 of those pixels, and a wide shot with faces under 10.
     - Decide whether the model also sees the picture at another size.
-- **More subjects:** number plates, people, vehicles and animals. The things that people blur most must be one choice each.
+- **More subjects:** number plates, animals and screens. The things that people blur most must be one choice each.
+  - The buttons in the app for people and vehicles. Only `motion.find` of the CLI, IPC and MCP finds them.
+    - The menus and the Blur row of the app list the subjects of `SUBJECTS` in `crates/vidcut/src/gui/inspector.rs`.
   - A search on 2026-11-10 found no number plate model that has a clear license, a small size and plates of many countries.
     - The models with a clear license know the plates of one country, or have about 40 MB and attention layers.
   - Check on a picture with a number plate whether the text subject finds its characters. No test clip has a number plate.
-  - YOLOX-S finds people, vehicles, animals and screens.
+  - The YOLOX-S model of the people and the vehicles also has classes for animals and screens.
+- **People and vehicles, what is left:**
+  - Check the vehicle subject on a clip with vehicles. No test clip shows one.
+  - The model can give one person two boxes, for example with a thing that the person holds. Then one person can get two paths.
+  - The model runs on a square of 640 pixels, as the code of its maker does. Try a model input with the shape of the picture.
+    - Measured on 2026-11-11, on 16 threads, with the file decoded on the GPU:
+    - A 720p file at 24 fps gives 21 pictures in a second. The model takes 95 % of that time.
+    - A 2160p file at 59.94 fps in a project of 24 fps gives 17 pictures in a second. The model takes 72 % of that time.
 - **Text, the open parts:**
   - Very small text: try a longer side above 960 pixels for a large source, and measure the time.
   - Text that comes into the picture has no blur on its first frames, as a face has not.

@@ -324,7 +324,7 @@ impl Join {
                 keep: 0.35,
                 overlap: 0.2,
                 wait_secs: 1.0,
-                shortest_secs: 0.5,
+                shortest_secs: 1.0,
                 steady: 0.0,
             },
         }

@@ -54,26 +54,39 @@ flowchart TD
 ## Subjects
 
 - `motion.find` gives each thing of one `Subject` in a clip a motion path ([model](model.md#motion-paths), [deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
-  - `Subject::Face` is a face. `Subject::Text` is a line or a block of text. `Subject::ALL` lists the subjects.
+  - `Subject::Face` is a face. `Subject::Text` is a line or a block of text. `Subject::Person` is a person. `Subject::Vehicle` is a vehicle.
+  - `Subject::ALL` lists the subjects.
   - The subjects differ in two places only: `subjects::Net` holds the model of each, and `Join::of` holds the rules of its paths.
+  - `Subject::Person` and `Subject::Vehicle` have one model and one model file. Each keeps its own classes of that model (`yolox::PEOPLE`, `yolox::VEHICLES`).
 - `subjects::find` in vidcut-av measures. It reads only the range that the clip shows:
   - A `Look` has the first time, the last time and the time between two frames of the project (`every`).
   - `VideoReader` seeks to the first time. It decodes on the GPU or the CPU, as the preferences tell.
   - `subjects::find` looks only at the first decoded frame at or after each time of the `Look`.
     - Why: a file of 60 fps in a project of 24 fps shows two frames of each five.
-  - It scales each picture to the longer side that the model takes (`yunet::SIDE`, `ppocr::SIDE`), upright, with square pixels.
+  - It scales each picture to the longer side that the model takes (`yunet::SIDE`, `ppocr::SIDE`, `yolox::SIDE`), upright, with square pixels.
   - The model runs with tract on the CPU, one picture on each thread of the pool (`pool::run`).
   - `Detections` holds the time of each picture and its `Found` boxes: the center, the size, the rotation and the score. The center and the size are fractions of the picture.
   - `Detections` also holds the scene score of each picture against the picture before it (`scene`).
     - `Looking::picture` measures it on the small picture, with `small_luma`, `mafd` and `scene_score` of `analyze.scenes`. Thus the file is not decoded a second time.
     - `subjects::find` also measures `SEED` pictures before the first time, where the file has them. `Detections` does not hold them.
       - Why: the scene score of a picture uses the two pictures before it. Without them, a fast move at the start of a clip scores as a shot change.
-  - It keeps each box with a score of `yunet::LEAST` or `ppocr::LEAST` or more. Why: the core can then decide again with other scores, and nothing is measured again.
+  - It keeps each box with a score of `yunet::LEAST`, `ppocr::LEAST` or `yolox::LEAST` or more. Why: the core can then decide again with other scores, and nothing is measured again.
 - `yunet` prepares the picture and decodes the outputs of the model:
   - The picture goes in as blue, green and red values from 0 to 255. Its right side and its bottom are padded to a multiple of 32.
   - Each of the strides 8, 16 and 32 gives a class score, an object score and a box for each cell.
   - The score of a box is the root of the product of the two scores.
-  - Of the boxes that overlap more than `yunet::SAME`, the box with the highest score stays.
+  - Of the boxes that overlap more than `yunet::SAME`, the box with the highest score stays (`subjects::apart`).
+- `yolox` finds people and vehicles with the YOLOX-S model, by the code of its maker (the files yolox.py and demo.py of OpenCV Zoo):
+  - The model takes a square picture with a side of `yolox::SIDE`. The picture is at its top left, and the rest has the value of `PAD`.
+    - Thus the model also runs on the part without a picture. Why: the code of the maker gives the model this square.
+  - The picture goes in as red, green and blue values from 0 to 255 (`colors`).
+  - Each of the strides 8, 16 and 32 gives a box, an object score and 80 class scores for each cell.
+  - The class of a box is the class with the highest score. The score of the box is the object score times that class score (`named`).
+  - A find keeps the boxes of its own classes. `PEOPLE` is the class person. `VEHICLES` is bicycle, car, motorcycle, bus, train and truck.
+  - Of the kept boxes that overlap more than `yolox::SAME`, the box with the highest score stays (`subjects::apart`).
+    - The code of the maker does this for each class alone. `yolox` does it for the classes of the subject together.
+    - Why: a `Found` holds no class. Two boxes of two classes on one vehicle must not make two paths.
+  - The maker scales the picture with a bilinear filter. `subjects::small` scales with the mean of an area, as for the other subjects.
 - `ppocr` finds text with the PP-OCRv5 mobile detection model, by the rules of the config of that model:
   - The picture goes in as blue, green and red values, each less its mean and divided by its spread (`MEAN`, `SPREAD`).
   - The model gives one map of the picture. A value tells how sure the model is that the pixel is in the middle part of a line of text.
@@ -89,14 +102,20 @@ flowchart TD
   - A box joins the open path whose last box overlaps it most. The overlap must be `overlap` or more.
   - A box with a score of `start` or more opens a path. A box with a score of `keep` or more continues a path.
     - Why: a face that turns away scores lower, and its path must not stop there.
+    - A person and a vehicle have the same rules. No test clip shows a vehicle.
+    - Their `start` is the default score limit of the demo of the maker. Their `keep` is the default of the class of the maker.
+      - Why: on a test clip, a man near the camera behind a railing scores from 0.48 to 0.71. The `start` of a face gives him no path.
   - A path waits `wait_secs` for its thing. Then the path ends.
   - Each open path ends at a shot change inside the clip (`Detections::cut`, with `SCENE_SCORE`). A thing of the next shot opens a new path.
     - Why: the box of the next shot at the same place is another thing. The user must be able to remove it alone.
   - A path stays only with boxes of a score of `start` or more on as many frames as `shortest_secs` has.
     - Why: a pattern that looks like a face scores high on a few frames only.
+    - The `shortest_secs` of a person and a vehicle is longer than that of a face.
+      - Why: the model can give one person a second box, for example with a thing that the person holds.
+      - On the test clips, such a box has a score of `start` or more on fewer frames than that time has.
     - The end of a shot is the next shot change or the end of the clip. Fewer frames can be left from the first box of a path to that end. Then such a box on each of those frames is sufficient.
       - Why: each path ends at a shot change. A thing that shows late in a shot, or in a short shot, must get its path too.
-  - A path stays only with a box on a share of `steady` of its frames. Faces have no such rule.
+  - A path stays only with a box on a share of `steady` of its frames. Faces, people and vehicles have no such rule.
     - Why: a pattern that looks like text comes and goes from frame to frame. A face that turns away is not found for a time, and must stay.
   - `motion::simplified` keeps the first sample, the last sample, and each sample that the line between its kept neighbors misses.
     - A miss is more than `SLACK` of the size of the box, in the center or in the size, or more than `TURN_SLACK` degrees.
@@ -106,11 +125,12 @@ flowchart TD
 - A still has one picture. `subject_look` asks for it once, and each frame of the clip takes its boxes.
 - `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the subject, the model file, the rules of its model and the `Look` (`subjects::name`).
   - The model file is the first 8 digits of its SHA-256 in the catalog. Thus a new model file gives another file.
-  - Each model names its own rules (`yunet::name`, `ppocr::name`), with the values that prepare the picture. Thus a change of a rule gives another file.
+  - Each model names its own rules (`yunet::name`, `ppocr::name`, `yolox::name`), with the values that prepare the picture. Thus a change of a rule gives another file.
+  - `yolox::name` also holds the classes of the subject.
 - With `VIDCUT_DEBUG`, a line of the area `subjects` gives the pictures, the frames, the time and the time in the model.
 - In a GUI, `Live::measuring` measures on `vidcut-measure` first (`editor::subject_looks`). Headless, `work_first` measures on `vidcut-subjects`.
-- The model files are `catalog::YUNET_ONNX` and `catalog::PPOCR_DET_ONNX`. `subjects::get_ready` fetches the file of the subject when the request has `download`.
-- `models.check` finds the subject of a model id with `subjects::of`.
+- The model files are `catalog::YUNET_ONNX`, `catalog::PPOCR_DET_ONNX` and `catalog::YOLOX_ONNX`. `subjects::get_ready` fetches the file of the subject when the request has `download`.
+- `models.check` finds the subject of a model id with `subjects::of`. For the model of two subjects, that is the first of them.
 
 ## Tracks
 
@@ -492,7 +512,7 @@ A file with a `part` piece in its name is still being written, and does not coun
 - `crates/vidcut-core/src/fingerprint.rs`, `crates/vidcut-core/src/dirs.rs`, `crates/vidcut-core/src/disk_cache.rs`
 - `crates/vidcut-core/src/transcript.rs`, `crates/vidcut-core/src/transcripts.rs`, `crates/vidcut-core/src/speakers.rs`, `crates/vidcut-core/src/retime.rs`
 - `crates/vidcut-av/src/analysis.rs`, `crates/vidcut-av/src/transcribe.rs`, `crates/vidcut-av/src/speech_api.rs`, `crates/vidcut-av/src/models.rs`
-- `crates/vidcut-av/src/subjects.rs`, `crates/vidcut-av/src/subjects/yunet.rs`, `crates/vidcut-core/src/motion.rs`
+- `crates/vidcut-av/src/subjects.rs`, `crates/vidcut-av/src/subjects/yunet.rs`, `crates/vidcut-av/src/subjects/yolox.rs`, `crates/vidcut-core/src/motion.rs`
 - `crates/vidcut-av/src/light.rs`, `crates/vidcut-av/src/waveform.rs`, `crates/vidcut-av/src/thumbs.rs`
 - `crates/vidcut/src/env.rs`, `crates/vidcut/src/paths.rs`, `crates/vidcut/src/preferences.rs`, `crates/vidcut/src/services.rs`
 - `crates/vidcut/src/thumbcache.rs`, `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/storyboard.rs`

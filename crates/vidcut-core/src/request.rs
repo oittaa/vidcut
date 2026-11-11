@@ -2825,15 +2825,16 @@ pub enum Request {
     /// up to a second, and then shows near the same place, stays on its path.
     /// A shot change inside a clip ends each path, and a thing of the next
     /// shot gets a new one.
-    /// A face, a person or a vehicle found for under half a second gets no
-    /// path. Text gets a path when it is found for a second, on four of
-    /// each five frames. Less time can be left before a shot change or the
-    /// end of the clip; a thing found on each of those frames then gets a
-    /// path. Lines of text that are near each other are one block with one
-    /// path, and a line that leans gets an area that leans with it. The
-    /// area of a person or a vehicle is the box around all of it that
-    /// shows. The paths get names in the order the things first show:
-    /// `Face 1`, `Face 2`, or `Text 1`, `Person 1`, `Vehicle 1`.
+    /// A face found for under half a second gets no path. A person or a
+    /// vehicle gets a path when it is found for a second. Text gets a path
+    /// when it is found for a second, on four of each five frames. Less time
+    /// can be left before a shot change or the end of the clip; a thing
+    /// found on each of those frames then gets a path. Lines of text
+    /// that are near each other are one block with one path, and a line
+    /// that leans gets an area that leans with it. The area of a person or
+    /// a vehicle is the box around all of it that shows. The paths get
+    /// names in the order the things first show: `Face 1`, `Face 2`, or
+    /// `Text 1`, `Person 1`, `Vehicle 1`.
     ///
     /// Returns each clip with its new `paths`: the `id`, the `name`, the
     /// `count` of its samples, the source frames `first` and `last` of them,
