@@ -10,7 +10,7 @@ use crate::player::{AlphaUse, Layout, Picture, Sampling, TitleOver, TitlePicture
 use crate::thumbs::Image;
 use vidcut_core::model::{AlphaMode, Hdr};
 use vidcut_core::place::{Level, Mix, MixPart, Mixes, Placing, Working, chain, lettered};
-use vidcut_core::preferences::Scope;
+use vidcut_core::preferences::{Scope, ScopeScale};
 use vidcut_core::render::{Moving, Placed, Shift};
 
 #[cfg(any(target_os = "linux", windows))]
@@ -3005,7 +3005,7 @@ impl Screen {
         self.scoping = on;
     }
 
-    pub fn scopes(&mut self, gpu: &Gpu, wanted: &[(Scope, (u32, u32))]) -> bool {
+    pub fn scopes(&mut self, gpu: &Gpu, wanted: &[(Scope, (u32, u32))], scale: ScopeScale) -> bool {
         if wanted.is_empty() {
             self.plots.drop_all();
             return false;
@@ -3019,6 +3019,7 @@ impl Screen {
             (canvas, target.size),
             (self.drawn_colors, self.draws),
             wanted,
+            scale,
         )
     }
 

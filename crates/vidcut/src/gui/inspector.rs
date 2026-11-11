@@ -1341,6 +1341,7 @@ struct Sound {
     muted: bool,
     keyed: bool,
     pan: f64,
+    pan_on: bool,
 }
 
 type Lists<'a> = (&'a [Chosen], &'a [Sound], &'a [Paced]);
@@ -1495,6 +1496,7 @@ enum Act {
     FullSpeed,
     Retime(ClipRetime),
     Mute(bool),
+    PanOn(bool),
     Link(bool),
     Flips([Option<bool>; 2]),
     Zooming(bool),
@@ -1868,6 +1870,18 @@ fn field(
     acts: &mut Vec<Act>,
 ) {
     label(ui, f.label(), set);
+    field_rest(ui, f, i, (set, shown, range), look, keys, acts);
+}
+
+fn field_rest(
+    ui: &mut egui::Ui,
+    f: Key,
+    i: &Inspector,
+    (set, shown, range): (bool, f64, RangeInclusive<f64>),
+    look: Look<'_>,
+    keys: Option<KeyMark>,
+    acts: &mut Vec<Act>,
+) {
     ui.horizontal(|ui| {
         if look.off {
             ui.disable();
@@ -3246,6 +3260,7 @@ impl Workspace {
                     muted: a.muted,
                     keyed: a.is_keyed(),
                     pan: a.pan,
+                    pan_on: a.pan_on,
                 })
             })
             .collect()
@@ -4236,7 +4251,14 @@ impl Workspace {
             );
             let panned = sounds.iter().any(|s| s.pan != Key::Pan.usual());
             let pan = (panned, first.pan, *PAN.start()..=*PAN.end());
-            field(
+            ui.horizontal(|ui| {
+                let mut on = first.pan_on;
+                if ui.checkbox(&mut on, "").clicked() {
+                    acts.push(Act::PanOn(on));
+                }
+                label(ui, Key::Pan.label(), panned);
+            });
+            field_rest(
                 ui,
                 Key::Pan,
                 &self.inspector,
@@ -4542,6 +4564,16 @@ impl Workspace {
                 })
             }),
             Act::Clear(tool) => self.clear_pictures(chosen, tool),
+            Act::PanOn(on) => {
+                let ids: Vec<&str> = sounds
+                    .iter()
+                    .filter(|s| s.pan_on != on)
+                    .map(|s| s.id.as_str())
+                    .collect();
+                if !ids.is_empty() {
+                    self.send("clip.set", json!({ "clips": ids, "pan_on": on }));
+                }
+            }
             Act::Mute(on) => {
                 let ids: Vec<&str> = sounds
                     .iter()

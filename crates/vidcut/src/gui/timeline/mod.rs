@@ -139,6 +139,7 @@ pub(crate) fn nearest_edit(t: &Track, near: i64, side: Side) -> Option<i64> {
 }
 
 pub const ZOOM: std::ops::RangeInclusive<f64> = 0.01..=40.0;
+const WHEEL_ZOOM_POINTS: f32 = 200.0;
 pub const BORING_SECS: std::ops::RangeInclusive<f64> = 1.0..=300.0;
 pub const JUMP_FRAMES: std::ops::RangeInclusive<i64> = 1..=120;
 
@@ -1407,7 +1408,7 @@ impl Workspace {
                 self.options_menu(ui, p)
             });
             ui.menu_button(RichText::new("Actions").small(), |ui| {
-                self.timeline_actions_menu(ui, p)
+                self.timeline_actions_menu(ui, p, true)
             });
             ui.menu_button(RichText::new("Edit").small(), |ui| {
                 self.edit_actions_menu(ui)
@@ -1545,14 +1546,20 @@ impl Workspace {
         }
     }
 
-    pub(super) fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
+    pub(super) fn speech_item(&mut self, ui: &mut egui::Ui) {
+        if ui.button("Create Subtitles from Audio…").clicked() {
+            self.open_speech();
+            ui.close();
+        }
+    }
+
+    pub(super) fn timeline_actions_menu(&mut self, ui: &mut egui::Ui, p: &Project, speech: bool) {
         let selected = self.snap.selection.clips.clone();
         let with = |want: fn(&vidcut_core::model::Clip) -> bool| {
             selected.iter().any(|id| p.clip(id).is_some_and(want))
         };
-        if ui.button("Create Subtitles from Audio…").clicked() {
-            self.open_speech();
-            ui.close();
+        if speech {
+            self.speech_item(ui);
         }
         let video = with(|c| c.video);
         if ui
@@ -1703,7 +1710,7 @@ impl Workspace {
         if over <= 0.0 || self.timeline.drag.is_some() || !ui.rect_contains_pointer(band) {
             return;
         }
-        let dy = ui.input(|i| match i.modifiers.command {
+        let dy = ui.input(|i| match i.modifiers.command || i.modifiers.alt {
             true => 0.0,
             false => i.smooth_scroll_delta.y,
         });
@@ -2284,7 +2291,17 @@ impl Workspace {
         if !resp.hovered() || self.timeline.drag.is_some() {
             return;
         }
-        let (zoom, scroll) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta));
+        let (zoom, scroll, alt) = ui.input(|i| {
+            (
+                i.zoom_delta(),
+                i.smooth_scroll_delta,
+                i.modifiers.alt && !i.modifiers.command,
+            )
+        });
+        let zoom = match alt {
+            true => zoom * (scroll.y / WHEEL_ZOOM_POINTS).exp(),
+            false => zoom,
+        };
         if !upper && zoom != 1.0 {
             let o = &mut self.timeline.options;
             o.ppf = (o.ppf * f64::from(zoom)).clamp(*ZOOM.start(), *ZOOM.end());
@@ -4216,6 +4233,7 @@ mod tests {
                 gain_keys: Vec::new(),
                 muted: false,
                 pan: 0.0,
+                pan_on: true,
                 equalizer: None,
                 dialogue_leveler: None,
                 compressor: None,

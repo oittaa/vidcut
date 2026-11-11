@@ -14,7 +14,7 @@ use crate::live::{Capture, Presented};
 use vidcut_av::screen::Gate;
 use vidcut_av::screen::{Drawn, Gpu, Screen};
 use vidcut_core::model::Hdr;
-use vidcut_core::preferences::Scope;
+use vidcut_core::preferences::{Scope, ScopeScale};
 
 type Engine = Arc<Player>;
 
@@ -36,6 +36,7 @@ struct State {
     want: [i32; 2],
     super_scale: bool,
     scopes: Vec<(Scope, [i32; 2])>,
+    scale: ScopeScale,
     target: Option<Target>,
     scope_targets: Vec<(Scope, Target)>,
     colors: Option<Hdr>,
@@ -209,11 +210,13 @@ impl Viewer {
         &mut self,
         render: &RenderState,
         wanted: &[(Scope, [i32; 2])],
+        scale: ScopeScale,
     ) -> ScopePictures {
         let (targets, colors) = {
             let mut s = self.shared.lock();
-            if s.scopes != wanted {
+            if s.scopes != wanted || s.scale != scale {
                 s.scopes = wanted.to_vec();
+                s.scale = scale;
                 s.woken = true;
                 self.shared.wake.notify_all();
             }
@@ -315,7 +318,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     let mut generation = 0u64;
     let mut next: Option<Instant> = None;
     loop {
-        let (tasks, engine, want, super_scale, scopes) = {
+        let (tasks, engine, want, super_scale, scopes, scale) = {
             let mut s = shared.lock();
             while !s.woken && !s.stop {
                 let wait = next.map_or(IDLE, |n| n.saturating_duration_since(Instant::now()));
@@ -338,6 +341,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
                 s.want,
                 s.super_scale,
                 s.scopes.clone(),
+                s.scale,
             )
         };
         let now = Instant::now();
@@ -376,7 +380,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             .iter()
             .map(|&(scope, [w, h])| (scope, (w.max(2) as u32, h.max(2) as u32)))
             .collect();
-        let plotted = screen.scopes(gpu, &wanted);
+        let plotted = screen.scopes(gpu, &wanted, scale);
         let changed = drawn != Drawn::Same;
         if changed && vidcut_av::debug() {
             eprintln!("[viewer] drew {} at {w}x{h}", drew(shown.as_ref(), &screen));

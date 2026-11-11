@@ -41,6 +41,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - Quick Export shows a progress bar dialog while it exports (p. 789).
+  - Create Subtitles from Audio shows its progress in a dialog box (p. 1235).
   - The Deliver page has the render settings and the Render Queue (pp. 4103–4132).
   - In Resolve Studio 21.2, the Quick Export row is H.264 Master, HyperDeck, H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok, Presentations, Dropbox and Replay.
   - YouTube has a menu of four sizes, 720p to 2160p (p. 4105).
@@ -50,7 +51,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - It has no HyperDeck, Presentations, Dropbox or Replay.
   - The Export dialog also shows the live plan, and gives the export as a shell command.
   - In a running GUI, exports are jobs ([design/export.md](design/export.md#the-guis-exports), [design/live.md](design/live.md#jobs)).
-  - No progress dialog opens. Jobs shows the progress of each job.
+  - Create Subtitles from Audio is a job too. It downloads its models as a job.
+  - No progress dialog opens. Jobs shows the progress of each job, and can cancel it.
 - **Why:**
   - The plan and the command let scripts reproduce GUI exports.
   - An export runs beside the editing. A dialog over the timeline for each export interrupts that editing.
@@ -231,7 +233,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Option+wheel zooms the timeline, and Command+wheel moves through it (Edit page, p. 853).
   - The lower timeline of the Cut page also zooms with Option+wheel.
 - **vidcut:**
-  - Ctrl+wheel (Cmd on a Mac) and a pinch on a trackpad zoom the lower timeline.
+  - Alt+wheel (Option on a Mac) zooms the lower timeline, as in Resolve.
+  - Ctrl+wheel (Cmd on a Mac) zooms it too, and does not move through it.
 - **Why:**
   - Ctrl+wheel and Cmd+wheel zoom in browsers and most programs.
   - egui gives them and a pinch as one zoom.
@@ -302,19 +305,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Then the keyboard selects the next edit to trim, as the manual tells.
   - No clip disappears.
 
-## X29. A Dynamic Trim run says why it stopped
-
-- **Resolve:**
-  - A run that reaches the last frame of a neighbor clip or the end of the media just stops.
-  - The Trim Editor comes back with green handles, and nothing tells why (21.1.1).
-- **vidcut:**
-  - The run stops there and applies.
-  - The cut becomes red, and the viewer tells why until the next trim ([D32](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - The message is in the line of the Trim Editor or under the picture.
-- **Why:**
-  - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
-  - The user cannot tell whether a key press was missed or the media ran out.
-
 ## X30. Slowed sound keeps its pitch on every system
 
 - **Resolve:**
@@ -342,20 +332,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Scripts, the command log and OTIO files name media by id.
   - Two items for one file would split its marks, color and proxy.
   - An agent that imports a folder again would double the pool.
-
-## X32. Import Media Folder names what it left out
-
-- **Resolve:**
-  - Import Media Folder leaves out a file that it cannot read, and shows no message. Examples are a text file, or a file that only looks like a video.
-  - A folder without media imports nothing.
-  - These results are from Resolve Studio 21.1.1.
-- **vidcut:**
-  - The result names each skipped file and why vidcut skipped it.
-  - The notice in the GUI counts the skipped files, and names up to five of each kind.
-  - A folder without media is an error ([D53](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-- **Why:**
-  - The reason is the same as in [X29](#x29-a-dynamic-trim-run-says-why-it-stopped).
-  - An agent can cut a card or a render folder that the user imports. No clip of it must go missing without a message.
 
 ## X35. The History window docks
 
@@ -506,31 +482,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - CEA-608 is a broadcast format with lines of 32 characters.
   - vidcut writes no MXF.
 
-## X46. Create Subtitles from Audio with open models on this computer
-
-- **Resolve:**
-  - Only Resolve Studio has it, with its built-in AI.
-  - It is the first item of Timeline Actions on the Cut page (p. 646), and in Timeline > AI Tools (p. 1234).
-  - More languages come as an Extras download (pp. 1234–1235).
-  - Its dialog shows the progress.
-- **vidcut:**
-  - `subtitles.transcribe` runs transcribe.cpp on this computer. It runs on the GPU, unless GPU acceleration is off.
-  - Parakeet Ultra is the default model. It has 25 European languages and times for each word.
-  - Qwen3-ASR 1.7B has 30 languages. Whisper large-v3 has 100 languages and times for each phrase.
-  - The request can also name a GGUF file.
-  - vidcut downloads the library of transcribe.cpp, Silero VAD and the speech models into the cache folder. In the GUI, a question that gives their size comes first.
-  - In the GUI, Create Subtitles from Audio… is the first item of Timeline Actions. The Timeline menu shows these items after Keyframes and Audio Scrubbing.
-  - Its dialog also has the model, Speakers, the GPU, the range, the tracks that it hears and the track.
-  - The model list gives the languages of each model, how it times the words, and its size or price ([spec §8.12](cut-page-spec.md#812-subtitles-pp-645646-702-12271248)).
-  - A box for each track with sound is ticked when playback hears that track.
-  - Under Advanced are the lines, the characters per line, the gap, where the words come from, and how the speech is found.
-  - The run is a job. No progress dialog opens. Jobs shows its progress and the progress of the download, and can cancel it.
-  - While it runs, Jobs and `jobs.get` name the model, the device, the language and the speaker model, when each is known.
-- **Why:**
-  - The speech never leaves the computer. Every build has it.
-  - Parakeet Ultra is the default because it gives real word times.
-  - Jobs keeps long work beside the editing, as for exports (X3).
-
 ## X52. Titles come from a Titles tab and are edited in the Inspector
 
 - **Resolve:**
@@ -660,7 +611,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - The highlighted word is then not the word that is spoken, until the word timings are updated.
 - **vidcut:**
   - The animation is part of the style of a track (D69). The user sets it in the Subtitle Track section of the Inspector or with `track.set`.
-  - The looks of Create Subtitles from Audio ([X46](#x46-create-subtitles-from-audio-with-open-models-on-this-computer)) put the speech on a new track that is already animated.
+  - The looks of Create Subtitles from Audio ([spec §8.12](cut-page-spec.md#812-subtitles-pp-645646-702-12271248)) put the speech on a new track that is already animated.
   - Word times follow edits and new text automatically (D70).
 - **Why:**
   - It is one step from the speech to animated subtitles.
@@ -806,7 +757,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing selected that it can show, it shows one line.
   - With several clips selected, a section shows the first clip that it acts on. Its header gives the number of these clips.
-  - The Transform and Crop sections have a switch at the left of their names. Dynamic Zoom, Composite, Speed and Audio have none.
+  - The Transform and Crop sections have a switch at the left of their names. The Pan row has a switch too. Dynamic Zoom, Composite, Speed and the other Audio rows have none.
   - Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
   - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has no accent color, and its Reset does nothing.
@@ -842,21 +793,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A Reset for each value puts back one value and keeps the others of its group.
   - Resolve's Inspector has only Ease and Swap for Dynamic Zoom. Numbers show each box exactly, and bring back a box that is out of the viewer.
   - Mute is beside Volume, as in the strip of the Mixer. Thus the user does not need the right-click menu to mute a clip.
-
-## X71. A drag on the volume line of a selected clip changes all the selected clips
-
-- **Resolve:**
-  - On the Edit page, each clip with sound has a volume overlay. A drag up or down on it sets the level of the clip (p. 1109).
-  - The volume commands of the Edit page change several selected clips together. The clips keep the differences between their levels (p. 1110).
-  - The manual does not tell whether a drag on the overlay changes the other selected clips.
-- **vidcut:**
-  - The scale and the steps of the volume line are in [D77](cut-page-spec.md#12-decisions-on-gaps-and-contradictions).
-  - A drag on a clip that is not selected changes only that clip. It does not select the clip.
-  - A drag on a selected clip changes all the selected clips with sound by the same number of dB. Thus they keep the differences between their gains.
-  - A line on a locked track does not take a drag. A selected clip on a locked track does not change.
-- **Why:**
-  - A drag changes a value by an amount. A move of several clips also moves each clip by the same amount.
-  - Resolve's volume commands also keep the differences between the selected clips.
 
 ## X73. The volume line takes the keyframe controls of the Edit page
 
@@ -1429,29 +1365,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - Source Overwrite makes a synced cutaway. A clip that is out of sync is the fault that this edit is there to prevent.
 
-## X127. The viewer has scopes
-
-- **Resolve:**
-  - The Cut page has no scope. The video scopes open on the Color, Media and Deliver pages (pp. 3092–3093).
-  - By default, the Waveform and the Parade have a 10-bit scale from 0 to 1023, whatever the data levels of the project are (p. 3093).
-  - A menu changes that scale to 12-bit, percent, millivolts or nits (p. 3093).
-  - The Vectorscope has targets for 75 percent color bars, and a skin tone line that the user can turn on (p. 3098).
-  - The Waveform overlays Y, CbCr or RGB (p. 3097).
-  - The Parade shows RGB, YRGB or YCbCr. It has options for color, extents, brightness and reference levels (p. 3102).
-  - There are five scopes (p. 3097). The Histogram is one of the others (p. 3093).
-- **vidcut:**
-  - The View menu and the header of the viewer turn on the Waveform, the Parade and the Vectorscope, each one by itself.
-  - The scopes are in a column at the right of the viewer picture, one above the other.
-  - The Trim Editor, Dynamic Trim, Multi Source and the grid of a synced group show no scopes.
-  - The Waveform shows luma. The Parade shows red, green and blue, each in its color.
-  - The scale follows the timeline color space: 10-bit in SDR, and nits in HDR PQ and HDR HLG. There is no menu for the scale.
-  - The Vectorscope has no skin tone line.
-  - vidcut has only these three scopes, and none of the options of a scope.
-- **Why:**
-  - vidcut has no Color, Media or Deliver page. Thus the viewer is the place for the scopes.
-  - A cut that vidcut delivers does not go through another page. The scopes let the user see the levels of that cut.
-  - The scale follows the timeline, because the same color space then gives the same scale with no setting to change.
-
 ## X128. Removing a file takes it out of its groups
 
 - **Resolve:**
@@ -1742,17 +1655,14 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:**
   - The law of the Pan is different on a stereo track and on a mono track (measured in Resolve Studio 21.2).
   - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives both laws.
-  - The Pan has a switch.
   - The scripting API takes a Pan outside −100 to 100, and sets the nearest limit.
 - **vidcut:**
   - A track has no channel type. Each clip uses the law of a stereo track.
   - A mix of one channel has no sides. The Pan does not change it.
   - A mix of three channels or more applies the Pan to its first two channels.
-  - The Audio section has no switch for the Pan. Pan 0 gives the same sound.
   - `clip.set` refuses a Pan outside −100 to 100.
 - **Why:**
   - Resolve puts a mono clip on a stereo track by default. Thus the law of a stereo track is what most clips get.
-  - One slider is simpler.
   - A value outside the range is an error in the script. A refusal shows the error.
 
 ## X154. The Equalizer is a window
@@ -1829,32 +1739,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The effect has no public rules. A spectral gate is the usual way to lower steady noise and it runs in real time.
   - The default effect lowered the noise by 0.4 dB and the quiet lines by up to 6.0 dB (spec). Meeting recordings need the opposite.
-
-## X158. An ease on all selected keyframes comes from a right-click or the bar
-
-- **Resolve:**
-  - The title bar of the Curve Editor has four buttons: Linear, Ease In, Ease In and Out, and Ease Out. They change all the selected keyframes (pp. 1262–1263).
-  - A right-click on a keyframe in the Keyframe Editor opens no menu.
-- **vidcut:**
-  - A right-click on a selected keyframe keeps the selection. The ease goes on all the selected keyframes.
-  - A right-click on another keyframe selects that keyframe alone.
-  - With two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
-- **Why:**
-  - The ease menu is already on the keyframe ([spec §2](cut-page-spec.md#2-layout-pp-636637)). A second place in a title bar adds nothing.
-  - A selection across several values takes one ease in one undo step.
-
-## X159. Snapping also goes to other keyframes
-
-- **Resolve:**
-  - Enable Snapping snaps the control points of the Curve Editor to the playhead (pp. 1259, 1264).
-  - A keyframe of another curve and a timeline marker are not targets (measured in Resolve Studio 21.2).
-- **vidcut:**
-  - Enable Snapping acts on each drag of keyframes: on a track, on a group track and on a curve.
-  - A dragged keyframe goes to the playhead or to a keyframe of another value when one is near.
-  - It does not act on a handle, or on a Shift-drag that changes only the value.
-- **Why:**
-  - Two values often change on the same frame. A snap to the keyframes of the other values does this without a look at the timecode.
-  - Two keyframes of one value cannot share a frame. Thus the keyframes of the same value are not targets.
 
 ## X160. The graph sits above the tracks with a scale for each curve
 
