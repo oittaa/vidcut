@@ -1232,10 +1232,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Ease and Transition Curve give the progress, as for a Push. With Ease None, frame f of N frames is at f/N of the way.
   - Border puts a band of Color on the edge, centered on it. Its width is a part of the timeline width. Color is white unless set.
   - The band makes the way of the edge longer by the width of the band. Thus no band shows on the first frame.
-    - vidcut: the middle of the band starts half a band before the first corner. It ends half a band past the far corner.
+    - The middle of the band starts half a band before the first corner. It ends half a band past the far corner.
   - Feather fades the incoming picture into the outgoing picture linearly across the band. The band then shows no color.
-  - vidcut: a pixel shows the incoming picture when its middle is behind the band. The edge has no smoothing.
-  - vidcut: at a gap, the missing side shows the tracks below.
+  - The edge has no smoothing. Each pixel shows one side.
+    - vidcut: a pixel shows the incoming picture when its middle is behind the band.
+  - At a gap, the missing side shows the tracks below.
   - A request makes one: `{"type": "wipe", "angle": 30, "border": 0.01, "feather": true}`.
   - A request can change a dissolve into a wipe, and a wipe into a dissolve.
   - An OTIO file holds it as Resolve's Edge Wipe, with its values ([gotchas](gotchas.md#resolves-otio-files)).
