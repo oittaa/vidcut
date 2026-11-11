@@ -1299,6 +1299,7 @@ mod tests {
                 in_handle: None,
                 out_handle: None,
             }],
+            y: Vec::new(),
         }];
         let placed = Placed {
             clip: "c1".into(),

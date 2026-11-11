@@ -531,6 +531,8 @@ Writing:
     - The points of a polygon take no keyframes ([todo](../todo/motion-tracking.md)).
   - `motion.track` refuses an area with keyframes on its center, its size or its rotation (`ops::motion::start`). Why: a track puts those values back at their usual values.
 - The `keys` of an `Effect` hold one `EffectKeys` for each `EffectValue` with keyframes, sorted by value.
+  - A point (Position, Center) keeps X in `keys` and Y in `y`, as `Picture` keeps its Position.
+  - The functions of `keyframes` that split, hold, scale, move and drop keys keep the two lists in step (`split_channel`, `move_channel`).
   - `effect_keys` maps each `EffectValue` to its place in the kind of effect, or in the area. An `EffectValue` of another kind has no place, and `ops::picture::effect_checked` refuses it.
   - `effect_checked` also refuses a value of the area on an effect with no area.
   - `effect_checked` checks each keyframe as a plain value of the effect.

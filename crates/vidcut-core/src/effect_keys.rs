@@ -1,4 +1,9 @@
-use crate::keyframes::{ease_mark, hold, reshape, retimed, scaled_by, split_inside, value_at};
+use std::collections::HashSet;
+
+use crate::keyframes::{
+    drop_channel, ease_mark, hold_channel, put_pair, retarget_channel, retime_channel,
+    scale_channel, split_channel, value_at, value_paired,
+};
 use crate::model::{
     Clip, Ease, Effect, EffectArea, EffectKeys, EffectKind, EffectValue, FilmGrain, GaussianBlur,
     Glow, Keyframe, MosaicBlur, Sharpen, Vignette,
@@ -6,6 +11,7 @@ use crate::model::{
 
 type Range = (f64, f64);
 type Slot<'a> = Option<(&'a mut f64, Range)>;
+type Point<'a> = Option<(&'a mut [f64; 2], Range)>;
 
 const BLEND: Range = (0.0, 1.0);
 const FINITE: Range = (f64::MIN, f64::MAX);
@@ -58,14 +64,6 @@ fn mosaic_slot(m: &mut MosaicBlur, value: EffectValue) -> Slot<'_> {
         V::Aspect => (
             m.aspect.get_or_insert(MosaicBlur::STRETCH),
             MosaicBlur::STRETCHES,
-        ),
-        V::PositionX => (
-            &mut m.position.get_or_insert(MosaicBlur::MIDDLE)[0],
-            MosaicBlur::PLACES,
-        ),
-        V::PositionY => (
-            &mut m.position.get_or_insert(MosaicBlur::MIDDLE)[1],
-            MosaicBlur::PLACES,
         ),
         _ => return None,
     })
@@ -188,14 +186,6 @@ fn vignette_slot(v: &mut Vignette, value: EffectValue) -> Slot<'_> {
             v.anamorphism.get_or_insert(Vignette::STRETCH),
             Vignette::STRETCHES,
         ),
-        V::CenterX => (
-            &mut v.center.get_or_insert(Vignette::MIDDLE)[0],
-            Vignette::PLACES,
-        ),
-        V::CenterY => (
-            &mut v.center.get_or_insert(Vignette::MIDDLE)[1],
-            Vignette::PLACES,
-        ),
         V::Softness => (
             v.softness.get_or_insert(Vignette::SOFTNESS),
             Vignette::SHARES,
@@ -241,6 +231,19 @@ fn slot(kind: &mut EffectKind, value: EffectValue) -> Slot<'_> {
         EffectKind::FilmGrain(g) => grain_slot(g, value),
         EffectKind::Vignette(v) => vignette_slot(v, value),
         EffectKind::Sharpen(s) => sharpen_slot(s, value),
+    }
+}
+
+fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
+    match (kind, value) {
+        (EffectKind::MosaicBlur(m), EffectValue::Position) => Some((
+            m.position.get_or_insert(MosaicBlur::MIDDLE),
+            MosaicBlur::PLACES,
+        )),
+        (EffectKind::Vignette(v), EffectValue::Center) => {
+            Some((v.center.get_or_insert(Vignette::MIDDLE), Vignette::PLACES))
+        }
+        _ => None,
     }
 }
 
@@ -290,7 +293,7 @@ impl EffectValue {
         EffectValue::AreaSoftness,
     ];
 
-    pub const ALL: [EffectValue; 80] = [
+    pub const ALL: [EffectValue; 78] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -308,8 +311,7 @@ impl EffectValue {
         EffectValue::XOffset,
         EffectValue::YOffset,
         EffectValue::Aspect,
-        EffectValue::PositionX,
-        EffectValue::PositionY,
+        EffectValue::Position,
         EffectValue::Threshold,
         EffectValue::AlphaThreshold,
         EffectValue::Spread,
@@ -353,8 +355,7 @@ impl EffectValue {
         EffectValue::Size,
         EffectValue::Rotation,
         EffectValue::Anamorphism,
-        EffectValue::CenterX,
-        EffectValue::CenterY,
+        EffectValue::Center,
         EffectValue::Transparency,
         EffectValue::ColorRed,
         EffectValue::ColorGreen,
@@ -383,17 +384,36 @@ impl EffectValue {
     pub fn of_area(self) -> bool {
         Self::AREA.contains(&self)
     }
+
+    pub fn pair(self) -> bool {
+        matches!(self, EffectValue::Position | EffectValue::Center)
+    }
+}
+
+impl EffectKeys {
+    fn channel(&mut self) -> (&mut Vec<Keyframe>, Option<&mut Vec<f64>>) {
+        let pair = self.value.pair();
+        (&mut self.keys, pair.then_some(&mut self.y))
+    }
 }
 
 impl Effect {
-    fn read(&self, value: EffectValue) -> Option<(f64, Range)> {
+    fn read_point(&self, value: EffectValue) -> Option<([f64; 2], Range)> {
         if value == EffectValue::Blend {
-            return Some((self.mixed(), BLEND));
+            return Some(([self.mixed(), 0.0], BLEND));
         }
         if value.of_area() {
-            return area_read(self.area.as_ref()?, value);
+            return area_read(self.area.as_ref()?, value).map(|(n, range)| ([n, 0.0], range));
         }
-        slot(&mut self.kind.clone(), value).map(|(n, range)| (*n, range))
+        let mut kind = self.kind.clone();
+        if value.pair() {
+            return point_slot(&mut kind, value).map(|(p, range)| (*p, range));
+        }
+        slot(&mut kind, value).map(|(n, range)| ([*n, 0.0], range))
+    }
+
+    fn read(&self, value: EffectValue) -> Option<(f64, Range)> {
+        self.read_point(value).map(|([x, _], range)| (x, range))
     }
 
     pub fn values(&self) -> Vec<EffectValue> {
@@ -403,6 +423,7 @@ impl Effect {
             .filter(|v| match *v {
                 EffectValue::Blend => true,
                 v if v.of_area() => self.area.is_some(),
+                v if v.pair() => point_slot(&mut kind, v).is_some(),
                 v => slot(&mut kind, v).is_some(),
             })
             .collect()
@@ -427,7 +448,17 @@ impl Effect {
             .map_or(&[], |k| k.keys.as_slice())
     }
 
-    pub fn keys_mut(&mut self, value: EffectValue) -> Option<&mut Vec<Keyframe>> {
+    pub fn y_of(&self, value: EffectValue) -> &[f64] {
+        self.keys
+            .iter()
+            .find(|k| k.value == value)
+            .map_or(&[], |k| k.y.as_slice())
+    }
+
+    pub fn channel_mut(
+        &mut self,
+        value: EffectValue,
+    ) -> Option<(&mut Vec<Keyframe>, Option<&mut Vec<f64>>)> {
         if !self.takes(value) {
             return None;
         }
@@ -439,26 +470,46 @@ impl Effect {
                     EffectKeys {
                         value,
                         keys: Vec::new(),
+                        y: Vec::new(),
                     },
                 );
                 i
             }
         };
-        Some(&mut self.keys[i].keys)
+        Some(self.keys[i].channel())
+    }
+
+    pub fn keys_mut(&mut self, value: EffectValue) -> Option<&mut Vec<Keyframe>> {
+        if value.pair() {
+            return None;
+        }
+        self.channel_mut(value).map(|(keys, _)| keys)
     }
 
     pub fn plain(&self, value: EffectValue) -> f64 {
         self.read(value).map_or(0.0, |(n, _)| n)
     }
 
+    pub fn point(&self, value: EffectValue) -> [f64; 2] {
+        self.read_point(value).map_or([0.0; 2], |(p, _)| p)
+    }
+
     pub fn write(&mut self, value: EffectValue, to: f64) {
         let place = match value {
             EffectValue::Blend => Some((self.blend.get_or_insert(to), BLEND)),
             v if v.of_area() => self.area.as_mut().and_then(|a| area_slot(a, v)),
+            v if v.pair() => point_slot(&mut self.kind, v).map(|(p, range)| (&mut p[0], range)),
             v => slot(&mut self.kind, v),
         };
         if let Some((n, _)) = place {
             *n = to;
+        }
+    }
+
+    pub fn write_point(&mut self, value: EffectValue, to: [f64; 2]) {
+        match point_slot(&mut self.kind, value) {
+            Some((p, _)) => *p = to,
+            None => self.write(value, to[0]),
         }
     }
 
@@ -467,9 +518,28 @@ impl Effect {
     }
 
     pub fn value_at(&self, value: EffectValue, frame: f64) -> f64 {
+        self.point_at(value, frame)[0]
+    }
+
+    pub fn point_at(&self, value: EffectValue, frame: f64) -> [f64; 2] {
         let (low, high) = self.range_of(value).unwrap_or(FINITE);
-        value_at(self.keys_of(value), frame)
-            .map_or_else(|| self.plain(value), |n| n.clamp(low, high))
+        let keys = self.keys_of(value);
+        let x = value_at(keys, frame);
+        let y = match value.pair() {
+            true => {
+                let ys = self.y_of(value);
+                if ys.len() != keys.len() {
+                    return self.point(value);
+                }
+                value_paired(keys, frame, |i| ys[i])
+            }
+            false => Some(0.0),
+        };
+        match (x, y) {
+            (Some(x), Some(y)) if value.pair() => [x.clamp(low, high), y.clamp(low, high)],
+            (Some(x), _) => [x.clamp(low, high), 0.0],
+            _ => self.point(value),
+        }
     }
 
     pub fn put(&mut self, value: EffectValue, frame: i64, to: f64) {
@@ -478,10 +548,18 @@ impl Effect {
         }
     }
 
+    pub fn put_point(&mut self, value: EffectValue, frame: i64, to: [f64; 2]) {
+        match self.channel_mut(value) {
+            Some((keys, Some(y))) => put_pair(keys, y, frame, to),
+            Some((keys, None)) => crate::ops::keyframes::put_value(keys, frame, to[0]),
+            None => {}
+        }
+    }
+
     pub fn adopted(&self, frame: f64) -> Effect {
         let mut e = self.clone();
         for k in &self.keys {
-            e.write(k.value, self.value_at(k.value, frame));
+            e.write_point(k.value, self.point_at(k.value, frame));
         }
         e
     }
@@ -495,10 +573,10 @@ impl Effect {
     pub fn previewed(&self, baseline: &Effect, edited: &Effect, frame: i64) -> Effect {
         let mut out = edited.clone();
         for k in &self.keys {
-            let to = edited.plain(k.value);
-            out.write(k.value, self.plain(k.value));
-            if to != baseline.plain(k.value) {
-                out.put(k.value, frame, to);
+            let to = edited.point(k.value);
+            out.write_point(k.value, self.point(k.value));
+            if to != baseline.point(k.value) {
+                out.put_point(k.value, frame, to);
             }
         }
         out
@@ -513,17 +591,17 @@ impl Effect {
 
     pub fn toggle_keys(&mut self, frame: i64, area: bool) -> bool {
         if self.has_key_at(frame, area) {
+            let at = HashSet::from([frame]);
             for k in self.keys.iter_mut().filter(|k| k.value.of_area() == area) {
-                reshape(&mut k.keys, |marked| {
-                    marked.retain(|(key, _)| key.frame != frame);
-                });
+                let (keys, y) = k.channel();
+                drop_channel(keys, y, &at);
             }
             self.keys.retain(|k| !k.keys.is_empty());
             return false;
         }
         for value in self.values().into_iter().filter(|v| v.of_area() == area) {
-            let to = self.value_at(value, frame as f64);
-            self.put(value, frame, to);
+            let to = self.point_at(value, frame as f64);
+            self.put_point(value, frame, to);
         }
         true
     }
@@ -536,35 +614,36 @@ impl Effect {
 
     pub fn split_keys(&mut self, frame: i64) {
         for k in &mut self.keys {
-            split_inside(&mut k.keys, frame);
+            let (keys, y) = k.channel();
+            split_channel(keys, y, frame);
         }
     }
 
     pub fn hold_keys(&mut self, at: i64, until: i64) {
         for k in &mut self.keys {
-            hold(&mut k.keys, at, until);
+            let (keys, y) = k.channel();
+            hold_channel(keys, y, at, until);
         }
     }
 
     pub fn scale_key_times(&mut self, conv: &impl Fn(i64) -> i64, ratio: &impl Fn(i64) -> f64) {
         for k in &mut self.keys {
-            k.keys = scaled_by(&k.keys, conv, ratio);
+            let (keys, y) = k.channel();
+            scale_channel(keys, y, conv, ratio);
         }
     }
 
     pub fn retime_keys(&mut self, old: &Clip, new: &Clip) {
         for k in &mut self.keys {
-            k.keys = retimed(&k.keys, old, new);
+            let (keys, y) = k.channel();
+            retime_channel(keys, y, old, new);
         }
     }
 
     pub fn retarget_keys(&mut self, map: &impl Fn(i64) -> i64) {
         for k in &mut self.keys {
-            for key in &mut k.keys {
-                key.frame = map(key.frame);
-            }
-            k.keys.sort_by_key(|key| key.frame);
-            k.keys.dedup_by_key(|key| key.frame);
+            let (keys, y) = k.channel();
+            retarget_channel(keys, y, map);
         }
     }
 }
@@ -588,6 +667,7 @@ mod tests {
         e.keys = vec![EffectKeys {
             value: EffectValue::Strength,
             keys: vec![key(0, 0.2), key(10, 0.6)],
+            y: Vec::new(),
         }];
         e
     }
@@ -615,6 +695,7 @@ mod tests {
         e.keys = vec![EffectKeys {
             value: EffectValue::Strength,
             keys: vec![first, key(30, 0.9)],
+            y: Vec::new(),
         }];
         assert_eq!(e.value_at(EffectValue::Strength, 15.0), 1.0);
     }
@@ -642,8 +723,8 @@ mod tests {
     }
 
     #[test]
-    fn a_vignette_has_ten_values_and_the_blend() {
-        assert_eq!(EffectType::Vignette.made().values().len(), 11);
+    fn a_vignette_has_nine_values_and_the_blend() {
+        assert_eq!(EffectType::Vignette.made().values().len(), 10);
     }
 
     #[test]

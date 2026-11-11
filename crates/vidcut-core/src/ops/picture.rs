@@ -469,14 +469,24 @@ fn keys_checked(e: &Effect) -> Result<Vec<EffectKeys>> {
                 "{name} keyframes out of order or on one frame"
             )));
         }
-        for k in &entry.keys {
+        let ys = match entry.value.pair() {
+            true => entry.keys.len(),
+            false => 0,
+        };
+        if entry.y.len() != ys {
+            return Err(Error::invalid(format!(
+                "{name} keyframes need one y each on a point, and none on a number"
+            )));
+        }
+        for (i, k) in entry.keys.iter().enumerate() {
             for (h, before) in [(k.in_handle, true), (k.out_handle, false)] {
                 if let Some(h) = h {
                     crate::keyframes::checked_handle(h, before)?;
                 }
             }
             let mut one = plain.clone();
-            one.write(entry.value, k.value);
+            let y = entry.y.get(i).copied().unwrap_or(0.0);
+            one.write_point(entry.value, [k.value, y]);
             plain_effect_checked(&one).map_err(|err| {
                 Error::invalid(format!(
                     "{name} keyframe at source frame {}: {}",

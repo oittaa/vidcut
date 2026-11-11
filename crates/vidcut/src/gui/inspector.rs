@@ -763,16 +763,21 @@ impl Knob {
         effect_checked(&self.written(e, v)).unwrap_or_else(|_| e.clone())
     }
 
-    fn keyed_value(self, e: &Effect) -> Option<EffectValue> {
+    fn keyed_value(self, e: &Effect) -> Option<(EffectValue, usize)> {
         let values = e.values();
         let mut probe = e.clone();
         for value in &values {
-            probe.write(*value, f64::NAN);
+            probe.write_point(*value, [f64::NAN; 2]);
         }
         let out = self.written(&probe, 0.0);
         values
             .into_iter()
-            .find(|value| !out.plain(*value).is_nan() && !e.keys_of(*value).is_empty())
+            .filter(|value| !e.keys_of(*value).is_empty())
+            .find_map(|value| {
+                let axes = if value.pair() { 2 } else { 1 };
+                let axis = out.point(value)[..axes].iter().position(|n| !n.is_nan())?;
+                Some((value, axis))
+            })
     }
 
     fn param(self, e: &Effect) -> (&'static str, Value) {
@@ -805,10 +810,12 @@ fn knob_picture(c: &Chosen, (n, k): (usize, Knob), v: f64) -> Option<Picture> {
     let e = c.shown.effects.get(n)?;
     let mut p = c.shown.clone();
     p.effects[n] = match k.keyed_value(e) {
-        Some(value) => {
+        Some((value, axis)) => {
             let mut keyed = e.clone();
             let r = k.dial().range;
-            keyed.put(value, c.frame, v.clamp(*r.start(), *r.end()));
+            let mut point = e.point_at(value, c.frame as f64);
+            point[axis] = v.clamp(*r.start(), *r.end());
+            keyed.put_point(value, c.frame, point);
             keyed
         }
         None => k.put(e, v),

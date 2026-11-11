@@ -4124,8 +4124,9 @@ pub enum KeyParam {
     /// end takes that end.
     CenterY,
     /// A value of an effect, as `{"effect": 0, "value": "strength"}`. Its
-    /// numbers are those of `effects.set`. One number of a color or a
-    /// position has a value of its own, for example `color_red`. The area
+    /// numbers are those of `effects.set`. One number of a color has a value
+    /// of its own, for example `color_red`. A `position` or a `center` is one
+    /// value with x and y, one keyframe for both, as `[0.5, 0.5]`. The area
     /// of an effect has `area_center_x`, `area_center_y`, `area_width`,
     /// `area_height`, `area_rotation` and `area_softness`.
     /// `keyframes.list` names it in the same form.
@@ -4205,7 +4206,8 @@ pub struct CopiedKey {
     pub kind: Option<EffectType>,
     /// Timeline frames after the first copied keyframe.
     pub offset: i64,
-    /// A number, or x and y for position, zoom and the anchor point.
+    /// A number, or x and y for position, zoom, the anchor point and an
+    /// effect's `position` or `center`.
     pub value: KeyValue,
     /// The ease. A paste sets its handles again for the new neighbors.
     /// Without it, the paste keeps the handles as they are.
@@ -4227,8 +4229,8 @@ pub struct CopiedKey {
     pub out_point: Option<[f64; 2]>,
 }
 
-/// A keyframe value: one number, or x and y for position, zoom and the
-/// anchor point.
+/// A keyframe value: one number, or x and y for position, zoom, the anchor
+/// point and an effect's `position` or `center`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum KeyValue {
