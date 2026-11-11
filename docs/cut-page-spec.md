@@ -1374,7 +1374,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A key is never in a file that vidcut writes.
   - Local models stay the default.
 - **Speakers of cues:**
-  - In Resolve, a cue has no speaker, and Create Subtitles from Audio gives none (pp. 1234–1235). Speakers show in the Transcription window (pp. 1000–1002).
+  - The subtitle pages of the manual (pp. 1227–1248) name no speaker of a cue.
+  - Create Subtitles from Audio knows when several people speak (p. 1234). Speakers show in the Transcription window (pp. 1000–1002).
   - vidcut: each cue keeps the person who says it. Create Subtitles from Audio with speakers sets it. Splits, joins and edits keep it.
   - A person can have a color. A cue can have its own color, which overrides the color of the person.
   - The Speakers setting of the subtitle track tells what the color paints.
@@ -1487,7 +1488,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Neural Engine transcribes a Media Pool clip or a timeline.
   - The Transcription window shows the text with its timecodes, the speakers, and the silences as (...).
   - Its search highlights the matches.
-  - Resolve Studio keeps one transcription for each clip. A new one replaces it, and Clear Transcription removes it (pp. 995–996).
+  - Clear Transcription removes the transcription of a clip (p. 996).
 - **Editing from the text** (pp. 999–1000, 1004–1008), on the Cut page too:
   - A click on a word moves the playhead to the end of the word.
   - A drag over words sets In and Out. X selects a sentence.
