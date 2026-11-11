@@ -1406,7 +1406,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A new keyframe is selected. Thus the bar shows its value at once.
   - With two or more keyframes selected, the bar shows their number, their ease and Delete.
   - The curve of a value shows under its track.
-  - Fit Clip is the name of Full Extend Zoom.
   - Ctrl and the mouse wheel zoom at the pointer. Shift and the mouse wheel move the range.
   - A scroll bar under the tracks shows and moves the range.
 - **Why:**
