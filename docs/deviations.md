@@ -61,6 +61,10 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - Delete Bin deletes the bin, the bins in it and their clips (p. 377).
+  - These are measurements in Resolve Studio 21.2:
+    - Remove Selected Clip on media that timeline clips use asks no question. The pool item goes.
+    - The clips of that media on the timeline stay, offline.
+    - A compound clip that holds a clip of that media stays in the pool and on the timeline.
 - **vidcut:**
   - `bins.remove` removes the bin and the bins in it. Their media move up to its parent bin.
   - `media.remove` removes media. It needs `force` when clips or compound clips use the media.
@@ -68,18 +72,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - Bins only organize the pool.
   - When a script or a mistake removes a bin, the media and their clips must stay in the project.
-
-## X7. Timelines start at 00:00:00:00
-
-- **Resolve:**
-  - New timelines start at record timecode 01:00:00:00 (p. 678).
-- **vidcut:**
-  - The default start timecode is 00:00:00:00.
-  - New Project and Project Settings offer 00, 01 and 10 hours, or any timecode that the user types.
-  - Timecodes in commands are record timecodes.
-- **Why:**
-  - With a zero start, timecode, seconds and frame numbers count from one point. Thus `00:01:00:00` and `60s` are the same frame.
-  - One hour (programmes) and ten hours (UK broadcast) are the usual other starts.
 
 ## X8. The source viewer counts project frames
 
@@ -423,6 +415,9 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Insert Selected Subtitles to Timeline Using Timecode places its cues by timecode. From a file timed from zero, it inserts nothing.
   - The user can drag the file onto a subtitle track. Then its first cue goes where the user drops it.
   - A drop on the gray area above the video tracks makes a new subtitle track. There too, the first cue goes where the user drops it (p. 1230).
+  - These are measurements in Resolve Studio 21.2, on a timeline with one subtitle track:
+    - A drop of a subtitle item on video track 1 makes no new track. Video track 1 does not change.
+    - The cues go on the subtitle track from the drop point. They overwrite the cues there.
 - **vidcut:**
   - Import Media, Import Media Folder and File > Import Subtitle bring in SRT, WebVTT and TTML files. vidcut does not read `.srtx`.
   - A subtitle item in the pool shows the text of its first cue, and how many cues it holds.
@@ -444,6 +439,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A list at the bottom of the Captions panel shows every subtitle of the track (p. 1231).
   - Prev and Next move through the list (p. 1233).
   - The manual does not tell where the playhead goes.
+  - These are measurements in Resolve Studio 21.2:
+    - Next, and a click on a row of the list, select the cue and put the playhead at its In.
+    - A click on a subtitle on the track does not move the playhead.
+    - The typed text shows in the viewer at once. After a click at another place, one Ctrl+Z removes all of the typed text.
+    - Insert Selected Subtitles to Timeline Using Timecode cuts the head of a later cue that overlaps. Cues at 11–13 s and 12–14 s become 11–13 s and 13–14 s.
   - In Resolve Studio 21.1.1, the panel is as the screenshots on pp. 1231 and 1233 show it:
     - Above the text box, a line has an In field and an Out field. At its right, a dim "11 Characters" counts the characters of the text.
     - Add New is at the left of the line above the list. Prev and Next are at its right.
@@ -469,18 +469,10 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - A cue that already overlaps this cue and reaches into the part loses its frames in the part.
     - A cue that covers all of the part and more stays as it is (D79).
   - `subtitles.set` alone does not overwrite. Scripts and imports keep the cues that overlap (D56).
-  - The names of the columns of the list are "#", "In/Out", "Text" and "CPS". The text shows on two lines at most.
-    - The row of the open cue is highlighted. While the user types, it shows the typed text.
-    - When another cue opens and its row is out of view, the list scrolls the row to its middle.
-  - Add New does what Add Subtitle in the right-click menu of the track does ([X44](#x44-add-subtitle-uses-the-shown-subtitle-track)).
-  - The name of the track is at the right of the line with Add New. Previous and Next are on the heading line of the Subtitle section.
-  - Previous, Next and a click on a row first put in the changes of the section. Then they select the cue and move the playhead to its start.
-  - A button is off when there is no cue before or after. While a cue is being added, the buttons are off, and Add New and the list do not show.
-  - The Delete button of the section deletes the open cue.
+  - The row of the open cue is highlighted. While the user types, it shows the typed text.
+  - Prev, Next and a click on a row first put in the changes of the section. Then they select the cue and move the playhead to its start.
 - **Why:**
   - One change for each edit of the text keeps typing out of the undo history. With the playhead at the start of the cue, the viewer shows the cue.
-  - On the heading line, Previous and Next stay in one place. Above the list, the rows change. The text box grows with the text. The Name row shows only for a cue with a person.
-  - The Inspector can be narrow. Thus the names of the columns are short. The GUI of vidcut does not use the word "caption". Thus the text column is "Text".
   - Imports and scripts can need cues that overlap (D56). Thus `subtitles.set` alone keeps them.
 
 ## X44. Add Subtitle uses the shown subtitle track
@@ -539,16 +531,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Parakeet Ultra is the default because it gives real word times.
   - Jobs keeps long work beside the editing, as for exports (X3).
 
-## X51. A double-click on a subtitle track's name opens its style
-
-- **Resolve:**
-  - The user sets the style of a track in the Track panel of the Inspector (p. 1237).
-  - A double-click on the name renames the track (spec §8.12).
-- **vidcut:**
-  - A double-click on the name of a subtitle track, or Name and Style… in its right-click menu, opens the Subtitle Track section in the Inspector.
-  - The section has the name, the language and the style of the track.
-- **Why:** no reason is recorded.
-
 ## X52. Titles come from a Titles tab and are edited in the Inspector
 
 - **Resolve:**
@@ -597,6 +579,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The Position in the Inspector also moves it (p. 764).
   - A lower third is at a corner or at the middle of the bottom of title safe (p. 1178).
   - A position goes from 4 picture sizes before its bottom left to 4 picture sizes after it, on each axis (measured in Resolve Studio 21.1.2).
+  - The Position of a Text title in the Inspector is in frame pixels from the bottom left, with Y up (measured in Resolve Studio 21.2).
+    - In a 3840 × 2160 timeline, the middle of the picture is X 1920, Y 1080.
 - **vidcut:**
   - The Title section of the Inspector shows the place of a title from the top left of the picture.
   - It shows the place in percents of the width and the height of the picture.
@@ -670,6 +654,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - AI Animated Subtitles are only in Resolve Studio. They are Fusion title templates in the Animated section of the Titles tab.
   - After the subtitles are made, the user drags a template onto the header of a subtitle track. The user sets it in the Inspector (p. 1240).
   - After a correction, Update Word Timings times the words of a cue again. Synchronize Word Timings does this for a track (p. 1241).
+  - Synchronize Word Timings is in the right-click menu of the header of a subtitle track on the Edit page (Resolve Studio 21.2).
   - Measured in Resolve Studio 21.1.2:
     - The word times of a cue count from its start. A ripple delete, a razor cut and a trim do not change them.
     - The highlighted word is then not the word that is spoken, until the word timings are updated.
@@ -712,14 +697,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - Speaker Detection (Studio) remembers each voice across the clips of a project. Thus it finds a speaker from one clip again in the next clip.
-  - Display Speakers shows the speakers. A double-click on a name changes it.
-  - Assign To moves text to another speaker.
   - Reset Speaker Data forgets the speakers (pp. 997–1001).
 - **vidcut:**
   - On this computer, speakers come numbered for each file.
   - With a paid request, speakers are numbered across all files of the request.
-  - In the Transcription window, the name of a person is a menu: Rename, Same Person As and Separate.
-  - Same Person As joins the speaker of this file with another person.
+  - Same Person As, in the right-click menu of a name in the Transcription window, joins the speaker of this file with another person.
   - vidcut cannot join speakers by their voices yet, in a project or across projects. This waits for transcribe.cpp ([to do](todo/voice-signatures.md)).
 - **Why:**
   - No model that vidcut runs gives the signature of a voice yet.
@@ -814,6 +796,9 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The Audio panel has Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (pp. 743–744).
   - The manual names no Mute in the Audio panel (pp. 742–744).
   - Its Video panel also has Speed Change: Direction, Speed %, Frames Per Second, Duration, Ripple Sequence and Pitch Correction (pp. 736–737).
+  - These are measurements on the Cut page of Resolve Studio 21.2:
+    - The Speed Change rows are Direction, Ease, Change Speed, Frames per Second, Duration and Pitch Correction. There is no Ripple Sequence box.
+    - Pitch Correction is on. A speed change ripples the clips after the clip.
   - With several clips selected, its header is Multiple Clips, and a value that differs between them shows a dash (measured in Resolve Studio 21.1.2).
 - **vidcut:**
   - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
@@ -913,12 +898,13 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - The Safe Area button and View > Safe Area set overlays on the viewer (pp. 682–683, 1177).
-  - The viewer keeps one picture while you trim.
+  - In Resolve Studio 21.2, the Trim Editor also shows the title-safe guide. It is one box over the whole two-up view, fitted to the viewer. It is not one box for each picture.
 - **vidcut:**
   - The Trim Editor and Dynamic Trim show no guides. Those views are two pictures, or four.
   - A viewer screenshot is the picture without the guides.
 - **Why:**
   - The guides belong on the one picture fitted to the timeline.
+  - One box over two pictures marks neither picture. vidcut does not copy it.
   - A two-up view has no single frame for one crop.
 
 ## X81. No KeyKode in the timecode menu
@@ -1055,7 +1041,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X94. Speed keyframes and the Mark menu's keyframe items
 
 - **Resolve:**
-  - The clip's right-click menu calls a speed keyframe a speed point. Its item is Add Speed Point.
   - Add Keyframe, Delete Keyframe and Delete All Keyframes act on the selected values of the Keyframes panel or the keyframe tray (p. 4343).
   - With the panel and the tray closed, they act on the speed keyframes of the selected clips.
   - Then Delete Keyframe and Delete All Keyframes do the same thing in Resolve Studio 21.1.2.
@@ -1067,7 +1052,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - In one check, the question named no value. After Delete, a Position X with no keyframes also went back to 0.
   - The keyframe tray has a Speed group with two rows, Retime Frame and Retime Speed. Each row has a key at each speed keyframe.
 - **vidcut:**
-  - A point where the speed changes is a speed keyframe. The GUI, the requests and the docs use this one name. The right-click menu has Add Speed Keyframe.
   - The Keyframes tab and the keyframe tray have one Speed row, in a Speed group.
   - With the Keyframes tab or the tray open, the three items act on the selected rows and keyframes.
   - With the tray open, the Keyframes tab closed, and no row or keyframe selected, Add Keyframe adds a speed keyframe, as in Resolve.
@@ -1080,7 +1064,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The question of Delete All Keyframes names the values, the number of keyframes and the clip.
   - Delete All Keyframes removes only the keyframes of the selected rows. A value with no keyframes keeps its value.
 - **Why:**
-  - One thing has one name. Retime Frame and Retime Speed show the same speed keyframes, so one row is sufficient.
+  - Retime Frame and Retime Speed show the same speed keyframes, so one row is sufficient.
   - An item that does nothing gives the user no clue. The user sees which keyframes go, and how many, before they go.
   - A Delete All that removes one speed keyframe is a fault in Resolve. The reset of a value with no keyframes is a fault too. vidcut does not copy them.
 
@@ -1958,7 +1942,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - After a decompose beside a J or L cut, the cut stays. A sound that comes back starts after that cut.
     - A clip whose sound the cuts cover, alone or together, has no sound.
 - **Why:**
-  - A timeline starts at 00:00:00:00 ([X7](#x7-timelines-start-at-00000000)). Thus a compound clip has no start timecode.
   - A project has one timeline (X2). Thus a pool item has no timeline to open.
   - A clip holds its picture and sound as one. Half of a clip is not a thing that vidcut can select.
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.

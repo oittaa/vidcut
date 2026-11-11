@@ -379,6 +379,7 @@ impl Fixture {
         }
         let settings = Settings {
             fps,
+            start_tc: 0,
             auto_format: false,
             ..Settings::default()
         };

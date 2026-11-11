@@ -102,7 +102,7 @@ pub struct Settings {
     pub channels: u16,
     /// Track 1 ripples on insert, delete, move and trim (Ripple On).
     pub ripple_on: bool,
-    /// Record timecode of timeline frame 0, in frames (deviation X7: 0, not 01:00:00:00).
+    /// Record timecode of timeline frame 0, in frames: 01:00:00:00 by default.
     pub start_tc: i64,
     /// Record timecode counts drop-frame (decision D47): at 29.97, 59.94 and
     /// 119.88, and nothing at other rates.
@@ -150,7 +150,7 @@ impl Default for Settings {
             sample_rate: 48_000,
             channels: 2,
             ripple_on: true,
-            start_tc: 0,
+            start_tc: 30 * 3600,
             drop_frame: false,
             auto_format: true,
             still_secs: 5.0,
@@ -204,9 +204,11 @@ impl Settings {
     pub fn with_format(fps: Option<&str>, size: Option<(u32, u32)>) -> crate::error::Result<Self> {
         let mut s = Self::default();
         if let Some(f) = fps {
-            s.fps = f
-                .parse()
-                .map_err(|e: crate::time::TimeError| crate::error::Error::usage(e.to_string()))?;
+            s.set_fps(
+                f.parse().map_err(|e: crate::time::TimeError| {
+                    crate::error::Error::usage(e.to_string())
+                })?,
+            );
             s.auto_format = false;
         }
         if let Some((w, h)) = size {

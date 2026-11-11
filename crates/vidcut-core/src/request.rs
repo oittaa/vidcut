@@ -66,8 +66,8 @@ pub enum Request {
         /// Count record timecode drop-frame (29.97, 59.94 and 119.88; decision D47).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         drop_frame: Option<bool>,
-        /// Record timecode of the first frame: `00:00:00:00` (the default),
-        /// `01:00:00:00`, `10:00:00:00` or any other (deviation X7).
+        /// Record timecode of the first frame: `01:00:00:00` (the default),
+        /// `00:00:00:00`, `10:00:00:00` or any other.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start_tc: Option<TimeSpec>,
     },

@@ -256,6 +256,7 @@ pub struct TimelineView {
     pub normalize: Option<super::normalize::NormalizeDialog>,
     pub normalize_last: Option<super::normalize::Choice>,
     pub equalizer: Option<super::equalizer::EqualizerDialog>,
+    pub track_naming: Option<(String, String)>,
     pub leveler: Option<super::leveler::LevelerDialog>,
     pub compressor: Option<super::compressor::CompressorDialog>,
     pub noise: Option<super::noise::NoiseDialog>,
@@ -319,6 +320,7 @@ impl Default for TimelineView {
             silence: None,
             normalize: None,
             equalizer: None,
+            track_naming: None,
             leveler: None,
             compressor: None,
             noise: None,
@@ -2871,7 +2873,7 @@ impl Workspace {
         }
         ui.separator();
         if ui
-            .button(bindings.named("Change Duration…", Action::ChangeDuration))
+            .button(bindings.named("Change Clip Duration…", Action::ChangeDuration))
             .clicked()
         {
             self.timeline.duration_dialog = Some(String::new());
@@ -2880,7 +2882,7 @@ impl Workspace {
         let change_speed = bindings.named("Change Speed…", Action::ChangeSpeed);
         if c.generator.is_some() {
             ui.add_enabled(false, egui::Button::new(change_speed));
-            ui.add_enabled(false, egui::Button::new("Add Speed Keyframe"));
+            ui.add_enabled(false, egui::Button::new("Add Speed Point"));
         } else if !c.is_generator() && ui.button(change_speed).clicked() {
             self.open_speed_dialog();
             ui.close();
@@ -2888,7 +2890,7 @@ impl Workspace {
         if super::keyframe_editor::takes_speed(c) {
             let play = self.snap.timeline.position;
             let why = super::keyframe_editor::add_speed_key_why(&[c], play);
-            let r = ui.add_enabled(why.is_none(), egui::Button::new("Add Speed Keyframe"));
+            let r = ui.add_enabled(why.is_none(), egui::Button::new("Add Speed Point"));
             let r = match why {
                 Some(why) => r.on_disabled_hover_text(why),
                 None => r,

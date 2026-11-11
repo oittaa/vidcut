@@ -1312,6 +1312,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Add Subtitle Track adds a subtitle track above the video tracks. It is in Timeline Actions, and in the right-click menu of a track header.
   - The names of the tracks are Subtitle 1, Subtitle 2, and so on.
   - A double-click on the name renames the track. Exports use the name.
+    - vidcut: Enter or a click elsewhere keeps the new name. Escape drops it.
+  - The Track panel of the Inspector sets the style of the track (p. 1237).
+    - vidcut: Name and Style… in the right-click menu of the name opens it as the Subtitle Track section.
+    - The section has the name, the language and the style.
   - A subtitle track locks like any track.
   - One subtitle track shows at a time. When one shows, the others are hidden (p. 1228).
   - Minimize Subtitle Track (Timeline Options, p. 645) makes them shorter.
@@ -1325,6 +1329,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A click on a cue in the list loads it into the Inspector to edit (p. 1236).
   - Add New, above the list, adds a cue at the playhead on the track of the list (p. 1233).
   - Prev and Next in the Inspector move to the cue before or after on the track (pp. 1231, 1233).
+  - vidcut: the text of a row shows on two lines at most. The list scrolls the row of a newly opened cue to its middle.
+  - vidcut: the line with Add New also has the name of the track. The Delete button of the section deletes the open cue.
   - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. A value inside the cue next to it changes nothing (D79). Else the new range overwrites the other cues of the track.
   - Cues move, trim, split and delete like clips.
   - Details: D56, D57, D78, D79; deviations X43, X44.
@@ -1428,7 +1434,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The usual anchor is the middle of the block.
     - An IMSC1 file has a region as large as the block, centered on the position, with `tts:textAlign` start.
     - An SRT or WebVTT file has no alignment and no position.
-  - Details: D61; deviation X51.
+  - Details: D61.
 - **Style of one cue** (p. 1238):
   - A cue stores its own style when you set one.
   - A field left out of that style keeps the track's style.
@@ -1560,7 +1566,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Follow keeps the word under the playhead in view during playback.
   - While the pointer is over the window, Delete, X, Ctrl+A, Ctrl+C and Esc act on the window. On the timeline, Ctrl+X and Ctrl+V do too.
   - With speakers, a paragraph starts at each person, under the name of the person.
-  - The speaker commands are Rename, Same Person As and Separate.
+  - A double-click on the name of a speaker opens a field for a new name (p. 1001).
+  - vidcut: the right-click menu of the name has Rename, Same Person As and Separate.
   - Assign To gives the selected words to another person.
   - Several transcripts of a file:
     - Transcribe Audio keeps the transcript with the file. It does not keep it in the project.
@@ -2155,7 +2162,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: Speed Change on a generator has a dim dot and does not open. A still acts the same.
   - Measured: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
   - Measured: the scripting API refuses a speed. An import of a time warp on a Solid Color keeps the length and drops the warp.
-  - vidcut: the speed requests refuse a generator. The right-click menu has Change Speed and Add Speed Keyframe grey, and Change Duration on.
+  - vidcut: the speed requests refuse a generator. The right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
   - vidcut: an import of a time warp on a Solid Color keeps the length and drops the warp.
 - **Solid Color:**
   - It has one value, Color. Black is the default (measured).
@@ -3021,6 +3028,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
   - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate ([X149](deviations.md#x149-a-project-takes-any-frame-rate)).
+  - A new timeline starts at record timecode 01:00:00:00 (p. 678). New Project and Project Settings also offer 00 and 10 hours, or any typed timecode.
   - Its Frame rate menu offers the rates that Resolve Studio 21.2 takes for a project (`timelineFrameRate` in a script):
     - 16, 18, 23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60, 72, 90, 95.904, 96, 100, 119.88 and 120 fps.
     - Resolve refuses other rates, for example 15, 20, 144 and 240.
@@ -3217,7 +3225,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The strip shows the speed of each section, and a line at each speed keyframe.
     - A click on a speed opens a list: 20%, 30%, 40%, 50%, 60%, 70%, 100% and Set.
     - Set opens the Set Speed Change window, with a Speed field.
-    - The clip's right-click menu adds a speed keyframe ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
+    - Add Speed Point in the clip's right-click menu adds a speed keyframe.
     - With the Keyframes tab and the keyframe tray closed, the keyframe items of the Mark menu act on speed keyframes.
   - **Inspector:** these facts come from Resolve Studio 21.1.2:
     - The header of the Speed Change group has a keyframe diamond between < and > buttons. The diamond is red with the playhead on a speed keyframe.
@@ -3245,7 +3253,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The diamond adds or removes a speed keyframe at the playhead. The arrows move the playhead to the previous or next speed keyframe.
     - The diamond is red on a speed keyframe (measured in Resolve Studio 21.1.2). The other Keyframe buttons are orange on a keyframe (p. 1250).
     - The list opens only on a section that plays forward. `speed.set` changes only such a section.
-    - Add Speed Keyframe in the right-click menu adds a speed keyframe at the playhead.
+    - Add Speed Point in the right-click menu adds a speed keyframe at the playhead.
     - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
       - A speed keyframe does not move or copy. Its value is the speed of the section after it.
       - Its ease menu has Linear and Ease In and Out ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
@@ -3447,7 +3455,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A duration of less than one frame is refused.
   - A source Out past the end of the media is refused.
   - `marks.set` and `media.marks.set` take the same values as `duration`.
-- **D61. Burned-in subtitles** (§8.12; p. 1247; deviations X45, X51).
+- **D61. Burned-in subtitles** (§8.12; p. 1247; deviation X45).
   - The manual does not say how a track looks burned in before it has a style.
   - The usual look is Resolve's default, measured in Resolve Studio 21.1.2:
     - White Open Sans Regular at Size 58: 58/1080 of the picture height.
