@@ -2732,7 +2732,8 @@ pub enum Request {
     /// path tells where one area of a clip's picture is on its source frames:
     /// a face, a number plate or another thing in the picture. Each clip
     /// gives its `track` and its `paths`: the `id`, the `name`, the `count`
-    /// of its samples, and the source frames `first` and `last` of them.
+    /// of its samples, and the source frames `first` and `last` of them. A
+    /// path that `motion.track` made also has `tracked`.
     #[serde(rename = "motion.list")]
     MotionList {
         #[serde(default)]
@@ -2839,8 +2840,11 @@ pub enum Request {
     ///
     /// The clip gets a motion path named `Track 1`, `Track 2`, and so on.
     /// The area then follows that path with its own shape, so the effect
-    /// works only where the path lasts. When the area follows a track
+    /// works only where the path lasts. When the area follows a path
     /// already, a track of one `way` keeps the samples of the other side.
+    /// A path that an earlier track made for this area gets the new samples,
+    /// and keeps its id and its name. Another path stays as it is, and the
+    /// area gets a new path.
     ///
     /// Returns the path: its `id`, its `name`, the `count` of its samples
     /// and their source frames `first` and `last`. It also gives the

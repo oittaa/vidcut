@@ -59,6 +59,7 @@ pub fn add(p: &mut Project, id: &str, name: Option<&str>, samples: &[PathSample]
         id: path.clone(),
         name: name.and_then(named),
         subject: None,
+        tracked: false,
         samples: Arc::new(samples.to_vec()),
     });
     Ok(json!({ "clip": id, "path": path }))
@@ -147,6 +148,9 @@ fn shown(c: &Clip, m: &MotionPath, at: Option<i64>, samples: bool) -> Value {
     }
     if let Some(subject) = m.subject {
         v["subject"] = json!(subject);
+    }
+    if m.tracked {
+        v["tracked"] = json!(true);
     }
     if let Some((first, last)) = m.span() {
         v["first"] = json!(first);
@@ -326,31 +330,40 @@ pub fn tracked(
     if let Some(why) = motion::samples_problem(&samples) {
         return Err(Error::invalid(why));
     }
-    let tracks = |m: &MotionPath| {
-        let name = m.name.as_deref();
-        m.subject.is_none() && name.is_some_and(|n| n.starts_with(TRACK))
-    };
-    let old = old.filter(|m| tracks(m)).map(|m| m.id.clone());
     let shared = |old: &String| followers(c).any(|(n, path)| n != effect && path == old);
-    if let Some(old) = old.filter(|old| !shared(old)) {
-        c.motion.retain(|m| m.id != old);
-    }
-    if c.motion.len() >= motion::PATHS_KEPT {
-        return Err(Error::invalid(format!(
-            "{id} has {} motion paths, the most a clip takes",
-            motion::PATHS_KEPT
-        )));
-    }
-    let number = 1 + c.motion.iter().filter(|m| tracks(m)).count();
-    let path = MotionPath {
-        id: motion::next_id(&c.motion),
-        name: Some(format!("{TRACK} {number}")),
-        subject: None,
-        samples: Arc::new(samples),
+    let own = old.filter(|m| m.tracked && !shared(&m.id));
+    let path = match own.map(|m| m.id.clone()) {
+        Some(own) => {
+            path_of(c, &own)?.samples = Arc::new(samples);
+            own
+        }
+        None => {
+            if c.motion.len() >= motion::PATHS_KEPT {
+                return Err(Error::invalid(format!(
+                    "{id} has {} motion paths, the most a clip takes",
+                    motion::PATHS_KEPT
+                )));
+            }
+            let named = |n: &usize| {
+                c.motion
+                    .iter()
+                    .any(|m| m.name == Some(format!("{TRACK} {n}")))
+            };
+            let number = (1..).find(|n| !named(n)).unwrap_or(1);
+            let path = motion::next_id(&c.motion);
+            c.motion.push(MotionPath {
+                id: path.clone(),
+                name: Some(format!("{TRACK} {number}")),
+                subject: None,
+                tracked: true,
+                samples: Arc::new(samples),
+            });
+            path
+        }
     };
-    let shown = shown(c, &path, None, false);
-    let follows = Some(path.id.clone());
-    c.motion.push(path);
+    let stored = c.motion.iter().find(|m| m.id == path);
+    let shown = stored.map_or(Value::Null, |m| shown(c, m, None, false));
+    let follows = Some(path);
     let effects = c.picture.iter_mut().flat_map(|x| &mut x.effects);
     if let Some(e) = effects.into_iter().nth(effect) {
         e.area = Some(EffectArea {
@@ -386,6 +399,7 @@ pub fn found(
             id: motion::next_id(&c.motion),
             name: Some(format!("{} {}", subject.title(), n + 1)),
             subject: Some(subject),
+            tracked: false,
             samples: Arc::new(track.samples),
         };
         let mut v = shown(c, &path, None, false);

@@ -538,6 +538,7 @@ Writing:
   - `ops::motion::takes` tells which clips take them: not titles, generators, compound clips or sound.
 - A `MotionPath` tells where one area of the source picture is on the source frames of the clip. It has an id, a name and its samples.
   - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). `motion.find` with `replace` takes off the paths of that subject.
+  - A path that `motion.track` made has `tracked`. A later track of the same area writes its samples again, and the path keeps its id and its name.
 - A `PathSample` holds the source `frame`, the `center` and the `size` of the area as fractions of the source picture, and the `rotation`.
   - The `frame` counts as `source_in` does, at each speed of the clip (`Clip::source_at`).
   - Why: a thing is at one place on a source picture, at any speed that plays that picture.
