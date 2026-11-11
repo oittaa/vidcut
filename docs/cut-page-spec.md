@@ -209,6 +209,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - The Add Tracks window of Resolve Studio 21.1.2 takes 0 to 99 video tracks and 0 to 999 audio tracks. `track.add` takes the same.
     - vidcut has these items in this order, except the four in [the gaps](todo/cut-page-gaps.md).
     - After them, vidcut has Add Title (D66), Add Subtitle (X44), Re-time Subtitles to Speech (§8.12) and Ripple Delete Silence (§9).
+  - **Timeline** in the menu bar: Create Subtitles from Audio is under AI Tools (p. 1234).
+    - vidcut: the menu also has Keyframes and Audio Scrubbing. The other items of Timeline Actions follow.
   - **Edit Actions:** Trim Start to Playhead, Trim End to Playhead.
 - **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker. After them is the Keyframes button, which shows the keyframe tray (p. 1259).
   - vidcut also has a Snap button among them.
@@ -1354,6 +1356,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: an OpenTimelineIO export writes an SRT beside it for each subtitle track with cues.
   - Details: D58, D61, D64; deviation X45.
 - **Create Subtitles from Audio** (pp. 1234–1235):
+  - Only Resolve Studio has it (p. 1234).
+  - It is in Timeline > AI Tools (p. 1234), and it is the first item of Timeline Actions (p. 646).
+  - A dialog box shows its progress (p. 1235).
+  - More languages come in a package of the Extras Downloads Manager (p. 1235).
   - It transcribes the speech of the timeline's In–Out range, or of the whole timeline.
   - The cues go onto the highest subtitle track. If there is no subtitle track, it makes one.
   - Its options:
@@ -1362,7 +1368,20 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - the characters per line (42), and one or two lines
     - the frames between subtitles (0)
   - A muted track is not heard.
-  - Details: D62; deviations X46 and X56.
+  - Details: D62; deviations X3 and X56.
+- **Local speech models** (vidcut):
+  - Every build has Create Subtitles from Audio. `subtitles.transcribe` runs transcribe.cpp on this computer.
+  - It runs on the GPU, unless GPU acceleration is off.
+  - Parakeet Ultra is the default model. It has 25 European languages and times for each word.
+  - Qwen3-ASR 1.7B has 30 languages. Whisper large-v3 has 100 languages and times for each phrase.
+  - The request can also name a GGUF file.
+  - vidcut downloads the library of transcribe.cpp, Silero VAD and the speech models into the cache folder.
+  - In the GUI, a question that gives their size comes before the download.
+  - The dialog also has the model, Speakers, the GPU, the range, the tracks that it hears and the track.
+  - The model list gives the languages of each model, how it times the words, and its size or price.
+  - A box for each track with sound is ticked when playback hears that track.
+  - Under Advanced are the lines, the characters per line, the gap, where the words come from, and how the speech is found.
+  - While it runs, Jobs and `jobs.get` name the model, the device, the language and the speaker model, when each is known.
 - **Paid speech models** (vidcut):
   - Two more models run on the servers of their companies: `grok-voice-transcribe-2.0` of xAI and `gemini-3.5-transcribe` of Google.
   - Under Advanced, each model has those of its options that keep word times.

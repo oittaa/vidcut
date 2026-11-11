@@ -41,6 +41,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - Quick Export shows a progress bar dialog while it exports (p. 789).
+  - Create Subtitles from Audio shows its progress in a dialog box (p. 1235).
   - The Deliver page has the render settings and the Render Queue (pp. 4103–4132).
   - In Resolve Studio 21.2, the Quick Export row is H.264 Master, HyperDeck, H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok, Presentations, Dropbox and Replay.
   - YouTube has a menu of four sizes, 720p to 2160p (p. 4105).
@@ -50,7 +51,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - It has no HyperDeck, Presentations, Dropbox or Replay.
   - The Export dialog also shows the live plan, and gives the export as a shell command.
   - In a running GUI, exports are jobs ([design/export.md](design/export.md#the-guis-exports), [design/live.md](design/live.md#jobs)).
-  - No progress dialog opens. Jobs shows the progress of each job.
+  - Create Subtitles from Audio is a job too. It downloads its models as a job.
+  - No progress dialog opens. Jobs shows the progress of each job, and can cancel it.
 - **Why:**
   - The plan and the command let scripts reproduce GUI exports.
   - An export runs beside the editing. A dialog over the timeline for each export interrupts that editing.
@@ -514,31 +516,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - CEA-608 is a broadcast format with lines of 32 characters.
   - vidcut writes no MXF.
 
-## X46. Create Subtitles from Audio with open models on this computer
-
-- **Resolve:**
-  - Only Resolve Studio has it, with its built-in AI.
-  - It is the first item of Timeline Actions on the Cut page (p. 646), and in Timeline > AI Tools (p. 1234).
-  - More languages come as an Extras download (pp. 1234–1235).
-  - Its dialog shows the progress.
-- **vidcut:**
-  - `subtitles.transcribe` runs transcribe.cpp on this computer. It runs on the GPU, unless GPU acceleration is off.
-  - Parakeet Ultra is the default model. It has 25 European languages and times for each word.
-  - Qwen3-ASR 1.7B has 30 languages. Whisper large-v3 has 100 languages and times for each phrase.
-  - The request can also name a GGUF file.
-  - vidcut downloads the library of transcribe.cpp, Silero VAD and the speech models into the cache folder. In the GUI, a question that gives their size comes first.
-  - In the GUI, Create Subtitles from Audio… is the first item of Timeline Actions. The Timeline menu shows these items after Keyframes and Audio Scrubbing.
-  - Its dialog also has the model, Speakers, the GPU, the range, the tracks that it hears and the track.
-  - The model list gives the languages of each model, how it times the words, and its size or price ([spec §8.12](cut-page-spec.md#812-subtitles-pp-645646-702-12271248)).
-  - A box for each track with sound is ticked when playback hears that track.
-  - Under Advanced are the lines, the characters per line, the gap, where the words come from, and how the speech is found.
-  - The run is a job. No progress dialog opens. Jobs shows its progress and the progress of the download, and can cancel it.
-  - While it runs, Jobs and `jobs.get` name the model, the device, the language and the speaker model, when each is known.
-- **Why:**
-  - The speech never leaves the computer. Every build has it.
-  - Parakeet Ultra is the default because it gives real word times.
-  - Jobs keeps long work beside the editing, as for exports (X3).
-
 ## X51. A double-click on a subtitle track's name opens its style
 
 - **Resolve:**
@@ -675,7 +652,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - The highlighted word is then not the word that is spoken, until the word timings are updated.
 - **vidcut:**
   - The animation is part of the style of a track (D69). The user sets it in the Subtitle Track section of the Inspector or with `track.set`.
-  - The looks of Create Subtitles from Audio ([X46](#x46-create-subtitles-from-audio-with-open-models-on-this-computer)) put the speech on a new track that is already animated.
+  - The looks of Create Subtitles from Audio ([spec §8.12](cut-page-spec.md#812-subtitles-pp-645646-702-12271248)) put the speech on a new track that is already animated.
   - Word times follow edits and new text automatically (D70).
 - **Why:**
   - It is one step from the speech to animated subtitles.
