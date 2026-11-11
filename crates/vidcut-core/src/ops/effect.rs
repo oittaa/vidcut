@@ -287,11 +287,11 @@ pub fn set(
                 value.name().replace('_', " ")
             )));
         };
-        let to = next.plain(value);
-        if to != e.value_at(value, frame as f64) {
-            next.put(value, frame, to);
+        let to = next.point(value);
+        if to != e.point_at(value, frame as f64) {
+            next.put_point(value, frame, to);
         }
-        next.write(value, e.plain(value));
+        next.write_point(value, e.point(value));
     }
     *e = effect_checked(&next)?;
     Ok(())

@@ -2143,21 +2143,24 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Each value in the list above has its own keyframes, on source frames (`Effect::keys`).
   - Between keyframes, a value follows the same curve as a Transform value. A curve past the range of the value stops at the end of the range.
   - After the last keyframe, a value holds. Before the first one, it holds too.
-  - Position, Center and each number of a color are values of their own ([X152](deviations.md#x152-effect-keyframes-have-one-number-each)).
-  - Film Grain Freeze has no keyframes ([X152](deviations.md#x152-effect-keyframes-have-one-number-each)).
+  - Each number of a color is a value of its own.
+  - Position and Center are each one point. One keyframe holds X and Y (`EffectKeys`).
+  - Film Grain Freeze has no keyframes ([X152](deviations.md#x152-film-grain-freeze-has-no-keyframes)).
   - The header of each effect section has the Keyframe button between Previous and Next.
     - The button is orange on a keyframe.
     - On a frame with a keyframe of the effect, it removes each keyframe of the effect on that frame.
     - On any other frame, it adds a keyframe on each value of the effect, at the value of that frame.
     - A right-click on the button sets the ease of the keyframes on that frame.
   - At the playhead, a change of a value with keyframes puts a keyframe there. The plain value stays.
-  - A change of one number of a pair or a set puts a keyframe on that number only. The other numbers keep their curves.
+  - A change of one number of a color puts a keyframe on that number only. The other numbers keep their curves.
+  - A change of X or Y of a point puts one keyframe on the point. The other number takes its value at that frame.
   - A paste puts a keyframe of an effect value only on an effect of the same kind.
   - When the last keyframe of a value goes, the value returns to its plain value.
   - Reset removes the keyframes of the effect, as the reset button of a group does.
   - The area of an effect has its own keyframes ([deviation X166](deviations.md#x166-an-effect-has-an-area)). The Keyframe button and Reset do not change them.
   - The Keyframes tab has a group for each effect with a track for each value. A group name has a number when the clip has two effects of a kind.
   - `keyframes.add` and the other `keyframes` methods take `{"effect": 0, "value": "strength"}` in `param`.
+  - A point takes `[x, y]` in `value`.
   - `effects.set` with `at` puts a keyframe on a value with keyframes. `effects.key` is the Keyframe button.
 - **Compound clips:** the effects of a compound clip work on the mix of its tracks, after its transform ([D75](#12-decisions-on-gaps-and-contradictions)).
 - **In OTIO files:**

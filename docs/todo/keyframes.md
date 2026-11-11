@@ -8,7 +8,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - A clip has volume keyframes on its volume line ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
   - Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../spec.md#815-transform-and-crop-pp-766768), D75).
-  - The values of the effects of a clip have keyframes on `Effect` ([§8.16](../spec.md#816-effects-pp-765-3526-3536), [X152](../deviations.md#x152-effect-keyframes-have-one-number-each)).
+  - The values of the effects of a clip have keyframes on `Effect` ([§8.16](../spec.md#816-effects-pp-765-3526-3536), [X152](../deviations.md#x152-film-grain-freeze-has-no-keyframes)).
   - The Keyframes tab shows each value of the item selected first that can have keyframes.
   - Each value has a track. Its curve shows when the user turns it on. A drag moves a keyframe, a group or a handle.
   - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. The anchor point is one keyframe for X and Y.
@@ -362,6 +362,14 @@ Rule 3: each GUI action has a request.
 - `keyframes.copy` returns the selected keyframes with their offsets. `keyframes.paste` puts them on clips. `keyframes.cut` copies, then removes.
 - `gui.show keyframes` opens the Keyframes tab. `gui.close keyframes` closes it.
 - `gui.show keyframe_tray` opens the keyframe tray. `gui.close keyframe_tray` closes it.
+
+## Effect Freeze
+
+- Measured in Resolve Studio 21.2, on the Fusion page, with the Film Grain plugin:
+  - Freeze takes a curve from 0 to 1. Freeze is on where the curve is 0.5 or more.
+  - A frozen frame shows the grain of the latest Freeze keyframe at or before it.
+- Not measured: the grain of a frozen frame before the first Freeze keyframe, and Freeze keys in the Inspector of the Cut page.
+- **To do:** Freeze keyframes on a Film Grain, with these rules ([X152](../deviations.md#x152-film-grain-freeze-has-no-keyframes)).
 
 ## Open questions
 

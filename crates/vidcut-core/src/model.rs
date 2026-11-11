@@ -3574,12 +3574,18 @@ impl EffectArea {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EffectKeys {
     pub value: EffectValue,
+    /// On a point (`position`, `center`), `value` is X. A handle value moves
+    /// X. Y keeps the handle frames and a value offset of 0.
     pub keys: Vec<Keyframe>,
+    /// Y of each keyframe of a point, in the same order. Left out for a
+    /// value of one number.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub y: Vec<f64>,
 }
 
 /// A value of an effect that can have keyframes. A color or a list of
-/// channels has one value for each of its numbers, and a position or a center
-/// has one for x and one for y. `softness`, `opacity` and `saturation` are
+/// channels has one value for each of its numbers. A position or a center is
+/// one value, a point with X and Y. `softness`, `opacity` and `saturation` are
 /// values of more than one kind of effect. The six `area_` values are the
 /// center, the size, the rotation and the softness of the area of an effect.
 /// An effect of any kind has them while it has an area.
@@ -3605,8 +3611,7 @@ pub enum EffectValue {
     XOffset,
     YOffset,
     Aspect,
-    PositionX,
-    PositionY,
+    Position,
     Threshold,
     AlphaThreshold,
     Spread,
@@ -3650,8 +3655,7 @@ pub enum EffectValue {
     Size,
     Rotation,
     Anamorphism,
-    CenterX,
-    CenterY,
+    Center,
     Transparency,
     ColorRed,
     ColorGreen,

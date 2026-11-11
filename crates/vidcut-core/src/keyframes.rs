@@ -803,7 +803,8 @@ impl Picture {
 
     pub fn split_keys(&mut self, frame: i64) {
         for v in PictureValue::ALL {
-            split_channel(self, v, frame);
+            let (keys, y) = parts_mut(self, v);
+            split_channel(keys, y, frame);
         }
         for e in &mut self.effects {
             e.split_keys(frame);
@@ -812,7 +813,8 @@ impl Picture {
 
     pub fn hold_keys(&mut self, at: i64, until: i64) {
         for v in PictureValue::ALL {
-            hold_channel(self, v, at, until);
+            let (keys, y) = parts_mut(self, v);
+            hold_channel(keys, y, at, until);
         }
         for e in &mut self.effects {
             e.hold_keys(at, until);
@@ -821,7 +823,8 @@ impl Picture {
 
     pub fn scale_times(&mut self, conv: &impl Fn(i64) -> i64, ratio: &impl Fn(i64) -> f64) {
         for v in PictureValue::ALL {
-            scale_channel(self, v, &conv, ratio);
+            let (keys, y) = parts_mut(self, v);
+            scale_channel(keys, y, &conv, ratio);
         }
         for e in &mut self.effects {
             e.scale_key_times(conv, ratio);
@@ -830,7 +833,8 @@ impl Picture {
 
     pub fn retimed_to(&mut self, old: &Clip, new: &Clip) {
         for v in PictureValue::ALL {
-            retime_channel(self, v, old, new);
+            let (keys, y) = parts_mut(self, v);
+            retime_channel(keys, y, old, new);
         }
         for e in &mut self.effects {
             e.retime_keys(old, new);
@@ -839,7 +843,8 @@ impl Picture {
 
     pub fn retarget(&mut self, map: impl Fn(i64) -> i64) {
         for v in PictureValue::ALL {
-            retarget_channel(self, v, &map);
+            let (keys, y) = parts_mut(self, v);
+            retarget_channel(keys, y, &map);
         }
         for e in &mut self.effects {
             e.retarget_keys(&map);
@@ -878,44 +883,61 @@ impl Picture {
         chosen: &std::collections::HashSet<i64>,
         moved: impl Fn(i64) -> i64,
     ) {
-        let y_was = parts(self)[v as usize].1.cloned().unwrap_or_default();
         let (keys, y) = parts_mut(self, v);
-        let mut rows: Vec<(Keyframe, f64)> = keys
-            .iter()
-            .enumerate()
-            .map(|(i, k)| {
-                let frame = if chosen.contains(&k.frame) {
-                    moved(k.frame)
-                } else {
-                    k.frame
-                };
-                (
-                    Keyframe { frame, ..*k },
-                    y_was.get(i).copied().unwrap_or(0.0),
-                )
-            })
-            .collect();
-        rows.sort_by_key(|(k, _)| k.frame);
-        rows.dedup_by_key(|(k, _)| k.frame);
-        *keys = rows.iter().map(|(k, _)| *k).collect();
-        if let Some(y) = y {
-            *y = rows.into_iter().map(|(_, n)| n).collect();
-        }
+        move_channel(keys, y, chosen, moved);
     }
 
     pub fn drop_chosen(&mut self, v: PictureValue, chosen: &std::collections::HashSet<i64>) {
-        let y_was = parts(self)[v as usize].1.cloned().unwrap_or_default();
         let (keys, y) = parts_mut(self, v);
-        let rows: Vec<(Keyframe, f64)> = keys
-            .iter()
-            .enumerate()
-            .filter(|(_, k)| !chosen.contains(&k.frame))
-            .map(|(i, k)| (*k, y_was.get(i).copied().unwrap_or(0.0)))
-            .collect();
-        *keys = rows.iter().map(|(k, _)| *k).collect();
-        if let Some(y) = y {
-            *y = rows.into_iter().map(|(_, n)| n).collect();
-        }
+        drop_channel(keys, y, chosen);
+    }
+}
+
+pub fn move_channel(
+    keys: &mut Vec<Keyframe>,
+    y: Option<&mut Vec<f64>>,
+    chosen: &std::collections::HashSet<i64>,
+    moved: impl Fn(i64) -> i64,
+) {
+    let y_was = y.as_deref().cloned().unwrap_or_default();
+    let mut rows: Vec<(Keyframe, f64)> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, k)| {
+            let frame = if chosen.contains(&k.frame) {
+                moved(k.frame)
+            } else {
+                k.frame
+            };
+            (
+                Keyframe { frame, ..*k },
+                y_was.get(i).copied().unwrap_or(0.0),
+            )
+        })
+        .collect();
+    rows.sort_by_key(|(k, _)| k.frame);
+    rows.dedup_by_key(|(k, _)| k.frame);
+    *keys = rows.iter().map(|(k, _)| *k).collect();
+    if let Some(y) = y {
+        *y = rows.into_iter().map(|(_, n)| n).collect();
+    }
+}
+
+pub fn drop_channel(
+    keys: &mut Vec<Keyframe>,
+    y: Option<&mut Vec<f64>>,
+    chosen: &std::collections::HashSet<i64>,
+) {
+    let y_was = y.as_deref().cloned().unwrap_or_default();
+    let rows: Vec<(Keyframe, f64)> = keys
+        .iter()
+        .enumerate()
+        .filter(|(_, k)| !chosen.contains(&k.frame))
+        .map(|(i, k)| (*k, y_was.get(i).copied().unwrap_or(0.0)))
+        .collect();
+    *keys = rows.iter().map(|(k, _)| *k).collect();
+    if let Some(y) = y {
+        *y = rows.into_iter().map(|(_, n)| n).collect();
     }
 }
 
@@ -1087,8 +1109,7 @@ impl Title {
     }
 }
 
-fn split_channel(p: &mut Picture, v: PictureValue, frame: i64) {
-    let (keys, y) = parts_mut(p, v);
+pub fn split_channel(keys: &mut Vec<Keyframe>, y: Option<&mut Vec<f64>>, frame: i64) {
     let paired = y
         .as_deref()
         .and_then(|y| value_paired(keys, frame as f64, |i| y.get(i).copied().unwrap_or(0.0)));
@@ -1097,22 +1118,20 @@ fn split_channel(p: &mut Picture, v: PictureValue, frame: i64) {
     }
 }
 
-fn hold_channel(p: &mut Picture, v: PictureValue, at: i64, until: i64) {
-    let (keys, y) = parts_mut(p, v);
+pub fn hold_channel(keys: &mut Vec<Keyframe>, y: Option<&mut Vec<f64>>, at: i64, until: i64) {
     if let (Some(i), Some(y)) = (hold(keys, at, until), y) {
         let value = y.get(i - 1).copied().unwrap_or(0.0);
         y.insert(i.min(y.len()), value);
     }
 }
 
-fn scale_channel(
-    p: &mut Picture,
-    v: PictureValue,
+pub fn scale_channel(
+    keys: &mut Vec<Keyframe>,
+    y: Option<&mut Vec<f64>>,
     conv: &impl Fn(i64) -> i64,
     ratio: &impl Fn(i64) -> f64,
 ) {
-    let y_was = parts(p)[v as usize].1.cloned().unwrap_or_default();
-    let (keys, y) = parts_mut(p, v);
+    let y_was = y.as_deref().cloned().unwrap_or_default();
     let mut rows: Vec<(Keyframe, f64)> = keys
         .iter()
         .enumerate()
@@ -1132,9 +1151,8 @@ fn scale_channel(
     }
 }
 
-fn retime_channel(p: &mut Picture, v: PictureValue, old: &Clip, new: &Clip) {
-    let y_was = parts(p)[v as usize].1.cloned().unwrap_or_default();
-    let (keys, y) = parts_mut(p, v);
+pub fn retime_channel(keys: &mut Vec<Keyframe>, y: Option<&mut Vec<f64>>, old: &Clip, new: &Clip) {
+    let y_was = y.as_deref().cloned().unwrap_or_default();
     if keys.is_empty() {
         return;
     }
@@ -1164,9 +1182,12 @@ fn retime_channel(p: &mut Picture, v: PictureValue, old: &Clip, new: &Clip) {
     *keys = next;
 }
 
-fn retarget_channel(p: &mut Picture, v: PictureValue, map: &impl Fn(i64) -> i64) {
-    let y_was = parts(p)[v as usize].1.cloned().unwrap_or_default();
-    let (keys, y) = parts_mut(p, v);
+pub fn retarget_channel(
+    keys: &mut Vec<Keyframe>,
+    y: Option<&mut Vec<f64>>,
+    map: &impl Fn(i64) -> i64,
+) {
+    let y_was = y.as_deref().cloned().unwrap_or_default();
     let mut rows: Vec<(Keyframe, f64)> = keys
         .iter()
         .enumerate()
@@ -1225,7 +1246,7 @@ fn key_at(frame: i64, value: f64) -> Keyframe {
     }
 }
 
-fn put_pair(keys: &mut Vec<Keyframe>, y: &mut Vec<f64>, frame: i64, value: [f64; 2]) {
+pub fn put_pair(keys: &mut Vec<Keyframe>, y: &mut Vec<f64>, frame: i64, value: [f64; 2]) {
     let mut rows: Vec<(Keyframe, f64, Option<Ease>)> = keys
         .iter()
         .enumerate()
@@ -1376,6 +1397,7 @@ mod tests {
         e.keys = vec![crate::model::EffectKeys {
             value: crate::model::EffectValue::Strength,
             keys: vec![key(10, 0.5)],
+            y: Vec::new(),
         }];
         let mut p = Picture {
             effects: vec![e],

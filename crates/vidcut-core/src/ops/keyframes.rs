@@ -5,7 +5,9 @@ use serde_json::{Value, json};
 use super::locate;
 use crate::error::{Error, Result};
 use crate::generators::{Axis, CENTER, checked_center};
-use crate::keyframes::{PictureValue, checked, checked_handle, ease_of, reshape};
+use crate::keyframes::{
+    PictureValue, checked, checked_handle, ease_mark, ease_of, put_pair, reshape,
+};
 use crate::model::{
     Clip, ClipAudio, Ease, Effect, Generator, Gradient, Handle, Keyframe, LowerThirdLine, Picture,
     Project, Title, TitleKind,
@@ -112,6 +114,29 @@ impl Number {
         }
     }
 
+    fn pair(self) -> bool {
+        matches!(self, Self::Effect(q) if q.value.pair())
+    }
+
+    fn ys(self, c: &Clip) -> &[f64] {
+        match self {
+            Self::Effect(q) => effect_of(c, q).map_or(&[], |e| e.y_of(q.value)),
+            _ => &[],
+        }
+    }
+
+    fn point_at(self, c: &Clip, frame: f64) -> [f64; 2] {
+        match self {
+            Self::Effect(q) => effect_of(c, q).map_or([0.0; 2], |e| e.point_at(q.value, frame)),
+            _ => [self.value_at(c, frame), 0.0],
+        }
+    }
+
+    fn checked_point(self, [x, y]: [f64; 2]) -> Result<[f64; 2]> {
+        let y = if self.pair() { self.checked(y)? } else { y };
+        Ok([self.checked(x)?, y])
+    }
+
     fn keys(self, c: &Clip) -> &[Keyframe] {
         match self {
             Self::Volume => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
@@ -120,11 +145,11 @@ impl Number {
         }
     }
 
-    fn keys_mut(self, c: &mut Clip) -> Option<&mut Vec<Keyframe>> {
+    fn channel_mut(self, c: &mut Clip) -> Option<Channel<'_>> {
         match self {
-            Self::Volume => c.audio.as_mut().map(|a| &mut a.gain_keys),
+            Self::Volume => c.audio.as_mut().map(|a| (&mut a.gain_keys, None)),
             Self::Center(axis) => match &mut c.generator {
-                Some(Generator::FourColorGradient(g)) => Some(g.keys_mut(axis)),
+                Some(Generator::FourColorGradient(g)) => Some((g.keys_mut(axis), None)),
                 _ => None,
             },
             Self::Effect(q) => c
@@ -132,7 +157,7 @@ impl Number {
                 .as_mut()?
                 .effects
                 .get_mut(q.effect)?
-                .keys_mut(q.value),
+                .channel_mut(q.value),
         }
     }
 
@@ -165,6 +190,38 @@ impl Number {
     }
 }
 
+type Channel<'a> = (&'a mut Vec<Keyframe>, Option<&'a mut Vec<f64>>);
+
+fn ys_after(keys: &[Keyframe], follow: &[(i64, f64)]) -> Vec<f64> {
+    keys.iter()
+        .map(|k| {
+            follow
+                .iter()
+                .find(|(f, _)| *f == k.frame)
+                .map_or(0.0, |(_, y)| *y)
+        })
+        .collect()
+}
+
+fn number_value(
+    param: KeyParam,
+    number: Number,
+    value: Option<KeyValue>,
+) -> Result<Option<[f64; 2]>> {
+    match (number.pair(), value) {
+        (_, None) => Ok(None),
+        (true, Some(KeyValue::Pair(n))) => Ok(Some(n)),
+        (false, Some(KeyValue::Scalar(n))) => Ok(Some([n, 0.0])),
+        (true, Some(KeyValue::Scalar(_))) => {
+            Err(Error::usage(format!("{} is x and y", param_name(param))))
+        }
+        (false, Some(KeyValue::Pair(_))) => Err(Error::usage(format!(
+            "{} takes one number",
+            param_name(param)
+        ))),
+    }
+}
+
 fn effect_of(c: &Clip, q: EffectParam) -> Option<&Effect> {
     c.picture.as_ref()?.effects.get(q.effect)
 }
@@ -190,18 +247,14 @@ fn gradient(c: &Clip) -> Option<&Gradient> {
     }
 }
 
-fn number_mut<'a>(
-    p: &'a mut Project,
-    id: &str,
-    number: Number,
-) -> Result<(&'a mut Vec<Keyframe>, Clip)> {
+fn number_mut<'a>(p: &'a mut Project, id: &str, number: Number) -> Result<(Channel<'a>, Clip)> {
     let (ti, ci) = locate(p, id)?;
     let c = &mut p.tracks[ti].clips[ci];
     let shape = c.clone();
-    let keys = number
-        .keys_mut(c)
+    let channel = number
+        .channel_mut(c)
         .ok_or_else(|| Error::invalid(format!("{id} {}", number.missing())))?;
-    Ok((keys, shape))
+    Ok((channel, shape))
 }
 
 pub fn add(
@@ -222,8 +275,8 @@ pub fn add(
     if let Some(v) = picture_param(param) {
         return add_picture(p, ids, v, at, value, ease);
     }
-    let value = scalar(param, value)?;
     let number = Number::of(param);
+    let value = number_value(param, number, value)?;
     let added = add_number(p, ids, number, at, value, ease)?;
     settled(p, ids, number)?;
     Ok(added)
@@ -234,10 +287,10 @@ fn add_number(
     ids: &[String],
     number: Number,
     at: i64,
-    value: Option<f64>,
+    value: Option<[f64; 2]>,
     ease: Option<Ease>,
 ) -> Result<Vec<(String, i64)>> {
-    let value = value.map(|v| number.checked(v)).transpose()?;
+    let value = value.map(|v| number.checked_point(v)).transpose()?;
     let takes = |c: &Clip| number.takes(c);
     let targets: Vec<String> = ids
         .iter()
@@ -260,9 +313,18 @@ fn add_number(
     }
     let mut added = Vec::new();
     for id in &targets {
-        let (keys, c) = number_mut(p, id, number)?;
+        let ((keys, y), c) = number_mut(p, id, number)?;
         let frame = c.content_at(at);
-        let v = value.unwrap_or_else(|| number.value_at(&c, frame as f64));
+        let point = value.unwrap_or_else(|| number.point_at(&c, frame as f64));
+        if let Some(y) = y {
+            put_pair(keys, y, frame, point);
+            if let Some(e) = ease {
+                ease_mark(keys, frame, e);
+            }
+            added.push((id.clone(), frame));
+            continue;
+        }
+        let v = point[0];
         reshape(keys, |marked| {
             let i = match marked.iter().position(|(k, _)| k.frame == frame) {
                 Some(i) => {
@@ -330,19 +392,15 @@ pub(super) fn picked_as(
     Ok(out)
 }
 
-fn keyed_number<'a>(
-    p: &'a mut Project,
-    id: &str,
-    number: Number,
-) -> Result<(&'a mut Vec<Keyframe>, Clip)> {
-    let (keys, c) = number_mut(p, id, number)?;
-    if keys.is_empty() {
+fn keyed_number<'a>(p: &'a mut Project, id: &str, number: Number) -> Result<(Channel<'a>, Clip)> {
+    let (channel, c) = number_mut(p, id, number)?;
+    if channel.0.is_empty() {
         return Err(Error::invalid(format!(
             "{id} has no {} keyframes",
             number.name()
         )));
     }
-    Ok((keys, c))
+    Ok((channel, c))
 }
 
 pub fn set(
@@ -367,19 +425,11 @@ pub fn set(
         return set_picture(p, ids, v, pick, change);
     }
     let number = Number::of(param);
-    let value = change
-        .value
-        .map(|v| scalar(param, Some(v)))
-        .transpose()?
-        .flatten()
-        .map(|v| number.checked(v))
+    let value = number_value(param, number, change.value)?
+        .map(|v| number.checked_point(v))
         .transpose()?;
-    let by = change
-        .by
-        .map(|v| scalar(param, Some(v)))
-        .transpose()?
-        .flatten();
-    if by.is_some_and(|b| !b.is_finite()) {
+    let by = number_value(param, number, change.by)?;
+    if by.is_some_and(|b| !b[0].is_finite() || !b[1].is_finite()) {
         return Err(Error::invalid(match number {
             Number::Volume => "`by` needs a number of dB",
             Number::Center(_) | Number::Effect(_) => "`by` needs a number",
@@ -401,15 +451,29 @@ pub fn set(
         .map(|h| h.map(|h| checked_handle(h, false)).transpose())
         .transpose()?;
     for id in ids {
-        let (keys, c) = keyed_number(p, id, number)?;
+        let ((keys, y), c) = keyed_number(p, id, number)?;
         let chosen = picked_as(&c, keys, pick, &number.name())?;
+        if let Some(y) = y {
+            for (_, n) in keys
+                .iter()
+                .zip(y.iter_mut())
+                .filter(|(k, _)| chosen.contains(&k.frame))
+            {
+                if let Some(v) = value {
+                    *n = v[1];
+                }
+                if let Some(by) = by {
+                    *n = number.limited(&c, *n + by[1]);
+                }
+            }
+        }
         reshape(keys, |marked| {
             for entry in marked.iter_mut().filter(|(k, _)| chosen.contains(&k.frame)) {
                 if let Some(v) = value {
-                    entry.0.value = v;
+                    entry.0.value = v[0];
                 }
                 if let Some(by) = by {
-                    entry.0.value = number.limited(&c, entry.0.value + by);
+                    entry.0.value = number.limited(&c, entry.0.value + by[0]);
                 }
                 if let Some(e) = change.ease {
                     eased(entry, e);
@@ -458,7 +522,7 @@ fn shift_number(
         return Err(Error::usage("give `by` or `to`"));
     }
     for id in ids {
-        let (keys, c) = keyed_number(p, id, number)?;
+        let ((keys, y), c) = keyed_number(p, id, number)?;
         let chosen = picked_as(&c, keys, pick, &number.name())?;
         if to.is_some() && chosen.len() != 1 {
             return Err(Error::usage(format!(
@@ -485,11 +549,23 @@ fn shift_number(
                 )));
             }
         }
+        let follow: Option<Vec<(i64, f64)>> = y.as_deref().map(|y| {
+            keys.iter()
+                .zip(y)
+                .map(|(k, n)| match chosen.contains(&k.frame) {
+                    true => (moved(k.frame), *n),
+                    false => (k.frame, *n),
+                })
+                .collect()
+        });
         reshape(keys, |marked| {
             for (k, _) in marked.iter_mut().filter(|(k, _)| chosen.contains(&k.frame)) {
                 k.frame = moved(k.frame);
             }
         });
+        if let (Some(y), Some(follow)) = (y, follow) {
+            *y = ys_after(keys, &follow);
+        }
     }
     Ok(())
 }
@@ -509,11 +585,20 @@ pub fn remove(p: &mut Project, ids: &[String], param: KeyParam, pick: &Pick) -> 
 
 fn remove_number(p: &mut Project, ids: &[String], number: Number, pick: &Pick) -> Result<()> {
     for id in ids {
-        let (keys, c) = keyed_number(p, id, number)?;
+        let ((keys, y), c) = keyed_number(p, id, number)?;
         let chosen = picked_as(&c, keys, pick, &number.name())?;
+        let follow: Option<Vec<(i64, f64)>> = y.as_deref().map(|y| {
+            keys.iter()
+                .map(|k| k.frame)
+                .zip(y.iter().copied())
+                .collect()
+        });
         reshape(keys, |marked| {
             marked.retain(|(k, _)| !chosen.contains(&k.frame));
         });
+        if let (Some(y), Some(follow)) = (y, follow) {
+            *y = ys_after(keys, &follow);
+        }
     }
     Ok(())
 }
@@ -537,16 +622,21 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                 if held.is_empty() {
                     continue;
                 }
+                let ys = number.ys(c);
                 let keys: Vec<Value> = held
                     .iter()
                     .enumerate()
                     .map(|(i, k)| {
                         let at = c.key_time(k.frame).round() as i64;
+                        let value = match number.pair() {
+                            true => json!([k.value, ys.get(i).copied().unwrap_or(0.0)]),
+                            false => json!(k.value),
+                        };
                         let mut v = json!({
                             "frame": k.frame,
                             "at": at,
                             "at_tc": p.settings.timecode(at),
-                            "value": k.value,
+                            "value": value,
                             "ease": ease_of(held, i),
                         });
                         if let Some(h) = k.in_handle {
@@ -796,6 +886,10 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
                 (Some(v), Some(picture)) if v.pair() => {
                     KeyValue::Pair(picture.key_value(v, k.frame).unwrap_or([k.value, 0.0]))
                 }
+                (None, _) if Number::of(plain).pair() => KeyValue::Pair([
+                    k.value,
+                    Number::of(plain).ys(c).get(i).copied().unwrap_or(0.0),
+                ]),
                 _ => KeyValue::Scalar(k.value),
             };
             let at = c.key_time(k.frame).round() as i64;
@@ -928,17 +1022,6 @@ fn picture_param(param: KeyParam) -> Option<PictureValue> {
         KeyParam::CropSoftness => Some(PictureValue::CropSoftness),
         KeyParam::Opacity => Some(PictureValue::Opacity),
         KeyParam::Speed | KeyParam::Effect(_) => None,
-    }
-}
-
-fn scalar(param: KeyParam, value: Option<KeyValue>) -> Result<Option<f64>> {
-    match value {
-        None => Ok(None),
-        Some(KeyValue::Scalar(n)) => Ok(Some(n)),
-        Some(KeyValue::Pair(_)) => Err(Error::usage(format!(
-            "{} takes one number",
-            param_name(param)
-        ))),
     }
 }
 

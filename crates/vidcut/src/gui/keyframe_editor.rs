@@ -733,16 +733,19 @@ fn tick_step(ppf: f32, fps: f64) -> i64 {
 }
 
 fn paired(param: KeyParam) -> bool {
-    matches!(
-        param,
-        KeyParam::Position
-            | KeyParam::UpperPosition
-            | KeyParam::LowerPosition
-            | KeyParam::Zoom
-            | KeyParam::UpperZoom
-            | KeyParam::LowerZoom
-            | KeyParam::Anchor
-    )
+    match param {
+        KeyParam::Effect(q) => q.value.pair(),
+        _ => matches!(
+            param,
+            KeyParam::Position
+                | KeyParam::UpperPosition
+                | KeyParam::LowerPosition
+                | KeyParam::Zoom
+                | KeyParam::UpperZoom
+                | KeyParam::LowerZoom
+                | KeyParam::Anchor
+        ),
+    }
 }
 
 fn linear(clip: &Clip, param: KeyParam) -> bool {
@@ -1236,7 +1239,7 @@ fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
                     out.push(Lane {
                         param: KeyParam::Effect(EffectParam { effect, value }),
                         keys: keys.to_vec(),
-                        extra: Vec::new(),
+                        extra: e.y_of(value).to_vec(),
                     });
                 }
             }

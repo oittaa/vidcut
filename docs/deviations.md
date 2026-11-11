@@ -1538,17 +1538,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The OpenEXR writer of vidcut writes this attribute for each level that it gets.
   - The attribute is part of the OpenEXR format. A reader can see the level of the file, and a reader that does not know it skips it.
 
-## X152. Effect keyframes have one number each
+## X152. Film Grain Freeze has no keyframes
 
-- **Resolve:**
-  - Mosaic Blur Position and Vignette Center are one point with X and Y (measured in Resolve Studio 21.2).
-  - Film Grain Freeze takes a curve (measured in Resolve Studio 21.2).
-- **vidcut:**
-  - Position X, Position Y, Center X and Center Y have keyframes of their own.
-  - Film Grain Freeze is a switch and has no keyframes.
-- **Why:**
-  - The keyframes of an effect are one list of numbers for each value. A pair of numbers needs a second list, as Transform has, for two values only.
-  - A keyframe is a number on a curve. A switch has no value between on and off, and the curves of vidcut have no steps.
+- **Resolve:** Film Grain Freeze takes a curve (measured in Resolve Studio 21.2).
+- **vidcut:** Film Grain Freeze is a switch and has no keyframes.
+- **Why:** Freeze keyframes are not built yet ([todo](todo/keyframes.md#effect-freeze)).
 
 ## X153. Every clip pans as on a stereo track
 
