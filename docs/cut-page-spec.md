@@ -92,7 +92,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Reset Keyframes removes all keyframes of the track.
   - **Time** (p. 1258):
     - The time ruler shows timecode. A click or a drag on it moves the playhead.
-    - The tracks start at the range of the clip. Fit Clip goes back to that range.
+    - The tracks start at the range of the clip. Full Extend Zoom goes back to that range.
     - Detail Zoom zooms in four times, around the playhead.
     - The zoom slider sets the zoom, around the middle of the range.
     - Ctrl and the mouse wheel zoom at the pointer. Shift and the mouse wheel move the range.

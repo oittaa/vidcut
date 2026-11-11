@@ -144,7 +144,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - [§2](../cut-page-spec.md#2-layout-pp-636637) gives the measured rules of the clicks, the box, the steps, the paste and the clipboard.
 - A right-click sets the ease of that keyframe, or of all the selected keyframes, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
 - A bar shows the value, time and ease of the selected keyframe (X90).
-- The time ruler moves the playhead. Fit Clip, Detail Zoom, the zoom slider and Ctrl with the mouse wheel zoom.
+- The time ruler moves the playhead. Full Extend Zoom, Detail Zoom, the zoom slider and Ctrl with the mouse wheel zoom.
 - A scroll bar under the tracks moves the range.
 - The Keyframes button of the lower timeline shows a tray under its tracks. It has the keyed tracks of the clip, on the time of the timeline.
 - `keyframes.add`, `keyframes.remove`, `keyframes.set`, `keyframes.move`, `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do these edits.

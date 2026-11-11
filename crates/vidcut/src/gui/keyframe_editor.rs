@@ -2221,7 +2221,7 @@ impl Workspace {
                 }
                 if ui
                     .button(ARROWS_OUT_LINE_HORIZONTAL)
-                    .on_hover_text("Fit Clip")
+                    .on_hover_text("Full Extend Zoom")
                     .clicked()
                 {
                     fit = true;
