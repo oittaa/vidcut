@@ -429,6 +429,10 @@ pub fn problem(keys: &[Keyframe]) -> Option<String> {
 }
 
 impl ClipAudio {
+    pub fn heard_pan(&self) -> f64 {
+        if self.pan_on { self.pan } else { 0.0 }
+    }
+
     pub fn is_keyed(&self) -> bool {
         !self.gain_keys.is_empty()
     }

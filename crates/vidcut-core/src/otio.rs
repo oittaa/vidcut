@@ -840,8 +840,8 @@ pub fn export_drawn(
                             json!(effects::relative(&au.gain_keys, c.content_at(s)));
                     }
                     meta["muted"] = json!(au.muted);
-                    if au.pan != 0.0 {
-                        meta["pan"] = json!(au.pan);
+                    if au.heard_pan() != 0.0 {
+                        meta["pan"] = json!(au.heard_pan());
                     }
                     if let Some(eq) = &au.equalizer {
                         meta["equalizer"] = json!(eq);
@@ -958,8 +958,8 @@ pub fn export_drawn(
                     "clip": c.id, "media": c.media, "color": c.color, "stream": au.stream,
                     "gain_db": au.gain_db,
                 });
-                if au.pan != 0.0 {
-                    meta["pan"] = json!(au.pan);
+                if au.heard_pan() != 0.0 {
+                    meta["pan"] = json!(au.heard_pan());
                 }
                 if let Some(eq) = &au.equalizer {
                     meta["equalizer"] = json!(eq);

@@ -3595,6 +3595,7 @@ fn mutate(
             muted,
             gain_db,
             pan,
+            pan_on,
             equalizer,
             dialogue_leveler,
             compressor,
@@ -3624,6 +3625,7 @@ fn mutate(
                 muted: *muted,
                 gain_db: *gain_db,
                 pan: *pan,
+                pan_on: *pan_on,
                 equalizer: equalizer.clone(),
                 dialogue_leveler: dialogue_leveler.clone(),
                 compressor: compressor.clone(),
@@ -5840,6 +5842,7 @@ fn place_imported(
                         .collect(),
                     muted: c.muted,
                     pan: c.pan.clamp(*PAN.start(), *PAN.end()),
+                    pan_on: true,
                     equalizer: c
                         .equalizer
                         .clone()

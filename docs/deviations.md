@@ -779,7 +779,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing selected that it can show, it shows one line.
   - With several clips selected, a section shows the first clip that it acts on. Its header gives the number of these clips.
-  - The Transform and Crop sections have a switch at the left of their names. Dynamic Zoom, Composite, Speed and Audio have none.
+  - The Transform and Crop sections have a switch at the left of their names. The Pan row has a switch too. Dynamic Zoom, Composite, Speed and the other Audio rows have none.
   - Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
   - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has no accent color, and its Reset does nothing.
@@ -1714,17 +1714,14 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:**
   - The law of the Pan is different on a stereo track and on a mono track (measured in Resolve Studio 21.2).
   - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives both laws.
-  - The Pan has a switch.
   - The scripting API takes a Pan outside −100 to 100, and sets the nearest limit.
 - **vidcut:**
   - A track has no channel type. Each clip uses the law of a stereo track.
   - A mix of one channel has no sides. The Pan does not change it.
   - A mix of three channels or more applies the Pan to its first two channels.
-  - The Audio section has no switch for the Pan. Pan 0 gives the same sound.
   - `clip.set` refuses a Pan outside −100 to 100.
 - **Why:**
   - Resolve puts a mono clip on a stereo track by default. Thus the law of a stereo track is what most clips get.
-  - One slider is simpler.
   - A value outside the range is an error in the script. A refusal shows the error.
 
 ## X154. The Equalizer is a window
