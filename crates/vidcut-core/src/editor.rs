@@ -4294,10 +4294,11 @@ fn mutate(
             effect,
             at,
             ease,
+            area,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let at = resolve(p, at, playhead)?;
-            ops::effect::key(p, &id, *effect, at, *ease)?
+            ops::effect::key(p, &id, *effect, at, *ease, *area)?
         }
         Request::EffectsReset { clip, effect } => {
             let id = resolve_clip(p, clip, playhead)?;

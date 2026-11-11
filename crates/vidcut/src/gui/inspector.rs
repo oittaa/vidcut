@@ -821,6 +821,7 @@ fn effect_key_times(c: &Clip, n: usize) -> Vec<i64> {
     effects.get(n).map_or_else(Vec::new, |e| {
         e.keys
             .iter()
+            .filter(|k| !k.value.of_area())
             .flat_map(|k| k.keys.iter())
             .map(|k| c.key_time(k.frame).round() as i64)
             .collect()
@@ -1767,7 +1768,8 @@ fn effect_marks(c: &Clip, at: i64) -> Vec<KeyMark> {
     effects
         .iter()
         .map(|e| {
-            let keys: Vec<Keyframe> = e.keys.iter().flat_map(|k| k.keys.clone()).collect();
+            let own = e.keys.iter().filter(|k| !k.value.of_area());
+            let keys: Vec<Keyframe> = own.flat_map(|k| k.keys.clone()).collect();
             mark(c, &keys, at)
         })
         .collect()
@@ -2906,6 +2908,7 @@ fn effect_block(
     let mut fresh = e.kind().made();
     fresh.on = e.on;
     fresh.area = e.area.clone();
+    fresh.keys = e.area_keys().cloned().collect();
     let changed = *e != fresh;
     let header = |ui: &mut egui::Ui| {
         let mut act = None;

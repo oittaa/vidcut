@@ -401,6 +401,7 @@ The bar and the Jobs button:
   - The section shows the values of the playhead's frame (`Effect::adopted`).
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.
   - The Keyframe button and its ease menu send `effects.key`. Previous and Next seek (`step_effect`).
+    - The button and the seeks leave out the keyframes of the area (`effect_marks`, `effect_key_times`). Why: `effects.key` without `area` does not change them.
   - Each effect has the same Area rows (`area_rows`). Each change is one `effects.set` with `area`. Off sends a null `area`.
     - The numbers of the area are knobs (`AreaKnob`), so a drag previews and lands as the other values do.
     - The Follow menu lists None, one entry for each `Subject` (`Subject::ALL`, `all_of`) and the motion paths of the clip (`follow_row`, `PathRow`).

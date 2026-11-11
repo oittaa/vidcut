@@ -452,7 +452,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "effects.key",
-        "vidcut effects key c3 0 --at 2s\n  vidcut effects key c3 0 --at 2s --ease ease_in_out",
+        "vidcut effects key c3 0 --at 2s\n  vidcut effects key c3 0 --at 2s --ease ease_in_out\n  \
+         vidcut effects key c3 1 --at 2s --area",
     ),
     (
         "motion.list",

@@ -40,6 +40,7 @@ In this file, a path is never a track of the timeline.
 - Transform, Crop and the values of the effects have keyframes ([keyframes.md](keyframes.md)).
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path ([deviation X166](../deviations.md#x166-an-effect-has-an-area)).
+  - The center, the size, the rotation and the softness of the area have keyframes ([model](../design/model.md#pictures)).
 - `motion.find` finds the faces and the text of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
 - `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
 - `motion.follow` makes a title follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)).
@@ -76,7 +77,11 @@ In this file, a path is never a track of the timeline.
 
 **To do:**
 
-- **Area keyframes:** keyframes on the center, the size, the rotation and the softness of the area of an effect.
+- **Area keyframes, what is left:**
+  - The Inspector has no Keyframe button for the area of an effect. `effects.key` with `area` is the request for it.
+  - The viewer shows the outline and the handles of an area at its plain values. They must show its values at the playhead.
+  - The points of a polygon take no keyframes.
+  - `motion.track` refuses an area with keyframes on its center, its size or its rotation. A track must keep those keyframes as an offset from the path.
 - **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
   - Try how many frames a found path must start early and end late.
 - **Faces, what is left:**

@@ -517,11 +517,21 @@ Writing:
   - The area is a part of a base box. The base box is the whole source picture (`Area::WHOLE`), or the area of a motion path.
   - With `follows`, the area names a motion path of the same clip. The base box is then the area of that path at each frame ([export](export.md#placed-pictures)).
   - `effects.set` refuses a `follows` that names no path of the clip. `motion.remove` refuses a path that an area follows.
-  - `effects.set` takes an `AreaChange`. Its fields replace their own (`AreaChange::on`). Null takes the area off.
-  - `effects.reset` keeps the area. `ops::picture::effect_checked` checks it (`area_checked`).
-  - The area has no keyframes ([todo](../todo/motion-tracking.md)).
+  - `effects.set` takes an `AreaChange`. Its fields replace their own (`AreaChange::on`). Null takes the area off, with the keyframes of the area.
+  - `effects.reset` keeps the area and the keyframes of the area. `ops::picture::effect_checked` checks the area (`area_checked`).
+  - The center, the size, the rotation and the softness of the area take keyframes. They are six values of `EffectValue` (`EffectValue::AREA`).
+    - Their keyframes are in the `keys` of the effect, as the keyframes of its other values are.
+    - Why: the requests, a retime and the OTIO metadata then have one path for each keyframe of an effect.
+    - An effect has these values only while it has an area (`Effect::values`).
+    - `Effect::sampled` writes them into the area at a frame. `place::Masking` then reads that area ([export](export.md#effects)).
+    - Thus keyframes on the center, the size and the rotation move the whole shape. With `follows`, they count from the box of the path at that frame.
+    - `effects.key` with `area` works only on these values. Without `area`, it works only on the other values (`Effect::toggle_keys`).
+    - `effects.set` puts a keyframe on each of these values that the `AreaChange` names and that has keyframes (`named_values`).
+    - The points of a polygon take no keyframes ([todo](../todo/motion-tracking.md)).
+  - `motion.track` refuses an area with keyframes on its center, its size or its rotation (`ops::motion::start`). Why: a track puts those values back at their usual values.
 - The `keys` of an `Effect` hold one `EffectKeys` for each `EffectValue` with keyframes, sorted by value.
-  - `effect_keys` maps each `EffectValue` to its place in the kind of effect. An `EffectValue` of another kind has no place, and `ops::picture::effect_checked` refuses it.
+  - `effect_keys` maps each `EffectValue` to its place in the kind of effect, or in the area. An `EffectValue` of another kind has no place, and `ops::picture::effect_checked` refuses it.
+  - `effect_checked` also refuses a value of the area on an effect with no area.
   - `effect_checked` checks each keyframe as a plain value of the effect.
   - A request names an effect by its place in the list of the clip, from 0.
   - `picture.clear` of all the tools keeps the effects.
