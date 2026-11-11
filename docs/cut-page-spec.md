@@ -550,7 +550,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The timecode is drop-frame where the project counts drop-frame (D47).
   - That default is Auto (D91).
   - A right-click chooses another count (D91).
-  - There is no KeyKode (X81).
+  - There is no KeyKode ([gaps](todo/cut-page-gaps.md)).
 - **Stats for Nerds** (vidcut):
   - The right-click menu of the viewer opens a panel over the picture.
   - The panel has a group for each of these:
@@ -1378,7 +1378,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Resolve Studio 21.1.1 leaves the subtitle tracks out of its OpenTimelineIO, FCPXML, FCP 7 XML, EDL and CSV exports.
   - A subtitle file in an OpenTimelineIO file makes the import of Resolve Studio 21.1.1 fail.
   - vidcut: an OpenTimelineIO export writes an SRT beside it for each subtitle track with cues.
-  - Details: D58, D61, D64; deviation X45.
+  - Details: D58, D61, D64.
 - **Create Subtitles from Audio** (pp. 1234–1235):
   - Only Resolve Studio has it (p. 1234).
   - It is in Timeline > AI Tools (p. 1234), and it is the first item of Timeline Actions (p. 646).
@@ -1512,7 +1512,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It loads a preset onto a track as one change that you can undo.
   - It replaces a preset and deletes a preset, each after a confirmation.
   - It exports or imports a preset as a `.preset` file.
-  - vidcut: looks, for titles too. Some looks are built in (X59). Details: D71.
+  - vidcut: looks, for titles too. Some looks are built in. Details: D71.
 - **Later:**
   - the faces of a track style other than regular and bold, line spacing, kerning, zoom, opacity (p. 1237)
   - caption presets (p. 1235)
@@ -3085,8 +3085,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Mirrored matrices count only as rotations.
 - **D34. Interlaced sources** (p. 741).
   - A stream is interlaced if its field order says so, or if its first frame has the interlaced flag.
-  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`, one frame for each frame (deviation X13).
+  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`, one frame for each frame.
   - The deinterlacer keeps the first field.
+  - Measured in Resolve Studio 21.2: an interlaced clip comes in with deinterlacing on, and the picture keeps the first field.
+  - Clip Attributes in Resolve Studio 21.2 has no switch that turns it off.
   - Output is never interlaced, and never at the field rate.
 - **D35. HDR and color** (pp. 230–239).
   - A clip is HDR when its transfer is PQ or HLG.
@@ -3174,7 +3176,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - After such an edit the parts can differ in place or length. Then they are separate clips, and an export gives them no link group.
     - A timeline drag shows only the part under the pointer. The other parts move when the drag ends.
     - Resolve was not measured for a locked part, or for a move to another track.
-- **D41. Proxies** (deviation X18; the proxy chapters, pp. 207–218, are outside the Cut page).
+- **D41. Proxies** (the proxy chapters, pp. 207–218, are outside the Cut page).
   - Videos and image sequences get proxies on demand (Generate Proxy).
   - A running GUI also makes proxies for media that are hard to play (preferences `proxies.*`):
     - image sequences
@@ -3530,7 +3532,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A duration of less than one frame is refused.
   - A source Out past the end of the media is refused.
   - `marks.set` and `media.marks.set` take the same values as `duration`.
-- **D61. Burned-in subtitles** (§8.12; p. 1247; deviation X45).
+- **D61. Burned-in subtitles** (§8.12; p. 1247).
   - The manual does not say how a track looks burned in before it has a style.
   - The usual look is Resolve's default, measured in Resolve Studio 21.1.2:
     - White Open Sans Regular at Size 58: 58/1080 of the picture height.
@@ -4009,7 +4011,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Thus captions that are off from the speech still find their words.
   - A matched word starts where it was heard, kept inside its cue.
   - The other words are spread between their matched neighbors by their characters.
-- **D71. Looks** (§8.12, §8.14; pp. 1239–1240; deviation X59).
+- **D71. Looks** (§8.12, §8.14; pp. 1239–1240).
   - The manual saves the style of a subtitle track as a named preset, and loads it onto a track.
   - It does not say where presets are kept, or tell of any built-in presets.
   - A look is a named style for a subtitle track or a title.
@@ -4601,7 +4603,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - These are the values in SMPTE ST 2046-1 and EBU R 95.
   - Title layout still uses 90% of the picture (D65). The overlay uses the same share of the extents.
   - The extents are the framing box. Default framing uses the picture.
-- **D91. The viewer timecode menu** (§4.3; pp. 713–714; deviation X81).
+- **D91. The viewer timecode menu** (§4.3; pp. 713–714).
   - Auto is the default. It follows the viewer.
   - Source modes show Source Timecode.
   - Timeline mode shows record timecode.
