@@ -469,18 +469,10 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - A cue that already overlaps this cue and reaches into the part loses its frames in the part.
     - A cue that covers all of the part and more stays as it is (D79).
   - `subtitles.set` alone does not overwrite. Scripts and imports keep the cues that overlap (D56).
-  - The names of the columns of the list are "#", "In/Out", "Text" and "CPS". The text shows on two lines at most.
-    - The row of the open cue is highlighted. While the user types, it shows the typed text.
-    - When another cue opens and its row is out of view, the list scrolls the row to its middle.
-  - Add New does what Add Subtitle in the right-click menu of the track does ([X44](#x44-add-subtitle-uses-the-shown-subtitle-track)).
-  - The name of the track is at the right of the line with Add New. Previous and Next are on the heading line of the Subtitle section.
-  - Previous, Next and a click on a row first put in the changes of the section. Then they select the cue and move the playhead to its start.
-  - A button is off when there is no cue before or after. While a cue is being added, the buttons are off, and Add New and the list do not show.
-  - The Delete button of the section deletes the open cue.
+  - The row of the open cue is highlighted. While the user types, it shows the typed text.
+  - Prev, Next and a click on a row first put in the changes of the section. Then they select the cue and move the playhead to its start.
 - **Why:**
   - One change for each edit of the text keeps typing out of the undo history. With the playhead at the start of the cue, the viewer shows the cue.
-  - On the heading line, Previous and Next stay in one place. Above the list, the rows change. The text box grows with the text. The Name row shows only for a cue with a person.
-  - The Inspector can be narrow. Thus the names of the columns are short. The GUI of vidcut does not use the word "caption". Thus the text column is "Text".
   - Imports and scripts can need cues that overlap (D56). Thus `subtitles.set` alone keeps them.
 
 ## X44. Add Subtitle uses the shown subtitle track
