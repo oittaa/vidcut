@@ -125,7 +125,9 @@ flowchart TD
 - The result is a `Detections` with one box on each picture of the track, and no box on the other pictures (`laid`).
   - Thus a track shares the disk cache of `motion.find` (`AvEnv::tracked`). `tracking::name` gives the model file and `LOST` to the name of the file.
 - `motion::followed` makes the samples: the box of the area, moved and scaled with the box of the track. `motion::stopped` tells why a track ended.
-- `ops::motion::tracked` stores the path, with the name Track and a number. The area then follows the path by its id, with no offset.
+- `ops::motion::tracked` stores the samples. The area then follows the path by its id, with no offset.
+  - A path with `tracked` that only this area follows gets the new samples. It keeps its id and its name.
+  - Else the area gets a new path, with `tracked` and the name Track and a number. The path that it followed stays as it is.
   - A track of one way keeps the samples of the other side of a track that the area followed (`TrackWay`).
 - In a GUI, `Live::measuring` measures first (`editor::track_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model file is `catalog::VITTRACK_ONNX`. `tracking::get_ready` fetches it when the request has `download`.

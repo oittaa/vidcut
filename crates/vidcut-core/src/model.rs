@@ -1840,6 +1840,10 @@ pub struct MotionPath {
     /// a path that it did not make.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<Subject>,
+    /// On, `motion.track` made this path. A later track of the same area
+    /// then writes its samples again. Left out when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tracked: bool,
     /// The area on source frames: at least one sample, one for a frame, in
     /// the order of the frames.
     pub samples: Arc<Vec<PathSample>>,
