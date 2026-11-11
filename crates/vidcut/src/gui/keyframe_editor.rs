@@ -36,6 +36,8 @@ const TRACK_H: f32 = 26.0;
 const CURVE_H: f32 = 110.0;
 const GRAPH_H: f32 = 280.0;
 const GRIP_H: f32 = 6.0;
+const GRAPH_ZOOM_MOST: f64 = 100.0;
+const PAN_W: f32 = 10.0;
 const TRACKS_KEPT: f32 = 3.0;
 const DIMMED: f32 = 0.65;
 const HUES: [Color32; 6] = [
@@ -412,6 +414,14 @@ impl Target {
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum GraphScale {
+    Off,
+    On,
+    #[default]
+    Normalized,
+}
+
 #[derive(Default)]
 pub struct Editor {
     clip: Option<String>,
@@ -434,6 +444,9 @@ pub struct Editor {
     graph_off: Vec<KeyParam>,
     graph_active: Option<KeyParam>,
     graph_h: Option<f32>,
+    graph_scale: GraphScale,
+    graph_zoom: f64,
+    graph_pan: Option<f64>,
     view: Option<(f64, f64)>,
     held: Option<Held>,
     fresh: Option<(KeyParam, i64, Instant)>,
@@ -2199,6 +2212,16 @@ impl Workspace {
                     if ui.checkbox(&mut snapping, "Enable Snapping").changed() {
                         editor.snap_off = !snapping;
                     }
+                    ui.separator();
+                    ui.menu_button("Auto Zoom Graph Height", |ui| {
+                        for (scale, label) in [
+                            (GraphScale::Off, "Off"),
+                            (GraphScale::On, "On"),
+                            (GraphScale::Normalized, "Normalized"),
+                        ] {
+                            ui.radio_value(&mut editor.graph_scale, scale, label);
+                        }
+                    });
                 });
                 if most > 1.0 {
                     ui.spacing_mut().slider_width = ZOOM_W;
@@ -2238,6 +2261,21 @@ impl Workspace {
                     .clicked()
                 {
                     editor.graph = !editor.graph;
+                }
+                if editor.graph && editor.graph_scale == GraphScale::Off {
+                    ui.spacing_mut().slider_width = ZOOM_W;
+                    let mut zoom = editor.graph_zoom.max(1.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut zoom, 1.0..=GRAPH_ZOOM_MOST)
+                                .logarithmic(true)
+                                .show_value(false),
+                        )
+                        .on_hover_text("Graph Height Zoom")
+                        .changed()
+                    {
+                        editor.graph_zoom = zoom;
+                    }
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.add(egui::Label::new(RichText::new(name).strong()).truncate());
@@ -2838,6 +2876,7 @@ impl Workspace {
             clip,
             plot,
             frame,
+            shared: None,
         };
         let spots = self.paint_curve(ui, &area, lane, rows, [colors.text, colors.text_dim]);
         self.use_curve(ui, &area, lane, &spots);
@@ -2887,6 +2926,7 @@ impl Workspace {
             clip,
             plot,
             frame,
+            shared: self.shared_scale(&shown, shift, frame),
         };
         let mut dims = Vec::new();
         for (lane, color) in shown.iter().filter(|(l, _)| Some(l.param) != active) {
@@ -2920,7 +2960,67 @@ impl Workspace {
         } else {
             playhead(&painter, TimeMap::of(plot.lo, plot.hi, rect), rect, plot);
         }
+        self.graph_pan(ui, rect);
         self.graph_grip(ui, plot, h, most);
+    }
+
+    fn shared_scale(
+        &self,
+        shown: &[(&Lane, Color32)],
+        shift: Option<&Shift>,
+        frame: &Frame,
+    ) -> Option<(f64, f64)> {
+        let editor = &self.key_editor;
+        if editor.graph_scale == GraphScale::Normalized {
+            return None;
+        }
+        if let Some((param, lo, hi)) = editor.drag.as_ref().and_then(|d| d.frozen) {
+            return Some((
+                shown_value(param, lo, false, frame),
+                shown_value(param, hi, false, frame),
+            ));
+        }
+        let mut lo = f64::MAX;
+        let mut hi = f64::MIN;
+        let mut least = 0.0f64;
+        for (lane, _) in shown {
+            let show = |v: f64| shown_value(lane.param, v, false, frame);
+            let (vlo, vhi) = value_ends(&shown_lane(lane, shift));
+            lo = lo.min(show(vlo));
+            hi = hi.max(show(vhi));
+            least = least.max(show(least_span(lane.param)) - show(0.0));
+        }
+        if !lo.is_finite() {
+            return None;
+        }
+        let whole = ValueMap::of(lo, hi, least, Rect::ZERO);
+        if editor.graph_scale == GraphScale::On {
+            return Some((whole.lo, whole.hi));
+        }
+        let span = whole.span() / editor.graph_zoom.max(1.0);
+        let bottom = whole.lo + editor.graph_pan.unwrap_or(0.5) * (whole.span() - span);
+        Some((bottom, bottom + span))
+    }
+
+    fn graph_pan(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        let editor = &mut self.key_editor;
+        if editor.graph_scale != GraphScale::Off || editor.graph_zoom <= 1.0 {
+            return;
+        }
+        let bar = Rect::from_min_max(pos2(rect.right() - PAN_W, rect.top()), rect.right_bottom());
+        let mut pan = editor.graph_pan.unwrap_or(0.5);
+        let keep = ui.spacing().slider_width;
+        ui.spacing_mut().slider_width = bar.height();
+        let r = ui.put(
+            bar,
+            egui::Slider::new(&mut pan, 0.0..=1.0)
+                .vertical()
+                .show_value(false),
+        );
+        ui.spacing_mut().slider_width = keep;
+        if r.changed() {
+            editor.graph_pan = Some(pan);
+        }
     }
 
     fn graph_grip(&mut self, ui: &mut egui::Ui, plot: Plot, h: f32, most: f32) {
@@ -2957,7 +3057,7 @@ impl Workspace {
             ..
         } = *area;
         let map = TimeMap::of(plot.lo, plot.hi, rect);
-        let values = self.curve_values(lane, rows, rect);
+        let values = self.curve_values(lane, rows, area);
         let painter = ui.painter_at(rect);
         let colors = theme::colors();
         if !matches!(
@@ -3060,7 +3160,8 @@ impl Workspace {
         }
     }
 
-    fn curve_values(&self, lane: &Lane, rows: &[Shown], rect: Rect) -> ValueMap {
+    fn curve_values(&self, lane: &Lane, rows: &[Shown], area: &CurveArea<'_>) -> ValueMap {
+        let rect = area.rect;
         let frozen = self
             .key_editor
             .drag
@@ -3074,6 +3175,9 @@ impl Workspace {
                 top: rect.top(),
                 height: rect.height().max(1.0),
             };
+        }
+        if let Some(shared) = area.shared {
+            return shared_values(lane.param, shared, area.frame, rect);
         }
         let (vlo, vhi) = value_ends(rows);
         ValueMap::of(vlo, vhi, least_span(lane.param), rect)
@@ -3603,6 +3707,16 @@ struct CurveArea<'a> {
     clip: &'a Clip,
     plot: Plot,
     frame: &'a Frame,
+    shared: Option<(f64, f64)>,
+}
+
+fn shared_values(param: KeyParam, (lo, hi): (f64, f64), frame: &Frame, rect: Rect) -> ValueMap {
+    ValueMap {
+        lo: stored_value(param, lo, false, frame),
+        hi: stored_value(param, hi, false, frame),
+        top: rect.top(),
+        height: rect.height().max(1.0),
+    }
 }
 
 struct CurveSpots {
@@ -3732,12 +3846,18 @@ fn dim_curve(
     rows: &[Shown],
     color: Color32,
 ) -> Vec<Vec<Pos2>> {
-    let (vlo, vhi) = value_ends(rows);
+    let values = match area.shared {
+        Some(shared) => shared_values(lane.param, shared, area.frame, area.rect),
+        None => {
+            let (vlo, vhi) = value_ends(rows);
+            ValueMap::of(vlo, vhi, least_span(lane.param), area.rect)
+        }
+    };
     let paint = CurvePaint {
         painter,
         clip: area.clip,
         map: TimeMap::of(area.plot.lo, area.plot.hi, area.rect),
-        values: ValueMap::of(vlo, vhi, least_span(lane.param), area.rect),
+        values,
     };
     let keys: Vec<Keyframe> = rows.iter().map(|r| r.key).collect();
     let mut lines = vec![sample_curve(&paint, 1.0, color, |source| {

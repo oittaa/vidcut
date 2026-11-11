@@ -80,13 +80,18 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
   - **Track controls** (p. 1257):
     - The curve button shows the curve of the value under its track.
-  - **Graph** (p. 1261, [X160](deviations.md#x160-the-graph-sits-above-the-tracks-with-a-scale-for-each-curve)):
+  - **Graph** (p. 1261, [X160](deviations.md#x160-the-graph-sits-above-the-tracks)):
     - The Graph button in the header shows one large graph above the tracks. The curves under the tracks then go away.
     - The graph shows a colored line for each value with keyframes. The curve button of a track takes its line out or puts it back.
     - One curve is active. It has the points and the handles, and each edit in the graph acts on it. The other curves are dimmed.
     - A click on a dimmed curve makes it the active curve and clears the selection (measured in Resolve Studio 21.2).
     - A click on a name beside the graph, on a track's name or on a track's keyframe also makes that curve active. The selection stays.
     - A drag on the line under the graph changes its height.
+    - The ⋯ menu has Auto Zoom Graph Height. It sets the height of the graph from the keyframes, and it is on by default (p. 1264).
+    - In Resolve Studio 21.2, it has Off, On and Normalized. A new project has Normalized (measured). vidcut does the same.
+    - Normalized gives each curve the full height with its own range. The labels show the range of the active curve.
+    - On gives all the curves one range, from the values of their keyframes.
+    - Off also gives all the curves one range. A slider in the header zooms the height. A slider at the right of the graph moves the view up and down (p. 1264).
     - The Keyframe button adds a keyframe at the playhead, also outside the clip (measured in Resolve Studio 21.1.2). On a keyframe, it removes that keyframe, as the Inspector's button does.
     - The Keyframe button is orange on a keyframe (p. 1250), in the Inspector too.
     - The arrows beside it go to the previous and the next keyframe of the value, also outside the clip (measured in Resolve Studio 21.1.2).
