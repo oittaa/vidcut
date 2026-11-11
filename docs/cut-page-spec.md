@@ -182,11 +182,13 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Ripple On, Snap, Fixed Playhead, Trim to Audio, Trim with Safe Edit.
     - Display Clip Names, Durations and Status.
     - Minimize Subtitle Track, Boring Detector.
-  - **Timeline Actions:**
-    - Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker.
+  - **Timeline Actions**, in this order:
+    - Create Subtitles from Audio, Detect Scene Cuts, Audio Assistant, Voice Convert.
+    - Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker, Set Color and Add Marker.
+    - Clear Transition from All Edits, Add Dissolve to All Edits, Add Transition to All Edits.
     - The Add Tracks window of Resolve Studio 21.1.2 takes 0 to 99 video tracks and 0 to 999 audio tracks. `track.add` takes the same.
-    - Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits.
-    - vidcut also has Add Subtitle (deviation X44), Create Subtitles from Audio (X46), Re-time Subtitles to Speech (X49) and Ripple Delete Silence.
+    - vidcut has these items in this order, except the four in [the gaps](todo/cut-page-gaps.md).
+    - After them, vidcut has Add Title (deviation X52), Add Subtitle (X44), Re-time Subtitles to Speech (X49) and Ripple Delete Silence (X47).
   - **Edit Actions:** Trim Start to Playhead, Trim End to Playhead.
 - **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker. After them is the Keyframes button, which shows the keyframe tray (p. 1259).
 - **Upper timeline:**
