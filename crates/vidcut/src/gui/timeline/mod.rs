@@ -3261,12 +3261,11 @@ impl Workspace {
             Gesture::Compound { name, len, .. } => (name.clone(), Some((0, *len))),
             Gesture::Title { template, len } => (template.label.clone(), Some((0, *len))),
             Gesture::Generator { label, len, .. } => (label.clone(), Some((0, *len))),
-            Gesture::Transition { label, kind } => (
+            Gesture::Transition { label, .. } => (
                 (*label).to_string(),
                 Some((
                     0,
-                    self.project()
-                        .map_or(0, |p| vidcut_core::ops::dissolve_length(p, kind)),
+                    self.project().map_or(0, vidcut_core::ops::dissolve_length),
                 )),
             ),
             Gesture::Effect { label, .. } => ((*label).to_string(), None),

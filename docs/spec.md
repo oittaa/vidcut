@@ -1192,7 +1192,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Details: D50.
 - **Cut** (p. 759): the edit nearest the playhead becomes a cut again.
 - **Smooth Cut** (p. 759):
-  - The button puts a 0.2-second Smooth Cut centered on the edit nearest the playhead (deviation X100).
+  - The button puts a one-second Smooth Cut centered on the edit nearest the playhead (p. 759).
   - Its Mode is Better, its Process is AI and its Ease is None.
   - Where the sounds of the clips meet at that edit, a Cross Fade 0 dB of the same length goes on the sound too.
 - **A selected dissolve** (pp. 759, 761):
@@ -1302,7 +1302,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It has a card for Edge Wipe under Wipe, and cards for Push and Slide under Motion.
   - The Edge Wipe of the card has the Angle 0. It comes in from the bottom.
   - The Push of the card is Push Left. The Slide of the card is Left-Right, In. The Smooth Cut of the card is the Smooth Cut of the button.
-  - A drag of a card onto an edit of a video track adds that transition there, one second long. A Smooth Cut is 0.2 seconds long (X100).
+  - A drag of a card onto an edit of a video track adds that transition there, one second long.
     - Left of the edit, it ends on the edit. Right of the edit, it starts on it. On the edit, it is centered.
     - The length is shortened to the media (X27).
   - A drag of a card onto a transition changes its type. The length stays.
