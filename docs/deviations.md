@@ -764,16 +764,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The Inspector is where those numbers are set.
   - The viewer handles move, zoom, turn and crop the picture.
 
-## X86. The Full Screen button is on the viewer
-
-- **Resolve:**
-  - The Full Screen control is at the right of the top bar (p. 636).
-- **vidcut:**
-  - The Full Screen button is on the viewer, beside the duration.
-- **Why:**
-  - Full screen and the enhanced viewer cover the top bar.
-  - The button stays on the viewer, so it can be clicked while they are on.
-
 ## X90. The curve of a value shows under its track
 
 - **Resolve:**

@@ -1,4 +1,5 @@
 use eframe::egui::{self, RichText};
+use vidcut_core::request::{ViewerFrame, ViewerFrameKey, viewer_frame_after};
 
 use super::row::Row;
 use super::theme;
@@ -16,6 +17,7 @@ enum Item {
     Transcription,
     Mixer,
     Help,
+    FullScreen,
 }
 
 const LEFT: [Item; 4] = [
@@ -25,16 +27,18 @@ const LEFT: [Item; 4] = [
     Item::Export,
 ];
 
-const RIGHT: [Item; 6] = [
+const RIGHT: [Item; 7] = [
     Item::NoPreview,
     Item::Jobs,
     Item::History,
     Item::Transcription,
     Item::Mixer,
     Item::Help,
+    Item::FullScreen,
 ];
 
-const LEAVING: [Item; 10] = [
+const LEAVING: [Item; 11] = [
+    Item::FullScreen,
     Item::Help,
     Item::Mixer,
     Item::Transcription,
@@ -117,6 +121,14 @@ impl Workspace {
             Item::Transcription => ui.toggle_value(&mut self.transcription.open, "Transcription"),
             Item::Mixer => ui.toggle_value(&mut self.show_mixer, "Mixer"),
             Item::Help => ui.toggle_value(&mut self.help.open, "Help"),
+            Item::FullScreen => {
+                let now = self.snap.viewer_frame;
+                let r = ui.selectable_label(now == ViewerFrame::FullScreen, "Full Screen");
+                if r.clicked() {
+                    self.send_frame(viewer_frame_after(now, ViewerFrameKey::FullScreen));
+                }
+                r
+            }
         }
     }
 }

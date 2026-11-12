@@ -61,7 +61,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The edit-function buttons go with the pool, as they do for the other tabs. vidcut: no measurement tells where they go in Resolve.
     - `gui.close media_pool` hides the pool. `gui.show media_pool` shows it.
   - On the right: Quick Export and the Full Screen viewer.
-    - vidcut's Full Screen button is on the viewer (deviation X86).
+    - vidcut also has a Full Screen button on the viewer.
   - A Transitions tab shows the transitions in the place of the Media Pool (p. 759, §8.11).
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - An Effects tab shows the video effects in the place of the Media Pool (p. 765, §8.16).
@@ -586,7 +586,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 ### 4.5 Other viewer features
 - Full Screen (Shift+F) fills the display with the viewer.
   - Shift+F again returns to the page.
-  - The Full Screen button on the viewer does the same thing (deviation X86).
+  - The Full Screen button on the viewer does the same thing.
   - `viewer.frame` with `full_screen` or `page` does it from a script.
 - Enhanced viewer (Alt+F) fills the page with the viewer.
   - The Media Pool, the timelines and the bars are covered.
