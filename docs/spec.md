@@ -1362,7 +1362,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A subtitle track locks like any track.
   - One subtitle track shows at a time. When one shows, the others are hidden (p. 1228).
   - Minimize Subtitle Track (Timeline Options, p. 645) makes them shorter.
-  - The header of each subtitle track has a destination control, ST1, ST2 and so on (pp. 1228, 1232).
+  - The header of each subtitle track has a destination control (p. 1228). Its labels are ST1, ST2 and so on (p. 1232).
     - These are measurements in Resolve Studio 21.2. A new subtitle track has it on. A click turns it on or off. The other tracks keep theirs.
     - Paste uses it. Create Caption and Add New in the Inspector do not.
   - Details: D56.
