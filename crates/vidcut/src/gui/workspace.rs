@@ -1460,6 +1460,11 @@ impl Workspace {
                 self.send(method, json!({ "clips": clips }));
             } else if !cut && !self.snap.selection.cues.is_empty() {
                 let cues = self.snap.selection.cues.clone();
+                if let Some(p) = self.project()
+                    && let Ok(data) = vidcut_core::ops::subtitles::copy_cues(p, &cues)
+                {
+                    ctx.copy_text(json!(data).to_string());
+                }
                 self.send("edit.copy", json!({ "cues": cues }));
             }
         }
