@@ -2290,13 +2290,31 @@ impl Workspace {
         if !resp.hovered() || self.timeline.drag.is_some() {
             return;
         }
-        let (zoom, scroll, alt) = ui.input(|i| {
+        let speed = ui.ctx().options(|o| o.input_options.scroll_zoom_speed);
+        let (zoom, mut scroll, alt, command) = ui.input(|i| {
+            let pinch: f32 = i
+                .events
+                .iter()
+                .filter_map(|e| match e {
+                    egui::Event::Zoom(z) => Some(*z),
+                    _ => None,
+                })
+                .product();
             (
-                i.zoom_delta(),
+                (pinch, i.zoom_delta()),
                 i.smooth_scroll_delta,
                 i.modifiers.alt && !i.modifiers.command,
+                i.modifiers.command,
             )
         });
+        let (pinch, all) = zoom;
+        let zoom = match command {
+            true => {
+                scroll.x += (all / pinch).ln() / speed;
+                pinch
+            }
+            false => all,
+        };
         let zoom = match alt {
             true => zoom * (scroll.y / WHEEL_ZOOM_POINTS).exp(),
             false => zoom,

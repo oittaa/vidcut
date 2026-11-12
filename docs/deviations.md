@@ -171,17 +171,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Phone, camera and graded HDR footage looks on TVs as its sources do.
   - This needs no setup by a colorist.
 
-## X21. Ctrl+wheel zooms the timeline
-
-- **Resolve:**
-  - Option+wheel zooms the timeline, and Command+wheel moves through it (Edit page, p. 853).
-  - The lower timeline of the Cut page also zooms with Option+wheel.
-- **vidcut:**
-  - Ctrl+wheel (Cmd on a Mac) zooms the lower timeline. It does not move through it.
-- **Why:**
-  - Ctrl+wheel and Cmd+wheel zoom in browsers and most programs.
-  - egui gives them and a pinch as one zoom.
-
 ## X24. Cross fades follow their curves exactly
 
 - **Resolve:**

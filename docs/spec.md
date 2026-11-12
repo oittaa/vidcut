@@ -658,7 +658,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 **Lower timeline:**
 - It is a detail view around the playhead (p. 644).
 - Alt+wheel (Option+wheel on a Mac) and the − and + buttons zoom it. Alt+wheel is the zoom of the Edit page timeline (p. 853).
-- vidcut: Ctrl+wheel (deviation X21) and a trackpad pinch zoom it too.
+- Ctrl+wheel (Cmd+wheel on a Mac) moves along it, as on the Edit page timeline (p. 853). Wheel down moves forward.
+- A trackpad pinch zooms it too.
 - The manual calls its zoom fixed, but Resolve zooms it too.
 - A sideways swipe scrolls it (p. 66).
 - **Fixed Playhead on (default, D1):**
@@ -2858,7 +2859,8 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
 | Click an edit | Trim Editor (D52) |
 | W | Dynamic Trim on/off |
 | Shift+S | Audio scrubbing on/off |
-| Alt+wheel, Ctrl+wheel | Zoom the lower timeline (X21) |
+| Alt+wheel | Zoom the lower timeline |
+| Ctrl+wheel | Move along the timeline |
 | Wheel over the lower timeline's tracks | Scroll them, when they do not fit (X57) |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+I | Import media |
