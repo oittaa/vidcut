@@ -215,7 +215,7 @@ impl Workspace {
             mixer: Default::default(),
             preferences: Default::default(),
             help: Default::default(),
-            history: super::history::HistoryUi::load(),
+            history: super::history::HistoryUi::default(),
             project_ui: Default::default(),
             import: Default::default(),
             relink: Default::default(),
@@ -2058,17 +2058,23 @@ impl Workspace {
                 theme::decorated(ui, Deco::Status, |ui| self.status_bar(ui))
             });
         if self.history.open && self.snap.project.is_some() {
-            egui::Window::new("History")
-                .id(egui::Id::unique("history-window"))
-                .title_bar(false)
-                .resizable(true)
-                .default_width(self.history.width)
-                .default_height(super::history::HEIGHT)
-                .min_width(super::history::MIN_WIDTH)
-                .frame(theme::card(panel))
-                .show(&ctx, |ui| {
-                    theme::decorated(ui, Deco::Card, |ui| self.history_panel(ui))
-                });
+            let owner = self.main_window;
+            let mut window = std::mem::take(&mut self.history.window);
+            let mut open = true;
+            super::dialog::separate_window(
+                &ctx,
+                &mut window,
+                owner,
+                &super::history::WINDOW,
+                &mut open,
+                |ui| self.history_panel(ui),
+            );
+            self.history.window = window;
+            if !open {
+                self.history.close();
+            }
+        } else {
+            self.history.window.close();
         }
         if self.snap.project.is_none() {
             egui::CentralPanel::default().show(ui, |ui| self.start_screen(ui));
