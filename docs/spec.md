@@ -3505,7 +3505,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Subtitle tracks are `S1`, `S2`, … from the video up.
   - In Resolve Studio 21.1.2, a script added 380 subtitle tracks to one timeline, and none was refused.
   - `track.add` takes a `count` of at least 1 subtitle track, with no top limit.
-  - vidcut: a new track that an import, a transcription or a paste makes is the shown track.
+  - vidcut: a new track that an import, a transcription, a paste or `subtitles.add` makes is the shown track.
+    - `subtitles.add` makes a track when its `track` is the next new id, or when the project has no subtitle track.
   - A new cue lasts 3 s from the playhead, measured in Resolve Studio 21.1.2. It does not stop at the next cue.
   - Add New and Add Subtitle overwrite what the new cue covers, measured in Resolve Studio 21.1.2:
     - A cue that the new cue fully covers is removed.

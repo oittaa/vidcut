@@ -1548,7 +1548,8 @@ pub enum Request {
     TrackList {},
     /// Add tracks (Timeline Actions > Add Track): video tracks go on top, audio
     /// tracks at the bottom, subtitle tracks above the video. Returns their
-    /// ids. A new subtitle track is the one shown.
+    /// ids. The first subtitle track is the one shown. A later new subtitle
+    /// track is hidden, and the other tracks keep their state.
     #[serde(rename = "track.add")]
     TrackAdd {
         kind: NewTrack,
