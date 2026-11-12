@@ -1538,7 +1538,8 @@ pub enum Request {
     TrackList {},
     /// Add tracks (Timeline Actions > Add Track): video tracks go on top, audio
     /// tracks at the bottom, subtitle tracks above the video. Returns their
-    /// ids. A new subtitle track is the one shown.
+    /// ids. A new subtitle track is the one shown. The first subtitle track is
+    /// also the destination.
     #[serde(rename = "track.add")]
     TrackAdd {
         kind: NewTrack,
@@ -1557,7 +1558,7 @@ pub enum Request {
     },
     /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
     /// volume in dB, Voice Isolation, ducking). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
-    /// `language`, and `style` or a `look`.
+    /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
         track: String,
@@ -1615,6 +1616,12 @@ pub enum Request {
         /// others.
         #[serde(default)]
         shown: Option<bool>,
+        /// `true` makes a subtitle track the destination (ST1, ST2, …):
+        /// `subtitles.add` with no track puts the cue there. It clears the
+        /// others. A track stops being the destination only when another
+        /// one becomes it.
+        #[serde(default)]
+        destination: Option<bool>,
         /// A subtitle track's language, as a code such as `en` or `pt-BR`.
         /// Empty string clears it.
         #[serde(default)]
@@ -2010,8 +2017,8 @@ pub enum Request {
     },
     /// Add a cue: `text` from `at` (default: the playhead) to `end`, or for
     /// `duration`. Without either it lasts 3 s. It changes no other cue, so
-    /// it can overlap them. On `track` (default: the shown subtitle track; S1
-    /// is made when there is none). Returns its id.
+    /// it can overlap them. On `track` (default: the destination subtitle
+    /// track; S1 is made when there is none). Returns its id.
     #[serde(rename = "subtitles.add")]
     SubtitlesAdd {
         /// Its lines, separated by a line break. `<i>`, `<b>`, `<u>` and

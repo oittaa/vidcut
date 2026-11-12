@@ -3961,6 +3961,7 @@ fn mutate(
             locked,
             name,
             shown,
+            destination,
             language,
             style,
             look,
@@ -3980,10 +3981,16 @@ fn mutate(
                 (None, Some(l)) => Some(crate::looks::subtitle_look(env, l)?.style),
                 (None, None) => None,
             };
+            if *destination == Some(false) {
+                return Err(Error::usage(
+                    "destination takes true; make another track the destination instead",
+                ));
+            }
             let props = ops::subtitles::TrackProps {
                 locked: *locked,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
                 shown: *shown,
+                destination: destination.is_some(),
                 language: language
                     .as_ref()
                     .map(|l| (!l.trim().is_empty()).then(|| l.trim().to_string())),
@@ -3994,17 +4001,22 @@ fn mutate(
         }
         Request::TrackSet { track, .. } if track.starts_with('S') => {
             return Err(Error::usage(
-                "a subtitle track takes locked, name, shown, language, style and look",
+                "a subtitle track takes locked, name, shown, destination, language, style and look",
             ));
         }
         Request::TrackSet { shown: Some(_), .. }
+        | Request::TrackSet {
+            destination: Some(_),
+            ..
+        }
         | Request::TrackSet {
             language: Some(_), ..
         }
         | Request::TrackSet { style: Some(_), .. }
         | Request::TrackSet { look: Some(_), .. } => {
             return Err(Error::usage(
-                "shown, language, style and look are a subtitle track's; a title takes a look \
+                "shown, destination, language, style and look are a subtitle track's; a title \
+                 takes a look \
                  with titles.set",
             ));
         }

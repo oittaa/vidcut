@@ -19,6 +19,7 @@ use crate::gui::theme;
 use crate::gui::workspace::Workspace;
 use vidcut_core::shortcuts::Action;
 
+const DESTINATION: f32 = 26.0;
 const EDGE: f32 = 8.0;
 const FILL: Color32 = Color32::from_rgb(52, 98, 108);
 
@@ -710,9 +711,23 @@ impl Workspace {
         child.set_clip_rect(rect.intersect(child.clip_rect()));
         child.spacing_mut().button_padding.x = 3.0;
         let parts = header_parts(rect);
+        let left = parts.enlarge.left();
+        let destination = parts.enlarge.with_max_x(left + DESTINATION);
+        let label = format!("ST{}", t.id.trim_start_matches('S'));
+        let r = child.put(
+            destination,
+            egui::Button::selectable(t.destination, RichText::new(&label).small()),
+        );
+        let what = format!("Destination {}", t.id);
+        r.widget_info(|| {
+            egui::WidgetInfo::selected(egui::Role::Button, true, t.destination, &what)
+        });
+        if r.on_hover_text("Destination").clicked() && !t.destination {
+            self.send("track.set", json!({ "track": t.id, "destination": true }));
+        }
         let mut name = child.new_child(
             egui::UiBuilder::new()
-                .max_rect(parts.name.with_min_x(parts.enlarge.left()))
+                .max_rect(parts.name.with_min_x(destination.right() + 4.0))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         let field = egui::Id::unique(("subtitle-track-name", &t.id));

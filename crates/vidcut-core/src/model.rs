@@ -6298,6 +6298,10 @@ pub struct SubtitleTrack {
     pub language: Option<String>,
     /// Shown in the viewer. One subtitle track at a time is.
     pub shown: bool,
+    /// The destination of Add Subtitle when no track is named. One subtitle
+    /// track at a time is. Left out when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub destination: bool,
     pub locked: bool,
     /// How it looks burned in and in an IMSC1 file.
     #[serde(default, skip_serializing_if = "SubtitleStyle::is_empty")]
@@ -6443,6 +6447,7 @@ impl SubtitleTrack {
             name: None,
             language: None,
             shown: false,
+            destination: false,
             locked: false,
             style: SubtitleStyle::default(),
             cues: Vec::new(),

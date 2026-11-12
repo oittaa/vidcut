@@ -696,6 +696,7 @@ impl Words<'_> {
                     "locked": t.locked,
                     "name": t.name,
                     "shown": t.shown,
+                    "destination": t.destination,
                     "language": t.language,
                     "style": t.style,
                 })),
@@ -716,6 +717,9 @@ impl Words<'_> {
             t["video_enabled"].clone()
         });
         s.put("shown", "Show", &raw, |t| t["shown"].clone());
+        s.put("destination", "Destination", &raw, |t| {
+            t["destination"].clone()
+        });
         if let Some(duck) = p.get("duck") {
             let before = s.olds(|t| t["duck"].clone());
             ducking(&mut s.f, &before, duck);

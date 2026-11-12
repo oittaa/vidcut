@@ -21,6 +21,7 @@ pub fn add_track(p: &mut Project, name: Option<String>) -> String {
     let mut t = SubtitleTrack::new(id.clone());
     t.name = name;
     t.shown = true;
+    t.destination = !p.subtitles.iter().any(|o| o.destination);
     for o in &mut p.subtitles {
         o.shown = false;
     }
@@ -63,6 +64,11 @@ pub fn remove_track(p: &mut Project, id: &str, force: bool) -> Result<()> {
     }
     p.subtitles.remove(ti);
     renumber(p);
+    if !p.subtitles.iter().any(|t| t.destination)
+        && let Some(t) = p.subtitles.first_mut()
+    {
+        t.destination = true;
+    }
     Ok(())
 }
 
@@ -71,6 +77,7 @@ pub struct TrackProps {
     pub locked: Option<bool>,
     pub name: Option<Option<String>>,
     pub shown: Option<bool>,
+    pub destination: bool,
     pub language: Option<Option<String>>,
     pub style: Option<SubtitleStyle>,
 }
@@ -263,6 +270,11 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
         Some(false) => p.subtitles[ti].shown = false,
         None => {}
     }
+    if props.destination {
+        for (i, t) in p.subtitles.iter_mut().enumerate() {
+            t.destination = i == ti;
+        }
+    }
     let t = &mut p.subtitles[ti];
     if let Some(l) = props.locked {
         t.locked = l;
@@ -303,7 +315,7 @@ pub fn target(p: &mut Project, track: Option<&str>) -> Result<usize> {
 pub fn usual_track(p: &Project) -> Option<usize> {
     p.subtitles
         .iter()
-        .position(|t| t.shown)
+        .position(|t| t.destination)
         .or((!p.subtitles.is_empty()).then_some(0))
 }
 
