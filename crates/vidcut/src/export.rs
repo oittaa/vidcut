@@ -127,6 +127,7 @@ pub fn save_preset(s: &PresetSave<'_>) -> Result<Value> {
         title: s.title.unwrap_or(s.name).into(),
         description: s.description.unwrap_or_default().into(),
         quick_export: s.quick_export,
+        family: None,
         settings,
     };
     if s.dry_run {

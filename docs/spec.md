@@ -2696,7 +2696,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - H.265 Master (Main10)
   - ProRes 422 HQ (LPCM audio)
   - YouTube 720p–2160p (MP4, H.264 High)
-  - Vimeo
+  - Vimeo 720p, 1080p and 2160p (p. 4105)
   - TikTok (vertical 1080×1920)
 - **User presets:** you can add them to the Quick Export row.
 - **In vidcut:**
