@@ -1472,6 +1472,32 @@ pub struct Inspector {
     find_error: bool,
     finding: Option<Finding>,
     area_edit: Option<usize>,
+    tab: Tab,
+    effect_picked: Option<usize>,
+    effect_shut: bool,
+    effect_drawn: bool,
+    effects_seen: Option<(String, Vec<Effect>)>,
+    watched: Option<(std::sync::Weak<Project>, Vec<String>)>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+enum Tab {
+    #[default]
+    Video,
+    Audio,
+    Effects,
+}
+
+impl Tab {
+    const ALL: [Tab; 3] = [Tab::Video, Tab::Audio, Tab::Effects];
+
+    fn name(self) -> &'static str {
+        match self {
+            Tab::Video => "Video",
+            Tab::Audio => "Audio",
+            Tab::Effects => "Effects",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1575,6 +1601,8 @@ enum Act {
     EffectReset(usize),
     EffectRemove(usize),
     EffectMove(usize, usize),
+    EffectOpen(usize),
+    Tab(Tab),
     Tint(usize, [u8; 3], [u8; 3]),
 }
 
@@ -3043,6 +3071,8 @@ fn effect_block(
     fresh.area = e.area.clone();
     fresh.keys = e.area_keys().cloned().collect();
     let changed = *e != fresh;
+    let picked = i.effect_picked == Some(n);
+    let open = picked && !i.effect_shut;
     let header = |ui: &mut egui::Ui| {
         let mut act = None;
         let mut on = e.on;
@@ -3051,7 +3081,14 @@ fn effect_block(
         if r.clicked() {
             act = Some(Act::EffectSet(n, json!({ "on": on })));
         }
-        ui.label(RichText::new(e.kind().name()).strong());
+        let mut name = RichText::new(e.kind().name()).strong();
+        if picked {
+            name = name.color(theme::colors().accent);
+        }
+        let title = ui.add(egui::Label::new(name).sense(egui::Sense::click()));
+        if title.clicked() && !title.double_clicked() {
+            act = Some(Act::EffectOpen(n));
+        }
         match key_buttons(ui, marks, &Ease::ALL, None) {
             Some(KeyClick::Step(dir)) => act = Some(Act::EffectStep(n, dir)),
             Some(KeyClick::Toggle) => act = Some(Act::EffectKey(n, None)),
@@ -3078,25 +3115,44 @@ fn effect_block(
         act
     };
     let id = ui.make_persistent_id(("inspector-effect", n));
-    let (_, header, _) =
-        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
-            .show_header(ui, header)
-            .body(|ui| {
-                match &e.kind {
-                    EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (n, e, g), acts),
-                    EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (n, e, m), acts),
-                    EffectKind::Glow(g) => glow_rows(ui, i, (n, e, g), acts),
-                    EffectKind::FilmGrain(g) => grain_rows(ui, i, (n, e, g), acts),
-                    EffectKind::Vignette(v) => vignette_rows(ui, i, (n, e, v), acts),
-                    EffectKind::Sharpen(_) => sharpen_rows(ui, i, (n, e), acts),
-                }
-                area_rows(ui, i, (n, e), paths, acts);
-                fold(ui, (n, "Global Blend"), |ui| {
-                    knob(ui, i, (n, Knob::Blend), e, acts);
-                    check(ui, (n, "Use Alpha", e.use_alpha, true), "use_alpha", acts);
-                });
-            });
+    let mut state =
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, open);
+    state.set_open(open);
+    let (toggle, header, _) = state.show_header(ui, header).body(|ui| {
+        match &e.kind {
+            EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (n, e, g), acts),
+            EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (n, e, m), acts),
+            EffectKind::Glow(g) => glow_rows(ui, i, (n, e, g), acts),
+            EffectKind::FilmGrain(g) => grain_rows(ui, i, (n, e, g), acts),
+            EffectKind::Vignette(v) => vignette_rows(ui, i, (n, e, v), acts),
+            EffectKind::Sharpen(_) => sharpen_rows(ui, i, (n, e), acts),
+        }
+        area_rows(ui, i, (n, e), paths, acts);
+        fold(ui, (n, "Global Blend"), |ui| {
+            knob(ui, i, (n, Knob::Blend), e, acts);
+            check(ui, (n, "Use Alpha", e.use_alpha, true), "use_alpha", acts);
+        });
+    });
+    if toggle.clicked() && !toggle.double_clicked() {
+        acts.push(Act::EffectOpen(n));
+    }
     acts.extend(header.inner);
+}
+
+fn tab_has(tab: Tab, chosen: &[Chosen], sounds: &[Sound]) -> bool {
+    match tab {
+        Tab::Video => !chosen.is_empty(),
+        Tab::Audio => !sounds.is_empty(),
+        Tab::Effects => matches!(chosen, [c] if !c.stored.effects.is_empty()),
+    }
+}
+
+fn shuffled(was: &[Effect], now: &[Effect]) -> bool {
+    let mut left: Vec<&Effect> = now.iter().collect();
+    was.iter().all(|e| {
+        let found = left.iter().position(|x| *x == e);
+        found.map(|k| left.swap_remove(k)).is_some()
+    })
 }
 
 fn effects(ui: &mut egui::Ui, i: &Inspector, c: &Chosen, acts: &mut Vec<Act>) {
@@ -3558,6 +3614,108 @@ impl Workspace {
             since: Instant::now(),
             pictures: vec![(c.id.clone(), c.stored.clone(), to)],
         });
+    }
+
+    pub(super) fn watch_inspector(&mut self) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let clips = &self.snap.selection.clips;
+        let same = self.inspector.watched.as_ref().is_some_and(|(at, seen)| {
+            std::ptr::eq(at.as_ptr(), std::sync::Arc::as_ptr(&p)) && seen == clips
+        });
+        if same {
+            return;
+        }
+        self.inspector.watched = Some((std::sync::Arc::downgrade(&p), clips.clone()));
+        let (chosen, sounds) = (self.chosen(), self.sounds());
+        self.settle_tabs(&chosen, &sounds);
+    }
+
+    pub(super) fn pick_effect(&mut self, n: usize) {
+        self.inspector.effect_picked = Some(n);
+        self.inspector.effect_shut = false;
+    }
+
+    pub(super) fn pick_drawn(&mut self, n: usize) {
+        self.pick_effect(n);
+        self.inspector.effect_drawn = true;
+    }
+
+    pub(super) fn sync_effect_area(&mut self) {
+        let picked = self.inspector.effect_picked;
+        let g = &mut self.timeline.picture_grab;
+        g.area = picked.filter(|_| g.effects);
+    }
+
+    fn settle_tabs(&mut self, chosen: &[Chosen], sounds: &[Sound]) {
+        self.settle_effects(chosen);
+        let i = &mut self.inspector;
+        if tab_has(i.tab, chosen, sounds) {
+            return;
+        }
+        let next = [Tab::Video, Tab::Audio]
+            .into_iter()
+            .find(|t| tab_has(*t, chosen, sounds));
+        if let Some(tab) = next {
+            i.tab = tab;
+        }
+    }
+
+    fn settle_effects(&mut self, chosen: &[Chosen]) {
+        let i = &mut self.inspector;
+        let seen = i.effects_seen.take();
+        let [c] = chosen else {
+            i.effect_picked = None;
+            return;
+        };
+        let now = &c.stored.effects;
+        let first = (!now.is_empty()).then_some(0);
+        let was = match seen {
+            Some((id, was)) if id == c.id => was,
+            _ => {
+                if !std::mem::take(&mut i.effect_drawn) {
+                    i.effect_picked = first;
+                    i.effect_shut = false;
+                }
+                i.effects_seen = Some((c.id.clone(), now.clone()));
+                return;
+            }
+        };
+        let changed = (0..was.len().max(now.len())).find(|&k| was.get(k) != now.get(k));
+        let Some(k) = changed else {
+            i.effects_seen = Some((c.id.clone(), was));
+            return;
+        };
+        let picked = i.effect_picked.filter(|&p| p < was.len());
+        match now.len().cmp(&was.len()) {
+            std::cmp::Ordering::Greater => {
+                i.tab = Tab::Effects;
+                i.effect_picked = Some(k);
+                i.effect_shut = false;
+                i.effect_drawn = false;
+            }
+            std::cmp::Ordering::Less => match picked {
+                Some(p) if p == k => {
+                    i.effect_picked = first;
+                    i.effect_shut = false;
+                }
+                Some(p) if p > k => i.effect_picked = Some(p - 1),
+                _ => {}
+            },
+            std::cmp::Ordering::Equal => {
+                if let Some(p) = picked
+                    && was[p] != now[p]
+                    && shuffled(&was, now)
+                {
+                    i.effect_picked = now.iter().position(|e| *e == was[p]);
+                }
+            }
+        }
+        if i.effect_picked.is_some_and(|p| p >= now.len()) {
+            i.effect_picked = first;
+        }
+        i.effects_seen = Some((c.id.clone(), now.clone()));
     }
 
     fn send_effect(&mut self, method: &str, chosen: &[Chosen], n: usize, mut params: Value) {
@@ -4637,9 +4795,9 @@ impl Workspace {
                 }
             }
             Act::AreaEdit(n) => {
-                let grab = &mut self.timeline.picture_grab;
-                grab.area = (grab.area != Some(n)).then_some(n);
-                grab.tool = None;
+                let on = !self.timeline.picture_grab.effects;
+                self.pick_effect(n);
+                self.effects_tool(on);
             }
             Act::AreaTrack(n) => {
                 if let Some(c) = chosen.first() {
@@ -4708,6 +4866,12 @@ impl Workspace {
             Act::EffectMove(n, to) => {
                 self.send_effect("effects.move", chosen, n, json!({ "to": to }));
             }
+            Act::EffectOpen(n) => {
+                let i = &mut self.inspector;
+                i.effect_shut = i.effect_picked == Some(n) && !i.effect_shut;
+                i.effect_picked = Some(n);
+            }
+            Act::Tab(tab) => self.inspector.tab = tab,
             Act::Tint(effect, from, to) => {
                 if let Some(c) = chosen.first() {
                     self.inspector.tinted = Some(Tinted {
@@ -4833,64 +4997,87 @@ impl Workspace {
             self.inspector.held = None;
         }
         let mut acts = Vec::new();
+        self.settle_tabs(&chosen, &sounds);
+        let shared = self.project_shared();
+        let first = shared.as_ref().and_then(|p| {
+            let top = chosen.first().map(|c| &c.id);
+            let id = top
+                .or(sounds.first().map(|s| &s.id))
+                .or(paced.first().map(|c| &c.id))?;
+            p.clip(id)
+        });
+        let has = |t: Tab| tab_has(t, &chosen, &sounds);
+        let tab = Some(self.inspector.tab)
+            .filter(|t| has(*t))
+            .unwrap_or(Tab::Video);
+        if let (Some(p), Some(first)) = (&shared, first) {
+            ui.horizontal(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if chosen.len() > 1 {
+                        ui.label(dim(format!("{} clips selected", chosen.len())));
+                    }
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        let text = RichText::new(name(p, first)).strong();
+                        ui.add(egui::Label::new(text).truncate());
+                    });
+                });
+            });
+            if has(Tab::Video) || has(Tab::Audio) {
+                ui.horizontal(|ui| {
+                    for t in Tab::ALL {
+                        let button = egui::Button::selectable(t == tab, t.name());
+                        if ui.add_enabled(has(t), button).clicked() {
+                            acts.push(Act::Tab(t));
+                        }
+                    }
+                });
+            }
+        }
         egui::ScrollArea::vertical()
+            .id_salt(tab)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_max_width(ui.available_width() - dialog::scroll_room(ui));
-                let forms = self.title_form(ui)
-                    | self.cue_form(ui)
-                    | self.track_form(ui)
-                    | self.transition_form(ui);
-                let Some(p) = self.project_shared() else {
-                    return;
-                };
-                let top = chosen.first().map(|c| &c.id);
-                let Some(first) = top
-                    .or(sounds.first().map(|s| &s.id))
-                    .or(paced.first().map(|c| &c.id))
-                    .and_then(|id| p.clip(id))
-                else {
-                    if !forms {
+                let titled = (first.is_none() || tab == Tab::Video) && self.title_form(ui);
+                let forms =
+                    titled | self.cue_form(ui) | self.track_form(ui) | self.transition_form(ui);
+                let (Some(p), Some(first)) = (&shared, first) else {
+                    if shared.is_some() && !forms {
                         ui.label(dim("Select a clip with a picture or sound"));
                     }
                     return;
                 };
-                ui.horizontal(|ui| {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if chosen.len() > 1 {
-                            ui.label(dim(format!("{} clips selected", chosen.len())));
-                        }
-                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            let text = RichText::new(name(&p, first)).strong();
-                            ui.add(egui::Label::new(text).truncate());
-                        });
-                    });
-                });
-                self.generator_section(ui, first, &mut acts);
-                if !chosen.is_empty() {
+                if tab == Tab::Video {
+                    self.generator_section(ui, first, &mut acts);
+                }
+                if tab == Tab::Video && !chosen.is_empty() {
                     let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
                     let i = &self.inspector;
                     let at = self.snap.timeline.position;
-                    transform(ui, i, &p, at, &chosen, &mut acts);
-                    crop(ui, i, &p, at, &chosen, &mut acts);
-                    dynamic_zoom(ui, i, &p, at, &chosen, boxes, &mut acts);
-                    composite(ui, i, &p, at, &chosen, &mut acts);
-                    self.input_lut_section(ui, &p, &chosen);
-                    self.super_scale_section(ui, &p, &chosen);
+                    transform(ui, i, p, at, &chosen, &mut acts);
+                    crop(ui, i, p, at, &chosen, &mut acts);
+                    dynamic_zoom(ui, i, p, at, &chosen, boxes, &mut acts);
+                    composite(ui, i, p, at, &chosen, &mut acts);
+                    self.input_lut_section(ui, p, &chosen);
+                    self.super_scale_section(ui, p, &chosen);
                     self.motion_section(ui, &chosen[0]);
+                }
+                if tab == Tab::Effects && !chosen.is_empty() {
                     self.inspector.area_edit = self.timeline.picture_grab.area;
                     effects(ui, &self.inspector, &chosen[0], &mut acts);
                 }
-                if !paced.is_empty() {
-                    let state = (&self.inspector, &*p, dropped);
+                if tab == Tab::Audio && !sounds.is_empty() {
+                    self.audio_section(ui, p, &sounds, &mut acts);
+                }
+                if tab != Tab::Effects && !paced.is_empty() {
+                    let state = (&self.inspector, &**p, dropped);
                     let at = self.snap.timeline.position;
                     speed_section(ui, state, (&paced, at), ripple, &mut acts);
                 }
-                if !sounds.is_empty() {
-                    self.audio_section(ui, &p, &sounds, &mut acts);
+                if tab == Tab::Audio && !sounds.is_empty() {
                     let ids: Vec<String> = sounds.iter().map(|s| s.id.clone()).collect();
-                    self.equalizer_section(ui, &p, &ids);
-                    self.leveler_section(ui, &p, &ids);
+                    self.equalizer_section(ui, p, &ids);
+                    self.leveler_section(ui, p, &ids);
                 }
             });
         for act in acts {
