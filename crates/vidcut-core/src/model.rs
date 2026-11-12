@@ -6298,6 +6298,10 @@ pub struct SubtitleTrack {
     pub language: Option<String>,
     /// Shown in the viewer. One subtitle track at a time is.
     pub shown: bool,
+    /// Its destination control (ST1, ST2, …) is on. A paste of cues uses it.
+    /// Left out when on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub destination: bool,
     pub locked: bool,
     /// How it looks burned in and in an IMSC1 file.
     #[serde(default, skip_serializing_if = "SubtitleStyle::is_empty")]
@@ -6330,6 +6334,15 @@ impl CueWord {
     pub fn from_times(times: &[i64]) -> Vec<Self> {
         times.iter().copied().map(Self::at).collect()
     }
+}
+
+/// A cue with the subtitle track it is on: what `edit.copy` returns for
+/// cues and `edit.paste` takes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackCue {
+    pub track: String,
+    #[serde(flatten)]
+    pub cue: Cue,
 }
 
 /// One subtitle: its text over a span of the timeline.
@@ -6443,6 +6456,7 @@ impl SubtitleTrack {
             name: None,
             language: None,
             shown: false,
+            destination: true,
             locked: false,
             style: SubtitleStyle::default(),
             cues: Vec::new(),

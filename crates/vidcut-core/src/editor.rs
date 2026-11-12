@@ -3838,17 +3838,27 @@ fn mutate(
         },
         Request::EditPaste {
             clips,
+            cues,
             at,
             insert,
             duration,
         } => {
-            let clips = clips.as_ref().ok_or_else(|| {
-                Error::usage("edit.paste needs `clips` (the GUI pastes its clipboard)")
-            })?;
             let at = match at {
                 Some(t) => resolve(p, t, playhead)?,
                 None => need(playhead, "at")?,
             };
+            if let Some(cues) = cues {
+                if clips.is_some() || *insert || duration.is_some() {
+                    return Err(Error::usage(
+                        "cues paste alone: without clips, insert or duration",
+                    ));
+                }
+                let ids = ops::subtitles::paste_cues(p, cues, at)?;
+                return Ok(json!({ "cues": ids }));
+            }
+            let clips = clips.as_ref().ok_or_else(|| {
+                Error::usage("edit.paste needs `clips` or `cues` (the GUI pastes its clipboard)")
+            })?;
             let clips = match duration {
                 Some(d) => ops::cut_to(clips, length(p, d)?),
                 None => clips.clone(),
@@ -3961,6 +3971,7 @@ fn mutate(
             locked,
             name,
             shown,
+            destination,
             language,
             style,
             look,
@@ -3984,6 +3995,7 @@ fn mutate(
                 locked: *locked,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
                 shown: *shown,
+                destination: *destination,
                 language: language
                     .as_ref()
                     .map(|l| (!l.trim().is_empty()).then(|| l.trim().to_string())),
@@ -3994,17 +4006,22 @@ fn mutate(
         }
         Request::TrackSet { track, .. } if track.starts_with('S') => {
             return Err(Error::usage(
-                "a subtitle track takes locked, name, shown, language, style and look",
+                "a subtitle track takes locked, name, shown, destination, language, style and look",
             ));
         }
         Request::TrackSet { shown: Some(_), .. }
+        | Request::TrackSet {
+            destination: Some(_),
+            ..
+        }
         | Request::TrackSet {
             language: Some(_), ..
         }
         | Request::TrackSet { style: Some(_), .. }
         | Request::TrackSet { look: Some(_), .. } => {
             return Err(Error::usage(
-                "shown, language, style and look are a subtitle track's; a title takes a look \
+                "shown, destination, language, style and look are a subtitle track's; a title \
+                 takes a look \
                  with titles.set",
             ));
         }
@@ -7887,16 +7904,20 @@ pub fn query(
             "undo": history.undo.iter().rev().collect::<Vec<_>>(),
             "redo": history.redo.iter().rev().collect::<Vec<_>>(),
         }),
-        Request::EditCopy { clips, range } => match (clips, range) {
-            (Some(clips), None) => {
+        Request::EditCopy { clips, range, cues } => match (clips, range, cues) {
+            (Some(clips), None, None) => {
                 let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
                 json!({ "clips": ops::copy_clips(p, &ids)? })
             }
-            (None, Some(range)) => {
+            (None, Some(range), None) => {
                 let (a, b) = ctx(p, playhead).range(range)?;
                 json!({ "clips": ops::copy_range(p, a, b)? })
             }
-            _ => return Err(Error::usage("give `clips` or `range`")),
+            (None, None, Some(cues)) => {
+                let ids = resolve_cues(p, &cues.to_vec(), playhead)?;
+                json!({ "cues": ops::subtitles::copy_cues(p, &ids)? })
+            }
+            _ => return Err(Error::usage("give `clips`, `range` or `cues`")),
         },
         live if live.is_live() => {
             return Err(Error::no_instance(format!(

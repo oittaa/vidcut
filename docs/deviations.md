@@ -363,19 +363,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - One change for each edit of the text keeps typing out of the undo history. With the playhead at the start of the cue, the viewer shows the cue.
   - Imports and scripts can need cues that overlap (D56). Thus `subtitles.set` alone keeps them.
 
-## X44. Add Subtitle uses the shown subtitle track
-
-- **Resolve:**
-  - The header of each subtitle track has a destination control (ST1, ST2, …).
-  - This control selects the track that Add Subtitle puts new subtitles on (p. 1232).
-  - Add Subtitle is in the right-click menu of a subtitle track (p. 1233).
-- **vidcut:**
-  - Add Subtitle in Timeline Actions puts the subtitle on the shown subtitle track.
-  - Add Subtitle in the right-click menu of a subtitle track puts the subtitle on that track.
-  - The header has no destination control.
-- **Why:**
-  - The track that the viewer shows is the track that the user works on. Thus one control does both.
-
 ## X52. Titles come from a Titles tab and are edited in the Inspector
 
 - **Resolve:**

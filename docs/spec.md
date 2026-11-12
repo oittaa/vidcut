@@ -224,7 +224,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Clear Transition from All Edits, Add Dissolve to All Edits, Add Transition to All Edits.
     - The Add Tracks window of Resolve Studio 21.1.2 takes 0 to 99 video tracks and 0 to 999 audio tracks. `track.add` takes the same.
     - vidcut has these items in this order, except the four in [the gaps](todo/gaps.md).
-    - After them, vidcut has Add Title (D66), Add Subtitle (X44), Re-time Subtitles to Speech (§8.12) and Ripple Delete Silence (§9).
+    - After them, vidcut has Add Title (D66), Add Subtitle, Re-time Subtitles to Speech (§8.12) and Ripple Delete Silence (§9).
   - **Timeline** in the menu bar: Create Subtitles from Audio is under AI Tools (p. 1234).
     - vidcut: the menu also has Keyframes and Audio Scrubbing. The other items of Timeline Actions follow.
   - **Edit Actions:** Trim Start to Playhead, Trim End to Playhead.
@@ -1362,10 +1362,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A subtitle track locks like any track.
   - One subtitle track shows at a time. When one shows, the others are hidden (p. 1228).
   - Minimize Subtitle Track (Timeline Options, p. 645) makes them shorter.
-  - Details: D56; deviation X44.
+  - The header of each subtitle track has a destination control (p. 1228). Its labels are ST1, ST2 and so on (p. 1232).
+    - These are measurements in Resolve Studio 21.2. A new subtitle track has it on. A click turns it on or off. The other tracks keep theirs.
+    - Paste uses it. Create Caption, Add New and Add Subtitle do not.
+  - Details: D56.
 - **Cues** (pp. 1231–1233, 1236–1237):
   - Add Subtitle, in the right-click menu of a subtitle track, puts a cue at the playhead.
-  - vidcut: with no subtitle track, Add Subtitle in Timeline Actions first makes Subtitle 1.
+    - The cue goes on that track, also when the destination control of the track is off. The track does not become the shown track. This is measured in Resolve Studio 21.2.
+  - vidcut: Add Subtitle in Timeline Actions puts the cue on the shown track, else on the oldest subtitle track. With no subtitle track, it first makes Subtitle 1.
   - You type its text in the Inspector. The text shows on the cue as you type it.
   - The Captions list, at the bottom of the Inspector, shows every cue of the track (pp. 1231, 1233).
   - Each row of the list has its number, its In above its Out, its text and its characters per second (CPS).
@@ -1376,7 +1380,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: the line with Add New also has the name of the track. The Delete button of the section deletes the open cue.
   - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. A value inside the cue next to it changes nothing (D79). Else the new range overwrites the other cues of the track.
   - Cues move, trim, split and delete like clips.
-  - Details: D56, D57, D78, D79; deviations X43, X44.
+  - Copy (Ctrl+C) and Paste (Ctrl+V) take cues too. These are measurements in Resolve Studio 21.2:
+    - A pasted cue starts at the playhead.
+    - It goes on its own track when the destination control of that track is on.
+    - Else it goes on the lowest subtitle track whose control is on.
+    - When no control is on, a new subtitle track takes it.
+    - A pasted cue trims a cue that it partly covers. vidcut applies the whole rule of Add New.
+  - Details: D56, D57, D78, D79; deviation X43.
 - **Keyframes** ([measured](todo/keyframes.md#subtitles)):
   - A cue acts as a picture as large as the frame. It takes the Transform, Crop and Composite keyframes of a clip (§8.15, D75), without an anchor point, flips, Dynamic Zoom, composite mode or effects.
   - The Inspector of a cue has no Keyframe buttons. The Keyframes tab and the keyframe tray show the item selected first, a cue or a clip.

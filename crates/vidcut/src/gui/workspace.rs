@@ -1447,10 +1447,10 @@ impl Workspace {
             (Action::Copy, false, "edit.copy"),
             (Action::Cut, true, "edit.cut"),
         ] {
-            if fired.pressed(action)
-                && !self.copy_editor_keys(cut)
-                && !self.snap.selection.clips.is_empty()
-            {
+            if !fired.pressed(action) || self.copy_editor_keys(cut) {
+                continue;
+            }
+            if !self.snap.selection.clips.is_empty() {
                 let clips = self.snap.selection.clips.clone();
                 if let Some(p) = self.project()
                     && let Ok(data) = vidcut_core::ops::copy_clips(p, &clips)
@@ -1458,6 +1458,14 @@ impl Workspace {
                     ctx.copy_text(json!(data).to_string());
                 }
                 self.send(method, json!({ "clips": clips }));
+            } else if !cut && !self.snap.selection.cues.is_empty() {
+                let cues = self.snap.selection.cues.clone();
+                if let Some(p) = self.project()
+                    && let Ok(data) = vidcut_core::ops::subtitles::copy_cues(p, &cues)
+                {
+                    ctx.copy_text(json!(data).to_string());
+                }
+                self.send("edit.copy", json!({ "cues": cues }));
             }
         }
         if fired.pressed(Action::Paste) && !self.paste_editor_keys() {
