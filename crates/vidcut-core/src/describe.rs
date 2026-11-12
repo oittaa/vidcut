@@ -76,7 +76,7 @@ pub fn describe_at(
         "proxy.generate" => format!("Make proxies: {}", d.media_or("media", "every video")),
         "proxy.remove" => format!("Remove proxies: {}", d.media_or("media", "all")),
         "bins.add" => format!("New bin {}", d.text("path")),
-        "bins.remove" => format!("Remove bin {}", d.text("path")),
+        "bins.remove" => format!("Delete bin {}", d.text("path")),
         "bins.rename" => format!("Rename bin {} to {}", d.text("path"), d.text("to")),
         "timeline.import" => match d.text("mode").as_str() {
             "replace" => format!("Import timeline {}, replacing the timeline", d.file("path")),

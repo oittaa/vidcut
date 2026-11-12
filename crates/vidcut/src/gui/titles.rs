@@ -24,19 +24,68 @@ struct LineFields {
     rotation: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Axis {
+    side: f64,
+    up: bool,
+    from_middle: bool,
+}
+
+impl Axis {
+    fn pair(size: [f64; 2], follows: bool) -> [Self; 2] {
+        [
+            Self {
+                side: size[0],
+                up: false,
+                from_middle: follows,
+            },
+            Self {
+                side: size[1],
+                up: true,
+                from_middle: follows,
+            },
+        ]
+    }
+
+    fn pixels(self, n: f64) -> f64 {
+        let n = if self.up { 1.0 - n } else { n };
+        let n = if self.from_middle { n - 0.5 } else { n };
+        n * self.side
+    }
+
+    fn fraction(self, px: f64) -> f64 {
+        let n = px / self.side;
+        let n = if self.from_middle { n + 0.5 } else { n };
+        if self.up { 1.0 - n } else { n }
+    }
+
+    fn shown(self, n: Option<f64>) -> String {
+        plain(n.map(|n| self.pixels(n)))
+    }
+
+    fn kept(self, shown: &str, stored: Option<f64>) -> Result<Option<f64>, String> {
+        let at = stored.map(|n| self.pixels(n));
+        if shown.trim().is_empty() || shown.trim() == plain(at) {
+            return Ok(stored);
+        }
+        Ok(kept_plain(shown, at, "position")?.map(|px| self.fraction(px)))
+    }
+}
+
 impl LineFields {
-    fn of(t: &Title) -> Self {
+    fn of(t: &Title, size: [f64; 2]) -> Self {
+        let [x, y] = Axis::pair(size, t.follows.is_some());
         Self {
             anchor: t.anchor,
-            across: percent(t.position.map(|p| p[0])),
-            down: percent(t.position.map(|p| p[1])),
+            across: x.shown(t.position.map(|p| p[0])),
+            down: y.shown(t.position.map(|p| p[1])),
             zoom: percent(t.zoom),
             rotation: plain(t.rotation),
         }
     }
 
-    fn of_upper(t: &Title) -> Self {
-        let f = Self::of(&t.upper_view());
+    fn of_upper(t: &Title, size: [f64; 2]) -> Self {
+        let f = Self::of(&t.upper_view(), size);
         match (&t.upper, t.position) {
             (None, None) => Self {
                 across: String::new(),
@@ -51,6 +100,7 @@ impl LineFields {
 #[derive(Debug)]
 pub struct TitleDialog {
     clip: String,
+    size: [f64; 2],
     at: i64,
     kind: TitleKind,
     align: TitleAlign,
@@ -94,9 +144,10 @@ const ALIGNS: [(TitleAlign, &str); 3] = [
 ];
 
 impl TitleDialog {
-    fn new(clip: &str, t: Option<&Title>) -> Self {
+    fn new(clip: &str, t: Option<&Title>, size: [f64; 2]) -> Self {
         let mut d = Self {
             clip: clip.to_string(),
+            size,
             at: 0,
             kind: TitleKind::Text,
             align: TitleAlign::Left,
@@ -140,8 +191,8 @@ impl TitleDialog {
         self.tracking = plain(t.style.tracking);
         self.case = t.style.case.unwrap_or_default();
         self.base = Some(t.clone());
-        self.line = LineFields::of(t);
-        self.upper = LineFields::of_upper(t);
+        self.line = LineFields::of(t, self.size);
+        self.upper = LineFields::of_upper(t, self.size);
         self.title_opacity = percent(t.opacity);
         self.loaded = true;
     }
@@ -166,8 +217,8 @@ impl TitleDialog {
     }
 
     pub(super) fn placed(&mut self, t: &Title) {
-        self.line = LineFields::of(t);
-        self.upper = LineFields::of_upper(t);
+        self.line = LineFields::of(t, self.size);
+        self.upper = LineFields::of_upper(t, self.size);
         self.shown = self.shown.is_some().then(|| t.clone());
     }
 }
@@ -271,8 +322,9 @@ fn kept(shown: &str, value: Option<f64>, what: &str) -> Result<Option<f64>, Stri
 }
 
 fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine, String> {
-    let across = kept(&f.across, stored.position.map(|p| p[0]), "position")?;
-    let down = kept(&f.down, stored.position.map(|p| p[1]), "position")?;
+    let [x, y] = Axis::pair(d.size, stored.follows.is_some());
+    let across = x.kept(&f.across, stored.position.map(|p| p[0]))?;
+    let down = y.kept(&f.down, stored.position.map(|p| p[1]))?;
     let scroll = d.kind == TitleKind::Scroll;
     let position = match (across, down) {
         (Some(x), _) if scroll => Some([x, stored.position.map_or(0.5, |p| p[1])]),
@@ -513,7 +565,10 @@ impl Workspace {
         self.close_title_form();
         let found = self.stored_title(id);
         self.looks.reread();
-        let mut d = TitleDialog::new(id, found.as_ref());
+        let size = self.project().map_or([1.0, 1.0], |p| {
+            [f64::from(p.settings.width), f64::from(p.settings.height)]
+        });
+        let mut d = TitleDialog::new(id, found.as_ref(), size);
         d.focus = focus;
         self.timeline.title_dialog = Some(d);
     }
@@ -714,10 +769,11 @@ impl Workspace {
             "{}% of the picture",
             percent(Some(Title::usual_size(d.kind)))
         );
-        let across_hint = format!("{}%", percent(Some(usual[0])));
-        let down_hint = format!("{}%", percent(Some(usual[1])));
-        let upper_hint = format!("{}%", percent(Some(usual[1] + Title::UPPER_DROP)));
         let following = found.and_then(|(_, _, t)| t.follows.as_ref());
+        let [x, y] = Axis::pair(d.size, following.is_some());
+        let across_hint = x.shown(Some(usual[0]));
+        let down_hint = y.shown(Some(usual[1]));
+        let upper_hint = y.shown(Some(usual[1] + Title::UPPER_DROP));
         let paths = found.map_or_else(Vec::new, |(_, clip, _)| leads(&p, clip, following));
         let mut follow = None;
         let mut clicks = Vec::new();
@@ -768,7 +824,7 @@ impl Workspace {
                         TitlePart::Lower
                     };
                     let mut moved = anchor_row(ui, f, Title::usual_anchor(kind, align, part));
-                    moved |= row(ui, "Across", &mut f.across, &across_hint);
+                    moved |= row(ui, "X", &mut f.across, &across_hint);
                     keys(ui, PictureValue::Position, line);
                     ui.end_row();
                     if !scroll {
@@ -777,7 +833,7 @@ impl Workspace {
                         } else {
                             &down_hint
                         };
-                        moved |= row(ui, "Down", &mut f.down, hint);
+                        moved |= row(ui, "Y", &mut f.down, hint);
                         ui.end_row();
                         moved |= row(ui, "Zoom", &mut f.zoom, "100%");
                         keys(ui, PictureValue::Zoom, line);
@@ -806,16 +862,18 @@ impl Workspace {
             ui.end_row();
         });
         ui.label(dim(match (d.kind, following.is_some()) {
-            (TitleKind::LowerThird, false) => "Across and Down: each line's anchor, in percents.",
-            (TitleKind::LowerThird, true) => {
-                "Across and Down: each line's anchor from the followed thing, in percents."
+            (TitleKind::LowerThird, false) => {
+                "X and Y: each line's anchor, in pixels from the bottom left."
             }
-            (TitleKind::Scroll, _) => "Across: the anchor's column, in percents of the picture.",
+            (TitleKind::LowerThird, true) => {
+                "X and Y: each line's anchor, in pixels from the followed thing."
+            }
+            (TitleKind::Scroll, _) => "X: the anchor's column, in pixels from the left.",
             (TitleKind::Text, false) => {
-                "Across and Down: the anchor's place, in percents of the picture."
+                "X and Y: the anchor's place, in pixels from the bottom left."
             }
             (TitleKind::Text, true) => {
-                "Across and Down: the anchor's place from the followed thing, in percents."
+                "X and Y: the anchor's place, in pixels from the followed thing."
             }
         }));
         if !d.error.is_empty() {

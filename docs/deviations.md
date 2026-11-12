@@ -29,13 +29,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X2. One timeline per project file
 
 - **Resolve:**
-  - A project holds many timelines. The Master bin lists them (pp. 655, 678).
+  - A project holds many timelines. The Media Pool stores them in bins (p. 678).
+  - The Master bin of the Cut page lists all of them (p. 655).
 - **vidcut:**
   - A project file holds exactly one timeline.
-- **Why:**
-  - This is simple for a cutting tool, and it is an obvious mapping for scripts.
   - Several timelines are several project files that share media.
-  - The owner decided that several timelines in one project can wait.
+- **Why:** several timelines in one project are not built yet ([todo](todo/timelines.md)).
 
 ## X3. Exports are jobs, and Quick Export has a shorter row
 
@@ -44,10 +43,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Create Subtitles from Audio shows its progress in a dialog box (p. 1235).
   - The Deliver page has the render settings and the Render Queue (pp. 4103–4132).
   - In Resolve Studio 21.2, the Quick Export row is H.264 Master, HyperDeck, H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok, Presentations, Dropbox and Replay.
-  - YouTube has a menu of four sizes, 720p to 2160p (p. 4105).
   - HyperDeck makes H.264 files for a Blackmagic HyperDeck (p. 4108). Presentations uploads to Blackmagic Cloud (p. 4106).
+  - TikTok has a menu of two resolutions (p. 4106). The manual does not name them.
 - **vidcut:**
-  - The Quick Export row is AV1, H.264 Master, H.265 Master, ProRes 422 HQ, YouTube 1080p, YouTube 2160p, Vimeo 1080p and TikTok.
+  - The Quick Export row is AV1, H.264 Master, H.265 Master, ProRes 422 HQ, YouTube, Vimeo and TikTok.
+  - TikTok is one preset, 1080×1920, with no menu.
   - It has no HyperDeck, Presentations, Dropbox or Replay.
   - The Export dialog also shows the live plan, and gives the export as a shell command.
   - In a running GUI, exports are jobs ([design/export.md](design/export.md#the-guis-exports), [design/live.md](design/live.md#jobs)).
@@ -57,23 +57,21 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The plan and the command let scripts reproduce GUI exports.
   - An export runs beside the editing. A dialog over the timeline for each export interrupts that editing.
   - vidcut does not upload, and it has no settings for a Blackmagic HyperDeck. The Export dialog has H.264 for other needs.
-  - One item in the row is one preset, with no menu. Thus YouTube shows as two items, 1080p and 2160p.
+  - The two TikTok resolutions are not measured yet.
 
-## X6. Removing a bin keeps its clips
+## X6. Removing media deletes the clips that use it
 
 - **Resolve:**
-  - Delete Bin deletes the bin, the bins in it and their clips (p. 377).
   - These are measurements in Resolve Studio 21.2:
     - Remove Selected Clip on media that timeline clips use asks no question. The pool item goes.
     - The clips of that media on the timeline stay, offline.
     - A compound clip that holds a clip of that media stays in the pool and on the timeline.
 - **vidcut:**
-  - `bins.remove` removes the bin and the bins in it. Their media move up to its parent bin.
   - `media.remove` removes media. It needs `force` when clips or compound clips use the media.
-  - `force` also deletes those compound clips, on the timeline and in the pool.
+  - `force` also deletes those clips, and the compound clips that hold the media, on the timeline and in the pool.
+  - Delete Bin (`bins.remove`) removes the media of the bin in the same way.
 - **Why:**
-  - Bins only organize the pool.
-  - When a script or a mistake removes a bin, the media and their clips must stay in the project.
+  - A clip on the timeline needs its media in the pool. vidcut has no clip without a pool item.
 
 ## X8. The source viewer counts project frames
 
@@ -171,17 +169,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Phone, camera and graded HDR footage looks on TVs as its sources do.
   - This needs no setup by a colorist.
 
-## X21. Ctrl+wheel zooms the timeline
-
-- **Resolve:**
-  - Option+wheel zooms the timeline, and Command+wheel moves through it (Edit page, p. 853).
-  - The lower timeline of the Cut page also zooms with Option+wheel.
-- **vidcut:**
-  - Ctrl+wheel (Cmd on a Mac) zooms the lower timeline. It does not move through it.
-- **Why:**
-  - Ctrl+wheel and Cmd+wheel zoom in browsers and most programs.
-  - egui gives them and a pinch as one zoom.
-
 ## X24. Cross fades follow their curves exactly
 
 - **Resolve:**
@@ -193,15 +180,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The curve gives the transition its name. The curve needs no points from an editor.
   - The two differ by more than 1% only in the 20 ms where a curve leaves silence or reaches it.
-
-## X25. Import is in the top bar
-
-- **Resolve:**
-  - The Import Media and Import Media Folder buttons are in the Media Pool (p. 654).
-- **vidcut:**
-  - Import and Import Folder are in the top bar.
-- **Why:**
-  - The top bar shows on every tab, also while Titles or the Inspector replaces the pool.
 
 ## X26. One folder for proxies and the render cache is a preference
 
@@ -410,7 +388,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A double-click on a title clip, or Edit Title… in its right-click menu, also opens the section.
   - While the Inspector tab shows, a click on a title clip also shows its section.
   - The section has the text, the kind of the title, the alignment and a Look list ([D71](spec.md#12-decisions-on-gaps-and-contradictions)).
-  - It shows the place of the title, or of each line of a lower third, as percents across and down (X54).
+  - It shows the place of the title, or of each line of a lower third, as X and Y in frame pixels.
   - A change goes in as one `titles.set` when the user leaves the field. A button puts it in at once. Ctrl+Z undoes it.
   - A value at its usual number shows an empty box with that number as a hint. A number in the other box of a pair keeps this usual number.
   - When the pointer is near a title, the viewer shows its outline, its corners and the handle above it. They work without a click.
@@ -440,22 +418,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Text+ and Fusion titles are Fusion compositions, and vidcut does not have Fusion (spec §1). Blend modes are out (spec §1).
   - The place, zoom, rotation and opacity of a title do what Transform and the opacity of Composite would do. The speed of a scroll comes from the length of its clip.
   - Markup in the text is what a script writes and reads.
-
-## X54. A title's place shows as percents from the top left
-
-- **Resolve:**
-  - The user moves the text of a title with a drag in the viewer. It snaps to the center and the thirds of the frame (pp. 763–764, 1176).
-  - The Position in the Inspector also moves it (p. 764).
-  - A lower third is at a corner or at the middle of the bottom of title safe (p. 1178).
-  - A position goes from 4 picture sizes before its bottom left to 4 picture sizes after it, on each axis (measured in Resolve Studio 21.1.2).
-  - The Position of a Text title in the Inspector is in frame pixels from the bottom left, with Y up (measured in Resolve Studio 21.2).
-    - In a 3840 × 2160 timeline, the middle of the picture is X 1920, Y 1080.
-- **vidcut:**
-  - The Title section of the Inspector shows the place of a title from the top left of the picture.
-  - It shows the place in percents of the width and the height of the picture.
-- **Why:**
-  - Percents mean the same at any picture size.
-  - The y counts down from the top. Thus it is 1 minus the y of Resolve's position, and the limits are the same.
 
 ## X55. A scroll rises over the whole clip, its lines spaced as other titles'
 
@@ -754,16 +716,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Pitch and yaw are numbers, as Rotation is.
   - The Inspector is where those numbers are set.
   - The viewer handles move, zoom, turn and crop the picture.
-
-## X86. The Full Screen button is on the viewer
-
-- **Resolve:**
-  - The Full Screen control is at the right of the top bar (p. 636).
-- **vidcut:**
-  - The Full Screen button is on the viewer, beside the duration.
-- **Why:**
-  - Full screen and the enhanced viewer cover the top bar.
-  - The button stays on the viewer, so it can be clicked while they are on.
 
 ## X90. The curve of a value shows under its track
 

@@ -61,7 +61,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The edit-function buttons go with the pool, as they do for the other tabs. vidcut: no measurement tells where they go in Resolve.
     - `gui.close media_pool` hides the pool. `gui.show media_pool` shows it.
   - On the right: Quick Export and the Full Screen viewer.
-    - vidcut's Full Screen button is on the viewer (deviation X86).
+    - vidcut also has a Full Screen button on the viewer.
   - A Transitions tab shows the transitions in the place of the Media Pool (p. 759, §8.11).
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - An Effects tab shows the video effects in the place of the Media Pool (p. 765, §8.16).
@@ -193,7 +193,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - A curve view, and a Parameters menu that chooses the shown values.
       - With no clip selected, the clip under the playhead. With more than one clip selected, a group for each clip.
   - The Sync Bin tab ([§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
-  - vidcut's bar also has Import and Import Folder (deviation X25), Export and Jobs (deviation X3), and Help.
+  - vidcut's bar also has Import and Import Folder, Export and Jobs (deviation X3), and Help.
   - vidcut: F1, or Help in the top bar, opens the Help window.
     - It lists every shortcut, with one action in each row.
     - A ? beside a less obvious action explains it in a few plain words.
@@ -239,6 +239,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 ## 3. Media Pool (Ch. 34, pp. 653–675)
 
 - **Import** (p. 654):
+  - The Import Media and Import Media Folder buttons are at the top of the Media Pool.
   - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog. The dialog can select many files.
   - **Import Media Folder**, the button beside Import Media, opens a folder dialog (pp. 654, 658; D53):
     - It brings the folder in as a bin inside the open bin, with a bin for each folder in it.
@@ -311,7 +312,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - The pool shows the clips of the open bin, and its bins as folders.
   - A path at the top (Master › Interviews › Day 1), the Bins menu and a double-click open any bin.
   - New Bin is on the File menu (Shift+Ctrl+N), on the Bins menu and on the right-click menu of the pool.
-  - The menu of a bin has Rename Bin and Remove Bin. Remove Bin keeps the clips of the bin (deviation X6).
+  - The menu of a bin has Rename Bin and Delete Bin.
+  - Delete Bin deletes the bin and the bins in it (p. 377). It also deletes the media in them. Media that clips use goes as in deviation X6.
   - Clips and bins dragged onto a bin, or onto a level of the path, move into it.
   - The menu of a clip has Move to Bin and Create Bin With Selected Clips (p. 656).
   - Imports go into the open bin (p. 377).
@@ -586,7 +588,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 ### 4.5 Other viewer features
 - Full Screen (Shift+F) fills the display with the viewer.
   - Shift+F again returns to the page.
-  - The Full Screen button on the viewer does the same thing (deviation X86).
+  - The Full Screen button on the viewer does the same thing.
   - `viewer.frame` with `full_screen` or `page` does it from a script.
 - Enhanced viewer (Alt+F) fills the page with the viewer.
   - The Media Pool, the timelines and the bars are covered.
@@ -658,7 +660,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 **Lower timeline:**
 - It is a detail view around the playhead (p. 644).
 - Alt+wheel (Option+wheel on a Mac) and the − and + buttons zoom it. Alt+wheel is the zoom of the Edit page timeline (p. 853).
-- vidcut: Ctrl+wheel (deviation X21) and a trackpad pinch zoom it too.
+- Ctrl+wheel (Cmd+wheel on a Mac) moves along it, as on the Edit page timeline (p. 853). Wheel down moves forward.
+- On a Mac, a trackpad pinch zooms it too.
 - The manual calls its zoom fixed, but Resolve zooms it too.
 - A sideways swipe scrolls it (p. 66).
 - **Fixed Playhead on (default, D1):**
@@ -1669,7 +1672,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Scroll moves its text from the bottom of the picture to the top. The length of the clip sets its speed.
   - vidcut has these five kinds:
     - Markup in the text styles words separately (X53).
-    - The place of a title shows as percents from the top left (X54).
+    - The X and Y of a title are frame pixels from the bottom left, with Y up (measured in Resolve Studio 21.2).
+    - On a title that follows a motion path, X and Y count from the middle of the thing. Y is up.
     - A scroll has its own motion and line spacing (X55).
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
@@ -2695,7 +2699,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - H.265 Master (Main10)
   - ProRes 422 HQ (LPCM audio)
   - YouTube 720p–2160p (MP4, H.264 High)
-  - Vimeo
+  - Vimeo 720p, 1080p and 2160p (p. 4105)
   - TikTok (vertical 1080×1920)
 - **User presets:** you can add them to the Quick Export row.
 - **In vidcut:**
@@ -2859,7 +2863,8 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
 | Click an edit | Trim Editor (D52) |
 | W | Dynamic Trim on/off |
 | Shift+S | Audio scrubbing on/off |
-| Alt+wheel, Ctrl+wheel | Zoom the lower timeline (X21) |
+| Alt+wheel | Zoom the lower timeline |
+| Ctrl+wheel | Move along the timeline |
 | Wheel over the lower timeline's tracks | Scroll them, when they do not fit (X57) |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+I | Import media |
@@ -3805,7 +3810,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The lower line of a lower third hangs from a point that is 10%, 50% or 90% across and 78% down, by its alignment.
   - The upper line stands on a point 80% down, at the same place across.
   - These are the points of Resolve's own lower thirds (measured in Resolve Studio 21.1.2). The two lines overlap by 2% of the picture height.
-  - `position` moves the point of the lower line (X54). Lines that go together keep the 2% between their points.
+  - `position` moves the point of the lower line. Lines that go together keep the 2% between their points.
   - Each line of a lower third has its own `anchor`. It acts on that line as on the block of a Text title (measured in Resolve Studio 21.1.2).
     - The upper line's usual anchor is the end of its bottom edge by `align`. The lower line's usual anchor is the end of its top edge by `align`.
     - `titles.set` with `anchor` changes the lower line. With `line`, it changes the named line.
@@ -4287,7 +4292,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A Film Grain on the compound clip counts its frames from the first frame of the compound clip.
       - A trim or a move of the compound clip does not change the pattern of the grain.
       - Float values stay exact inside a compound clip. A value above 1 is not clipped, and a value between 8-bit steps is not rounded.
-    - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
+    - A title inside it keeps its own place, zoom and rotation in the frame of the compound clip.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
     - `edit.decompose` gives the picture of the compound clip to each of its clips that has no picture of its own and fills the frame.
@@ -4296,7 +4301,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The other clips do not take the picture. A warning names them.
   - An export fits a placed picture at the size it shows, up to the size of the source. Thus a punch-in keeps the detail of the source.
   - The viewer draws it from the decoded picture with the same sums.
-  - Titles keep their own place (X54).
+  - Titles keep their own place.
   - **Viewer handles** (those of a title, X52):
     - A drag inside moves the picture. Its middle, as drawn, snaps to the middle and thirds of the frame, and a guide shows.
     - Shift keeps the drag on one axis, and Alt turns snapping off.
