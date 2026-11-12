@@ -2008,6 +2008,8 @@ fn job_method(j: &JobInfo) -> Option<&'static str> {
         "retime" => Some("subtitles.retime"),
         "word_times" => Some("subtitles.time_words"),
         "sync" => Some("multicam.create"),
+        "find" => Some("motion.find"),
+        "track" => Some("motion.track"),
         _ => None,
     }
 }

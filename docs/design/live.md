@@ -429,6 +429,8 @@ The bar and the Jobs button:
     - Then it has `effects.add` of a Mosaic Blur, and `effects.set` with an `area` that follows the subject.
     - It leaves the blur out when an effect of the clip follows the subject. With nothing to send, the button is off.
     - The live core runs an `apply` with `motion.find` as a long edit (`runs_long`): it measures on a job thread first.
+  - A `motion.find` and a `motion.track` of their own run as jobs (`start_encode`, kinds `find` and `track`). The Jobs window shows each with its progress, and Cancel stops it.
+    - The `apply` of Blur measures with no job, and shows no progress.
   - `Workspace::find` asks before a download when the model of the subject is not there (`subjects::needed`, `Finding`). `Workspace::motion_prompt` shows the question that the other local models use (`ask_download`), and `with_model` then sets `download` on `motion.find`.
   - The rows below list the motion paths of the clip.
   - A name goes with `motion.set` when its field loses the focus (`Naming`). Escape drops the typed name. Delete sends `motion.remove`.

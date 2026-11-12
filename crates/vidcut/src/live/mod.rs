@@ -3352,6 +3352,17 @@ impl Live {
                 Some(measure) => Step::Measure(measure, Box::new(envelope), None),
                 None => Step::Now(self.edit(envelope, job.origin)),
             },
+            Request::MotionFind { subject, .. } if !envelope.dry_run => {
+                let title = format!("Find {}", subject.many());
+                match self.measuring(&envelope) {
+                    Some(measure) => Step::Encode(measure, Box::new(envelope), title, "find"),
+                    None => Step::Now(self.edit(envelope, job.origin)),
+                }
+            }
+            Request::MotionTrack { .. } if !envelope.dry_run => match self.measuring(&envelope) {
+                Some(measure) => Step::Encode(measure, Box::new(envelope), "Track".into(), "track"),
+                None => Step::Now(self.edit(envelope, job.origin)),
+            },
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
             | Request::MotionFind { .. }
