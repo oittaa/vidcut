@@ -64,7 +64,7 @@ fn file(subject: Subject) -> catalog::File {
     }
 }
 
-fn side(subject: Subject) -> u32 {
+pub fn side(subject: Subject) -> u32 {
     match subject {
         Subject::Face => yunet::SIDE,
         Subject::Text => ppocr::SIDE,

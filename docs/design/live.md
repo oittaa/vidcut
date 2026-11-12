@@ -419,7 +419,9 @@ The bar and the Jobs button:
     - A subject entry sends the name of the subject in `follows`. It is there also when the clip has no path of that subject.
     - The menu shows the name of each `Subject` that an area follows (`Subject::named`), also of one that it does not list.
 - `Workspace::motion_section` shows for the first selected clip that takes motion paths (`ops::motion::takes`), above the effects.
-  - Its first row has a menu of the subjects (`SUBJECTS`), Find and Blur.
+  - Its first row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
+    - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
+    - Find and Blur send the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
   - Find sends `motion.find` (`find_request`), with `replace` when the clip has paths of that subject.
   - Blur sends one `apply` (`blur_request`). It has `motion.find` when the clip has no such path.
     - Then it has `effects.add` of a Mosaic Blur, and `effects.set` with an `area` that follows the subject.

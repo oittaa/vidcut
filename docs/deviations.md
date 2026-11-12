@@ -1760,7 +1760,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **vidcut:**
   - `motion.find` finds the things of one subject on the source frames that a clip shows. The subjects are `face`, `text`, `person` and `vehicle`.
     - A vehicle is a bicycle, a car, a motorcycle, a bus, a train or a truck.
-    - The app has buttons for `face` and `text` only.
+    - The Motion section of the Inspector finds each subject. The Blur tool has buttons for `face` and `text` only.
   - Each thing gets a motion path of its own.
   - A shot change inside a clip ends each path. For a file with another frame rate than the project, `motion.find` and Detect Scene Cuts can find different shot changes.
   - The text model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
