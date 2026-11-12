@@ -366,6 +366,8 @@ The bar and the Jobs button:
 - The dragged picture goes to the core with `Handle::preview_pictures`. After it, the sent picture goes there until the project has it (`tools::landing`).
 - The boxes of a Dynamic Zoom are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
 - `Workspace::area_controls` draws the handles of the area of one effect (`AreaShown`), before `Workspace::picture_controls`.
+  - The effect is the picked effect of the Inspector, while Effects of the Tools row is on (`Grab::effects`, `Workspace::effects_tool`).
+  - `Workspace::sync_effect_area` sets the effect each frame. With Effects off, the viewer shows no area.
   - `AreaShown::grip` gives what a press holds (`AreaHold`). `area_moved` gives the area of a drag, and `Workspace::land_area` sends one `effects.set`.
   - The handles show the area at the playhead (`Effect::adopted`). An effect with keyframes sends `at`, as the Inspector does.
   - `AreaShown::cursor` gives the pointer of a hold. `paint_area` puts a ring on the handle under the pointer.
@@ -373,12 +375,10 @@ The bar and the Jobs button:
 - The Blur tool (`Workspace::blur_tool`, `Grab::blurring`) draws a new area in the viewer (`Workspace::blur_controls`).
   - A drag holds `AreaHold::Draw` (`Workspace::blur_drag`). `area_drawn` makes the area from the two ends of the drag. The picture with the new effect is the preview.
   - With Free Shape, `Workspace::blur_points` keeps the clicked points. `area_through` makes the polygon when the shape closes.
-  - `drawn_request` is the `apply` of the new blur. `Workspace::land_drawn` sends it and shows the handles of the new effect.
-  - A press on the shown area goes to `Workspace::area_controls`. A press on another area of the clip first makes that area the shown one.
-  - `Workspace::blur_controls` also runs with the tool off. It then paints the outline of each area of the selected clip.
-    - A click on an outline makes that area the shown one. A click outside the areas shows none.
-    - With a picture tool on (`Grab::tool`), it takes no pointer. Thus `Workspace::picture_controls` gets each press.
-    - `Grab::blurring` tells whether a drag draws a new area. With the tool off, no drag starts on an area that is not the shown one.
+  - `drawn_request` is the `apply` of the new blur. `Workspace::land_drawn` sends it, picks the new effect (`Workspace::pick_effect`) and sets Effects on.
+  - A press on the shown area goes to `Workspace::area_controls`.
+  - With a picture tool on (`Grab::tool`), `Workspace::blur_controls` takes no pointer. Thus `Workspace::picture_controls` gets each press.
+  - `Grab::blurring` tells whether a drag draws a new area.
   - `Workspace::blur_tools` is the row of the tool: the shapes, and one button for each subject of `inspector::SUBJECTS` (`Workspace::subject_blur`).
     - `SUBJECTS` lists the subjects that the app shows: `Subject::Face` and `Subject::Text`. The other subjects of `Subject::ALL` have no button.
   - `Workspace::area_tools` has Track and Delete for the shown area. The row shows them also with the Tools row off (`Grab::rowed`).

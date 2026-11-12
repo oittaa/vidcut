@@ -1475,6 +1475,7 @@ pub struct Inspector {
     tab: Tab,
     effect_picked: Option<usize>,
     effect_shut: bool,
+    effect_drawn: bool,
     effects_seen: Option<(String, Vec<Effect>)>,
     watched: Option<(std::sync::Weak<Project>, Vec<String>)>,
 }
@@ -3631,6 +3632,22 @@ impl Workspace {
         self.settle_tabs(&chosen, &sounds);
     }
 
+    pub(super) fn pick_effect(&mut self, n: usize) {
+        self.inspector.effect_picked = Some(n);
+        self.inspector.effect_shut = false;
+    }
+
+    pub(super) fn pick_drawn(&mut self, n: usize) {
+        self.pick_effect(n);
+        self.inspector.effect_drawn = true;
+    }
+
+    pub(super) fn sync_effect_area(&mut self) {
+        let picked = self.inspector.effect_picked;
+        let g = &mut self.timeline.picture_grab;
+        g.area = picked.filter(|_| g.effects);
+    }
+
     fn settle_tabs(&mut self, chosen: &[Chosen], sounds: &[Sound]) {
         self.settle_effects(chosen);
         let i = &mut self.inspector;
@@ -3657,22 +3674,28 @@ impl Workspace {
         let was = match seen {
             Some((id, was)) if id == c.id => was,
             _ => {
-                i.effect_picked = first;
-                i.effect_shut = false;
+                if !std::mem::take(&mut i.effect_drawn) {
+                    i.effect_picked = first;
+                    i.effect_shut = false;
+                }
                 i.effects_seen = Some((c.id.clone(), now.clone()));
                 return;
             }
         };
         let changed = (0..was.len().max(now.len())).find(|&k| was.get(k) != now.get(k));
+        let Some(k) = changed else {
+            i.effects_seen = Some((c.id.clone(), was));
+            return;
+        };
         let picked = i.effect_picked.filter(|&p| p < was.len());
-        match (changed, now.len().cmp(&was.len())) {
-            (None, _) => {}
-            (Some(k), std::cmp::Ordering::Greater) => {
+        match now.len().cmp(&was.len()) {
+            std::cmp::Ordering::Greater => {
                 i.tab = Tab::Effects;
                 i.effect_picked = Some(k);
                 i.effect_shut = false;
+                i.effect_drawn = false;
             }
-            (Some(k), std::cmp::Ordering::Less) => match picked {
+            std::cmp::Ordering::Less => match picked {
                 Some(p) if p == k => {
                     i.effect_picked = first;
                     i.effect_shut = false;
@@ -3680,7 +3703,7 @@ impl Workspace {
                 Some(p) if p > k => i.effect_picked = Some(p - 1),
                 _ => {}
             },
-            (Some(_), std::cmp::Ordering::Equal) => {
+            std::cmp::Ordering::Equal => {
                 if let Some(p) = picked
                     && was[p] != now[p]
                     && shuffled(&was, now)
@@ -4772,9 +4795,9 @@ impl Workspace {
                 }
             }
             Act::AreaEdit(n) => {
-                let grab = &mut self.timeline.picture_grab;
-                grab.area = (grab.area != Some(n)).then_some(n);
-                grab.tool = None;
+                let on = !self.timeline.picture_grab.effects;
+                self.pick_effect(n);
+                self.effects_tool(on);
             }
             Act::AreaTrack(n) => {
                 if let Some(c) = chosen.first() {
