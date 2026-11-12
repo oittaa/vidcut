@@ -177,8 +177,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Option+wheel zooms the timeline, and Command+wheel moves through it (Edit page, p. 853).
   - The lower timeline of the Cut page also zooms with Option+wheel.
 - **vidcut:**
-  - Alt+wheel (Option on a Mac) zooms the lower timeline, as in Resolve.
-  - Ctrl+wheel (Cmd on a Mac) zooms it too, and does not move through it.
+  - Ctrl+wheel (Cmd on a Mac) zooms the lower timeline. It does not move through it.
 - **Why:**
   - Ctrl+wheel and Cmd+wheel zoom in browsers and most programs.
   - egui gives them and a pinch as one zoom.
@@ -876,7 +875,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **vidcut:**
   - The Keyframes tab and the keyframe tray have one Speed row, in a Speed group.
   - With the Keyframes tab or the tray open, the three items act on the selected rows and keyframes.
-  - With the tray open, the Keyframes tab closed, and no row or keyframe selected, Add Keyframe adds a speed keyframe, as in Resolve.
   - With the Keyframes tab open and no row selected, Add Keyframe stays off.
   - With both closed, they act on the speed keyframes of the selected clips ([D48](spec.md#12-decisions-on-gaps-and-contradictions)).
     - Delete All Keyframes then asks first, for example "Delete 3 Speed keyframes of Clip 2?". Then it removes all the speed keyframes.
