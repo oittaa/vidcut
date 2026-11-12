@@ -3821,20 +3821,26 @@ fn mutate(
             };
             json!({ "at": at, "keyframes": ops::keyframes::paste(p, &ids, at, keys)? })
         }
-        Request::EditCut { clips, range } => match (clips, range) {
-            (Some(clips), None) => {
+        Request::EditCut { clips, range, cues } => match (clips, range, cues) {
+            (Some(clips), None, None) => {
                 let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
                 let copied = ops::copy_clips(p, &ids)?;
                 ops::delete(p, &ids, false)?;
                 json!({ "clips": copied })
             }
-            (None, Some(range)) => {
+            (None, Some(range), None) => {
                 let (a, b) = ctx(p, playhead).range(range)?;
                 let copied = ops::copy_range(p, a, b)?;
                 ops::delete_range(p, a, b, true)?;
                 json!({ "clips": copied })
             }
-            _ => return Err(Error::usage("give `clips` or `range`")),
+            (None, None, Some(cues)) => {
+                let ids = resolve_cues(p, &cues.to_vec(), playhead)?;
+                let copied = ops::subtitles::copy_cues(p, &ids)?;
+                ops::subtitles::remove_cues(p, &ids)?;
+                json!({ "cues": copied })
+            }
+            _ => return Err(Error::usage("give `clips`, `range` or `cues`")),
         },
         Request::EditPaste {
             clips,

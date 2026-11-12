@@ -1510,13 +1510,17 @@ pub enum Request {
     /// Cut clips (Ctrl+X): copy, then delete with ripple on Track 1. With
     /// `range` instead of `clips`: copy the parts in that range, then take
     /// them out of every unlocked track and leave a gap (Cut in the
-    /// Transcription window).
+    /// Transcription window). With `cues` instead (`q3`, or `S1@15s`): copy
+    /// those cues with their subtitle tracks, as `cues`, then delete them and
+    /// leave a gap.
     #[serde(rename = "edit.cut")]
     EditCut {
         #[serde(default)]
         clips: Option<OneOrMany<ClipRef>>,
         #[serde(default)]
         range: Option<RangeSpec>,
+        #[serde(default)]
+        cues: Option<OneOrMany<String>>,
     },
     /// Paste clips (Ctrl+V) at `at`, each over its own track, keeping their
     /// spacing. Defaults: the GUI's clipboard and playhead. With `insert`,
