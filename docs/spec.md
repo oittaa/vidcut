@@ -1153,7 +1153,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The row opens to show the steps. Its Undo all button goes back to before the first step.
   - `history.get` gives all of this. `history.go` goes to any step.
 - **vidcut's History window:**
-  - It docks at the right side of the window (deviation X35). Edit > History > Open History Window, or History in the top bar, opens it.
+  - It is a window of its own. Edit > History > Open History Window, or History in the top bar, opens it.
   - When the pointer is on a step, the timeline shows the state after that step. This works in the panel and in Edit > History.
     - The project does not change.
     - The timeline also outlines what the step changed. If that part is off screen, the lower timeline scrolls to it.
@@ -3475,7 +3475,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The run then applies as K applies it, as one undo step (D32).
   - The sound plays slowed, with its pitch kept, as at any speed other than 1× (deviation X30).
   - The repeats of a held key are not presses. Thus L held alone plays at 1×.
-- **D55. Undo steps** (§8.10; pp. 651–652; deviation X35).
+- **D55. Undo steps** (§8.10; pp. 651–652).
   - The manual does not say what a step is, or how a step gets its name.
   - Every request that changes the project is one step, an `apply` batch too.
   - Undo and redo are not steps.

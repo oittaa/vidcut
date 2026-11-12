@@ -20,8 +20,11 @@ use crate::live::{PlayerId, PreviewAt};
 use crate::when;
 
 const ROW: f32 = 24.0;
-const WIDTH: f32 = 440.0;
-pub(super) const MIN_WIDTH: f32 = 320.0;
+pub(super) const WINDOW: super::window::Separate = super::window::Separate {
+    title: "History",
+    file: "window-history.json",
+    size: [440.0, 560.0],
+};
 const MENU: usize = 20;
 const FLASH: f64 = 1.6;
 
@@ -29,7 +32,8 @@ const FLASH: f64 = 1.6;
 pub(super) struct HistoryUi {
     pub open: bool,
     pub keys: bool,
-    pub width: f32,
+    pub window: super::window::Tool,
+    focused: bool,
     hovered: Option<usize>,
     was: Option<usize>,
     cursor: Option<usize>,
@@ -111,36 +115,7 @@ enum Act {
     Unname(usize),
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct Kept {
-    width: f32,
-}
-
-fn kept_path() -> std::path::PathBuf {
-    crate::paths::config_dir().join("history.json")
-}
-
 impl HistoryUi {
-    pub(super) fn load() -> Self {
-        let width = std::fs::read_to_string(kept_path())
-            .ok()
-            .and_then(|t| serde_json::from_str::<Kept>(&t).ok())
-            .map_or(WIDTH, |k| k.width.clamp(MIN_WIDTH, 900.0));
-        Self {
-            width,
-            ..Self::default()
-        }
-    }
-
-    fn save(&self) {
-        if let Some(dir) = kept_path().parent()
-            && std::fs::create_dir_all(dir).is_ok()
-        {
-            let text = json!(Kept { width: self.width }).to_string();
-            let _ = vidcut_core::temp::write(&kept_path(), text.as_bytes());
-        }
-    }
-
     pub(super) fn show(&mut self) {
         self.open = true;
         self.keys = true;
@@ -358,6 +333,9 @@ impl Workspace {
 
     pub(super) fn history_keys(&mut self, ctx: &egui::Context) {
         let h = &mut self.history;
+        if h.keys && ctx.input(|i| i.pointer.any_pressed()) {
+            h.leave();
+        }
         if !h.open || !h.keys || h.naming.is_some() {
             return;
         }
@@ -476,18 +454,13 @@ impl Workspace {
             self.history.cursor = None;
             self.history.follow = true;
         }
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("History").strong());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let close = ui.add(egui::Button::new(icon::X).frame(false));
-                close.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::Role::Button, true, "Close the history")
-                });
-                if close.clicked() {
-                    self.history.close();
-                }
-            });
-        });
+        let focused = ui.input(|i| i.viewport().focused) == Some(true);
+        if focused && !self.history.focused {
+            self.history.keys = true;
+        } else if !focused && self.history.focused {
+            self.history.leave();
+        }
+        self.history.focused = focused;
         self.history_list(ui, &steps);
         let inside = ui.min_rect();
         let clicked = ui.input(|i| {
@@ -504,11 +477,6 @@ impl Workspace {
             if !self.history.keys {
                 self.history.leave();
             }
-        }
-        let width = ui.min_rect().width();
-        if (width - self.history.width).abs() > 1.0 && !ui.input(|i| i.pointer.any_down()) {
-            self.history.width = width;
-            self.history.save();
         }
     }
 

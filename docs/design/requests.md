@@ -209,7 +209,7 @@ Revert:
 
 The History panel (`HistoryUi`):
 
-- It docks at the right side of the window. The config folder keeps its width.
+- It is a system window of its own, as the Jobs window is ([live.md](live.md)).
 - When the current step changes, the panel scrolls only as far as that row needs.
 - Copy as Command copies the `Call` of a step as a `vidcut rpc` command, as the export jobs do (`vidcut_command`).
 - It previews a step without a change to the project:
