@@ -384,6 +384,7 @@ The bar and the Jobs button:
   - A click on a box picks its path (`Grab::found`). The smallest box under the pointer wins (`within`).
     - The click also picks the first effect that follows that path (`Workspace::pick_effect`).
   - Blur and Other Effect add an effect that follows the picked path (`Workspace::effect_on`). Then the left panel shows the Inspector.
+    - The area is a box for text, a person or a vehicle, and an ellipse for a face (`boxed`). The Blur of a subject uses the same shapes.
   - Transform, Crop, Dynamic Zoom, Effects and Blur set Find off, and Find sets them off.
   - `Workspace::blur_tools` is the row of the tool: the shapes, and one button for each subject of `inspector::SUBJECTS` (`Workspace::subject_blur`).
     - `SUBJECTS` lists the subjects that the app shows: `Subject::Face` and `Subject::Text`. The other subjects of `Subject::ALL` have no button.

@@ -2877,6 +2877,10 @@ fn find_request(c: &Chosen, subject: Subject, extra: &Value) -> (&'static str, V
     ("motion.find", with_extra(params, extra))
 }
 
+fn boxed(subject: Subject) -> bool {
+    subject != Subject::Face
+}
+
 fn blur_request(
     id: &str,
     found: bool,
@@ -2891,7 +2895,10 @@ fn blur_request(
         commands.push(json!({ "method": "motion.find", "params": params }));
     }
     if !effects.iter().any(follows) {
-        let area = json!({ "follows": subject.name(), "size": BLUR_SIZE });
+        let mut area = json!({ "follows": subject.name(), "size": BLUR_SIZE });
+        if boxed(subject) {
+            area["shape"] = json!(AreaShape::Box);
+        }
         let add = json!({ "clips": [id], "kind": "mosaic_blur" });
         let set = json!({ "clip": id, "effect": effects.len(), "area": area });
         commands.push(json!({ "method": "effects.add", "params": add }));
@@ -4248,7 +4255,10 @@ impl Workspace {
         let count = c.picture.as_ref().map_or(0, |x| x.effects.len());
         let found = c.motion.iter().find(|m| m.id == path);
         let name = found.and_then(|m| m.name.as_deref()).unwrap_or(path);
-        let area = json!({ "follows": path, "size": BLUR_SIZE });
+        let mut area = json!({ "follows": path, "size": BLUR_SIZE });
+        if found.and_then(|m| m.subject).is_some_and(boxed) {
+            area["shape"] = json!(AreaShape::Box);
+        }
         let commands = json!([
             { "method": "effects.add", "params": { "clips": [clip], "kind": kind } },
             { "method": "effects.set", "params": { "clip": clip, "effect": count, "area": area } },
