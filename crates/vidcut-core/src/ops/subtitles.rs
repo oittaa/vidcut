@@ -20,12 +20,22 @@ pub fn add_track(p: &mut Project, name: Option<String>) -> String {
     let id = format!("S{}", p.subtitles.len() + 1);
     let mut t = SubtitleTrack::new(id.clone());
     t.name = name;
-    t.shown = true;
-    for o in &mut p.subtitles {
-        o.shown = false;
-    }
+    t.shown = p.subtitles.is_empty();
     p.subtitles.push(t);
     id
+}
+
+pub fn add_shown_track(p: &mut Project, name: Option<String>) -> usize {
+    add_track(p, name);
+    let ti = p.subtitles.len() - 1;
+    show_only(p, ti);
+    ti
+}
+
+fn show_only(p: &mut Project, ti: usize) {
+    for (i, t) in p.subtitles.iter_mut().enumerate() {
+        t.shown = i == ti;
+    }
 }
 
 fn index(p: &Project, id: &str) -> Result<usize> {
@@ -256,11 +266,7 @@ fn checked_words_style(w: &SubtitleWords) -> Result<SubtitleWords> {
 pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     let ti = index(p, id)?;
     match props.shown {
-        Some(true) => {
-            for (i, t) in p.subtitles.iter_mut().enumerate() {
-                t.shown = i == ti;
-            }
-        }
+        Some(true) => show_only(p, ti),
         Some(false) => p.subtitles[ti].shown = false,
         None => {}
     }
@@ -289,8 +295,7 @@ pub fn target(p: &mut Project, track: Option<&str>) -> Result<usize> {
             return Ok(i);
         }
         if id == format!("S{}", p.subtitles.len() + 1) {
-            add_track(p, None);
-            return Ok(p.subtitles.len() - 1);
+            return Ok(add_shown_track(p, None));
         }
         return Err(Error::not_found(format!(
             "no subtitle track {id} (the next new one is S{})",
@@ -300,8 +305,7 @@ pub fn target(p: &mut Project, track: Option<&str>) -> Result<usize> {
     if let Some(i) = usual_track(p) {
         return Ok(i);
     }
-    add_track(p, None);
-    Ok(0)
+    Ok(add_shown_track(p, None))
 }
 
 pub fn usual_track(p: &Project) -> Option<usize> {
@@ -693,8 +697,7 @@ fn paste_track(p: &mut Project, from: &str) -> usize {
     if let Some(i) = p.subtitles.iter().position(|t| t.destination) {
         return i;
     }
-    add_track(p, None);
-    p.subtitles.len() - 1
+    add_shown_track(p, None)
 }
 
 fn overwrite(p: &mut Project, ti: usize, from: i64, to: i64) -> Result<()> {
@@ -963,8 +966,7 @@ pub fn import(
     let ti = match track {
         Some(id) => target(p, Some(id))?,
         None => {
-            add_track(p, name);
-            let ti = p.subtitles.len() - 1;
+            let ti = add_shown_track(p, name);
             p.subtitles[ti].language = read.language.clone();
             let shared = read
                 .cues

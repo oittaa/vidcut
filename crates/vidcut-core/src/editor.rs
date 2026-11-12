@@ -4720,8 +4720,7 @@ fn mutate(
                 let ti = match track {
                     Some(t) => ops::subtitles::target(p, Some(t))?,
                     None if look.is_some() || p.subtitles.is_empty() => {
-                        ops::subtitles::add_track(p, None);
-                        p.subtitles.len() - 1
+                        ops::subtitles::add_shown_track(p, None)
                     }
                     None => p.subtitles.len() - 1,
                 };
