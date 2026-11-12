@@ -553,6 +553,7 @@ Writing:
   - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). `motion.find` with `replace` takes off the paths of that subject.
     - A path that the area of an effect or a title follows stays (`followed`).
     - A found thing that such a path already follows gets no second path (`same_thing`). Its samples go into that path (`merged`).
+    - Between the first and the last new sample, the path keeps only the new samples. Outside them, it keeps its old samples.
     - Thus a second find adds the new things, and a kept path follows its thing on the frames of the new find.
   - A path that `motion.track` made has `tracked`. A later track of the same area writes its samples again, and the path keeps its id and its name.
 - A `PathSample` holds the source `frame`, the `center` and the `size` of the area as fractions of the source picture, and the `rotation`.

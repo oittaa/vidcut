@@ -426,11 +426,13 @@ fn cover(a: &Area, b: &PathSample) -> f64 {
     if all > 0.0 { both / all } else { 0.0 }
 }
 
-fn merged(was: &[PathSample], now: Vec<PathSample>) -> Vec<PathSample> {
-    let old = was.iter().map(|s| (s.frame, *s));
-    let mut all: std::collections::BTreeMap<i64, PathSample> = old.collect();
-    all.extend(now.into_iter().map(|s| (s.frame, s)));
-    all.into_values().collect()
+fn merged(was: &[PathSample], now: &[PathSample]) -> Vec<PathSample> {
+    let (Some(first), Some(last)) = (now.first(), now.last()) else {
+        return was.to_vec();
+    };
+    let before = was.iter().filter(|s| s.frame < first.frame);
+    let after = was.iter().filter(|s| s.frame > last.frame);
+    before.chain(now).chain(after).copied().collect()
 }
 
 fn same_thing(kept: &MotionPath, found: &[PathSample]) -> bool {
@@ -616,7 +618,7 @@ pub fn found(
             .iter_mut()
             .find(|m| old.contains(&m.id) && same_thing(m, &track.samples));
         match stays {
-            Some(m) => m.samples = Arc::new(merged(&m.samples, track.samples)),
+            Some(m) => m.samples = Arc::new(merged(&m.samples, &track.samples)),
             None => fresh.push(track),
         }
     }
