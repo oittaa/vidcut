@@ -101,6 +101,7 @@ struct Wheeled {
 pub struct Grab {
     pub(crate) tool: Option<PictureTool>,
     pub(crate) row: bool,
+    pub(crate) effects: bool,
     pub(crate) area: Option<usize>,
     blur: bool,
     shape: AreaShape,
@@ -123,7 +124,7 @@ impl Grab {
     }
 
     pub(crate) fn rowed(&self) -> bool {
-        self.row || self.area.is_some()
+        self.row || self.effects
     }
 }
 
@@ -708,6 +709,7 @@ impl Workspace {
     pub(super) fn show_picture_tool(&mut self, tool: PictureTool) {
         let g = &mut self.timeline.picture_grab;
         g.tool = Some(tool);
+        g.effects = false;
         g.area = None;
         g.blur = false;
         g.drawn = None;
@@ -736,8 +738,16 @@ impl Workspace {
             g.tool = None;
             g.row = true;
             self.select_shown();
-        } else {
-            g.area = None;
+        }
+    }
+
+    pub(super) fn effects_tool(&mut self, on: bool) {
+        let g = &mut self.timeline.picture_grab;
+        g.effects = on;
+        g.area_held = None;
+        if on {
+            g.tool = None;
+            self.select_shown();
         }
     }
 
@@ -769,6 +779,11 @@ impl Workspace {
             if ui.add_enabled(found || lit, b).clicked() {
                 self.picture_tool(t);
             }
+        }
+        let lit = self.timeline.picture_grab.effects;
+        let b = egui::Button::selectable(lit, "Effects");
+        if ui.add_enabled(found || lit, b).clicked() {
+            self.effects_tool(!lit);
         }
         let blurs = self.timeline.picture_grab.blurring();
         let b = egui::Button::selectable(blurs, "Blur");
@@ -889,7 +904,6 @@ impl Workspace {
             .clicked()
             && let Some(((id, _), n)) = chosen
         {
-            self.timeline.picture_grab.area = None;
             self.send("effects.remove", json!({ "clip": id, "effect": n }));
         }
     }
@@ -1786,8 +1800,8 @@ impl Workspace {
         let Some(n) = effects.into_iter().position(|e| e.area.is_some()) else {
             return;
         };
-        self.timeline.picture_grab.area = Some(n);
-        self.timeline.picture_grab.tool = None;
+        self.pick_effect(n);
+        self.effects_tool(true);
     }
 
     fn area_shown(&self, picture: Rect, held: Option<&AreaHeld>) -> Option<AreaShown> {
@@ -1900,8 +1914,9 @@ impl Workspace {
             return;
         };
         self.send("apply", drawn_request(&held.clip, held.effect, area));
+        self.pick_drawn(held.effect);
         let g = &mut self.timeline.picture_grab;
-        g.area = Some(held.effect);
+        g.effects = true;
         g.landing = Some((
             held.clip.clone(),
             held.now.clone(),
@@ -1977,7 +1992,8 @@ impl Workspace {
             self.timeline.picture_grab.drawn = None;
             if let Some(area) = area_through(&points) {
                 self.send("apply", drawn_request(&clip, effect, &area));
-                self.timeline.picture_grab.area = Some(effect);
+                self.pick_drawn(effect);
+                self.timeline.picture_grab.effects = true;
             }
             return;
         }
@@ -2015,10 +2031,7 @@ impl Workspace {
             g.drawn = None;
         }
         if g.blurred.as_ref() != clip.map(|c| &c.id) {
-            if g.blurred.is_some() {
-                g.area = None;
-                g.area_held = None;
-            }
+            g.area_held = None;
             g.blurred = clip.map(|c| c.id.clone());
         }
         let Some(c) = clip else {
@@ -2043,21 +2056,6 @@ impl Workspace {
             return false;
         }
         let active = g.area;
-        let others: Vec<(usize, AreaShown)> = (0..stored.effects.len())
-            .rev()
-            .filter(|n| Some(*n) != active)
-            .filter_map(|n| self.area_at(picture, n, None).map(|a| (n, a)))
-            .collect();
-        let accent = super::theme::colors().accent;
-        let painter = ui.painter_at(picture);
-        for (_, a) in &others {
-            let outline = outline_on(&a.s, &a.frame, &a.area);
-            paint_outline(
-                &painter,
-                &outline,
-                Stroke::new(1.0, accent.gamma_multiply(0.6)),
-            );
-        }
         if self.timeline.picture_grab.tool.is_some() {
             return false;
         }
@@ -2078,21 +2076,7 @@ impl Workspace {
         if shown.is_some_and(|a| a.on(over)) {
             return false;
         }
-        if let Some((n, _)) = others.iter().find(|(_, a)| a.on(over)) {
-            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-            if tool && resp.drag_started() {
-                self.timeline.picture_grab.area = Some(*n);
-                return false;
-            }
-            if resp.clicked() {
-                self.timeline.picture_grab.area = Some(*n);
-            }
-            return true;
-        }
         if !tool {
-            if resp.clicked() && active.is_some() {
-                self.timeline.picture_grab.area = None;
-            }
             return false;
         }
         ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
