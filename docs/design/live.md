@@ -402,6 +402,7 @@ The bar and the Jobs button:
     - `Workspace::watch_inspector` applies these rules while the Inspector is not shown. It works only when the selection or the project changes.
   - One effect is the picked effect of the Inspector. Its name has the accent color, and only its section can be open.
     - A click on the name or the arrow of another effect picks and opens it (`Act::EffectOpen`). A click on the picked effect closes or opens its section.
+    - A double-click acts as one click. Thus it opens a closed section, and does not close it again.
     - `Workspace::settle_effects` picks the first effect when the selection changes, and when the picked effect goes.
     - It picks an effect that comes to the clip, from an add or an undo. Then the Inspector also goes to the Effects tab.
     - The picked effect stays picked when its place in the order changes (`shuffled`).
