@@ -433,9 +433,6 @@ The bar and the Jobs button:
     - The `apply` of Blur measures with no job, and shows no progress.
   - `Workspace::find` asks before a download when the model of the subject is not there (`subjects::needed`, `Finding`). `Workspace::motion_prompt` shows the question that the other local models use (`ask_download`), and `with_model` then sets `download` on `motion.find`.
   - The rows below list the motion paths of the clip.
-    - Blur on a row adds a Mosaic Blur that follows only that path. Effect on a row adds another effect in the same way (`effect_request`).
-    - A click on a box in the viewer picks its path (`Workspace::paint_motion`, `Inspector::picked`). The box gets a thicker line, and the name in its row gets the accent color.
-    - A click in the name field of a row picks that path too.
   - A name goes with `motion.set` when its field loses the focus (`Naming`). Escape drops the typed name. Delete sends `motion.remove`.
   - The rows read the paths from the shared project of the snapshot. The snapshot holds no copy of the samples.
 - `Workspace::input_lut_section` shows the Input LUT row of the media of the selected clips, with a file pick and Reset. Each change is one `media.set`.

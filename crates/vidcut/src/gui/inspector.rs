@@ -1470,7 +1470,6 @@ pub struct Inspector {
     find_open: bool,
     find_better: bool,
     find_error: bool,
-    pub(super) picked: Option<(String, String)>,
     finding: Option<Finding>,
     area_edit: Option<usize>,
 }
@@ -2842,27 +2841,6 @@ fn with_extra(mut params: Value, extra: &Value) -> Value {
     params
 }
 
-fn follows(e: &Effect, path: &str) -> bool {
-    e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(path)
-}
-
-fn effect_request(
-    c: &Chosen,
-    row: &PathRow,
-    kind: vidcut_core::model::EffectType,
-) -> (&'static str, Value) {
-    let area = json!({ "follows": row.id, "size": BLUR_SIZE });
-    let add = json!({ "clips": [c.id], "kind": kind });
-    let set = json!({ "clip": c.id, "effect": c.stored.effects.len(), "area": area });
-    let name = row.name.as_deref().unwrap_or(&row.id);
-    let commands = json!([
-        { "method": "effects.add", "params": add },
-        { "method": "effects.set", "params": set },
-    ]);
-    let label = format!("{} On {name}", kind.name());
-    ("apply", json!({ "commands": commands, "label": label }))
-}
-
 fn find_request(c: &Chosen, subject: Subject, extra: &Value) -> (&'static str, Value) {
     let mut params = json!({ "clips": [c.id], "subject": subject });
     if found(c, subject) {
@@ -4161,7 +4139,6 @@ impl Workspace {
         let mut values = std::mem::take(&mut self.inspector.find_values);
         let mut open = self.inspector.find_open;
         let mut better = self.inspector.find_better;
-        let mut picked = self.inspector.picked.take();
         let wrong = self.inspector.find_error;
         let extra = find_extra(&values);
         let mut tried = false;
@@ -4264,20 +4241,12 @@ impl Workspace {
                         .filter(|n| n.clip == c.id && n.path == row.id)
                         .map(|n| n.text.clone());
                     let mut text = typed.clone().unwrap_or_else(|| now.to_string());
-                    let on = picked
-                        .as_ref()
-                        .is_some_and(|(clip, path)| *clip == c.id && *path == row.id);
                     label(ui, if n == 0 { "Found" } else { "" }, false);
-                    let mut edit = egui::TextEdit::singleline(&mut text)
-                        .hint_text("Name")
-                        .desired_width(NAME_WIDTH);
-                    if on {
-                        edit = edit.text_color(theme::colors().accent);
-                    }
-                    let field = ui.add(edit);
-                    if field.gained_focus() {
-                        picked = Some((c.id.clone(), row.id.clone()));
-                    }
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .hint_text("Name")
+                            .desired_width(NAME_WIDTH),
+                    );
                     if field.lost_focus() && !cancelled && text.trim() != now {
                         let params = json!({ "clip": c.id, "path": row.id, "name": text });
                         sends.push(("motion.set", params));
@@ -4291,28 +4260,10 @@ impl Workspace {
                     } else if typed.is_some() {
                         naming = None;
                     }
-                    ui.horizontal(|ui| {
-                        let has = c.stored.effects.iter().any(|e| follows(e, &row.id));
-                        if ui.add_enabled(!has, egui::Button::new("Blur")).clicked() {
-                            sends.push(effect_request(
-                                c,
-                                row,
-                                vidcut_core::model::EffectType::MosaicBlur,
-                            ));
-                        }
-                        ui.menu_button("Effect", |ui| {
-                            for kind in vidcut_core::model::EffectType::ALL {
-                                if ui.button(kind.name()).clicked() {
-                                    sends.push(effect_request(c, row, kind));
-                                    ui.close();
-                                }
-                            }
-                        });
-                        if icon(ui, TRASH, "Delete", true) {
-                            let params = json!({ "clip": c.id, "paths": [row.id] });
-                            sends.push(("motion.remove", params));
-                        }
-                    });
+                    if icon(ui, TRASH, "Delete", true) {
+                        let params = json!({ "clip": c.id, "paths": [row.id] });
+                        sends.push(("motion.remove", params));
+                    }
                     ui.end_row();
                 }
             },
@@ -4322,7 +4273,6 @@ impl Workspace {
         self.inspector.find_values = values;
         self.inspector.find_open = open;
         self.inspector.find_better = better;
-        self.inspector.picked = picked;
         if tried || extra.is_some() {
             self.inspector.find_error = extra.is_none();
         }
