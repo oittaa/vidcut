@@ -4362,7 +4362,25 @@ fn mutate(
             replace,
             download,
             size,
+            start,
+            keep,
+            overlap,
+            wait,
+            shortest,
+            steady,
         } => {
+            let usual = crate::motion::Join::of(*subject);
+            let rules = crate::motion::Join {
+                start: start.unwrap_or(usual.start),
+                keep: keep.unwrap_or(usual.keep),
+                overlap: overlap.unwrap_or(usual.overlap),
+                wait_secs: wait.unwrap_or(usual.wait_secs),
+                shortest_secs: shortest.unwrap_or(usual.shortest_secs),
+                steady: steady.unwrap_or(usual.steady),
+            };
+            if let Some(why) = rules.problem() {
+                return Err(Error::usage(why));
+            }
             let sides = crate::analysis::SIDES;
             if size.is_some_and(|s| !(sides.0..=sides.1).contains(&s)) {
                 return Err(Error::usage(format!(
@@ -4386,7 +4404,6 @@ fn mutate(
                     ..subject_look(&media, fps, frames)
                 };
                 let found = env.subjects(&media, *subject, look, *download)?;
-                let rules = crate::motion::Join::of(*subject);
                 let tracks = crate::motion::joined(&found, media.origin(), fps, frames, &rules);
                 out.push(ops::motion::found(p, id, *subject, tracks)?);
             }

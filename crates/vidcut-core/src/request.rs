@@ -2867,6 +2867,33 @@ pub enum Request {
         /// and takes more time. The picture is never larger than its source.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         size: Option<u32>,
+        /// The score, from 0 to 1, at which a box starts a path. Usual: 0.7
+        /// for `face` and `text`, 0.5 for `person` and `vehicle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<f32>,
+        /// The score, from 0 to `start`, at which a box continues a path.
+        /// Usual: 0.4 for `face`, 0.6 for `text`, 0.35 for `person` and
+        /// `vehicle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keep: Option<f32>,
+        /// How much a box must overlap the last box of a path to join that
+        /// path, from 0 to 1. Usual: 0.2.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        overlap: Option<f64>,
+        /// The seconds that a path waits for its thing while no box joins
+        /// it, from 0 to 60. Usual: 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wait: Option<f64>,
+        /// The seconds that a path must last, from its first box to its
+        /// last, from 0 to 60. A path that starts later than that before
+        /// the end of its shot stays. Usual: 0.5 for `face`, 1 for the
+        /// others.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shortest: Option<f64>,
+        /// The share of its frames on which a path must have a box, from 0
+        /// to 1. Usual: 0.8 for `text`, 0.5 for the others.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        steady: Option<f64>,
     },
     /// Follow the thing under the area of one effect of a clip (`c3`, or
     /// `V2@15s`). `effect` counts from 0, in the order of the clip's
