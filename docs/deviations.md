@@ -194,15 +194,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The curve gives the transition its name. The curve needs no points from an editor.
   - The two differ by more than 1% only in the 20 ms where a curve leaves silence or reaches it.
 
-## X25. Import is in the top bar
-
-- **Resolve:**
-  - The Import Media and Import Media Folder buttons are in the Media Pool (p. 654).
-- **vidcut:**
-  - Import and Import Folder are in the top bar.
-- **Why:**
-  - The top bar shows on every tab, also while Titles or the Inspector replaces the pool.
-
 ## X26. One folder for proxies and the render cache is a preference
 
 - **Resolve:**
