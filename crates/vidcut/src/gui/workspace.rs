@@ -2058,12 +2058,15 @@ impl Workspace {
                 theme::decorated(ui, Deco::Status, |ui| self.status_bar(ui))
             });
         if self.history.open && self.snap.project.is_some() {
-            egui::Panel::right("history")
+            egui::Window::new("History")
+                .id(egui::Id::unique("history-window"))
+                .title_bar(false)
                 .resizable(true)
-                .default_size(self.history.width)
-                .min_size(super::history::MIN_WIDTH)
+                .default_width(self.history.width)
+                .default_height(super::history::HEIGHT)
+                .min_width(super::history::MIN_WIDTH)
                 .frame(theme::card(panel))
-                .show(ui, |ui| {
+                .show(&ctx, |ui| {
                     theme::decorated(ui, Deco::Card, |ui| self.history_panel(ui))
                 });
         }

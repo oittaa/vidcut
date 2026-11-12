@@ -276,15 +276,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Two items for one file would split its marks, color and proxy.
   - An agent that imports a folder again would double the pool.
 
-## X35. The History window docks
-
-- **Resolve:**
-  - The History window floats over the page (21.1.1).
-- **vidcut:**
-  - The history docks at the right side of the window ([spec §8.10](spec.md#810-undo-pp-651652)).
-- **Why:**
-  - A window over the picture hides what the history is about.
-
 ## X39. A GIF of one frame is a still, whatever its delay
 
 - **Resolve:**

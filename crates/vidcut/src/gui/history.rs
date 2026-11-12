@@ -21,6 +21,7 @@ use crate::when;
 
 const ROW: f32 = 24.0;
 const WIDTH: f32 = 440.0;
+pub(super) const HEIGHT: f32 = 480.0;
 pub(super) const MIN_WIDTH: f32 = 320.0;
 const MENU: usize = 20;
 const FLASH: f64 = 1.6;
