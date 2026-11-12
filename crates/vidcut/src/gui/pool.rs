@@ -531,6 +531,25 @@ impl Workspace {
         let mut search_below = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new("Media Pool").strong());
+            let open = project.is_some();
+            for (glyph, name, folder) in [
+                (egui_phosphor::regular::FILE_PLUS, "Import Media", false),
+                (
+                    egui_phosphor::regular::FOLDER_PLUS,
+                    "Import Media Folder",
+                    true,
+                ),
+            ] {
+                let b = egui::Button::new(RichText::new(glyph).size(14.0));
+                let r = ui.add_enabled(open, b).on_hover_text(name);
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, open, name));
+                if r.clicked() {
+                    match folder {
+                        true => self.import_folder(),
+                        false => self.import_media(),
+                    }
+                }
+            }
             if let Some(p) = project {
                 let mut on = p.settings.use_proxies;
                 if ui.checkbox(&mut on, "Proxies").changed() {

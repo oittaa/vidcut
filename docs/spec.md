@@ -193,7 +193,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
       - A curve view, and a Parameters menu that chooses the shown values.
       - With no clip selected, the clip under the playhead. With more than one clip selected, a group for each clip.
   - The Sync Bin tab ([§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
-  - vidcut's bar also has Import and Import Folder (deviation X25), Export and Jobs (deviation X3), and Help.
+  - vidcut's bar also has Import and Import Folder, Export and Jobs (deviation X3), and Help.
   - vidcut: F1, or Help in the top bar, opens the Help window.
     - It lists every shortcut, with one action in each row.
     - A ? beside a less obvious action explains it in a few plain words.
@@ -239,6 +239,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 ## 3. Media Pool (Ch. 34, pp. 653–675)
 
 - **Import** (p. 654):
+  - The Import Media and Import Media Folder buttons are at the top of the Media Pool.
   - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog. The dialog can select many files.
   - **Import Media Folder**, the button beside Import Media, opens a folder dialog (pp. 654, 658; D53):
     - It brings the folder in as a bin inside the open bin, with a bin for each folder in it.
