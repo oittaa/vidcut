@@ -3266,7 +3266,7 @@ impl Workspace {
                 Some((
                     0,
                     self.project()
-                        .map_or(0, |p| vidcut_core::ops::dissolve_length(p, kind)),
+                        .map_or(0, |p| vidcut_core::ops::default_transition_length(p, kind)),
                 )),
             ),
             Gesture::Effect { label, .. } => ((*label).to_string(), None),
