@@ -1721,7 +1721,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - On the Edit page, the Viewer shows the controls of an effect only with Open FX Overlay on in its menu (21.2).
     - It shows the controls of the selected effect of the Inspector, also while the section of that effect is closed.
     - It shows them on each tab of the Inspector and with the Inspector closed. With no clip selected, it shows none.
-    - It keeps the controls of the selected clip while the playhead is on another clip.
 - **vidcut:**
   - An effect of a clip can have an area: an ellipse, a box or a polygon. The effect then shows only inside it. With `invert`, it shows only outside it.
   - The area stays on the content of the picture through the transform, the crop, the flips, a Dynamic Zoom and a compound clip around it.
@@ -1734,7 +1733,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The Tools row under the viewer has Effects. With it on, the viewer shows the area of the picked effect of the Inspector, with its handles.
     - The viewer shows no other area. With Effects off, it shows no area.
     - With no clip selected, or with more than one, the viewer shows no area.
-    - The viewer shows the area only while the playhead is on its clip.
   - Edit Shape sets Effects on or off.
     - A drag inside the area moves it. On an ellipse or a box, a corner changes its size, and the top handle turns it.
     - On a polygon, Alt and a click also removes a point. Why: a trackpad has no middle button.
@@ -1747,7 +1745,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - Keyframes on the points of a polygon are not built yet ([todo](todo/motion-tracking.md)).
   - The user draws the area on the thing to hide, and sees the blur at once. Resolve needs a node, the Window palette and the Blur palette for that.
-  - An area is on the picture of its clip. Another clip at the playhead does not show that picture.
   - A blur over a face or a number plate must cover only that part of the picture.
   - One effect can cover each face of a clip. The user then changes one blur, not one for each face.
   - One rule gives each of the six effects an area.
