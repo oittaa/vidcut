@@ -225,7 +225,7 @@ impl Workspace {
         }
     }
 
-    fn send_frame(&self, mode: ViewerFrame) {
+    pub(super) fn send_frame(&self, mode: ViewerFrame) {
         self.send("viewer.frame", json!({ "mode": mode }));
     }
 
