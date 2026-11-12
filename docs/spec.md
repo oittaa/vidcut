@@ -2803,7 +2803,8 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
 - macOS keeps the keys of the manual.
 - Shortcuts do nothing while a text field has focus, or while a modal question shows.
 - Esc dismisses the question and does nothing (Cancel, or Keep Running when quitting).
-- The table gives the default keys. The Keys page of Preferences (X138), `keys.set` and `keys.reset` change them.
+- The table gives the default keys. The Keyboard Customization window (p. 121), `keys.set` and `keys.reset` change them.
+- File > Keyboard Customization… opens that window.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.

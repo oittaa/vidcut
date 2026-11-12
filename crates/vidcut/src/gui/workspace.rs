@@ -264,6 +264,7 @@ impl Workspace {
             GuiPanel::Mixer => self.show_mixer = true,
             GuiPanel::KeyframeTray => self.key_tray = true,
             GuiPanel::Preferences => self.open_preferences(ctx),
+            GuiPanel::KeyboardCustomization => self.preferences.keys_open = true,
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
@@ -338,6 +339,7 @@ impl Workspace {
             GuiPanel::Mixer => self.show_mixer = false,
             GuiPanel::KeyframeTray => self.key_tray = false,
             GuiPanel::Preferences => self.preferences.open = false,
+            GuiPanel::KeyboardCustomization => self.preferences.keys_open = false,
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
@@ -401,6 +403,7 @@ impl Workspace {
             (GuiPanel::Mixer, self.show_mixer),
             (GuiPanel::KeyframeTray, self.key_tray),
             (GuiPanel::Preferences, self.preferences.open),
+            (GuiPanel::KeyboardCustomization, self.preferences.keys_open),
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
@@ -987,6 +990,9 @@ impl Workspace {
                     .clicked()
                 {
                     self.open_preferences(ui.ctx());
+                }
+                if ui.button("Keyboard Customization…").clicked() {
+                    self.preferences.keys_open = true;
                 }
                 ui.separator();
                 if ui.button("Quit").clicked() {
@@ -2032,6 +2038,7 @@ impl Workspace {
         self.keys(&ctx);
         self.export_windows(&ctx);
         self.preferences_window(&ctx);
+        self.keys_window(&ctx);
         self.help_window(&ctx);
         self.history_frame(&ctx);
         self.project_windows(&ctx);

@@ -4475,6 +4475,8 @@ pub enum GuiPanel {
     Mixer,
     /// Application preferences.
     Preferences,
+    /// Keyboard Customization: the keys of each action.
+    KeyboardCustomization,
     /// The keyboard shortcuts.
     Help,
     /// The undo history.

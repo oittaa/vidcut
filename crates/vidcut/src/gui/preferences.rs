@@ -50,6 +50,8 @@ pub(super) struct PreferencesUi {
     key_search: String,
     capture: Option<Capture>,
     confirm_keys: bool,
+    pub(super) keys_open: bool,
+    keys_window: super::window::Tool,
 }
 
 impl PreferencesUi {
@@ -97,10 +99,9 @@ enum Page {
     Proxies,
     Services,
     Fillers,
-    Keys,
 }
 
-const PAGES: [(Page, &str, &str); 10] = [
+const PAGES: [(Page, &str, &str); 9] = [
     (Page::General, icon::GEAR_SIX, "General"),
     (Page::Editing, icon::SCISSORS, "Editing"),
     (Page::Gpu, icon::GRAPHICS_CARD, "GPU"),
@@ -110,8 +111,13 @@ const PAGES: [(Page, &str, &str); 10] = [
     (Page::Proxies, icon::FILM_STRIP, "Proxies"),
     (Page::Services, icon::CLOUD, "Services"),
     (Page::Fillers, icon::CHAT_TEXT, "Filler Words"),
-    (Page::Keys, icon::KEYBOARD, "Keys"),
 ];
+
+const KEYS: super::window::Separate = super::window::Separate {
+    title: "Keyboard Customization",
+    file: "window-keys.json",
+    size: [560.0, 640.0],
+};
 
 const LABEL: f32 = 140.0;
 const SIDEBAR: f32 = 150.0;
@@ -253,49 +259,48 @@ fn without_key(bindings: &Bindings, action: Action, slot: usize) -> Option<(&'st
 }
 
 fn keys_page(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings) {
-    page(ui, "Keys", "", |ui| {
-        ui.add(
-            egui::TextEdit::singleline(&mut state.key_search)
-                .hint_text("Find an Action or a Key")
-                .desired_width(f32::INFINITY),
-        );
-        let query = state.key_search.trim().to_lowercase();
-        dialog::form(ui, "preferences-keys", |ui| {
-            for group in Group::ALL {
-                let rows: Vec<&Shortcut> = SHORTCUTS
-                    .iter()
-                    .filter(|s| s.group == group && matches!(s.keys, Keys::Own(..)))
-                    .filter(|s| super::help::matches(s, &query, bindings))
-                    .collect();
-                if rows.is_empty() {
-                    continue;
-                }
-                ui.vertical(|ui| super::help::heading(ui, group.title()));
-                ui.end_row();
-                for s in rows {
-                    if let Keys::Own(action, _) = s.keys {
-                        dialog::tall_row(ui, s.title, |ui| key_row(ui, state, bindings, action));
-                    }
+    ui.spacing_mut().item_spacing.y = 8.0;
+    ui.add(
+        egui::TextEdit::singleline(&mut state.key_search)
+            .hint_text("Find an Action or a Key")
+            .desired_width(f32::INFINITY),
+    );
+    let query = state.key_search.trim().to_lowercase();
+    dialog::form(ui, "preferences-keys", |ui| {
+        for group in Group::ALL {
+            let rows: Vec<&Shortcut> = SHORTCUTS
+                .iter()
+                .filter(|s| s.group == group && matches!(s.keys, Keys::Own(..)))
+                .filter(|s| super::help::matches(s, &query, bindings))
+                .collect();
+            if rows.is_empty() {
+                continue;
+            }
+            ui.vertical(|ui| super::help::heading(ui, group.title()));
+            ui.end_row();
+            for s in rows {
+                if let Keys::Own(action, _) = s.keys {
+                    dialog::tall_row(ui, s.title, |ui| key_row(ui, state, bindings, action));
                 }
             }
-        });
-        dialog::footer(ui, |ui| {
-            if state.confirm_keys {
-                if dialog::main_button(ui, "Reset All Keys", true) {
-                    state.keyed = Some(("keys.reset", json!({})));
-                    state.capture = None;
-                    state.confirm_keys = false;
-                }
-                if ui.button("Cancel").clicked() {
-                    state.confirm_keys = false;
-                }
-            } else if ui
-                .add_enabled(bindings.any_custom(), egui::Button::new("Reset All Keys…"))
-                .clicked()
-            {
-                state.confirm_keys = true;
+        }
+    });
+    dialog::footer(ui, |ui| {
+        if state.confirm_keys {
+            if dialog::main_button(ui, "Reset All Keys", true) {
+                state.keyed = Some(("keys.reset", json!({})));
+                state.capture = None;
+                state.confirm_keys = false;
             }
-        });
+            if ui.button("Cancel").clicked() {
+                state.confirm_keys = false;
+            }
+        } else if ui
+            .add_enabled(bindings.any_custom(), egui::Button::new("Reset All Keys…"))
+            .clicked()
+        {
+            state.confirm_keys = true;
+        }
     });
 }
 
@@ -432,11 +437,38 @@ impl Workspace {
         true
     }
 
+    pub(super) fn keys_window(&mut self, ctx: &egui::Context) {
+        let owner = self.main_window;
+        let bindings = self.snap.bindings.clone();
+        let state = &mut self.preferences;
+        if !state.keys_open {
+            state.keys_window.close();
+            state.capture = None;
+            state.confirm_keys = false;
+            return;
+        }
+        let mut window = std::mem::take(&mut state.keys_window);
+        let mut open = true;
+        super::dialog::separate_window(ctx, &mut window, owner, &KEYS, &mut open, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| keys_page(ui, state, &bindings));
+        });
+        state.keys_window = window;
+        state.keys_open = open;
+        if let Some((method, params)) = state.keyed.take() {
+            self.send(method, params);
+            if self.preferences.open {
+                self.preferences.ask =
+                    Some(Ask::send(&self.live, ctx, "preferences.get", json!({})));
+            }
+        }
+    }
+
     pub(super) fn preferences_window(&mut self, ctx: &egui::Context) {
         self.reset_answered(ctx);
         self.reset_window(ctx);
         let project = self.project_folder();
-        let bindings = self.snap.bindings.clone();
         let ui_state = &mut self.preferences;
         if !ui_state.open {
             return;
@@ -591,7 +623,6 @@ impl Workspace {
                                     Page::Fillers => {
                                         fillers(ui, &state, busy, ui_state, &mut patch)
                                     }
-                                    Page::Keys => keys_page(ui, ui_state, &bindings),
                                 }
                                 if let Some(e) = &ui_state.error {
                                     ui.add(
@@ -606,10 +637,6 @@ impl Workspace {
                 });
             });
         ui_state.open = open;
-        if !open || ui_state.page != Page::Keys {
-            ui_state.capture = None;
-            ui_state.confirm_keys = false;
-        }
         if reset {
             ui_state.ask = Some(Ask::send(&self.live, ctx, "preferences.reset", json!({})));
         }
