@@ -697,6 +697,10 @@ pub struct Preset {
     /// Shown in Quick Export.
     #[serde(default)]
     pub quick_export: bool,
+    /// Quick Export shows the presets of one family as one item, with a menu
+    /// of their sizes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family: Option<String>,
     pub settings: ExportSettings,
 }
 
@@ -753,6 +757,7 @@ fn preset(
         title: title.into(),
         description: description.into(),
         quick_export: quick,
+        family: None,
         settings,
     }
 }
@@ -792,6 +797,16 @@ pub fn builtin_presets() -> Vec<Preset> {
         width: Some(w),
         height: Some(h),
         ..video(V::H264, Some(q))
+    };
+    let site = |family: &str, w: u32, h: u32, quick: bool| Preset {
+        family: Some(family.into()),
+        ..preset(
+            &format!("{}-{h}p", family.to_lowercase()),
+            &format!("{family} {h}p"),
+            &format!("MP4, H.264 {w}×{h}, AAC"),
+            quick,
+            av(C::Mp4, sized(w, h, 18), audio(A::Aac, Some(320))),
+        )
     };
     vec![
         preset(
@@ -843,27 +858,13 @@ pub fn builtin_presets() -> Vec<Preset> {
                 audio(A::PcmS24, None),
             ),
         ),
-        preset(
-            "youtube-1080p",
-            "YouTube 1080p",
-            "MP4, H.264 1920×1080, AAC",
-            true,
-            av(C::Mp4, sized(1920, 1080, 18), audio(A::Aac, Some(320))),
-        ),
-        preset(
-            "youtube-2160p",
-            "YouTube 2160p",
-            "MP4, H.264 3840×2160, AAC",
-            true,
-            av(C::Mp4, sized(3840, 2160, 18), audio(A::Aac, Some(320))),
-        ),
-        preset(
-            "vimeo-1080p",
-            "Vimeo 1080p",
-            "MP4, H.264 1920×1080, AAC",
-            true,
-            av(C::Mp4, sized(1920, 1080, 18), audio(A::Aac, Some(320))),
-        ),
+        site("YouTube", 1280, 720, false),
+        site("YouTube", 1920, 1080, true),
+        site("YouTube", 2560, 1440, false),
+        site("YouTube", 3840, 2160, false),
+        site("Vimeo", 1280, 720, false),
+        site("Vimeo", 1920, 1080, true),
+        site("Vimeo", 3840, 2160, false),
         preset(
             "tiktok",
             "TikTok",
@@ -877,13 +878,6 @@ pub fn builtin_presets() -> Vec<Preset> {
                 },
                 audio(A::Aac, Some(256)),
             ),
-        ),
-        preset(
-            "youtube-720p",
-            "YouTube 720p",
-            "MP4, H.264 1280×720, AAC",
-            false,
-            av(C::Mp4, sized(1280, 720, 18), audio(A::Aac, Some(320))),
         ),
         preset(
             "vp9-webm",

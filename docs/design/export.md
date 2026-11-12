@@ -419,6 +419,7 @@ Voice Isolation:
 
 - GUI media exports are `background`.
 - Quick Export lists the presets marked `quick_export`. It sends one with `overwrite` and no range.
+  - The presets of one `family` are one item. The first of them with `quick_export` gives the item, and its Resolution menu lists all of them.
 - The Export dialog ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)) starts from a preset. It sends the changes as `set` overrides, with a range, per-clip names and `overwrite`.
 - The dialog shows `export.plan` as its params change.
 

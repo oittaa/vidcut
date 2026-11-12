@@ -35,7 +35,7 @@ pub fn split(length: i64, align: Align) -> (i64, i64) {
 
 const SMOOTH_CUT_SECONDS: f64 = 0.2;
 
-pub fn length(p: &Project, kind: &PictureTransition) -> i64 {
+pub fn default_length(p: &Project, kind: &PictureTransition) -> i64 {
     let seconds = match kind {
         PictureTransition::SmoothCut { .. } => SMOOTH_CUT_SECONDS,
         _ => 1.0,
