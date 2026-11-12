@@ -420,7 +420,9 @@ The bar and the Jobs button:
     - The menu shows the name of each `Subject` that an area follows (`Subject::named`), also of one that it does not list.
 - `Workspace::motion_section` shows for the first selected clip that takes motion paths (`ops::motion::takes`), above the effects.
   - Its first row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
+    - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.
     - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
+    - Each field tells on hover what it sets, and what a lower or a higher number does.
     - Find and Blur send the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
   - Find sends `motion.find` (`find_request`), with `replace` when the clip has paths of that subject.
   - Blur sends one `apply` (`blur_request`). It has `motion.find` when the clip has no such path.

@@ -39,41 +39,49 @@ const FIELD_WIDTH: f32 = 76.0;
 const NAME_WIDTH: f32 = 140.0;
 const BLUR_SIZE: [f64; 2] = [1.3, 1.3];
 pub(super) const SUBJECTS: [Subject; 2] = [Subject::Face, Subject::Text];
-const FIND_VALUES: [(&str, &str, &str); 7] = [
+const BETTER_SIDE: u32 = 1920;
+const FIND_VALUES: [(&str, &str, &str, &str); 7] = [
     (
         "size",
         "Search Picture Size (px)",
-        "Larger Finds Smaller Things And Takes Longer",
+        "The model looks at the picture scaled to this size.",
+        "Larger finds smaller things and takes much longer.",
     ),
     (
         "start",
         "Min Score To Start (0-1)",
-        "How Sure The Model Must Be To Start Following A Thing",
+        "How sure the model must be to start following a thing.",
+        "Lower finds more things, and more wrong ones.",
     ),
     (
         "keep",
         "Min Score To Continue (0-1)",
-        "How Sure The Model Must Be To Keep Following It",
+        "How sure the model must be on later frames to keep following.",
+        "Lower keeps a thing through blur and turns.",
     ),
     (
         "overlap",
         "Min Box Overlap (0-1)",
-        "How Much A Box Must Overlap The Last One",
+        "How much a box must overlap the box of the frame before.",
+        "Lower follows faster things, and can mix up neighbors.",
     ),
     (
         "wait",
         "Max Time Hidden (s)",
-        "How Long A Thing May Stay Hidden",
+        "A thing hidden for longer than this counts as a new thing.",
+        "Longer follows a thing behind trees and people.",
     ),
     (
         "shortest",
         "Min Time Followed (s)",
-        "Things Followed For Less Time Are Dropped",
+        "A thing followed for less time than this is dropped.",
+        "Longer removes more wrong finds, and more short ones.",
     ),
     (
         "steady",
         "Min Share Of Frames Seen (0-1)",
-        "Things Seen On Fewer Of Their Frames Are Dropped",
+        "The share of its frames on which a thing must be seen.",
+        "Higher removes things that flicker on and off.",
     ),
 ];
 
@@ -1460,6 +1468,7 @@ pub struct Inspector {
     subject: Subject,
     find_values: [String; 7],
     find_open: bool,
+    find_better: bool,
     find_error: bool,
     finding: Option<Finding>,
     area_edit: Option<usize>,
@@ -2810,7 +2819,7 @@ fn found(c: &Chosen, subject: Subject) -> bool {
 
 fn find_extra(values: &[String; 7]) -> Option<Value> {
     let mut out = serde_json::Map::new();
-    for ((key, _, _), text) in FIND_VALUES.iter().zip(values) {
+    for ((key, _, _, _), text) in FIND_VALUES.iter().zip(values) {
         let text = text.trim();
         if text.is_empty() {
             continue;
@@ -4129,6 +4138,7 @@ impl Workspace {
         let mut subject = self.inspector.subject;
         let mut values = std::mem::take(&mut self.inspector.find_values);
         let mut open = self.inspector.find_open;
+        let mut better = self.inspector.find_better;
         let wrong = self.inspector.find_error;
         let extra = find_extra(&values);
         let mut tried = false;
@@ -4148,7 +4158,10 @@ impl Workspace {
                                 ui.selectable_value(&mut subject, s, s.many());
                             }
                         });
-                    let given = extra.clone().unwrap_or(Value::Null);
+                    let mut given = extra.clone().unwrap_or(Value::Null);
+                    if better && given.is_object() && given.get("size").is_none() {
+                        given["size"] = json!(BETTER_SIDE);
+                    }
                     if ui.button("Find").clicked() {
                         tried = true;
                         asked = Some(find_request(c, subject, &given));
@@ -4165,10 +4178,34 @@ impl Workspace {
                     }
                 });
                 ui.end_row();
+                label(ui, "Quality", false);
+                dialog::switch(ui, |ui| {
+                    let quick = ui.selectable_label(!better, "Faster");
+                    if quick
+                        .on_hover_text("The model looks at a small picture. It is quick.")
+                        .clicked()
+                    {
+                        better = false;
+                    }
+                    let slow = ui.selectable_label(better, "Better");
+                    let tip = [
+                        "The model looks at a larger picture.",
+                        "It finds smaller things and takes much longer.",
+                    ]
+                    .join("\n");
+                    if slow.on_hover_text(tip.as_str()).clicked() {
+                        better = true;
+                    }
+                });
+                ui.end_row();
                 if open {
                     let usual = vidcut_core::motion::Join::of(subject);
+                    let side = match better {
+                        true => BETTER_SIDE,
+                        false => vidcut_av::subjects::side(subject),
+                    };
                     let hints = [
-                        vidcut_av::subjects::side(subject).to_string(),
+                        side.to_string(),
                         usual.start.to_string(),
                         usual.keep.to_string(),
                         usual.overlap.to_string(),
@@ -4176,14 +4213,19 @@ impl Workspace {
                         usual.shortest_secs.to_string(),
                         usual.steady.to_string(),
                     ];
-                    for (i, (_, name, tip)) in FIND_VALUES.iter().enumerate() {
-                        label(ui, name, !values[i].trim().is_empty());
+                    for (i, (_, name, what, effect)) in FIND_VALUES.iter().enumerate() {
+                        let tip = format!("{what}\n{effect}");
+                        let set = !values[i].trim().is_empty();
+                        let c = theme::colors();
+                        let color = if set { c.accent } else { c.text_dim };
+                        ui.label(RichText::new(*name).color(color))
+                            .on_hover_text(tip.as_str());
                         ui.add(
                             egui::TextEdit::singleline(&mut values[i])
                                 .hint_text(hints[i].as_str())
                                 .desired_width(NAME_WIDTH),
                         )
-                        .on_hover_text(*tip);
+                        .on_hover_text(tip.as_str());
                         ui.end_row();
                     }
                     if wrong {
@@ -4230,6 +4272,7 @@ impl Workspace {
         self.inspector.subject = subject;
         self.inspector.find_values = values;
         self.inspector.find_open = open;
+        self.inspector.find_better = better;
         if tried || extra.is_some() {
             self.inspector.find_error = extra.is_none();
         }
