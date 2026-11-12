@@ -23,6 +23,11 @@ use super::theme;
 use super::viewer::{ACTIVE_ANGLE, GridCell, grid_pictures};
 use super::workspace::{Workspace, dim, fit};
 
+const WINDOW: super::window::Separate = super::window::Separate {
+    title: "Sync Clips",
+    file: "window-sync-clips.json",
+    size: [980.0, 700.0],
+};
 const FAST_NUDGE: i64 = 5;
 const RULER: f32 = 22.0;
 const RULER_LABEL: f32 = 70.0;
@@ -59,6 +64,7 @@ struct Lane {
 #[derive(Default)]
 pub(super) struct SyncClips {
     pub(super) open: bool,
+    window: super::window::Tool,
     group: Option<String>,
     bin: String,
     files: Vec<String>,
@@ -286,8 +292,11 @@ impl Workspace {
                 move || drop(sound),
             );
         }
+        s.window.close();
+        let window = std::mem::take(&mut s.window);
         self.sync_clips = SyncClips {
             solo: s.solo,
+            window,
             ..SyncClips::default()
         };
     }
@@ -489,7 +498,10 @@ impl Workspace {
         self.sync_clips_follow(ctx, &p);
         let mut open = true;
         let mut cancel = false;
-        dialog::tool_window(ctx, "Sync Clips", &mut open, [980.0, 700.0], |ui| {
+        let owner = self.main_window;
+        let mut window = std::mem::take(&mut self.sync_clips.window);
+        dialog::separate_window(ctx, &mut window, owner, &WINDOW, &mut open, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
             self.sync_clips_pictures(ui, &p);
             self.sync_clips_bar(ui, &p);
             let least = RULER + self.sync_clips.rows.len() as f32 * LEAST_ROW;
@@ -499,6 +511,7 @@ impl Workspace {
             self.sync_clips_rows(ui, rect, &p);
             cancel = self.sync_clips_footer(ui);
         });
+        self.sync_clips.window = window;
         if !open || cancel {
             self.close_sync_clips();
             return;

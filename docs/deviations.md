@@ -1147,16 +1147,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The history gets one entry, and Cancel has nothing to undo.
   - The owner approved this difference.
 
-## X121. The Sync Clips window is inside the main window
-
-- **Resolve:**
-  - This is a measurement in Resolve Studio 21.1.2. The icon opens a separate window with the title "Sync Clips".
-- **vidcut:**
-  - The window is inside vidcut's main window.
-- **Why:**
-  - The window is for one short task, so it needs no place of its own on the screen.
-  - The owner approved this difference.
-
 ## X122. A clip on the timeline does not follow Save Sync
 
 - **Resolve:**
