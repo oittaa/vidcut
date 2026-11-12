@@ -1611,6 +1611,9 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The blur of the node is in the Blur palette. It shows only inside the windows of the node (21.2).
   - The Viewer shows the outline of a window only while the Window palette or the Tracker palette is open (21.2).
     - With the Blur palette open, it shows no outline. The Cut page shows no outline, and nothing there marks a clip with a window.
+  - On the Edit page, the Viewer shows the controls of an effect only with Open FX Overlay on in its menu (21.2).
+    - It shows the controls of the selected effect of the Inspector, also while the section of that effect is closed.
+    - It shows them on each tab of the Inspector and with the Inspector closed. With no clip selected, it shows none.
 - **vidcut:**
   - An effect of a clip can have an area: an ellipse, a box or a polygon. The effect then shows only inside it. With `invert`, it shows only outside it.
   - The area stays on the content of the picture through the transform, the crop, the flips, a Dynamic Zoom and a compound clip around it.
@@ -1620,22 +1623,21 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - `motion.remove` refuses a path that an area follows by its id. A path that an area follows by its subject can go.
   - Each effect in the Inspector has Area rows: Off, Ellipse, Box or Polygon, then Edit Shape, Track, Invert Area, Area Softness and Follow.
     - Area Advanced Controls has Center X, Center Y, Width, Height and Rotation.
-  - The viewer shows a thin outline of each area of the selected clip at the playhead.
-    - A click on an outline, or inside it, shows the handles of that area. A click outside the areas hides the handles.
-    - With no clip selected, the viewer shows no outline. Thus it shows the picture of an export.
-  - Edit Shape shows the handles of the area in the viewer.
+  - The Tools row under the viewer has Effects. With it on, the viewer shows the area of the picked effect of the Inspector, with its handles.
+    - The viewer shows no other area. With Effects off, it shows no area.
+    - With no clip selected, or with more than one, the viewer shows no area.
+  - Edit Shape sets Effects on or off.
     - A drag inside the area moves it. On an ellipse or a box, a corner changes its size, and the top handle turns it.
     - On a polygon, Alt and a click also removes a point. Why: a trackpad has no middle button.
   - The Tools row under the viewer has Blur ([spec §8.15](spec.md#815-transform-and-crop-pp-766768)).
     - The right-click menu of a clip has Blur. It shows the Tools row with Blur on, for that clip.
     - With Ellipse or Box, a drag in the picture adds a Mosaic Blur with that area. With Shift, the area is as wide as it is high on the screen.
     - With Free Shape, each click adds a point. A click on the first point, or a double-click, closes the shape. Escape drops it.
-    - A drag on the outline of another area shows its handles and moves it.
+    - A new area sets Effects on, and its effect is the picked one.
   - The points of a polygon take no keyframes.
 - **Why:**
   - Keyframes on the points of a polygon are not built yet ([todo](todo/motion-tracking.md)).
   - The user draws the area on the thing to hide, and sees the blur at once. Resolve needs a node, the Window palette and the Blur palette for that.
-  - The outline of an area tells where an effect works, with no tool open.
   - A blur over a face or a number plate must cover only that part of the picture.
   - One effect can cover each face of a clip. The user then changes one blur, not one for each face.
   - One rule gives each of the six effects an area.

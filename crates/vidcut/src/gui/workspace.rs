@@ -386,7 +386,7 @@ impl Workspace {
                     g.tool = None;
                 }
             }
-            GuiPanel::EffectArea => self.timeline.picture_grab.area = None,
+            GuiPanel::EffectArea => self.effects_tool(false),
             GuiPanel::Blur => self.blur_tool(false),
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
         }
@@ -431,10 +431,7 @@ impl Workspace {
                 GuiPanel::DynamicZoom,
                 tool == Some(PictureTool::DynamicZoom),
             ),
-            (
-                GuiPanel::EffectArea,
-                self.timeline.picture_grab.area.is_some(),
-            ),
+            (GuiPanel::EffectArea, self.timeline.picture_grab.effects),
             (GuiPanel::Blur, self.timeline.picture_grab.blurring()),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
         ];
@@ -2156,8 +2153,10 @@ impl Workspace {
         if self.left != LeftTab::Titles {
             self.end_title_hover();
         }
+        self.sync_effect_area();
         if self.left != LeftTab::Inspector {
             self.leave_inspector();
+            self.watch_inspector();
             self.settle_transition_drafts(None, ui.ctx());
         }
         if self.left != LeftTab::Keyframes && !self.key_tray {
