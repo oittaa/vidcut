@@ -826,7 +826,7 @@ fn transition_preview(ctx: &Ctx, pos: Pos2, kind: &PictureTransition) -> Preview
     } else {
         vidcut_core::ops::Align::Start
     };
-    let length = vidcut_core::ops::dissolve_length(ctx.project);
+    let length = vidcut_core::ops::dissolve_length(ctx.project, kind);
     let shape = vidcut_core::ops::Shape::Length(length, align);
     let Some((before, after)) = vidcut_core::ops::dissolve_sides(ctx.project, &id, at, shape)
     else {
