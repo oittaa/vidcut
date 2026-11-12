@@ -179,7 +179,10 @@ pub struct Look {
     pub from: f64,
     pub to: f64,
     pub every: f64,
+    pub side: Option<u32>,
 }
+
+pub const SIDES: (u32, u32) = (320, 3840);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Follow {

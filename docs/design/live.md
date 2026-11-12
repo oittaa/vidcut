@@ -419,12 +419,18 @@ The bar and the Jobs button:
     - A subject entry sends the name of the subject in `follows`. It is there also when the clip has no path of that subject.
     - The menu shows the name of each `Subject` that an area follows (`Subject::named`), also of one that it does not list.
 - `Workspace::motion_section` shows for the first selected clip that takes motion paths (`ops::motion::takes`), above the effects.
-  - Its first row has a menu of the subjects (`SUBJECTS`), Find and Blur.
+  - Its first row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
+    - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.
+    - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
+    - Each field tells on hover what it sets, and what a lower or a higher number does.
+    - Find and Blur send the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
   - Find sends `motion.find` (`find_request`), with `replace` when the clip has paths of that subject.
   - Blur sends one `apply` (`blur_request`). It has `motion.find` when the clip has no such path.
     - Then it has `effects.add` of a Mosaic Blur, and `effects.set` with an `area` that follows the subject.
     - It leaves the blur out when an effect of the clip follows the subject. With nothing to send, the button is off.
     - The live core runs an `apply` with `motion.find` as a long edit (`runs_long`): it measures on a job thread first.
+  - A `motion.find` and a `motion.track` of their own run as jobs (`start_encode`, kinds `find` and `track`). The Jobs window shows each with its progress, and Cancel stops it.
+    - The `apply` of Blur measures with no job, and shows no progress.
   - `Workspace::find` asks before a download when the model of the subject is not there (`subjects::needed`, `Finding`). `Workspace::motion_prompt` shows the question that the other local models use (`ask_download`), and `with_model` then sets `download` on `motion.find`.
   - The rows below list the motion paths of the clip.
   - A name goes with `motion.set` when its field loses the focus (`Naming`). Escape drops the typed name. Delete sends `motion.remove`.

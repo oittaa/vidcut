@@ -4382,7 +4382,33 @@ fn mutate(
             subject,
             replace,
             download,
+            size,
+            start,
+            keep,
+            overlap,
+            wait,
+            shortest,
+            steady,
         } => {
+            let usual = crate::motion::Join::of(*subject);
+            let rules = crate::motion::Join {
+                start: start.unwrap_or(usual.start),
+                keep: keep.unwrap_or(usual.keep),
+                overlap: overlap.unwrap_or(usual.overlap),
+                wait_secs: wait.unwrap_or(usual.wait_secs),
+                shortest_secs: shortest.unwrap_or(usual.shortest_secs),
+                steady: steady.unwrap_or(usual.steady),
+            };
+            if let Some(why) = rules.problem() {
+                return Err(Error::usage(why));
+            }
+            let sides = crate::analysis::SIDES;
+            if size.is_some_and(|s| !(sides.0..=sides.1).contains(&s)) {
+                return Err(Error::usage(format!(
+                    "size (--size) is from {} to {} pixels",
+                    sides.0, sides.1
+                )));
+            }
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let fps = p.settings.fps.as_f64();
             let mut looks = Vec::new();
@@ -4394,9 +4420,11 @@ fn mutate(
             }
             let mut out = Vec::new();
             for (id, media, frames) in looks {
-                let look = subject_look(&media, fps, frames);
+                let look = Look {
+                    side: *size,
+                    ..subject_look(&media, fps, frames)
+                };
                 let found = env.subjects(&media, *subject, look, *download)?;
-                let rules = crate::motion::Join::of(*subject);
                 let tracks = crate::motion::joined(&found, media.origin(), fps, frames, &rules);
                 out.push(ops::motion::found(p, id, *subject, tracks)?);
             }
@@ -6934,6 +6962,7 @@ pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> V
         clips,
         subject,
         download,
+        size,
         ..
     } = request
     else {
@@ -6946,7 +6975,10 @@ pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> V
         .filter(|c| ops::motion::takes(c))
         .filter_map(|c| {
             let media = p.media(&c.media)?;
-            let look = subject_look(media, fps, c.shown());
+            let look = Look {
+                side: *size,
+                ..subject_look(media, fps, c.shown())
+            };
             Some((media.clone(), *subject, look, *download))
         })
         .collect()

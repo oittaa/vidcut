@@ -64,6 +64,9 @@ flowchart TD
   - `subjects::find` looks only at the first decoded frame at or after each time of the `Look`.
     - Why: a file of 60 fps in a project of 24 fps shows two frames of each five.
   - It scales each picture to the longer side that the model takes (`yunet::SIDE`, `ppocr::SIDE`, `yolox::SIDE`), upright, with square pixels.
+    - `motion.find` can give another longer side with `size` (`Look::side`), within `analysis::SIDES`. A larger picture shows the model smaller things, and takes more time.
+    - With a given size, the picture is never larger than its source.
+    - `AvEnv` puts a given size in the name of the cached find.
   - The model runs with tract on the CPU, one picture on each thread of the pool (`pool::run`).
   - `Detections` holds the time of each picture and its `Found` boxes: the center, the size, the rotation and the score. The center and the size are fractions of the picture.
   - `Detections` also holds the scene score of each picture against the picture before it (`scene`).
@@ -108,15 +111,18 @@ flowchart TD
   - A path waits `wait_secs` for its thing. Then the path ends.
   - Each open path ends at a shot change inside the clip (`Detections::cut`, with `SCENE_SCORE`). A thing of the next shot opens a new path.
     - Why: the box of the next shot at the same place is another thing. The user must be able to remove it alone.
-  - A path stays only with boxes of a score of `start` or more on as many frames as `shortest_secs` has.
-    - Why: a pattern that looks like a face scores high on a few frames only.
+  - A path stays only when it lasts `shortest_secs`, from its first box to its last.
+    - Why: a pattern that looks like a thing shows for a short time only.
+    - The time counts the frames between those boxes, also the frames with no box.
+      - Why: a thing behind a tree has no box on some frames. A count of the boxes then removes a path that lasts long enough.
     - The `shortest_secs` of a person and a vehicle is longer than that of a face.
       - Why: the model can give one person a second box, for example with a thing that the person holds.
-      - On the test clips, such a box has a score of `start` or more on fewer frames than that time has.
-    - The end of a shot is the next shot change or the end of the clip. Fewer frames can be left from the first box of a path to that end. Then such a box on each of those frames is sufficient.
+    - The end of a shot is the next shot change or the end of the clip. Less time can be left from the first box of a path to that end. Then the path stays when it lasts to that end.
       - Why: each path ends at a shot change. A thing that shows late in a shot, or in a short shot, must get its path too.
-  - A path stays only with a box on a share of `steady` of its frames. Faces, people and vehicles have no such rule.
-    - Why: a pattern that looks like text comes and goes from frame to frame. A face that turns away is not found for a time, and must stay.
+  - A path stays only with a box on a share of `steady` of its frames.
+    - Why: a pattern that comes and goes from frame to frame is no thing. Two short sights that are far apart are no path.
+  - `motion.find` takes each of these values: `start`, `keep`, `overlap`, `wait`, `shortest` and `steady`. `Join::of` gives the usual values of a subject, and `Join::problem` checks the given values.
+    - The boxes of a find stay in the disk cache. Thus a find with other values takes the boxes from there, and the model does not run again.
   - `motion::simplified` keeps the first sample, the last sample, and each sample that the line between its kept neighbors misses.
     - A miss is more than `SLACK` of the size of the box, in the center or in the size, or more than `TURN_SLACK` degrees.
     - Why: the project file holds each sample, and vidcut writes that file after each edit.

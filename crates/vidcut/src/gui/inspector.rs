@@ -39,6 +39,51 @@ const FIELD_WIDTH: f32 = 76.0;
 const NAME_WIDTH: f32 = 140.0;
 const BLUR_SIZE: [f64; 2] = [1.3, 1.3];
 pub(super) const SUBJECTS: [Subject; 2] = [Subject::Face, Subject::Text];
+const BETTER_SIDE: u32 = 1920;
+const FIND_VALUES: [(&str, &str, &str, &str); 7] = [
+    (
+        "size",
+        "Search Picture Size (px)",
+        "The model looks at the picture scaled to this size.",
+        "Larger finds smaller things and takes much longer.",
+    ),
+    (
+        "start",
+        "Min Score To Start (0-1)",
+        "How sure the model must be to start following a thing.",
+        "Lower finds more things, and more wrong ones.",
+    ),
+    (
+        "keep",
+        "Min Score To Continue (0-1)",
+        "How sure the model must be on later frames to keep following.",
+        "Lower keeps a thing through blur and turns.",
+    ),
+    (
+        "overlap",
+        "Min Box Overlap (0-1)",
+        "How much a box must overlap the box of the frame before.",
+        "Lower follows faster things, and can mix up neighbors.",
+    ),
+    (
+        "wait",
+        "Max Time Hidden (s)",
+        "A thing hidden for longer than this counts as a new thing.",
+        "Longer follows a thing behind trees and people.",
+    ),
+    (
+        "shortest",
+        "Min Time Followed (s)",
+        "A thing followed for less time than this is dropped.",
+        "Longer removes more wrong finds, and more short ones.",
+    ),
+    (
+        "steady",
+        "Min Share Of Frames Seen (0-1)",
+        "The share of its frames on which a thing must be seen.",
+        "Higher removes things that flicker on and off.",
+    ),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Field {
@@ -1421,6 +1466,10 @@ pub struct Inspector {
     lut_pick: Option<(Vec<String>, Picked)>,
     naming: Option<Naming>,
     subject: Subject,
+    find_values: [String; 7],
+    find_open: bool,
+    find_better: bool,
+    find_error: bool,
     finding: Option<Finding>,
     area_edit: Option<usize>,
 }
@@ -2768,25 +2817,49 @@ fn found(c: &Chosen, subject: Subject) -> bool {
     c.paths.iter().any(|p| p.subject == Some(subject))
 }
 
-fn find_request(c: &Chosen, subject: Subject) -> (&'static str, Value) {
+fn find_extra(values: &[String; 7]) -> Option<Value> {
+    let mut out = serde_json::Map::new();
+    for ((key, _, _, _), text) in FIND_VALUES.iter().zip(values) {
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        let number: f64 = text.replace(',', ".").parse().ok()?;
+        let value = match *key {
+            "size" => json!(number.round() as u32),
+            _ => json!(number),
+        };
+        out.insert((*key).to_string(), value);
+    }
+    Some(Value::Object(out))
+}
+
+fn with_extra(mut params: Value, extra: &Value) -> Value {
+    for (key, value) in extra.as_object().into_iter().flatten() {
+        params[key.as_str()] = value.clone();
+    }
+    params
+}
+
+fn find_request(c: &Chosen, subject: Subject, extra: &Value) -> (&'static str, Value) {
     let mut params = json!({ "clips": [c.id], "subject": subject });
     if found(c, subject) {
         params["replace"] = json!(true);
     }
-    ("motion.find", params)
+    ("motion.find", with_extra(params, extra))
 }
 
 fn blur_request(
     id: &str,
     found: bool,
     effects: &[Effect],
-    subject: Subject,
+    (subject, extra): (Subject, &Value),
 ) -> Option<(&'static str, Value)> {
     let follows =
         |e: &Effect| e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(subject.name());
     let mut commands = Vec::new();
     if !found {
-        let params = json!({ "clips": [id], "subject": subject });
+        let params = with_extra(json!({ "clips": [id], "subject": subject }), extra);
         commands.push(json!({ "method": "motion.find", "params": params }));
     }
     if !effects.iter().any(follows) {
@@ -3986,7 +4059,7 @@ impl Workspace {
         }
         let found = c.motion.iter().any(|m| m.subject == Some(subject));
         let effects = c.picture.as_ref().map_or(&[][..], |x| &x.effects);
-        blur_request(clip, found, effects, subject)
+        blur_request(clip, found, effects, (subject, &Value::Null))
     }
 
     pub(super) fn find(&mut self, method: &'static str, params: Value, subject: Subject) {
@@ -4063,6 +4136,12 @@ impl Workspace {
         let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
         let mut naming = self.inspector.naming.take();
         let mut subject = self.inspector.subject;
+        let mut values = std::mem::take(&mut self.inspector.find_values);
+        let mut open = self.inspector.find_open;
+        let mut better = self.inspector.find_better;
+        let wrong = self.inspector.find_error;
+        let extra = find_extra(&values);
+        let mut tried = false;
         let mut sends = Vec::new();
         let mut asked = None;
         group(
@@ -4075,20 +4154,86 @@ impl Workspace {
                     egui::ComboBox::from_id_salt("inspector-motion-subject")
                         .selected_text(subject.many())
                         .show_ui(ui, |ui| {
-                            for s in SUBJECTS {
+                            for s in Subject::ALL {
                                 ui.selectable_value(&mut subject, s, s.many());
                             }
                         });
-                    if ui.button("Find").clicked() {
-                        asked = Some(find_request(c, subject));
+                    let mut given = extra.clone().unwrap_or(Value::Null);
+                    if better && given.is_object() && given.get("size").is_none() {
+                        given["size"] = json!(BETTER_SIDE);
                     }
-                    let blur = blur_request(&c.id, found(c, subject), &c.stored.effects, subject);
+                    if ui.button("Find").clicked() {
+                        tried = true;
+                        asked = Some(find_request(c, subject, &given));
+                    }
+                    let had = found(c, subject);
+                    let blur = blur_request(&c.id, had, &c.stored.effects, (subject, &given));
                     let button = egui::Button::new("Blur");
                     if ui.add_enabled(blur.is_some(), button).clicked() {
+                        tried = true;
                         asked = blur;
+                    }
+                    if ui.add(egui::Button::selectable(open, "Advanced")).clicked() {
+                        open = !open;
                     }
                 });
                 ui.end_row();
+                label(ui, "Quality", false);
+                dialog::switch(ui, |ui| {
+                    let quick = ui.selectable_label(!better, "Faster");
+                    if quick
+                        .on_hover_text("The model looks at a small picture. It is quick.")
+                        .clicked()
+                    {
+                        better = false;
+                    }
+                    let slow = ui.selectable_label(better, "Better");
+                    let tip = [
+                        "The model looks at a larger picture.",
+                        "It finds smaller things and takes much longer.",
+                    ]
+                    .join("\n");
+                    if slow.on_hover_text(tip.as_str()).clicked() {
+                        better = true;
+                    }
+                });
+                ui.end_row();
+                if open {
+                    let usual = vidcut_core::motion::Join::of(subject);
+                    let side = match better {
+                        true => BETTER_SIDE,
+                        false => vidcut_av::subjects::side(subject),
+                    };
+                    let hints = [
+                        side.to_string(),
+                        usual.start.to_string(),
+                        usual.keep.to_string(),
+                        usual.overlap.to_string(),
+                        usual.wait_secs.to_string(),
+                        usual.shortest_secs.to_string(),
+                        usual.steady.to_string(),
+                    ];
+                    for (i, (_, name, what, effect)) in FIND_VALUES.iter().enumerate() {
+                        let tip = format!("{what}\n{effect}");
+                        let set = !values[i].trim().is_empty();
+                        let c = theme::colors();
+                        let color = if set { c.accent } else { c.text_dim };
+                        ui.label(RichText::new(*name).color(color))
+                            .on_hover_text(tip.as_str());
+                        ui.add(
+                            egui::TextEdit::singleline(&mut values[i])
+                                .hint_text(hints[i].as_str())
+                                .desired_width(NAME_WIDTH),
+                        )
+                        .on_hover_text(tip.as_str());
+                        ui.end_row();
+                    }
+                    if wrong {
+                        label(ui, "", false);
+                        label(ui, "A Value Is Not A Number", true);
+                        ui.end_row();
+                    }
+                }
                 for (n, row) in c.paths.iter().enumerate() {
                     let now = row.name.as_deref().unwrap_or("");
                     let typed = naming
@@ -4125,6 +4270,15 @@ impl Workspace {
         );
         self.inspector.naming = naming;
         self.inspector.subject = subject;
+        self.inspector.find_values = values;
+        self.inspector.find_open = open;
+        self.inspector.find_better = better;
+        if tried || extra.is_some() {
+            self.inspector.find_error = extra.is_none();
+        }
+        if extra.is_none() {
+            asked = None;
+        }
         for (method, params) in sends {
             self.send(method, params);
         }

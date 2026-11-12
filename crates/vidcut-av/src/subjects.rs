@@ -64,7 +64,7 @@ fn file(subject: Subject) -> catalog::File {
     }
 }
 
-fn side(subject: Subject) -> u32 {
+pub fn side(subject: Subject) -> u32 {
     match subject {
         Subject::Face => yunet::SIDE,
         Subject::Text => ppocr::SIDE,
@@ -92,8 +92,8 @@ impl Net {
         Ok(match subject {
             Subject::Face => Self::Face(yunet::Model::load(path, size)?),
             Subject::Text => Self::Text(ppocr::Model::load(path, size)?),
-            Subject::Person => Self::Things(yolox::Model::load(path, yolox::PEOPLE)?),
-            Subject::Vehicle => Self::Things(yolox::Model::load(path, yolox::VEHICLES)?),
+            Subject::Person => Self::Things(yolox::Model::load(path, yolox::PEOPLE, size)?),
+            Subject::Vehicle => Self::Things(yolox::Model::load(path, yolox::VEHICLES, size)?),
         })
     }
 
@@ -255,8 +255,15 @@ struct Looking {
 }
 
 impl Looking {
-    fn start(subject: Subject, path: &Path, first: &frame::Video, turn: u16) -> Result<Self> {
-        let content = fitted(first, turn, side(subject));
+    fn start(
+        subject: Subject,
+        path: &Path,
+        (first, turn): (&frame::Video, u16),
+        wanted: Option<u32>,
+    ) -> Result<Self> {
+        let source = first.width().max(first.height());
+        let most = wanted.map_or(side(subject), |s| s.min(source));
+        let content = fitted(first, turn, most);
         Ok(Self {
             model: Net::load(subject, path, content)?,
             content,
@@ -356,7 +363,8 @@ pub fn find(
                     let seeing = match &mut looking {
                         Some(seeing) => seeing,
                         None => {
-                            let seeing = Looking::start(subject, &weights, &decoded, turn)?;
+                            let seeing =
+                                Looking::start(subject, &weights, (&decoded, turn), look.side)?;
                             looking.insert(seeing)
                         }
                     };

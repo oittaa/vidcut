@@ -21,6 +21,7 @@ const ROW: usize = 5 + CLASSES;
 pub(crate) struct Model {
     plan: Arc<TypedRunnableModel>,
     classes: &'static [usize],
+    side: usize,
 }
 
 pub fn name(classes: &[usize]) -> String {
@@ -33,8 +34,7 @@ pub fn name(classes: &[usize]) -> String {
     )
 }
 
-fn colors(picture: &[f32], (cw, ch): (usize, usize)) -> Vec<f32> {
-    let side = SIDE as usize;
+fn colors(picture: &[f32], (cw, ch): (usize, usize), side: usize) -> Vec<f32> {
     let plane = side * side;
     let mut out = vec![PAD; 3 * plane];
     for (c, to) in out.chunks_exact_mut(plane).enumerate() {
@@ -59,12 +59,12 @@ fn named(row: &[f32]) -> (usize, f32) {
 }
 
 impl Model {
-    pub(crate) fn load(path: &Path, classes: &'static [usize]) -> Result<Self> {
+    pub(crate) fn load(path: &Path, classes: &'static [usize], size: (u32, u32)) -> Result<Self> {
         let onnx = tract_onnx::onnx()
             .with_ignore_output_shapes(true)
             .with_ignore_value_info(true);
         let mut model = onnx.model_for_path(path).map_err(|e| bad(path, e))?;
-        let side = SIDE as usize;
+        let side = (size.0.max(size.1) as usize).div_ceil(32) * 32;
         model
             .set_input_fact(0, f32::fact([1, 3, side, side]).into())
             .map_err(|e| bad(path, e))?;
@@ -72,17 +72,21 @@ impl Model {
             .into_optimized()
             .and_then(|m| m.into_runnable())
             .map_err(|e| bad(path, e))?;
-        Ok(Self { plan, classes })
+        Ok(Self {
+            plan,
+            classes,
+            side,
+        })
     }
 
     pub(crate) fn size(&self) -> (usize, usize) {
-        (SIDE as usize, SIDE as usize)
+        (self.side, self.side)
     }
 
     pub(crate) fn find(&self, picture: &[f32], content: (usize, usize)) -> Result<Vec<Found>> {
         let failed = |e: TractError| Error::Invalid(format!("object detection: {e}"));
-        let side = SIDE as usize;
-        let colors = colors(picture, content);
+        let side = self.side;
+        let colors = colors(picture, content, side);
         let input = Tensor::from_shape(&[1, 3, side, side], &colors).map_err(failed)?;
         let out = self.plan.run(tvec!(input.into())).map_err(failed)?;
         let view = out[0].to_plain_array_view::<f32>().map_err(failed)?;

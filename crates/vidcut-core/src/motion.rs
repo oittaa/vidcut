@@ -309,7 +309,7 @@ impl Join {
                 overlap: 0.2,
                 wait_secs: 1.0,
                 shortest_secs: 0.5,
-                steady: 0.0,
+                steady: 0.5,
             },
             Subject::Text => Self {
                 start: 0.7,
@@ -325,16 +325,35 @@ impl Join {
                 overlap: 0.2,
                 wait_secs: 1.0,
                 shortest_secs: 1.0,
-                steady: 0.0,
+                steady: 0.5,
             },
         }
     }
+
+    pub fn problem(&self) -> Option<&'static str> {
+        let share = |v: f64| (0.0..=1.0).contains(&v);
+        let secs = |v: f64| (0.0..=Self::MOST_SECS).contains(&v);
+        if !share(f64::from(self.start)) || !share(f64::from(self.keep)) {
+            return Some("start and keep are scores from 0 to 1");
+        }
+        if self.keep > self.start {
+            return Some("keep is at most start");
+        }
+        if !share(self.overlap) || !share(self.steady) {
+            return Some("overlap and steady are shares from 0 to 1");
+        }
+        if !secs(self.wait_secs) || !secs(self.shortest_secs) {
+            return Some("wait and shortest are from 0 to 60 seconds");
+        }
+        None
+    }
+
+    pub const MOST_SECS: f64 = 60.0;
 }
 
 struct Open {
     last: Found,
     seen: i64,
-    sure: usize,
     total: f64,
     samples: Vec<PathSample>,
 }
@@ -376,6 +395,7 @@ pub fn look(origin: f64, fps: f64, (first, end): (i64, i64)) -> Look {
         from: shown_time(origin, fps, first),
         to: shown_time(origin, fps, end - 1),
         every: 1.0 / fps,
+        side: None,
     }
 }
 
@@ -421,7 +441,6 @@ pub fn joined(
                 (moved[t], joined[b]) = (true, true);
                 let o = &mut open[t];
                 (o.last, o.seen) = (boxes[b], frame);
-                o.sure += usize::from(boxes[b].score >= rules.start);
                 o.total += f64::from(boxes[b].score);
                 o.samples.push(sample(frame, &boxes[b]));
             }
@@ -434,23 +453,20 @@ pub fn joined(
             open.push(Open {
                 last: *f,
                 seen: frame,
-                sure: 1,
                 total: f64::from(f.score),
                 samples: vec![sample(frame, f)],
             });
         }
     }
     done.extend(open);
-    let steady = |o: &Open| {
-        let lasts = o.seen - o.samples[0].frame + 1;
-        o.samples.len() as f64 >= rules.steady * lasts as f64
-    };
+    let lasts = |o: &Open| (o.seen - o.samples[0].frame + 1) as usize;
+    let steady = |o: &Open| o.samples.len() as f64 >= rules.steady * lasts(o) as f64;
     let left = |o: &Open| {
         let from = o.samples[0].frame;
         let next = shots.partition_point(|&s| s <= from);
         (shots.get(next).copied().unwrap_or(end) - from) as usize
     };
-    done.retain(|o| o.sure >= shortest.min(left(o)) && steady(o));
+    done.retain(|o| lasts(o) >= shortest.min(left(o)) && steady(o));
     done.sort_by(|a, b| {
         let (a, b) = (&a.samples[0], &b.samples[0]);
         (a.frame, a.center[0])

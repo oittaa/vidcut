@@ -396,6 +396,7 @@ impl Env for AvEnv {
             us(look.to),
             us(look.every)
         );
+        let key = look.side.map_or(key.clone(), |s| format!("{key}-s{s}"));
         measured(
             &self.memos.subjects,
             analysis_file(media, &key),
