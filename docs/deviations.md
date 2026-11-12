@@ -29,13 +29,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X2. One timeline per project file
 
 - **Resolve:**
-  - A project holds many timelines. The Master bin lists them (pp. 655, 678).
+  - A project holds many timelines. The Media Pool stores them in bins (p. 678).
+  - The Master bin of the Cut page lists all of them (p. 655).
 - **vidcut:**
   - A project file holds exactly one timeline.
-- **Why:**
-  - This is simple for a cutting tool, and it is an obvious mapping for scripts.
   - Several timelines are several project files that share media.
-  - The owner decided that several timelines in one project can wait.
+- **Why:** several timelines in one project are not built yet ([todo](todo/timelines.md)).
 
 ## X3. Exports are jobs, and Quick Export has a shorter row
 
