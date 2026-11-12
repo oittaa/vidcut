@@ -12,7 +12,6 @@ use vidcut_core::place::{Level, Placing, anchored, apply, flipped};
 use vidcut_core::render::{Placed, Run};
 
 use super::timeline::tools::landing;
-use super::title_browser::LeftTab;
 use super::workspace::Workspace;
 
 const GRAB: f32 = 6.0;
@@ -102,6 +101,8 @@ pub struct Grab {
     pub(crate) tool: Option<PictureTool>,
     pub(crate) row: bool,
     pub(crate) effects: bool,
+    pub(crate) find: bool,
+    found: Option<(String, String)>,
     pub(crate) area: Option<usize>,
     blur: bool,
     shape: AreaShape,
@@ -710,6 +711,7 @@ impl Workspace {
         let g = &mut self.timeline.picture_grab;
         g.tool = Some(tool);
         g.effects = false;
+        g.find = false;
         g.area = None;
         g.blur = false;
         g.drawn = None;
@@ -736,6 +738,7 @@ impl Workspace {
         g.area_held = None;
         if on {
             g.tool = None;
+            g.find = false;
             g.row = true;
             self.select_shown();
         }
@@ -747,6 +750,22 @@ impl Workspace {
         g.area_held = None;
         if on {
             g.tool = None;
+            g.find = false;
+            self.select_shown();
+        }
+    }
+
+    pub(super) fn find_tool(&mut self, on: bool) {
+        let g = &mut self.timeline.picture_grab;
+        g.find = on;
+        g.found = None;
+        if on {
+            g.tool = None;
+            g.effects = false;
+            g.blur = false;
+            g.drawn = None;
+            g.area_held = None;
+            g.row = true;
             self.select_shown();
         }
     }
@@ -780,6 +799,11 @@ impl Workspace {
                 self.picture_tool(t);
             }
         }
+        let finds = self.timeline.picture_grab.find;
+        let b = egui::Button::selectable(finds, "Find");
+        if ui.add_enabled(found || finds, b).clicked() {
+            self.find_tool(!finds);
+        }
         let lit = self.timeline.picture_grab.effects;
         let b = egui::Button::selectable(lit, "Effects");
         if ui.add_enabled(found || lit, b).clicked() {
@@ -793,6 +817,10 @@ impl Workspace {
         if self.timeline.picture_grab.blurring() {
             ui.separator();
             self.blur_tools(ui, clip.as_ref());
+        }
+        if self.timeline.picture_grab.find {
+            ui.separator();
+            self.find_tools(ui, clip.as_ref());
         }
         let Some(tool) = self.timeline.picture_grab.tool else {
             if self.timeline.picture_grab.area.is_some() {
@@ -883,6 +911,58 @@ impl Workspace {
                 self.find(method, params, subject);
             }
         }
+    }
+
+    fn find_tools(&mut self, ui: &mut egui::Ui, clip: Option<&(String, Picture)>) {
+        use vidcut_core::model::Subject;
+        for subject in Subject::ALL {
+            let b = egui::Button::new(subject.many());
+            if ui.add_enabled(clip.is_some(), b).clicked()
+                && let Some((id, _)) = clip
+            {
+                self.find_things(id, subject);
+            }
+        }
+        let picked = self.timeline.picture_grab.found.clone();
+        let Some(((id, pic), (_, path))) = clip.zip(picked).filter(|((id, _), p)| *id == p.0)
+        else {
+            return;
+        };
+        ui.separator();
+        ui.label(self.found_name(id, &path));
+        let follows = |e: &vidcut_core::model::Effect| {
+            e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(path.as_str())
+        };
+        let blurred = pic
+            .effects
+            .iter()
+            .any(|e| follows(e) && e.kind() == EffectType::MosaicBlur);
+        let mut wanted = None;
+        if ui
+            .add_enabled(!blurred, egui::Button::new("Blur"))
+            .clicked()
+        {
+            wanted = Some(EffectType::MosaicBlur);
+        }
+        ui.menu_button("Other Effect", |ui| {
+            for kind in EffectType::ALL {
+                if ui.button(kind.name()).clicked() {
+                    wanted = Some(kind);
+                    ui.close();
+                }
+            }
+        });
+        if let Some(kind) = wanted {
+            self.effect_on(id, &path, kind);
+        }
+    }
+
+    fn found_name(&self, clip: &str, path: &str) -> String {
+        let named = self.project_shared().and_then(|p| {
+            let m = p.clip(clip)?.motion.iter().find(|m| m.id == path)?;
+            m.name.clone()
+        });
+        named.unwrap_or_else(|| path.to_string())
     }
 
     fn area_tools(&mut self, ui: &mut egui::Ui, clip: Option<&(String, Picture)>) {
@@ -1375,8 +1455,8 @@ fn area_corners(a: &Area, [fw, fh]: [f64; 2]) -> [[f64; 2]; 4] {
 }
 
 impl Workspace {
-    pub(super) fn paint_motion(&self, ui: &egui::Ui, picture: Rect) {
-        if self.left != LeftTab::Inspector {
+    pub(super) fn paint_motion(&mut self, ui: &egui::Ui, picture: Rect) {
+        if !self.timeline.picture_grab.find {
             return;
         }
         let Some(p) = self.project_shared() else {
@@ -1398,14 +1478,31 @@ impl Workspace {
         let painter = ui.painter_at(picture);
         let color = super::theme::colors().accent;
         let source = c.source_at(at) as f64;
+        let picked = self.timeline.picture_grab.found.clone();
+        let press = ui.input(|i| match i.pointer.primary_clicked() {
+            true => i.pointer.interact_pos(),
+            false => None,
+        });
+        let press = press.filter(|at| picture.contains(*at));
+        let mut hit: Option<(f32, String)> = None;
         for m in &c.motion {
             let Some(area) = m.base_at(source) else {
                 continue;
             };
             let corners = area_corners(&area, [fw, fh]).map(|uv| s.screen(uv));
+            let on = picked
+                .as_ref()
+                .is_some_and(|(clip, path)| *clip == c.id && *path == m.id);
+            let width = if on { 4.0 } else { 1.5 };
             for i in 0..4 {
                 let edge = [corners[i], corners[(i + 1) % 4]];
-                painter.line_segment(edge, Stroke::new(1.5, color));
+                painter.line_segment(edge, Stroke::new(width, color));
+            }
+            if press.is_some_and(|at| within(&corners, at)) {
+                let size = (corners[1] - corners[0]).length() * (corners[3] - corners[0]).length();
+                if hit.as_ref().is_none_or(|(least, _)| size < *least) {
+                    hit = Some((size, m.id.clone()));
+                }
             }
             painter.text(
                 corners[0] - vec2(0.0, 3.0),
@@ -1415,7 +1512,28 @@ impl Workspace {
                 color,
             );
         }
+        let Some((_, path)) = hit else {
+            return;
+        };
+        let effects = c.picture.iter().flat_map(|x| &x.effects);
+        let follows = |e: &vidcut_core::model::Effect| {
+            e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(path.as_str())
+        };
+        let effect = effects.into_iter().position(follows);
+        self.timeline.picture_grab.found = Some((c.id.clone(), path));
+        if let Some(n) = effect {
+            self.pick_effect(n);
+        }
     }
+}
+
+fn within(corners: &[Pos2; 4], at: Pos2) -> bool {
+    let side = |i: usize| {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        (b.x - a.x) * (at.y - a.y) - (b.y - a.y) * (at.x - a.x)
+    };
+    let sides = [side(0), side(1), side(2), side(3)];
+    sides.iter().all(|v| *v >= 0.0) || sides.iter().all(|v| *v <= 0.0)
 }
 
 const AREA_GRIP: f32 = 9.0;

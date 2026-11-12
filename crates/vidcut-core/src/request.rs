@@ -4571,6 +4571,10 @@ pub enum GuiPanel {
     /// drag in the picture then adds a Mosaic Blur with that area, and a drag
     /// on an area changes it.
     Blur,
+    /// The viewer's Find tool on the selected clip, with the Tools row. Its
+    /// buttons find faces, people, vehicles or text. A click on the box of a
+    /// found thing picks it for Blur or another effect.
+    Find,
     /// The viewer's Tools row: Transform, Crop, Dynamic Zoom and Blur, the
     /// flips, Swap, the ease, Reset, and the shapes and subjects of Blur.
     Tools,
