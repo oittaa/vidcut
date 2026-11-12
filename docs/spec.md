@@ -1364,11 +1364,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Minimize Subtitle Track (Timeline Options, p. 645) makes them shorter.
   - The header of each subtitle track has a destination control (p. 1228). Its labels are ST1, ST2 and so on (p. 1232).
     - These are measurements in Resolve Studio 21.2. A new subtitle track has it on. A click turns it on or off. The other tracks keep theirs.
-    - Paste uses it. Create Caption and Add New in the Inspector do not.
+    - Paste uses it. Create Caption, Add New and Add Subtitle do not.
   - Details: D56.
 - **Cues** (pp. 1231–1233, 1236–1237):
   - Add Subtitle, in the right-click menu of a subtitle track, puts a cue at the playhead.
-  - vidcut: with no subtitle track, Add Subtitle in Timeline Actions first makes Subtitle 1.
+    - The cue goes on that track, also when the destination control of the track is off. The track does not become the shown track. This is measured in Resolve Studio 21.2.
+  - vidcut: Add Subtitle in Timeline Actions puts the cue on the shown track, else on the oldest subtitle track. With no subtitle track, it first makes Subtitle 1.
   - You type its text in the Inspector. The text shows on the cue as you type it.
   - The Captions list, at the bottom of the Inspector, shows every cue of the track (pp. 1231, 1233).
   - Each row of the list has its number, its In above its Out, its text and its characters per second (CPS).
