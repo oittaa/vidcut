@@ -1380,7 +1380,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: the line with Add New also has the name of the track. The Delete button of the section deletes the open cue.
   - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. A value inside the cue next to it changes nothing (D79). Else the new range overwrites the other cues of the track.
   - Cues move, trim, split and delete like clips.
-  - Copy (Ctrl+C) and Paste (Ctrl+V) take cues too. These are measurements in Resolve Studio 21.2:
+  - Copy (Ctrl+C), Cut (Ctrl+X) and Paste (Ctrl+V) take cues too. These are measurements in Resolve Studio 21.2:
+    - Cut removes the selected cues and leaves a gap. The cues after them do not move. Paste then puts the cut cues at the playhead.
     - A pasted cue starts at the playhead.
     - It goes on its own track when the destination control of that track is on.
     - Else it goes on the lowest subtitle track whose control is on.

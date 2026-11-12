@@ -231,6 +231,7 @@ pub fn describe_at(
         "edit.copy" if !params["cues"].is_null() => format!("Copy {}", d.cues("cues")),
         "edit.copy" => format!("Copy {}", d.clips("clips")),
         "edit.cut" if d.params["range"].is_string() => format!("Cut {}", d.range("range")),
+        "edit.cut" if !params["cues"].is_null() => format!("Cut {}", d.cues("cues")),
         "edit.cut" => format!("Cut {}", d.clips("clips")),
         "edit.paste" => format!("Paste at {}", d.time("at")),
         "track.add" => {
