@@ -239,9 +239,13 @@ impl Workspace {
         if let Some(kind) = doubled
             && let Some(first) = selected.first()
         {
+            self.expect_effect(first);
             self.send("effects.add", json!({ "clips": [first], "kind": kind }));
         }
-        if let Some(kind) = added.filter(|_| !selected.is_empty()) {
+        if let Some(kind) = added
+            && let Some(first) = selected.first()
+        {
+            self.expect_effect(first);
             self.send("effects.add", json!({ "clips": selected, "kind": kind }));
         }
     }

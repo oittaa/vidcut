@@ -391,6 +391,17 @@ The bar and the Jobs button:
 
 - It is a tab of the left panel (`LeftTab`). It draws the open Title, Subtitle and Subtitle Track sections (`Workspace::title_form`, `Workspace::cue_form`, `Workspace::track_form`).
   - Follow in the Title section lists the motion paths of the clips that play under the title (`leads`, `follow_row`). A choice sends `motion.follow`, and the title goes onto the thing.
+- With a clip selected, it has three tabs (`Tab`): Video, Audio and Effects. The name of the clip and the tabs stay above the sections when they scroll.
+  - Video shows the Title, Generator and picture sections, the Motion section and the Speed section.
+  - Audio shows the sound sections. Without a picture in the selection, it also shows the Speed section.
+  - Effects shows the effect sections.
+  - A tab without sections is disabled. Thus the Effects tab is disabled for a clip with no effects, as in Resolve (p. 1150).
+  - The Inspector shows the tab that the user set last, where that tab has sections. Otherwise it shows Video, then Audio.
+  - When the first selected clip gets an effect, the Inspector goes to the Effects tab and opens that effect (`Workspace::settle_effects`).
+    - `Workspace::expect_effect` keeps the count of effects before an add from the effects list or a drop on the timeline.
+    - Thus the Inspector goes to that effect also when it opens after the add.
+  - One effect section is open at a time (`Act::EffectOpen`). A click on the name or the arrow of a section opens it and closes the others.
+    - A click on the open section closes it. The first effect is open when the selection changes.
 - `Workspace::follow_selection` shows the section of the selected title or subtitle. With only several titles selected, it shows no section. A section that closes puts its changes in first.
 - The In and Out fields of a cue (`Workspace::cue_times`) send one `apply`. It sets the cue, and sets or removes the cues that it overwrites. A value inside the cue next to it sends nothing (`enters_neighbor`).
 - The picture fields convert between the picture and their own unit (`Field::read`, `Field::put`). The fitted size comes from `place::fitted`, as in an export.
@@ -418,7 +429,7 @@ The bar and the Jobs button:
     - The Follow menu lists None, one entry for each subject of `SUBJECTS` (`all_of`) and the motion paths of the clip (`follow_row`, `PathRow`).
     - A subject entry sends the name of the subject in `follows`. It is there also when the clip has no path of that subject.
     - The menu shows the name of each `Subject` that an area follows (`Subject::named`), also of one that it does not list.
-- `Workspace::motion_section` shows for the first selected clip that takes motion paths (`ops::motion::takes`), above the effects.
+- `Workspace::motion_section` shows for the first selected clip that takes motion paths (`ops::motion::takes`), below the picture sections of the Video tab.
   - Its first row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
     - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.
     - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
