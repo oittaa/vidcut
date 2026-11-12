@@ -1476,6 +1476,7 @@ pub struct Inspector {
     effect_picked: Option<usize>,
     effect_shut: bool,
     effects_seen: Option<(String, Vec<Effect>)>,
+    watched: Option<(std::sync::Weak<Project>, Vec<String>)>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -3137,6 +3138,14 @@ fn effect_block(
     acts.extend(header.inner);
 }
 
+fn tab_has(tab: Tab, chosen: &[Chosen], sounds: &[Sound]) -> bool {
+    match tab {
+        Tab::Video => !chosen.is_empty(),
+        Tab::Audio => !sounds.is_empty(),
+        Tab::Effects => matches!(chosen, [c] if !c.stored.effects.is_empty()),
+    }
+}
+
 fn shuffled(was: &[Effect], now: &[Effect]) -> bool {
     let mut left: Vec<&Effect> = now.iter().collect();
     was.iter().all(|e| {
@@ -3606,17 +3615,40 @@ impl Workspace {
         });
     }
 
-    pub(super) fn expect_effect(&mut self, clip: &str) {
-        let effects = self
-            .project_shared()
-            .and_then(|p| Some(p.clip(clip)?.picture.as_ref()?.effects.clone()));
-        self.inspector.effects_seen = Some((clip.to_string(), effects.unwrap_or_default()));
+    pub(super) fn watch_inspector(&mut self) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let clips = &self.snap.selection.clips;
+        let same = self.inspector.watched.as_ref().is_some_and(|(at, seen)| {
+            std::ptr::eq(at.as_ptr(), std::sync::Arc::as_ptr(&p)) && seen == clips
+        });
+        if same {
+            return;
+        }
+        self.inspector.watched = Some((std::sync::Arc::downgrade(&p), clips.clone()));
+        let (chosen, sounds) = (self.chosen(), self.sounds());
+        self.settle_tabs(&chosen, &sounds);
+    }
+
+    fn settle_tabs(&mut self, chosen: &[Chosen], sounds: &[Sound]) {
+        self.settle_effects(chosen);
+        let i = &mut self.inspector;
+        if tab_has(i.tab, chosen, sounds) {
+            return;
+        }
+        let next = [Tab::Video, Tab::Audio]
+            .into_iter()
+            .find(|t| tab_has(*t, chosen, sounds));
+        if let Some(tab) = next {
+            i.tab = tab;
+        }
     }
 
     fn settle_effects(&mut self, chosen: &[Chosen]) {
         let i = &mut self.inspector;
         let seen = i.effects_seen.take();
-        let Some(c) = chosen.first() else {
+        let [c] = chosen else {
             i.effect_picked = None;
             return;
         };
@@ -4942,7 +4974,7 @@ impl Workspace {
             self.inspector.held = None;
         }
         let mut acts = Vec::new();
-        self.settle_effects(&chosen);
+        self.settle_tabs(&chosen, &sounds);
         let shared = self.project_shared();
         let first = shared.as_ref().and_then(|p| {
             let top = chosen.first().map(|c| &c.id);
@@ -4951,18 +4983,10 @@ impl Workspace {
                 .or(paced.first().map(|c| &c.id))?;
             p.clip(id)
         });
-        let has = |t: Tab| match t {
-            Tab::Video => !chosen.is_empty(),
-            Tab::Audio => !sounds.is_empty(),
-            Tab::Effects => chosen.first().is_some_and(|c| !c.stored.effects.is_empty()),
-        };
-        let tab = [self.inspector.tab, Tab::Video, Tab::Audio]
-            .into_iter()
-            .find(|t| has(*t))
+        let has = |t: Tab| tab_has(t, &chosen, &sounds);
+        let tab = Some(self.inspector.tab)
+            .filter(|t| has(*t))
             .unwrap_or(Tab::Video);
-        if has(tab) {
-            self.inspector.tab = tab;
-        }
         if let (Some(p), Some(first)) = (&shared, first) {
             ui.horizontal(|ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

@@ -395,16 +395,17 @@ The bar and the Jobs button:
   - Video shows the Title, Generator and picture sections, the Motion section and the Speed section.
   - Audio shows the sound sections and the Speed section.
   - Effects shows the effect sections.
-  - A tab without sections is disabled. Thus the Effects tab is disabled for a clip with no effects, as in Resolve (p. 1150).
-  - The Inspector stays on its tab while the selection has sections for it. Otherwise it goes to Video, or to Audio without a picture, and stays there.
+  - A tab without sections is disabled (`tab_has`). Thus the Effects tab is disabled for a clip with no effects, as in Resolve (p. 1150).
+    - The Effects tab is also disabled while more than one clip with a picture is selected.
+  - The Inspector stays on its tab while the selection has sections for it (`Workspace::settle_tabs`). Otherwise it goes to Video, or to Audio without a picture, and stays there.
     - An empty selection does not change the tab.
+    - `Workspace::watch_inspector` applies these rules while the Inspector is not shown. It works only when the selection or the project changes.
   - One effect is the picked effect of the Inspector. Its name has the accent color, and only its section can be open.
     - A click on the name or the arrow of another effect picks and opens it (`Act::EffectOpen`). A click on the picked effect closes or opens its section.
     - `Workspace::settle_effects` picks the first effect when the selection changes, and when the picked effect goes.
     - It picks an effect that comes to the clip, from an add or an undo. Then the Inspector also goes to the Effects tab.
     - The picked effect stays picked when its place in the order changes (`shuffled`).
-  - `Workspace::expect_effect` keeps the effects of a clip before an add from the effects list or a drop on the timeline.
-    - Thus the Inspector goes to the added effect also when it opens after the add.
+    - An effect that comes to a clip that is not selected changes nothing in the Inspector.
 - `Workspace::follow_selection` shows the section of the selected title or subtitle. With only several titles selected, it shows no section. A section that closes puts its changes in first.
 - The In and Out fields of a cue (`Workspace::cue_times`) send one `apply`. It sets the cue, and sets or removes the cues that it overwrites. A value inside the cue next to it sends nothing (`enters_neighbor`).
 - The picture fields convert between the picture and their own unit (`Field::read`, `Field::put`). The fitted size comes from `place::fitted`, as in an export.

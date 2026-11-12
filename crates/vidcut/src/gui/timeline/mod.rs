@@ -2254,12 +2254,6 @@ impl Workspace {
                 ) {
                     ("edit.dissolve", true) => self.send_asking("edit.dissolve", params),
                     ("edit.transition", true) => self.send_asking("edit.transition", params),
-                    ("effects.add", _) => {
-                        if let Some(clip) = params["clips"][0].as_str() {
-                            self.expect_effect(clip);
-                        }
-                        self.send_drag(&method, params);
-                    }
                     _ => self.send_drag(&method, params),
                 }
                 if (d.preview.gains.is_some() || !d.preview.trims.is_empty())
