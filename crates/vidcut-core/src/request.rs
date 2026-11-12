@@ -1038,7 +1038,7 @@ pub enum Request {
     /// the edit of `track` (default V1) nearest `at` (default: the
     /// playhead), and a Cross Fade +3 dB where its clips' sounds meet
     /// there, or a Cross Fade 0 dB with a smooth cut (the Smooth Cut
-    /// button). `length` (default 1 s, 0.2 s for a smooth cut) is shortened
+    /// button). `length` (default 1 s) is shortened
     /// to the frames its clips' media and the track leave. `align`: centered
     /// on the edit, starting
     /// on it or ending on it. `before` and `after` instead give each side
