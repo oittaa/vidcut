@@ -397,15 +397,42 @@ pub fn findable(p: &mut Project, id: &str, subject: Subject, replace: bool) -> R
             subject.name()
         )));
     }
-    if let Some((n, path)) = followers(c).find(|(_, path)| old.iter().any(|x| x == path)) {
-        return Err(Error::invalid(format!(
-            "the area of effect {n} of {id} follows motion path {path}: first give that area \
-             another `follows`, or none (effects.set)"
-        )));
+    Ok(c.shown())
+}
+
+fn followed(p: &Project, id: &str) -> Vec<String> {
+    let titles = p.tracks.iter().flat_map(|t| &t.clips);
+    let led = titles.filter_map(|c| {
+        let follow = c.title.as_ref()?.follows.as_ref()?;
+        (follow.clip == id).then(|| follow.path.clone())
+    });
+    let mut out: Vec<String> = led.collect();
+    if let Some(c) = p.clip(id) {
+        out.extend(followers(c).map(|(_, path)| path.to_string()));
     }
-    let shown = c.shown();
-    led(p, id, &old)?;
-    Ok(shown)
+    out
+}
+
+const SAME_THING: f64 = 0.5;
+
+fn cover(a: &Area, b: &PathSample) -> f64 {
+    let side = |i: usize| {
+        let (a0, a1) = (a.center[i] - a.size[i] / 2.0, a.center[i] + a.size[i] / 2.0);
+        let (b0, b1) = (b.center[i] - b.size[i] / 2.0, b.center[i] + b.size[i] / 2.0);
+        (a1.min(b1) - a0.max(b0)).max(0.0)
+    };
+    let both = side(0) * side(1);
+    let all = a.size[0] * a.size[1] + b.size[0] * b.size[1] - both;
+    if all > 0.0 { both / all } else { 0.0 }
+}
+
+fn same_thing(kept: &MotionPath, found: &[PathSample]) -> bool {
+    let shared: Vec<f64> = found
+        .iter()
+        .filter_map(|s| Some(cover(&kept.base_at(s.frame as f64)?, s)))
+        .collect();
+    let same = shared.iter().filter(|v| **v >= SAME_THING).count();
+    same * 2 > shared.len()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -570,9 +597,19 @@ pub fn found(
     subject: Subject,
     tracks: Vec<motion::FoundPath>,
 ) -> Result<Value> {
+    let kept = followed(p, id);
     let c = clip_of(p, id)?;
     let old = of_subject(c, subject);
-    c.motion.retain(|m| !old.contains(&m.id));
+    c.motion
+        .retain(|m| !old.contains(&m.id) || kept.contains(&m.id));
+    let stay: Vec<MotionPath> = c
+        .motion
+        .iter()
+        .filter(|m| old.contains(&m.id))
+        .cloned()
+        .collect();
+    let again = |t: &motion::FoundPath| stay.iter().any(|m| same_thing(m, &t.samples));
+    let tracks: Vec<motion::FoundPath> = tracks.into_iter().filter(|t| !again(t)).collect();
     if c.motion.len() + tracks.len() > motion::PATHS_KEPT {
         return Err(Error::invalid(format!(
             "{id} would have {} motion paths, more than the {} a clip takes",
@@ -581,10 +618,18 @@ pub fn found(
         )));
     }
     let mut paths = Vec::new();
-    for (n, track) in tracks.into_iter().enumerate() {
+    let mut n = 0;
+    for track in tracks {
+        let name = loop {
+            n += 1;
+            let name = format!("{} {n}", subject.title());
+            if !c.motion.iter().any(|m| m.name.as_deref() == Some(&name)) {
+                break name;
+            }
+        };
         let path = MotionPath {
             id: motion::next_id(&c.motion),
-            name: Some(format!("{} {}", subject.title(), n + 1)),
+            name: Some(name),
             subject: Some(subject),
             tracked: false,
             samples: Arc::new(track.samples),

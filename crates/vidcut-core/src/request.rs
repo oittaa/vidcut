@@ -2858,8 +2858,8 @@ pub enum Request {
         subject: Subject,
         /// Take the paths that an earlier `motion.find` of this subject made
         /// off the clip first. Without it, a clip that has such paths is an
-        /// error. A path that the area of an effect follows stays, and the
-        /// request fails, as in `motion.remove`.
+        /// error. A path that the area of an effect or a title follows stays.
+        /// A thing that such a path follows gets no second path.
         #[serde(default)]
         replace: bool,
         /// Download the model of the subject when it is not on this
