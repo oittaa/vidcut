@@ -409,7 +409,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A double-click on a title clip, or Edit Title… in its right-click menu, also opens the section.
   - While the Inspector tab shows, a click on a title clip also shows its section.
   - The section has the text, the kind of the title, the alignment and a Look list ([D71](spec.md#12-decisions-on-gaps-and-contradictions)).
-  - It shows the place of the title, or of each line of a lower third, as percents across and down (X54).
+  - It shows the place of the title, or of each line of a lower third, as X and Y in frame pixels.
   - A change goes in as one `titles.set` when the user leaves the field. A button puts it in at once. Ctrl+Z undoes it.
   - A value at its usual number shows an empty box with that number as a hint. A number in the other box of a pair keeps this usual number.
   - When the pointer is near a title, the viewer shows its outline, its corners and the handle above it. They work without a click.
@@ -439,22 +439,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Text+ and Fusion titles are Fusion compositions, and vidcut does not have Fusion (spec §1). Blend modes are out (spec §1).
   - The place, zoom, rotation and opacity of a title do what Transform and the opacity of Composite would do. The speed of a scroll comes from the length of its clip.
   - Markup in the text is what a script writes and reads.
-
-## X54. A title's place shows as percents from the top left
-
-- **Resolve:**
-  - The user moves the text of a title with a drag in the viewer. It snaps to the center and the thirds of the frame (pp. 763–764, 1176).
-  - The Position in the Inspector also moves it (p. 764).
-  - A lower third is at a corner or at the middle of the bottom of title safe (p. 1178).
-  - A position goes from 4 picture sizes before its bottom left to 4 picture sizes after it, on each axis (measured in Resolve Studio 21.1.2).
-  - The Position of a Text title in the Inspector is in frame pixels from the bottom left, with Y up (measured in Resolve Studio 21.2).
-    - In a 3840 × 2160 timeline, the middle of the picture is X 1920, Y 1080.
-- **vidcut:**
-  - The Title section of the Inspector shows the place of a title from the top left of the picture.
-  - It shows the place in percents of the width and the height of the picture.
-- **Why:**
-  - Percents mean the same at any picture size.
-  - The y counts down from the top. Thus it is 1 minus the y of Resolve's position, and the limits are the same.
 
 ## X55. A scroll rises over the whole clip, its lines spaced as other titles'
 

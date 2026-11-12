@@ -1670,7 +1670,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Scroll moves its text from the bottom of the picture to the top. The length of the clip sets its speed.
   - vidcut has these five kinds:
     - Markup in the text styles words separately (X53).
-    - The place of a title shows as percents from the top left (X54).
+    - The X and Y of a title are frame pixels from the bottom left, with Y up (measured in Resolve Studio 21.2).
+    - On a title that follows a motion path, X and Y count from the middle of the thing. Y is up.
     - A scroll has its own motion and line spacing (X55).
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
@@ -3805,7 +3806,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The lower line of a lower third hangs from a point that is 10%, 50% or 90% across and 78% down, by its alignment.
   - The upper line stands on a point 80% down, at the same place across.
   - These are the points of Resolve's own lower thirds (measured in Resolve Studio 21.1.2). The two lines overlap by 2% of the picture height.
-  - `position` moves the point of the lower line (X54). Lines that go together keep the 2% between their points.
+  - `position` moves the point of the lower line. Lines that go together keep the 2% between their points.
   - Each line of a lower third has its own `anchor`. It acts on that line as on the block of a Text title (measured in Resolve Studio 21.1.2).
     - The upper line's usual anchor is the end of its bottom edge by `align`. The lower line's usual anchor is the end of its top edge by `align`.
     - `titles.set` with `anchor` changes the lower line. With `line`, it changes the named line.
@@ -4287,7 +4288,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A Film Grain on the compound clip counts its frames from the first frame of the compound clip.
       - A trim or a move of the compound clip does not change the pattern of the grain.
       - Float values stay exact inside a compound clip. A value above 1 is not clipped, and a value between 8-bit steps is not rounded.
-    - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
+    - A title inside it keeps its own place, zoom and rotation in the frame of the compound clip.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
     - `edit.decompose` gives the picture of the compound clip to each of its clips that has no picture of its own and fills the frame.
@@ -4296,7 +4297,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The other clips do not take the picture. A warning names them.
   - An export fits a placed picture at the size it shows, up to the size of the source. Thus a punch-in keeps the detail of the source.
   - The viewer draws it from the decoded picture with the same sums.
-  - Titles keep their own place (X54).
+  - Titles keep their own place.
   - **Viewer handles** (those of a title, X52):
     - A drag inside moves the picture. Its middle, as drawn, snaps to the middle and thirds of the frame, and a guide shows.
     - Shift keeps the drag on one axis, and Alt turns snapping off.
