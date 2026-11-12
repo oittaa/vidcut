@@ -3084,8 +3084,8 @@ fn effect_block(
         if picked {
             name = name.color(theme::colors().accent);
         }
-        let title = egui::Label::new(name).sense(egui::Sense::click());
-        if ui.add(title).clicked() {
+        let title = ui.add(egui::Label::new(name).sense(egui::Sense::click()));
+        if title.clicked() && !title.double_clicked() {
             act = Some(Act::EffectOpen(n));
         }
         match key_buttons(ui, marks, &Ease::ALL, None) {
@@ -3132,7 +3132,7 @@ fn effect_block(
             check(ui, (n, "Use Alpha", e.use_alpha, true), "use_alpha", acts);
         });
     });
-    if toggle.clicked() {
+    if toggle.clicked() && !toggle.double_clicked() {
         acts.push(Act::EffectOpen(n));
     }
     acts.extend(header.inner);
