@@ -2578,8 +2578,8 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - vidcut: `clip.set` sets `equalizer`. Its `on` is the switch.
     - On a clip with no equalizer, a change makes a flat one. It is on, unless `on` is false.
     - null makes the equalizer off again, with the usual values. Reset sends it.
-  - vidcut: a Notch filter cuts its frequency, and a Bell filter keeps its Q ([X170](deviations.md#x170-the-clip-equalizer-differs-in-three-ways)).
-  - vidcut: an OTIO export keeps the equalizer in vidcut's own metadata ([X170](deviations.md#x170-the-clip-equalizer-differs-in-three-ways)).
+  - vidcut: a Notch band makes a cut in the sound. A Bell band keeps the width of its Q value ([X170](deviations.md#x170-the-equalizer-notch-bell-width-and-otio-export)).
+  - vidcut: an OTIO export keeps the equalizer in fields that only vidcut reads ([X170](deviations.md#x170-the-equalizer-notch-bell-width-and-otio-export)).
     - An equalizer that changes the sound gives the note `equalizer_kept`.
     - An equalizer that is off does not change the sound, also after an import.
 - **Dialogue Leveler** (pp. 743, 774–775):
