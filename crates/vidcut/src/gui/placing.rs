@@ -1361,7 +1361,7 @@ fn area_corners(a: &Area, [fw, fh]: [f64; 2]) -> [[f64; 2]; 4] {
 }
 
 impl Workspace {
-    pub(super) fn paint_motion(&self, ui: &egui::Ui, picture: Rect) {
+    pub(super) fn paint_motion(&mut self, ui: &egui::Ui, picture: Rect) {
         if self.left != LeftTab::Inspector {
             return;
         }
@@ -1384,14 +1384,32 @@ impl Workspace {
         let painter = ui.painter_at(picture);
         let color = super::theme::colors().accent;
         let source = c.source_at(at) as f64;
+        let picked = self.inspector.picked.clone();
+        let free = self.timeline.picture_grab.tool.is_none();
+        let press = ui.input(|i| match i.pointer.primary_clicked() {
+            true => i.pointer.interact_pos(),
+            false => None,
+        });
+        let press = press.filter(|at| free && picture.contains(*at));
+        let mut hit: Option<(f32, String)> = None;
         for m in &c.motion {
             let Some(area) = m.base_at(source) else {
                 continue;
             };
             let corners = area_corners(&area, [fw, fh]).map(|uv| s.screen(uv));
+            let on = picked
+                .as_ref()
+                .is_some_and(|(clip, path)| *clip == c.id && *path == m.id);
+            let width = if on { 3.0 } else { 1.5 };
             for i in 0..4 {
                 let edge = [corners[i], corners[(i + 1) % 4]];
-                painter.line_segment(edge, Stroke::new(1.5, color));
+                painter.line_segment(edge, Stroke::new(width, color));
+            }
+            if press.is_some_and(|at| within(&corners, at)) {
+                let size = (corners[1] - corners[0]).length() * (corners[3] - corners[0]).length();
+                if hit.as_ref().is_none_or(|(least, _)| size < *least) {
+                    hit = Some((size, m.id.clone()));
+                }
             }
             painter.text(
                 corners[0] - vec2(0.0, 3.0),
@@ -1401,7 +1419,19 @@ impl Workspace {
                 color,
             );
         }
+        if let Some((_, path)) = hit {
+            self.inspector.picked = Some((c.id.clone(), path));
+        }
     }
+}
+
+fn within(corners: &[Pos2; 4], at: Pos2) -> bool {
+    let side = |i: usize| {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        (b.x - a.x) * (at.y - a.y) - (b.y - a.y) * (at.x - a.x)
+    };
+    let sides = [side(0), side(1), side(2), side(3)];
+    sides.iter().all(|v| *v >= 0.0) || sides.iter().all(|v| *v <= 0.0)
 }
 
 const AREA_GRIP: f32 = 9.0;
