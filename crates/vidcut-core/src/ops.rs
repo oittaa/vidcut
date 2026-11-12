@@ -1,5 +1,4 @@
 pub mod compound;
-mod dissolve;
 pub mod effect;
 pub mod filmstrip;
 mod follow;
@@ -14,18 +13,19 @@ pub mod speed;
 pub mod subtitles;
 pub mod titles;
 mod tracks;
+mod transition;
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
-pub use dissolve::{
-    Align, Made, Shape, cross_fade_joins, dissolve, dissolve_clips, length as dissolve_length,
-    planned as dissolve_sides, room_at as dissolve_room, set_transition, split as dissolve_frames,
-    to_cut,
-};
 use serde_json::json;
 pub use source_overwrite::{Placed, SourceLining, file_start_at, source_overwrite};
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
+pub use transition::{
+    Align, Made, Shape, cross_fade_joins, default_length as default_transition_length, dissolve,
+    dissolve_clips, planned as dissolve_sides, room_at as dissolve_room, set_transition,
+    split as dissolve_frames, to_cut,
+};
 
 use crate::error::{Error, Result};
 use crate::model::{
