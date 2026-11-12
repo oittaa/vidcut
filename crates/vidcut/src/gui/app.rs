@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -126,6 +126,22 @@ pub struct App {
     gate: Arc<Gate>,
     session: Option<std::thread::JoinHandle<()>>,
     window: super::window::Window,
+    captures: Arc<AtomicUsize>,
+}
+
+struct Capturing(Arc<AtomicUsize>);
+
+impl Capturing {
+    fn start(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::Relaxed);
+        Self(count.clone())
+    }
+}
+
+impl Drop for Capturing {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 const QUIT_PATIENCE: Duration = Duration::from_secs(5);
@@ -209,6 +225,7 @@ impl App {
             gate,
             session: Some(session),
             window,
+            captures: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -226,7 +243,9 @@ impl eframe::App for App {
         for task in self.port.take() {
             match task {
                 UiTask::CaptureWindow(done) => {
+                    let capturing = Capturing::start(&self.captures);
                     ctx.request_screenshot(move |image| {
+                        drop(capturing);
                         let rgba = image
                             .pixels
                             .iter()
@@ -269,6 +288,9 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             }
+        }
+        if self.captures.load(Ordering::Relaxed) > 0 {
+            ctx.request_repaint();
         }
     }
 

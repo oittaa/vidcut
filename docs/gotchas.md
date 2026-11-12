@@ -36,6 +36,10 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 - **egui does not give the native handles of its viewports.** eframe gives only the handle of the main window (`Frame`).
   - The owner and the placement of a separate window need its handle.
   - Thus on Windows, `Tool::watch` finds a separate window by its title among the windows of the UI thread (`native::find`).
+- **egui gives a window screenshot only after one more frame.**
+  - `request_screenshot` draws the window into a texture and reads it back from the GPU. The read-back finishes in a later frame.
+  - egui does not draw that frame by itself. A window with nothing to change draws no frame, so the picture does not arrive.
+  - Thus the GUI asks for new frames while a window capture waits (`Capturing`).
 
 ## FFmpeg: reading and decoding
 
