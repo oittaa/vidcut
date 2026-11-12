@@ -156,6 +156,7 @@ pub(super) struct PresetInfo {
     pub description: String,
     #[serde(default)]
     pub quick_export: bool,
+    pub family: Option<String>,
     #[serde(default)]
     pub user: bool,
     pub settings: ExportSettings,
@@ -586,6 +587,14 @@ impl Dialog {
     }
 }
 
+fn size_of(p: &PresetInfo) -> String {
+    p.settings
+        .video
+        .as_ref()
+        .and_then(|v| v.height.map(|h| format!("{h}p")))
+        .unwrap_or_else(|| "timeline size".into())
+}
+
 impl Workspace {
     pub(super) fn open_quick_export(&mut self, ctx: &egui::Context) {
         self.refresh_presets(ctx);
@@ -700,13 +709,13 @@ impl Workspace {
             return;
         };
         let animated = self.animated_track();
-        let presets: Vec<PresetInfo> = self
-            .export
-            .presets
-            .iter()
-            .filter(|p| p.quick_export)
-            .cloned()
-            .collect();
+        let all = self.export.presets.clone();
+        let mut presets: Vec<PresetInfo> = Vec::new();
+        for p in all.iter().filter(|p| p.quick_export) {
+            if p.family.is_none() || presets.iter().all(|k| k.family != p.family) {
+                presets.push(p.clone());
+            }
+        }
         if q.selected.is_none() {
             q.selected = presets
                 .iter()
@@ -736,40 +745,57 @@ impl Workspace {
             }
             ui.horizontal_wrapped(|ui| {
                 for p in &presets {
-                    let selected = q.selected.as_deref() == Some(p.name.as_str());
-                    let size = p
-                        .settings
-                        .video
-                        .as_ref()
-                        .and_then(|v| v.height.map(|h| format!("{h}p")))
-                        .unwrap_or_else(|| "timeline size".into());
-                    let text = match p.unavailable {
-                        Some(_) => format!("{}\nNot available here", p.title),
+                    let shown = all
+                        .iter()
+                        .find(|m| {
+                            p.family.is_some()
+                                && m.family == p.family
+                                && Some(&m.name) == q.selected.as_ref()
+                        })
+                        .unwrap_or(p);
+                    let selected = q.selected.as_deref() == Some(shown.name.as_str());
+                    let title = p.family.as_deref().unwrap_or(&p.title);
+                    let text = match shown.unavailable {
+                        Some(_) => format!("{title}\nNot available here"),
                         None => format!(
-                            "{}\n{} · {}",
-                            p.title,
-                            p.settings.container.extension().to_uppercase(),
-                            size
+                            "{title}\n{} · {}",
+                            shown.settings.container.extension().to_uppercase(),
+                            size_of(shown)
                         ),
                     };
                     let r = ui
-                        .add_enabled_ui(p.unavailable.is_none(), |ui| {
+                        .add_enabled_ui(shown.unavailable.is_none(), |ui| {
                             ui.add_sized([150.0, 56.0], egui::Button::selectable(selected, text))
                         })
                         .inner;
                     if r.clicked() {
-                        q.selected = Some(p.name.clone());
+                        if !selected {
+                            q.selected = Some(p.name.clone());
+                        }
                         q.error = None;
                     }
                 }
             });
-            let picked = presets
-                .iter()
-                .find(|p| Some(&p.name) == q.selected.as_ref());
+            let picked = all.iter().find(|p| Some(&p.name) == q.selected.as_ref());
             if let Some(p) = picked {
                 super::dialog::note(ui, p.description.clone());
             }
             super::dialog::form(ui, "quick-export-form", |ui| {
+                if let Some(family) = picked.and_then(|p| p.family.as_ref()) {
+                    super::dialog::row(ui, "Resolution", |ui| {
+                        egui::ComboBox::from_id_salt("quick-export-resolution")
+                            .selected_text(picked.map(size_of).unwrap_or_default())
+                            .show_ui(ui, |ui| {
+                                for m in all.iter().filter(|m| m.family.as_ref() == Some(family)) {
+                                    let on = Some(&m.name) == q.selected.as_ref();
+                                    if ui.selectable_label(on, size_of(m)).clicked() && !on {
+                                        q.selected = Some(m.name.clone());
+                                        q.error = None;
+                                    }
+                                }
+                            });
+                    });
+                }
                 super::dialog::row(ui, "Range", |ui| ui.label(&range));
                 if let Some((_, name)) = &animated {
                     super::dialog::row(ui, "Subtitles", |ui| {
@@ -798,7 +824,7 @@ impl Workspace {
             open = false;
         }
         if export && let Some(name) = q.selected.clone() {
-            let ext = presets
+            let ext = all
                 .iter()
                 .find(|p| p.name == name)
                 .map_or("mp4", |p| p.settings.container.extension());

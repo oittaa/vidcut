@@ -179,6 +179,7 @@ pub fn run_with(
                         "title": p.title,
                         "description": p.description,
                         "quick_export": p.quick_export,
+                        "family": p.family,
                         "container": p.settings.container,
                         "user": export::is_user_preset(&p.name),
                         "settings": p.settings,
