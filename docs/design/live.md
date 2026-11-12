@@ -379,7 +379,8 @@ The bar and the Jobs button:
     - A click on an outline makes that area the shown one. A click outside the areas shows none.
     - With a picture tool on (`Grab::tool`), it takes no pointer. Thus `Workspace::picture_controls` gets each press.
     - `Grab::blurring` tells whether a drag draws a new area. With the tool off, no drag starts on an area that is not the shown one.
-  - `Workspace::blur_tools` is the row of the tool: the shapes, and one button for each `Subject` (`Workspace::subject_blur`).
+  - `Workspace::blur_tools` is the row of the tool: the shapes, and one button for each subject of `inspector::SUBJECTS` (`Workspace::subject_blur`).
+    - `SUBJECTS` lists the subjects that the app shows: `Subject::Face` and `Subject::Text`. The other subjects of `Subject::ALL` have no button.
   - `Workspace::area_tools` has Track and Delete for the shown area. The row shows them also with the Tools row off (`Grab::rowed`).
   - The Area rows of each effect in the Inspector have Track too (`Act::AreaTrack`).
     - Track sends `motion.track` for the area (`Workspace::track`): both ways when the area follows no path.
@@ -414,10 +415,11 @@ The bar and the Jobs button:
     - The button and the seeks leave out the keyframes of the area (`effect_marks`, `effect_key_times`). Why: `effects.key` without `area` does not change them.
   - Each effect has the same Area rows (`area_rows`). Each change is one `effects.set` with `area`. Off sends a null `area`.
     - The numbers of the area are knobs (`AreaKnob`), so a drag previews and lands as the other values do.
-    - The Follow menu lists None, one entry for each `Subject` (`Subject::ALL`, `all_of`) and the motion paths of the clip (`follow_row`, `PathRow`).
+    - The Follow menu lists None, one entry for each subject of `SUBJECTS` (`all_of`) and the motion paths of the clip (`follow_row`, `PathRow`).
     - A subject entry sends the name of the subject in `follows`. It is there also when the clip has no path of that subject.
+    - The menu shows the name of each `Subject` that an area follows (`Subject::named`), also of one that it does not list.
 - `Workspace::motion_section` shows for the first selected clip that takes motion paths (`ops::motion::takes`), above the effects.
-  - Its first row has a menu of the subjects (`Subject::ALL`), Find and Blur.
+  - Its first row has a menu of the subjects (`SUBJECTS`), Find and Blur.
   - Find sends `motion.find` (`find_request`), with `replace` when the clip has paths of that subject.
   - Blur sends one `apply` (`blur_request`). It has `motion.find` when the clip has no such path.
     - Then it has `effects.add` of a Mosaic Blur, and `effects.set` with an `area` that follows the subject.

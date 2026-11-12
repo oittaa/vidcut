@@ -4,7 +4,7 @@ use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, ve
 use serde_json::{Value, json};
 use vidcut_core::model::{
     AreaShape, Clip, CompositeMode, DynamicZoom, Ease, EffectArea, EffectType, Picture,
-    PictureTool, Project, Subject, TrackKind, ZoomBox,
+    PictureTool, Project, TrackKind, ZoomBox,
 };
 use vidcut_core::motion::Area;
 use vidcut_core::ops::picture::{has_picture, zoom_shown};
@@ -859,7 +859,7 @@ impl Workspace {
             }
         }
         ui.separator();
-        for subject in Subject::ALL {
+        for subject in super::inspector::SUBJECTS {
             let request = clip.and_then(|(id, _)| self.subject_blur(id, subject));
             let b = egui::Button::new(super::inspector::all_of(subject));
             if ui.add_enabled(request.is_some(), b).clicked()

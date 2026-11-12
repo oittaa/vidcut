@@ -3,6 +3,7 @@ use std::path::Path;
 use tract_onnx::prelude::*;
 use vidcut_core::analysis::Found;
 
+use super::bad;
 use crate::error::{Error, Result};
 
 pub use vidcut_core::catalog::PPOCR_DET_ONNX as FILE;
@@ -21,10 +22,6 @@ const SPREAD: [f32; 3] = [0.229, 0.224, 0.225];
 pub(crate) struct Model {
     plan: Arc<TypedRunnableModel>,
     size: (usize, usize),
-}
-
-fn bad(path: &Path, what: impl std::fmt::Display) -> Error {
-    Error::Invalid(format!("{}: {what}", path.display()))
 }
 
 fn near(x: usize, y: usize, w: usize, h: usize) -> impl Iterator<Item = (usize, usize)> {

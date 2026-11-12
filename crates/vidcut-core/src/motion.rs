@@ -319,6 +319,14 @@ impl Join {
                 shortest_secs: 1.0,
                 steady: 0.8,
             },
+            Subject::Person | Subject::Vehicle => Self {
+                start: 0.5,
+                keep: 0.35,
+                overlap: 0.2,
+                wait_secs: 1.0,
+                shortest_secs: 1.0,
+                steady: 0.0,
+            },
         }
     }
 }

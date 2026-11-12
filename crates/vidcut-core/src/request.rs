@@ -2825,14 +2825,16 @@ pub enum Request {
     /// up to a second, and then shows near the same place, stays on its path.
     /// A shot change inside a clip ends each path, and a thing of the next
     /// shot gets a new one.
-    /// A face found for under half a second gets no path. Text gets a path
+    /// A face found for under half a second gets no path. A person or a
+    /// vehicle gets a path when it is found for a second. Text gets a path
     /// when it is found for a second, on four of each five frames. Less time
     /// can be left before a shot change or the end of the clip; a thing
     /// found on each of those frames then gets a path. Lines of text
     /// that are near each other are one block with one path, and a line
-    /// that leans gets an area that leans with it. The paths get names in
-    /// the order the things first show: `Face 1`, `Face 2`, or `Text 1`,
-    /// `Text 2`.
+    /// that leans gets an area that leans with it. The area of a person or
+    /// a vehicle is the box around all of it that shows. The paths get
+    /// names in the order the things first show: `Face 1`, `Face 2`, or
+    /// `Text 1`, `Person 1`, `Vehicle 1`.
     ///
     /// Returns each clip with its new `paths`: the `id`, the `name`, the
     /// `count` of its samples, the source frames `first` and `last` of them,
@@ -2843,7 +2845,8 @@ pub enum Request {
     #[serde(rename = "motion.find")]
     MotionFind {
         clips: OneOrMany<ClipRef>,
-        /// The kind of thing to find. Usual: `face`.
+        /// The kind of thing to find: `face`, `text`, `person` or `vehicle`.
+        /// Usual: `face`.
         #[serde(default)]
         subject: Subject,
         /// Take the paths that an earlier `motion.find` of this subject made
@@ -2853,8 +2856,9 @@ pub enum Request {
         #[serde(default)]
         replace: bool,
         /// Download the model of the subject when it is not on this
-        /// computer, checked against its SHA-256. Without it, a missing
-        /// model is an error that tells its size.
+        /// computer, checked against its SHA-256: 233 kB for `face`, 4.8 MB
+        /// for `text`, and one file of 35.9 MB for `person` and `vehicle`.
+        /// Without it, a missing model is an error that tells its size.
         #[serde(default)]
         download: bool,
     },
