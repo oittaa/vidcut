@@ -395,7 +395,8 @@ The bar and the Jobs button:
   - Video shows the Title, Generator and picture sections, the Motion section and the Speed section.
   - Audio shows the sound sections and the Speed section.
   - Effects shows the effect sections.
-  - A tab without sections is disabled (`tab_has`). Thus the Effects tab is disabled for a clip with no effects, as in Resolve (p. 1150).
+  - A tab without sections is disabled (`tab_has`). Thus the Effects tab is disabled for a clip with no effects.
+    - Resolve 21.2 shows that tab dim for such a clip. Its manual says that the panel is dimmed (p. 1150).
     - The Effects tab is also disabled while more than one clip with a picture is selected.
   - The Inspector stays on its tab while the selection has sections for it (`Workspace::settle_tabs`). Otherwise it goes to Video, or to Audio without a picture, and stays there.
     - An empty selection does not change the tab.
