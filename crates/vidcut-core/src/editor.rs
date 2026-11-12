@@ -3267,7 +3267,7 @@ fn mutate(
                 (None, None) => ops::Shape::Length(
                     match length {
                         Some(l) => frames(l)?,
-                        None => ops::dissolve_length(p),
+                        None => ops::dissolve_length(p, transition),
                     },
                     *align,
                 ),
