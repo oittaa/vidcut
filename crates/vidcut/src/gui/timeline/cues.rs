@@ -19,7 +19,6 @@ use crate::gui::theme;
 use crate::gui::workspace::Workspace;
 use vidcut_core::shortcuts::Action;
 
-const DESTINATION: f32 = 26.0;
 const EDGE: f32 = 8.0;
 const FILL: Color32 = Color32::from_rgb(52, 98, 108);
 
@@ -706,31 +705,22 @@ impl Workspace {
         });
     }
 
-    pub(super) fn subtitle_header(&mut self, ui: &mut egui::Ui, rect: Rect, t: &SubtitleTrack) {
+    pub(super) fn subtitle_header(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        t: &SubtitleTrack,
+        p: &Project,
+    ) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         child.set_clip_rect(rect.intersect(child.clip_rect()));
         child.spacing_mut().button_padding.x = 3.0;
         let parts = header_parts(rect);
-        let left = parts.enlarge.left();
-        let destination = parts.enlarge.with_max_x(left + DESTINATION);
-        let label = format!("ST{}", t.id.trim_start_matches('S'));
-        let r = child.put(
-            destination,
-            egui::Button::selectable(t.destination, RichText::new(&label).small()),
-        );
-        let what = format!("Destination {}", t.id);
-        r.widget_info(|| {
-            egui::WidgetInfo::selected(egui::Role::Button, true, t.destination, &what)
-        });
-        if r.on_hover_text("Destination").clicked() {
-            self.send(
-                "track.set",
-                json!({ "track": t.id, "destination": !t.destination }),
-            );
-        }
+        super::label_line(&child, parts.label);
+        self.track_label(&mut child, parts.label, &t.id, p, false);
         let mut name = child.new_child(
             egui::UiBuilder::new()
-                .max_rect(parts.name.with_min_x(destination.right() + 4.0))
+                .max_rect(parts.name)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         let field = egui::Id::unique(("subtitle-track-name", &t.id));
@@ -761,7 +751,7 @@ impl Workspace {
                 t.locked,
                 lock,
                 json!({ "track": t.id, "locked": !t.locked }),
-                parts.toggles[0],
+                parts.icons[1],
             ),
             (
                 "Show",
@@ -769,7 +759,7 @@ impl Workspace {
                 !t.shown,
                 shown,
                 json!({ "track": t.id, "shown": !t.shown }),
-                parts.toggles[2],
+                parts.icons[3],
             ),
         ];
         for (what, tip, lit, glyph, change, at) in buttons {

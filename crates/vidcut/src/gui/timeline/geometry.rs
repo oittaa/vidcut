@@ -898,32 +898,36 @@ mod tests {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeaderParts {
-    pub enlarge: Rect,
+    pub icons: [Rect; 4],
     pub name: Rect,
-    pub toggles: [Rect; 3],
+    pub label: Rect,
 }
 
 const HEADER_TOGGLE: f32 = 17.0;
 const HEADER_GAP: f32 = 2.0;
 const HEADER_LINE: f32 = 18.0;
+pub const HEADER_LABEL: f32 = 28.0;
 
 pub fn header_parts(header: Rect) -> HeaderParts {
     let h = HEADER_LINE.min(header.height() - 2.0).max(1.0);
     let top = (header.center().y - h / 2.0).round();
-    let right = header.right().round();
-    let toggle = |i: u8| {
-        let end = right - f32::from(2 - i) * (HEADER_TOGGLE + HEADER_GAP);
-        Rect::from_min_max(pos2(end - HEADER_TOGGLE, top), pos2(end, top + h))
-    };
-    let toggles = [toggle(0), toggle(1), toggle(2)];
     let left = header.left().round();
-    let enlarge = Rect::from_min_max(pos2(left, top), pos2(left + HEADER_TOGGLE, top + h));
+    let icon = |i: u8| {
+        let x = left + f32::from(i) * (HEADER_TOGGLE + HEADER_GAP);
+        Rect::from_min_max(pos2(x, top), pos2(x + HEADER_TOGGLE, top + h))
+    };
+    let icons = [icon(0), icon(1), icon(2), icon(3)];
+    let right = header.right().round();
+    let label = Rect::from_min_max(
+        pos2(right - HEADER_LABEL, header.top()),
+        pos2(right, header.bottom()),
+    );
     HeaderParts {
-        enlarge,
         name: Rect::from_min_max(
-            pos2(enlarge.right() + 2.0 * HEADER_GAP, top),
-            pos2(toggles[0].left() - 2.0 * HEADER_GAP, top + h),
+            pos2(icons[3].right() + 2.0 * HEADER_GAP, top),
+            pos2(label.left() - 2.0 * HEADER_GAP, top + h),
         ),
-        toggles,
+        icons,
+        label,
     }
 }

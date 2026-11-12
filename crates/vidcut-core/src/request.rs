@@ -3655,7 +3655,7 @@ pub enum Request {
     /// the timeline's zoom and Timeline Options, and the windows open.
     #[serde(rename = "gui.state")]
     GuiState {},
-    /// What an edit takes from the source. The toggles beside the upper timeline.
+    /// What an edit takes from the source. The two icons at the left of the edit buttons.
     /// `video_only` drops the sound. `audio_only` drops the picture.
     /// The two cannot both be on. Setting one on turns the other off.
     /// A field left out stays as it is.
