@@ -1659,7 +1659,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Each thing gets a motion path of its own.
   - A shot change inside a clip ends each path. For a file with another frame rate than the project, `motion.find` and Detect Scene Cuts can find different shot changes.
   - The text model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
-  - While the Inspector is open, the viewer shows a box with its name on each path of the selected clip.
+  - While Find of the Tools row is on, the viewer shows a box with its name on each path of the selected clip.
   - After a Find, the status line tells how many things it found.
 - **Why:**
   - A blur must cover each face of a clip, and the user must not draw each one.

@@ -551,6 +551,10 @@ Writing:
   - `ops::motion::takes` tells which clips take them: not titles, generators, compound clips or sound.
 - A `MotionPath` tells where one area of the source picture is on the source frames of the clip. It has an id, a name and its samples.
   - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). `motion.find` with `replace` takes off the paths of that subject.
+    - A path that the area of an effect or a title follows stays (`followed`).
+    - A found thing that such a path already follows gets no second path (`same_thing`). Its samples go into that path (`merged`).
+    - Between the first and the last new sample, the path keeps only the new samples. Outside them, it keeps its old samples.
+    - Thus a second find adds the new things, and a kept path follows its thing on the frames of the new find.
   - A path that `motion.track` made has `tracked`. A later track of the same area writes its samples again, and the path keeps its id and its name.
 - A `PathSample` holds the source `frame`, the `center` and the `size` of the area as fractions of the source picture, and the `rotation`.
   - The `frame` counts as `source_in` does, at each speed of the clip (`Clip::source_at`).
@@ -574,7 +578,7 @@ Writing:
   - `ops::motion::follow` sets it for `motion.follow`. It names the clip that `under` gives, as `ops::motion::settle` does.
     - It puts the title on the thing: the position becomes the middle. `Title::moved` moves the upper line of a lower third by the same amount.
     - It refuses a title with keyframes on its position.
-  - `motion.remove` and `motion.find` with `replace` refuse a path that a title follows (`led`).
+  - `motion.remove` refuses a path that a title follows (`led`).
   - `ops::motion::settle` runs after each request:
     - A title whose clip or path is gone follows no path, with a warning.
     - The clip of the path can play on no frame of the title. Another clip there can have the same samples under that path id, from the same media. The title then follows that clip (`under`).

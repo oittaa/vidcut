@@ -2877,6 +2877,10 @@ fn find_request(c: &Chosen, subject: Subject, extra: &Value) -> (&'static str, V
     ("motion.find", with_extra(params, extra))
 }
 
+fn boxed(subject: Subject) -> bool {
+    subject != Subject::Face
+}
+
 fn blur_request(
     id: &str,
     found: bool,
@@ -2891,7 +2895,10 @@ fn blur_request(
         commands.push(json!({ "method": "motion.find", "params": params }));
     }
     if !effects.iter().any(follows) {
-        let area = json!({ "follows": subject.name(), "size": BLUR_SIZE });
+        let mut area = json!({ "follows": subject.name(), "size": BLUR_SIZE });
+        if boxed(subject) {
+            area["shape"] = json!(AreaShape::Box);
+        }
         let add = json!({ "clips": [id], "kind": "mosaic_blur" });
         let set = json!({ "clip": id, "effect": effects.len(), "area": area });
         commands.push(json!({ "method": "effects.add", "params": add }));
@@ -3088,6 +3095,16 @@ fn effect_block(
         let title = ui.add(egui::Label::new(name).sense(egui::Sense::click()));
         if title.clicked() && !title.double_clicked() {
             act = Some(Act::EffectOpen(n));
+        }
+        let followed = e.area.as_ref().and_then(|a| a.follows.as_deref());
+        if let Some(named) = followed {
+            let path = paths.iter().find(|p| p.id == named);
+            let covers = match (path, Subject::named(named)) {
+                (Some(p), _) => p.name.clone().unwrap_or_else(|| p.id.clone()),
+                (None, Some(s)) => all_of(s),
+                (None, None) => named.to_string(),
+            };
+            ui.label(dim(covers));
         }
         match key_buttons(ui, marks, &Ease::ALL, None) {
             Some(KeyClick::Step(dir)) => act = Some(Act::EffectStep(n, dir)),
@@ -4203,6 +4220,52 @@ impl Workspace {
         if choose {
             self.ask_input_lut(ui.ctx(), media, now);
         }
+    }
+
+    pub(super) fn find_things(&mut self, clip: &str, subject: Subject) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(c) = p.clip(clip).filter(|c| vidcut_core::ops::motion::takes(c)) else {
+            return;
+        };
+        let mut params = json!({ "clips": [clip], "subject": subject });
+        if c.motion.iter().any(|m| m.subject == Some(subject)) {
+            params["replace"] = json!(true);
+        }
+        let mut given = find_extra(&self.inspector.find_values).unwrap_or(Value::Null);
+        if self.inspector.find_better && given.is_object() && given.get("size").is_none() {
+            given["size"] = json!(BETTER_SIDE);
+        }
+        self.find("motion.find", with_extra(params, &given), subject);
+    }
+
+    pub(super) fn effect_on(
+        &mut self,
+        clip: &str,
+        path: &str,
+        kind: vidcut_core::model::EffectType,
+    ) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(c) = p.clip(clip) else {
+            return;
+        };
+        let count = c.picture.as_ref().map_or(0, |x| x.effects.len());
+        let found = c.motion.iter().find(|m| m.id == path);
+        let name = found.and_then(|m| m.name.as_deref()).unwrap_or(path);
+        let mut area = json!({ "follows": path, "size": BLUR_SIZE });
+        if found.and_then(|m| m.subject).is_some_and(boxed) {
+            area["shape"] = json!(AreaShape::Box);
+        }
+        let commands = json!([
+            { "method": "effects.add", "params": { "clips": [clip], "kind": kind } },
+            { "method": "effects.set", "params": { "clip": clip, "effect": count, "area": area } },
+        ]);
+        let label = format!("{} On {name}", kind.name());
+        self.send("apply", json!({ "commands": commands, "label": label }));
+        self.left = super::title_browser::LeftTab::Inspector;
     }
 
     pub(super) fn subject_blur(
