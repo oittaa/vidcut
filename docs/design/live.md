@@ -391,6 +391,23 @@ The bar and the Jobs button:
 
 - It is a tab of the left panel (`LeftTab`). It draws the open Title, Subtitle and Subtitle Track sections (`Workspace::title_form`, `Workspace::cue_form`, `Workspace::track_form`).
   - Follow in the Title section lists the motion paths of the clips that play under the title (`leads`, `follow_row`). A choice sends `motion.follow`, and the title goes onto the thing.
+- With a clip selected, it has three tabs (`Tab`): Video, Audio and Effects. The name of the clip and the tabs stay above the sections when they scroll.
+  - Video shows the Title, Generator and picture sections, the Motion section and the Speed section.
+  - Audio shows the sound sections and the Speed section.
+  - Effects shows the effect sections.
+  - A tab without sections is disabled (`tab_has`). Thus the Effects tab is disabled for a clip with no effects.
+    - Resolve 21.2 shows that tab dim for such a clip. Its manual says that the panel is dimmed (p. 1150).
+    - The Effects tab is also disabled while more than one clip with a picture is selected.
+  - The Inspector stays on its tab while the selection has sections for it (`Workspace::settle_tabs`). Otherwise it goes to Video, or to Audio without a picture, and stays there.
+    - An empty selection does not change the tab.
+    - `Workspace::watch_inspector` applies these rules while the Inspector is not shown. It works only when the selection or the project changes.
+  - One effect is the picked effect of the Inspector. Its name has the accent color, and only its section can be open.
+    - A click on the name or the arrow of another effect picks and opens it (`Act::EffectOpen`). A click on the picked effect closes or opens its section.
+    - A double-click acts as one click. Thus it opens a closed section, and does not close it again.
+    - `Workspace::settle_effects` picks the first effect when the selection changes, and when the picked effect goes.
+    - It picks an effect that comes to the clip, from an add or an undo. Then the Inspector also goes to the Effects tab.
+    - The picked effect stays picked when its place in the order changes (`shuffled`).
+    - An effect that comes to a clip that is not selected changes nothing in the Inspector.
 - `Workspace::follow_selection` shows the section of the selected title or subtitle. With only several titles selected, it shows no section. A section that closes puts its changes in first.
 - The In and Out fields of a cue (`Workspace::cue_times`) send one `apply`. It sets the cue, and sets or removes the cues that it overwrites. A value inside the cue next to it sends nothing (`enters_neighbor`).
 - The picture fields convert between the picture and their own unit (`Field::read`, `Field::put`). The fitted size comes from `place::fitted`, as in an export.
@@ -418,7 +435,7 @@ The bar and the Jobs button:
     - The Follow menu lists None, one entry for each subject of `SUBJECTS` (`all_of`) and the motion paths of the clip (`follow_row`, `PathRow`).
     - A subject entry sends the name of the subject in `follows`. It is there also when the clip has no path of that subject.
     - The menu shows the name of each `Subject` that an area follows (`Subject::named`), also of one that it does not list.
-- `Workspace::motion_section` shows for the first selected clip that takes motion paths (`ops::motion::takes`), above the effects.
+- `Workspace::motion_section` shows for the first selected clip that takes motion paths (`ops::motion::takes`), below the picture sections of the Video tab.
   - Its first row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
     - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.
     - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.

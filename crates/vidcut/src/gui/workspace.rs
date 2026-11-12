@@ -2142,6 +2142,7 @@ impl Workspace {
         }
         if self.left != LeftTab::Inspector {
             self.leave_inspector();
+            self.watch_inspector();
             self.settle_transition_drafts(None, ui.ctx());
         }
         if self.left != LeftTab::Keyframes && !self.key_tray {
