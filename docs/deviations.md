@@ -1052,7 +1052,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - Source Overwrite makes a synced cutaway. A frozen frame is not in sync with the timeline.
   - The file also keeps its place in an OTIO export.
-  - The owner approved this difference.
 
 ## X114. Source Overwrite tells when it writes nothing
 
@@ -1065,7 +1064,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - A button that does nothing looks broken.
   - A script needs to know that no clip went in.
-  - The owner approved this difference.
 
 ## X115. A typed duration gives exactly that length
 
@@ -1080,7 +1078,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - Two seconds at 25 fps are 50 frames.
   - The field and the edit agree.
-  - The owner approved this difference.
 
 ## X116. The Ripple Overwrite button treats other tracks as a drop does
 
@@ -1094,7 +1091,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The button takes out picture that the edit does not replace. It also cuts clips that start before the replaced part.
   - One rule for one edit is easier to predict.
-  - The owner approved this difference.
 
 ## X117. Cues stay with the picture in a Ripple Overwrite
 
@@ -1110,7 +1106,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - A cue belongs to the picture under it.
   - The user does not have to re-time the cues.
-  - The owner approved this difference.
 ## X118. Source Overwrite at the end of the timeline uses the first clip
 
 - **Resolve:**
@@ -1122,7 +1117,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - With no clip under the playhead, the reference is the first clip that shows part of the marks. The length of the last clip plays no part.
 - **Why:**
   - A limit with no known reason looks like a fault, and the user cannot predict it.
-  - The owner approved this difference.
 
 ## X119. Auto Sync on a saved group waits for Save Sync
 
@@ -1134,7 +1128,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Save Sync writes them to the same group. Cancel loses nothing.
 - **Why:**
   - The offline clip is a fault. A sync must not break a timeline.
-  - The owner approved this difference.
 
 ## X120. A drag in an opened group changes the group at Save Sync
 
@@ -1145,7 +1138,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The end result is the same.
   - The history gets one entry, and Cancel has nothing to undo.
-  - The owner approved this difference.
 
 ## X122. A clip on the timeline does not follow Save Sync
 
@@ -1155,7 +1147,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A clip already on the timeline stays as it is.
 - **Why:**
   - vidcut has no clip of a group on the timeline. Source Overwrite makes clips of one file.
-  - The owner approved this difference.
 
 ## X123. The Sync Clips icon opens a saved group
 
@@ -1169,7 +1160,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - Two groups on one file leave the older one hard to reach.
   - The icon keeps the saved work when it opens the saved group.
-  - The owner approved this difference.
 
 ## X125. Sync by Sound uses time order on a row
 
@@ -1183,7 +1173,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - Nothing is lost for a reason the user cannot see, and the result does not depend on bin order.
   - This is the rule of Timecode, so one rule serves both.
-  - The owner approved this difference.
 
 ## X126. Source Overwrite keeps sync with a timeline Out alone
 
@@ -1204,7 +1193,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - `media.remove` also takes the file out of its groups. A group with no file left goes too.
 - **Why:**
   - A group in vidcut holds only files that are in the project.
-  - The owner approved this difference.
 
 ## X129. Generators have the correct picture where Resolve has a fault
 
@@ -1229,7 +1217,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - An edit from the grid and an edit from the camera alone take the same frames.
 - **Why:**
   - The same marks give the same frames in both views.
-  - The owner approved this difference.
 
 ## X131. A broken `.cube` file is refused
 
@@ -1245,7 +1232,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - `media.set` and `project.set` refuse the file and give the reason.
 - **Why:**
   - An error is better than a wrong picture that looks correct.
-  - The owner approved this difference.
 
 ## X132. A Mosaic Blur Triangle keeps its own color in a corner at the side of the frame
 
@@ -1258,7 +1244,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A corner has the box at the middle of the pixel's own triangle, clamped into the frame, at each distance.
 - **Why:**
   - The Resolve result does not repeat.
-  - The owner approved this difference.
 
 ## X133. A Mosaic Blur cell edge exactly on a pixel gives the pixel to the cell on the right or below
 
@@ -1269,7 +1254,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - That pixel goes to the cell on the right or below.
 - **Why:**
   - vidcut has one fixed rule where the renders show none.
-  - The owner approved this difference.
 
 ## X134. With FFmpeg 8, vidcut refuses an animated WebP
 
@@ -1280,7 +1264,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - FFmpeg 8 reads the file as a still of 2×2 pixels, and its picture never renders ([gotchas](gotchas.md#ffmpeg-reading-and-decoding)).
   - A refusal gives the reason. A still that shows nothing does not.
-  - The owner approved this difference.
 
 ## X135. One key has one action
 
@@ -1295,7 +1278,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - One key on two actions is confusing.
   - The rule that selects the action in Resolve is not known.
-  - The owner approved this difference.
 
 ## X136. DNxHR 444 exports without alpha
 
@@ -1305,7 +1287,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - `video.alpha` refuses DNxHR 444. The Export dialog does not show Export Alpha for it.
 - **Why:**
   - The FFmpeg encoder `dnxhd` cannot write alpha.
-  - The owner approved this difference.
 
 ## X137. A Scroll line wider than the picture wraps
 
@@ -1316,7 +1297,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The line wraps at 90% of the picture width, as the lines of other titles do.
 - **Why:**
   - A wrapped line loses no letters.
-  - The owner approved this difference.
 
 ## X139. One Input LUT submenu takes any `.cube` file
 
@@ -1329,7 +1309,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The picture is the same.
   - The picker reaches any file, with no LUT folder to set up.
-  - The owner approved this difference.
 
 ## X140. The Atmosphere noise of a Glow has its own pattern
 
@@ -1342,7 +1321,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The noise has the statistics of the renders at the measured values. Its pattern is not the pattern of Resolve.
 - **Why:**
   - No render shows how Resolve makes the pattern. Thus no frame can be the same.
-  - The owner approved this difference.
 
 ## X141. A Glow up to a Spread of 0.1 has a plain blur
 
@@ -1354,7 +1332,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Against the renders, the largest difference is 0.0099, at a Spread of 0.05. The rms difference is about 0.0002.
 - **Why:**
   - No rule for the steps is known. The difference is small.
-  - The owner approved this difference.
 
 ## X142. A Glow keeps the tracks below around a smaller picture
 
@@ -1367,7 +1344,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Other tracks below show around the clip and through its clear parts. The glow around the clip covers them by its brightest color.
 - **Why:**
   - The black is a fault in Resolve. An effect on a clip does not hide the tracks below.
-  - The owner approved this difference.
 
 ## X143. The noise of a Film Grain has its own pattern
 
@@ -1379,7 +1355,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The noise has the spectrum and the statistics of the renders. Its pattern on each frame is not the pattern of Resolve.
 - **Why:**
   - No render shows how Resolve makes the pattern. Thus no frame can be the same.
-  - The owner approved this difference.
 
 ## X144. A Film Grain has no jumps at Symmetry 0.4 and 0.6
 
@@ -1391,7 +1366,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The table has no curve at 0.4 and 0.6. There, vidcut blends the curves at 0.38 and 0.42, and at 0.58 and 0.62.
 - **Why:**
   - The jumps are a fault in Resolve. A small change of Symmetry does not make a large change of the grain.
-  - The owner approved this difference.
 
 ## X146. Straight ProRes 4444 holds straight colors
 
@@ -1401,7 +1375,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - With `video.alpha_mode` `straight`, ProRes 4444 and 4444 XQ hold straight colors.
 - **Why:**
   - The file holds what its Alpha Mode says. The file from Resolve does not agree with its own setting.
-  - The owner approved this difference.
 
 ## X147. An image sequence refuses sound settings
 
@@ -1412,7 +1385,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A TIFF or OpenEXR export with `audio` settings stops with an error. It writes no files.
 - **Why:**
   - The files cannot hold sound. vidcut does not drop a setting without a word.
-  - The owner approved this difference.
 
 ## X148. An OpenEXR in drop-frame timecode has the drop-frame flag
 
@@ -1424,7 +1396,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The `timeCode` of OpenEXR follows SMPTE 12M. There, bit 6 is the drop-frame flag.
   - Without the flag, a reader takes the digits as non-drop-frame. At 29.97 fps, a frame count from them is then 2 frames too high for each minute that drops numbers.
-  - The owner approved this difference.
 
 ## X149. A project takes any frame rate
 
@@ -1436,7 +1407,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - `project create --fps` and the first video can set any positive rate.
 - **Why:**
   - A file at another rate keeps each frame at its own rate. Examples are a 15 fps screen recording and a 144 fps game capture. A project at one of the 19 rates retimes such a file.
-  - The owner approved this difference.
 
 ## X150. A subtitle shadow moves right by its full offset
 
