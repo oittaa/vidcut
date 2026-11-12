@@ -426,6 +426,13 @@ fn cover(a: &Area, b: &PathSample) -> f64 {
     if all > 0.0 { both / all } else { 0.0 }
 }
 
+fn merged(was: &[PathSample], now: Vec<PathSample>) -> Vec<PathSample> {
+    let old = was.iter().map(|s| (s.frame, *s));
+    let mut all: std::collections::BTreeMap<i64, PathSample> = old.collect();
+    all.extend(now.into_iter().map(|s| (s.frame, s)));
+    all.into_values().collect()
+}
+
 fn same_thing(kept: &MotionPath, found: &[PathSample]) -> bool {
     let shared: Vec<f64> = found
         .iter()
@@ -602,14 +609,18 @@ pub fn found(
     let old = of_subject(c, subject);
     c.motion
         .retain(|m| !old.contains(&m.id) || kept.contains(&m.id));
-    let stay: Vec<MotionPath> = c
-        .motion
-        .iter()
-        .filter(|m| old.contains(&m.id))
-        .cloned()
-        .collect();
-    let again = |t: &motion::FoundPath| stay.iter().any(|m| same_thing(m, &t.samples));
-    let tracks: Vec<motion::FoundPath> = tracks.into_iter().filter(|t| !again(t)).collect();
+    let mut fresh = Vec::new();
+    for track in tracks {
+        let stays = c
+            .motion
+            .iter_mut()
+            .find(|m| old.contains(&m.id) && same_thing(m, &track.samples));
+        match stays {
+            Some(m) => m.samples = Arc::new(merged(&m.samples, track.samples)),
+            None => fresh.push(track),
+        }
+    }
+    let tracks: Vec<motion::FoundPath> = fresh;
     if c.motion.len() + tracks.len() > motion::PATHS_KEPT {
         return Err(Error::invalid(format!(
             "{id} would have {} motion paths, more than the {} a clip takes",
