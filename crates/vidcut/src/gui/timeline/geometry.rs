@@ -898,7 +898,7 @@ mod tests {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeaderParts {
-    pub icons: [Rect; 4],
+    pub icons: [Rect; 5],
     pub name: Rect,
     pub label: Rect,
 }
@@ -916,7 +916,7 @@ pub fn header_parts(header: Rect) -> HeaderParts {
         let x = left + f32::from(i) * (HEADER_TOGGLE + HEADER_GAP);
         Rect::from_min_max(pos2(x, top), pos2(x + HEADER_TOGGLE, top + h))
     };
-    let icons = [icon(0), icon(1), icon(2), icon(3)];
+    let icons = [icon(0), icon(1), icon(2), icon(3), icon(4)];
     let right = header.right().round();
     let label = Rect::from_min_max(
         pos2(right - HEADER_LABEL, header.top()),
@@ -924,7 +924,7 @@ pub fn header_parts(header: Rect) -> HeaderParts {
     );
     HeaderParts {
         name: Rect::from_min_max(
-            pos2(icons[3].right() + 2.0 * HEADER_GAP, top),
+            pos2(icons[4].right() + 2.0 * HEADER_GAP, top),
             pos2(label.left() - 2.0 * HEADER_GAP, top + h),
         ),
         icons,

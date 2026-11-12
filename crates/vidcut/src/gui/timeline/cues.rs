@@ -19,6 +19,7 @@ use crate::gui::theme;
 use crate::gui::workspace::Workspace;
 use vidcut_core::shortcuts::Action;
 
+const DESTINATION: f32 = 26.0;
 const EDGE: f32 = 8.0;
 const FILL: Color32 = Color32::from_rgb(52, 98, 108);
 
@@ -718,9 +719,25 @@ impl Workspace {
         let parts = header_parts(rect);
         super::label_line(&child, parts.label);
         self.track_label(&mut child, parts.label, &t.id, p, false);
+        let destination = parts.name.with_max_x(parts.name.left() + DESTINATION);
+        let label = format!("ST{}", t.id.trim_start_matches('S'));
+        let r = child.put(
+            destination,
+            egui::Button::selectable(t.destination, RichText::new(&label).small()),
+        );
+        let what = format!("Destination {}", t.id);
+        r.widget_info(|| {
+            egui::WidgetInfo::selected(egui::Role::Button, true, t.destination, &what)
+        });
+        if r.on_hover_text("Destination").clicked() {
+            self.send(
+                "track.set",
+                json!({ "track": t.id, "destination": !t.destination }),
+            );
+        }
         let mut name = child.new_child(
             egui::UiBuilder::new()
-                .max_rect(parts.name)
+                .max_rect(parts.name.with_min_x(destination.right() + 4.0))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         let field = egui::Id::unique(("subtitle-track-name", &t.id));
@@ -759,7 +776,7 @@ impl Workspace {
                 !t.shown,
                 shown,
                 json!({ "track": t.id, "shown": !t.shown }),
-                parts.icons[3],
+                parts.icons[4],
             ),
         ];
         for (what, tip, lit, glyph, change, at) in buttons {

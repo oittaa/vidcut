@@ -486,7 +486,7 @@ const LOWER_ROWS: [f32; 3] = [130.0, 80.0, 60.0];
 const LOWER_SUBTITLE: f32 = 40.0;
 const LOWER_SUBTITLE_MINIMIZED: f32 = 22.0;
 const LOWER_RULER: f32 = 30.0;
-const HEADER: f32 = 180.0;
+const HEADER: f32 = 200.0;
 const BOX_CONTROL: f32 = 18.0;
 const SWATCH: f32 = 20.0;
 const SWATCH_GAP: f32 = 4.0;
@@ -1830,19 +1830,18 @@ impl Workspace {
             Sense::click(),
         );
         let subtitle = p.subtitle_track(track);
-        let (on, text, what) = match subtitle {
-            Some(s) => (
-                s.destination,
-                format!("ST{}", s.id.trim_start_matches('S')),
-                format!("Destination {}", s.id),
-            ),
-            None => (
-                self.is_target(track),
-                track.to_string(),
-                format!("Target {track}"),
-            ),
+        let (on, text) = match subtitle {
+            Some(s) => (false, format!("ST{}", s.id.trim_start_matches('S'))),
+            None => (self.is_target(track), track.to_string()),
         };
-        r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, &what));
+        r.widget_info(|| match subtitle {
+            Some(s) => {
+                egui::WidgetInfo::labeled(egui::Role::Button, true, format!("Inspector {}", s.id))
+            }
+            None => {
+                egui::WidgetInfo::selected(egui::Role::Button, true, on, format!("Target {track}"))
+            }
+        });
         let c = theme::colors();
         let color = if on {
             c.accent
@@ -1863,17 +1862,11 @@ impl Workspace {
         }
         if r.clicked() {
             match subtitle {
-                Some(s) => self.send(
-                    "track.set",
-                    json!({ "track": s.id, "destination": !s.destination }),
-                ),
+                Some(s) => self.open_track_dialog(s),
                 None => self.target = (track != MAIN).then(|| track.to_string()),
             }
         }
-        match subtitle {
-            Some(_) => r.on_hover_text("Destination"),
-            None => r,
-        }
+        r
     }
 
     fn track_headers(&mut self, ui: &mut egui::Ui, lower_rect: Rect, rows: &Rows, p: &Project) {
@@ -2010,7 +2003,7 @@ impl Workspace {
                 let change = json!({ "track": t.id, "video_enabled": !t.video_enabled });
                 buttons.push(("Video", "Disable Video", !t.video_enabled, picture, change));
             }
-            let columns = parts.icons.into_iter().skip(1);
+            let columns = [parts.icons[1], parts.icons[3], parts.icons[4]];
             for ((what, tip, lit, glyph, change), at) in buttons.into_iter().zip(columns) {
                 let name = format!("{what} {}", t.id);
                 if header_button(&mut child, at, glyph, &name, lit)
