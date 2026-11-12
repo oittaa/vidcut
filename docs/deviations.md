@@ -59,21 +59,19 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - vidcut does not upload, and it has no settings for a Blackmagic HyperDeck. The Export dialog has H.264 for other needs.
   - One item in the row is one preset, with no menu. Thus YouTube shows as two items, 1080p and 2160p.
 
-## X6. Removing a bin keeps its clips
+## X6. Removing media deletes the clips that use it
 
 - **Resolve:**
-  - Delete Bin deletes the bin, the bins in it and their clips (p. 377).
   - These are measurements in Resolve Studio 21.2:
     - Remove Selected Clip on media that timeline clips use asks no question. The pool item goes.
     - The clips of that media on the timeline stay, offline.
     - A compound clip that holds a clip of that media stays in the pool and on the timeline.
 - **vidcut:**
-  - `bins.remove` removes the bin and the bins in it. Their media move up to its parent bin.
   - `media.remove` removes media. It needs `force` when clips or compound clips use the media.
-  - `force` also deletes those compound clips, on the timeline and in the pool.
+  - `force` also deletes those clips, and the compound clips that hold the media, on the timeline and in the pool.
+  - Delete Bin (`bins.remove`) removes the media of the bin in the same way.
 - **Why:**
-  - Bins only organize the pool.
-  - When a script or a mistake removes a bin, the media and their clips must stay in the project.
+  - A clip on the timeline needs its media in the pool. vidcut has no clip without a pool item.
 
 ## X8. The source viewer counts project frames
 

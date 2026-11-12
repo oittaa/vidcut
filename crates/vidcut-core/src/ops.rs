@@ -3248,24 +3248,26 @@ pub fn remove_bin(p: &mut Project, path: &str) -> Result<()> {
     if !has_bin(p, path) || path.is_empty() {
         return Err(Error::not_found(format!("no bin {path:?}")));
     }
-    let parent = path.rsplit_once('/').map_or("", |(a, _)| a).to_string();
     p.bins.retain(|b| !within(b, path));
-    for m in &mut p.media {
-        if within(&m.bin, path) {
-            m.bin = parent.clone();
-        }
-    }
-    for g in &mut p.groups {
-        if within(&g.bin, path) {
-            g.bin = parent.clone();
-        }
-    }
-    for k in &mut p.compounds {
-        if within(&k.bin, path) {
-            k.bin = parent.clone();
-        }
-    }
+    p.media.retain(|m| !within(&m.bin, path));
+    p.groups.retain(|g| !within(&g.bin, path));
+    p.compounds.retain(|k| !within(&k.bin, path));
     Ok(())
+}
+
+pub fn bin_users(p: &Project, path: &str) -> Vec<String> {
+    let inside = p.media.iter().filter(|m| within(&m.bin, path));
+    let media: Vec<&str> = inside.map(|m| m.id.as_str()).collect();
+    let clips = media.iter().flat_map(|m| p.clips_using(m)).map(|c| &c.id);
+    let outside = p.compounds.iter().filter(|k| !within(&k.bin, path));
+    let held = outside.filter(|k| media.iter().any(|m| k.holds(m)));
+    let mut users: Vec<String> = Vec::new();
+    for id in clips.chain(held.map(|k| &k.id)) {
+        if !users.contains(id) {
+            users.push(id.clone());
+        }
+    }
+    users
 }
 
 pub fn rename_bin(p: &mut Project, path: &str, to: &str) -> Result<()> {
