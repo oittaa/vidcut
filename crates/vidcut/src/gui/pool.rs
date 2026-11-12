@@ -1135,8 +1135,16 @@ impl Workspace {
                 });
                 ui.close();
             }
-            if ui.button("Remove Bin").clicked() {
-                self.send("bins.remove", json!({ "path": path }));
+            let used = self
+                .project()
+                .is_some_and(|p| !vidcut_core::ops::bin_users(p, path).is_empty());
+            let label = if used {
+                "Delete Bin (and its clips)"
+            } else {
+                "Delete Bin"
+            };
+            if ui.button(label).clicked() {
+                self.send("bins.remove", json!({ "path": path, "force": used }));
                 ui.close();
             }
         });

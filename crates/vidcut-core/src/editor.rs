@@ -2447,6 +2447,25 @@ fn clip_ids(ids: &[String]) -> Value {
     v
 }
 
+fn remove_media(p: &mut Project, media: &str) -> Result<()> {
+    let users: Vec<String> = p.clips_using(media).map(|c| c.id.clone()).collect();
+    if !users.is_empty() {
+        ops::delete(p, &users, false)?;
+    }
+    p.compounds.retain(|k| !k.holds(media));
+    p.media.retain(|m| m.id != media);
+    for g in &mut p.groups {
+        g.dropped.retain(|m| m != media);
+        for row in &mut g.rows {
+            row.clips.retain(|c| c.media != media);
+        }
+        g.rows.retain(|row| !row.clips.is_empty());
+    }
+    p.groups.retain(|g| !g.rows.is_empty());
+    forget_tape_marks(p, media);
+    Ok(())
+}
+
 fn forget_tape_marks(p: &mut Project, media: &str) {
     if p.tape_marks.order.iter().any(|m| m == media) {
         p.tape_marks = Default::default();
@@ -2685,7 +2704,22 @@ fn mutate(
             ops::add_bin(p, path)?;
             Value::Null
         }
-        Request::BinsRemove { path } => {
+        Request::BinsRemove { path, force } => {
+            if path.is_empty() || !ops::has_bin(p, path) {
+                return Err(Error::not_found(format!("no bin {path:?}")));
+            }
+            let users = ops::bin_users(p, path);
+            if !force && !users.is_empty() {
+                return Err(Error::invalid(format!(
+                    "bin {path:?} holds media used by {}; pass force to delete those clips too",
+                    users.join(", ")
+                )));
+            }
+            let inside = p.media.iter().filter(|m| ops::within(&m.bin, path));
+            let media: Vec<String> = inside.map(|m| m.id.clone()).collect();
+            for m in &media {
+                remove_media(p, m)?;
+            }
             ops::remove_bin(p, path)?;
             Value::Null
         }
@@ -2754,23 +2788,10 @@ fn mutate(
             if !force && !(users.is_empty() && held.is_empty()) {
                 return Err(Error::invalid(format!(
                     "{media} is used by {}; pass force to delete those clips too",
-                    [users.clone(), held].concat().join(", ")
+                    [users, held].concat().join(", ")
                 )));
             }
-            if !users.is_empty() {
-                ops::delete(p, &users, false)?;
-            }
-            p.compounds.retain(|k| !k.holds(media));
-            p.media.retain(|m| &m.id != media);
-            for g in &mut p.groups {
-                g.dropped.retain(|m| m != media);
-                for row in &mut g.rows {
-                    row.clips.retain(|c| &c.media != media);
-                }
-                g.rows.retain(|row| !row.clips.is_empty());
-            }
-            p.groups.retain(|g| !g.rows.is_empty());
-            forget_tape_marks(p, media);
+            remove_media(p, media)?;
             Value::Null
         }
         Request::MediaRelink {

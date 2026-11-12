@@ -694,9 +694,16 @@ pub enum Request {
     /// too.
     #[serde(rename = "bins.add")]
     BinsAdd { path: String },
-    /// Remove a bin and the bins inside it; their media move to its parent.
+    /// Delete a bin, the bins inside it and all that they hold: media,
+    /// compound clips and synced groups. The files stay on disk. When the
+    /// timeline or a compound clip elsewhere uses that media, it needs
+    /// `force`, which also deletes those clips, as `media.remove` does.
     #[serde(rename = "bins.remove")]
-    BinsRemove { path: String },
+    BinsRemove {
+        path: String,
+        #[serde(default)]
+        force: bool,
+    },
     /// Rename or move a bin, with everything inside it.
     #[serde(rename = "bins.rename")]
     BinsRename { path: String, to: String },

@@ -1184,14 +1184,14 @@ mod tests {
     }
 
     #[test]
-    fn a_removed_bin_moves_its_compound_clip_up() {
+    fn a_removed_bin_deletes_its_compound_clip() {
         let mut f = Fixture::new(&[(4.0, true)]);
         f.append("m1", 0, 60);
         f.ok(req("bins.add", json!({"path": "X"})));
         let made = json!({"range": "10f..40f", "bin": "X"});
         f.ok(req("media.compound", made));
         f.ok(req("bins.remove", json!({"path": "X"})));
-        assert_eq!(f.editor.project().compounds[0].bin, "");
+        assert!(f.editor.project().compounds.is_empty());
     }
 
     #[test]

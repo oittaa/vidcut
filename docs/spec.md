@@ -312,7 +312,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - The pool shows the clips of the open bin, and its bins as folders.
   - A path at the top (Master › Interviews › Day 1), the Bins menu and a double-click open any bin.
   - New Bin is on the File menu (Shift+Ctrl+N), on the Bins menu and on the right-click menu of the pool.
-  - The menu of a bin has Rename Bin and Remove Bin. Remove Bin keeps the clips of the bin (deviation X6).
+  - The menu of a bin has Rename Bin and Delete Bin.
+  - Delete Bin deletes the bin and the bins in it (p. 377). It also deletes the media in them. Media that clips use goes as in deviation X6.
   - Clips and bins dragged onto a bin, or onto a level of the path, move into it.
   - The menu of a clip has Move to Bin and Create Bin With Selected Clips (p. 656).
   - Imports go into the open bin (p. 377).
