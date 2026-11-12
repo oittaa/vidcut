@@ -1376,16 +1376,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A wrapped line loses no letters.
   - The owner approved this difference.
 
-## X138. The keys are a page of Preferences
-
-- **Resolve:**
-  - Keyboard Customization is a separate window (p. 121).
-- **vidcut:**
-  - The keys are the Keys page of the Preferences window.
-- **Why:**
-  - vidcut stores the keys in the preferences, with the other settings of the user.
-  - The owner approved this difference.
-
 ## X139. One Input LUT submenu takes any `.cube` file
 
 - **Resolve:**

@@ -262,13 +262,13 @@ The bar and the Jobs button:
 
 **Separate windows.**
 
-- The Transcription, Jobs and History windows are system windows of their own (`dialog::separate_window`). Thus they can go to another screen.
+- The Transcription, Jobs, History and Keyboard Customization windows are system windows of their own (`dialog::separate_window`). Thus they can go to another screen.
 - They are immediate viewports of egui. Thus eframe draws them each time that it draws the main window.
   - Why: they use the state of the `Workspace`, which a deferred viewport cannot borrow.
 - A window opens without the keyboard focus. With no kept place, it opens at the center of the main window.
 - On Windows, `Tool::watch` finds the window by its title among the windows of the UI thread ([gotchas](../gotchas.md#wgpu-and-egui)).
 - The main window then owns it. Thus it stays above the main window and has no taskbar button.
-- `window-transcription.json`, `window-jobs.json` and `window-history.json` keep the windows as `window.json` keeps the main window.
+- `window-transcription.json`, `window-jobs.json`, `window-history.json` and `window-keys.json` keep the windows as `window.json` keeps the main window.
   - Windows keeps the placement.
   - macOS and Linux keep the size, the maximized state, and the position that egui reports. Wayland reports no position.
 - The keys that a separate window does not use go to the main window in the next frame (`dialog::take_forwarded_keys`). Thus the shortcuts work there too.
@@ -679,11 +679,12 @@ Order:
 - `Workspace::viewer_keys` takes the viewer frame keys with `take`, after the windows that ask for an answer. Why: Esc closes the question first.
 - `Shuttle` and the skim use `held`, because they need a key that stays down.
 
-The Keys page of Preferences:
+The Keyboard Customization window:
 
-- `Workspace::capture_key` runs at the start of `Workspace::keys`. While the page waits for a key, it removes every key event of the frame. Thus the key fires no action.
-- `caught` gives the `Combo` of the event and its owner. A key that another action uses stays unset, and the page names that action.
-- The page sends `keys.set` and `keys.reset`, as the CLI does.
+- It is a system window of its own (`dialog::separate_window`). Its keys go to the main window in the next frame, as for the other separate windows.
+- `Workspace::capture_key` runs at the start of `Workspace::keys`. While the window waits for a key, it removes every key event of the frame. Thus the key fires no action.
+- `caught` gives the `Combo` of the event and its owner. A key that another action uses stays unset, and the window names that action.
+- The window sends `keys.set` and `keys.reset`, as the CLI does.
 
 ## From a key press to a frame
 
