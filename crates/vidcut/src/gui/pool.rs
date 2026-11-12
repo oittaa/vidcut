@@ -35,7 +35,7 @@ const LIST_COLUMNS: [&str; 9] = [
 const LIST_GAP: Vec2 = Vec2::new(12.0, 4.0);
 const STRIP_HEIGHT: f32 = 54.0;
 const HEADER: f32 = 20.0;
-const EDIT_ICONS: f32 = 8.0;
+const EDIT_ICONS: f32 = 10.0;
 const EDIT_ICON: f32 = 16.0;
 const EDIT_ICON_GAP: f32 = 4.0;
 const CARD_HEIGHT: f32 = 96.0;
@@ -2350,6 +2350,7 @@ impl Workspace {
                 .button_padding
                 .x
                 .min((spare / (2.0 * EDIT_ICONS)).max(0.0));
+            self.edit_only_toggles(ui, EDIT_ICON);
             let buttons = [
                 (icon::SMART_INSERT, "Smart Insert", "edit.smart_insert"),
                 (icon::APPEND, "Append", "edit.append"),

@@ -480,13 +480,13 @@ pub struct Layout {
 }
 
 const UPPER_RULER: f32 = 24.0;
-const UPPER_TRACK: f32 = 40.0;
-const UPPER_OTHER: f32 = 9.0;
+const UPPER_TRACK: f32 = 18.0;
+const UPPER_OTHER: f32 = 18.0;
 const LOWER_ROWS: [f32; 3] = [130.0, 80.0, 60.0];
 const LOWER_SUBTITLE: f32 = 40.0;
 const LOWER_SUBTITLE_MINIMIZED: f32 = 22.0;
 const LOWER_RULER: f32 = 30.0;
-const HEADER: f32 = 150.0;
+const HEADER: f32 = 200.0;
 const BOX_CONTROL: f32 = 18.0;
 const SWATCH: f32 = 20.0;
 const SWATCH_GAP: f32 = 4.0;
@@ -494,10 +494,14 @@ const RING: f32 = 3.0;
 
 mod icon {
     pub use egui_phosphor::regular::{
-        ARROWS_IN_LINE_VERTICAL as SHRINK, ARROWS_OUT_LINE_VERTICAL as ENLARGE,
+        ARROWS_IN_LINE_HORIZONTAL as DYNAMIC_TRIM, ARROWS_IN_LINE_VERTICAL as SHRINK,
+        ARROWS_LEFT_RIGHT as RIPPLE, ARROWS_OUT_LINE_VERTICAL as ENLARGE,
         BOOKMARK_SIMPLE as MARKER, DIAMONDS_FOUR as KEYFRAMES, EYE as VIDEO_ON,
-        EYE_SLASH as VIDEO_OFF, LOCK_SIMPLE as LOCKED, LOCK_SIMPLE_OPEN as UNLOCKED,
-        MAGNET as SNAP, SCISSORS as SPLIT, SPEAKER_HIGH as AUDIO_ON, SPEAKER_SLASH as AUDIO_OFF,
+        EYE_SLASH as VIDEO_OFF, FILM_STRIP as VIDEO_ONLY, LIST_PLUS as TIMELINE_ACTIONS,
+        LOCK_SIMPLE as LOCKED, LOCK_SIMPLE_OPEN as UNLOCKED, MAGNET as SNAP,
+        MUSIC_NOTES as AUDIO_ONLY, PENCIL_SIMPLE as EDIT_ACTIONS, SCISSORS as SPLIT,
+        SLIDERS_HORIZONTAL as TIMELINE_OPTIONS, SPEAKER_HIGH as AUDIO_ON,
+        SPEAKER_SLASH as AUDIO_OFF,
     };
 }
 
@@ -505,6 +509,34 @@ fn icon_toggle(ui: &mut egui::Ui, icon: &str, name: &str, on: bool) -> egui::Res
     let r = ui.add(egui::Button::selectable(on, RichText::new(icon).size(15.0)));
     r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
     r
+}
+
+fn spread(area: Rect, n: usize) -> Vec<Rect> {
+    let w = area.width() / n as f32;
+    (0..n)
+        .map(|i| {
+            let x = area.left() + w * i as f32;
+            Rect::from_min_max(pos2(x, area.top()), pos2(x + w, area.bottom()))
+        })
+        .collect()
+}
+
+fn slot(ui: &mut egui::Ui, cell: Rect) -> egui::Ui {
+    let row = Rect::from_center_size(cell.center(), vec2(cell.width(), BOX_CONTROL + 4.0));
+    ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(row)
+            .layout(egui::Layout::top_down(egui::Align::Center)),
+    )
+}
+
+pub(super) fn label_line(ui: &egui::Ui, label: Rect) {
+    let x = label.left().round() - 0.5;
+    ui.painter().vline(
+        x,
+        label.y_range(),
+        ui.visuals().widgets.noninteractive.bg_stroke,
+    );
 }
 
 fn header_button(ui: &mut egui::Ui, at: Rect, icon: &str, name: &str, lit: bool) -> egui::Response {
@@ -555,12 +587,6 @@ fn color_button(ui: &mut egui::Ui, name: &str, on: bool) -> egui::Response {
         );
     }
     r.on_hover_text(title)
-}
-
-fn word_toggle(ui: &mut egui::Ui, word: &str, name: &str, on: bool) -> egui::Response {
-    let r = ui.add(egui::Button::selectable(on, RichText::new(word).small()));
-    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
-    r
 }
 
 fn options_path() -> std::path::PathBuf {
@@ -1061,7 +1087,7 @@ impl Workspace {
             lower_rect.min,
             pos2(content.left() - 1.0, layout.lower_ruler.bottom()),
         );
-        self.timeline_boxes(ui, upper_box, lower_box, &p);
+        self.timeline_boxes(ui, upper_box, lower_box, &layout.upper, &p);
 
         if let Some(d) = &self.timeline.drag
             && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
@@ -1395,42 +1421,42 @@ impl Workspace {
         });
     }
 
-    fn timeline_boxes(&mut self, ui: &mut egui::Ui, upper: Rect, lower: Rect, p: &Project) {
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(upper.shrink(3.0)));
-        child.set_clip_rect(upper.intersect(child.clip_rect()));
-        child.spacing_mut().item_spacing = vec2(2.0, 2.0);
-        child.spacing_mut().button_padding = vec2(3.0, 1.0);
-        child.spacing_mut().interact_size.y = BOX_CONTROL;
-        child.horizontal(|ui| {
-            ui.menu_button(RichText::new("Options").small(), |ui| {
-                self.options_menu(ui, p)
-            });
-            ui.menu_button(RichText::new("Actions").small(), |ui| {
-                self.timeline_actions_menu(ui, p, true)
-            });
-            ui.menu_button(RichText::new("Edit").small(), |ui| {
-                self.edit_actions_menu(ui)
-            });
+    fn timeline_boxes(
+        &mut self,
+        ui: &mut egui::Ui,
+        upper: Rect,
+        lower: Rect,
+        rows: &Rows,
+        p: &Project,
+    ) {
+        let strip = upper.right() - geometry::HEADER_LABEL;
+        label_line(ui, Rect::from_min_max(pos2(strip, upper.top()), upper.max));
+        let menus = Rect::from_min_max(upper.min, pos2(strip, upper.bottom()));
+        let mut slots = spread(menus, 3).into_iter();
+        let named = |r: egui::Response, name: &str| {
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
+            r.on_hover_text(name);
+        };
+        let glyph = |g: &str| RichText::new(g).size(15.0);
+        let mut menu = |ui: &mut egui::Ui| {
+            let mut child = slot(ui, slots.next().unwrap_or(menus));
+            child.spacing_mut().button_padding = vec2(3.0, 1.0);
+            child
+        };
+        let r = menu(ui).menu_button(glyph(icon::TIMELINE_OPTIONS), |ui| self.options_menu(ui, p));
+        named(r.response, "Timeline Options");
+        let r = menu(ui).menu_button(glyph(icon::TIMELINE_ACTIONS), |ui| {
+            self.timeline_actions_menu(ui, p, true)
         });
-        child.horizontal_wrapped(|ui| {
-            for t in p.tracks.iter() {
-                let on = self.is_target(&t.id);
-                let r = ui.selectable_label(on, RichText::new(&t.id).small());
-                let name = format!("Target {}", t.id);
-                r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, &name));
-                if r.clicked() {
-                    self.target = (t.id != MAIN).then(|| t.id.clone());
-                }
-            }
-            self.edit_only_toggles(ui);
-        });
-        let mut child =
-            ui.new_child(egui::UiBuilder::new().max_rect(lower.shrink2(vec2(3.0, 1.0))));
-        child.set_clip_rect(lower.intersect(child.clip_rect()));
-        child.spacing_mut().item_spacing = vec2(1.0, 0.0);
-        child.spacing_mut().button_padding = vec2(2.0, 0.0);
-        child.spacing_mut().interact_size.y = BOX_CONTROL;
-        child.horizontal_centered(|ui| self.timeline_tools(ui, p));
+        named(r.response, "Timeline Actions");
+        let r = menu(ui).menu_button(glyph(icon::EDIT_ACTIONS), |ui| self.edit_actions_menu(ui));
+        named(r.response, "Edit Actions");
+        for row in &rows.rows {
+            let r = row.rect.rect;
+            let at = Rect::from_min_max(pos2(strip, r.top()), pos2(upper.right(), r.bottom()));
+            self.track_label(ui, at, &row.track, p, true);
+        }
+        self.timeline_tools(ui, lower.shrink2(vec2(3.0, 0.0)), p);
     }
 
     fn take_edit_only(&mut self, ui: &egui::Ui) {
@@ -1443,9 +1469,14 @@ impl Workspace {
         }
     }
 
-    fn edit_only_toggles(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn edit_only_toggles(&mut self, ui: &mut egui::Ui, size: f32) {
         let video = self.video_only;
-        if ui.selectable_label(video, "Video Only").clicked() {
+        let r = ui.add(egui::Button::selectable(
+            video,
+            RichText::new(icon::VIDEO_ONLY).size(size),
+        ));
+        r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, video, "Video Only"));
+        if r.on_hover_text("Insert Video Only").clicked() {
             let on = !video;
             self.video_only = on;
             if on {
@@ -1454,7 +1485,12 @@ impl Workspace {
             self.send("gui.only", json!({ "video_only": on }));
         }
         let audio = self.audio_only;
-        if ui.selectable_label(audio, "Audio Only").clicked() {
+        let r = ui.add(egui::Button::selectable(
+            audio,
+            RichText::new(icon::AUDIO_ONLY).size(size),
+        ));
+        r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, audio, "Audio Only"));
+        if r.on_hover_text("Insert Audio Only").clicked() {
             let on = !audio;
             self.audio_only = on;
             if on {
@@ -1464,12 +1500,32 @@ impl Workspace {
         }
     }
 
-    fn timeline_tools(&mut self, ui: &mut egui::Ui, p: &Project) {
+    fn timeline_tools(&mut self, ui: &mut egui::Ui, area: Rect, p: &Project) {
+        let mut slots = spread(area, 6).into_iter();
+        let mut tool = |ui: &mut egui::Ui| {
+            let mut child = slot(ui, slots.next().unwrap_or(area));
+            child.spacing_mut().button_padding = vec2(2.0, 0.0);
+            child.spacing_mut().interact_size.y = BOX_CONTROL;
+            child
+        };
         let ripple = p.settings.ripple_on;
-        if word_toggle(ui, "Ripple", "Ripple On", ripple).clicked() {
+        if icon_toggle(&mut tool(ui), icon::RIPPLE, "Ripple On", ripple)
+            .on_hover_text("Ripple On")
+            .clicked()
+        {
             self.send("project.set", json!({ "ripple_on": !ripple }));
         }
-        let r = word_toggle(ui, "Trim", "Dynamic Trim", self.timeline.dynamic.is_some());
+        let mode = match self.timeline.options.dynamic_mode {
+            tools::DynamicMode::Slip => "Dynamic Trim Mode (Slip)",
+            tools::DynamicMode::Slide => "Dynamic Trim Mode (Slide)",
+        };
+        let r = icon_toggle(
+            &mut tool(ui),
+            icon::DYNAMIC_TRIM,
+            "Dynamic Trim",
+            self.timeline.dynamic.is_some(),
+        )
+        .on_hover_text(mode);
         if r.clicked() {
             self.toggle_dynamic();
         }
@@ -1483,26 +1539,26 @@ impl Workspace {
                 ui.close();
             }
         });
-        if icon_toggle(ui, icon::SPLIT, "Split", false)
+        if icon_toggle(&mut tool(ui), icon::SPLIT, "Split", false)
             .on_hover_text("Split")
             .clicked()
         {
             self.split_at_playhead();
         }
-        if icon_toggle(ui, icon::MARKER, "Marker", false)
+        if icon_toggle(&mut tool(ui), icon::MARKER, "Marker", false)
             .on_hover_text("Add Marker")
             .clicked()
         {
             self.send("markers.add", json!({ "at": self.snap.timeline.position }));
         }
-        if icon_toggle(ui, icon::SNAP, "Snap", self.snapping())
+        if icon_toggle(&mut tool(ui), icon::SNAP, "Snap", self.snapping())
             .on_hover_text("Snap")
             .clicked()
         {
             self.timeline.options.snapping = !self.timeline.options.snapping;
             self.timeline.options.save();
         }
-        if icon_toggle(ui, icon::KEYFRAMES, "Keyframes", self.key_tray)
+        if icon_toggle(&mut tool(ui), icon::KEYFRAMES, "Keyframes", self.key_tray)
             .on_hover_text("Keyframes")
             .clicked()
         {
@@ -1760,6 +1816,59 @@ impl Workspace {
         painter.rect_filled(thumb, 3.0, shade);
     }
 
+    fn track_label(
+        &mut self,
+        ui: &mut egui::Ui,
+        at: Rect,
+        track: &str,
+        p: &Project,
+        upper: bool,
+    ) -> egui::Response {
+        let r = ui.interact(
+            at,
+            egui::Id::unique(("track-label", track, upper)),
+            Sense::click(),
+        );
+        let subtitle = p.subtitle_track(track);
+        let (on, text) = match subtitle {
+            Some(s) => (false, format!("ST{}", s.id.trim_start_matches('S'))),
+            None => (self.is_target(track), track.to_string()),
+        };
+        r.widget_info(|| match subtitle {
+            Some(s) => {
+                egui::WidgetInfo::labeled(egui::Role::Button, true, format!("Inspector {}", s.id))
+            }
+            None => {
+                egui::WidgetInfo::selected(egui::Role::Button, true, on, format!("Target {track}"))
+            }
+        });
+        let c = theme::colors();
+        let color = if on {
+            c.accent
+        } else if r.hovered() {
+            c.text
+        } else {
+            c.text_dim
+        };
+        let font = egui::TextStyle::Small.resolve(ui.style());
+        let galley = ui.painter().layout_no_wrap(text, font, color);
+        if galley.size().y <= at.height() + 2.0 {
+            let pos = egui::Align2::CENTER_CENTER
+                .anchor_size(at.center(), galley.size())
+                .min;
+            ui.painter()
+                .with_clip_rect(at.intersect(ui.clip_rect()))
+                .galley(pos, galley, color);
+        }
+        if r.clicked() {
+            match subtitle {
+                Some(s) => self.open_track_dialog(s),
+                None => self.target = (track != MAIN).then(|| track.to_string()),
+            }
+        }
+        r
+    }
+
     fn track_headers(&mut self, ui: &mut egui::Ui, lower_rect: Rect, rows: &Rows, p: &Project) {
         for row in &rows.rows {
             let r = row.rect.rect;
@@ -1771,7 +1880,7 @@ impl Workspace {
                 pos2(lower_rect.left() + HEADER - 4.0, r.bottom()),
             );
             if let Some(s) = p.subtitle_track(&row.track) {
-                self.subtitle_header(ui, rect, s);
+                self.subtitle_header(ui, rect, s, p);
                 continue;
             }
             let Some(t) = p.track(&row.track) else {
@@ -1780,29 +1889,30 @@ impl Workspace {
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
             child.set_clip_rect(rect.intersect(child.clip_rect()));
             child.spacing_mut().button_padding.x = 3.0;
-            let is_target = self.is_target(&t.id);
-            let label = t.name.clone().unwrap_or_else(|| t.id.clone());
             let parts = geometry::header_parts(rect);
-            let mut name = child.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(parts.name)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            label_line(&child, parts.label);
+            let area = child.interact(
+                parts.name,
+                egui::Id::unique(("track-header", &t.id)),
+                Sense::click(),
             );
-            let r = name.add(
-                egui::Button::selectable(
-                    is_target,
-                    if is_target {
-                        RichText::new(&label).small()
-                    } else {
-                        RichText::new(&label).strong().small()
-                    },
-                )
-                .truncate(),
-            );
-            if r.clicked() {
+            if let Some(n) = &t.name {
+                let mut name = child.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(parts.name)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                name.add(
+                    egui::Label::new(RichText::new(n).small())
+                        .truncate()
+                        .selectable(false),
+                );
+            }
+            if area.clicked() {
                 self.target = (t.id != MAIN).then(|| t.id.clone());
             }
-            r.context_menu(|ui| {
+            let pick = self.track_label(&mut child, parts.label, &t.id, p, false);
+            area.union(pick).context_menu(|ui| {
                 if ui.button("Add Video Track").clicked() {
                     self.send("track.add", json!({ "kind": "video" }));
                     ui.close();
@@ -1852,7 +1962,7 @@ impl Workspace {
                 icon::ENLARGE
             };
             let name = format!("Enlarge {}", t.id);
-            if header_button(&mut child, parts.enlarge, glyph, &name, enlarged)
+            if header_button(&mut child, parts.icons[0], glyph, &name, enlarged)
                 .on_hover_text("Enlarge Track")
                 .clicked()
             {
@@ -1893,7 +2003,8 @@ impl Workspace {
                 let change = json!({ "track": t.id, "video_enabled": !t.video_enabled });
                 buttons.push(("Video", "Disable Video", !t.video_enabled, picture, change));
             }
-            for ((what, tip, lit, glyph, change), at) in buttons.into_iter().zip(parts.toggles) {
+            let columns = [parts.icons[1], parts.icons[3], parts.icons[4]];
+            for ((what, tip, lit, glyph, change), at) in buttons.into_iter().zip(columns) {
                 let name = format!("{what} {}", t.id);
                 if header_button(&mut child, at, glyph, &name, lit)
                     .on_hover_text(tip)

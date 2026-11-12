@@ -706,13 +706,20 @@ impl Workspace {
         });
     }
 
-    pub(super) fn subtitle_header(&mut self, ui: &mut egui::Ui, rect: Rect, t: &SubtitleTrack) {
+    pub(super) fn subtitle_header(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        t: &SubtitleTrack,
+        p: &Project,
+    ) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         child.set_clip_rect(rect.intersect(child.clip_rect()));
         child.spacing_mut().button_padding.x = 3.0;
         let parts = header_parts(rect);
-        let left = parts.enlarge.left();
-        let destination = parts.enlarge.with_max_x(left + DESTINATION);
+        super::label_line(&child, parts.label);
+        self.track_label(&mut child, parts.label, &t.id, p, false);
+        let destination = parts.name.with_max_x(parts.name.left() + DESTINATION);
         let label = format!("ST{}", t.id.trim_start_matches('S'));
         let r = child.put(
             destination,
@@ -761,7 +768,7 @@ impl Workspace {
                 t.locked,
                 lock,
                 json!({ "track": t.id, "locked": !t.locked }),
-                parts.toggles[0],
+                parts.icons[1],
             ),
             (
                 "Show",
@@ -769,7 +776,7 @@ impl Workspace {
                 !t.shown,
                 shown,
                 json!({ "track": t.id, "shown": !t.shown }),
-                parts.toggles[2],
+                parts.icons[4],
             ),
         ];
         for (what, tip, lit, glyph, change, at) in buttons {

@@ -230,11 +230,17 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - **Edit Actions:** Trim Start to Playhead, Trim End to Playhead.
 - **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker. After them is the Keyframes button, which shows the keyframe tray (p. 1259).
   - vidcut also has a Snap button among them.
+  - The buttons are spread evenly across their row, measured in Resolve Studio 21.2.
 - **Upper timeline:**
-  - The track-number buttons to its left select the target track.
-  - The Audio Only and Video Only toggles are there too (pp. 643, 694).
-    - The two cannot both be on.
-    - `gui.only` sets them. The choice lasts for this session.
+  - A column at its left has a label beside each track: V1, A1, ST1 and so on (p. 643).
+    - The labels are plain text, with no box. Each track row is about 18 px tall, V1 too, so each label fits. These are measurements in Resolve Studio 21.2.
+    - A click on the label of a video or audio track makes it the target track (p. 643).
+    - A click on the label of a subtitle track opens the track in the Inspector. This is measured in Resolve Studio 21.2.
+  - The Timeline Options, Timeline Actions and Edit Actions icons are to the left of the labels. They are spread evenly across the box. These are measurements in Resolve Studio 21.2.
+- **Video Only and Audio Only** (p. 694):
+  - They are two icons at the left end of the row of edit buttons, above the upper timeline. Video Only is first. This is measured in Resolve Studio 21.2.
+  - The two cannot both be on.
+  - `gui.only` sets them. The choice lasts for this session.
 
 ## 3. Media Pool (Ch. 34, pp. 653–675)
 
@@ -683,6 +689,13 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - A disabled clip is dull. A muted clip shows a mute icon.
 
 **Track headers** (pp. 647, 678, 717): Enlarge (one track at a time), Lock, Mute (audio) and Video Enable icons (D43).
+- These are measurements in Resolve Studio 21.2:
+  - Each icon has its own column from the left, the same on each track. A track without an icon leaves its column empty.
+  - A subtitle track has Lock and Enable only, in the Lock and Video Enable columns.
+  - The labels of the tracks (V1, A1, ST1) are plain text in a column at the right end of the headers. A line separates the column from the icons.
+  - A Solo icon is between Lock and Mute.
+- vidcut has no Solo icon yet. Its column stays empty, so Mute and Video Enable are in the columns of Resolve.
+- vidcut: the name of a track shows between the icons and the label, when the track has a name. A subtitle track always shows its name.
 
 **Automatic tools** (p. 690):
 - The **Boring Detector** (Timeline Options) highlights clips on the upper timeline, live as you edit:
@@ -1365,6 +1378,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The header of each subtitle track has a destination control (p. 1228). Its labels are ST1, ST2 and so on (p. 1232).
     - These are measurements in Resolve Studio 21.2. A new subtitle track has it on. A click turns it on or off. The other tracks keep theirs.
     - Paste uses it. Create Caption, Add New and Add Subtitle do not.
+    - The Cut page does not show it. vidcut shows it before the name of the track.
   - Details: D56.
 - **Cues** (pp. 1231–1233, 1236–1237):
   - Add Subtitle, in the right-click menu of a subtitle track, puts a cue at the playhead.
