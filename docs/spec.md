@@ -867,7 +867,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A saved group plus a new file opens as a new sync, by the rows of [§3](#3-media-pool-ch-34-pp-653675). Files of two saved groups or more do the same.
     - Cancel adds nothing. Save Sync makes a new group, and the earlier groups stay.
   - "Open Sync Group…" in the menu of a file in a group opens its newest group.
-  - The window is inside vidcut's main window ([deviation X121](deviations.md#x121-the-sync-clips-window-is-inside-the-main-window)).
+  - It is a window of its own, with the title "Sync Clips". It can go outside vidcut's main window.
 - **Which files it takes:**
   - A file with no camera name opens the window. Its camera name stays empty after Save Sync.
   - The window has no limit of cameras. The measurements open 24 cameras.
