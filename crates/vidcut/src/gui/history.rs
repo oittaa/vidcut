@@ -333,6 +333,9 @@ impl Workspace {
 
     pub(super) fn history_keys(&mut self, ctx: &egui::Context) {
         let h = &mut self.history;
+        if h.keys && ctx.input(|i| i.pointer.any_pressed()) {
+            h.leave();
+        }
         if !h.open || !h.keys || h.naming.is_some() {
             return;
         }
@@ -454,7 +457,7 @@ impl Workspace {
         let focused = ui.input(|i| i.viewport().focused) == Some(true);
         if focused && !self.history.focused {
             self.history.keys = true;
-        } else if !focused && self.history.keys {
+        } else if !focused && self.history.focused {
             self.history.leave();
         }
         self.history.focused = focused;
