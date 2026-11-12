@@ -40,13 +40,41 @@ const NAME_WIDTH: f32 = 140.0;
 const BLUR_SIZE: [f64; 2] = [1.3, 1.3];
 pub(super) const SUBJECTS: [Subject; 2] = [Subject::Face, Subject::Text];
 const FIND_VALUES: [(&str, &str, &str); 7] = [
-    ("size", "Size", "Longer Side The Model Sees, In Pixels"),
-    ("start", "Start Score", "Score That Starts A Path, 0 To 1"),
-    ("keep", "Keep Score", "Score That Continues A Path, 0 To 1"),
-    ("overlap", "Overlap", "Overlap With The Last Box, 0 To 1"),
-    ("wait", "Wait", "Seconds A Path Waits For Its Thing"),
-    ("shortest", "Shortest", "Seconds A Path Must Last"),
-    ("steady", "Seen Share", "Share Of Frames With A Box, 0 To 1"),
+    (
+        "size",
+        "Search Picture Size (px)",
+        "Larger Finds Smaller Things And Takes Longer",
+    ),
+    (
+        "start",
+        "Min Score To Start (0-1)",
+        "How Sure The Model Must Be To Start Following A Thing",
+    ),
+    (
+        "keep",
+        "Min Score To Continue (0-1)",
+        "How Sure The Model Must Be To Keep Following It",
+    ),
+    (
+        "overlap",
+        "Min Box Overlap (0-1)",
+        "How Much A Box Must Overlap The Last One",
+    ),
+    (
+        "wait",
+        "Max Time Hidden (s)",
+        "How Long A Thing May Stay Hidden",
+    ),
+    (
+        "shortest",
+        "Min Time Followed (s)",
+        "Things Followed For Less Time Are Dropped",
+    ),
+    (
+        "steady",
+        "Min Share Of Frames Seen (0-1)",
+        "Things Seen On Fewer Of Their Frames Are Dropped",
+    ),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
