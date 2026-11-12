@@ -1496,12 +1496,16 @@ pub enum Request {
     /// ready for `edit.paste`. The GUI also keeps them on its clipboard.
     /// With `range` instead of `clips`: the parts of the clips on the
     /// unlocked tracks in that range (Copy in the Transcription window).
+    /// With `cues` instead (`q3`, or `S1@15s`): those cues with their
+    /// subtitle tracks, as `cues`.
     #[serde(rename = "edit.copy")]
     EditCopy {
         #[serde(default)]
         clips: Option<OneOrMany<ClipRef>>,
         #[serde(default)]
         range: Option<RangeSpec>,
+        #[serde(default)]
+        cues: Option<OneOrMany<String>>,
     },
     /// Cut clips (Ctrl+X): copy, then delete with ripple on Track 1. With
     /// `range` instead of `clips`: copy the parts in that range, then take
@@ -1518,10 +1522,16 @@ pub enum Request {
     /// spacing. Defaults: the GUI's clipboard and playhead. With `insert`,
     /// the clips at and after `at` on every unlocked track move later to
     /// make room, so nothing is covered (Paste in the Transcription window).
+    /// With `cues` instead of `clips`: each cue goes on its own subtitle
+    /// track when its destination is on, else on the first subtitle track
+    /// whose destination is on, else on a new subtitle track. A pasted cue
+    /// overwrites the cues it covers.
     #[serde(rename = "edit.paste")]
     EditPaste {
         #[serde(default)]
         clips: Option<Vec<TrackClip>>,
+        #[serde(default)]
+        cues: Option<Vec<crate::model::TrackCue>>,
         #[serde(default)]
         at: Option<TimeSpec>,
         #[serde(default)]
@@ -1557,7 +1567,7 @@ pub enum Request {
     },
     /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
     /// volume in dB, Voice Isolation, ducking). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
-    /// `language`, and `style` or a `look`.
+    /// `destination`, `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
     TrackSet {
         track: String,
@@ -1615,6 +1625,10 @@ pub enum Request {
         /// others.
         #[serde(default)]
         shown: Option<bool>,
+        /// A subtitle track's destination control (ST1, ST2, …). A paste of
+        /// cues uses the tracks that have it on.
+        #[serde(default)]
+        destination: Option<bool>,
         /// A subtitle track's language, as a code such as `en` or `pt-BR`.
         /// Empty string clears it.
         #[serde(default)]

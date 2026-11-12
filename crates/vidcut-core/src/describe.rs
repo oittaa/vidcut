@@ -228,6 +228,7 @@ pub fn describe_at(
                 _ => "Linear",
             }
         ),
+        "edit.copy" if !params["cues"].is_null() => format!("Copy {}", d.cues("cues")),
         "edit.copy" => format!("Copy {}", d.clips("clips")),
         "edit.cut" if d.params["range"].is_string() => format!("Cut {}", d.range("range")),
         "edit.cut" => format!("Cut {}", d.clips("clips")),

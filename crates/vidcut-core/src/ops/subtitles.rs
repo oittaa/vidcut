@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::error::{Error, Result};
 use crate::model::{
     Cue, CueWord, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle,
-    SubtitleTrack, SubtitleWords, TextStroke, Title, size_fits,
+    SubtitleTrack, SubtitleWords, TextStroke, Title, TrackCue, size_fits,
 };
 use crate::request::SubtitleTimeBase;
 use crate::subtitles::{self, Read, Timed};
@@ -71,6 +71,7 @@ pub struct TrackProps {
     pub locked: Option<bool>,
     pub name: Option<Option<String>>,
     pub shown: Option<bool>,
+    pub destination: Option<bool>,
     pub language: Option<Option<String>>,
     pub style: Option<SubtitleStyle>,
 }
@@ -264,6 +265,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
         None => {}
     }
     let t = &mut p.subtitles[ti];
+    if let Some(d) = props.destination {
+        t.destination = d;
+    }
     if let Some(l) = props.locked {
         t.locked = l;
     }
@@ -661,6 +665,88 @@ pub fn move_cues(
         place_cue(&mut p.subtitles[dest.unwrap_or(ti)], c);
     }
     Ok(())
+}
+
+pub fn copy_cues(p: &Project, ids: &[String]) -> Result<Vec<TrackCue>> {
+    if ids.is_empty() {
+        return Err(Error::usage("no cues to copy"));
+    }
+    ids.iter()
+        .map(|id| {
+            let (ti, ci) = find(p, id)?;
+            let t = &p.subtitles[ti];
+            Ok(TrackCue {
+                track: t.id.clone(),
+                cue: t.cues[ci].clone(),
+            })
+        })
+        .collect()
+}
+
+fn paste_track(p: &mut Project, from: &str) -> usize {
+    if let Some(i) = p
+        .subtitle_index(from)
+        .filter(|&i| p.subtitles[i].destination)
+    {
+        return i;
+    }
+    if let Some(i) = p.subtitles.iter().position(|t| t.destination) {
+        return i;
+    }
+    add_track(p, None);
+    p.subtitles.len() - 1
+}
+
+fn overwrite(p: &mut Project, ti: usize, from: i64, to: i64) -> Result<()> {
+    let hit: Vec<(String, i64, i64)> = p.subtitles[ti]
+        .cues
+        .iter()
+        .filter(|c| c.start < to && c.end() > from)
+        .map(|c| (c.id.clone(), c.start, c.end()))
+        .collect();
+    let mut gone = Vec::new();
+    for (id, start, end) in hit {
+        match (start < from, end > to) {
+            (false, false) => gone.push(id),
+            (true, false) => {
+                set_cue(p, &id, None, None, Some(from), None, None)?;
+            }
+            (false, true) => {
+                set_cue(p, &id, None, Some(to), None, None, None)?;
+            }
+            (true, true) => {
+                split_cue(p, &id, to)?;
+                set_cue(p, &id, None, None, Some(from), None, None)?;
+            }
+        }
+    }
+    if !gone.is_empty() {
+        remove_cues(p, &gone)?;
+    }
+    Ok(())
+}
+
+pub fn paste_cues(p: &mut Project, cues: &[TrackCue], at: i64) -> Result<Vec<String>> {
+    let Some(first) = cues.iter().map(|c| c.cue.start).min() else {
+        return Err(Error::usage("no cues to paste"));
+    };
+    if at < 0 {
+        return Err(Error::invalid("a cue can't start before 0"));
+    }
+    let mut ids = Vec::new();
+    for c in cues {
+        let ti = paste_track(p, &c.track);
+        unlocked(p, ti)?;
+        let start = at + c.cue.start - first;
+        overwrite(p, ti, start, start + c.cue.duration)?;
+        let id = p.alloc_cue_id();
+        let mut cue = c.cue.clone();
+        cue.id = id.clone();
+        cue.start = start;
+        place_cue(&mut p.subtitles[ti], cue);
+        ids.push(id);
+    }
+    Ok(ids)
 }
 
 pub fn remove_cues(p: &mut Project, ids: &[String]) -> Result<()> {

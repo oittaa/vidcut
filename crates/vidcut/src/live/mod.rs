@@ -616,6 +616,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         pool: PoolView::default(),
         clipboard: Vec::new(),
         key_clipboard: Vec::new(),
+        cue_clipboard: Vec::new(),
         log: VecDeque::new(),
         log_seq: 0,
         notices: Arc::new(VecDeque::new()),
@@ -894,6 +895,7 @@ struct Live {
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
     key_clipboard: Vec<vidcut_core::request::CopiedKey>,
+    cue_clipboard: Vec<vidcut_core::model::TrackCue>,
     log: VecDeque<LogEntry>,
     log_seq: u64,
     notices: Arc<VecDeque<Notice>>,
@@ -3561,11 +3563,14 @@ impl Live {
         playhead: i64,
     ) -> Result<Response> {
         match &mut envelope.request {
-            Request::EditPaste { clips, .. } if clips.is_none() => {
-                if self.clipboard.is_empty() {
+            Request::EditPaste { clips, cues, .. } if clips.is_none() && cues.is_none() => {
+                if !self.clipboard.is_empty() {
+                    *clips = Some(self.clipboard.clone());
+                } else if !self.cue_clipboard.is_empty() {
+                    *cues = Some(self.cue_clipboard.clone());
+                } else {
                     return Err(Error::usage("the clipboard is empty"));
                 }
-                *clips = Some(self.clipboard.clone());
             }
             Request::KeyframesPaste { keyframes, .. } if keyframes.is_none() => {
                 if self.key_clipboard.is_empty() {
@@ -3662,12 +3667,18 @@ impl Live {
                     if let Ok(clips) = serde_json::from_value(r.result["clips"].clone()) {
                         self.clipboard = clips;
                         self.key_clipboard.clear();
+                        self.cue_clipboard.clear();
+                    } else if let Ok(cues) = serde_json::from_value(r.result["cues"].clone()) {
+                        self.cue_clipboard = cues;
+                        self.clipboard.clear();
+                        self.key_clipboard.clear();
                     }
                 }
                 Request::KeyframesCopy { .. } | Request::KeyframesCut { .. } => {
                     if let Ok(keys) = serde_json::from_value(r.result["keyframes"].clone()) {
                         self.key_clipboard = keys;
                         self.clipboard.clear();
+                        self.cue_clipboard.clear();
                     }
                 }
                 _ => {}
@@ -5046,6 +5057,7 @@ impl Live {
             "two_up": self.renderer.two_up(),
             "clipboard": self.clipboard.len(),
             "keyframe_clipboard": self.key_clipboard.len(),
+            "cue_clipboard": self.cue_clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
         })
     }
