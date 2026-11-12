@@ -1473,8 +1473,9 @@ pub struct Inspector {
     finding: Option<Finding>,
     area_edit: Option<usize>,
     tab: Tab,
-    effect_open: Option<usize>,
-    effects_seen: Option<(String, usize)>,
+    effect_picked: Option<usize>,
+    effect_shut: bool,
+    effects_seen: Option<(String, Vec<Effect>)>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -3068,7 +3069,8 @@ fn effect_block(
     fresh.area = e.area.clone();
     fresh.keys = e.area_keys().cloned().collect();
     let changed = *e != fresh;
-    let open = i.effect_open == Some(n);
+    let picked = i.effect_picked == Some(n);
+    let open = picked && !i.effect_shut;
     let header = |ui: &mut egui::Ui| {
         let mut act = None;
         let mut on = e.on;
@@ -3078,7 +3080,7 @@ fn effect_block(
             act = Some(Act::EffectSet(n, json!({ "on": on })));
         }
         let mut name = RichText::new(e.kind().name()).strong();
-        if open {
+        if picked {
             name = name.color(theme::colors().accent);
         }
         let title = egui::Label::new(name).sense(egui::Sense::click());
@@ -3133,6 +3135,14 @@ fn effect_block(
         acts.push(Act::EffectOpen(n));
     }
     acts.extend(header.inner);
+}
+
+fn shuffled(was: &[Effect], now: &[Effect]) -> bool {
+    let mut left: Vec<&Effect> = now.iter().collect();
+    was.iter().all(|e| {
+        let found = left.iter().position(|x| *x == e);
+        found.map(|k| left.swap_remove(k)).is_some()
+    })
 }
 
 fn effects(ui: &mut egui::Ui, i: &Inspector, c: &Chosen, acts: &mut Vec<Act>) {
@@ -3597,30 +3607,60 @@ impl Workspace {
     }
 
     pub(super) fn expect_effect(&mut self, clip: &str) {
-        let count = self
+        let effects = self
             .project_shared()
-            .and_then(|p| Some(p.clip(clip)?.picture.as_ref()?.effects.len()));
-        self.inspector.effects_seen = Some((clip.to_string(), count.unwrap_or(0)));
+            .and_then(|p| Some(p.clip(clip)?.picture.as_ref()?.effects.clone()));
+        self.inspector.effects_seen = Some((clip.to_string(), effects.unwrap_or_default()));
     }
 
     fn settle_effects(&mut self, chosen: &[Chosen]) {
-        let now = chosen
-            .first()
-            .map(|c| (c.id.clone(), c.stored.effects.len()));
         let i = &mut self.inspector;
-        match (i.effects_seen.take(), &now) {
-            (Some((was, before)), Some((is, count))) if was == *is => {
-                if *count > before {
-                    i.tab = Tab::Effects;
-                    i.effect_open = Some(count - 1);
-                } else if i.effect_open.is_some_and(|open| open >= *count) {
-                    i.effect_open = None;
+        let seen = i.effects_seen.take();
+        let Some(c) = chosen.first() else {
+            i.effect_picked = None;
+            return;
+        };
+        let now = &c.stored.effects;
+        let first = (!now.is_empty()).then_some(0);
+        let was = match seen {
+            Some((id, was)) if id == c.id => was,
+            _ => {
+                i.effect_picked = first;
+                i.effect_shut = false;
+                i.effects_seen = Some((c.id.clone(), now.clone()));
+                return;
+            }
+        };
+        let changed = (0..was.len().max(now.len())).find(|&k| was.get(k) != now.get(k));
+        let picked = i.effect_picked.filter(|&p| p < was.len());
+        match (changed, now.len().cmp(&was.len())) {
+            (None, _) => {}
+            (Some(k), std::cmp::Ordering::Greater) => {
+                i.tab = Tab::Effects;
+                i.effect_picked = Some(k);
+                i.effect_shut = false;
+            }
+            (Some(k), std::cmp::Ordering::Less) => match picked {
+                Some(p) if p == k => {
+                    i.effect_picked = first;
+                    i.effect_shut = false;
+                }
+                Some(p) if p > k => i.effect_picked = Some(p - 1),
+                _ => {}
+            },
+            (Some(_), std::cmp::Ordering::Equal) => {
+                if let Some(p) = picked
+                    && was[p] != now[p]
+                    && shuffled(&was, now)
+                {
+                    i.effect_picked = now.iter().position(|e| *e == was[p]);
                 }
             }
-            (_, Some((_, count))) => i.effect_open = (*count > 0).then_some(0),
-            (_, None) => i.effect_open = None,
         }
-        i.effects_seen = now;
+        if i.effect_picked.is_some_and(|p| p >= now.len()) {
+            i.effect_picked = first;
+        }
+        i.effects_seen = Some((c.id.clone(), now.clone()));
     }
 
     fn send_effect(&mut self, method: &str, chosen: &[Chosen], n: usize, mut params: Value) {
@@ -4767,27 +4807,14 @@ impl Workspace {
             Act::EffectStep(n, dir) => self.step_effect(n, dir, chosen),
             Act::EffectKey(n, ease) => self.key_effect(n, ease, chosen),
             Act::EffectReset(n) => self.send_effect("effects.reset", chosen, n, json!({})),
-            Act::EffectRemove(n) => {
-                self.send_effect("effects.remove", chosen, n, json!({}));
-                let i = &mut self.inspector;
-                i.effect_open = match i.effect_open {
-                    Some(open) if open == n => None,
-                    Some(open) if open > n => Some(open - 1),
-                    open => open,
-                };
-            }
+            Act::EffectRemove(n) => self.send_effect("effects.remove", chosen, n, json!({})),
             Act::EffectMove(n, to) => {
                 self.send_effect("effects.move", chosen, n, json!({ "to": to }));
-                let i = &mut self.inspector;
-                i.effect_open = match i.effect_open {
-                    Some(open) if open == n => Some(to),
-                    Some(open) if open == to => Some(n),
-                    open => open,
-                };
             }
             Act::EffectOpen(n) => {
                 let i = &mut self.inspector;
-                i.effect_open = (i.effect_open != Some(n)).then_some(n);
+                i.effect_shut = i.effect_picked == Some(n) && !i.effect_shut;
+                i.effect_picked = Some(n);
             }
             Act::Tab(tab) => self.inspector.tab = tab,
             Act::Tint(effect, from, to) => {
@@ -4933,6 +4960,9 @@ impl Workspace {
             .into_iter()
             .find(|t| has(*t))
             .unwrap_or(Tab::Video);
+        if has(tab) {
+            self.inspector.tab = tab;
+        }
         if let (Some(p), Some(first)) = (&shared, first) {
             ui.horizontal(|ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -4989,18 +5019,15 @@ impl Workspace {
                     self.inspector.area_edit = self.timeline.picture_grab.area;
                     effects(ui, &self.inspector, &chosen[0], &mut acts);
                 }
-                let speed = match tab {
-                    Tab::Video => true,
-                    Tab::Audio => chosen.is_empty(),
-                    Tab::Effects => false,
-                };
-                if speed && !paced.is_empty() {
+                if tab == Tab::Audio && !sounds.is_empty() {
+                    self.audio_section(ui, p, &sounds, &mut acts);
+                }
+                if tab != Tab::Effects && !paced.is_empty() {
                     let state = (&self.inspector, &**p, dropped);
                     let at = self.snap.timeline.position;
                     speed_section(ui, state, (&paced, at), ripple, &mut acts);
                 }
                 if tab == Tab::Audio && !sounds.is_empty() {
-                    self.audio_section(ui, p, &sounds, &mut acts);
                     let ids: Vec<String> = sounds.iter().map(|s| s.id.clone()).collect();
                     self.equalizer_section(ui, p, &ids);
                     self.leveler_section(ui, p, &ids);

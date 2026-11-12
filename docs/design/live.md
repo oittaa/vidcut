@@ -393,15 +393,18 @@ The bar and the Jobs button:
   - Follow in the Title section lists the motion paths of the clips that play under the title (`leads`, `follow_row`). A choice sends `motion.follow`, and the title goes onto the thing.
 - With a clip selected, it has three tabs (`Tab`): Video, Audio and Effects. The name of the clip and the tabs stay above the sections when they scroll.
   - Video shows the Title, Generator and picture sections, the Motion section and the Speed section.
-  - Audio shows the sound sections. Without a picture in the selection, it also shows the Speed section.
+  - Audio shows the sound sections and the Speed section.
   - Effects shows the effect sections.
   - A tab without sections is disabled. Thus the Effects tab is disabled for a clip with no effects, as in Resolve (p. 1150).
-  - The Inspector shows the tab that the user set last, where that tab has sections. Otherwise it shows Video, then Audio.
-  - When the first selected clip gets an effect, the Inspector goes to the Effects tab and opens that effect (`Workspace::settle_effects`).
-    - `Workspace::expect_effect` keeps the count of effects before an add from the effects list or a drop on the timeline.
-    - Thus the Inspector goes to that effect also when it opens after the add.
-  - One effect section is open at a time (`Act::EffectOpen`). A click on the name or the arrow of a section opens it and closes the others.
-    - A click on the open section closes it. The first effect is open when the selection changes.
+  - The Inspector stays on its tab while the selection has sections for it. Otherwise it goes to Video, or to Audio without a picture, and stays there.
+    - An empty selection does not change the tab.
+  - One effect is the picked effect of the Inspector. Its name has the accent color, and only its section can be open.
+    - A click on the name or the arrow of another effect picks and opens it (`Act::EffectOpen`). A click on the picked effect closes or opens its section.
+    - `Workspace::settle_effects` picks the first effect when the selection changes, and when the picked effect goes.
+    - It picks an effect that comes to the clip, from an add or an undo. Then the Inspector also goes to the Effects tab.
+    - The picked effect stays picked when its place in the order changes (`shuffled`).
+  - `Workspace::expect_effect` keeps the effects of a clip before an add from the effects list or a drop on the timeline.
+    - Thus the Inspector goes to the added effect also when it opens after the add.
 - `Workspace::follow_selection` shows the section of the selected title or subtitle. With only several titles selected, it shows no section. A section that closes puts its changes in first.
 - The In and Out fields of a cue (`Workspace::cue_times`) send one `apply`. It sets the cue, and sets or removes the cues that it overwrites. A value inside the cue next to it sends nothing (`enters_neighbor`).
 - The picture fields convert between the picture and their own unit (`Field::read`, `Field::put`). The fitted size comes from `place::fitted`, as in an export.
