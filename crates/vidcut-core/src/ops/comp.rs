@@ -381,7 +381,13 @@ pub fn set(
     Ok(())
 }
 
-pub fn key(p: &mut Project, id: &str, name: &str, at: i64, ease: Option<Ease>) -> Result<Value> {
+pub fn key(
+    p: &mut Project,
+    id: &str,
+    name: &str,
+    at: i64,
+    (value, ease): (Option<EffectValue>, Option<Ease>),
+) -> Result<Value> {
     let frame = source_frame(p, id, at)?;
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
@@ -392,17 +398,35 @@ pub fn key(p: &mut Project, id: &str, name: &str, at: i64, ease: Option<Ease>) -
             n.tool.label()
         )));
     }
-    let keyed = match ease {
-        Some(ease) if n.has_key_at(frame, false) => {
+    if let Some(v) = value
+        && !n.values().contains(&v)
+    {
+        return Err(Error::invalid(format!(
+            "{name} is a {}, which has no {}",
+            n.tool.label(),
+            v.name().replace('_', " ")
+        )));
+    }
+    let on = match value {
+        Some(v) => n.keys_of(v).iter().any(|k| k.frame == frame),
+        None => n.has_key_at(frame, false),
+    };
+    let keyed = match (ease, value) {
+        (Some(ease), Some(v)) if on => {
+            n.ease_value_key(v, frame, ease);
+            true
+        }
+        (Some(ease), None) if on => {
             n.ease_keys(frame, ease, false);
             true
         }
-        Some(_) => {
+        (Some(_), _) => {
             return Err(Error::invalid(format!(
                 "{name} of {id} has no keyframes on source frame {frame}"
             )));
         }
-        None => n.toggle_keys(frame, false),
+        (None, Some(v)) => n.toggle_value_key(v, frame),
+        (None, None) => n.toggle_keys(frame, false),
     };
     *n = node_checked(n)?;
     Ok(json!({ "clip": id, "node": name, "frame": frame, "keyed": keyed }))

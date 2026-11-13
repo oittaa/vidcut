@@ -274,9 +274,22 @@ The bar and the Jobs button:
 - The keys that a separate window does not use go to the main window in the next frame (`dialog::take_forwarded_keys`). Thus the shortcuts work there too.
   - Held keys do not go. Thus K with J or L works only in the main window.
 
+**The Effects page** ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
+
+- `EffectsPage` holds the page that shows, the selected nodes, and the state of the Node Editor and of a mask drag.
+- `Workspace::effects_clip` finds the clip of the page: the topmost visible clip at the playhead (`placing::topmost`).
+- The viewer renders that clip alone through `render::composition_alone` and `Cells::show_plan`, at the size of its own picture.
+- The Inspector of the page is `Workspace::node_inspector`. It shows each selected node with the rows of its tool.
+  - A drag holds the value (`Inspector::held`) and sends one `comp.set` when it stops. `Workspace::node_preview` shows the held value until then.
+  - Each value has its Keyframe button. It sends `comp.key` with the `value`.
+- A drag of a mask handle in the viewer changes a copy of the composition. It sends one `comp.set` when it stops.
+- A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
+- On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L and the steps of a frame and a second.
+
 **View state.**
 
 - The view state is the selected edit points (`TimelineView::edit`, `TimelineView::edits`) and the selected dissolve (`TimelineView::transition`). It is also the target track, the zoom, the Timeline Options and the open windows.
+- It is also the page and the selected nodes of the Effects page.
 - `timeline.json` keeps the target track, the zoom and the Timeline Options. Requests reach the view state through `Renderer::gui`.
 - When another project opens, `TimelineView::switch_project` clears the view state. It keeps the Timeline Options and the choices that are not about one project. The open windows of the timeline close.
 - `LeftTab::Hidden` is the left area with no tab open. Each place that opens a tab sets `Workspace::left`, thus it also shows the area.

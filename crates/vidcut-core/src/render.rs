@@ -3922,6 +3922,39 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
     }
 }
 
+pub fn composition_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
+    let c = p
+        .clip(clip)
+        .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
+        .clone();
+    let mut alone = p.clone();
+    let own = p.media(&c.media).and_then(|m| m.info.video.as_ref());
+    if let Some((w, h)) = own.map(crate::model::VideoInfo::display_size) {
+        alone.settings.width = w;
+        alone.settings.height = h;
+    }
+    for t in &mut alone.tracks {
+        t.clips.retain(|x| x.id == c.id);
+        t.transitions.clear();
+        t.video_enabled = true;
+        for x in &mut t.clips {
+            x.enabled = true;
+            x.picture = x
+                .picture
+                .take()
+                .and_then(|p| p.composition)
+                .map(|composition| Picture {
+                    composition: Some(composition),
+                    ..Picture::default()
+                });
+        }
+    }
+    let mut plan = flatten(&alone, c.start, c.end())?;
+    plan.audio.clear();
+    plan.colors = timeline_colors(p);
+    Ok(plan)
+}
+
 pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     let c = p
         .clip(clip)

@@ -4424,11 +4424,12 @@ fn mutate(
             clip,
             node,
             at,
+            value,
             ease,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let at = resolve(p, at, playhead)?;
-            ops::comp::key(p, &id, node, at, *ease)?
+            ops::comp::key(p, &id, node, at, (*value, *ease))?
         }
         Request::CompReset { clip, node } => {
             let id = resolve_clip(p, clip, playhead)?;

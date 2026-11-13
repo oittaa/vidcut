@@ -584,6 +584,26 @@ pub trait Keyed: Clone {
         true
     }
 
+    fn toggle_value_key(&mut self, value: EffectValue, frame: i64) -> bool {
+        if self.keys_of(value).iter().any(|k| k.frame == frame) {
+            if let Some((keys, y)) = self.channel_mut(value) {
+                drop_channel(keys, y, &HashSet::from([frame]));
+            }
+            self.key_list_mut().retain(|k| !k.keys.is_empty());
+            return false;
+        }
+        let to = self.point_at(value, frame as f64);
+        self.put_point(value, frame, to);
+        true
+    }
+
+    fn ease_value_key(&mut self, value: EffectValue, frame: i64, ease: Ease) {
+        if let Some((keys, _)) = self.channel_mut(value) {
+            ease_mark(keys, frame, ease);
+        }
+        self.key_list_mut().retain(|k| !k.keys.is_empty());
+    }
+
     fn ease_keys(&mut self, frame: i64, ease: Ease, area: bool) {
         for k in self
             .key_list_mut()

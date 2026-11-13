@@ -1378,8 +1378,25 @@ fn live(method: &str, r: &Response) -> Option<()> {
         "gui.quit" | "gui.window" | "gui.trim_editor" | "gui.dynamic_trim" => {
             println!("ok {method}")
         }
-        "gui.state" | "gui.show" | "gui.close" | "gui.target" | "gui.timeline" => {
+        "gui.state" | "gui.show" | "gui.close" | "gui.target" | "gui.timeline" | "gui.page"
+        | "gui.nodes" => {
             let t = &v["timeline"];
+            let nodes: Vec<&str> = v["nodes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            println!("page {}", v["page"].as_str().unwrap_or("-"));
+            println!(
+                "effects clip {}, nodes {}",
+                v["clip"].as_str().unwrap_or("-"),
+                if nodes.is_empty() {
+                    "-".to_string()
+                } else {
+                    nodes.join(" ")
+                }
+            );
             let on = |k: &str| if t[k] == true { "on" } else { "off" };
             let windows: Vec<&str> = v["windows"]
                 .as_array()

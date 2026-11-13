@@ -25,8 +25,9 @@ use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GuiPanel, OneOrMany, PoolMode,
-    ScreenshotTarget, TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
+    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GuiPanel, OneOrMany, Page,
+    PoolMode, ScreenshotTarget, TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame,
+    ViewerMode,
 };
 use vidcut_core::time::{DurationSpec, Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -91,6 +92,8 @@ pub enum GuiChange {
     Timeline(TimelineOptions),
     Show(GuiPanel),
     Close(GuiPanel),
+    Page(Page),
+    Nodes(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -120,6 +123,9 @@ pub struct TimelineState {
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct GuiState {
+    pub page: Page,
+    pub clip: Option<String>,
+    pub nodes: Vec<String>,
     pub edit: Option<EditPoint>,
     pub edits: Vec<EditPoint>,
     pub target: String,
@@ -3129,6 +3135,10 @@ impl Live {
             }
             Request::GuiClose { panel } => {
                 self.gui_change(vec![GuiChange::Close(panel)], |s| json!(s))
+            }
+            Request::GuiPage { page } => self.gui_change(vec![GuiChange::Page(page)], |s| json!(s)),
+            Request::GuiNodes { nodes } => {
+                self.gui_change(vec![GuiChange::Nodes(nodes)], |s| json!(s))
             }
             Request::GuiState {} => self.gui_change(Vec::new(), |s| json!(s)),
             Request::GuiOnly {

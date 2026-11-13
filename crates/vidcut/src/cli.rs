@@ -164,6 +164,8 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("mixer.preview", &["track", "volume_db"]),
     ("gui.show", &["panel"]),
     ("gui.close", &["panel"]),
+    ("gui.page", &["page"]),
+    ("gui.nodes", &["nodes"]),
     ("gui.target", &["track"]),
     ("gui.trim_editor", &["at"]),
 ];
@@ -495,6 +497,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "comp.key",
         "vidcut comp key c3 Ellipse1 --at 2s
+  vidcut comp key c3 Ellipse1 --at 2s --value soft_edge
   vidcut comp key c3 Ellipse1 --at 2s --ease ease_in_out",
     ),
     (

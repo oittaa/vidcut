@@ -12,11 +12,12 @@ use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    AreaShape, Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel,
-    Effect, EffectArea, EffectKind, EffectValue, FilmGrain, GaussianBlur, Generator, Glow,
-    GlowAlpha, GlowFraming, GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe,
-    MosaicBlur, MotionPath, Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject,
-    TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    AreaShape, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, ClipRetime, CompositeMode,
+    Composition, DynamicZoom, Ease, EbuLevel, Effect, EffectArea, EffectKind, EffectType,
+    EffectValue, FillMethod, FilmGrain, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
+    GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, MotionPath, Node,
+    Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject, Tool, TrackKind, Upscaler,
+    Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::motion::{REACH, TURN};
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
@@ -117,6 +118,7 @@ enum Field {
 enum Key {
     Picture(Field),
     Effect(usize, Knob),
+    Node(usize, EffectValue, usize),
     Center(Axis),
     Volume,
     Pan,
@@ -1204,6 +1206,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.label(),
             Key::Effect(_, k) => k.dial().label,
+            Key::Node(..) => "",
             Key::Center(Axis::X) => "Center X",
             Key::Center(Axis::Y) => "Center Y",
             Key::Volume => "Volume",
@@ -1228,7 +1231,7 @@ impl Key {
             Key::Volume => " dB",
             Key::Speed => "%",
             Key::Rate => " fps",
-            Key::Effect(..) | Key::Center(_) | Key::Length | Key::Pan => "",
+            Key::Effect(..) | Key::Node(..) | Key::Center(_) | Key::Length | Key::Pan => "",
         }
     }
 
@@ -1236,6 +1239,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.speed(),
             Key::Effect(_, k) => k.dial().speed,
+            Key::Node(_, v, _) => node_speed(v),
             Key::Center(_) => 0.005,
             Key::Volume => 0.1,
             Key::Pan => 0.5,
@@ -1248,7 +1252,7 @@ impl Key {
         match self {
             Key::Picture(Field::Pitch | Field::Yaw) => (0, 3),
             Key::Picture(_) => (0, 2),
-            Key::Effect(..) | Key::Center(_) => (3, 3),
+            Key::Effect(..) | Key::Node(..) | Key::Center(_) => (3, 3),
             Key::Volume | Key::Pan => (1, 1),
             Key::Speed => (0, 2),
             Key::Rate => (0, 3),
@@ -1260,9 +1264,504 @@ impl Key {
         match self {
             Key::Picture(f) => f.usual(),
             Key::Effect(_, k) => k.dial().usual,
+            Key::Node(_, v, _) => node_usual(v),
             Key::Center(_) | Key::Volume | Key::Pan => 0.0,
             Key::Speed => 100.0,
             Key::Rate | Key::Length => 0.0,
+        }
+    }
+}
+
+const NODE: usize = usize::MAX;
+const NODES: usize = 1 << 16;
+
+fn node_slot(k: usize) -> usize {
+    NODE - k
+}
+
+fn slot_node(n: usize) -> Option<usize> {
+    let k = NODE - n;
+    (k < NODES).then_some(k)
+}
+
+fn node_speed(v: EffectValue) -> f64 {
+    match v {
+        EffectValue::Size | EffectValue::YSize => 0.05,
+        EffectValue::Angle
+        | EffectValue::ZRotation
+        | EffectValue::XRotation
+        | EffectValue::YRotation => 0.5,
+        EffectValue::Blend => 0.005,
+        _ => 0.002,
+    }
+}
+
+fn node_usual(v: EffectValue) -> f64 {
+    match v {
+        EffectValue::Size | EffectValue::YSize | EffectValue::Level | EffectValue::Blend => 1.0,
+        EffectValue::Width | EffectValue::Height | EffectValue::Center => 0.5,
+        _ => 0.0,
+    }
+}
+
+fn node_effect(n: &Node) -> Option<Effect> {
+    let Tool::Effect(kind) = &n.tool else {
+        return None;
+    };
+    let mut e = EffectType::of(kind).made();
+    e.kind = kind.clone();
+    e.blend = n.blend;
+    e.keys = n.keys.clone();
+    Some(e)
+}
+
+fn node_value_of(f: Key, n: &Node) -> Option<EffectValue> {
+    match f {
+        Key::Node(_, v, _) => Some(v),
+        Key::Effect(_, k) => node_effect(n)
+            .and_then(|e| k.keyed_value(&e))
+            .map(|(v, _)| v),
+        _ => None,
+    }
+}
+
+fn node_value(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n): (usize, &Node),
+    (v, text): (EffectValue, &str),
+    acts: &mut Vec<Act>,
+) {
+    let (Some(k), Some((point, (lo, hi)))) = (slot_node(slot), n.read_point(v)) else {
+        return;
+    };
+    let keys = i.mark_of(slot, v);
+    if !v.pair() {
+        let f = Key::Node(k, v, 0);
+        let set = point[0] != f.usual();
+        label(ui, text, set);
+        field_rest(
+            ui,
+            f,
+            i,
+            (set, point[0], lo..=hi),
+            Look::default(),
+            keys,
+            acts,
+        );
+        return;
+    }
+    let fields = [Key::Node(k, v, 0), Key::Node(k, v, 1)];
+    let usual = fields.map(Key::usual);
+    let set = point != usual;
+    label(ui, text, set);
+    ui.horizontal(|ui| {
+        for (f, now) in fields.into_iter().zip(point) {
+            drag(ui, f, i, (now, lo..=hi), &Look::default(), acts);
+        }
+        if let Some(keys) = keys {
+            key_acts(ui, fields[0], &keys, acts);
+        }
+    });
+    if reset(ui, set) {
+        acts.push(node_set(slot, &v.name(), json!(usual)));
+    }
+    ui.end_row();
+}
+
+fn node_set(slot: usize, put: &str, value: Value) -> Act {
+    let mut params = json!({});
+    params[put] = value;
+    Act::EffectSet(slot, params)
+}
+
+fn passes_row(ui: &mut egui::Ui, slot: usize, (now, usual): (u32, u32), acts: &mut Vec<Act>) {
+    label(ui, "Num Passes", now != usual);
+    let id = ui.scope_id().with(("node-passes", slot));
+    let mut v = ui.data(|d| d.get_temp::<u32>(id)).unwrap_or(now);
+    let r = ui.add(
+        egui::DragValue::new(&mut v)
+            .range(1..=Blur::MOST_PASSES)
+            .speed(0.1),
+    );
+    if r.dragged() {
+        ui.data_mut(|d| d.insert_temp(id, v));
+    }
+    if r.drag_stopped() || (r.changed() && !r.dragged()) {
+        ui.data_mut(|d| d.remove::<u32>(id));
+        if v != now {
+            acts.push(node_set(slot, "passes", json!(v)));
+        }
+    }
+    if reset(ui, now != usual) {
+        acts.push(node_set(slot, "passes", json!(usual)));
+    }
+    ui.end_row();
+}
+
+fn channels_row(ui: &mut egui::Ui, slot: usize, now: [bool; 4], acts: &mut Vec<Act>) {
+    label(ui, "Color Channels", now != Blur::ALL);
+    ui.horizontal(|ui| {
+        for (k, name) in ["Red", "Green", "Blue", "Alpha"].into_iter().enumerate() {
+            let mut on = now[k];
+            if ui.checkbox(&mut on, name).clicked() {
+                let mut to = now;
+                to[k] = on;
+                acts.push(node_set(slot, "channels", json!(to)));
+            }
+        }
+    });
+    if reset(ui, now != Blur::ALL) {
+        acts.push(node_set(slot, "channels", json!(Blur::ALL)));
+    }
+    ui.end_row();
+}
+
+fn fill_label(f: FillMethod) -> &'static str {
+    match f {
+        FillMethod::Alternate => "Alternate",
+        FillMethod::NonZeroWinding => "Non Zero Winding",
+    }
+}
+
+const FILLS: [FillMethod; 2] = [FillMethod::Alternate, FillMethod::NonZeroWinding];
+
+fn node_rows(ui: &mut egui::Ui, i: &Inspector, (slot, n): (usize, &Node), acts: &mut Vec<Act>) {
+    use EffectValue as V;
+    let value = |ui: &mut egui::Ui, acts: &mut Vec<Act>, v: V, text: &str| {
+        node_value(ui, i, (slot, n), (v, text), acts);
+    };
+    let filters = (
+        &BlurFilter::ALL[..],
+        BlurFilter::name as fn(BlurFilter) -> &'static str,
+    );
+    match &n.tool {
+        Tool::Blur(b) => {
+            let filter = (b.filter(), BlurFilter::default());
+            choice_row(ui, (slot, "Filter", "filter"), filter, filters, acts);
+            if b.filter() == BlurFilter::MultiBox {
+                passes_row(ui, slot, (b.passes(), Blur::PASSES), acts);
+            }
+            channels_row(ui, slot, b.channels(), acts);
+            check(ui, (slot, "Lock X/Y", b.lock_xy, true), "lock_xy", acts);
+            value(ui, acts, V::Size, "Blur Size");
+            value(ui, acts, V::YSize, "Y Blur Size");
+            let modes = (
+                &BlurClipping::ALL[..],
+                BlurClipping::name as fn(BlurClipping) -> &'static str,
+            );
+            let mode = (b.clipping(), BlurClipping::default());
+            choice_row(ui, (slot, "Clipping Mode", "clipping"), mode, modes, acts);
+            value(ui, acts, V::Blend, "Blend");
+        }
+        Tool::Effect(kind) => {
+            let Some(e) = node_effect(n) else {
+                return;
+            };
+            match kind {
+                EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (slot, &e, g), acts),
+                EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (slot, &e, m), acts),
+                EffectKind::Glow(g) => glow_rows(ui, i, (slot, &e, g), acts),
+                EffectKind::FilmGrain(g) => grain_rows(ui, i, (slot, &e, g), acts),
+                EffectKind::Vignette(v) => vignette_rows(ui, i, (slot, &e, v), acts),
+                EffectKind::Sharpen(_) => sharpen_rows(ui, i, (slot, &e), acts),
+            }
+            if matches!(kind, EffectKind::GaussianBlur(_)) {
+                check(
+                    ui,
+                    (slot, "Blur Alpha", n.blur_alpha, true),
+                    "blur_alpha",
+                    acts,
+                );
+            }
+            knob(ui, i, (slot, Knob::Blend), &e, acts);
+        }
+        t => {
+            let Some(m) = t.mask() else {
+                ui.label(dim("No values"));
+                ui.end_row();
+                return;
+            };
+            value(ui, acts, V::Level, "Level");
+            let filter = (m.filter(), BlurFilter::default());
+            choice_row(ui, (slot, "Filter", "filter"), filter, filters, acts);
+            if m.filter() == BlurFilter::MultiBox {
+                passes_row(ui, slot, (m.passes(), Blur::PASSES), acts);
+            }
+            value(ui, acts, V::SoftEdge, "Soft Edge");
+            value(ui, acts, V::BorderWidth, "Border Width");
+            check(ui, (slot, "Invert", m.invert, false), "invert", acts);
+            check(ui, (slot, "Solid", m.solid, true), "solid", acts);
+            value(ui, acts, V::Center, "Center");
+            value(ui, acts, V::Width, "Width");
+            value(ui, acts, V::Height, "Height");
+            value(ui, acts, V::CornerRadius, "Corner Radius");
+            value(ui, acts, V::Angle, "Angle");
+            value(ui, acts, V::Size, "Size");
+            value(ui, acts, V::XRotation, "X Rotation");
+            value(ui, acts, V::YRotation, "Y Rotation");
+            value(ui, acts, V::ZRotation, "Z Rotation");
+            if matches!(t, Tool::Polygon(_)) {
+                let fills = (&FILLS[..], fill_label as fn(FillMethod) -> &'static str);
+                let now = (m.fill_method.unwrap_or_default(), FillMethod::default());
+                choice_row(ui, (slot, "Fill Method", "fill_method"), now, fills, acts);
+            }
+        }
+    }
+}
+
+fn node_header(ui: &mut egui::Ui, n: &Node, active: bool, acts: &mut Vec<Act>) {
+    ui.horizontal(|ui| {
+        let name = RichText::new(&n.name).strong();
+        let name = if active {
+            name.color(theme::colors().accent)
+        } else {
+            name
+        };
+        if ui.add(egui::Button::new(name).frame(false)).clicked() && !active {
+            acts.push(Act::NodeActive);
+        }
+        ui.label(dim(n.tool.label()));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let changed = n.tool != n.tool.made() || n.blend.is_some() || !n.keys.is_empty();
+            if ui
+                .add_enabled(changed, egui::Button::new("Reset"))
+                .clicked()
+            {
+                acts.push(Act::NodeReset);
+            }
+        });
+    });
+}
+
+impl Inspector {
+    fn mark_of(&self, slot: usize, v: EffectValue) -> Option<KeyMark> {
+        self.marks
+            .iter()
+            .find(|(n, w, _)| *n == slot && *w == v)
+            .map(|(_, _, m)| m.clone())
+    }
+}
+
+impl Workspace {
+    pub(super) fn node_inspector(&mut self, ui: &mut egui::Ui) {
+        self.inspector.marks.clear();
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let clip = self.effects_clip().and_then(|id| p.clip(&id).cloned());
+        let Some(clip) = clip else {
+            ui.label(dim("No clip at the playhead"));
+            return;
+        };
+        let comp = super::effects_page::stored_composition(&clip);
+        let picked: Vec<usize> = self
+            .effects_page
+            .nodes
+            .iter()
+            .filter_map(|name| comp.index(name))
+            .collect();
+        if picked.is_empty() {
+            ui.label(dim("Select a node"));
+            return;
+        }
+        let at = self.snap.timeline.position;
+        let source = clip.source_at(at) as f64;
+        for &k in &picked {
+            let n = &comp.nodes[k];
+            for v in n.values() {
+                let m = mark(&clip, n.keys_of(v), at);
+                self.inspector.marks.push((node_slot(k), v, m));
+            }
+        }
+        let active = self.effects_page.picked().map(str::to_owned);
+        let shown: Vec<Node> = picked
+            .iter()
+            .map(|&k| comp.nodes[k].sampled(source))
+            .collect();
+        let mut all: Vec<Vec<Act>> = Vec::new();
+        let i = &self.inspector;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                for (&k, n) in picked.iter().zip(&shown) {
+                    let mut acts = Vec::new();
+                    let on = active.as_deref() == Some(n.name.as_str());
+                    node_header(ui, n, on, &mut acts);
+                    let slot = node_slot(k);
+                    rows(ui, (slot, "node"), |ui| {
+                        node_rows(ui, i, (slot, n), &mut acts);
+                    });
+                    ui.separator();
+                    all.push(acts);
+                }
+            });
+        for ((&k, n), acts) in picked.iter().zip(&shown).zip(all) {
+            self.node_acts(acts, &clip, (&comp.nodes[k], n));
+        }
+    }
+
+    fn node_acts(&mut self, acts: Vec<Act>, clip: &Clip, (stored, shown): (&Node, &Node)) {
+        let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
+        for act in acts {
+            match act {
+                Act::Hold(field, value) => {
+                    self.inspector.held = Some(Held {
+                        field,
+                        value,
+                        from: value,
+                        start: Vec::new(),
+                        dragging: true,
+                    });
+                }
+                Act::Drag(field, value) => {
+                    if let Some(h) = self.inspector.held.as_mut().filter(|h| h.field == field) {
+                        h.value = value;
+                    }
+                }
+                Act::Land(field) => {
+                    let held = self
+                        .inspector
+                        .held
+                        .take_if(|h| h.field == field && h.dragging);
+                    if let Some(h) = held.filter(|h| h.value != h.from) {
+                        self.put_node(field, h.value, clip, shown);
+                    }
+                }
+                Act::Put(field, value) => {
+                    if held_on(&self.inspector, field) {
+                        self.inspector.held = None;
+                    }
+                    self.put_node(field, value, clip, shown);
+                }
+                Act::Edit(field, value) => {
+                    if !held_on(&self.inspector, field) {
+                        self.inspector.held = Some(Held {
+                            field,
+                            value,
+                            from: value,
+                            start: Vec::new(),
+                            dragging: false,
+                        });
+                    }
+                }
+                Act::Release(field) => {
+                    let mine = self.inspector.held.as_ref();
+                    if mine.is_some_and(|h| h.field == field && !h.dragging) {
+                        self.inspector.held = None;
+                    }
+                }
+                Act::EffectSet(_, params) => self.send_node("comp.set", clip, stored, params),
+                Act::Tint(_, _, to) => {
+                    let color = to.map(|c| f64::from(c) / 255.0);
+                    self.send_node("comp.set", clip, stored, json!({ "color": color }));
+                }
+                Act::Toggle(f) => {
+                    if let Some(v) = node_value_of(f, stored) {
+                        self.send_node("comp.key", clip, stored, json!({ "value": v }));
+                    }
+                }
+                Act::KeyEase(f, ease) => {
+                    if let Some(v) = node_value_of(f, stored) {
+                        let params = json!({ "value": v, "ease": ease });
+                        self.send_node("comp.key", clip, stored, params);
+                    }
+                }
+                Act::Step(f, dir) => {
+                    let Some(v) = node_value_of(f, stored) else {
+                        continue;
+                    };
+                    let times = stored
+                        .keys_of(v)
+                        .iter()
+                        .map(|k| clip.key_time(k.frame).round() as i64);
+                    if let Some(t) = next_key(times, self.snap.timeline.position, dir) {
+                        self.seek(PlayerId::Timeline, t, false);
+                    }
+                }
+                Act::NodeReset => self.send_node("comp.reset", clip, stored, json!({})),
+                Act::NodeActive => {
+                    let mut nodes = self.effects_page.nodes.clone();
+                    nodes.retain(|x| *x != stored.name);
+                    nodes.push(stored.name.clone());
+                    self.send("gui.nodes", json!({ "nodes": nodes }));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn send_node(&mut self, method: &str, clip: &Clip, node: &Node, mut params: Value) {
+        params["clip"] = json!(clip.id);
+        params["node"] = json!(node.name);
+        if method != "comp.reset" {
+            params["at"] = json!(self.snap.timeline.position);
+        }
+        self.send(method, params);
+    }
+
+    fn put_node(&mut self, field: Key, value: f64, clip: &Clip, shown: &Node) {
+        let params = match field {
+            Key::Node(_, v, axis) => {
+                let Some((mut point, _)) = shown.read_point(v) else {
+                    return;
+                };
+                point[axis] = value;
+                let mut params = json!({});
+                params[v.name()] = if v.pair() { json!(point) } else { json!(value) };
+                params
+            }
+            Key::Effect(_, k) => {
+                let Some(e) = node_effect(shown) else {
+                    return;
+                };
+                let (name, v) = k.param(&k.put(&e, value));
+                let mut params = json!({});
+                params[name] = v;
+                params
+            }
+            _ => return,
+        };
+        self.send_node("comp.set", clip, shown, params);
+    }
+
+    pub(super) fn node_preview(&self, comp: &mut Composition, source: f64) {
+        let Some(h) = &self.inspector.held else {
+            return;
+        };
+        let k = match h.field {
+            Key::Node(k, ..) => k,
+            Key::Effect(n, _) => match slot_node(n) {
+                Some(k) => k,
+                None => return,
+            },
+            _ => return,
+        };
+        let Some(n) = comp.nodes.get_mut(k) else {
+            return;
+        };
+        let shown = n.sampled(source);
+        match h.field {
+            Key::Node(_, v, axis) => {
+                n.key_list_mut().retain(|x| x.value != v);
+                let mut point = shown.read_point(v).map_or([0.0; 2], |(p, _)| p);
+                point[axis] = h.value;
+                n.write_point(v, point);
+            }
+            Key::Effect(_, knob) => {
+                let Some(e) = node_effect(&shown) else {
+                    return;
+                };
+                if let Some(v) = node_value_of(h.field, n) {
+                    n.key_list_mut().retain(|x| x.value != v);
+                }
+                let after = knob.put(&e, h.value);
+                n.blend = after.blend;
+                if let Tool::Effect(kind) = &mut n.tool {
+                    *kind = after.kind;
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -1478,6 +1977,7 @@ pub struct Inspector {
     effect_shut: bool,
     effect_drawn: bool,
     effects_seen: Option<(String, Vec<Effect>)>,
+    marks: Vec<(usize, EffectValue, KeyMark)>,
     watched: Option<(std::sync::Weak<Project>, Vec<String>)>,
 }
 
@@ -1605,6 +2105,8 @@ enum Act {
     EffectOpen(usize),
     Tab(Tab),
     Tint(usize, [u8; 3], [u8; 3]),
+    NodeReset,
+    NodeActive,
 }
 
 fn param_name(key: Key) -> Option<&'static str> {
@@ -2284,13 +2786,14 @@ fn knob(ui: &mut egui::Ui, i: &Inspector, (n, k): (usize, Knob), e: &Effect, act
     let shown = k.read(e);
     let dial = k.dial();
     let values = (shown != dial.usual, shown, dial.range);
+    let keys = k.keyed_value(e).and_then(|(v, _)| i.mark_of(n, v));
     field(
         ui,
         Key::Effect(n, k),
         i,
         values,
         Look::default(),
-        None,
+        keys,
         acts,
     );
 }
@@ -4016,6 +4519,7 @@ impl Workspace {
                 });
             }
             Key::Effect(n, k) => self.send_knob(chosen, (n, k), value),
+            Key::Node(..) => {}
             Key::Center(axis) => self.send_center(axis, value, chosen),
             Key::Volume => self.send_volume(sounds, value),
             Key::Pan => self.send_pan(sounds, value),
@@ -4733,6 +5237,7 @@ impl Workspace {
     fn inspect(&mut self, act: Act, (chosen, sounds, paced): Lists<'_>) {
         let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
+            Act::NodeReset | Act::NodeActive => {}
             Act::Denoise(on) => {
                 let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
                 self.send(
@@ -5056,6 +5561,7 @@ impl Workspace {
         let gone = |k: Key| match k {
             Key::Picture(_) | Key::Center(_) => chosen.is_empty(),
             Key::Effect(n, _) => chosen.first().is_none_or(|c| c.shown.effects.len() <= n),
+            Key::Node(..) => true,
             Key::Volume | Key::Pan => sounds.is_empty(),
             Key::Speed | Key::Rate | Key::Length => paced.is_empty(),
         };

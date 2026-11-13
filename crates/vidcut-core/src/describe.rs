@@ -337,7 +337,15 @@ pub fn describe_at(
         ),
         "comp.remove" => format!("Remove {} of {}", d.text("node"), d.clips("clip")),
         "comp.paste" => format!("Paste {} into {}", d.text("node"), d.clips("clip")),
-        "comp.key" => format!("Key {} of {}", d.text("node"), d.clips("clip")),
+        "comp.key" => match d.params["value"].as_str() {
+            Some(v) => format!(
+                "Key {} of {} of {}",
+                v.replace('_', " "),
+                d.text("node"),
+                d.clips("clip")
+            ),
+            None => format!("Key {} of {}", d.text("node"), d.clips("clip")),
+        },
         "comp.reset" => format!("Reset {} of {}", d.text("node"), d.clips("clip")),
         "motion.add" => format!("Add a motion path to {}", d.clips("clip")),
         "motion.set" => format!(
@@ -532,6 +540,8 @@ pub fn describe_at(
         }
         "gui.show" => format!("Show {}", d.text("panel")),
         "gui.close" => format!("Close {}", d.text("panel")),
+        "gui.page" => format!("Show the {} page", d.text("page")),
+        "gui.nodes" => format!("Select nodes {}", d.list("nodes").join(", ")),
         "gui.target" => format!("Target track {}", d.text("track")),
         "gui.timeline" => format!("Timeline view: {}", compact(params)),
         "gui.screenshot" => "Screenshot".into(),

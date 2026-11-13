@@ -2855,15 +2855,18 @@ pub enum Request {
         #[serde(default)]
         after: Option<String>,
     },
-    /// The Keyframe button of one node of a clip's composition. With a
-    /// keyframe on `at`, it removes each keyframe of the node on that frame.
-    /// Without one, it puts a keyframe on `at` on each value of the node.
-    /// With `ease`, it only gives the keyframes on `at` that ease.
+    /// The Keyframe button of one value of a node of a clip's composition,
+    /// or of all its values without `value`. With a keyframe on `at`, it
+    /// removes the keyframes of those values on that frame. Without one, it
+    /// puts a keyframe on `at` on each of those values. With `ease`, it only
+    /// gives the keyframes on `at` that ease.
     #[serde(rename = "comp.key")]
     CompKey {
         clip: ClipRef,
         node: String,
         at: TimeSpec,
+        #[serde(default)]
+        value: Option<EffectValue>,
         #[serde(default)]
         ease: Option<Ease>,
     },
@@ -3746,8 +3749,19 @@ pub enum Request {
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
     #[serde(rename = "gui.close")]
     GuiClose { panel: GuiPanel },
-    /// What only the GUI keeps: the edit points selected, the target track,
-    /// the timeline's zoom and Timeline Options, and the windows open.
+    /// Show a page of the window: `cut`, or `effects`, the node editor of
+    /// the composition of the topmost clip at the playhead. Answers what
+    /// `gui.state` does.
+    #[serde(rename = "gui.page")]
+    GuiPage { page: Page },
+    /// Select nodes in the node editor of the effects page, by name. The
+    /// Inspector and the viewer then show the last one. An empty list
+    /// selects none. Answers what `gui.state` does.
+    #[serde(rename = "gui.nodes")]
+    GuiNodes { nodes: Vec<String> },
+    /// What only the GUI keeps: the page, the clip of the effects page and
+    /// its nodes selected, the edit points selected, the target track, the
+    /// timeline's zoom and Timeline Options, and the windows open.
     #[serde(rename = "gui.state")]
     GuiState {},
     /// What an edit takes from the source. The two icons at the left of the edit buttons.
@@ -4601,6 +4615,18 @@ pub enum DynamicTrimMode {
     Slip,
     /// The clip keeps its media and moves between its neighbors.
     Slide,
+}
+
+/// A page of the window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Page {
+    /// The timeline, the viewer and the Media Pool.
+    #[default]
+    Cut,
+    /// The node editor of a clip's composition, its viewer and its
+    /// Inspector.
+    Effects,
 }
 
 /// A window `gui.show` opens.
@@ -5922,6 +5948,8 @@ impl Request {
                 | Self::GuiQuit {}
                 | Self::GuiShow { .. }
                 | Self::GuiClose { .. }
+                | Self::GuiPage { .. }
+                | Self::GuiNodes { .. }
                 | Self::GuiState {}
                 | Self::GuiOnly { .. }
                 | Self::GuiTarget { .. }

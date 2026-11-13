@@ -2534,7 +2534,29 @@ The shapes:
 - The MediaIn and the MediaOut nodes can be deleted. Undo puts them back.
 - An OTIO export of Resolve holds nothing of a composition. vidcut keeps the composition in its own metadata of the clip, in the picture (§8.16).
 
-Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key` and `comp.reset`. `picture.clear` with `composition` takes it off.
+#### The Effects page
+
+- The Effects page shows the composition of the topmost visible clip at the playhead (p. 1332).
+- The viewer shows that clip alone, at the size of its own picture (p. 1332).
+- The Effects Library is at the left and the Inspector is at the right. Both take the full height (p. 1287).
+- The Node Editor is under the viewer (p. 1287).
+- The Time Ruler and the transport controls are under the viewer (p. 1293).
+  - The keyframes of the selected node show as tick marks on the Time Ruler (p. 1302).
+- Select:
+  - A click on a node selects it. Ctrl-click (Command on a Mac) adds a node to the selection, or takes it out (pp. 1390–1391).
+  - One selected node is the active node. New tools go after it (p. 1391).
+  - A click on the empty Node Editor selects none (p. 1391).
+- A click on a tool in the Effects Library adds it after the active node (p. 1287).
+- The Inspector shows the controls of each selected node (pp. 1313–1314).
+  - Each node has a header with its name and Reset (p. 1314). A click on the name makes it the active node (p. 1391).
+  - The controls of a tool are in the order of the manual (pp. 2110–2111, 2474–2475, 2481–2483, 2491–2493).
+- Each value has a Keyframe button at its right (p. 1519).
+  - It puts a keyframe at the playhead. On a keyframe, it removes the keyframe.
+  - Its arrows go to the keyframes on each side.
+  - After a value has a keyframe, a change on another frame puts a keyframe there.
+- When the active node is a mask, the viewer shows its edge, its center and its handles. A drag of one changes the mask.
+
+Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key` and `comp.reset`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

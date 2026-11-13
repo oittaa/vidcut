@@ -146,7 +146,7 @@ fn box_width(sigma: f64, count: u32) -> f64 {
 }
 
 impl Shaping {
-    fn of(m: &Mask, tool: &Tool, (w, h): (f64, f64)) -> Self {
+    pub fn of(m: &Mask, tool: &Tool, (w, h): (f64, f64)) -> Self {
         let [cx, cy] = m.middle();
         let middle = [cx * w, (1.0 - cy) * h];
         let turn = m.turn().to_radians();
@@ -194,7 +194,7 @@ impl Shaping {
         }
     }
 
-    fn tilted(m: &Mask, [x, y]: [f64; 2], [mx, my]: [f64; 2], (w, h): (f64, f64)) -> [f64; 2] {
+    pub fn tilted(m: &Mask, [x, y]: [f64; 2], [mx, my]: [f64; 2], (w, h): (f64, f64)) -> [f64; 2] {
         let k = m.scale();
         let [z, tx, ty] = m.tilts().map(f64::to_radians);
         let (qx, qy) = (x * w * k, y * h * k);
