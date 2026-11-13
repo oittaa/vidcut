@@ -142,16 +142,13 @@ pub fn add(p: &mut Project, id: &str, tool: ToolType, after: Option<&str>) -> Re
     Ok(json!({ "clip": id, "node": name }))
 }
 
-pub fn paste(
-    p: &mut Project,
-    id: &str,
-    name: &str,
-    from: Option<&str>,
-    after: Option<&str>,
-) -> Result<Value> {
-    let source = from.unwrap_or(id);
-    let c = kept(p, source)?;
-    let mut node = c.nodes[found(c, source, name)?].clone();
+pub fn copied(p: &mut Project, id: &str, name: &str) -> Result<Node> {
+    let c = kept(p, id)?;
+    Ok(c.nodes[found(c, id, name)?].clone())
+}
+
+pub fn paste(p: &mut Project, id: &str, mut node: Node, after: Option<&str>) -> Result<Value> {
+    node = node_checked(&node)?;
     let c = comp_of(p, id)?;
     one_of(c, &node.tool, id)?;
     if c.node(&node.name).is_some() {

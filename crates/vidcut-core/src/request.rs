@@ -10,7 +10,7 @@ use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     AreaShape, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, DuckDetect, DynamicZoom,
     Ease, EbuLevel, EffectArea, EffectType, EffectValue, FillMethod, GeneratorKind, GlowAlpha,
-    GlowFraming, GlowOutput, GrainComposite, GrainPreset, Handle, LowerThirdLine, PathSample,
+    GlowFraming, GlowOutput, GrainComposite, GrainPreset, Handle, LowerThirdLine, Node, PathSample,
     PictureTool, PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor,
     TitleKind, TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape, ZoomBox,
 };
@@ -2843,17 +2843,21 @@ pub enum Request {
     CompRemove { clip: ClipRef, node: String },
     /// Put a copy of a node, with its values and keyframes, into the
     /// composition of `clip`, as `comp.add` puts a new node after `after`.
-    /// The node comes from the composition of `from`, or of `clip`. The copy
+    /// The node is `node` of the composition of `from`, or of `clip`. Or it
+    /// is `copy`: a node as the composition of a clip holds it. The copy
     /// keeps its name while it is free, else it is the name with `_1` or the
     /// first free number after it. Returns the clip and the `node`'s name.
     #[serde(rename = "comp.paste")]
     CompPaste {
         clip: ClipRef,
-        node: String,
+        #[serde(default)]
+        node: Option<String>,
         #[serde(default)]
         from: Option<ClipRef>,
         #[serde(default)]
         after: Option<String>,
+        #[serde(default)]
+        copy: Option<Box<Node>>,
     },
     /// The Keyframe button of one value of a node of a clip's composition,
     /// or of all its values without `value`. With a keyframe on `at`, it

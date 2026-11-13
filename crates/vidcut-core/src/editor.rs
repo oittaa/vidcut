@@ -4412,13 +4412,25 @@ fn mutate(
             node,
             from,
             after,
+            copy,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            let from = match from {
-                Some(f) => Some(resolve_clip(p, f, playhead)?),
-                None => None,
+            let pasted = match (copy, node) {
+                (Some(copy), None) if from.is_none() => (**copy).clone(),
+                (None, Some(name)) => {
+                    let source = match from {
+                        Some(f) => resolve_clip(p, f, playhead)?,
+                        None => id.clone(),
+                    };
+                    ops::comp::copied(p, &source, name)?
+                }
+                _ => {
+                    return Err(Error::usage(
+                        "comp.paste takes a `node`, with `from` or without, or a `copy`",
+                    ));
+                }
             };
-            ops::comp::paste(p, &id, node, from.as_deref(), after.as_deref())?
+            ops::comp::paste(p, &id, pasted, after.as_deref())?
         }
         Request::CompKey {
             clip,

@@ -285,6 +285,11 @@ The bar and the Jobs button:
 - A drag of a mask handle in the viewer changes a copy of the composition. It sends one `comp.set` when it stops.
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
 - On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L and the steps of a frame and a second.
+  - The keys of `Panel::Effects` work only on the page: Pass Through, Rename and the keyframe steps of the active node.
+  - Delete, Copy, Cut, Paste and the selection keys act on the nodes there.
+- A copied node is a value in `EffectsPage`. Paste sends it in `comp.paste` as `copy`. Thus a node that changes after Copy pastes as it was.
+- A drag from a knot, or from a half of a join, makes a `Linking`. The drop sends `comp.connect` for the new join, and parts the join that the drag took.
+- Several edits of one key go as one `apply`. Thus one undo step takes them back.
 
 **View state.**
 

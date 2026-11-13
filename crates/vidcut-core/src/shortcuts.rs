@@ -15,16 +15,18 @@ pub enum Group {
     Edit,
     Clips,
     Trim,
+    Nodes,
     App,
 }
 
 impl Group {
-    pub const ALL: [Group; 6] = [
+    pub const ALL: [Group; 7] = [
         Group::Play,
         Group::Mark,
         Group::Edit,
         Group::Clips,
         Group::Trim,
+        Group::Nodes,
         Group::App,
     ];
 
@@ -35,6 +37,7 @@ impl Group {
             Group::Edit => "Put clips in",
             Group::Clips => "Change clips",
             Group::Trim => "Select and trim",
+            Group::Nodes => "Effects page",
             Group::App => "Project and app",
         }
     }
@@ -44,6 +47,7 @@ impl Group {
 pub enum Panel {
     App,
     Transcription,
+    Effects,
 }
 
 macro_rules! actions {
@@ -139,6 +143,10 @@ actions! {
     SelectSentence "select_sentence",
     DynamicTrim "dynamic_trim",
     Snapping "snapping",
+    PassThrough "pass_through",
+    RenameNode "rename_node",
+    PreviousNodeKeyframe "previous_node_keyframe",
+    NextNodeKeyframe "next_node_keyframe",
     Undo "undo",
     Redo "redo",
     Import "import",
@@ -151,6 +159,10 @@ impl Action {
     pub fn panel(self) -> Panel {
         match self {
             Action::SelectSentence => Panel::Transcription,
+            Action::PassThrough
+            | Action::RenameNode
+            | Action::PreviousNodeKeyframe
+            | Action::NextNodeKeyframe => Panel::Effects,
             _ => Panel::App,
         }
     }
@@ -664,7 +676,7 @@ const fn pointer(
     }
 }
 
-use Group::{App, Clips, Edit, Mark, Play, Trim};
+use Group::{App, Clips, Edit, Mark, Nodes, Play, Trim};
 
 pub const SHORTCUTS: &[Shortcut] = &[
     own(
@@ -1334,6 +1346,45 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Some("While Ripple Delete Silence is open, it redoes a change to its stripes or settings."),
     ),
     own(App, Action::Import, &["Ctrl+I"], "Import media", None),
+    own(
+        Nodes,
+        Action::PassThrough,
+        &["Ctrl+P"],
+        "Pass through",
+        Some("The selected nodes do nothing, or work again."),
+    ),
+    own(
+        Nodes,
+        Action::RenameNode,
+        &["F2"],
+        "Rename the selected nodes",
+        None,
+    ),
+    own(
+        Nodes,
+        Action::PreviousNodeKeyframe,
+        &["Alt+["],
+        "Previous keyframe of the node",
+        Some("The playhead goes to the keyframe of the active node before it."),
+    ),
+    own(
+        Nodes,
+        Action::NextNodeKeyframe,
+        &["Alt+]"],
+        "Next keyframe of the node",
+        Some("The playhead goes to the next keyframe of the active node."),
+    ),
+    same(Nodes, Action::Delete, "Delete the selected nodes", None),
+    same(Nodes, Action::Copy, "Copy the active node", None),
+    same(Nodes, Action::Cut, "Cut the active node", None),
+    same(
+        Nodes,
+        Action::Paste,
+        "Paste a node",
+        Some("The copy goes after the active node."),
+    ),
+    same(Nodes, Action::SelectAll, "Select all nodes", None),
+    same(Nodes, Action::SelectNothing, "Select no node", None),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),
     own(App, Action::Preferences, &["Ctrl+,"], "Preferences", None),
     own(App, Action::Help, &["F1"], "Help", None),

@@ -2527,10 +2527,25 @@ The shapes:
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
-- Delete a node: the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
+- Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
+  - With several nodes selected, a Rename window opens for each node in turn (p. 1416).
 - Copy and paste with a node selected: the copy goes after the selected node. It has the same values. Its name is the old name with `_1`.
+  - Copy (Ctrl+C) and Cut (Ctrl+X) take the active node with its values at that moment. Paste (Ctrl+V) puts it after the active node.
+- A right-click on a node opens a menu: Rename, Pass Through, Copy, Paste and Delete.
+- Join (pp. 1394–1397):
+  - Drag from an output to an input, or from an input to an output.
+  - A drop on a node joins its input. A mask joins the effect mask input.
+  - A pointer on a knot shows its name.
+- Part and move a join (pp. 1400–1401):
+  - A pointer on a join shows the half under it in blue.
+  - A click on the input half parts the join.
+  - A drag of a half takes that end of the join. A drop on a knot or a node joins it there. A drop on an empty place parts the join.
+- Select (pp. 1390–1391):
+  - A drag on the empty Node Editor selects the nodes in its box. A Ctrl-drag takes them out of the selection.
+  - Ctrl+A selects all the nodes. Ctrl+Shift+A selects none.
+- Alt+[ and Alt+] move the playhead to the keyframes of the active node (p. 1303).
 - The MediaIn and the MediaOut nodes can be deleted. Undo puts them back.
 - An OTIO export of Resolve holds nothing of a composition. vidcut keeps the composition in its own metadata of the clip, in the picture (§8.16).
 

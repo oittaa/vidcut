@@ -336,7 +336,14 @@ pub fn describe_at(
             d.text("to")
         ),
         "comp.remove" => format!("Remove {} of {}", d.text("node"), d.clips("clip")),
-        "comp.paste" => format!("Paste {} into {}", d.text("node"), d.clips("clip")),
+        "comp.paste" => format!(
+            "Paste {} into {}",
+            d.params["node"]
+                .as_str()
+                .or(d.params["copy"]["name"].as_str())
+                .unwrap_or("a node"),
+            d.clips("clip")
+        ),
         "comp.key" => match d.params["value"].as_str() {
             Some(v) => format!(
                 "Key {} of {} of {}",
