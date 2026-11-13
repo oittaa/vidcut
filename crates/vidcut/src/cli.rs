@@ -89,6 +89,14 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("picture.set", &["clips"]),
     ("picture.clear", &["clips"]),
     ("effects.add", &["clips", "kind"]),
+    ("comp.add", &["clip", "tool"]),
+    ("comp.set", &["clip", "node"]),
+    ("comp.connect", &["clip", "node"]),
+    ("comp.rename", &["clip", "node", "to"]),
+    ("comp.remove", &["clip", "node"]),
+    ("comp.paste", &["clip", "node"]),
+    ("comp.key", &["clip", "node"]),
+    ("comp.reset", &["clip", "node"]),
     ("effects.set", &["clip", "effect"]),
     ("effects.key", &["clip", "effect"]),
     ("effects.reset", &["clip", "effect"]),
@@ -171,6 +179,10 @@ const GROUPS: &[(&str, &str)] = &[
         "The render cache: what it renders, Render and Delete",
     ),
     ("clip", "Clip properties"),
+    (
+        "comp",
+        "The nodes of a clip's composition: tools and masks on its own picture, before its transform",
+    ),
     ("decoders", "Hardware decoders that work here"),
     ("edit", "Edit the timeline"),
     (
@@ -450,6 +462,40 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut effects set c3 1 --area '{\"follows\":\"face\",\"size\":[1.3,1.3]}'\n  \
          vidcut effects set c3 1 --area '{\"follows\":null}'\n  \
          vidcut effects set c3 1 --area null",
+    ),
+    (
+        "comp.add",
+        "vidcut comp add c3 blur --after MediaIn1
+  vidcut comp add c3 ellipse --after Blur1
+           vidcut comp add c3 gaussian_blur --after Blur1
+  vidcut comp add V2@10s rectangle",
+    ),
+    (
+        "comp.set",
+        "vidcut comp set c3 Blur1 --size 5
+           vidcut comp set c3 Blur1 --filter box --lock-xy false --y-size 2
+           vidcut comp set c3 Ellipse1 --center 0.4,0.6 --width 0.2 --height 0.3 --soft-edge 0.05
+           vidcut comp set c3 Rectangle1 --corner-radius 0.3 --angle 15 --invert true
+           vidcut comp set c3 Polygon1 --points '[[0,0.2],[-0.1,-0.1],[0.1,-0.1]]'
+           vidcut comp set c3 GaussianBlur1 --strength 0.6 --blend 0.5
+           vidcut comp set c3 Blur1 --pass-through true
+           vidcut comp set c3 Blur1 --size 8 --at 2s",
+    ),
+    (
+        "comp.connect",
+        "vidcut comp connect c3 MediaOut1 --from Blur1
+           vidcut comp connect c3 Blur1 --input effect_mask --from Ellipse1
+           vidcut comp connect c3 Blur1 --input effect_mask",
+    ),
+    (
+        "comp.paste",
+        "vidcut comp paste c3 Blur1 --after Blur1
+  vidcut comp paste c4 Blur1 --from c3 --after MediaIn1",
+    ),
+    (
+        "comp.key",
+        "vidcut comp key c3 Ellipse1 --at 2s
+  vidcut comp key c3 Ellipse1 --at 2s --ease ease_in_out",
     ),
     (
         "effects.key",

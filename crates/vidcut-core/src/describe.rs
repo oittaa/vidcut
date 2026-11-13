@@ -319,6 +319,26 @@ pub fn describe_at(
             d.clips("clip"),
             d.params["to"].as_u64().unwrap_or(0) + 1
         ),
+        "comp.add" => format!(
+            "Add {} to the composition of {}",
+            d.text("tool").replace('_', " "),
+            d.clips("clip")
+        ),
+        "comp.set" => format!("Change {} of {}", d.text("node"), d.clips("clip")),
+        "comp.connect" => match d.params["from"].as_str() {
+            Some(from) => format!("Join {from} to {} of {}", d.text("node"), d.clips("clip")),
+            None => format!("Part an input of {} of {}", d.text("node"), d.clips("clip")),
+        },
+        "comp.rename" => format!(
+            "Rename {} of {} to {}",
+            d.text("node"),
+            d.clips("clip"),
+            d.text("to")
+        ),
+        "comp.remove" => format!("Remove {} of {}", d.text("node"), d.clips("clip")),
+        "comp.paste" => format!("Paste {} into {}", d.text("node"), d.clips("clip")),
+        "comp.key" => format!("Key {} of {}", d.text("node"), d.clips("clip")),
+        "comp.reset" => format!("Reset {} of {}", d.text("node"), d.clips("clip")),
         "motion.add" => format!("Add a motion path to {}", d.clips("clip")),
         "motion.set" => format!(
             "Change motion path {} of {}",
@@ -344,6 +364,7 @@ pub fn describe_at(
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
             Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),
             Some("composite") => format!("Reset the composite of {}", d.clips("clips")),
+            Some("composition") => format!("Remove the composition of {}", d.clips("clips")),
             Some(_) => format!("Reset the transform of {}", d.clips("clips")),
             None => format!("Reset the picture of {}", d.clips("clips")),
         },

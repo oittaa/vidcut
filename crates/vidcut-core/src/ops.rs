@@ -1,3 +1,4 @@
+pub mod comp;
 pub mod compound;
 pub mod effect;
 pub mod filmstrip;

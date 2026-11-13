@@ -4370,6 +4370,71 @@ fn mutate(
             ops::effect::shift(p, &id, *effect, *to)?;
             Value::Null
         }
+        Request::CompAdd { clip, tool, after } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::add(p, &id, *tool, after.as_deref())?
+        }
+        Request::CompSet {
+            clip,
+            node,
+            at,
+            change,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            ops::comp::set(p, &id, node, change, at)?;
+            Value::Null
+        }
+        Request::CompConnect {
+            clip,
+            node,
+            input,
+            from,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::connect(p, &id, node, *input, from.as_deref())?;
+            Value::Null
+        }
+        Request::CompRename { clip, node, to } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::rename(p, &id, node, to)?
+        }
+        Request::CompRemove { clip, node } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::remove(p, &id, node)?;
+            Value::Null
+        }
+        Request::CompPaste {
+            clip,
+            node,
+            from,
+            after,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let from = match from {
+                Some(f) => Some(resolve_clip(p, f, playhead)?),
+                None => None,
+            };
+            ops::comp::paste(p, &id, node, from.as_deref(), after.as_deref())?
+        }
+        Request::CompKey {
+            clip,
+            node,
+            at,
+            ease,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let at = resolve(p, at, playhead)?;
+            ops::comp::key(p, &id, node, at, *ease)?
+        }
+        Request::CompReset { clip, node } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::reset(p, &id, node)?;
+            Value::Null
+        }
         Request::MotionAdd {
             clip,
             name,

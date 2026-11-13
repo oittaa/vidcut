@@ -9,6 +9,7 @@ use egui_phosphor::regular::{
     CHART_LINE, DOTS_THREE, MAGNIFYING_GLASS_PLUS, WAVE_SINE,
 };
 use serde_json::{Value, json};
+use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{self, CENTER};
 use vidcut_core::keyframes::{
     PictureValue, ease_of, eases, handle_point, value_mapped, value_paired,

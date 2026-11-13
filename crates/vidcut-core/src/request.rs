@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    AreaShape, Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel,
-    EffectArea, EffectType, EffectValue, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput,
-    GrainComposite, GrainPreset, Handle, LowerThirdLine, PathSample, PictureTool,
-    PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
-    TitleStyle, TrackClip, TrackWay, VignetteMode, VignetteShape, ZoomBox,
+    AreaShape, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, DuckDetect, DynamicZoom,
+    Ease, EbuLevel, EffectArea, EffectType, EffectValue, FillMethod, GeneratorKind, GlowAlpha,
+    GlowFraming, GlowOutput, GrainComposite, GrainPreset, Handle, LowerThirdLine, PathSample,
+    PictureTool, PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor,
+    TitleKind, TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2706,7 +2706,8 @@ pub enum Request {
     /// (position, zoom, rotation, anchor, pitch, yaw and flips), the `crop`
     /// (its sides and softness), the `dynamic_zoom`, the `composite` (the
     /// composite mode and the opacity), or all of them when no `tool` is
-    /// given.
+    /// given. Their effects and compositions stay. `composition` takes off
+    /// the composition, and each picture comes as it is.
     #[serde(rename = "picture.clear")]
     PictureClear {
         clips: OneOrMany<ClipRef>,
@@ -2781,6 +2782,95 @@ pub enum Request {
         effect: usize,
         to: usize,
     },
+    /// Add a node to the composition of a clip: footage, a still, an image
+    /// sequence or a compound clip. A clip without a composition first gets
+    /// `MediaIn1` joined to `MediaOut1`. The node's name is its tool's name
+    /// and the first free number, as `Blur1`.
+    ///
+    /// With `after` a tool or `media_in`, a tool goes into the picture's way
+    /// after it, and each node that took that picture takes the new tool.
+    /// With `after` a tool, a mask goes on its effect mask, after the masks
+    /// that are there. With `after` a mask, a mask goes after it in its
+    /// chain. Any other new node joins nothing.
+    /// Returns the clip and the `node`'s name.
+    #[serde(rename = "comp.add")]
+    CompAdd {
+        clip: ClipRef,
+        tool: ToolType,
+        #[serde(default)]
+        after: Option<String>,
+    },
+    /// Change values of one node of a clip's composition. Each value given
+    /// replaces its own; a value the node's tool doesn't have is an error.
+    /// A value with keyframes takes a keyframe on `at` and keeps its plain
+    /// value. Without `at`, or a playhead, that is an error.
+    #[serde(rename = "comp.set")]
+    CompSet {
+        clip: ClipRef,
+        node: String,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(flatten)]
+        change: Box<NodeChange>,
+    },
+    /// Join the output of node `from` to an input of `node`, in place of
+    /// what was there, or with no `from`, leave that input empty. The
+    /// `input` takes a tool or `media_in`, and the `effect_mask` takes a
+    /// mask. A join that makes a loop is an error.
+    #[serde(rename = "comp.connect")]
+    CompConnect {
+        clip: ClipRef,
+        node: String,
+        #[serde(default)]
+        input: NodeInput,
+        #[serde(default)]
+        from: Option<String>,
+    },
+    /// Give a node another name. Each sign that is not a letter, a digit or
+    /// `_` goes, and so do digits at the start. A name that another node has
+    /// is an error. The joins keep the node. Returns the new `node` name.
+    #[serde(rename = "comp.rename")]
+    CompRename {
+        clip: ClipRef,
+        node: String,
+        to: String,
+    },
+    /// Take a node out of a clip's composition. The nodes on each side join
+    /// up: what took its picture takes the picture that came into it, and
+    /// what took its mask takes the masks that came into it. The masks on
+    /// its effect mask stay, joined to nothing.
+    #[serde(rename = "comp.remove")]
+    CompRemove { clip: ClipRef, node: String },
+    /// Put a copy of a node, with its values and keyframes, into the
+    /// composition of `clip`, as `comp.add` puts a new node after `after`.
+    /// The node comes from the composition of `from`, or of `clip`. The copy
+    /// keeps its name while it is free, else it is the name with `_1` or the
+    /// first free number after it. Returns the clip and the `node`'s name.
+    #[serde(rename = "comp.paste")]
+    CompPaste {
+        clip: ClipRef,
+        node: String,
+        #[serde(default)]
+        from: Option<ClipRef>,
+        #[serde(default)]
+        after: Option<String>,
+    },
+    /// The Keyframe button of one node of a clip's composition. With a
+    /// keyframe on `at`, it removes each keyframe of the node on that frame.
+    /// Without one, it puts a keyframe on `at` on each value of the node.
+    /// With `ease`, it only gives the keyframes on `at` that ease.
+    #[serde(rename = "comp.key")]
+    CompKey {
+        clip: ClipRef,
+        node: String,
+        at: TimeSpec,
+        #[serde(default)]
+        ease: Option<Ease>,
+    },
+    /// Put one node of a clip's composition back at its usual values, with
+    /// no keyframes. It keeps its name, its joins and its place.
+    #[serde(rename = "comp.reset")]
+    CompReset { clip: ClipRef, node: String },
     /// The motion paths of `clips`, or of every clip that has some. A motion
     /// path tells where one area of a clip's picture is on its source frames:
     /// a face, a number plate or another thing in the picture. Each clip
@@ -4905,6 +4995,107 @@ pub struct EffectChange {
         skip_serializing_if = "Option::is_none"
     )]
     pub area: Option<Option<AreaChange>>,
+    #[serde(flatten)]
+    pub values: KindChange,
+}
+
+/// A change to a node of a composition: each value given replaces its own.
+/// Every value of every tool is here, and each tool takes its own
+/// (`ops::comp::set`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct NodeChange {
+    /// On, the node does nothing: it passes on what comes in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pass_through: Option<bool>,
+    /// How much of a `blur` or an `effect` shows, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend: Option<f64>,
+    /// Off, a Gaussian Blur does not blur the alpha.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur_alpha: Option<bool>,
+    /// Its place in the node editor, `[x, y]` in node widths and heights.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<[f64; 2]>,
+    /// A blur's shape, or how a mask's soft edge blurs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<BlurFilter>,
+    /// Off, a blur's `y_size` sets the blur down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock_xy: Option<bool>,
+    /// Without `lock_xy`, how much a blur blurs down, from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_size: Option<f64>,
+    /// How many boxes a `multi_box` blur or soft edge uses, from 1 to 64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passes: Option<u32>,
+    /// What a blur takes from beyond the edges of the picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipping: Option<BlurClipping>,
+    /// Which of red, green, blue and alpha a blur blurs, `[r, g, b, a]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channels: Option<[bool; 4]>,
+    /// How strong a mask is, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<f64>,
+    /// How soft a mask's edge is, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_edge: Option<f64>,
+    /// How far a mask's edge moves out, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_width: Option<f64>,
+    /// On, a mask is the part outside its shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invert: Option<bool>,
+    /// Off, a mask is only a band about its edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solid: Option<bool>,
+    /// The width of an ellipse or a rectangle mask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    /// The height of an ellipse or a rectangle mask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+    /// Degrees an ellipse or a rectangle mask is turned counterclockwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
+    /// Degrees a polygon mask is turned counterclockwise, first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_rotation: Option<f64>,
+    /// Degrees a polygon mask is tilted about its horizontal axis, second.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_rotation: Option<f64>,
+    /// Degrees a polygon mask is tilted about its vertical axis, last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_rotation: Option<f64>,
+    /// How round the corners of a rectangle mask are, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner_radius: Option<f64>,
+    /// Which parts a polygon mask whose sides cross covers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_method: Option<FillMethod>,
+    /// The corners of a polygon mask, each `[x, y]` from its middle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<[f64; 2]>>,
+    #[serde(flatten)]
+    pub values: KindChange,
+}
+
+/// An input of a node of a composition.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeInput {
+    /// The picture that comes in.
+    #[default]
+    Input,
+    /// The mask that limits where the tool works.
+    EffectMask,
+}
+
+/// A change to the values of an effect's kind: each value given replaces
+/// its own. Every value of every kind is here, and each kind takes its own
+/// (`ops::effect::set`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct KindChange {
     /// A Gaussian Blur's strength, from 0 (none) to 1; with `split`, across.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strength: Option<f64>,
@@ -5133,7 +5324,8 @@ pub struct EffectChange {
     /// The shape of a Vignette, in `advanced`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_shape: Option<VignetteShape>,
-    /// How large a Vignette's shape is, from 0.01 to 2.
+    /// How large a Vignette's shape is, from 0.01 to 2. How much a `blur`
+    /// node blurs, or how large a polygon mask is, from 0 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// Turns a Vignette's shape counter-clockwise, in `advanced`, in degrees
@@ -5145,6 +5337,7 @@ pub struct EffectChange {
     pub anamorphism: Option<f64>,
     /// The middle of a Vignette's shape, in `advanced`, `[x, y]` as fractions
     /// of the picture from its bottom left, each from -1000000 to 1000000.
+    /// The middle of a mask node, the same way, each from -10 to 10.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center: Option<Vec<f64>>,
     /// How much of the picture shows through a Vignette's color, in

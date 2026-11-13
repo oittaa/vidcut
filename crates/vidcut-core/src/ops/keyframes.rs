@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use serde_json::{Value, json};
 
 use super::locate;
+use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::generators::{Axis, CENTER, checked_center};
 use crate::keyframes::{
@@ -1355,6 +1356,7 @@ fn listed(p: &Project, c: &Clip, picture: &Picture, v: PictureValue) -> Vec<Valu
 
 #[cfg(test)]
 mod tests {
+    use crate::effect_keys::Keyed;
     use crate::keyframes::PictureValue;
     use crate::model::{Effect, EffectValue};
     use crate::test_support::Fixture;

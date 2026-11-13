@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
+use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, Effect, EffectArea, EffectValue, Follow, MotionPath, PathSample, Project, Subject, Title,

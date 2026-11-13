@@ -1,3 +1,4 @@
+use crate::effect_keys::Keyed;
 use crate::model::{
     AreaShape, Border, CellShape, CompositeMode, Effect, EffectArea, EffectKind, FilmGrain, Glow,
     GlowAlpha, GlowFraming, GlowOutput, Media, MosaicBlur, Picture, Sharpen, Vignette,

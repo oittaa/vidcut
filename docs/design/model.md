@@ -499,6 +499,7 @@ Writing:
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
   - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`)
   - its `effects`, in their order: each an `Effect` with an `EffectKind`, a `GaussianBlur`, a `MosaicBlur`, a `Glow`, a `FilmGrain`, a `Vignette` or a `Sharpen` ([export](export.md#effects))
+  - its `composition`: the nodes that work on its own picture before all of the above ([compositions](#compositions))
 - Each value is left out at its usual value. A picture that `Picture::is_usual` accepts is only fitted into the frame.
 - Each value of `keyframes::PictureValue` can hold `Keyframe`s beside the plain value. `Picture::is_usual` is false while a value has keyframes.
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
@@ -544,6 +545,33 @@ Writing:
   - Pitch and yaw lean the picture about its middle, in its own axes, before the zoom and the turn ([spec D93](../spec.md#12-decisions-on-gaps-and-contradictions)). Thus `Level.back` is a projective map. Without a lean, it is affine.
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
 - The shader of the viewer and the export holds the sums of the composite modes (D75, `mixed` in `picture.wgsl`).
+
+## Compositions
+
+- A `Picture` can hold a `Composition`: the nodes that work on the clip's own picture, before its crop and its transform ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
+- Each `Node` has a `name`, a `Tool`, its joins, a `place` in the node editor and its `keys`.
+  - `Tool::MediaIn` is the clip's own picture. `Tool::MediaOut` is the picture that the clip shows.
+  - `Tool::Blur` holds a `Blur`. `Tool::Effect` holds an `EffectKind`, one of the kinds of the clip effects.
+  - `Tool::Ellipse`, `Tool::Rectangle` and `Tool::Polygon` hold a `Mask`.
+  - `input` names the node whose picture comes in. `effect_mask` names the last mask of a chain of masks.
+- The joins are names, not places in the list. Why: a request, the GUI and the OTIO metadata then name a node in one way, and a removal moves no other join.
+- The module `composition` reads a composition:
+  - `Composition::chain` follows the inputs from the MediaOut node back to the MediaIn node. It gives the tools in their order, or none when it does not get to the MediaIn node.
+  - `Composition::masks_of` follows the effect masks of a node back. It gives the masks in their order.
+  - `Composition::loops` finds a loop of joins.
+  - `Composition::plain` is the composition of a clip without one: `MediaIn1` joined to `MediaOut1`.
+  - `Composition::free_name` gives the name of the tool with the first free number. `Composition::copy_name` adds `_` and the first free number from 1.
+  - `composition::cleaned` keeps letters, digits and `_`, with no digit first.
+- `ops::comp` holds the edits: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key` and `comp.reset`.
+  - A clip without a composition gets `Composition::plain` on its first `comp.add` or `comp.paste`.
+  - `comp.set` takes a `NodeChange`. Its `values` are a `KindChange`: the values of an effect's kind, which `effects.set` also takes in its `EffectChange`.
+  - A blur takes its `size`, and a mask its `center`, from the `KindChange`. Why: the names in the request are then those of the model.
+- `ops::picture::composition_checked` checks the names, the joins, the loops and each node (`ops::picture::node_checked`). It is part of `ops::picture::checked`.
+- The keyframes of a node are in its `keys`, one `EffectKeys` for each `EffectValue` with keyframes.
+  - The trait `effect_keys::Keyed` holds the keyframe work of an `Effect` and of a `Node`: read, write, sample, split, hold, scale, retime and retarget.
+  - An `Effect` and a `Node` give only the slots of their values (`Keyed::read_point`, `Keyed::write`). Why: then one copy of the keyframe work serves both.
+  - The functions of `Picture` that work on keyframes also work on the nodes (`Picture::nodes_mut`).
+- `picture.clear` of all the tools keeps the composition. `PictureTool::Composition` takes it off.
 
 ## Motion paths
 

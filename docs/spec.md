@@ -2452,6 +2452,90 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - vidcut gives an edit to the picture and to the sound of the compound clip.
   - An OTIO file holds them as a `TimeEffect` on the `Stack`, as on a clip. Its source positions count from the start of the compound clip.
 
+### 8.19 Compositions (pp. 1332, 1385, 1403, 1420, 2108–2111, 2472, 2480, 2483, 2490–2492, 2500)
+
+This section follows the Fusion page. The facts without a page are measured in Resolve Studio 21.2.0 on 2026-11-13.
+
+- A clip of footage, a still, an image sequence or a compound clip can have a composition: a set of nodes. A generator has none.
+- The composition works on the clip's own picture, in its own pixels. It works before the crop, the transform and the effects of the clip.
+  - Measured: a clip at Zoom 0.5 with a Blur in its composition keeps a sharp edge.
+- A clip without a composition shows its picture as it is. The Effects page shows it as `MediaIn1` joined to `MediaOut1` (p. 1332).
+- The picture goes from the MediaIn node, through the tools that each input joins, to the MediaOut node.
+  - Without a MediaOut node, or with nothing on its input, the clip shows nothing.
+  - Measured: Resolve then stops a render with "The Fusion composition at 01:00:00:00 could not be processed successfully". An export of vidcut also stops with an error.
+- Tools:
+  - Blur: the Blur tool of the Fusion page (pp. 2108–2111). See below.
+  - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
+- Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
+  - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
+  - A mask on the effect mask input of a mask adds the two: a + b − a × b. This is the Merge paint mode.
+- Names: the tool's name and the first free number, as `Blur1`, `GaussianBlur1`, `Ellipse1`, `Polygon1`.
+
+#### The tools in clip pixels
+
+The sizes of the tools follow the clip's own picture, W × H pixels. On a 16:9 picture, √(W × H) is 0.75 × W.
+
+- Blur:
+  - The spread follows W, across and down. With Fast Gaussian, the sigma is 0.000598 × Blur Size × W.
+  - Filter: Box, Bartlett, Multi-box, Gaussian or Fast Gaussian. Usual: Fast Gaussian.
+    - Box: one flat box, 0.002831 × Blur Size × W wide.
+    - Bartlett: a triangle. It is the same as Multi-box with 2 passes.
+    - Multi-box: Num Passes flat boxes, with the sigma of Fast Gaussian. Usual: 4 passes.
+    - Gaussian: a sigma of 0.000605 × Blur Size × W.
+  - Lock X/Y: on. Off, Y Blur Size sets the blur down. Blur Size: 1, from 0 to 1000000.
+  - Clipping Mode: Frame. Frame and Domain repeat the edge pixels. None takes clear black beyond the edges.
+  - Red, Green, Blue and Alpha: on. Blend: 1.
+- Gaussian Blur: the sigma is 0.075 × Strength² × √(W × H). On a 16:9 picture, this is the sigma of the clip effect at Zoom 1. A tool also has Blur Alpha: on.
+- Mosaic Blur: a cell is √(W × H) / 50 at Pixel Frequency 100.
+- Glow: the spread follows √(W × H).
+- Vignette: the shape follows the picture's frame, W and H.
+- Film Grain: the grain follows H.
+- Sharpen: it works in the clip's pixels.
+
+#### The masks
+
+Each mask has these controls (pp. 2491–2492, 2500):
+
+- Level: 1, from 0 to 1. The mask is this strong.
+- Soft Edge: 0, from 0 to 1. The slider goes to 0.2. It blurs the mask by its Filter.
+- Filter: Fast Gaussian. Box, Bartlett, Multi-box and Gaussian are the other choices. Measured, at Soft Edge s on a picture W wide:
+  - Fast Gaussian: a sigma of 0.431 × s × W.
+  - Gaussian: a sigma of 0.4276 × s × W.
+  - Box, Bartlett and Multi-box: one, two or Num Passes flat boxes with a sum of a sigma of 0.4135 × s × W. Num Passes: 4, from 1 to 64.
+- Border Width: 0, from −1 to 1. The slider goes from −0.2 to 0.2. The edge moves out by Border Width / 2 × W.
+- Invert: off. On, the mask is outside its shape.
+- Solid: on. Off, the mask is only a band of Border Width / 2 × W on each side of the edge.
+- Center: (0.5, 0.5), as fractions of the picture from its bottom left. Y goes up.
+
+Measured, a mask with an effect mask input:
+
+- Invert and Level act on its own shape only. Invert comes first, then Level.
+- Then the mask adds what comes in: a + b − a × b.
+- The manual says that Level and Invert act on the whole mask (p. 2491). The render shows otherwise. vidcut follows the render.
+
+The shapes:
+
+- Ellipse: Width and Height 0.5, from 0 to 1000000. The sliders go to 2. Both are fractions of W. Angle: 0, counterclockwise.
+- Rectangle: Width 0.5, a fraction of W. Height 0.5, a fraction of H. Both from 0 to 1000000, and the sliders go to 1. Angle: 0. Corner Radius: 0, from 0 to 1, a fraction of half the shorter side.
+- Polygon (p. 2483): its points, from its center. X is a fraction of W. Y is a fraction of H, up.
+  - Size: 1, from 0 to 1000000. The slider goes to 5. The points move out from the center by this.
+  - Z Rotation, X Rotation and Y Rotation: 0. Measured: Z turns the shape counterclockwise in square pixels. Then X tilts it, and then Y.
+  - The tilts have no perspective. X 60 makes the shape half as high, and Y 60 makes it half as wide.
+  - Fill Method: Alternate. A part that the sides go around twice is a hole. Non Zero Winding fills it.
+
+#### Edits
+
+- Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
+- Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
+- Delete a node: the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
+- Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
+- Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
+- Copy and paste with a node selected: the copy goes after the selected node. It has the same values. Its name is the old name with `_1`.
+- The MediaIn and the MediaOut nodes can be deleted. Undo puts them back.
+- An OTIO export of Resolve holds nothing of a composition. vidcut keeps the composition in its own metadata of the clip, in the picture (§8.16).
+
+Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key` and `comp.reset`. `picture.clear` with `composition` takes it off.
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.

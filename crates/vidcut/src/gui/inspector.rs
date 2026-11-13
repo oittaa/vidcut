@@ -8,6 +8,7 @@ use egui_phosphor::regular::{
     FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, TRASH,
 };
 use serde_json::{Value, json};
+use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
@@ -4837,7 +4838,9 @@ impl Workspace {
                 match tool {
                     PictureTool::Transform => p.transform_off = !on,
                     PictureTool::Crop => p.crop_off = !on,
-                    PictureTool::DynamicZoom | PictureTool::Composite => return None,
+                    PictureTool::DynamicZoom
+                    | PictureTool::Composite
+                    | PictureTool::Composition => return None,
                 }
                 Some(p)
             }),

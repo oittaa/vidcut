@@ -1,12 +1,15 @@
 use serde_json::{Value, json};
 
+use crate::composition::named_well;
+use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    AreaShape, Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectArea,
-    EffectKeys, EffectKind, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput,
-    GrainComposite, MosaicBlur, Picture, PictureTool, Project, Sharpen, TrackKind, Vignette,
-    VignetteMode, VignetteShape, ZoomBox,
+    AreaShape, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode, Composition,
+    Crop, DynamicZoom, Effect, EffectArea, EffectKeys, EffectKind, FillMethod, FilmGrain,
+    GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, MosaicBlur, Node,
+    Picture, PictureTool, Project, Sharpen, Tool, TrackKind, Vignette, VignetteMode, VignetteShape,
+    ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -41,6 +44,11 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
         composite_mode: p.composite_mode.filter(|m| *m != CompositeMode::Normal),
         opacity: p.opacity.filter(|o| *o != 1.0),
         effects,
+        composition: p
+            .composition
+            .as_ref()
+            .map(composition_checked)
+            .transpose()?,
         ..p.clone()
     };
     Ok((!out.is_usual()).then_some(out))
@@ -445,8 +453,12 @@ fn sharpen_checked(s: &Sharpen) -> Result<Sharpen> {
     })
 }
 
-fn keys_checked(e: &Effect) -> Result<Vec<EffectKeys>> {
-    let mut keys = e.keys.clone();
+fn keys_checked<T: Keyed>(
+    e: &T,
+    label: &str,
+    plain_checked: impl Fn(&T) -> Result<T>,
+) -> Result<Vec<EffectKeys>> {
+    let mut keys = e.key_list().to_vec();
     keys.retain(|k| !k.keys.is_empty());
     keys.sort_by_key(|k| k.value);
     if keys.windows(2).any(|w| w[0].value == w[1].value) {
@@ -455,14 +467,11 @@ fn keys_checked(e: &Effect) -> Result<Vec<EffectKeys>> {
         ));
     }
     let mut plain = e.clone();
-    plain.keys.clear();
+    plain.key_list_mut().clear();
     for entry in &keys {
         let name = entry.value.name().replace('_', " ");
         if !e.takes(entry.value) {
-            return Err(Error::invalid(format!(
-                "a {} has no {name}",
-                e.kind().name()
-            )));
+            return Err(Error::invalid(format!("a {label} has no {name}")));
         }
         if entry.keys.windows(2).any(|w| w[0].frame >= w[1].frame) {
             return Err(Error::invalid(format!(
@@ -487,7 +496,7 @@ fn keys_checked(e: &Effect) -> Result<Vec<EffectKeys>> {
             let mut one = plain.clone();
             let y = entry.y.get(i).copied().unwrap_or(0.0);
             one.write_point(entry.value, [k.value, y]);
-            plain_effect_checked(&one).map_err(|err| {
+            plain_checked(&one).map_err(|err| {
                 Error::invalid(format!(
                     "{name} keyframe at source frame {}: {}",
                     k.frame, err.message
@@ -499,7 +508,7 @@ fn keys_checked(e: &Effect) -> Result<Vec<EffectKeys>> {
 }
 
 pub fn effect_checked(e: &Effect) -> Result<Effect> {
-    let keys = keys_checked(e)?;
+    let keys = keys_checked(e, e.kind().name(), plain_effect_checked)?;
     Ok(Effect {
         keys,
         ..plain_effect_checked(e)?
@@ -508,19 +517,229 @@ pub fn effect_checked(e: &Effect) -> Result<Effect> {
 
 fn plain_effect_checked(e: &Effect) -> Result<Effect> {
     within(e.blend, (0.0, 1.0), "an effect's blend is from 0 to 1")?;
-    let kind = match &e.kind {
+    Ok(Effect {
+        kind: kind_checked(&e.kind)?,
+        blend: e.blend.filter(|v| *v != 1.0),
+        area: e.area.as_ref().map(area_checked).transpose()?,
+        ..e.clone()
+    })
+}
+
+fn kind_checked(kind: &EffectKind) -> Result<EffectKind> {
+    Ok(match kind {
         EffectKind::GaussianBlur(b) => EffectKind::GaussianBlur(gaussian_checked(b)?),
         EffectKind::MosaicBlur(m) => EffectKind::MosaicBlur(mosaic_checked(m)?),
         EffectKind::Glow(g) => EffectKind::Glow(Box::new(glow_checked(g)?)),
         EffectKind::FilmGrain(g) => EffectKind::FilmGrain(Box::new(grain_checked(g)?)),
         EffectKind::Vignette(v) => EffectKind::Vignette(vignette_checked(v)?),
         EffectKind::Sharpen(s) => EffectKind::Sharpen(sharpen_checked(s)?),
+    })
+}
+
+pub fn node_checked(n: &Node) -> Result<Node> {
+    let keys = keys_checked(n, n.tool.label(), plain_node_checked)?;
+    Ok(Node {
+        keys,
+        ..plain_node_checked(n)?
+    })
+}
+
+fn plain_node_checked(n: &Node) -> Result<Node> {
+    within(n.blend, (0.0, 1.0), "a node's blend is from 0 to 1")?;
+    if !n.place.iter().all(|v| v.is_finite()) {
+        return Err(Error::invalid("a node's place is two finite numbers"));
+    }
+    let tool = match &n.tool {
+        Tool::Blur(b) => Tool::Blur(blur_checked(b)?),
+        Tool::Effect(kind) => Tool::Effect(kind_checked(kind)?),
+        Tool::Ellipse(m) => Tool::Ellipse(mask_checked(m, "ellipse")?),
+        Tool::Rectangle(m) => Tool::Rectangle(mask_checked(m, "rectangle")?),
+        Tool::Polygon(m) => Tool::Polygon(mask_checked(m, "polygon")?),
+        t => t.clone(),
     };
-    Ok(Effect {
-        kind,
-        blend: e.blend.filter(|v| *v != 1.0),
-        area: e.area.as_ref().map(area_checked).transpose()?,
-        ..e.clone()
+    Ok(Node {
+        tool,
+        blend: n.blend.filter(|v| *v != 1.0),
+        ..n.clone()
+    })
+}
+
+fn blur_checked(b: &Blur) -> Result<Blur> {
+    for v in [b.size, b.y_size] {
+        within(v, Blur::SIZES, "a blur's size is from 0 to 1000000")?;
+    }
+    if b.passes
+        .is_some_and(|n| !(1..=Blur::MOST_PASSES).contains(&n))
+    {
+        return Err(Error::invalid("a blur's passes are from 1 to 64"));
+    }
+    Ok(Blur {
+        filter: b.filter.filter(|f| *f != BlurFilter::default()),
+        size: b.size.filter(|v| *v != Blur::SIZE),
+        y_size: b.y_size.filter(|v| *v != Blur::SIZE),
+        passes: b.passes.filter(|v| *v != Blur::PASSES),
+        clipping: b.clipping.filter(|c| *c != BlurClipping::default()),
+        channels: b.channels.filter(|c| *c != Blur::ALL),
+        ..b.clone()
+    })
+}
+
+fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
+    let polygon = tool == "polygon";
+    within(m.level, Mask::LEVELS, "a mask's level is from 0 to 1")?;
+    within(
+        m.soft_edge,
+        Mask::SOFT_EDGES,
+        "a mask's soft edge is from 0 to 1",
+    )?;
+    if m.passes
+        .is_some_and(|n| !(1..=Blur::MOST_PASSES).contains(&n))
+    {
+        return Err(Error::invalid("a mask's passes are from 1 to 64"));
+    }
+    within(
+        m.border_width,
+        Mask::BORDERS,
+        "a mask's border width is from -1 to 1",
+    )?;
+    for v in m.center.into_iter().flatten() {
+        within(
+            Some(v),
+            Mask::PLACES,
+            "a mask's center is two fractions, each from -10 to 10",
+        )?;
+    }
+    let shaped = [("width", m.width), ("height", m.height), ("angle", m.angle)];
+    let tilted = [
+        ("size", m.size),
+        ("z rotation", m.z_rotation),
+        ("x rotation", m.x_rotation),
+        ("y rotation", m.y_rotation),
+    ];
+    let shaped: &[(&str, Option<f64>)] = &shaped;
+    let tilted: &[(&str, Option<f64>)] = &tilted;
+    let (own, other) = match polygon {
+        true => (tilted, shaped),
+        false => (shaped, tilted),
+    };
+    if let Some((what, _)) = other.iter().find(|(_, v)| v.is_some()) {
+        return Err(Error::invalid(format!("a {tool} has no {what}")));
+    }
+    for &(what, v) in own {
+        let (range, unit) = match what {
+            "width" | "height" | "size" => (Mask::SIZES, ""),
+            _ => (Mask::TURNS, " degrees"),
+        };
+        within(
+            v,
+            range,
+            &format!("a mask's {what} is from {} to {}{unit}", range.0, range.1),
+        )?;
+    }
+    if m.corner_radius.is_some() && tool != "rectangle" {
+        return Err(Error::invalid("only a rectangle has a corner radius"));
+    }
+    within(
+        m.corner_radius,
+        Mask::CORNERS,
+        "a corner radius is from 0 to 1",
+    )?;
+    if !polygon && !m.points.is_empty() {
+        return Err(Error::invalid("only a polygon has points"));
+    }
+    if !polygon && m.fill_method.is_some() {
+        return Err(Error::invalid("only a polygon has a fill method"));
+    }
+    let most = Mask::POINTS_KEPT;
+    if m.points.len() > most {
+        return Err(Error::invalid(format!(
+            "a polygon has at most {most} points, not {}",
+            m.points.len()
+        )));
+    }
+    for v in m.points.iter().flatten() {
+        within(
+            Some(*v),
+            Mask::PLACES,
+            "a polygon's points are fractions, each from -10 to 10",
+        )?;
+    }
+    Ok(Mask {
+        level: m.level.filter(|v| *v != Mask::LEVEL),
+        soft_edge: m.soft_edge.filter(|v| *v != 0.0),
+        filter: m.filter.filter(|f| *f != BlurFilter::default()),
+        passes: m.passes.filter(|v| *v != Blur::PASSES),
+        border_width: m.border_width.filter(|v| *v != 0.0),
+        center: m.center.filter(|c| *c != Mask::MIDDLE),
+        width: m.width.filter(|v| *v != Mask::SIZE),
+        height: m.height.filter(|v| *v != Mask::SIZE),
+        angle: m.angle.filter(|v| *v != 0.0),
+        size: m.size.filter(|v| *v != Mask::SCALE),
+        z_rotation: m.z_rotation.filter(|v| *v != 0.0),
+        x_rotation: m.x_rotation.filter(|v| *v != 0.0),
+        y_rotation: m.y_rotation.filter(|v| *v != 0.0),
+        corner_radius: m.corner_radius.filter(|v| *v != 0.0),
+        fill_method: m.fill_method.filter(|f| *f != FillMethod::default()),
+        ..m.clone()
+    })
+}
+
+pub fn composition_checked(c: &Composition) -> Result<Composition> {
+    for (i, n) in c.nodes.iter().enumerate() {
+        if !named_well(&n.name) {
+            return Err(Error::invalid(format!(
+                "{:?} is no node name: letters, digits and _, with no digit first",
+                n.name
+            )));
+        }
+        if c.nodes[..i].iter().any(|m| m.name == n.name) {
+            return Err(Error::invalid(format!("two nodes are named {}", n.name)));
+        }
+        let once = matches!(n.tool, Tool::MediaIn | Tool::MediaOut);
+        if once && c.nodes[..i].iter().any(|m| m.tool == n.tool) {
+            return Err(Error::invalid(format!(
+                "a composition has one {} node",
+                n.tool.label()
+            )));
+        }
+        let joined = |join: &Option<String>, fits: fn(&Tool) -> bool, what: &str| match join {
+            None => Ok(()),
+            Some(from) => match c.node(from) {
+                None => Err(Error::invalid(format!(
+                    "{}'s {what} is {from}, which is no node",
+                    n.name
+                ))),
+                Some(m) if !fits(&m.tool) => Err(Error::invalid(format!(
+                    "{}'s {what} is {from}, a {}, which doesn't fit there",
+                    n.name,
+                    m.tool.label()
+                ))),
+                Some(_) => Ok(()),
+            },
+        };
+        if n.input.is_some() && !n.tool.takes_input() {
+            return Err(Error::invalid(format!("{} has no picture input", n.name)));
+        }
+        if n.effect_mask.is_some() && !n.tool.takes_mask() {
+            return Err(Error::invalid(format!(
+                "{} has no effect mask input",
+                n.name
+            )));
+        }
+        joined(&n.input, |t| t.works() || *t == Tool::MediaIn, "input")?;
+        joined(&n.effect_mask, Tool::is_mask, "effect mask")?;
+    }
+    if let Some(at) = c.loops() {
+        return Err(Error::invalid(format!(
+            "the composition's joins make a loop through {at}"
+        )));
+    }
+    Ok(Composition {
+        nodes: c
+            .nodes
+            .iter()
+            .map(node_checked)
+            .collect::<Result<Vec<_>>>()?,
     })
 }
 
@@ -807,6 +1026,7 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
             Some(t) => cleared(&old, t),
             None => Picture {
                 effects: old.effects,
+                composition: old.composition,
                 ..Picture::default()
             },
         };
@@ -833,6 +1053,7 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
             opacity: old.opacity,
             opacity_keys: old.opacity_keys,
             effects: old.effects,
+            composition: old.composition,
             ..Picture::default()
         },
         PictureTool::Crop => {
@@ -844,6 +1065,10 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
             kept.clear_crop_keys();
             kept
         }
+        PictureTool::Composition => Picture {
+            composition: None,
+            ..old
+        },
         PictureTool::DynamicZoom => Picture {
             dynamic_zoom: None,
             ..old
@@ -1058,6 +1283,9 @@ pub fn violation(p: &Project, ti: usize, c: &Clip) -> Option<String> {
     let picture = c.picture.as_ref()?;
     if let Err(e) = takes(p, ti, c) {
         return Some(e.message);
+    }
+    if c.generator.is_some() && picture.composition.is_some() {
+        return Some(format!("{} is a generator, which has no composition", c.id));
     }
     checked(picture)
         .err()

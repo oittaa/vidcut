@@ -3445,6 +3445,10 @@ pub struct Picture {
     /// has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<Effect>,
+    /// The nodes that work on the clip's own picture, before its crop, its
+    /// transform and its effects. Left out, the picture comes as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition: Option<Composition>,
 }
 
 /// An effect on a clip's picture. It works on the picture as its transform
@@ -3583,6 +3587,254 @@ impl EffectArea {
     }
 }
 
+/// The nodes of a clip's composition. They work on the clip's own picture,
+/// in its own pixels, before its crop, its transform and its effects. The
+/// picture goes from the `media_in` node, through the nodes that each
+/// `input` joins, to the `media_out` node. A clip without a composition has
+/// `MediaIn1` joined to `MediaOut1`. Without a `media_out` node, or with
+/// nothing on its input, the clip shows nothing, and an export stops with
+/// an error.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Composition {
+    /// The nodes, in the order they were added.
+    pub nodes: Vec<Node>,
+}
+
+/// A node of a composition: the clip's picture coming in, a tool, a mask,
+/// or the picture going out.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Node {
+    /// Its name: letters, digits and `_`, with no digit first. No other node
+    /// of the composition has it. Requests name the node by it.
+    pub name: String,
+    #[serde(flatten)]
+    pub tool: Tool,
+    /// The node whose picture comes in, for a tool and for `media_out`.
+    /// Left out, nothing comes in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    /// The mask node on its effect mask input. A tool then works only where
+    /// the mask is. A mask adds its own shape to the masks that come in.
+    /// Left out, a tool works on the whole picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_mask: Option<String>,
+    /// On, the node does nothing. A tool passes on the picture that comes
+    /// in, and a mask passes on the masks that come in. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pass_through: bool,
+    /// How much of a `blur` or an `effect` shows, from 0 (the picture as it
+    /// comes in) to 1 (all of the tool). Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend: Option<f64>,
+    /// Off, a Gaussian Blur `effect` does not blur the alpha. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub blur_alpha: bool,
+    /// Its place in the node editor, `[x, y]` in node widths across and
+    /// node heights down.
+    pub place: [f64; 2],
+    /// The keyframes of its values, on source frames. A value with
+    /// keyframes follows them. Left out when it has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<EffectKeys>,
+}
+
+/// What a node does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "tool", rename_all = "snake_case")]
+pub enum Tool {
+    /// The clip's own picture, as its source gives it.
+    MediaIn,
+    /// The picture that the clip shows: the picture on its `input`.
+    MediaOut,
+    /// A blur in the clip's own pixels.
+    Blur(Blur),
+    /// An effect of one of the kinds of the clip's effects, with their
+    /// values. It works on the clip's own picture. Each size that follows
+    /// the picture on the frame follows the clip's own picture. A Gaussian
+    /// Blur's spread is 0.075 × strength² × √(width × height) of the
+    /// picture. A Sharpen works in its pixels.
+    Effect(EffectKind),
+    /// An ellipse mask.
+    Ellipse(Mask),
+    /// A box mask.
+    Rectangle(Mask),
+    /// A mask with straight sides through its `points`.
+    Polygon(Mask),
+}
+
+/// The tools that a composition takes: `blur`, the kinds of effect, the
+/// masks, and the picture coming in and going out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolType {
+    Blur,
+    GaussianBlur,
+    MosaicBlur,
+    Glow,
+    FilmGrain,
+    Vignette,
+    Sharpen,
+    Ellipse,
+    Rectangle,
+    Polygon,
+    MediaIn,
+    MediaOut,
+}
+
+/// A blur of the clip's own pixels. Its spread follows the width of the
+/// picture, across and down. With `fast_gaussian`, the sigma is 0.000598 ×
+/// the size × the width of the picture.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Blur {
+    /// The shape of the blur. Usual: `fast_gaussian`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<BlurFilter>,
+    /// How much it blurs, across and with `lock_xy` also down, from 0 to
+    /// 1000000. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// Off, `y_size` sets the blur down. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub lock_xy: bool,
+    /// Without `lock_xy`, how much it blurs down, from 0 to 1000000.
+    /// Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_size: Option<f64>,
+    /// How many boxes a `multi_box` filter uses, from 1 to 64. Usual: 4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passes: Option<u32>,
+    /// What lies beyond the edges of the picture. Usual: `frame`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipping: Option<BlurClipping>,
+    /// Which of red, green, blue and alpha it blurs. Usual: all four.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channels: Option<[bool; 4]>,
+}
+
+/// The shape of a `blur`. The spreads below are for each unit of size, as
+/// parts of the width of the picture.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BlurFilter {
+    /// One flat box, 0.002831 wide.
+    Box,
+    /// A triangle, 0.001445 from its middle to each end: two boxes.
+    Bartlett,
+    /// `passes` flat boxes in a row, with the sigma of `fast_gaussian`.
+    MultiBox,
+    /// A Gaussian curve with a sigma of 0.000605.
+    Gaussian,
+    /// A Gaussian curve with a sigma of 0.000598.
+    #[default]
+    FastGaussian,
+}
+
+/// What a `blur` takes from beyond the edges of the picture.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BlurClipping {
+    /// Clear black. The edges of the picture fade.
+    None,
+    /// The pixels of the edge, repeated.
+    Domain,
+    /// The pixels of the edge, repeated.
+    #[default]
+    Frame,
+}
+
+/// A mask: where the tool that it is on works. A field left out is at its
+/// usual value. Its numbers can have keyframes, in the `keys` of its node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Mask {
+    /// How strong the mask is, from 0 to 1. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<f64>,
+    /// How soft its edge is, from 0 to 1: a blur of the mask by its
+    /// `filter`. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_edge: Option<f64>,
+    /// How the soft edge blurs the mask. `fast_gaussian` has a sigma of
+    /// 0.431 × `soft_edge` × the width of the picture, and `gaussian` 0.4276.
+    /// `box`, `bartlett` and `multi_box` have 0.4135, from one, two or
+    /// `passes` flat boxes. Usual: `fast_gaussian`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<BlurFilter>,
+    /// How many boxes a `multi_box` soft edge uses, from 1 to 64. Usual: 4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passes: Option<u32>,
+    /// How far its edge moves out, from -1 to 1: half of this × the width
+    /// of the picture. Below 0, the edge moves in. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_width: Option<f64>,
+    /// On, the mask is the part outside its shape. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invert: bool,
+    /// Off, the mask is only the band within half of `border_width` × the
+    /// width of the picture from its edge. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub solid: bool,
+    /// Its middle, `[x, y]` as fractions of the picture from its bottom left,
+    /// each from -10 to 10. Usual: `[0.5, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// The width of an `ellipse` or a `rectangle`, as a fraction of the
+    /// width of the picture, from 0 to 1000000. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    /// The height of an `ellipse`, as a fraction of the width of the
+    /// picture. The height of a `rectangle`, as a fraction of the height of
+    /// the picture. From 0 to 1000000. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+    /// Degrees an `ellipse` or a `rectangle` is turned counterclockwise
+    /// about its middle, from -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
+    /// How large a `polygon` is, from 0 to 1000000: its points are this
+    /// many times as far from its middle. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// Degrees a `polygon` is turned counterclockwise about its middle,
+    /// before its `x_rotation` and its `y_rotation`. From -1000000 to
+    /// 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_rotation: Option<f64>,
+    /// Degrees a `polygon` is tilted about its horizontal axis, after its
+    /// `z_rotation`. It is seen from the front, with no perspective: its
+    /// height becomes the cosine of this × its height. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_rotation: Option<f64>,
+    /// Degrees a `polygon` is tilted about its vertical axis, after its
+    /// `x_rotation`. It is seen from the front, with no perspective. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_rotation: Option<f64>,
+    /// How round the corners of a `rectangle` are, from 0 to 1: each corner
+    /// is a quarter circle with a radius of this × half of its shorter side.
+    /// Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner_radius: Option<f64>,
+    /// Which parts a `polygon` whose sides cross covers. Usual: `alternate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_method: Option<FillMethod>,
+    /// The corners of a `polygon`, in their order. Each is `[x, y]` from its
+    /// middle: x as a fraction of the width of the picture, and y as a
+    /// fraction of its height, up. From 3 to 128 of them. With fewer, it
+    /// covers nothing. Usual: none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub points: Vec<[f64; 2]>,
+}
+
+/// Which parts a polygon whose sides cross covers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FillMethod {
+    /// A part that the sides go around an even number of times is a hole.
+    #[default]
+    Alternate,
+    /// Each part that the sides go around is covered.
+    NonZeroWinding,
+}
+
 /// The keyframes of one value of an effect.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EffectKeys {
@@ -3601,7 +3853,11 @@ pub struct EffectKeys {
 /// one value, a point with X and Y. `softness`, `opacity` and `saturation` are
 /// values of more than one kind of effect. The six `area_` values are the
 /// center, the size, the rotation and the softness of the area of an effect.
-/// An effect of any kind has them while it has an area.
+/// An effect of any kind has them while it has an area. A node of a
+/// composition has the values of its tool: `size` and `y_size` of a blur,
+/// and `level`, `soft_edge`, `border_width`, `center`, `width`, `height`,
+/// `angle`, `corner_radius`, `size`, `z_rotation`, `x_rotation` and
+/// `y_rotation` of a mask. A blur and an effect also have `blend`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -3685,6 +3941,17 @@ pub enum EffectValue {
     AreaHeight,
     AreaRotation,
     AreaSoftness,
+    YSize,
+    Level,
+    SoftEdge,
+    BorderWidth,
+    Width,
+    Height,
+    Angle,
+    CornerRadius,
+    ZRotation,
+    XRotation,
+    YRotation,
 }
 
 /// What an effect does, with its own values.
@@ -4533,14 +4800,7 @@ impl EffectType {
 
 impl Effect {
     pub fn kind(&self) -> EffectType {
-        match self.kind {
-            EffectKind::GaussianBlur(_) => EffectType::GaussianBlur,
-            EffectKind::MosaicBlur(_) => EffectType::MosaicBlur,
-            EffectKind::Glow(_) => EffectType::Glow,
-            EffectKind::FilmGrain(_) => EffectType::FilmGrain,
-            EffectKind::Vignette(_) => EffectType::Vignette,
-            EffectKind::Sharpen(_) => EffectType::Sharpen,
-        }
+        EffectType::of(&self.kind)
     }
 
     pub fn moves_by_itself(&self) -> bool {
@@ -5228,6 +5488,7 @@ pub enum PictureTool {
     #[serde(rename = "dynamic_zoom")]
     DynamicZoom,
     Composite,
+    Composition,
 }
 
 impl Picture {

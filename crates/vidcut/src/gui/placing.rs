@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
+use vidcut_core::effect_keys::Keyed;
 use vidcut_core::model::{
     AreaShape, Clip, CompositeMode, DynamicZoom, Ease, EffectArea, EffectType, Picture,
     PictureTool, Project, TrackKind, ZoomBox,
@@ -321,7 +322,7 @@ impl Shown {
                     .max_by(|a, b| a.of(&z).size.total_cmp(&b.of(&z).size))
                     .map(Hold::ZoomMove)
             }
-            PictureTool::Composite => None,
+            PictureTool::Composite | PictureTool::Composition => None,
         }
     }
 
@@ -834,7 +835,7 @@ impl Workspace {
         let switch = match tool {
             PictureTool::Transform => Some(("transform_off", pic.transform_off)),
             PictureTool::Crop => Some(("crop_off", pic.crop_off)),
-            PictureTool::DynamicZoom | PictureTool::Composite => None,
+            PictureTool::DynamicZoom | PictureTool::Composite | PictureTool::Composition => None,
         };
         if let Some((key, off)) = switch {
             let mut on = !off;
@@ -1347,7 +1348,7 @@ impl Workspace {
                 }
             }
             PictureTool::DynamicZoom => paint_boxes(&painter, s),
-            PictureTool::Composite => {}
+            PictureTool::Composite | PictureTool::Composition => {}
         }
         if let Some(h) = &self.timeline.picture_grab.held {
             let guide = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 140));
