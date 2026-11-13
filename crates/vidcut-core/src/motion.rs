@@ -189,6 +189,11 @@ impl MotionPath {
     }
 }
 
+pub fn areas_of(paths: &[MotionPath], named: &str, frame: f64) -> Vec<Area> {
+    let followed = paths.iter().filter(|m| m.follows(named));
+    followed.filter_map(|m| m.base_at(frame)).collect()
+}
+
 pub fn samples_problem(samples: &[PathSample]) -> Option<String> {
     if samples.is_empty() {
         return Some("a motion path has at least one sample".into());

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use crate::composition::cleaned;
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
-use crate::model::{Composition, Ease, EffectValue, Node, Project, Tool, ToolType};
+use crate::model::{Composition, Ease, EffectValue, Node, Project, Subject, Tool, ToolType};
 use crate::request::{NodeChange, NodeInput};
 
 use super::effect::{kind_applied, source_frame};
@@ -142,6 +142,18 @@ pub fn add(p: &mut Project, id: &str, tool: ToolType, after: Option<&str>) -> Re
     Ok(json!({ "clip": id, "node": name }))
 }
 
+fn follow_checked(p: &Project, id: &str, named: &str) -> Result<()> {
+    let has = p
+        .clip(id)
+        .is_some_and(|c| c.motion.iter().any(|m| m.id == named));
+    match has || Subject::named(named).is_some() {
+        true => Ok(()),
+        false => Err(Error::not_found(format!(
+            "{id} has no motion path {named} for a mask to follow"
+        ))),
+    }
+}
+
 pub fn copied(p: &mut Project, id: &str, name: &str) -> Result<Node> {
     let c = kept(p, id)?;
     Ok(c.nodes[found(c, id, name)?].clone())
@@ -149,6 +161,9 @@ pub fn copied(p: &mut Project, id: &str, name: &str) -> Result<Node> {
 
 pub fn paste(p: &mut Project, id: &str, mut node: Node, after: Option<&str>) -> Result<Value> {
     node = node_checked(&node)?;
+    if let Some(named) = node.tool.mask().and_then(|m| m.follows.as_deref()) {
+        follow_checked(p, id, named)?;
+    }
     let c = comp_of(p, id)?;
     one_of(c, &node.tool, id)?;
     if c.node(&node.name).is_some() {
@@ -299,6 +314,9 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.border_width, &mut m.border_width);
             taken(&mut left.invert, &mut m.invert);
             taken(&mut left.solid, &mut m.solid);
+            if let Some(follows) = left.follows.take() {
+                m.follows = follows;
+            }
             if let Some(c) = left.values.center.take() {
                 let [x, y] = c[..] else {
                     return Err(Error::invalid("a mask's center is two numbers, [x, y]"));
@@ -354,6 +372,9 @@ pub fn set(
 ) -> Result<()> {
     if *change == NodeChange::default() {
         return Err(Error::usage("comp.set needs a value to change"));
+    }
+    if let Some(Some(named)) = &change.follows {
+        follow_checked(p, id, named)?;
     }
     let frame = at.map(|t| source_frame(p, id, t)).transpose()?;
     let c = kept(p, id)?;
@@ -433,9 +454,14 @@ pub fn reset(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    let follows = n.tool.mask().and_then(|m| m.follows.clone());
+    let mut tool = n.tool.made();
+    if let Some(m) = tool.mask_mut() {
+        m.follows = follows;
+    }
     *n = Node {
         name: n.name.clone(),
-        tool: n.tool.made(),
+        tool,
         input: n.input.take(),
         effect_mask: n.effect_mask.take(),
         pass_through: n.pass_through,

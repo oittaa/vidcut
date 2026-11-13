@@ -3822,6 +3822,17 @@ pub struct Mask {
     /// covers nothing. Usual: none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<[f64; 2]>,
+    /// The id of a motion path of the clip, as `p1`, or a subject, as
+    /// `face`: then each path that `motion.find` made for that subject. The
+    /// box of the path at each frame, turned as the path turns it, then
+    /// takes the place of the whole picture. Its `center` is a fraction of
+    /// that box from its bottom left. Its `width`, its `height` and its
+    /// `points` are fractions of the width and the height of that box. With
+    /// several paths, the mask has its shape in the box of each. It has none
+    /// before a path starts and after it ends. Left out, the mask is on the
+    /// whole picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follows: Option<String>,
 }
 
 /// Which parts a polygon whose sides cross covers.

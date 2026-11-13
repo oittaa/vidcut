@@ -113,9 +113,114 @@ pub enum Softening {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Shaping {
+pub struct Figure {
     pub outline: Outline,
     pub middle: [f64; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaskBase {
+    pub middle: [f64; 2],
+    pub size: [f64; 2],
+    pub round: f64,
+    pub turn: f64,
+}
+
+pub fn turned([x, y]: [f64; 2], turn: f64) -> [f64; 2] {
+    let (s, c) = turn.sin_cos();
+    [x * c + y * s, -x * s + y * c]
+}
+
+impl MaskBase {
+    pub fn whole((w, h): (f64, f64)) -> Self {
+        Self {
+            middle: [w / 2.0, h / 2.0],
+            size: [w, h],
+            round: w,
+            turn: 0.0,
+        }
+    }
+
+    pub fn of(a: &Area, (w, h): (f64, f64)) -> Self {
+        let size = [a.size[0] * w, a.size[1] * h];
+        Self {
+            middle: [a.center[0] * w, a.center[1] * h],
+            size,
+            round: size[1],
+            turn: a.rotation.to_radians(),
+        }
+    }
+
+    pub fn all(m: &Mask, (w, h): (f64, f64), areas: &dyn Fn(&str) -> Vec<Area>) -> Vec<Self> {
+        match m.follows.as_deref() {
+            None => vec![Self::whole((w, h))],
+            Some(named) => areas(named).iter().map(|a| Self::of(a, (w, h))).collect(),
+        }
+    }
+
+    pub fn unturned(&self) -> Self {
+        Self {
+            middle: [self.size[0] / 2.0, self.size[1] / 2.0],
+            turn: 0.0,
+            ..*self
+        }
+    }
+
+    pub fn screen(&self, [x, y]: [f64; 2]) -> [f64; 2] {
+        let [dx, dy] = turned([x - self.size[0] / 2.0, y - self.size[1] / 2.0], self.turn);
+        [self.middle[0] + dx, self.middle[1] + dy]
+    }
+
+    pub fn own(&self, [x, y]: [f64; 2]) -> [f64; 2] {
+        let [dx, dy] = turned([x - self.middle[0], y - self.middle[1]], -self.turn);
+        [dx + self.size[0] / 2.0, dy + self.size[1] / 2.0]
+    }
+}
+
+impl Figure {
+    pub const NONE: Self = Self {
+        outline: Outline::Polygon {
+            points: Vec::new(),
+            winding: false,
+        },
+        middle: [0.0, 0.0],
+    };
+    const ROUND: u32 = 72;
+
+    pub fn line(&self) -> Vec<[f64; 2]> {
+        let at = |[x, y]: [f64; 2], turn: f64| {
+            let [dx, dy] = turned([x, y], turn);
+            [self.middle[0] + dx, self.middle[1] + dy]
+        };
+        match &self.outline {
+            Outline::Ellipse { half, turn } => (0..=Self::ROUND)
+                .map(|i| {
+                    let a = f64::from(i) / f64::from(Self::ROUND) * std::f64::consts::TAU;
+                    at([half[0] * a.cos(), half[1] * a.sin()], *turn)
+                })
+                .collect(),
+            Outline::Rectangle { half, turn, .. } => [
+                [-1.0, -1.0],
+                [1.0, -1.0],
+                [1.0, 1.0],
+                [-1.0, 1.0],
+                [-1.0, -1.0],
+            ]
+            .iter()
+            .map(|[x, y]| at([x * half[0], y * half[1]], *turn))
+            .collect(),
+            Outline::Polygon { points, .. } => {
+                let mut out = points.clone();
+                out.extend(points.first());
+                out
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shaping {
+    pub figures: Vec<Figure>,
     pub border: f64,
     pub solid: bool,
     pub level: f64,
@@ -146,13 +251,14 @@ fn box_width(sigma: f64, count: u32) -> f64 {
 }
 
 impl Shaping {
-    pub fn of(m: &Mask, tool: &Tool, (w, h): (f64, f64)) -> Self {
+    pub fn figure(m: &Mask, tool: &Tool, b: &MaskBase) -> Figure {
         let [cx, cy] = m.middle();
-        let middle = [cx * w, (1.0 - cy) * h];
-        let turn = m.turn().to_radians();
+        let [w, h] = b.size;
+        let own = [cx * w, (1.0 - cy) * h];
+        let turn = m.turn().to_radians() + b.turn;
         let outline = match tool {
             Tool::Ellipse(_) => Outline::Ellipse {
-                half: [m.wide() * w / 2.0, m.high() * w / 2.0],
+                half: [m.wide() * w / 2.0, m.high() * b.round / 2.0],
                 turn,
             },
             Tool::Rectangle(_) => {
@@ -167,11 +273,18 @@ impl Shaping {
                 points: m
                     .points
                     .iter()
-                    .map(|p| Self::tilted(m, *p, middle, (w, h)))
+                    .map(|p| b.screen(Self::tilted(m, *p, own, (w, h))))
                     .collect(),
                 winding: m.fill_method == Some(FillMethod::NonZeroWinding),
             },
         };
+        Figure {
+            outline,
+            middle: b.screen(own),
+        }
+    }
+
+    pub fn of(m: &Mask, tool: &Tool, w: f64, bases: &[MaskBase]) -> Self {
         let s = m.soft();
         let soft = (s > 0.0).then(|| match boxes_of(m.filter(), m.passes()) {
             Some(count) => Softening::Boxes {
@@ -184,8 +297,7 @@ impl Shaping {
             }),
         });
         Self {
-            outline,
-            middle,
+            figures: bases.iter().map(|b| Self::figure(m, tool, b)).collect(),
             border: m.border() * w / 2.0,
             solid: m.solid,
             level: m.level(),
@@ -815,7 +927,12 @@ impl Working {
     }
 }
 
-pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64) -> Vec<Working> {
+pub fn composed(
+    c: &Composition,
+    (w, h): (f64, f64),
+    frame: i64,
+    areas: &dyn Fn(&str) -> Vec<Area>,
+) -> Vec<Working> {
     let Some(chain) = c.chain() else {
         return vec![Working::plain(Work::Clear, 1.0)];
     };
@@ -853,7 +970,11 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64) -> Vec<Working>
                 .masks_of(n)
                 .into_iter()
                 .filter(|m| !m.pass_through)
-                .filter_map(|m| Some(Shaping::of(m.tool.mask()?, &m.tool, (w, h))))
+                .filter_map(|m| {
+                    let mask = m.tool.mask()?;
+                    let bases = MaskBase::all(mask, (w, h), areas);
+                    Some(Shaping::of(mask, &m.tool, w, &bases))
+                })
                 .collect();
             Some(working)
         })
@@ -1081,7 +1202,8 @@ impl Placing {
             let sampled = Composition {
                 nodes: c.nodes.iter().map(|n| n.sampled(at)).collect(),
             };
-            composed(&sampled, pixels, p.frame)
+            let areas = |named: &str| p.followed.bases(named, p.source);
+            composed(&sampled, pixels, p.frame, &areas)
         });
         Self {
             level: own,

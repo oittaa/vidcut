@@ -117,6 +117,7 @@ impl Default for Mask {
             corner_radius: None,
             fill_method: None,
             points: Vec::new(),
+            follows: None,
         }
     }
 }

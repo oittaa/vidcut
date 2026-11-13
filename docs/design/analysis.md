@@ -140,8 +140,10 @@ flowchart TD
 
 ## Tracks
 
-- `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
+- `motion.track` follows the thing under the area of an effect, or under a mask ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
 - `ops::motion::start` gives the box to follow: the bounds of the area on the first frame of the track (`Area::within`, `Area::bounds`).
+  - For a mask, it takes the outline of the mask on that frame (`Shaping::figure`, `Figure::line`). The box to follow is the box around it.
+  - The path of an ellipse or a rectangle is its own box. The path of a polygon is the box around it, with no turn.
 - `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:
   - It reads the pictures that `subjects::find` reads: the first decoded frame at or after each time of the `Look`.
   - `Seeing::start` chooses the size of the pictures: the search area of the model then has about its own size. The longer side is from 320 to 1280 pixels.
@@ -161,6 +163,8 @@ flowchart TD
   - A path with `tracked` that only this area follows gets the new samples. It keeps its id and its name.
   - Else the area gets a new path, with `tracked` and the name Track and a number. The path that it followed stays as it is.
   - A track of one way keeps the samples of the other side of a track that the area followed (`TrackWay`).
+  - A mask then fills the box of the path. An ellipse or a rectangle gets the middle of the box, a width and a height of 1 and no angle.
+  - A polygon gets its points as parts of the box, a size of 1 and no rotation. Thus it keeps its shape on the first frame.
 - In a GUI, `Live::measuring` measures first (`editor::track_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model file is `catalog::VITTRACK_ONNX`. `tracking::get_ready` fetches it when the request has `download`.
 

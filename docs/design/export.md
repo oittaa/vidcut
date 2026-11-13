@@ -577,7 +577,7 @@ Dynamic Zoom and keyframes (D75):
 - `Effect::sampled` reads each keyed value of an effect at that frame. `Working::of` then builds the work of the effect from plain values.
 - `layer_size` fits the layer for the closer Dynamic Zoom box (`DynamicZoom::closest`) and the largest zoom key (`place::detail`).
 - The viewer and the export both take this `Placing`. Thus there is one draw path.
-- `Placed` also holds the motion paths that the areas of its effects follow (`render::Followed`, [model](model.md#motion-paths)).
+- `Placed` also holds the motion paths that the areas of its effects and the masks of its composition follow (`render::Followed`, [model](model.md#motion-paths)).
   - `Followed::of` takes them from the clip, with the pace of the clip and the source frame of its first frame.
   - A path shares its samples with the clip (`MotionPath.samples`). Thus a placed picture copies no sample, and two plans of one project compare them by their place in memory.
   - `Followed::bases` gives the area of each followed path at the frame (`MotionPath::base_at`). It goes from the keyframe frame to the source frame through the pace.
@@ -740,8 +740,16 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
 - An effect tool gives the work of its clip effect, through `Working::of`. Its sizes follow the picture, as on a frame of the same size (`place::OnFrame`).
   - With `blur_alpha` off, a Gaussian Blur has no sigma on the alpha.
 - `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out.
-  - `place::Shaping` holds one mask in the pixels of the picture: its `place::Outline`, its middle, its border, Solid, Level, Invert and its `place::Softening`.
+  - `place::Shaping` holds one mask in the pixels of the picture: a `place::Figure` for each place of the mask, its border, Solid, Level and Invert.
+  - Its `place::Softening` is the blur of its soft edge.
+  - A `place::Figure` holds a `place::Outline` and its middle.
   - `Shaping::tilted` turns, tilts and sizes the points of a polygon on the CPU. The shader thus gets the points in pixels.
+- A `place::MaskBase` is the box that a mask takes as its picture (`MaskBase::all`):
+  - Without `follows`, it is the whole picture (`MaskBase::whole`).
+  - With `follows`, it is the box of each followed path at the frame (`MaskBase::of`). `place::composed` gets these boxes through `Followed::bases`.
+  - With no path at the frame, the mask has no figure. It then covers nothing, and with Invert it covers all.
+  - `Shaping::figure` puts the shape of the mask into one base. The turn of the box adds to the turn of the mask.
+  - The border and the soft edge stay parts of the width of the picture. Why: a soft edge then looks the same on each box.
 
 The draw:
 
@@ -758,6 +766,7 @@ The draw:
 The masks:
 
 - `blur::mask_made` makes the mask of a tool before its passes. It uses the two pictures of the passes and two pictures of `Worked.masks`.
+  - It draws each figure of a mask into one picture before the soft edge. `fs_shape` keeps the larger cover of the figures there.
 - `fs_shape` draws the coverage of one mask from the distance to its edge. Each edge thus fades over one pixel.
   - `ellipse_distance` finds the nearest point of the ellipse by Newton steps. `box_distance` gives the distance to a box with round corners.
   - `polygon_distance` takes the nearest side, and the winding number for the inside.

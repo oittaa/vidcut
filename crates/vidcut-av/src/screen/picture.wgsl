@@ -1474,6 +1474,9 @@ fn fs_shape(in: Out) -> @location(0) vec4<f32> {
     if shaping.edge.y > 0.5 {
         cover = clamp(0.5 - (d - border), 0.0, 1.0);
     }
+    if shaping.edge.w > 0.5 {
+        cover = max(cover, textureLoad(blur_source, vec2<i32>(at), 0).r);
+    }
     return vec4<f32>(cover);
 }
 

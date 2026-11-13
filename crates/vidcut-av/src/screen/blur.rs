@@ -1,8 +1,8 @@
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{AreaShape, GlowOutput};
 use vidcut_core::place::{
-    Blurring, Boxing, GlowSpread, Glowing, GrainTile, Graining, Level, Masking, Outline, Placing,
-    Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
+    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Masking, Outline,
+    Placing, Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
 };
 
 use super::{Gpu, MIXING, begin, grain, sharpen, vignette};
@@ -279,13 +279,13 @@ fn soft_steps(pipes: &Pipes, soft: Option<Softening>) -> Vec<(&wgpu::RenderPipel
     }
 }
 
-fn shape_bytes(shape: &Shaping) -> Vec<u8> {
-    let (kind, half, turn, corner, count, winding) = match &shape.outline {
+fn shape_bytes(shape: &Shaping, figure: &Figure, joined: bool) -> Vec<u8> {
+    let (kind, half, turn, corner, count, winding) = match &figure.outline {
         Outline::Ellipse { half, turn } => (0.0, *half, *turn, 0.0, 0, false),
         Outline::Rectangle { half, turn, corner } => (1.0, *half, *turn, *corner, 0, false),
         Outline::Polygon { points, winding } => (2.0, [0.0; 2], 0.0, 0.0, points.len(), *winding),
     };
-    let [mx, my] = shape.middle;
+    let [mx, my] = figure.middle;
     float_bytes(&[
         mx,
         my,
@@ -298,12 +298,12 @@ fn shape_bytes(shape: &Shaping) -> Vec<u8> {
         shape.border,
         flag(shape.solid),
         flag(winding),
-        0.0,
+        flag(joined),
     ])
 }
 
-fn shape_points(gpu: &Gpu, shape: &Shaping) -> wgpu::Buffer {
-    let mut floats: Vec<f64> = match &shape.outline {
+fn shape_points(gpu: &Gpu, figure: &Figure) -> wgpu::Buffer {
+    let mut floats: Vec<f64> = match &figure.outline {
         Outline::Polygon { points, .. } => points.iter().flatten().copied().collect(),
         _ => Vec::new(),
     };
@@ -328,15 +328,23 @@ fn mask_made<'a>(
     encoder: &mut wgpu::CommandEncoder,
 ) -> &'a wgpu::TextureView {
     let mut kept: Option<usize> = None;
+    let none = [Figure::NONE];
     for shape in shapes {
-        let points = shape_points(gpu, shape);
-        let views = Views {
-            cells: Some(&points),
-            ..Views::same(&scratch[1].view)
+        let figures = match shape.figures.is_empty() {
+            true => &none[..],
+            false => &shape.figures[..],
         };
-        let drawn = (&gpu.blur.shape, &shape_bytes(shape)[..]);
-        draw_step(gpu, drawn, views, &scratch[0].view, encoder);
-        let mut from = 0;
+        let mut from = 1;
+        for (i, figure) in figures.iter().enumerate() {
+            let points = shape_points(gpu, figure);
+            let views = Views {
+                cells: Some(&points),
+                ..Views::same(&scratch[from].view)
+            };
+            let drawn = (&gpu.blur.shape, &shape_bytes(shape, figure, i > 0)[..]);
+            draw_step(gpu, drawn, views, &scratch[1 - from].view, encoder);
+            from = 1 - from;
+        }
         for (pipeline, bytes) in soft_steps(&gpu.blur, shape.soft) {
             let views = Views::same(&scratch[from].view);
             draw_step(

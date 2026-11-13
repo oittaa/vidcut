@@ -290,6 +290,11 @@ The bar and the Jobs button:
 - A copied node is a value in `EffectsPage`. Paste sends it in `comp.paste` as `copy`. Thus a node that changes after Copy pastes as it was.
 - A drag from a knot, or from a half of a join, makes a `Linking`. The drop sends `comp.connect` for the new join, and parts the join that the drag took.
 - Several edits of one key go as one `apply`. Thus one undo step takes them back.
+- A mask that follows a path has its handles on the box of the first path at the frame. A drag works in that box (`MaskBase::own`).
+- Track on a mask sends `motion.track` with the `node` (`Workspace::track_node`).
+- The Motion section is at the bottom of the Inspector of the page (`Workspace::page_motion`).
+  - Blur there sends one `apply`. It holds `motion.find` when the clip has no paths of the subject.
+  - It then adds a Mosaic Blur and a mask that follows the subject.
 
 **View state.**
 

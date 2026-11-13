@@ -668,7 +668,9 @@ impl PartialEq for Followed {
 impl Followed {
     pub fn of(clip: &Clip, picture: &Picture) -> Self {
         let named = |e: &crate::model::Effect| e.area.as_ref()?.follows.clone();
-        let named: Vec<String> = picture.effects.iter().filter_map(named).collect();
+        let mut named: Vec<String> = picture.effects.iter().filter_map(named).collect();
+        let nodes = picture.composition.iter().flat_map(|c| &c.nodes);
+        named.extend(nodes.filter_map(|n| n.tool.mask()?.follows.clone()));
         let follows = |m: &&MotionPath| named.iter().any(|n| m.follows(n));
         let shared = |m: &MotionPath| MotionPath {
             id: m.id.clone(),
@@ -713,8 +715,7 @@ impl Followed {
 
     pub fn bases(&self, named: &str, source: i64) -> Vec<Area> {
         let frame = (self.from + self.pace.offset(source - self.key)) as f64;
-        let followed = self.paths.iter().filter(|m| m.follows(named));
-        followed.filter_map(|m| m.base_at(frame)).collect()
+        crate::motion::areas_of(&self.paths, named, frame)
     }
 
     pub fn stamp_at(&self, source: i64) -> u64 {

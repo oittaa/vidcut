@@ -7,7 +7,7 @@ use eframe::egui::{
 use serde_json::{Value, json};
 use vidcut_core::effect_keys::Keyed;
 use vidcut_core::model::{Clip, Composition, EffectValue, Mask, Node, Project, Tool, ToolType};
-use vidcut_core::place::{Outline, Shaping};
+use vidcut_core::place::{Figure, MaskBase, Outline, Shaping, turned};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::request::{NodeInput, Page};
 use vidcut_core::shortcuts::{Action, Panel};
@@ -335,11 +335,6 @@ pub(super) fn stored_composition(c: &Clip) -> Composition {
         .unwrap_or_else(Composition::plain)
 }
 
-fn turned([x, y]: [f64; 2], turn: f64) -> [f64; 2] {
-    let (s, c) = turn.sin_cos();
-    [x * c + y * s, -x * s + y * c]
-}
-
 fn plus(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
     [a[0] + b[0], a[1] + b[1]]
 }
@@ -348,43 +343,12 @@ fn rounded(x: f64) -> f64 {
     (x * ROUND).round() / ROUND
 }
 
-fn outline_points(s: &Shaping) -> Vec<[f64; 2]> {
-    match &s.outline {
-        Outline::Ellipse { half, turn } => (0..=72)
-            .map(|i| {
-                let a = f64::from(i) / 72.0 * std::f64::consts::TAU;
-                plus(
-                    s.middle,
-                    turned([half[0] * a.cos(), half[1] * a.sin()], *turn),
-                )
-            })
-            .collect(),
-        Outline::Rectangle { half, turn, .. } => [
-            [-1.0, -1.0],
-            [1.0, -1.0],
-            [1.0, 1.0],
-            [-1.0, 1.0],
-            [-1.0, -1.0],
-        ]
-        .iter()
-        .map(|[x, y]| plus(s.middle, turned([x * half[0], y * half[1]], *turn)))
-        .collect(),
-        Outline::Polygon { points, .. } => {
-            let mut out = points.clone();
-            if let Some(first) = points.first() {
-                out.push(*first);
-            }
-            out
-        }
-    }
-}
-
-fn grips(s: &Shaping) -> Vec<(Grip, [f64; 2])> {
-    let mut out = vec![(Grip::Center, s.middle)];
-    match &s.outline {
+fn grips(f: &Figure) -> Vec<(Grip, [f64; 2])> {
+    let mut out = vec![(Grip::Center, f.middle)];
+    match &f.outline {
         Outline::Ellipse { half, turn } | Outline::Rectangle { half, turn, .. } => {
-            out.push((Grip::Width, plus(s.middle, turned([half[0], 0.0], *turn))));
-            out.push((Grip::Height, plus(s.middle, turned([0.0, -half[1]], *turn))));
+            out.push((Grip::Width, plus(f.middle, turned([half[0], 0.0], *turn))));
+            out.push((Grip::Height, plus(f.middle, turned([0.0, -half[1]], *turn))));
         }
         Outline::Polygon { points, .. } => {
             out.extend(points.iter().enumerate().map(|(i, p)| (Grip::Point(i), *p)));
@@ -403,8 +367,13 @@ fn inverse(a: [[f64; 2]; 2]) -> Option<[[f64; 2]; 2]> {
     })
 }
 
-fn gripped(m: &mut Mask, tool: &Tool, grip: Grip, at: [f64; 2], (w, h): (f64, f64)) {
-    let s = Shaping::of(m, tool, (w, h));
+fn gripped(m: &mut Mask, tool: &Tool, grip: Grip, at: [f64; 2], base: &MaskBase) {
+    let [w, h] = base.size;
+    if !(w > 0.0 && h > 0.0) {
+        return;
+    }
+    let s = Shaping::figure(m, tool, &base.unturned());
+    let at = base.own(at);
     let (lo, hi) = Mask::PLACES;
     match (grip, &s.outline) {
         (Grip::Center, _) => {
@@ -419,7 +388,7 @@ fn gripped(m: &mut Mask, tool: &Tool, grip: Grip, at: [f64; 2], (w, h): (f64, f6
             match grip {
                 Grip::Width => m.width = Some(rounded_size(2.0 * x.max(0.0) / w)),
                 _ => {
-                    let side = if ellipse { w } else { h };
+                    let side = if ellipse { base.round } else { h };
                     m.height = Some(rounded_size(2.0 * (-y).max(0.0) / side));
                 }
             }
@@ -514,7 +483,7 @@ impl Workspace {
             return h.composition.clone();
         }
         let mut c = stored_composition(clip);
-        let source = clip.source_at(self.snap.timeline.position) as f64;
+        let source = clip.content_at(self.snap.timeline.position) as f64;
         self.node_preview(&mut c, source);
         c
     }
@@ -967,10 +936,12 @@ impl Workspace {
             return;
         };
         let at = self.snap.timeline.position;
-        let node = node.sampled(clip.source_at(at) as f64);
+        let node = node.sampled(clip.content_at(at) as f64);
         let Some(m) = node.tool.mask() else {
             return;
         };
+        let frame = clip.source_at(at) as f64;
+        let areas = |named: &str| vidcut_core::motion::areas_of(&clip.motion, named, frame);
         let (w, h) = (f64::from(w), f64::from(h));
         let scale = f64::from(picture.width()) / w;
         let screen = |[x, y]: [f64; 2]| picture.min + vec2((x * scale) as f32, (y * scale) as f32);
@@ -978,12 +949,18 @@ impl Workspace {
             let d = p - picture.min;
             [f64::from(d.x) / scale, f64::from(d.y) / scale]
         };
-        let shaping = Shaping::of(m, &node.tool, (w, h));
-        let line: Vec<Pos2> = outline_points(&shaping).into_iter().map(screen).collect();
+        let bases = MaskBase::all(m, (w, h), &areas);
+        let shaping = Shaping::of(m, &node.tool, w, &bases);
         let painter = ui.painter_at(resp.rect);
         let accent = theme::colors().accent;
-        painter.add(egui::Shape::line(line, Stroke::new(1.5, accent)));
-        let spots = grips(&shaping);
+        for f in &shaping.figures {
+            let line: Vec<Pos2> = f.line().into_iter().map(screen).collect();
+            painter.add(egui::Shape::line(line, Stroke::new(1.5, accent)));
+        }
+        let (Some(first), Some(base)) = (shaping.figures.first(), bases.first()) else {
+            return;
+        };
+        let spots = grips(first);
         for (grip, spot) in &spots {
             let s = screen(*spot);
             match grip {
@@ -1025,7 +1002,7 @@ impl Workspace {
                 });
             }
         }
-        let source = clip.source_at(at) as f64;
+        let source = clip.content_at(at) as f64;
         let rev = self.project().map_or(0, |p| p.rev);
         let held = self
             .effects_page
@@ -1046,7 +1023,7 @@ impl Workspace {
             let tool = n.sampled(source).tool;
             if let (Some(m), Some(now)) = (n.tool.mask_mut(), tool.mask()) {
                 *m = now.clone();
-                gripped(m, &tool, held.grip, pixel(to), (w, h));
+                gripped(m, &tool, held.grip, pixel(to), base);
             }
         }
         if !resp.drag_stopped() {

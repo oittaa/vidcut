@@ -2570,8 +2570,16 @@ The shapes:
   - Its arrows go to the keyframes on each side.
   - After a value has a keyframe, a change on another frame puts a keyframe there.
 - When the active node is a mask, the viewer shows its edge, its center and its handles. A drag of one changes the mask.
+- A mask follows a tracked thing when its Center connects to the Offset Position of a tracker (p. 1793).
+  - vidcut: Follow in the Inspector of a mask picks a motion path of the clip, or all the paths of a subject ([X168](deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
+  - The box of the path then takes the place of the whole picture for the mask. With several paths, the viewer shows the edge of the mask in each box. The handles are on the first box.
+  - vidcut: Track under the controls of a mask makes a motion path for the thing under the mask, and the mask follows it.
+- vidcut: the Motion section is at the bottom of the Inspector of the page ([X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+  - Find there finds the things of a subject in the clip of the page.
+  - Blur there adds a Mosaic Blur before Media Out, with a mask on its effect mask that follows the subject.
 
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key` and `comp.reset`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
+`comp.set` with `follows` makes a mask follow a path. `motion.track` with `node` tracks a mask.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

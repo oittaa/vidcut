@@ -16,8 +16,8 @@ use vidcut_core::model::{
     Composition, DynamicZoom, Ease, EbuLevel, Effect, EffectArea, EffectKind, EffectType,
     EffectValue, FillMethod, FilmGrain, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
     GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, MotionPath, Node,
-    Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject, Tool, TrackKind, Upscaler,
-    Vignette, VignetteMode, VignetteShape, ZoomBox,
+    Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject, Tool, ToolType, TrackKind,
+    Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::motion::{REACH, TURN};
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
@@ -1426,7 +1426,13 @@ fn fill_label(f: FillMethod) -> &'static str {
 
 const FILLS: [FillMethod; 2] = [FillMethod::Alternate, FillMethod::NonZeroWinding];
 
-fn node_rows(ui: &mut egui::Ui, i: &Inspector, (slot, n): (usize, &Node), acts: &mut Vec<Act>) {
+fn node_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n): (usize, &Node),
+    paths: Option<&[PathRow]>,
+    acts: &mut Vec<Act>,
+) {
     use EffectValue as V;
     let value = |ui: &mut egui::Ui, acts: &mut Vec<Act>, v: V, text: &str| {
         node_value(ui, i, (slot, n), (v, text), acts);
@@ -1482,6 +1488,11 @@ fn node_rows(ui: &mut egui::Ui, i: &Inspector, (slot, n): (usize, &Node), acts: 
                 ui.end_row();
                 return;
             };
+            if let Some(paths) = paths {
+                let salt = ("node-follow", slot);
+                let set = |v: Value| node_set(slot, "follows", v);
+                follow_row(ui, (salt, m.follows.as_deref()), paths, set, acts);
+            }
             value(ui, acts, V::Level, "Level");
             let filter = (m.filter(), BlurFilter::default());
             choice_row(ui, (slot, "Filter", "filter"), filter, filters, acts);
@@ -1563,10 +1574,12 @@ impl Workspace {
             .collect();
         if picked.is_empty() {
             ui.label(dim("Select a node"));
+            self.page_motion(ui, &clip);
             return;
         }
+        let paths = vidcut_core::ops::motion::takes(&clip).then(|| path_rows(&clip));
         let at = self.snap.timeline.position;
-        let source = clip.source_at(at) as f64;
+        let source = clip.content_at(at) as f64;
         for &k in &picked {
             let n = &comp.nodes[k];
             for v in n.values() {
@@ -1590,7 +1603,10 @@ impl Workspace {
                     node_header(ui, n, on, &mut acts);
                     let slot = node_slot(k);
                     rows(ui, (slot, "node"), |ui| {
-                        node_rows(ui, i, (slot, n), &mut acts);
+                        node_rows(ui, i, (slot, n), paths.as_deref(), &mut acts);
+                        if paths.is_some() && n.tool.is_mask() {
+                            track_row(ui, &mut acts);
+                        }
                     });
                     ui.separator();
                     all.push(acts);
@@ -1599,6 +1615,39 @@ impl Workspace {
         for ((&k, n), acts) in picked.iter().zip(&shown).zip(all) {
             self.node_acts(acts, &clip, (&comp.nodes[k], n));
         }
+        self.page_motion(ui, &clip);
+    }
+
+    fn page_motion(&mut self, ui: &mut egui::Ui, clip: &Clip) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let picture = clip.picture.clone().unwrap_or_default();
+        let chosen = Chosen {
+            id: clip.id.clone(),
+            shown: picture.clone(),
+            stored: picture,
+            shape: shape(&p, clip),
+            frame: clip.content_at(self.snap.timeline.position),
+            effect_keys: Vec::new(),
+            paths: path_rows(clip),
+            finds: vidcut_core::ops::motion::takes(clip),
+        };
+        self.motion_section(ui, &chosen, true);
+    }
+
+    fn track_node(&mut self, clip: &Clip, node: &Node) {
+        let follows = node.tool.mask().and_then(|m| m.follows.as_ref());
+        let at = self.snap.timeline.position;
+        let followed = clip.motion.iter().find(|m| Some(&m.id) == follows);
+        let first = followed.and_then(|m| m.span()).map(|(first, _)| first);
+        let way = match first {
+            None => "both",
+            Some(first) if clip.source_at(at) <= first => "backward",
+            Some(_) => "forward",
+        };
+        let params = json!({ "clip": clip.id, "node": node.name, "at": at, "way": way });
+        self.track_request(params);
     }
 
     fn node_acts(&mut self, acts: Vec<Act>, clip: &Clip, (stored, shown): (&Node, &Node)) {
@@ -1680,6 +1729,7 @@ impl Workspace {
                     }
                 }
                 Act::NodeReset => self.send_node("comp.reset", clip, stored, json!({})),
+                Act::NodeTrack => self.track_node(clip, stored),
                 Act::NodeActive => {
                     let mut nodes = self.effects_page.nodes.clone();
                     nodes.retain(|x| *x != stored.name);
@@ -2107,6 +2157,7 @@ enum Act {
     Tint(usize, [u8; 3], [u8; 3]),
     NodeReset,
     NodeActive,
+    NodeTrack,
 }
 
 fn param_name(key: Key) -> Option<&'static str> {
@@ -3456,11 +3507,11 @@ pub(super) fn all_of(subject: Subject) -> String {
 
 fn follow_row(
     ui: &mut egui::Ui,
-    (n, a): (usize, &EffectArea),
+    (salt, now): ((&str, usize), Option<&str>),
     paths: &[PathRow],
+    set: impl Fn(Value) -> Act,
     acts: &mut Vec<Act>,
 ) {
-    let now = a.follows.as_deref();
     let subject = now.and_then(Subject::named);
     let followed = paths.iter().find(|p| Some(p.id.as_str()) == now);
     let shown = match (subject, followed) {
@@ -3469,29 +3520,76 @@ fn follow_row(
         (None, None) => "None".to_string(),
     };
     label(ui, "Follow", now.is_some());
-    egui::ComboBox::from_id_salt(("inspector-area-follow", n))
+    egui::ComboBox::from_id_salt(salt)
         .selected_text(shown)
         .show_ui(ui, |ui| {
             if ui.selectable_label(now.is_none(), "None").clicked() && now.is_some() {
-                acts.push(area_set(n, json!({ "follows": null })));
+                acts.push(set(Value::Null));
             }
             for s in SUBJECTS {
                 let on = subject == Some(s);
                 if ui.selectable_label(on, all_of(s)).clicked() && !on {
-                    acts.push(area_set(n, json!({ "follows": s.name() })));
+                    acts.push(set(json!(s.name())));
                 }
             }
             for p in paths {
                 let on = Some(p.id.as_str()) == now;
                 if ui.selectable_label(on, p.label()).clicked() && !on {
-                    acts.push(area_set(n, json!({ "follows": p.id })));
+                    acts.push(set(json!(p.id)));
                 }
             }
         });
     if reset(ui, now.is_some()) {
-        acts.push(area_set(n, json!({ "follows": null })));
+        acts.push(set(Value::Null));
     }
     ui.end_row();
+}
+
+fn track_row(ui: &mut egui::Ui, acts: &mut Vec<Act>) {
+    label(ui, "", false);
+    if ui.button("Track").clicked() {
+        acts.push(Act::NodeTrack);
+    }
+    ui.end_row();
+}
+
+fn page_blur(c: &Chosen, (subject, extra): (Subject, &Value)) -> Option<(&'static str, Value)> {
+    let comp = c
+        .stored
+        .composition
+        .clone()
+        .unwrap_or_else(Composition::plain);
+    let follows =
+        |n: &Node| n.tool.mask().and_then(|m| m.follows.as_deref()) == Some(subject.name());
+    let mut commands = Vec::new();
+    if !found(c, subject) {
+        let params = with_extra(json!({ "clips": [c.id], "subject": subject }), extra);
+        commands.push(json!({ "method": "motion.find", "params": params }));
+    }
+    if !comp.nodes.iter().any(follows) {
+        let after = comp.out().and_then(|o| o.input.clone());
+        let blur = comp.free_name(ToolType::MosaicBlur.made().base());
+        let shape = match boxed(subject) {
+            true => ToolType::Rectangle,
+            false => ToolType::Ellipse,
+        };
+        let mask = comp.free_name(shape.made().base());
+        let [width, height] = BLUR_SIZE;
+        let add = json!({ "clip": c.id, "tool": ToolType::MosaicBlur, "after": after });
+        let masked = json!({ "clip": c.id, "tool": shape, "after": blur });
+        let set = json!({
+            "clip": c.id,
+            "node": mask,
+            "follows": subject.name(),
+            "width": width,
+            "height": height,
+        });
+        commands.push(json!({ "method": "comp.add", "params": add }));
+        commands.push(json!({ "method": "comp.add", "params": masked }));
+        commands.push(json!({ "method": "comp.set", "params": set }));
+    }
+    let label = format!("Blur {}", subject.many());
+    (!commands.is_empty()).then(|| ("apply", json!({ "commands": commands, "label": label })))
 }
 
 fn area_rows(
@@ -3553,7 +3651,9 @@ fn area_rows(
         }
         ui.end_row();
         area(ui, AreaKnob::Softness, acts);
-        follow_row(ui, (n, a), paths, acts);
+        let salt = ("inspector-area-follow", n);
+        let set = |v: Value| area_set(n, json!({ "follows": v }));
+        follow_row(ui, (salt, a.follows.as_deref()), paths, set, acts);
     });
     if e.area.is_some() {
         fold(ui, (n, "Area Advanced Controls"), |ui| {
@@ -4822,6 +4922,10 @@ impl Workspace {
             Some(_) => "forward",
         };
         let params = json!({ "clip": clip, "effect": effect, "at": at, "way": way });
+        self.track_request(params);
+    }
+
+    fn track_request(&mut self, params: Value) {
         if model_needs(None).is_empty() {
             self.send("motion.track", params);
         } else {
@@ -4855,7 +4959,7 @@ impl Workspace {
         }
     }
 
-    fn motion_section(&mut self, ui: &mut egui::Ui, c: &Chosen) {
+    fn motion_section(&mut self, ui: &mut egui::Ui, c: &Chosen, page: bool) {
         if !c.finds {
             return;
         }
@@ -4893,7 +4997,10 @@ impl Workspace {
                         asked = Some(find_request(c, subject, &given));
                     }
                     let had = found(c, subject);
-                    let blur = blur_request(&c.id, had, &c.stored.effects, (subject, &given));
+                    let blur = match page {
+                        true => page_blur(c, (subject, &given)),
+                        false => blur_request(&c.id, had, &c.stored.effects, (subject, &given)),
+                    };
                     let button = egui::Button::new("Blur");
                     if ui.add_enabled(blur.is_some(), button).clicked() {
                         tried = true;
@@ -5237,7 +5344,7 @@ impl Workspace {
     fn inspect(&mut self, act: Act, (chosen, sounds, paced): Lists<'_>) {
         let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
-            Act::NodeReset | Act::NodeActive => {}
+            Act::NodeReset | Act::NodeActive | Act::NodeTrack => {}
             Act::Denoise(on) => {
                 let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
                 self.send(
@@ -5632,7 +5739,7 @@ impl Workspace {
                     composite(ui, i, p, at, &chosen, &mut acts);
                     self.input_lut_section(ui, p, &chosen);
                     self.super_scale_section(ui, p, &chosen);
-                    self.motion_section(ui, &chosen[0]);
+                    self.motion_section(ui, &chosen[0], false);
                 }
                 if tab == Tab::Effects && !chosen.is_empty() {
                     self.inspector.area_edit = self.timeline.picture_grab.area;

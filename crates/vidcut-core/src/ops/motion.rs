@@ -5,10 +5,11 @@ use serde_json::{Value, json};
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Effect, EffectArea, EffectValue, Follow, MotionPath, PathSample, Project, Subject, Title,
-    TitleKind, Track, TrackWay,
+    Clip, Effect, EffectArea, EffectValue, Follow, Mask, MotionPath, Node, PathSample, Project,
+    Subject, Title, TitleKind, Tool, Track, TrackWay,
 };
 use crate::motion::{self, Area};
+use crate::place::{MaskBase, Outline, Shaping};
 
 use super::locate;
 
@@ -112,9 +113,40 @@ pub fn set(p: &mut Project, id: &str, path: &str, change: PathChange) -> Result<
     Ok(())
 }
 
-fn followers(c: &Clip) -> impl Iterator<Item = (usize, &str)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Follower<'a> {
+    Effect(usize),
+    Mask(&'a str),
+}
+
+impl std::fmt::Display for Follower<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Effect(n) => write!(f, "the area of effect {n}"),
+            Self::Mask(name) => write!(f, "mask {name}"),
+        }
+    }
+}
+
+impl Follower<'_> {
+    fn request(&self) -> &'static str {
+        match self {
+            Self::Effect(_) => "effects.set",
+            Self::Mask(_) => "comp.set",
+        }
+    }
+}
+
+fn followers(c: &Clip) -> impl Iterator<Item = (Follower<'_>, &str)> {
     let effects = c.picture.iter().flat_map(|x| x.effects.iter().enumerate());
-    effects.filter_map(|(n, e)| Some((n, e.area.as_ref()?.follows.as_deref()?)))
+    let areas = effects
+        .filter_map(|(n, e)| Some((Follower::Effect(n), e.area.as_ref()?.follows.as_deref()?)));
+    let nodes = c.picture.iter().flat_map(|x| x.composition.iter());
+    let masks = nodes.flat_map(|k| &k.nodes).filter_map(|n| {
+        let follows = n.tool.mask()?.follows.as_deref()?;
+        Some((Follower::Mask(n.name.as_str()), follows))
+    });
+    areas.chain(masks)
 }
 
 pub fn remove(p: &mut Project, id: &str, paths: Option<&[String]>) -> Result<()> {
@@ -127,10 +159,11 @@ pub fn remove(p: &mut Project, id: &str, paths: Option<&[String]>) -> Result<()>
     for path in paths {
         path_of(c, path)?;
     }
-    if let Some((n, path)) = followers(c).find(|(_, path)| paths.iter().any(|x| x == path)) {
+    if let Some((who, path)) = followers(c).find(|(_, path)| paths.iter().any(|x| x == path)) {
         return Err(Error::invalid(format!(
-            "the area of effect {n} of {id} follows motion path {path}: first give that area \
-             another `follows`, or none (effects.set)"
+            "{who} of {id} follows motion path {path}: first give it another `follows`, or none \
+             ({})",
+            who.request()
         )));
     }
     led(p, id, paths)?;
@@ -365,9 +398,9 @@ pub fn list(p: &Project, ids: Option<&[String]>, at: Option<i64>, samples: bool)
 
 pub fn violation(c: &Clip) -> Option<String> {
     let has = |path: &str| Subject::named(path).is_some() || c.motion.iter().any(|m| m.id == path);
-    if let Some((n, path)) = followers(c).find(|(_, path)| !has(path)) {
+    if let Some((who, path)) = followers(c).find(|(_, path)| !has(path)) {
         return Some(format!(
-            "{}: the area of effect {n} follows motion path {path}, which the clip has not",
+            "{}: {who} follows motion path {path}, which the clip has not",
             c.id
         ));
     }
@@ -451,9 +484,10 @@ pub struct Start {
     pub frame: i64,
     pub own: Area,
     pub bounds: [f64; 4],
+    pub points: Vec<[f64; 2]>,
 }
 
-pub fn start(p: &Project, id: &str, effect: usize, at: i64) -> Result<Start> {
+pub fn start(p: &Project, id: &str, who: Follower, at: i64) -> Result<Start> {
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
     let media = p.media(&c.media).filter(|m| takes(c) && !m.is_still());
@@ -468,6 +502,33 @@ pub fn start(p: &Project, id: &str, effect: usize, at: i64) -> Result<Start> {
             "{id} does not show frame {at}: a track starts on a frame of the clip"
         )));
     }
+    let frame = c.source_at(at);
+    let shown = media.info.video.as_ref().map(|v| v.display_size());
+    let (w, h) = shown.unwrap_or((p.settings.width, p.settings.height));
+    let fit = [f64::from(w.max(1)), f64::from(h.max(1))];
+    let (own, bounds, points) = match who {
+        Follower::Effect(effect) => {
+            let (own, bounds) = area_start(c, id, effect, frame, fit)?;
+            (own, bounds, Vec::new())
+        }
+        Follower::Mask(name) => mask_start(c, id, name, frame, fit)?,
+    };
+    Ok(Start {
+        frames: c.shown(),
+        frame,
+        own,
+        bounds,
+        points,
+    })
+}
+
+fn area_start(
+    c: &Clip,
+    id: &str,
+    effect: usize,
+    frame: i64,
+    fit: [f64; 2],
+) -> Result<(Area, [f64; 4])> {
     let effects = c.picture.iter().flat_map(|x| &x.effects);
     let found = effects.into_iter().nth(effect);
     let Some((e, area)) = found.and_then(|e| Some((e, e.area.as_ref()?))) else {
@@ -477,7 +538,6 @@ pub fn start(p: &Project, id: &str, effect: usize, at: i64) -> Result<Start> {
         )));
     };
     unkeyed(e, effect, id)?;
-    let frame = c.source_at(at);
     let base = match area.follows.as_deref() {
         None => Area::WHOLE,
         Some(named) => {
@@ -491,15 +551,94 @@ pub fn start(p: &Project, id: &str, effect: usize, at: i64) -> Result<Start> {
             })?
         }
     };
-    let shown = media.info.video.as_ref().map(|v| v.display_size());
-    let (w, h) = shown.unwrap_or((p.settings.width, p.settings.height));
-    let fit = [f64::from(w.max(1)), f64::from(h.max(1))];
     let own = base.within(area, fit);
-    Ok(Start {
-        frames: c.shown(),
-        frame,
-        own,
-        bounds: own.bounds(area, fit),
+    Ok((own, own.bounds(area, fit)))
+}
+
+fn mask_of<'a>(c: &'a Clip, id: &str, name: &str) -> Result<(&'a Node, &'a Mask)> {
+    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
+    let node = comp.and_then(|k| k.node(name));
+    node.and_then(|n| Some((n, n.tool.mask()?))).ok_or_else(|| {
+        Error::invalid(format!(
+            "{id} has no mask {name}: a track follows the thing under a mask of its composition"
+        ))
+    })
+}
+
+const PLACE_VALUES: [EffectValue; 8] = [
+    EffectValue::Center,
+    EffectValue::Width,
+    EffectValue::Height,
+    EffectValue::Angle,
+    EffectValue::Size,
+    EffectValue::ZRotation,
+    EffectValue::XRotation,
+    EffectValue::YRotation,
+];
+
+fn mask_unkeyed(n: &Node, id: &str) -> Result<()> {
+    match PLACE_VALUES.into_iter().find(|v| !n.keys_of(*v).is_empty()) {
+        Some(value) => Err(Error::invalid(format!(
+            "mask {} of {id} has {} keyframes, and a track sets its place: first remove those \
+             keyframes (comp.key)",
+            n.name,
+            value.name().replace('_', " ")
+        ))),
+        None => Ok(()),
+    }
+}
+
+type MaskStart = (Area, [f64; 4], Vec<[f64; 2]>);
+
+fn mask_start(c: &Clip, id: &str, name: &str, frame: i64, fit: [f64; 2]) -> Result<MaskStart> {
+    let (n, m) = mask_of(c, id, name)?;
+    mask_unkeyed(n, id)?;
+    let [fw, fh] = fit;
+    let base = match m.follows.as_deref() {
+        None => MaskBase::whole((fw, fh)),
+        Some(named) => {
+            let found = motion::areas_of(&c.motion, named, frame as f64);
+            let first = found.first().ok_or_else(|| {
+                Error::invalid(format!(
+                    "mask {name} of {id} follows {named}, which does not last on this frame"
+                ))
+            })?;
+            MaskBase::of(first, (fw, fh))
+        }
+    };
+    let figure = Shaping::figure(m, &n.tool, &base);
+    let (mut low, mut high) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for spot in figure.line() {
+        for i in 0..2 {
+            (low[i], high[i]) = (low[i].min(spot[i]), high[i].max(spot[i]));
+        }
+    }
+    if !(low[0] < high[0] && low[1] < high[1]) {
+        return Err(Error::invalid(format!(
+            "mask {name} of {id} covers nothing: a track follows the thing under a mask"
+        )));
+    }
+    let middle = [(low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0];
+    let size = [high[0] - low[0], high[1] - low[1]];
+    let bounds = [middle[0] / fw, middle[1] / fh, size[0] / fw, size[1] / fh];
+    Ok(match &figure.outline {
+        Outline::Ellipse { half, turn } | Outline::Rectangle { half, turn, .. } => {
+            let own = Area {
+                center: [figure.middle[0] / fw, figure.middle[1] / fh],
+                size: [2.0 * half[0] / fw, 2.0 * half[1] / fh],
+                rotation: turn.to_degrees(),
+            };
+            (own, bounds, Vec::new())
+        }
+        Outline::Polygon { points, .. } => {
+            let own = Area {
+                center: [bounds[0], bounds[1]],
+                size: [bounds[2], bounds[3]],
+                rotation: 0.0,
+            };
+            let boxed = |[x, y]: &[f64; 2]| [(x - middle[0]) / size[0], (middle[1] - y) / size[1]];
+            (own, bounds, points.iter().map(boxed).collect())
+        }
     })
 }
 
@@ -527,20 +666,30 @@ fn unkeyed(e: &Effect, effect: usize, id: &str) -> Result<()> {
 pub fn tracked(
     p: &mut Project,
     id: &str,
-    effect: usize,
+    who: Follower,
     (start, way): (&Start, TrackWay),
     mut samples: Vec<PathSample>,
 ) -> Result<Value> {
     let c = clip_of(p, id)?;
-    let effects = c.picture.iter().flat_map(|x| &x.effects);
-    let found = effects.into_iter().nth(effect);
-    let Some((e, area)) = found.and_then(|e| Some((e, e.area.clone()?))) else {
-        return Err(Error::invalid(format!(
-            "effect {effect} of {id} has no area"
-        )));
+    let followed = match who {
+        Follower::Effect(effect) => {
+            let effects = c.picture.iter().flat_map(|x| &x.effects);
+            let found = effects.into_iter().nth(effect);
+            let Some((e, area)) = found.and_then(|e| Some((e, e.area.as_ref()?))) else {
+                return Err(Error::invalid(format!(
+                    "effect {effect} of {id} has no area"
+                )));
+            };
+            unkeyed(e, effect, id)?;
+            area.follows.clone()
+        }
+        Follower::Mask(name) => {
+            let (n, m) = mask_of(c, id, name)?;
+            mask_unkeyed(n, id)?;
+            m.follows.clone()
+        }
     };
-    unkeyed(e, effect, id)?;
-    let old = (area.follows.as_ref()).and_then(|f| c.motion.iter().find(|m| m.id == *f));
+    let old = (followed.as_ref()).and_then(|f| c.motion.iter().find(|m| m.id == *f));
     if let Some(old) = old {
         let stays = |s: &&PathSample| match way {
             TrackWay::Both => false,
@@ -554,7 +703,7 @@ pub fn tracked(
     if let Some(why) = motion::samples_problem(&samples) {
         return Err(Error::invalid(why));
     }
-    let shared = |old: &String| followers(c).any(|(n, path)| n != effect && path == old);
+    let shared = |old: &String| followers(c).any(|(w, path)| w != who && path == old);
     let own = old.filter(|m| m.tracked && !shared(&m.id));
     let path = match own.map(|m| m.id.clone()) {
         Some(own) => {
@@ -587,16 +736,41 @@ pub fn tracked(
     };
     let stored = c.motion.iter().find(|m| m.id == path);
     let shown = stored.map_or(Value::Null, |m| shown(c, m, None, false));
-    let follows = Some(path);
-    let effects = c.picture.iter_mut().flat_map(|x| &mut x.effects);
-    if let Some(e) = effects.into_iter().nth(effect) {
-        e.area = Some(EffectArea {
-            follows,
-            center: None,
-            size: None,
-            rotation: None,
-            ..area
-        });
+    match who {
+        Follower::Effect(effect) => {
+            let effects = c.picture.iter_mut().flat_map(|x| &mut x.effects);
+            if let Some(e) = effects.into_iter().nth(effect)
+                && let Some(area) = e.area.take()
+            {
+                e.area = Some(EffectArea {
+                    follows: Some(path),
+                    center: None,
+                    size: None,
+                    rotation: None,
+                    ..area
+                });
+            }
+        }
+        Follower::Mask(name) => {
+            let comp = c.picture.as_mut().and_then(|x| x.composition.as_mut());
+            let node = comp.and_then(|k| k.nodes.iter_mut().find(|n| n.name == name));
+            match node.map(|n| &mut n.tool) {
+                Some(Tool::Polygon(m)) => {
+                    m.follows = Some(path);
+                    m.center = None;
+                    m.points = start.points.clone();
+                    (m.size, m.z_rotation, m.x_rotation, m.y_rotation) = (None, None, None, None);
+                }
+                Some(t) => {
+                    if let Some(m) = t.mask_mut() {
+                        m.follows = Some(path);
+                        (m.center, m.angle) = (None, None);
+                        (m.width, m.height) = (Some(1.0), Some(1.0));
+                    }
+                }
+                None => {}
+            }
+        }
     }
     Ok(shown)
 }

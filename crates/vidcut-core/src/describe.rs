@@ -366,11 +366,14 @@ pub fn describe_at(
             d.params["subject"].as_str().unwrap_or("face"),
             d.clips("clips")
         ),
-        "motion.track" => format!(
-            "Track the area of effect {} of {}",
-            d.params["effect"],
-            d.clips("clip")
-        ),
+        "motion.track" => match d.params["node"].as_str() {
+            Some(node) => format!("Track {node} of {}", d.clips("clip")),
+            None => format!(
+                "Track the area of effect {} of {}",
+                d.params["effect"],
+                d.clips("clip")
+            ),
+        },
         "motion.follow" => match d.params["path"].as_str() {
             Some(path) => format!("Make {} follow motion path {path}", d.clips("clip")),
             None => format!("Stop {} following a motion path", d.clips("clip")),

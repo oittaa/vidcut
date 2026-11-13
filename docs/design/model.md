@@ -553,6 +553,7 @@ Writing:
   - `Tool::MediaIn` is the clip's own picture. `Tool::MediaOut` is the picture that the clip shows.
   - `Tool::Blur` holds a `Blur`. `Tool::Effect` holds an `EffectKind`, one of the kinds of the clip effects.
   - `Tool::Ellipse`, `Tool::Rectangle` and `Tool::Polygon` hold a `Mask`.
+  - A `Mask` can follow a motion path of its clip, or each path of a subject (`Mask.follows`).
   - `input` names the node whose picture comes in. `effect_mask` names the last mask of a chain of masks.
 - The joins are names, not places in the list. Why: a request, the GUI and the OTIO metadata then name a node in one way, and a removal moves no other join.
 - The module `composition` reads a composition:
@@ -580,11 +581,12 @@ Writing:
   - `ops::motion::takes` tells which clips take them: not titles, generators, compound clips or sound.
 - A `MotionPath` tells where one area of the source picture is on the source frames of the clip. It has an id, a name and its samples.
   - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). `motion.find` with `replace` takes off the paths of that subject.
-    - A path that the area of an effect or a title follows stays (`followed`).
+    - A path that the area of an effect, a mask or a title follows stays (`followed`).
     - A found thing that such a path already follows gets no second path (`same_thing`). Its samples go into that path (`merged`).
     - Between the first and the last new sample, the path keeps only the new samples. Outside them, it keeps its old samples.
     - Thus a second find adds the new things, and a kept path follows its thing on the frames of the new find.
-  - A path that `motion.track` made has `tracked`. A later track of the same area writes its samples again, and the path keeps its id and its name.
+  - A path that `motion.track` made has `tracked`. A later track of the same area or mask writes its samples again, and the path keeps its id and its name.
+  - `ops::motion::Follower` names what follows a path: the area of an effect, or a mask.
 - A `PathSample` holds the source `frame`, the `center` and the `size` of the area as fractions of the source picture, and the `rotation`.
   - The `frame` counts as `source_in` does, at each speed of the clip (`Clip::source_at`).
   - Why: a thing is at one place on a source picture, at any speed that plays that picture.

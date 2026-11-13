@@ -535,7 +535,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "motion.track",
-        "vidcut motion track c3 0 --download\n  vidcut motion track c3 1 --at 12s --way forward",
+        "vidcut motion track c3 0 --download\n  vidcut motion track c3 1 --at 12s --way forward\n  \
+         vidcut motion track c3 --node Ellipse1",
     ),
     (
         "motion.follow",

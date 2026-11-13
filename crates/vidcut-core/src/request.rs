@@ -2875,7 +2875,8 @@ pub enum Request {
         ease: Option<Ease>,
     },
     /// Put one node of a clip's composition back at its usual values, with
-    /// no keyframes. It keeps its name, its joins and its place.
+    /// no keyframes. It keeps its name, its joins, its place and the motion
+    /// path that it follows.
     #[serde(rename = "comp.reset")]
     CompReset { clip: ClipRef, node: String },
     /// The motion paths of `clips`, or of every clip that has some. A motion
@@ -2934,8 +2935,9 @@ pub enum Request {
         clear: Option<[i64; 2]>,
     },
     /// Take motion paths off a clip: `paths`, or all of them. A path that
-    /// the area of an effect follows stays, and the request fails: first
-    /// give that area another `follows`, or none (`effects.set`).
+    /// the area of an effect or a mask follows by its id stays, and the
+    /// request fails: first give that area (`effects.set`) or that mask
+    /// (`comp.set`) another `follows`, or none.
     #[serde(rename = "motion.remove")]
     MotionRemove {
         clip: ClipRef,
@@ -2974,7 +2976,8 @@ pub enum Request {
         subject: Subject,
         /// Take the paths that an earlier `motion.find` of this subject made
         /// off the clip first. Without it, a clip that has such paths is an
-        /// error. A path that the area of an effect or a title follows stays.
+        /// error. A path that the area of an effect, a mask or a title
+        /// follows stays.
         /// A thing that such a path follows gets no second path: its new
         /// samples go into that path.
         #[serde(default)]
@@ -3020,24 +3023,31 @@ pub enum Request {
         steady: Option<f64>,
     },
     /// Follow the thing under the area of one effect of a clip (`c3`, or
-    /// `V2@15s`). `effect` counts from 0, in the order of the clip's
-    /// effects. The track starts on the frame at `at`, which the clip must
-    /// show, and goes backward and forward from there. It follows the place
-    /// and the size of the thing. It stops at a shot change, where it loses
-    /// the thing, and at the ends of the clip.
+    /// `V2@15s`), or under the mask `node` of its composition. `effect`
+    /// counts from 0, in the order of the clip's effects. The track starts
+    /// on the frame at `at`, which the clip must show, and goes backward and
+    /// forward from there. It follows the place and the size of the thing.
+    /// It stops at a shot change, where it loses the thing, and at the ends
+    /// of the clip.
     ///
     /// The clip gets a motion path named `Track 1`, `Track 2`, and so on.
-    /// The area then follows that path with its own shape. Before the first
-    /// sample of the path and after its last, the area stays where that
-    /// sample puts it. When the area follows a path
-    /// already, a track of one `way` keeps the samples of the other side.
-    /// A path that an earlier track made for this area gets the new samples,
-    /// and keeps its id and its name. Another path stays as it is, and the
-    /// area gets a new path.
+    /// The area or the mask then follows that path with its own shape.
+    /// Before the first sample of the path and after its last, it stays
+    /// where that sample puts it. When it follows a path already, a track of
+    /// one `way` keeps the samples of the other side. A path that an earlier
+    /// track made for this area or this mask gets the new samples, and keeps
+    /// its id and its name. Another path stays as it is, and the area or the
+    /// mask gets a new path.
     ///
     /// The track puts the center, the size and the rotation of the area
     /// back at their usual values. An area with keyframes on one of them is
-    /// an error: first remove those keyframes (`keyframes.remove`).
+    /// an error: first remove those keyframes (`keyframes.remove`). The path
+    /// of an ellipse or a rectangle mask is its own box: its center goes to
+    /// the middle of the box, its width and its height to 1, and its angle
+    /// to 0. The path of a polygon mask is the box around it: its points
+    /// become fractions of that box, with a size of 1 and no rotation. A
+    /// mask with keyframes on its center, its size or its rotation is an
+    /// error: first remove those keyframes (`comp.key`).
     ///
     /// Returns the path: its `id`, its `name`, the `count` of its samples
     /// and their source frames `first` and `last`. It also gives the
@@ -3047,7 +3057,10 @@ pub enum Request {
     #[serde(rename = "motion.track")]
     MotionTrack {
         clip: ClipRef,
-        effect: usize,
+        #[serde(default)]
+        effect: Option<usize>,
+        #[serde(default)]
+        node: Option<String>,
         /// The frame where the track starts. Default: the playhead.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<TimeSpec>,
@@ -5106,6 +5119,14 @@ pub struct NodeChange {
     /// The corners of a polygon mask, each `[x, y]` from its middle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub points: Option<Vec<[f64; 2]>>,
+    /// The motion path that a mask follows, as `p1`, or a subject, as
+    /// `face` (`motion.list`). Null stops it.
+    #[serde(
+        default,
+        deserialize_with = "given",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub follows: Option<Option<String>>,
     #[serde(flatten)]
     pub values: KindChange,
 }
