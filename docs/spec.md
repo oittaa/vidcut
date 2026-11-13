@@ -31,13 +31,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
 - compound clips (§8.18)
+- compositions of nodes on the Effects page: Blur, the six effects, and Ellipse, Rectangle and Polygon masks (§8.19)
 - the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
 **Later (later):**
 - other effects, other transitions, other titles, other generators
 - keyframes other than Transform, Crop, Composite, speed, the clip volume, effect values and the Position, Zoom, Rotation and Opacity of a title
-- color ([todo](todo/auto-color.md)), Fusion
+- color ([todo](todo/auto-color.md)), the Fusion tools that §8.19 does not have
 - the display LUT, and LUT files other than `.cube` ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))

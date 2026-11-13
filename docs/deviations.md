@@ -402,7 +402,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The Position, Zoom, Rotation and Opacity of a title take keyframes ([todo](todo/keyframes.md#titles)). Its shadow and background do not.
   - A title clip has no Transform, Cropping, Speed or blend modes.
 - **Why:**
-  - Text+ and Fusion titles are Fusion compositions, and vidcut does not have Fusion (spec §1). Blend modes are out (spec §1).
+  - Text+ and Fusion titles are Fusion compositions with text tools. The compositions of vidcut have no text tool (spec §8.19). Blend modes are out (spec §1).
   - The place, zoom, rotation and opacity of a title do what Transform and the opacity of Composite would do. The speed of a scroll comes from the length of its clip.
   - Markup in the text is what a script writes and reads.
 
