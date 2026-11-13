@@ -572,6 +572,7 @@ Writing:
   - An `Effect` and a `Node` give only the slots of their values (`Keyed::read_point`, `Keyed::write`). Why: then one copy of the keyframe work serves both.
   - The functions of `Picture` that work on keyframes also work on the nodes (`Picture::nodes_mut`).
 - `picture.clear` of all the tools keeps the composition. `PictureTool::Composition` takes it off.
+- The draw of a composition is in [export](export.md#compositions).
 
 ## Motion paths
 

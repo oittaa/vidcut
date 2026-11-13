@@ -1664,6 +1664,20 @@ impl AudioPiece {
 }
 
 impl RenderPlan {
+    pub fn broken_composition(&self) -> Option<&str> {
+        self.video
+            .iter()
+            .flat_map(VideoPiece::layers)
+            .flat_map(|(layer, _)| layer.placed())
+            .find(|p| {
+                p.picture
+                    .composition
+                    .as_ref()
+                    .is_some_and(|c| c.chain().is_none())
+            })
+            .map(|p| p.clip.as_str())
+    }
+
     pub fn has_lut(&self) -> bool {
         self.output_lut.is_some()
             || self

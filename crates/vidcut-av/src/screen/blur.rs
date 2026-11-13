@@ -1,8 +1,8 @@
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{AreaShape, GlowOutput};
 use vidcut_core::place::{
-    Blurring, GlowSpread, Glowing, GrainTile, Graining, Level, Masking, Placing, Shading,
-    Sharpening, Tiling, Work, Working,
+    Blurring, Boxing, GlowSpread, Glowing, GrainTile, Graining, Level, Masking, Outline, Placing,
+    Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
 };
 
 use super::{Gpu, MIXING, begin, grain, sharpen, vignette};
@@ -24,6 +24,10 @@ const GLOW_FINE: f64 = 8.0;
 const TAIL: (f64, f64) = (3.8, 4.3);
 
 const BORDER_BLACK: u32 = 0;
+
+const BORDER_CLAMP: u32 = 1;
+
+const MOST_BOX: f64 = 65536.0;
 
 const BORDER_MIRROR: u32 = 2;
 
@@ -61,6 +65,10 @@ pub(super) struct Pipes {
     grain_noise: wgpu::RenderPipeline,
     grain: wgpu::RenderPipeline,
     area: wgpu::RenderPipeline,
+    boxes: wgpu::RenderPipeline,
+    shape: wgpu::RenderPipeline,
+    mask_join: wgpu::RenderPipeline,
+    masked: wgpu::RenderPipeline,
 }
 
 impl Pipes {
@@ -150,6 +158,10 @@ impl Pipes {
             grain_noise: pipeline(&plain, "fs_grain_noise"),
             grain: pipeline(&plain, "fs_grain"),
             area: pipeline(&of(&reading), "fs_area"),
+            boxes: pipeline(&plain, "fs_boxes"),
+            shape: pipeline(&of(&reading), "fs_shape"),
+            mask_join: pipeline(&plain, "fs_mask_join"),
+            masked: pipeline(&plain, "fs_masked"),
             layout,
             reading,
         }
@@ -164,6 +176,7 @@ struct Step<'a> {
 fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
     match &effect.work {
         Work::Blur(blur) => blur_steps(&pipes.blur, blur, effect),
+        Work::Boxes(boxing) => box_steps(&pipes.boxes, boxing, effect),
         Work::Mosaic(tiling) => (0..MOSAIC_STAGES)
             .map(|stage| Step {
                 pipeline: &pipes.mosaic,
@@ -178,8 +191,172 @@ fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
             pipeline: &pipes.sharpen,
             params: sharpen_bytes(sharpening, effect),
         }],
-        Work::Glow(_) | Work::Grain(_) => Vec::new(),
+        Work::Glow(_) | Work::Grain(_) | Work::Clear => Vec::new(),
     }
+}
+
+fn box_passes(width: f64) -> Vec<Pass> {
+    let width = width.min(MOST_BOX);
+    if width <= 1.0 {
+        return Vec::new();
+    }
+    let pass = |width: f64, step: u32, taps: u32| Pass {
+        spread: [width, 0.0, 0.0, 0.0],
+        step,
+        taps,
+    };
+    if width <= 2.0 * MOST + 1.0 {
+        return vec![pass(width, 1, (width / 2.0).ceil() as u32)];
+    }
+    let step = 2 * (width / (4.0 * MOST)).ceil() as u32 + 1;
+    let s = f64::from(step);
+    vec![
+        pass(s, 1, step / 2),
+        pass(width, step, ((width + s) / (2.0 * s)).ceil() as u32),
+    ]
+}
+
+fn box_ways(across: f64, down: f64, count: u32) -> Vec<(Pass, bool)> {
+    let mut ways = Vec::new();
+    for _ in 0..count {
+        ways.extend(box_passes(across).into_iter().map(|p| (p, false)));
+        ways.extend(box_passes(down).into_iter().map(|p| (p, true)));
+    }
+    ways
+}
+
+fn box_steps<'a>(
+    pipeline: &'a wgpu::RenderPipeline,
+    boxing: &Boxing,
+    effect: &Working,
+) -> Vec<Step<'a>> {
+    let mut ways = box_ways(boxing.across, boxing.down, boxing.count);
+    if ways.is_empty() {
+        let still = Pass {
+            spread: [0.0; 4],
+            step: 1,
+            taps: 0,
+        };
+        ways.push((still, false));
+    }
+    let count = ways.len();
+    let channels = boxing.channels.map(flag);
+    ways.iter()
+        .enumerate()
+        .map(|(j, (pass, down))| {
+            let more = [
+                effect.blend,
+                flag(effect.use_alpha),
+                flag(j + 1 == count),
+                flag(j == 0),
+            ];
+            Step {
+                pipeline,
+                params: pass_bytes(pass, *down, boxing.border.code(), more, channels),
+            }
+        })
+        .collect()
+}
+
+fn soft_steps(pipes: &Pipes, soft: Option<Softening>) -> Vec<(&wgpu::RenderPipeline, Vec<u8>)> {
+    let plain = [0.0; 4];
+    match soft {
+        None => Vec::new(),
+        Some(Softening::Gaussian(sigma)) => gaussian_ways(sigma)
+            .into_iter()
+            .map(|(pass, down)| {
+                let bytes = pass_bytes(&pass, down, BORDER_CLAMP, plain, plain);
+                (&pipes.blur, bytes)
+            })
+            .collect(),
+        Some(Softening::Boxes { width, count }) => box_ways(width, width, count)
+            .into_iter()
+            .map(|(pass, down)| {
+                let bytes = pass_bytes(&pass, down, BORDER_CLAMP, plain, [1.0; 4]);
+                (&pipes.boxes, bytes)
+            })
+            .collect(),
+    }
+}
+
+fn shape_bytes(shape: &Shaping) -> Vec<u8> {
+    let (kind, half, turn, corner, count, winding) = match &shape.outline {
+        Outline::Ellipse { half, turn } => (0.0, *half, *turn, 0.0, 0, false),
+        Outline::Rectangle { half, turn, corner } => (1.0, *half, *turn, *corner, 0, false),
+        Outline::Polygon { points, winding } => (2.0, [0.0; 2], 0.0, 0.0, points.len(), *winding),
+    };
+    let [mx, my] = shape.middle;
+    float_bytes(&[
+        mx,
+        my,
+        turn,
+        kind,
+        half[0],
+        half[1],
+        corner,
+        count as f64,
+        shape.border,
+        flag(shape.solid),
+        flag(winding),
+        0.0,
+    ])
+}
+
+fn shape_points(gpu: &Gpu, shape: &Shaping) -> wgpu::Buffer {
+    let mut floats: Vec<f64> = match &shape.outline {
+        Outline::Polygon { points, .. } => points.iter().flatten().copied().collect(),
+        _ => Vec::new(),
+    };
+    if floats.is_empty() {
+        floats = vec![0.0; 2];
+    }
+    let bytes = float_bytes(&floats);
+    let points = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vidcut shape"),
+        size: bytes.len() as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    gpu.queue.write_buffer(&points, 0, &bytes);
+    points
+}
+
+fn mask_made<'a>(
+    gpu: &Gpu,
+    (scratch, room): (&[Texture; 2], &'a [Texture; 2]),
+    shapes: &[Shaping],
+    encoder: &mut wgpu::CommandEncoder,
+) -> &'a wgpu::TextureView {
+    let mut kept: Option<usize> = None;
+    for shape in shapes {
+        let points = shape_points(gpu, shape);
+        let views = Views {
+            cells: Some(&points),
+            ..Views::same(&scratch[1].view)
+        };
+        let drawn = (&gpu.blur.shape, &shape_bytes(shape)[..]);
+        draw_step(gpu, drawn, views, &scratch[0].view, encoder);
+        let mut from = 0;
+        for (pipeline, bytes) in soft_steps(&gpu.blur, shape.soft) {
+            let views = Views::same(&scratch[from].view);
+            draw_step(
+                gpu,
+                (pipeline, &bytes[..]),
+                views,
+                &scratch[1 - from].view,
+                encoder,
+            );
+            from = 1 - from;
+        }
+        let to = kept.map_or(0, |k| 1 - k);
+        let start = kept.map_or(&scratch[1 - from].view, |k| &room[k].view);
+        let how = [shape.level, flag(shape.invert), flag(kept.is_none()), 0.0];
+        let joined = (&gpu.blur.mask_join, &float_bytes(&how)[..]);
+        let views = Views::with(&scratch[from].view, start);
+        draw_step(gpu, joined, views, &room[to].view, encoder);
+        kept = Some(to);
+    }
+    &room[kept.unwrap_or(0)].view
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -512,6 +689,44 @@ struct Worked {
     spare: Spare,
     tiles: Tiles,
     shrink: [f64; 2],
+    masks: Option<[Texture; 2]>,
+}
+
+#[derive(Default)]
+pub(super) struct Composer {
+    canvas: Option<Texture>,
+    scratch: Option<[Texture; 2]>,
+    worked: Worked,
+}
+
+impl Composer {
+    pub(super) fn canvas(&mut self, gpu: &Gpu, size: (u32, u32)) -> &wgpu::TextureView {
+        let sized = |c: &Texture| (c.texture.width(), c.texture.height()) == size;
+        if !self.canvas.as_ref().is_some_and(sized) {
+            *self = Self {
+                canvas: Some(Texture::new(gpu, size)),
+                ..Self::default()
+            };
+            self.worked.shrink = [1.0, 1.0];
+        }
+        &self.canvas.as_ref().expect("made above").view
+    }
+
+    pub(super) fn compose(
+        &mut self,
+        gpu: &Gpu,
+        works: &[Working],
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let Some(canvas) = self.canvas.as_ref() else {
+            return;
+        };
+        let size = (canvas.texture.width(), canvas.texture.height());
+        let scratch = self
+            .scratch
+            .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
+        effects_into(gpu, canvas, (scratch, &mut self.worked), works, encoder);
+    }
 }
 
 #[derive(Default)]
@@ -563,6 +778,20 @@ impl Blurred {
             canvas.texture.size(),
         );
         effects_into(gpu, canvas, (scratch, &mut self.worked), effects, encoder);
+    }
+
+    pub(super) fn composed(
+        &mut self,
+        gpu: &Gpu,
+        canvas: &Texture,
+        works: &[Working],
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let size = self.size;
+        let scratch = self
+            .scratch
+            .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
+        effects_into(gpu, canvas, (scratch, &mut self.worked), works, encoder);
     }
 
     pub(super) fn drop_layer(&mut self, i: usize) {
@@ -797,11 +1026,25 @@ fn landed(
     gpu: &Gpu,
     own: &Texture,
     (made, free): (&Texture, &Texture),
-    area: Option<&Masking>,
+    (area, mask): (Option<&Masking>, Option<&wgpu::TextureView>),
     encoder: &mut wgpu::CommandEncoder,
 ) {
-    let from = match area {
-        Some(masking) => {
+    let from = match (area, mask) {
+        (_, Some(mask)) => {
+            let views = Views {
+                mask,
+                ..Views::with(&made.view, &own.view)
+            };
+            draw_step(
+                gpu,
+                (&gpu.blur.masked, &[0; 16]),
+                views,
+                &free.view,
+                encoder,
+            );
+            free
+        }
+        (Some(masking), None) => {
             let maps = area_maps(gpu, masking);
             let step = (&gpu.blur.area, &area_bytes(masking)[..]);
             let views = Views {
@@ -811,7 +1054,7 @@ fn landed(
             draw_step(gpu, step, views, &free.view, encoder);
             free
         }
-        None => made,
+        (None, None) => made,
     };
     encoder.copy_texture_to_texture(
         from.texture.as_image_copy(),
@@ -824,7 +1067,7 @@ fn glow_into(
     gpu: &Gpu,
     own: &Texture,
     (scratch, spare): (&[Texture; 2], &mut Spare),
-    (glow, effect): (&Glowing, &Working),
+    (glow, effect, on): (&Glowing, &Working, Option<&wgpu::TextureView>),
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let size = own.texture.size();
@@ -864,7 +1107,7 @@ fn glow_into(
         &made.view,
         encoder,
     );
-    landed(gpu, own, (made, free), effect.area.as_ref(), encoder);
+    landed(gpu, own, (made, free), (effect.area.as_ref(), on), encoder);
 }
 
 fn gaussian_ways(sigma: f64) -> Vec<(Pass, bool)> {
@@ -930,7 +1173,7 @@ fn grain_into(
     gpu: &Gpu,
     own: &Texture,
     (scratch, spare, tiles, shrink): (&[Texture; 2], &mut Spare, &mut Tiles, [f64; 2]),
-    (grain, effect): (&Graining, &Working),
+    (grain, effect, on): (&Graining, &Working, Option<&wgpu::TextureView>),
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let size = own.texture.size();
@@ -988,7 +1231,7 @@ fn grain_into(
     };
     let last = (&gpu.blur.grain, &bytes[..]);
     draw_step(gpu, last, views, &made.view, encoder);
-    landed(gpu, own, (made, free), effect.area.as_ref(), encoder);
+    landed(gpu, own, (made, free), (effect.area.as_ref(), on), encoder);
 }
 
 fn effects_into(
@@ -999,18 +1242,37 @@ fn effects_into(
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let pipes = &gpu.blur;
+    let size = own.texture.size();
+    let masked = effects.iter().any(|e| !e.masks.is_empty());
+    if masked
+        && worked
+            .masks
+            .as_ref()
+            .is_none_or(|m| m[0].texture.size() != size)
+    {
+        let room = (size.width, size.height);
+        worked.masks = Some([Texture::new(gpu, room), Texture::new(gpu, room)]);
+    }
     for effect in effects {
+        if matches!(effect.work, Work::Clear) {
+            drop(begin(encoder, &own.view, Some(wgpu::Color::TRANSPARENT)));
+            continue;
+        }
+        let on = match (&worked.masks, effect.masks.is_empty()) {
+            (Some(room), false) => Some(mask_made(gpu, (scratch, room), &effect.masks, encoder)),
+            _ => None,
+        };
         let mut from = &own.view;
         let mut k = 0;
         let read = match &effect.work {
             Work::Glow(glow) => {
                 let room = (scratch, &mut worked.spare);
-                glow_into(gpu, own, room, (glow.as_ref(), effect), encoder);
+                glow_into(gpu, own, room, (glow.as_ref(), effect, on), encoder);
                 continue;
             }
             Work::Grain(grain) => {
                 let room = (scratch, &mut worked.spare, &mut worked.tiles, worked.shrink);
-                grain_into(gpu, own, room, (grain.as_ref(), effect), encoder);
+                grain_into(gpu, own, room, (grain.as_ref(), effect, on), encoder);
                 continue;
             }
             Work::Vignette(shading) => {
@@ -1050,7 +1312,7 @@ fn effects_into(
             k = 1 - k;
         }
         let ends = (&scratch[1 - k], &scratch[k]);
-        landed(gpu, own, ends, effect.area.as_ref(), encoder);
+        landed(gpu, own, ends, (effect.area.as_ref(), on), encoder);
     }
 }
 
