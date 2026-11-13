@@ -4349,11 +4349,10 @@ fn mutate(
             effect,
             at,
             ease,
-            area,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let at = resolve(p, at, playhead)?;
-            ops::effect::key(p, &id, *effect, at, *ease, *area)?
+            ops::effect::key(p, &id, *effect, at, *ease)?
         }
         Request::EffectsReset { clip, effect } => {
             let id = resolve_clip(p, clip, playhead)?;
@@ -4533,15 +4532,13 @@ fn mutate(
         }
         Request::MotionTrack {
             clip,
-            effect,
             node,
             at,
             way,
             download,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            let who = track_of(*effect, node.as_deref())?;
-            let (media, start, follow) = track_start(p, &id, who, at.as_ref(), playhead, *way)?;
+            let (media, start, follow) = track_start(p, &id, node, at.as_ref(), playhead, *way)?;
             let found = env.tracked(&media, follow, *download)?;
             let fps = p.settings.fps.as_f64();
             let (origin, frames) = (media.origin(), start.frames);
@@ -4559,7 +4556,7 @@ fn mutate(
                 stop(way.backward(), first - 1),
                 stop(way.forward(), last + 1),
             );
-            let mut out = ops::motion::tracked(p, &id, who, (&start, *way), samples)?;
+            let mut out = ops::motion::tracked(p, &id, node, (&start, *way), samples)?;
             out["clip"] = json!(id);
             out["score"] = json!(score);
             out["backward"] = json!(stops.0);
@@ -7011,20 +7008,10 @@ fn subject_look(media: &Media, fps: f64, frames: (i64, i64)) -> Look {
     crate::motion::look(media.origin(), fps, seen)
 }
 
-fn track_of(effect: Option<usize>, node: Option<&str>) -> Result<ops::motion::Follower<'_>> {
-    match (effect, node) {
-        (Some(n), None) => Ok(ops::motion::Follower::Effect(n)),
-        (None, Some(name)) => Ok(ops::motion::Follower::Mask(name)),
-        _ => Err(Error::usage(
-            "motion.track takes an `effect` (--effect) or a mask `node` (--node)",
-        )),
-    }
-}
-
 fn track_start(
     p: &Project,
     id: &str,
-    who: ops::motion::Follower,
+    mask: &str,
     at: Option<&TimeSpec>,
     playhead: Option<i64>,
     way: crate::model::TrackWay,
@@ -7034,7 +7021,7 @@ fn track_start(
         None => playhead
             .ok_or_else(|| Error::usage("motion.track needs `at` (--at): there is no playhead"))?,
     };
-    let start = ops::motion::start(p, id, who, at)?;
+    let start = ops::motion::start(p, id, mask, at)?;
     let media = p.clip(id).and_then(|c| p.media(&c.media)).cloned();
     let media = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
     let fps = p.settings.fps.as_f64();
@@ -7053,7 +7040,6 @@ pub type TrackLook = (Media, crate::analysis::Follow, bool);
 pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackLook> {
     let Request::MotionTrack {
         clip,
-        effect,
         node,
         at,
         way,
@@ -7063,10 +7049,7 @@ pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec
         return Vec::new();
     };
     let id = resolve_clip(p, clip, playhead).ok();
-    let who = track_of(*effect, node.as_deref()).ok();
-    let start = id
-        .zip(who)
-        .and_then(|(id, who)| track_start(p, &id, who, at.as_ref(), playhead, *way).ok());
+    let start = id.and_then(|id| track_start(p, &id, node, at.as_ref(), playhead, *way).ok());
     start
         .map(|(media, _, follow)| (media, follow, *download))
         .into_iter()

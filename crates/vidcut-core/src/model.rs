@@ -3479,112 +3479,6 @@ pub struct Effect {
     /// Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<EffectKeys>,
-    /// Where the effect works. Left out, it works on the whole picture.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub area: Option<EffectArea>,
-}
-
-/// The part of a picture that an effect works in: an ellipse or a box inside
-/// a base box. The base box is the whole source picture, or with `follows`
-/// the area of a motion path of the clip at each frame. The area stays on
-/// the content of the picture through its transform, its crop and its flips.
-/// A field left out is at its usual value. Its `center`, `size`, `rotation`
-/// and `softness` can have keyframes, in the `keys` of the effect. Each of
-/// them then follows its keyframes at a frame.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct EffectArea {
-    /// Its shape. Usual: `ellipse`.
-    #[serde(default, skip_serializing_if = "AreaShape::is_ellipse")]
-    pub shape: AreaShape,
-    /// Its middle, `[x, y]` as fractions of the base box from its top left,
-    /// each from -10 to 10. Usual: `[0.5, 0.5]`, the middle.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub center: Option<[f64; 2]>,
-    /// Its width and height as fractions of the base box, each from 0 to
-    /// 10. Usual: `[1, 1]`, as wide and as high as the base box.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<[f64; 2]>,
-    /// Degrees it is turned counterclockwise on the source picture, from
-    /// -100000 to 100000. Usual: 0.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rotation: Option<f64>,
-    /// How soft its edge is, from 0 (a hard edge) to 1: the share of the way
-    /// from its edge to its middle over which the effect fades in. Usual: 0.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub softness: Option<f64>,
-    /// On, the effect works outside the area. Usual: off.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub invert: bool,
-    /// The corners of a `polygon`, in their order: each `[x, y]` as
-    /// fractions of the area's own box from its top left, each from -10 to
-    /// 10, from 3 to 128 of them. Left out, the four corners of that box.
-    /// Another shape does not use them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub points: Vec<[f64; 2]>,
-    /// The id of a motion path of the same clip, as `p1`, or a subject, as
-    /// `face`: then each path of the clip that `motion.find` made for that
-    /// subject. The base box is then the area of a path at each frame,
-    /// turned as the path turns it: with a `size` of `[1.2, 1.2]`, the area
-    /// is the path's box, a fifth larger. With several paths, the effect
-    /// works in the area of each. It works in none before a path starts and
-    /// after it ends. Left out, the base box is the whole source picture.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub follows: Option<String>,
-}
-
-/// The shape of the area of an effect.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AreaShape {
-    /// The ellipse that touches the four sides of the box.
-    #[default]
-    Ellipse,
-    /// The box itself.
-    Box,
-    /// A shape with straight sides through the `points` of the area, in
-    /// their order.
-    Polygon,
-}
-
-impl AreaShape {
-    pub fn is_ellipse(&self) -> bool {
-        *self == Self::Ellipse
-    }
-}
-
-impl EffectArea {
-    pub const MIDDLE: [f64; 2] = [0.5, 0.5];
-    pub const WHOLE: [f64; 2] = [1.0, 1.0];
-    pub const CORNERS: [[f64; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
-    pub const POINTS_KEPT: usize = 128;
-    pub const PLACES: (f64, f64) = (-crate::motion::REACH, crate::motion::REACH);
-    pub const SIZES: (f64, f64) = (0.0, crate::motion::REACH);
-    pub const TURNS: (f64, f64) = (-crate::motion::TURN, crate::motion::TURN);
-    pub const SHARES: (f64, f64) = (0.0, 1.0);
-
-    pub fn corners(&self) -> &[[f64; 2]] {
-        if self.points.is_empty() {
-            &Self::CORNERS
-        } else {
-            &self.points
-        }
-    }
-
-    pub fn middle(&self) -> [f64; 2] {
-        self.center.unwrap_or(Self::MIDDLE)
-    }
-
-    pub fn extent(&self) -> [f64; 2] {
-        self.size.unwrap_or(Self::WHOLE)
-    }
-
-    pub fn turn(&self) -> f64 {
-        self.rotation.unwrap_or(0.0)
-    }
-
-    pub fn soft(&self) -> f64 {
-        self.softness.unwrap_or(0.0)
-    }
 }
 
 /// The nodes of a clip's composition. They work on the clip's own picture,
@@ -3828,9 +3722,10 @@ pub struct Mask {
     /// takes the place of the whole picture. Its `center` is a fraction of
     /// that box from its bottom left. Its `width`, its `height` and its
     /// `points` are fractions of the width and the height of that box. With
-    /// several paths, the mask has its shape in the box of each. It has none
-    /// before a path starts and after it ends. Left out, the mask is on the
-    /// whole picture.
+    /// several paths, the mask has its shape in the box of each. A path that
+    /// `motion.track` made keeps its first box before it starts and its last
+    /// box after it ends. Another path gives no shape there. Left out, the
+    /// mask is on the whole picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follows: Option<String>,
 }
@@ -3946,12 +3841,6 @@ pub enum EffectValue {
     MediumDetails,
     LargeDetails,
     SharpenChroma,
-    AreaCenterX,
-    AreaCenterY,
-    AreaWidth,
-    AreaHeight,
-    AreaRotation,
-    AreaSoftness,
     YSize,
     Level,
     SoftEdge,
@@ -4804,7 +4693,6 @@ impl EffectType {
             use_alpha: true,
             render_cache: false,
             keys: Vec::new(),
-            area: None,
         }
     }
 }

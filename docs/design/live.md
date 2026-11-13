@@ -291,10 +291,15 @@ The bar and the Jobs button:
 - A drag from a knot, or from a half of a join, makes a `Linking`. The drop sends `comp.connect` for the new join, and parts the join that the drag took.
 - Several edits of one key go as one `apply`. Thus one undo step takes them back.
 - A mask that follows a path has its handles on the box of the first path at the frame. A drag works in that box (`MaskBase::own`).
+- The Follow menu of a mask lists None, one entry for each subject of `SUBJECTS` (`all_of`) and the motion paths of the clip (`follow_row`, `PathRow`).
+  - A subject entry sends the name of the subject in `follows`. It is there also when the clip has no path of that subject.
+  - The menu shows the name of each `Subject` that a mask follows (`Subject::named`), also of one that it does not list.
+  - `SUBJECTS` lists the subjects that the menu shows: `Subject::Face` and `Subject::Text`.
 - Track on a mask sends `motion.track` with the `node` (`Workspace::track_node`).
+  - It goes both ways when the mask follows no path.
+  - When the mask follows a path, it goes forward from the playhead. On the first frame of that path, it goes backward.
+  - It asks before the download of the model, as Find does (`Finding`, `model_needs`).
 - The Motion section is at the bottom of the Inspector of the page (`Workspace::page_motion`).
-  - Blur there sends one `apply`. It holds `motion.find` when the clip has no paths of the subject.
-  - It then adds a Mosaic Blur and a mask that follows the subject.
 
 **View state.**
 
@@ -376,7 +381,7 @@ The bar and the Jobs button:
 
 **Pictures.**
 
-- T, Shift+T, Alt+T, the clip menu, the Tools row (`Workspace::picture_tools_row`) and `gui.show` set the viewer's tool (`placing::Grab`).
+- T, Shift+T, Alt+T, the clip menu, the Tools row (`Workspace::picture_tools_row`) and `gui.show` set the viewer's tool (`placing::Grab`). The Tools row has Transform, Crop and Dynamic Zoom.
 - `Guides::overlay` builds the framing and safe-area guides in egui, not `Screen::draw`. Thus an export leaves them out ([deviation X80](../deviations.md#x80-safe-area-guides-skip-the-trim-editor-and-dynamic-trim)).
 - `viewer.guides` changes `ViewerPrefs`. The snapshot carries `guides` and `show_super_scale`.
 - `viewer.scopes` changes `ViewerPrefs` too, and the snapshot carries `scopes`.
@@ -388,41 +393,13 @@ The bar and the Jobs button:
 - A drag, or a run of wheel notches (`Wheeled`, `Workspace::settle_picture_wheel`), ends in one `picture.set`.
 - The dragged picture goes to the core with `Handle::preview_pictures`. After it, the sent picture goes there until the project has it (`tools::landing`).
 - The boxes of a Dynamic Zoom are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
-- `Workspace::area_controls` draws the handles of the area of one effect (`AreaShown`), before `Workspace::picture_controls`.
-  - The effect is the picked effect of the Inspector, while Effects of the Tools row is on (`Grab::effects`, `Workspace::effects_tool`).
-  - `Workspace::sync_effect_area` sets the effect each frame. With Effects off, the viewer shows no area.
-  - `AreaShown::grip` gives what a press holds (`AreaHold`). `area_moved` gives the area of a drag, and `Workspace::land_area` sends one `effects.set`.
-  - The handles show the area at the playhead (`Effect::adopted`). An effect with keyframes sends `at`, as the Inspector does.
-  - `AreaShown::cursor` gives the pointer of a hold. `paint_area` puts a ring on the handle under the pointer.
-  - On a polygon, `Workspace::area_points` adds a point on a click on a side. It removes a point on a middle-click, or on a click with Alt.
-- The Blur tool (`Workspace::blur_tool`, `Grab::blurring`) draws a new area in the viewer (`Workspace::blur_controls`).
-  - A drag holds `AreaHold::Draw` (`Workspace::blur_drag`). `area_drawn` makes the area from the two ends of the drag. The picture with the new effect is the preview.
-  - With Free Shape, `Workspace::blur_points` keeps the clicked points. `area_through` makes the polygon when the shape closes.
-  - `drawn_request` is the `apply` of the new blur. `Workspace::land_drawn` sends it, picks the new effect (`Workspace::pick_effect`) and sets Effects on.
-  - A press on the shown area goes to `Workspace::area_controls`.
-  - With a picture tool on (`Grab::tool`), `Workspace::blur_controls` takes no pointer. Thus `Workspace::picture_controls` gets each press.
-  - `Grab::blurring` tells whether a drag draws a new area.
-- The Find tool (`Workspace::find_tool`, `Grab::find`) shows a box on each motion path of the selected clip (`Workspace::paint_motion`).
-  - Its buttons send `motion.find` for one subject (`Workspace::find_things`). They take the Quality and the Advanced values of the Motion section.
-  - A click on a box picks its path (`Grab::found`). The smallest box under the pointer wins (`within`).
-    - The click also picks the first effect that follows that path (`Workspace::pick_effect`).
-  - Blur and Other Effect add an effect that follows the picked path (`Workspace::effect_on`). Then the left panel shows the Inspector.
-    - The area is a box for text, a person or a vehicle, and an ellipse for a face (`boxed`). The Blur of a subject uses the same shapes.
-  - Transform, Crop, Dynamic Zoom, Effects and Blur set Find off, and Find sets them off.
-  - `Workspace::blur_tools` is the row of the tool: the shapes, and one button for each subject of `inspector::SUBJECTS` (`Workspace::subject_blur`).
-    - `SUBJECTS` lists the subjects that the app shows: `Subject::Face` and `Subject::Text`. The other subjects of `Subject::ALL` have no button.
-  - `Workspace::area_tools` has Track and Delete for the shown area. The row shows them also with the Tools row off (`Grab::rowed`).
-  - The Area rows of each effect in the Inspector have Track too (`Act::AreaTrack`).
-    - Track sends `motion.track` for the area (`Workspace::track`): both ways when the area follows no path.
-    - When the area follows a path, it goes forward from the playhead. On the first frame of that path, it goes backward.
-    - It asks before the download of the model, as Find does (`Finding`, `model_needs`).
 
 **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`).
 
 - It is a tab of the left panel (`LeftTab`). It draws the open Title, Subtitle and Subtitle Track sections (`Workspace::title_form`, `Workspace::cue_form`, `Workspace::track_form`).
   - Follow in the Title section lists the motion paths of the clips that play under the title (`leads`, `follow_row`). A choice sends `motion.follow`, and the title goes onto the thing.
 - With a clip selected, it has three tabs (`Tab`): Video, Audio and Effects. The name of the clip and the tabs stay above the sections when they scroll.
-  - Video shows the Title, Generator and picture sections, the Motion section and the Speed section.
+  - Video shows the Title, Generator and picture sections and the Speed section.
   - Audio shows the sound sections and the Speed section.
   - Effects shows the effect sections.
   - A tab without sections is disabled (`tab_has`). Thus the Effects tab is disabled for a clip with no effects.
@@ -432,7 +409,6 @@ The bar and the Jobs button:
     - An empty selection does not change the tab.
     - `Workspace::watch_inspector` applies these rules while the Inspector is not shown. It works only when the selection or the project changes.
   - One effect is the picked effect of the Inspector. Its name has the accent color, and only its section can be open.
-    - After the name, the title shows what the area of the effect follows: the name of a path, or all of a subject (`all_of`).
     - A click on the name or the arrow of another effect picks and opens it (`Act::EffectOpen`). A click on the picked effect closes or opens its section.
     - A double-click acts as one click. Thus it opens a closed section, and does not close it again.
     - `Workspace::settle_effects` picks the first effect when the selection changes, and when the picked effect goes.
@@ -460,22 +436,18 @@ The bar and the Jobs button:
   - The section shows the values of the playhead's frame (`Effect::adopted`).
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.
   - The Keyframe button and its ease menu send `effects.key`. Previous and Next seek (`step_effect`).
-    - The button and the seeks leave out the keyframes of the area (`effect_marks`, `effect_key_times`). Why: `effects.key` without `area` does not change them.
-  - Each effect has the same Area rows (`area_rows`). Each change is one `effects.set` with `area`. Off sends a null `area`.
-    - The numbers of the area are knobs (`AreaKnob`), so a drag previews and lands as the other values do.
-    - The Follow menu lists None, one entry for each subject of `SUBJECTS` (`all_of`) and the motion paths of the clip (`follow_row`, `PathRow`).
-    - A subject entry sends the name of the subject in `follows`. It is there also when the clip has no path of that subject.
-    - The menu shows the name of each `Subject` that an area follows (`Subject::named`), also of one that it does not list.
-- `Workspace::motion_section` shows for the first selected clip that takes motion paths (`ops::motion::takes`), below the picture sections of the Video tab.
+    - The button and the seeks use the keyframes of the effect (`effect_marks`, `effect_key_times`).
+- `Workspace::motion_section` shows for the clip of the Effects page when it takes motion paths (`ops::motion::takes`).
   - Its first row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
     - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.
     - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
     - Each field tells on hover what it sets, and what a lower or a higher number does.
     - Find and Blur send the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
   - Find sends `motion.find` (`find_request`), with `replace` when the clip has paths of that subject.
-  - Blur sends one `apply` (`blur_request`). It has `motion.find` when the clip has no such path.
-    - Then it has `effects.add` of a Mosaic Blur, and `effects.set` with an `area` that follows the subject.
-    - It leaves the blur out when an effect of the clip follows the subject. With nothing to send, the button is off.
+  - Blur sends one `apply` (`page_blur`). It has `motion.find` when the clip has no such path.
+    - Then it has `comp.add` of a Mosaic Blur before Media Out, `comp.add` of a mask on it, and `comp.set` of the mask with `follows`.
+    - The mask is a rectangle for text, a person or a vehicle, and an ellipse for a face (`boxed`).
+    - It leaves the blur out when a mask of the composition follows the subject. With nothing to send, the button is off.
     - The live core runs an `apply` with `motion.find` as a long edit (`runs_long`): it measures on a job thread first.
   - A `motion.find` and a `motion.track` of their own run as jobs (`start_encode`, kinds `find` and `track`). The Jobs window shows each with its progress, and Cancel stops it.
     - The `apply` of Blur measures with no job, and shows no progress.

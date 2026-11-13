@@ -305,11 +305,6 @@ pub fn describe_at(
         "picture.set" => d.picture_set(),
         "effects.add" => format!("Add {} to {}", d.effect_name(), d.clips("clips")),
         "effects.set" => format!("Change effect {} of {}", d.effect(), d.clips("clip")),
-        "effects.key" if d.flag("area") => format!(
-            "Key the area of effect {} of {}",
-            d.effect(),
-            d.clips("clip")
-        ),
         "effects.key" => format!("Key effect {} of {}", d.effect(), d.clips("clip")),
         "effects.reset" => format!("Reset effect {} of {}", d.effect(), d.clips("clip")),
         "effects.remove" => format!("Remove effect {} of {}", d.effect(), d.clips("clip")),
@@ -366,14 +361,11 @@ pub fn describe_at(
             d.params["subject"].as_str().unwrap_or("face"),
             d.clips("clips")
         ),
-        "motion.track" => match d.params["node"].as_str() {
-            Some(node) => format!("Track {node} of {}", d.clips("clip")),
-            None => format!(
-                "Track the area of effect {} of {}",
-                d.params["effect"],
-                d.clips("clip")
-            ),
-        },
+        "motion.track" => format!(
+            "Track {} of {}",
+            d.params["node"].as_str().unwrap_or("a mask"),
+            d.clips("clip")
+        ),
         "motion.follow" => match d.params["path"].as_str() {
             Some(path) => format!("Make {} follow motion path {path}", d.clips("clip")),
             None => format!("Stop {} following a motion path", d.clips("clip")),

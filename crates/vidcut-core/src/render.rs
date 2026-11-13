@@ -620,7 +620,7 @@ pub struct Placed {
     /// The Push or the Slide of this crossing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moving: Option<Move>,
-    /// The motion paths that the areas of its effects follow. Left out
+    /// The motion paths that the masks of its composition follow. Left out
     /// when none follows a path.
     #[serde(default, skip_serializing_if = "Followed::is_empty")]
     pub followed: Followed,
@@ -630,8 +630,8 @@ fn zero_i64(n: &i64) -> bool {
     *n == 0
 }
 
-/// The motion paths that the areas of a picture's effects follow, with the
-/// way from a keyframe position of the clip to its source frame.
+/// The motion paths that the masks of a picture's composition follow, with
+/// the way from a keyframe position of the clip to its source frame.
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct Followed {
     /// The paths, on source frames, without their names.
@@ -667,10 +667,10 @@ impl PartialEq for Followed {
 
 impl Followed {
     pub fn of(clip: &Clip, picture: &Picture) -> Self {
-        let named = |e: &crate::model::Effect| e.area.as_ref()?.follows.clone();
-        let mut named: Vec<String> = picture.effects.iter().filter_map(named).collect();
         let nodes = picture.composition.iter().flat_map(|c| &c.nodes);
-        named.extend(nodes.filter_map(|n| n.tool.mask()?.follows.clone()));
+        let named: Vec<String> = nodes
+            .filter_map(|n| n.tool.mask()?.follows.clone())
+            .collect();
         let follows = |m: &&MotionPath| named.iter().any(|n| m.follows(n));
         let shared = |m: &MotionPath| MotionPath {
             id: m.id.clone(),

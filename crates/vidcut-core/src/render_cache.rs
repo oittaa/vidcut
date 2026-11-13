@@ -1366,7 +1366,6 @@ mod tests {
             use_alpha: true,
             render_cache: true,
             keys: Vec::new(),
-            area: None,
         }
     }
 

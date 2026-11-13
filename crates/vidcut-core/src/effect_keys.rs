@@ -5,8 +5,8 @@ use crate::keyframes::{
     scale_channel, split_channel, value_at, value_paired,
 };
 use crate::model::{
-    Blur, Clip, Ease, Effect, EffectArea, EffectKeys, EffectKind, EffectValue, FilmGrain,
-    GaussianBlur, Glow, Keyframe, Mask, MosaicBlur, Node, Sharpen, Tool, Vignette,
+    Blur, Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FilmGrain, GaussianBlur, Glow,
+    Keyframe, Mask, MosaicBlur, Node, Sharpen, Tool, Vignette,
 };
 
 type Range = (f64, f64);
@@ -247,53 +247,8 @@ fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
     }
 }
 
-fn area_slot(a: &mut EffectArea, value: EffectValue) -> Slot<'_> {
-    use EffectValue as V;
-    Some(match value {
-        V::AreaCenterX => (
-            &mut a.center.get_or_insert(EffectArea::MIDDLE)[0],
-            EffectArea::PLACES,
-        ),
-        V::AreaCenterY => (
-            &mut a.center.get_or_insert(EffectArea::MIDDLE)[1],
-            EffectArea::PLACES,
-        ),
-        V::AreaWidth => (
-            &mut a.size.get_or_insert(EffectArea::WHOLE)[0],
-            EffectArea::SIZES,
-        ),
-        V::AreaHeight => (
-            &mut a.size.get_or_insert(EffectArea::WHOLE)[1],
-            EffectArea::SIZES,
-        ),
-        V::AreaRotation => (a.rotation.get_or_insert(0.0), EffectArea::TURNS),
-        V::AreaSoftness => (a.softness.get_or_insert(0.0), EffectArea::SHARES),
-        _ => return None,
-    })
-}
-
-fn area_read(a: &EffectArea, value: EffectValue) -> Option<(f64, Range)> {
-    let mut numbers = EffectArea {
-        center: a.center,
-        size: a.size,
-        rotation: a.rotation,
-        softness: a.softness,
-        ..EffectArea::default()
-    };
-    area_slot(&mut numbers, value).map(|(n, range)| (*n, range))
-}
-
 impl EffectValue {
-    pub const AREA: [EffectValue; 6] = [
-        EffectValue::AreaCenterX,
-        EffectValue::AreaCenterY,
-        EffectValue::AreaWidth,
-        EffectValue::AreaHeight,
-        EffectValue::AreaRotation,
-        EffectValue::AreaSoftness,
-    ];
-
-    pub const ALL: [EffectValue; 89] = [
+    pub const ALL: [EffectValue; 83] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -366,12 +321,6 @@ impl EffectValue {
         EffectValue::MediumDetails,
         EffectValue::LargeDetails,
         EffectValue::SharpenChroma,
-        EffectValue::AreaCenterX,
-        EffectValue::AreaCenterY,
-        EffectValue::AreaWidth,
-        EffectValue::AreaHeight,
-        EffectValue::AreaRotation,
-        EffectValue::AreaSoftness,
         EffectValue::YSize,
         EffectValue::Level,
         EffectValue::SoftEdge,
@@ -390,10 +339,6 @@ impl EffectValue {
             .ok()
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_default()
-    }
-
-    pub fn of_area(self) -> bool {
-        Self::AREA.contains(&self)
     }
 
     pub fn pair(self) -> bool {
@@ -556,28 +501,23 @@ pub trait Keyed: Clone {
         out
     }
 
-    fn has_key_at(&self, frame: i64, area: bool) -> bool {
+    fn has_key_at(&self, frame: i64) -> bool {
         self.key_list()
             .iter()
-            .filter(|k| k.value.of_area() == area)
             .any(|k| k.keys.iter().any(|key| key.frame == frame))
     }
 
-    fn toggle_keys(&mut self, frame: i64, area: bool) -> bool {
-        if self.has_key_at(frame, area) {
+    fn toggle_keys(&mut self, frame: i64) -> bool {
+        if self.has_key_at(frame) {
             let at = HashSet::from([frame]);
-            for k in self
-                .key_list_mut()
-                .iter_mut()
-                .filter(|k| k.value.of_area() == area)
-            {
+            for k in self.key_list_mut().iter_mut() {
                 let (keys, y) = k.channel();
                 drop_channel(keys, y, &at);
             }
             self.key_list_mut().retain(|k| !k.keys.is_empty());
             return false;
         }
-        for value in self.values().into_iter().filter(|v| v.of_area() == area) {
+        for value in self.values() {
             let to = self.point_at(value, frame as f64);
             self.put_point(value, frame, to);
         }
@@ -604,12 +544,8 @@ pub trait Keyed: Clone {
         self.key_list_mut().retain(|k| !k.keys.is_empty());
     }
 
-    fn ease_keys(&mut self, frame: i64, ease: Ease, area: bool) {
-        for k in self
-            .key_list_mut()
-            .iter_mut()
-            .filter(|k| k.value.of_area() == area)
-        {
+    fn ease_keys(&mut self, frame: i64, ease: Ease) {
+        for k in self.key_list_mut().iter_mut() {
             ease_mark(&mut k.keys, frame, ease);
         }
     }
@@ -663,9 +599,6 @@ impl Keyed for Effect {
         if value == EffectValue::Blend {
             return Some(([self.mixed(), 0.0], BLEND));
         }
-        if value.of_area() {
-            return area_read(self.area.as_ref()?, value).map(|(n, range)| ([n, 0.0], range));
-        }
         kind_read(&self.kind, value)
     }
 
@@ -675,7 +608,6 @@ impl Keyed for Effect {
             .into_iter()
             .filter(|v| match *v {
                 EffectValue::Blend => true,
-                v if v.of_area() => self.area.is_some(),
                 v => kind_takes(&mut kind, v),
             })
             .collect()
@@ -684,7 +616,6 @@ impl Keyed for Effect {
     fn write(&mut self, value: EffectValue, to: f64) {
         let place = match value {
             EffectValue::Blend => Some((self.blend.get_or_insert(to), BLEND)),
-            v if v.of_area() => self.area.as_mut().and_then(|a| area_slot(a, v)),
             v if v.pair() => point_slot(&mut self.kind, v).map(|(p, range)| (&mut p[0], range)),
             v => slot(&mut self.kind, v),
         };
@@ -698,12 +629,6 @@ impl Keyed for Effect {
             Some((p, _)) => *p = to,
             None => self.write(value, to[0]),
         }
-    }
-}
-
-impl Effect {
-    pub fn area_keys(&self) -> impl Iterator<Item = &EffectKeys> {
-        self.keys.iter().filter(|k| k.value.of_area())
     }
 }
 
@@ -782,9 +707,6 @@ impl Keyed for Node {
     fn read_point(&self, value: EffectValue) -> Option<([f64; 2], Range)> {
         if value == EffectValue::Blend {
             return self.tool.works().then_some(([self.mixed(), 0.0], BLEND));
-        }
-        if value.of_area() {
-            return None;
         }
         let mut tool = self.tool.clone();
         match value.pair() {
@@ -908,14 +830,14 @@ mod tests {
     #[test]
     fn toggle_on_a_key_removes_the_keys_of_that_frame() {
         let mut e = blur_with_keys();
-        e.toggle_keys(10, false);
+        e.toggle_keys(10);
         assert_eq!(e.keys_of(EffectValue::Strength), [key(0, 0.2)]);
     }
 
     #[test]
     fn toggle_off_a_key_keys_every_value_at_its_value() {
         let mut e = blur_with_keys();
-        e.toggle_keys(5, false);
+        e.toggle_keys(5);
         assert_eq!(e.keys.iter().filter(|k| !k.keys.is_empty()).count(), 11);
     }
 

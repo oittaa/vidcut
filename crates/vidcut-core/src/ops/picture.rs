@@ -5,11 +5,10 @@ use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    AreaShape, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode, Composition,
-    Crop, DynamicZoom, Effect, EffectArea, EffectKeys, EffectKind, FillMethod, FilmGrain,
-    GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, MosaicBlur, Node,
-    Picture, PictureTool, Project, Sharpen, Tool, TrackKind, Vignette, VignetteMode, VignetteShape,
-    ZoomBox,
+    Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode, Composition, Crop,
+    DynamicZoom, Effect, EffectKeys, EffectKind, FillMethod, FilmGrain, GaussianBlur, Glow,
+    GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, MosaicBlur, Node, Picture,
+    PictureTool, Project, Sharpen, Tool, TrackKind, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -520,7 +519,6 @@ fn plain_effect_checked(e: &Effect) -> Result<Effect> {
     Ok(Effect {
         kind: kind_checked(&e.kind)?,
         blend: e.blend.filter(|v| *v != 1.0),
-        area: e.area.as_ref().map(area_checked).transpose()?,
         ..e.clone()
     })
 }
@@ -740,54 +738,6 @@ pub fn composition_checked(c: &Composition) -> Result<Composition> {
             .iter()
             .map(node_checked)
             .collect::<Result<Vec<_>>>()?,
-    })
-}
-
-fn area_checked(a: &EffectArea) -> Result<EffectArea> {
-    for v in a.center.into_iter().flatten() {
-        within(
-            Some(v),
-            EffectArea::PLACES,
-            "an area's center is two fractions, each from -10 to 10",
-        )?;
-    }
-    for v in a.size.into_iter().flatten() {
-        within(
-            Some(v),
-            EffectArea::SIZES,
-            "an area's size is two fractions, each from 0 to 10",
-        )?;
-    }
-    within(
-        a.rotation,
-        EffectArea::TURNS,
-        "an area's rotation is from -100000 to 100000 degrees",
-    )?;
-    within(
-        a.softness,
-        EffectArea::SHARES,
-        "an area's softness is from 0 to 1",
-    )?;
-    let most = EffectArea::POINTS_KEPT;
-    if !a.points.is_empty() && !(3..=most).contains(&a.points.len()) {
-        return Err(Error::invalid(format!(
-            "an area's points are from 3 to {most} corners, not {}",
-            a.points.len()
-        )));
-    }
-    for v in a.points.iter().flatten() {
-        within(
-            Some(*v),
-            EffectArea::PLACES,
-            "an area's points are fractions, each from -10 to 10",
-        )?;
-    }
-    Ok(EffectArea {
-        center: a.center.filter(|c| *c != EffectArea::MIDDLE),
-        size: a.size.filter(|s| *s != EffectArea::WHOLE),
-        rotation: a.rotation.filter(|r| *r != 0.0),
-        softness: a.softness.filter(|s| *s != 0.0),
-        ..a.clone()
     })
 }
 
@@ -1227,22 +1177,7 @@ pub fn effect_shown(e: &Effect) -> Value {
     if let (Some(out), Some(more)) = (out.as_object_mut(), more.as_object()) {
         out.extend(more.clone());
     }
-    out["area"] = e.area.as_ref().map_or(Value::Null, area_shown);
     out
-}
-
-fn area_shown(a: &EffectArea) -> Value {
-    let points = (a.shape == AreaShape::Polygon).then(|| a.corners());
-    json!({
-        "shape": a.shape,
-        "points": points,
-        "center": a.middle(),
-        "size": a.extent(),
-        "rotation": a.turn(),
-        "softness": a.soft(),
-        "invert": a.invert,
-        "follows": a.follows,
-    })
 }
 
 pub fn zoom_shown(z: &DynamicZoom) -> Value {

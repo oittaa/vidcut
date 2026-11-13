@@ -427,7 +427,7 @@ pub fn key(
     }
     let on = match value {
         Some(v) => n.keys_of(v).iter().any(|k| k.frame == frame),
-        None => n.has_key_at(frame, false),
+        None => n.has_key_at(frame),
     };
     let keyed = match (ease, value) {
         (Some(ease), Some(v)) if on => {
@@ -435,7 +435,7 @@ pub fn key(
             true
         }
         (Some(ease), None) if on => {
-            n.ease_keys(frame, ease, false);
+            n.ease_keys(frame, ease);
             true
         }
         (Some(_), _) => {
@@ -444,7 +444,7 @@ pub fn key(
             )));
         }
         (None, Some(v)) => n.toggle_value_key(v, frame),
-        (None, None) => n.toggle_keys(frame, false),
+        (None, None) => n.toggle_keys(frame),
     };
     *n = node_checked(n)?;
     Ok(json!({ "clip": id, "node": name, "frame": frame, "keyed": keyed }))

@@ -577,12 +577,11 @@ Dynamic Zoom and keyframes (D75):
 - `Effect::sampled` reads each keyed value of an effect at that frame. `Working::of` then builds the work of the effect from plain values.
 - `layer_size` fits the layer for the closer Dynamic Zoom box (`DynamicZoom::closest`) and the largest zoom key (`place::detail`).
 - The viewer and the export both take this `Placing`. Thus there is one draw path.
-- `Placed` also holds the motion paths that the areas of its effects and the masks of its composition follow (`render::Followed`, [model](model.md#motion-paths)).
+- `Placed` also holds the motion paths that the masks of its composition follow (`render::Followed`, [model](model.md#motion-paths)).
   - `Followed::of` takes them from the clip, with the pace of the clip and the source frame of its first frame.
   - A path shares its samples with the clip (`MotionPath.samples`). Thus a placed picture copies no sample, and two plans of one project compare them by their place in memory.
-  - `Followed::bases` gives the area of each followed path at the frame (`MotionPath::base_at`). It goes from the keyframe frame to the source frame through the pace.
+  - `Followed::bases` gives the box of each followed path at the frame (`MotionPath::base_at`). It goes from the keyframe frame to the source frame through the pace.
   - `follows` names one path by its id, or each path of a subject (`MotionPath::follows`).
-  - `place::Masking` holds one map for each of these areas, and `fs_area` joins them in one pass. With no area at the frame, `Working::of` gives no work for the effect. With `invert` on, it then gives the work with no mask: the effect is on the whole picture.
   - Why: a path is on source frames, and the keyframe frame of a clip with a speed is a frame of the retimed source.
   - The paths are behind an `Arc`. Thus `Placed::after` copies no sample.
 
@@ -623,13 +622,6 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - The fit of the picture sets its size (`OnFrame.fit`). Thus a Zoom and a Pan do not change the shape.
 - `place::Sharpening` holds the gain of each band of a Sharpen, for the brightness and for the colors.
   - A Sharpen with all gains at 0 and Use Alpha on is no work at all (`Sharpening::still`).
-- `place::Masking` holds the area of an effect at the frame (`Working.area`, [model](model.md#pictures)).
-  - Its `rows` map a pixel of the canvas to the axes of the area. On these axes, the edge of the area is at 1.
-  - The rows join the map of the placement (`Level.back`) with the place of the area on the source picture.
-  - That map gives a point of the source picture. Thus the area stays on the content through a flip, a Dynamic Zoom, a pitch and a yaw.
-  - The source picture counts with square pixels, at its fitted shape (`OnFrame.fit`). Thus an ellipse on a wide picture is a true ellipse.
-  - `Placing::new` gives `Working::of` the base box of the area: the whole picture, or the area of the followed path at the frame.
-  - An area that follows a path that the plan does not hold takes the whole picture as its base box.
 
 The draw:
 
@@ -682,12 +674,7 @@ The draw:
   - The color planes are made only when a color gain is not 0. At a Sharpen Chroma of 1 the color gains are 0 (`Sharpening`).
 - `fs_sharpen` adds the changes to the colors. Each change is for the output, so the colors need no second conversion.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
-- `blur::landed` ends each effect, of each kind:
-  - With an area, `fs_area` mixes the result with the picture that came in, by the area (`blur::area_bytes`). Without an area, it copies the result.
-  - `fs_area` fades the edge of an area over one pixel at least (`area_inside`). The softness makes that band wider, toward the middle.
-  - `blur::area_maps` gives the shader the map of each area. A pixel takes the effect by the areas together (`area_reach`).
-  - For a polygon, `area_sides` gives the distance of a pixel to the nearest side, less than 0 inside. The points follow the maps in the same buffer.
-  - The coverage of a made frame goes through the same end. Thus its alpha changes only inside the area.
+- `blur::landed` ends each effect, of each kind. A clip effect has no mask, thus `blur::landed` copies the result.
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).

@@ -2186,7 +2186,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A paste puts a keyframe of an effect value only on an effect of the same kind.
   - When the last keyframe of a value goes, the value returns to its plain value.
   - Reset removes the keyframes of the effect, as the reset button of a group does.
-  - The area of an effect has its own keyframes ([deviation X166](deviations.md#x166-an-effect-has-an-area)). The Keyframe button and Reset do not change them.
   - The Keyframes tab has a group for each effect with a track for each value. A group name has a number when the clip has two effects of a kind.
   - `keyframes.add` and the other `keyframes` methods take `{"effect": 0, "value": "strength"}` in `param`.
   - A point takes `[x, y]` in `value`.
@@ -2571,7 +2570,7 @@ The shapes:
   - After a value has a keyframe, a change on another frame puts a keyframe there.
 - When the active node is a mask, the viewer shows its edge, its center and its handles. A drag of one changes the mask.
 - A mask follows a tracked thing when its Center connects to the Offset Position of a tracker (p. 1793).
-  - vidcut: Follow in the Inspector of a mask picks a motion path of the clip, or all the paths of a subject ([X168](deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
+  - vidcut: Follow in the Inspector of a mask picks a motion path of the clip, or all the paths of a subject ([X168](deviations.md#x168-a-mask-follows-a-thing)).
   - The box of the path then takes the place of the whole picture for the mask. With several paths, the viewer shows the edge of the mask in each box. The handles are on the first box.
   - vidcut: Track under the controls of a mask makes a motion path for the thing under the mask, and the mask follows it.
 - vidcut: the Motion section is at the bottom of the Inspector of the page ([X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).

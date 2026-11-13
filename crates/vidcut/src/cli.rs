@@ -106,7 +106,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("motion.set", &["clip", "path"]),
     ("motion.remove", &["clip"]),
     ("motion.find", &["clips"]),
-    ("motion.track", &["clip", "effect"]),
+    ("motion.track", &["clip", "node"]),
     ("motion.follow", &["clip"]),
     ("edit.append", &["media"]),
     ("edit.smart_insert", &["media"]),
@@ -454,16 +454,7 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut effects set c3 2 --center 0.25,0.75 --transparency 0.5 --composite-type screen\n  \
          vidcut effects set c3 3 --sharpen-amount 2.5 --fine-detail-size 0.03\n  \
          vidcut effects set c3 3 --fine-details 2 --large-details 3 --sharpen-chroma 1.5\n  \
-         vidcut effects set c3 0 --strength 0.6 --at 2s\n  \
-         vidcut effects set c3 1 --area '{\"center\":[0.3,0.4],\"size\":[0.2,0.3]}'\n  \
-         vidcut effects set c3 1 --area '{\"shape\":\"box\",\"rotation\":15,\"softness\":0.3}'\n  \
-         vidcut effects set c3 1 --area \
-         '{\"shape\":\"polygon\",\"points\":[[0.5,0],[1,1],[0,1]]}'\n  \
-         vidcut effects set c3 1 --area '{\"invert\":true}'\n  \
-         vidcut effects set c3 1 --area '{\"follows\":\"p1\",\"size\":[1.2,1.2]}'\n  \
-         vidcut effects set c3 1 --area '{\"follows\":\"face\",\"size\":[1.3,1.3]}'\n  \
-         vidcut effects set c3 1 --area '{\"follows\":null}'\n  \
-         vidcut effects set c3 1 --area null",
+         vidcut effects set c3 0 --strength 0.6 --at 2s",
     ),
     (
         "comp.add",
@@ -502,8 +493,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "effects.key",
-        "vidcut effects key c3 0 --at 2s\n  vidcut effects key c3 0 --at 2s --ease ease_in_out\n  \
-         vidcut effects key c3 1 --at 2s --area",
+        "vidcut effects key c3 0 --at 2s\n  vidcut effects key c3 0 --at 2s --ease ease_in_out",
     ),
     (
         "motion.list",
@@ -535,8 +525,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "motion.track",
-        "vidcut motion track c3 0 --download\n  vidcut motion track c3 1 --at 12s --way forward\n  \
-         vidcut motion track c3 --node Ellipse1",
+        "vidcut motion track c3 Ellipse1 --download\n  \
+         vidcut motion track c3 Rectangle1 --at 12s --way forward",
     ),
     (
         "motion.follow",

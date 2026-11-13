@@ -12,14 +12,13 @@ use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    AreaShape, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, ClipRetime, CompositeMode,
-    Composition, DynamicZoom, Ease, EbuLevel, Effect, EffectArea, EffectKind, EffectType,
-    EffectValue, FillMethod, FilmGrain, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
-    GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, MotionPath, Node,
-    Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject, Tool, ToolType, TrackKind,
-    Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, ClipRetime, CompositeMode,
+    Composition, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue,
+    FillMethod, FilmGrain, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming, GlowOutput,
+    Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, MotionPath, Node, Picture,
+    PictureTool, Project, Retime, Sharpen, Speed, Subject, Tool, ToolType, TrackKind, Upscaler,
+    Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
-use vidcut_core::motion::{REACH, TURN};
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
 use vidcut_core::time::TimeSpec;
@@ -40,7 +39,7 @@ const SAME: f64 = 1e-9;
 const FIELD_WIDTH: f32 = 76.0;
 const NAME_WIDTH: f32 = 140.0;
 const BLUR_SIZE: [f64; 2] = [1.3, 1.3];
-pub(super) const SUBJECTS: [Subject; 2] = [Subject::Face, Subject::Text];
+const SUBJECTS: [Subject; 2] = [Subject::Face, Subject::Text];
 const BETTER_SIDE: u32 = 1920;
 const FIND_VALUES: [(&str, &str, &str, &str); 7] = [
     (
@@ -135,18 +134,7 @@ enum Knob {
     Grain(GrainKnob),
     Vignette(VignetteKnob),
     Sharpen(SharpenKnob),
-    Area(AreaKnob),
     Blend,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum AreaKnob {
-    Softness,
-    CenterX,
-    CenterY,
-    Width,
-    Height,
-    Rotation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -701,58 +689,6 @@ impl SharpenKnob {
     }
 }
 
-impl AreaKnob {
-    fn dial(self) -> Dial {
-        let dial = |label, usual, range, speed| Dial {
-            label,
-            usual,
-            range,
-            speed,
-        };
-        let [x, y] = EffectArea::MIDDLE;
-        let [w, h] = EffectArea::WHOLE;
-        match self {
-            Self::Softness => dial("Area Softness", 0.0, 0.0..=1.0, 0.005),
-            Self::CenterX => dial("Center X", x, -REACH..=REACH, 0.001),
-            Self::CenterY => dial("Center Y", y, -REACH..=REACH, 0.001),
-            Self::Width => dial("Width", w, 0.0..=REACH, 0.001),
-            Self::Height => dial("Height", h, 0.0..=REACH, 0.001),
-            Self::Rotation => dial("Rotation", 0.0, -TURN..=TURN, 0.5),
-        }
-    }
-
-    fn read(self, a: &EffectArea) -> f64 {
-        match self {
-            Self::Softness => a.soft(),
-            Self::CenterX => a.middle()[0],
-            Self::CenterY => a.middle()[1],
-            Self::Width => a.extent()[0],
-            Self::Height => a.extent()[1],
-            Self::Rotation => a.turn(),
-        }
-    }
-
-    fn put(self, a: &mut EffectArea, to: f64) {
-        match self {
-            Self::Softness => a.softness = Some(to),
-            Self::CenterX => a.center = Some([to, a.middle()[1]]),
-            Self::CenterY => a.center = Some([a.middle()[0], to]),
-            Self::Width => a.size = Some([to, a.extent()[1]]),
-            Self::Height => a.size = Some([a.extent()[0], to]),
-            Self::Rotation => a.rotation = Some(to),
-        }
-    }
-
-    fn param(self, a: &EffectArea) -> Value {
-        match self {
-            Self::Softness => json!({ "softness": a.soft() }),
-            Self::CenterX | Self::CenterY => json!({ "center": a.middle() }),
-            Self::Width | Self::Height => json!({ "size": a.extent() }),
-            Self::Rotation => json!({ "rotation": a.turn() }),
-        }
-    }
-}
-
 impl Knob {
     fn dial(self) -> Dial {
         match self {
@@ -762,7 +698,6 @@ impl Knob {
             Knob::Grain(k) => k.dial(),
             Knob::Vignette(k) => k.dial(),
             Knob::Sharpen(k) => k.dial(),
-            Knob::Area(k) => k.dial(),
             Knob::Blend => Dial {
                 label: "Blend",
                 usual: 1.0,
@@ -780,7 +715,6 @@ impl Knob {
             (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.read(g),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.read(s),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.read(s),
-            (Knob::Area(k), _) => e.area.as_ref().map_or(k.dial().usual, |a| k.read(a)),
             (Knob::Blend, _) => e.mixed(),
             _ => self.dial().usual,
         }
@@ -797,11 +731,6 @@ impl Knob {
             (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.put(g, v),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.put(s, v),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.put(s, v),
-            (Knob::Area(k), _) => {
-                if let Some(a) = out.area.as_mut() {
-                    k.put(a, v);
-                }
-            }
             (Knob::Blend, _) => out.blend = Some(v),
             _ => {}
         }
@@ -837,10 +766,6 @@ impl Knob {
             (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.param(g),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.param(s),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.param(s),
-            (Knob::Area(k), _) => {
-                let area = e.area.as_ref();
-                ("area", area.map_or_else(|| json!({}), |a| k.param(a)))
-            }
             _ => ("blend", json!(e.mixed())),
         }
     }
@@ -877,7 +802,6 @@ fn effect_key_times(c: &Clip, n: usize) -> Vec<i64> {
     effects.get(n).map_or_else(Vec::new, |e| {
         e.keys
             .iter()
-            .filter(|k| !k.value.of_area())
             .flat_map(|k| k.keys.iter())
             .map(|k| c.key_time(k.frame).round() as i64)
             .collect()
@@ -1633,7 +1557,7 @@ impl Workspace {
             paths: path_rows(clip),
             finds: vidcut_core::ops::motion::takes(clip),
         };
-        self.motion_section(ui, &chosen, true);
+        self.motion_section(ui, &chosen);
     }
 
     fn track_node(&mut self, clip: &Clip, node: &Node) {
@@ -2021,11 +1945,9 @@ pub struct Inspector {
     find_better: bool,
     find_error: bool,
     finding: Option<Finding>,
-    area_edit: Option<usize>,
     tab: Tab,
     effect_picked: Option<usize>,
     effect_shut: bool,
-    effect_drawn: bool,
     effects_seen: Option<(String, Vec<Effect>)>,
     marks: Vec<(usize, EffectValue, KeyMark)>,
     watched: Option<(std::sync::Weak<Project>, Vec<String>)>,
@@ -2133,8 +2055,6 @@ enum Act {
     Flips([Option<bool>; 2]),
     Zooming(bool),
     Boxes,
-    AreaEdit(usize),
-    AreaTrack(usize),
     Ease(Ease),
     Mode(CompositeMode),
     Swap,
@@ -2412,8 +2332,7 @@ fn effect_marks(c: &Clip, at: i64) -> Vec<KeyMark> {
     effects
         .iter()
         .map(|e| {
-            let own = e.keys.iter().filter(|k| !k.value.of_area());
-            let keys: Vec<Keyframe> = own.flat_map(|k| k.keys.clone()).collect();
+            let keys: Vec<Keyframe> = e.keys.iter().flat_map(|k| k.keys.clone()).collect();
             mark(c, &keys, at)
         })
         .collect()
@@ -3436,33 +3355,6 @@ fn boxed(subject: Subject) -> bool {
     subject != Subject::Face
 }
 
-fn blur_request(
-    id: &str,
-    found: bool,
-    effects: &[Effect],
-    (subject, extra): (Subject, &Value),
-) -> Option<(&'static str, Value)> {
-    let follows =
-        |e: &Effect| e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(subject.name());
-    let mut commands = Vec::new();
-    if !found {
-        let params = with_extra(json!({ "clips": [id], "subject": subject }), extra);
-        commands.push(json!({ "method": "motion.find", "params": params }));
-    }
-    if !effects.iter().any(follows) {
-        let mut area = json!({ "follows": subject.name(), "size": BLUR_SIZE });
-        if boxed(subject) {
-            area["shape"] = json!(AreaShape::Box);
-        }
-        let add = json!({ "clips": [id], "kind": "mosaic_blur" });
-        let set = json!({ "clip": id, "effect": effects.len(), "area": area });
-        commands.push(json!({ "method": "effects.add", "params": add }));
-        commands.push(json!({ "method": "effects.set", "params": set }));
-    }
-    let label = format!("Blur {}", subject.many());
-    (!commands.is_empty()).then(|| ("apply", json!({ "commands": commands, "label": label })))
-}
-
 fn finds(method: &str, params: &Value) -> bool {
     let commands = params["commands"].as_array();
     method == "motion.find"
@@ -3488,20 +3380,7 @@ fn with_model(method: &str, params: &mut Value) {
     }
 }
 
-fn area_label(shape: Option<AreaShape>) -> &'static str {
-    match shape {
-        None => "Off",
-        Some(AreaShape::Ellipse) => "Ellipse",
-        Some(AreaShape::Box) => "Box",
-        Some(AreaShape::Polygon) => "Polygon",
-    }
-}
-
-fn area_set(n: usize, change: Value) -> Act {
-    Act::EffectSet(n, json!({ "area": change }))
-}
-
-pub(super) fn all_of(subject: Subject) -> String {
+fn all_of(subject: Subject) -> String {
     format!("All {}", subject.many())
 }
 
@@ -3592,95 +3471,15 @@ fn page_blur(c: &Chosen, (subject, extra): (Subject, &Value)) -> Option<(&'stati
     (!commands.is_empty()).then(|| ("apply", json!({ "commands": commands, "label": label })))
 }
 
-fn area_rows(
-    ui: &mut egui::Ui,
-    i: &Inspector,
-    (n, e): (usize, &Effect),
-    paths: &[PathRow],
-    acts: &mut Vec<Act>,
-) {
-    let area = |ui: &mut egui::Ui, k: AreaKnob, acts: &mut Vec<Act>| {
-        knob(ui, i, (n, Knob::Area(k)), e, acts);
-    };
-    rows(ui, (n, "area"), |ui| {
-        let now = e.area.as_ref().map(|a| a.shape);
-        label(ui, "Area", now.is_some());
-        let shapes = [
-            None,
-            Some(AreaShape::Ellipse),
-            Some(AreaShape::Box),
-            Some(AreaShape::Polygon),
-        ];
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt(("inspector-area-shape", n))
-                .selected_text(area_label(now))
-                .show_ui(ui, |ui| {
-                    for shape in shapes {
-                        let name = area_label(shape);
-                        if ui.selectable_label(shape == now, name).clicked() && shape != now {
-                            let change = shape.map_or(Value::Null, |s| json!({ "shape": s }));
-                            acts.push(area_set(n, change));
-                        }
-                    }
-                });
-            let edit = egui::Button::selectable(i.area_edit == Some(n), "Edit Shape");
-            if ui.add_enabled(now.is_some(), edit).clicked() {
-                acts.push(Act::AreaEdit(n));
-            }
-            if ui
-                .add_enabled(now.is_some(), egui::Button::new("Track"))
-                .clicked()
-            {
-                acts.push(Act::AreaTrack(n));
-            }
-        });
-        if reset(ui, now.is_some()) {
-            acts.push(area_set(n, Value::Null));
-        }
-        ui.end_row();
-        let Some(a) = &e.area else {
-            return;
-        };
-        label(ui, "Invert Area", a.invert);
-        let mut invert = a.invert;
-        if ui.checkbox(&mut invert, "").clicked() {
-            acts.push(area_set(n, json!({ "invert": invert })));
-        }
-        if reset(ui, a.invert) {
-            acts.push(area_set(n, json!({ "invert": false })));
-        }
-        ui.end_row();
-        area(ui, AreaKnob::Softness, acts);
-        let salt = ("inspector-area-follow", n);
-        let set = |v: Value| area_set(n, json!({ "follows": v }));
-        follow_row(ui, (salt, a.follows.as_deref()), paths, set, acts);
-    });
-    if e.area.is_some() {
-        fold(ui, (n, "Area Advanced Controls"), |ui| {
-            for k in [
-                AreaKnob::CenterX,
-                AreaKnob::CenterY,
-                AreaKnob::Width,
-                AreaKnob::Height,
-                AreaKnob::Rotation,
-            ] {
-                area(ui, k, acts);
-            }
-        });
-    }
-}
-
 fn effect_block(
     ui: &mut egui::Ui,
     i: &Inspector,
     (n, count): (usize, usize),
-    (e, marks, paths): (&Effect, &KeyMark, &[PathRow]),
+    (e, marks): (&Effect, &KeyMark),
     acts: &mut Vec<Act>,
 ) {
     let mut fresh = e.kind().made();
     fresh.on = e.on;
-    fresh.area = e.area.clone();
-    fresh.keys = e.area_keys().cloned().collect();
     let changed = *e != fresh;
     let picked = i.effect_picked == Some(n);
     let open = picked && !i.effect_shut;
@@ -3699,16 +3498,6 @@ fn effect_block(
         let title = ui.add(egui::Label::new(name).sense(egui::Sense::click()));
         if title.clicked() && !title.double_clicked() {
             act = Some(Act::EffectOpen(n));
-        }
-        let followed = e.area.as_ref().and_then(|a| a.follows.as_deref());
-        if let Some(named) = followed {
-            let path = paths.iter().find(|p| p.id == named);
-            let covers = match (path, Subject::named(named)) {
-                (Some(p), _) => p.name.clone().unwrap_or_else(|| p.id.clone()),
-                (None, Some(s)) => all_of(s),
-                (None, None) => named.to_string(),
-            };
-            ui.label(dim(covers));
         }
         match key_buttons(ui, marks, &Ease::ALL, None) {
             Some(KeyClick::Step(dir)) => act = Some(Act::EffectStep(n, dir)),
@@ -3748,7 +3537,6 @@ fn effect_block(
             EffectKind::Vignette(v) => vignette_rows(ui, i, (n, e, v), acts),
             EffectKind::Sharpen(_) => sharpen_rows(ui, i, (n, e), acts),
         }
-        area_rows(ui, i, (n, e), paths, acts);
         fold(ui, (n, "Global Blend"), |ui| {
             knob(ui, i, (n, Knob::Blend), e, acts);
             check(ui, (n, "Use Alpha", e.use_alpha, true), "use_alpha", acts);
@@ -3781,7 +3569,7 @@ fn effects(ui: &mut egui::Ui, i: &Inspector, c: &Chosen, acts: &mut Vec<Act>) {
     for (n, e) in c.shown.effects.iter().enumerate() {
         let shown = e.adopted(c.frame as f64);
         let marks = c.effect_keys.get(n).cloned().unwrap_or_default();
-        effect_block(ui, i, (n, count), (&shown, &marks, &c.paths), acts);
+        effect_block(ui, i, (n, count), (&shown, &marks), acts);
     }
 }
 
@@ -4253,22 +4041,6 @@ impl Workspace {
         self.settle_tabs(&chosen, &sounds);
     }
 
-    pub(super) fn pick_effect(&mut self, n: usize) {
-        self.inspector.effect_picked = Some(n);
-        self.inspector.effect_shut = false;
-    }
-
-    pub(super) fn pick_drawn(&mut self, n: usize) {
-        self.pick_effect(n);
-        self.inspector.effect_drawn = true;
-    }
-
-    pub(super) fn sync_effect_area(&mut self) {
-        let picked = self.inspector.effect_picked;
-        let g = &mut self.timeline.picture_grab;
-        g.area = picked.filter(|_| g.effects);
-    }
-
     fn settle_tabs(&mut self, chosen: &[Chosen], sounds: &[Sound]) {
         self.settle_effects(chosen);
         let i = &mut self.inspector;
@@ -4295,10 +4067,8 @@ impl Workspace {
         let was = match seen {
             Some((id, was)) if id == c.id => was,
             _ => {
-                if !std::mem::take(&mut i.effect_drawn) {
-                    i.effect_picked = first;
-                    i.effect_shut = false;
-                }
+                i.effect_picked = first;
+                i.effect_shut = false;
                 i.effects_seen = Some((c.id.clone(), now.clone()));
                 return;
             }
@@ -4314,7 +4084,6 @@ impl Workspace {
                 i.tab = Tab::Effects;
                 i.effect_picked = Some(k);
                 i.effect_shut = false;
-                i.effect_drawn = false;
             }
             std::cmp::Ordering::Less => match picked {
                 Some(p) if p == k => {
@@ -4827,68 +4596,7 @@ impl Workspace {
         }
     }
 
-    pub(super) fn find_things(&mut self, clip: &str, subject: Subject) {
-        let Some(p) = self.project_shared() else {
-            return;
-        };
-        let Some(c) = p.clip(clip).filter(|c| vidcut_core::ops::motion::takes(c)) else {
-            return;
-        };
-        let mut params = json!({ "clips": [clip], "subject": subject });
-        if c.motion.iter().any(|m| m.subject == Some(subject)) {
-            params["replace"] = json!(true);
-        }
-        let mut given = find_extra(&self.inspector.find_values).unwrap_or(Value::Null);
-        if self.inspector.find_better && given.is_object() && given.get("size").is_none() {
-            given["size"] = json!(BETTER_SIDE);
-        }
-        self.find("motion.find", with_extra(params, &given), subject);
-    }
-
-    pub(super) fn effect_on(
-        &mut self,
-        clip: &str,
-        path: &str,
-        kind: vidcut_core::model::EffectType,
-    ) {
-        let Some(p) = self.project_shared() else {
-            return;
-        };
-        let Some(c) = p.clip(clip) else {
-            return;
-        };
-        let count = c.picture.as_ref().map_or(0, |x| x.effects.len());
-        let found = c.motion.iter().find(|m| m.id == path);
-        let name = found.and_then(|m| m.name.as_deref()).unwrap_or(path);
-        let mut area = json!({ "follows": path, "size": BLUR_SIZE });
-        if found.and_then(|m| m.subject).is_some_and(boxed) {
-            area["shape"] = json!(AreaShape::Box);
-        }
-        let commands = json!([
-            { "method": "effects.add", "params": { "clips": [clip], "kind": kind } },
-            { "method": "effects.set", "params": { "clip": clip, "effect": count, "area": area } },
-        ]);
-        let label = format!("{} On {name}", kind.name());
-        self.send("apply", json!({ "commands": commands, "label": label }));
-        self.left = super::title_browser::LeftTab::Inspector;
-    }
-
-    pub(super) fn subject_blur(
-        &self,
-        clip: &str,
-        subject: Subject,
-    ) -> Option<(&'static str, Value)> {
-        let p = self.project_shared()?;
-        let c = p.clip(clip)?;
-        if !vidcut_core::ops::motion::takes(c) {
-            return None;
-        }
-        let found = c.motion.iter().any(|m| m.subject == Some(subject));
-        let effects = c.picture.as_ref().map_or(&[][..], |x| &x.effects);
-        blur_request(clip, found, effects, (subject, &Value::Null))
-    }
-
-    pub(super) fn find(&mut self, method: &'static str, params: Value, subject: Subject) {
+    fn find(&mut self, method: &'static str, params: Value, subject: Subject) {
         if finds(method, &params) && !model_needs(Some(subject)).is_empty() {
             self.inspector.finding = Some(Finding {
                 method,
@@ -4898,31 +4606,6 @@ impl Workspace {
         } else {
             self.send(method, params);
         }
-    }
-
-    pub(super) fn track(&mut self, clip: &str, effect: usize) {
-        let Some(p) = self.project_shared() else {
-            return;
-        };
-        let Some(c) = p.clip(clip) else {
-            return;
-        };
-        let effects = c.picture.iter().flat_map(|x| &x.effects);
-        let area = effects
-            .into_iter()
-            .nth(effect)
-            .and_then(|e| e.area.as_ref());
-        let follows = area.and_then(|a| a.follows.as_ref());
-        let at = self.snap.timeline.position;
-        let followed = c.motion.iter().find(|m| Some(&m.id) == follows);
-        let first = followed.and_then(|m| m.span()).map(|(first, _)| first);
-        let way = match first {
-            None => "both",
-            Some(first) if c.source_at(at) <= first => "backward",
-            Some(_) => "forward",
-        };
-        let params = json!({ "clip": clip, "effect": effect, "at": at, "way": way });
-        self.track_request(params);
     }
 
     fn track_request(&mut self, params: Value) {
@@ -4959,7 +4642,7 @@ impl Workspace {
         }
     }
 
-    fn motion_section(&mut self, ui: &mut egui::Ui, c: &Chosen, page: bool) {
+    fn motion_section(&mut self, ui: &mut egui::Ui, c: &Chosen) {
         if !c.finds {
             return;
         }
@@ -4996,11 +4679,7 @@ impl Workspace {
                         tried = true;
                         asked = Some(find_request(c, subject, &given));
                     }
-                    let had = found(c, subject);
-                    let blur = match page {
-                        true => page_blur(c, (subject, &given)),
-                        false => blur_request(&c.id, had, &c.stored.effects, (subject, &given)),
-                    };
+                    let blur = page_blur(c, (subject, &given));
                     let button = egui::Button::new("Blur");
                     if ui.add_enabled(blur.is_some(), button).clicked() {
                         tried = true;
@@ -5472,17 +5151,6 @@ impl Workspace {
                     self.show_boxes(chosen);
                 }
             }
-            Act::AreaEdit(n) => {
-                let on = !self.timeline.picture_grab.effects;
-                self.pick_effect(n);
-                self.effects_tool(on);
-            }
-            Act::AreaTrack(n) => {
-                if let Some(c) = chosen.first() {
-                    let id = c.id.clone();
-                    self.track(&id, n);
-                }
-            }
             Act::Boxes => {
                 if self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom) {
                     self.timeline.picture_grab.tool = None;
@@ -5739,10 +5407,8 @@ impl Workspace {
                     composite(ui, i, p, at, &chosen, &mut acts);
                     self.input_lut_section(ui, p, &chosen);
                     self.super_scale_section(ui, p, &chosen);
-                    self.motion_section(ui, &chosen[0], false);
                 }
                 if tab == Tab::Effects && !chosen.is_empty() {
-                    self.inspector.area_edit = self.timeline.picture_grab.area;
                     effects(ui, &self.inspector, &chosen[0], &mut acts);
                 }
                 if tab == Tab::Audio && !sounds.is_empty() {

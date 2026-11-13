@@ -212,12 +212,6 @@ fn applied(e: &Effect, change: &EffectChange) -> Result<Effect> {
     given(&mut left.blend, &mut next.blend);
     taken(&mut left.use_alpha, &mut next.use_alpha);
     taken(&mut left.render_cache, &mut next.render_cache);
-    if let Some(area) = left.area.take() {
-        next.area = area.map(|change| change.on(next.area.take().unwrap_or_default()));
-        if next.area.is_none() {
-            next.keys.retain(|k| !k.value.of_area());
-        }
-    }
     kind_applied(&mut next.kind, &mut left.values)?;
     if left != EffectChange::default() {
         return Err(Error::invalid(format!(
@@ -269,22 +263,8 @@ pub fn set(
         return Err(Error::usage("effects.set needs a value to change"));
     }
     let frame = at.map(|t| source_frame(p, id, t)).transpose()?;
-    let (ti, ci) = locate(p, id)?;
-    let paths: Vec<String> = p.tracks[ti].clips[ci]
-        .motion
-        .iter()
-        .map(|m| m.id.clone())
-        .collect();
     let e = &mut effects_of(p, id, n)?[n];
     let mut next = applied(e, change)?;
-    if let Some(path) = next.area.as_ref().and_then(|a| a.follows.as_ref())
-        && crate::model::Subject::named(path).is_none()
-        && !paths.contains(path)
-    {
-        return Err(Error::not_found(format!(
-            "{id} has no motion path {path} for the area to follow"
-        )));
-    }
     let named = named_values(e, change)?;
     for value in e.keys.iter().map(|k| k.value).filter(|v| named.contains(v)) {
         let Some(frame) = frame else {
@@ -303,33 +283,20 @@ pub fn set(
     Ok(())
 }
 
-pub fn key(
-    p: &mut Project,
-    id: &str,
-    n: usize,
-    at: i64,
-    ease: Option<Ease>,
-    area: bool,
-) -> Result<Value> {
+pub fn key(p: &mut Project, id: &str, n: usize, at: i64, ease: Option<Ease>) -> Result<Value> {
     let frame = source_frame(p, id, at)?;
     let e = &mut effects_of(p, id, n)?[n];
-    if area && e.area.is_none() {
-        return Err(Error::invalid(format!(
-            "effect {n} of {id} has no area: first give it one (effects.set)"
-        )));
-    }
     let keyed = match ease {
-        Some(ease) if e.has_key_at(frame, area) => {
-            e.ease_keys(frame, ease, area);
+        Some(ease) if e.has_key_at(frame) => {
+            e.ease_keys(frame, ease);
             true
         }
         Some(_) => {
-            let what = if area { "the area of effect" } else { "effect" };
             return Err(Error::invalid(format!(
-                "{what} {n} of {id} has no keyframes on source frame {frame}"
+                "effect {n} of {id} has no keyframes on source frame {frame}"
             )));
         }
-        None => e.toggle_keys(frame, area),
+        None => e.toggle_keys(frame),
     };
     *e = effect_checked(e)?;
     Ok(json!({ "clip": id, "effect": n, "frame": frame, "keyed": keyed }))
@@ -340,8 +307,6 @@ pub fn reset(p: &mut Project, id: &str, n: usize) -> Result<()> {
     if e.on {
         *e = Effect {
             render_cache: e.render_cache,
-            keys: e.area_keys().cloned().collect(),
-            area: e.area.take(),
             ..e.kind().made()
         };
     }

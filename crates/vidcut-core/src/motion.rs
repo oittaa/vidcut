@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::analysis::{Detections, Found, Look};
-use crate::model::{AreaShape, EffectArea, MotionPath, PathSample, Subject};
+use crate::model::{MotionPath, PathSample, Subject};
 
 pub const PATHS_KEPT: usize = 256;
 pub const SAMPLES_KEPT: usize = 1_000_000;
@@ -15,62 +15,6 @@ pub struct Area {
     pub center: [f64; 2],
     pub size: [f64; 2],
     pub rotation: f64,
-}
-
-fn turned([x, y]: [f64; 2], degrees: f64) -> [f64; 2] {
-    let (sin, cos) = degrees.to_radians().sin_cos();
-    [x * cos + y * sin, y * cos - x * sin]
-}
-
-impl Area {
-    pub const WHOLE: Self = Self {
-        center: [0.5, 0.5],
-        size: [1.0, 1.0],
-        rotation: 0.0,
-    };
-
-    pub fn within(&self, area: &EffectArea, [fw, fh]: [f64; 2]) -> Self {
-        let [bw, bh] = [self.size[0] * fw, self.size[1] * fh];
-        let [cx, cy] = area.middle();
-        let [dx, dy] = turned([(cx - 0.5) * bw, (cy - 0.5) * bh], self.rotation);
-        let [sx, sy] = area.extent();
-        Self {
-            center: [self.center[0] + dx / fw, self.center[1] + dy / fh],
-            size: [sx * self.size[0], sy * self.size[1]],
-            rotation: self.rotation + area.turn(),
-        }
-    }
-
-    pub fn bounds(&self, area: &EffectArea, [fw, fh]: [f64; 2]) -> [f64; 4] {
-        const ROUND: usize = 32;
-        let local: Vec<[f64; 2]> = match area.shape {
-            AreaShape::Ellipse => (0..ROUND)
-                .map(|i| std::f64::consts::TAU * i as f64 / ROUND as f64)
-                .map(|t| [t.cos(), t.sin()])
-                .collect(),
-            AreaShape::Box => vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]],
-            AreaShape::Polygon => (area.corners().iter())
-                .map(|[x, y]| [x * 2.0 - 1.0, y * 2.0 - 1.0])
-                .collect(),
-        };
-        let half = [self.size[0] * fw / 2.0, self.size[1] * fh / 2.0];
-        let spots = local.iter().map(|[x, y]| {
-            let [dx, dy] = turned([x * half[0], y * half[1]], self.rotation);
-            [self.center[0] + dx / fw, self.center[1] + dy / fh]
-        });
-        let (mut low, mut high) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
-        for spot in spots {
-            for i in 0..2 {
-                (low[i], high[i]) = (low[i].min(spot[i]), high[i].max(spot[i]));
-            }
-        }
-        [
-            (low[0] + high[0]) / 2.0,
-            (low[1] + high[1]) / 2.0,
-            high[0] - low[0],
-            high[1] - low[1],
-        ]
-    }
 }
 
 pub fn followed(

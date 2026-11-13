@@ -1,9 +1,8 @@
 use crate::effect_keys::Keyed;
 use crate::model::{
-    AreaShape, Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Composition,
-    Effect, EffectArea, EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha,
-    GlowFraming, GlowOutput, Mask, Media, MosaicBlur, Picture, Sharpen, Tool, Vignette,
-    VignetteMode, VignetteShape,
+    Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Composition, Effect,
+    EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, Mask,
+    Media, MosaicBlur, Picture, Sharpen, Tool, Vignette, VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -85,7 +84,6 @@ pub struct Working {
     pub work: Work,
     pub blend: f64,
     pub use_alpha: bool,
-    pub area: Option<Masking>,
     pub masks: Vec<Shaping>,
 }
 
@@ -315,60 +313,6 @@ impl Shaping {
         let (sx, cx) = tx.sin_cos();
         let (sy, cy) = ty.sin_cos();
         [mx + rx * cy + ry * sx * sy, my - ry * cx]
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Masking {
-    pub maps: Vec<[[f64; 3]; 3]>,
-    pub points: Vec<[f64; 2]>,
-    pub shape: AreaShape,
-    pub softness: f64,
-    pub invert: bool,
-}
-
-impl Masking {
-    const LEAST_HALF: f64 = 1e-9;
-
-    fn of(area: &EffectArea, bases: &[Area], back: &[f64; 8], fit: [f64; 2]) -> Self {
-        Self {
-            maps: bases
-                .iter()
-                .map(|b| Self::map(area, b, back, fit))
-                .collect(),
-            points: match area.shape {
-                AreaShape::Polygon => area.corners().to_vec(),
-                _ => Vec::new(),
-            },
-            shape: area.shape,
-            softness: area.soft(),
-            invert: area.invert,
-        }
-    }
-
-    fn map(area: &EffectArea, base: &Area, back: &[f64; 8], [fw, fh]: [f64; 2]) -> [[f64; 3]; 3] {
-        let turned = |[x, y]: [f64; 2], degrees: f64| {
-            let (sin, cos) = degrees.to_radians().sin_cos();
-            [x * cos + y * sin, y * cos - x * sin]
-        };
-        let [bw, bh] = [base.size[0] * fw, base.size[1] * fh];
-        let [cx, cy] = area.middle();
-        let [dx, dy] = turned([(cx - 0.5) * bw, (cy - 0.5) * bh], base.rotation);
-        let [px, py] = [base.center[0] * fw + dx, base.center[1] * fh + dy];
-        let [sx, sy] = area.extent();
-        let [hx, hy] = [sx * bw / 2.0, sy * bh / 2.0].map(|h| h.max(Self::LEAST_HALF));
-        let (sin, cos) = (base.rotation + area.turn()).to_radians().sin_cos();
-        let across = [fw * cos / hx, -fh * sin / hx, (py * sin - px * cos) / hx];
-        let down = [fw * sin / hy, fh * cos / hy, -(px * sin + py * cos) / hy];
-        let [a, b, e, c, d, f, g, h] = *back;
-        let through = |[u, v, w]: [f64; 3]| {
-            [
-                u * a + v * c + w * g,
-                u * b + v * d + w * h,
-                u * e + v * f + w,
-            ]
-        };
-        [through(across), through(down), [g, h, 1.0]]
     }
 }
 
@@ -828,19 +772,10 @@ impl Shading {
 }
 
 impl Working {
-    fn of(e: &Effect, on: &OnFrame, bases: Option<&[Area]>) -> Option<Self> {
+    fn of(e: &Effect, on: &OnFrame) -> Option<Self> {
         if !e.on || e.mixed() <= 0.0 {
             return None;
         }
-        let [_, _, fw, fh] = on.fit;
-        let masked = |a: &EffectArea, bases: &[Area]| Masking::of(a, bases, &on.back, [fw, fh]);
-        let area = match (e.area.as_ref(), bases) {
-            (None, _) => None,
-            (Some(a), None) => Some(masked(a, &[Area::WHOLE])),
-            (Some(a), Some([])) if a.invert => None,
-            (Some(_), Some([])) => return None,
-            (Some(a), Some(found)) => Some(masked(a, found)),
-        };
         let work = match &e.kind {
             EffectKind::GaussianBlur(b) => {
                 let (across, down) = b.spreads(on.width);
@@ -870,7 +805,6 @@ impl Working {
             work,
             blend: e.mixed(),
             use_alpha: e.use_alpha,
-            area,
             masks: Vec::new(),
         })
     }
@@ -880,7 +814,6 @@ impl Working {
             work,
             blend,
             use_alpha: true,
-            area: None,
             masks: Vec::new(),
         }
     }
@@ -957,7 +890,7 @@ pub fn composed(
                         blend: n.blend,
                         ..EffectType::of(kind).made()
                     };
-                    let mut working = Working::of(&effect, &on, None)?;
+                    let mut working = Working::of(&effect, &on)?;
                     if let (Work::Blur(b), false) = (&mut working.work, n.blur_alpha) {
                         b.across[3] = 0.0;
                         b.down[3] = 0.0;
@@ -1179,18 +1112,11 @@ impl Placing {
             canvas: [frame.0, frame.1],
             back: own.back,
         };
-        let based = |e: &Effect| {
-            let named = e.area.as_ref()?.follows.as_deref()?;
-            Some(p.followed.bases(named, p.source))
-        };
         let effects = p
             .picture
             .effects
             .iter()
-            .filter_map(|e| {
-                let bases = based(e);
-                Working::of(&e.sampled(p.source as f64), &on, bases.as_deref())
-            })
+            .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
             .collect();
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&own.back, c));

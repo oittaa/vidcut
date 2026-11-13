@@ -294,9 +294,6 @@ impl Workspace {
             GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
-            GuiPanel::EffectArea => self.show_effect_area(),
-            GuiPanel::Blur => self.blur_tool(true),
-            GuiPanel::Find => self.find_tool(true),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
         }
     }
@@ -394,9 +391,6 @@ impl Workspace {
                     g.tool = None;
                 }
             }
-            GuiPanel::EffectArea => self.effects_tool(false),
-            GuiPanel::Blur => self.blur_tool(false),
-            GuiPanel::Find => self.find_tool(false),
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
         }
     }
@@ -440,9 +434,6 @@ impl Workspace {
                 GuiPanel::DynamicZoom,
                 tool == Some(PictureTool::DynamicZoom),
             ),
-            (GuiPanel::EffectArea, self.timeline.picture_grab.effects),
-            (GuiPanel::Blur, self.timeline.picture_grab.blurring()),
-            (GuiPanel::Find, self.timeline.picture_grab.find),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
         ];
         let (edit, edits) = self.selected_edit_points();
@@ -2201,7 +2192,6 @@ impl Workspace {
         if self.left != LeftTab::Titles {
             self.end_title_hover();
         }
-        self.sync_effect_area();
         if self.left != LeftTab::Inspector {
             self.leave_inspector();
             self.watch_inspector();

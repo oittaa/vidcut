@@ -1,8 +1,8 @@
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{AreaShape, GlowOutput};
+use vidcut_core::model::GlowOutput;
 use vidcut_core::place::{
-    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Masking, Outline,
-    Placing, Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
+    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Outline, Placing,
+    Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
 };
 
 use super::{Gpu, MIXING, begin, grain, sharpen, vignette};
@@ -64,7 +64,6 @@ pub(super) struct Pipes {
     glow: wgpu::RenderPipeline,
     grain_noise: wgpu::RenderPipeline,
     grain: wgpu::RenderPipeline,
-    area: wgpu::RenderPipeline,
     boxes: wgpu::RenderPipeline,
     shape: wgpu::RenderPipeline,
     mask_join: wgpu::RenderPipeline,
@@ -157,7 +156,6 @@ impl Pipes {
             glow: pipeline(&plain, "fs_glow"),
             grain_noise: pipeline(&plain, "fs_grain_noise"),
             grain: pipeline(&plain, "fs_grain"),
-            area: pipeline(&of(&reading), "fs_area"),
             boxes: pipeline(&plain, "fs_boxes"),
             shape: pipeline(&of(&reading), "fs_shape"),
             mask_join: pipeline(&plain, "fs_mask_join"),
@@ -993,52 +991,15 @@ fn glow_blurred<'a>(
     &blurred_between(gpu, (&ways, border), ([0.0; 4], window), (a, b), encoder).view
 }
 
-fn area_bytes(masking: &Masking) -> Vec<u8> {
-    let shape = match masking.shape {
-        AreaShape::Ellipse => 0.0,
-        AreaShape::Box => 1.0,
-        AreaShape::Polygon => 2.0,
-    };
-    let count = masking.maps.len() as f64;
-    let points = masking.points.len() as f64;
-    float_bytes(&[
-        shape,
-        masking.softness,
-        flag(masking.invert),
-        count,
-        points,
-        0.0,
-        0.0,
-        0.0,
-    ])
-}
-
-fn area_maps(gpu: &Gpu, masking: &Masking) -> wgpu::Buffer {
-    let maps = masking.maps.iter().flatten().flatten();
-    let floats: Vec<f64> = maps
-        .chain(masking.points.iter().flatten())
-        .copied()
-        .collect();
-    let bytes = float_bytes(&floats);
-    let maps = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("vidcut area"),
-        size: bytes.len() as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    gpu.queue.write_buffer(&maps, 0, &bytes);
-    maps
-}
-
 fn landed(
     gpu: &Gpu,
     own: &Texture,
     (made, free): (&Texture, &Texture),
-    (area, mask): (Option<&Masking>, Option<&wgpu::TextureView>),
+    mask: Option<&wgpu::TextureView>,
     encoder: &mut wgpu::CommandEncoder,
 ) {
-    let from = match (area, mask) {
-        (_, Some(mask)) => {
+    let from = match mask {
+        Some(mask) => {
             let views = Views {
                 mask,
                 ..Views::with(&made.view, &own.view)
@@ -1052,17 +1013,7 @@ fn landed(
             );
             free
         }
-        (Some(masking), None) => {
-            let maps = area_maps(gpu, masking);
-            let step = (&gpu.blur.area, &area_bytes(masking)[..]);
-            let views = Views {
-                cells: Some(&maps),
-                ..Views::with(&made.view, &own.view)
-            };
-            draw_step(gpu, step, views, &free.view, encoder);
-            free
-        }
-        (None, None) => made,
+        None => made,
     };
     encoder.copy_texture_to_texture(
         from.texture.as_image_copy(),
@@ -1115,7 +1066,7 @@ fn glow_into(
         &made.view,
         encoder,
     );
-    landed(gpu, own, (made, free), (effect.area.as_ref(), on), encoder);
+    landed(gpu, own, (made, free), on, encoder);
 }
 
 fn gaussian_ways(sigma: f64) -> Vec<(Pass, bool)> {
@@ -1239,7 +1190,7 @@ fn grain_into(
     };
     let last = (&gpu.blur.grain, &bytes[..]);
     draw_step(gpu, last, views, &made.view, encoder);
-    landed(gpu, own, (made, free), (effect.area.as_ref(), on), encoder);
+    landed(gpu, own, (made, free), on, encoder);
 }
 
 fn effects_into(
@@ -1320,7 +1271,7 @@ fn effects_into(
             k = 1 - k;
         }
         let ends = (&scratch[1 - k], &scratch[k]);
-        landed(gpu, own, ends, (effect.area.as_ref(), on), encoder);
+        landed(gpu, own, ends, on, encoder);
     }
 }
 

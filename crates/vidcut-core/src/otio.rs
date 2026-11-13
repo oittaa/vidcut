@@ -2111,12 +2111,13 @@ fn our_picture(item: &Value) -> Option<Picture> {
     let mut p: Picture =
         serde_json::from_value(item["metadata"][VIDCUT].get("picture")?.clone()).ok()?;
     let paths = our_motion(item);
-    for area in p.effects.iter_mut().filter_map(|e| e.area.as_mut()) {
-        if let Some(id) = &area.follows
+    let nodes = p.composition.iter_mut().flat_map(|c| c.nodes.iter_mut());
+    for mask in nodes.filter_map(|n| n.tool.mask_mut()) {
+        if let Some(id) = &mask.follows
             && crate::model::Subject::named(id).is_none()
             && !paths.iter().any(|m| m.id == *id)
         {
-            area.follows = None;
+            mask.follows = None;
         }
     }
     crate::ops::picture::checked(&p).ok().flatten()
