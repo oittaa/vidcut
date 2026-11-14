@@ -458,7 +458,7 @@ The bar and the Jobs button:
     - The button and the seeks use the keyframes of the effect (`effect_marks`, `effect_key_times`).
 - `Workspace::tracker_section` shows the controls of a Tracker node.
   - The track buttons send one `motion.track` for each enabled pattern, with the `frame` and the `way`.
-    - Track Reverse starts at the Out, and Track Forward at the In. Track Fwd Then Reverse starts at the playhead, with the `way` `both`.
+    - Track Reverse, Track Fwd Then Reverse and Track Forward start at the playhead, with the `way` `backward`, `both` and `forward`.
     - The One Frame buttons start at the playhead, with the `length` 1. Then they send `gui.page_time` to the next frame.
     - Stop Tracking and Escape cancel the jobs of kind `track` (`Workspace::stop_tracks`).
     - While a job of kind `track` runs, the Node Editor and its keys take no work (`Workspace::tracks_running`).

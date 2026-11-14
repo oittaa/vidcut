@@ -1731,14 +1731,9 @@ impl Workspace {
             label(ui, "Track", false);
             ui.horizontal(|ui| {
                 let whole = [
-                    (
-                        CARET_LINE_LEFT,
-                        "Track Reverse",
-                        frames.mark_out,
-                        "backward",
-                    ),
+                    (CARET_LINE_LEFT, "Track Reverse", at, "backward"),
                     (ARROWS_LEFT_RIGHT, "Track Fwd Then Reverse", at, "both"),
-                    (CARET_LINE_RIGHT, "Track Forward", frames.mark_in, "forward"),
+                    (CARET_LINE_RIGHT, "Track Forward", at, "forward"),
                 ];
                 for (glyph, name, frame, way) in whole {
                     if icon(ui, glyph, name, can) {

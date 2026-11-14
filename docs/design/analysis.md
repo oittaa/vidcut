@@ -167,7 +167,7 @@ flowchart TD
 - `ops::motion::tracked` stores the samples, and the pattern gets the path (`Pattern.path`).
   - A path with `tracked` that only this pattern has gets the new samples. It keeps its id and its name.
   - Else the pattern gets a new path, with `tracked` and the name of the pattern. The old path stays as it is.
-  - A track of one way keeps the samples of the other side of the old track (`TrackWay`).
+  - The old path keeps its samples on the frames that the track did not reach.
 - In a GUI, `Live::measuring` measures first (`editor::track_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model file is `catalog::VITTRACK_ONNX`. `tracking::get_ready` fetches it when the request has `download`.
 

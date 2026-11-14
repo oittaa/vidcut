@@ -6,7 +6,6 @@ use crate::composition::Frames;
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, Follow, MotionPath, PathSample, Pattern, Project, Subject, Title, TitleKind, Tool, Track,
-    TrackWay,
 };
 use crate::motion::{self, Area};
 use crate::render::FileClock;
@@ -543,26 +542,15 @@ pub fn tracked(
     p: &mut Project,
     id: &str,
     (tracker, k): (&str, u32),
-    (start, way): (&Start, TrackWay),
     mut samples: Vec<PathSample>,
 ) -> Result<Value> {
     let c = clip_of(p, id)?;
     let pattern = pattern_of(c, id, tracker, k)?.clone();
     let old = (pattern.path.as_ref()).and_then(|f| c.motion.iter().find(|m| m.id == *f));
     if let Some(old) = old {
-        let beyond = |s: &PathSample| {
-            start
-                .reach
-                .is_some_and(|(lo, hi)| s.frame < lo || s.frame >= hi)
-        };
-        let stays = |s: &&PathSample| {
-            beyond(s)
-                || match way {
-                    TrackWay::Both => false,
-                    TrackWay::Forward => s.frame < start.frame,
-                    TrackWay::Backward => s.frame > start.frame,
-                }
-        };
+        let frames = samples.iter().map(|s| s.frame);
+        let covered = frames.clone().min().zip(frames.max());
+        let stays = |s: &&PathSample| covered.is_none_or(|(a, b)| s.frame < a || s.frame > b);
         samples.extend(old.samples.iter().filter(stays).cloned());
         samples.sort_by_key(|s| s.frame);
     }

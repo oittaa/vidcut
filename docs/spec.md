@@ -2638,12 +2638,15 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - Resolve also shows a search area around the box (p. 1784). vidcut shows none.
 - The track buttons are at the top of the Inspector (pp. 1784–1785). The rows below are measured in Resolve Studio 21.2. The 21.1 manual lists Track Reverse From Current Time and Track Forward From Current Time instead (p. 2844).
   - The first row has Track Reverse, Track Fwd Then Reverse and Track Forward.
-  - Track Reverse tracks backward from the end of the render range. Track Forward tracks forward from its start (p. 2844).
+  - Track Reverse tracks backward from the playhead. Track Forward tracks forward from the playhead to the end of the render range.
+  - The 21.1 manual says that they start at the end and at the start of the render range (p. 2844).
   - Track Fwd Then Reverse tracks forward from the playhead to the end of the render range. Then it tracks backward from the playhead to the start.
   - The second row has Track Reverse One Frame, Stop Tracking and Track Forward One Frame.
   - A One Frame button tracks one frame from the playhead. Then the playhead is on that frame.
   - The render range is from the In to the Out. A track stops at its end (p. 1785).
   - Stop Tracking and Escape stop a track (p. 1785). The frames that it tracked stay (pp. 1788, 2844).
+    - The frames of the old path that the track did not reach also stay. This is measured with each button of the first row.
+    - Stop Tracking asks "Are you sure you wish to do this?" first.
   - A track does not stop at a lost pattern or at a shot change. The user stops it (pp. 1785, 1788).
   - The buttons track each enabled pattern (p. 1787). The check box of a pattern in the list enables it.
   - While a track runs, the Node Editor takes no work (p. 1784).

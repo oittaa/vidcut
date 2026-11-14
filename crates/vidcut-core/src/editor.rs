@@ -4603,7 +4603,7 @@ fn mutate(
                     follow.frames.1 >= ends.1,
                 ),
             );
-            let mut out = ops::motion::tracked(p, &id, (node, k), (&start, *way), samples)?;
+            let mut out = ops::motion::tracked(p, &id, (node, k), samples)?;
             out["clip"] = json!(id);
             out["score"] = json!(score);
             out["backward"] = json!(stops.0);

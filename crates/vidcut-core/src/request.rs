@@ -3062,9 +3062,8 @@ pub enum Request {
     ///
     /// The pattern then follows its path: before the first sample of the
     /// path and after its last, it stays where that sample puts it. When
-    /// the pattern has a path already, a track of one `way` keeps the
-    /// samples of the other side. A track with a `length` also keeps the
-    /// samples beyond the frames that it can reach. A path that an earlier
+    /// the pattern has a path already, the track changes it only on the
+    /// frames that it tracked. The other samples stay. A path that an earlier
     /// track made for the pattern gets the new samples, and keeps its id.
     /// Another path stays as it is, and the pattern gets a new path, named
     /// as the pattern.
