@@ -60,7 +60,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - A click on the Media Pool tab while the pool shows hides the pool. The Viewer takes its room (p. 636).
     - With the pool hidden, the tabs are in a row above the Viewer. A click on a tab shows what that tab holds.
     - The edit-function buttons go with the pool, as they do for the other tabs. vidcut: no measurement tells where they go in Resolve.
-    - `gui.close media_pool` hides the pool. `gui.show media_pool` shows it.
+    - `gui.close media` hides the pool. `gui.show media` shows it.
   - On the right: Quick Export and the Full Screen viewer.
     - vidcut also has a Full Screen button on the viewer.
   - A Transitions tab shows the transitions in the place of the Media Pool (p. 759, §8.11).

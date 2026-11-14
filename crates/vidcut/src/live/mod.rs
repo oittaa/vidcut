@@ -5177,7 +5177,7 @@ fn proxies_title(project: &Project, request: &Request) -> String {
         .unwrap_or_default()
         .as_slice()
     {
-        [] => "proxies for the media pool".into(),
+        [] => "proxies for all media".into(),
         [id] => project
             .media(id)
             .map_or_else(|| id.clone(), |m| m.name.clone()),

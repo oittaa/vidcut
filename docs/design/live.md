@@ -649,7 +649,7 @@ The bar and the Jobs button:
 - `Live.multi_marks` holds the marks of the grid, for this session. Why: a change of bin clears them, and they are not on a file.
 - `Live.multi_alone` tells that one camera is open. `Live::open_camera` gives the file the marks with `SourceGrid::file_marks`. Then the ordinary source clip code draws the picture, the marks and the edits.
 - `SourceGrid::part` gives the frames of an edit in the grid. `SourceParams.lead` keeps the part before the file empty.
-- `SourceLining::Grid` is the reference rule of Source Overwrite in the grid. Why: it is not the rule of the Media Pool view.
+- `SourceLining::Grid` is the reference rule of Source Overwrite in the grid. Why: it is not the rule of the Media tab.
 - `Workspace::multi_view` gives each cell the frame of its file. `Workspace::camera_grid` draws the grid.
 
 **The Sync Bin** ([spec §7.4](../spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).

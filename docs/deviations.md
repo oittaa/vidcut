@@ -521,7 +521,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - With a project open, files and folders dropped anywhere on the window go into the open bin.
   - The files come in as Import Media brings them in.
   - Each folder comes in as Import Media Folder brings it in: a bin, with a bin for each folder in it.
-  - While they are over the window, the Media Pool shows Drop to Import.
+  - While they are over the window, the Media tab shows Drop to Import.
   - With no project open, a drop does nothing, because Import is not available then.
 - **Why:**
   - The window does not get the place where files are dropped. Thus a drop cannot aim at a bin or the timeline. The open bin is where Import puts media.
@@ -586,7 +586,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - One fall shape for every Rise Time is easier to predict. A start on a grid of 10 ms is of no use to the user.
   - The usual mix ducks music under every other track. A value that changes without a word is a different setting than the one asked for.
 
-## X70. The Inspector is a tab beside the Media Pool, in frame pixels
+## X70. The Inspector is a tab beside the Media tab, in frame pixels
 
 - **Resolve:**
   - The Inspector button at the top right of the UI toolbar opens the Inspector (pp. 734–744; [spec §8.15](spec.md#815-transform-and-crop-pp-766768)).
@@ -603,7 +603,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - Pitch Correction is on. A speed change ripples the clips after the clip.
   - With several clips selected, its header is Multiple Clips, and a value that differs between them shows a dash (measured in Resolve Studio 21.1.2).
 - **vidcut:**
-  - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
+  - An Inspector tab is beside the Media and Titles tabs. It opens in the same place.
   - It shows the Title section of a title and the Subtitle section of a subtitle. Other clips get the picture, Speed, Audio, Equalizer and Dialogue Leveler sections.
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
   - With nothing selected that it can show, it shows one line.
@@ -1530,7 +1530,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Decompose in Place has a submenu: Using Clips Only and Preserving Audio Data…
 - **vidcut:**
   - The window has only a name.
-  - A compound clip in the Media Pool does not open. Its menu has Append to Timeline, Place at Playhead and Delete.
+  - A compound clip in the Media tab does not open. Its menu has Append to Timeline, Place at Playhead and Delete.
   - A clip goes in with its picture and its sound.
   - A clip on a locked track refuses the request. In Convert In and Out to Compound Clip, a clip in the range on a locked track refuses it too.
   - A range with no clips refuses the request, with a message.

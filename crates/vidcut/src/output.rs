@@ -1757,7 +1757,7 @@ fn timeline(t: &Value) {
 fn media_list(m: &Value) {
     let items = m.as_array().cloned().unwrap_or_default();
     if items.is_empty() {
-        println!("(media pool is empty)");
+        println!("(no media)");
     }
     for i in items {
         let video = match &i["video"] {

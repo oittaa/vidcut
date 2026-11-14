@@ -530,7 +530,7 @@ impl Workspace {
         };
         let mut search_below = false;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Media Pool").strong());
+            ui.label(RichText::new("Media").strong());
             let open = project.is_some();
             for (glyph, name, folder) in [
                 (egui_phosphor::regular::FILE_PLUS, "Import Media", false),
@@ -2291,7 +2291,7 @@ impl Workspace {
                 1 => "1 item".to_string(),
                 n => format!("{n} items"),
             };
-            ui.label(RichText::new(format!("Remove {items} from the Media Pool?")).strong());
+            ui.label(RichText::new(format!("Remove {items} from Media?")).strong());
             if clips > 0 {
                 let it = if ids.len() == 1 { "it" } else { "them" };
                 let clips = match clips {
@@ -2327,7 +2327,7 @@ impl Workspace {
                 _ => self.send(
                     "apply",
                     json!({
-                        "label": format!("Remove {} items from the Media Pool", ids.len()),
+                        "label": format!("Remove {} items from Media", ids.len()),
                         "commands": ids
                             .iter()
                             .map(|id| json!({ "method": "media.remove", "params": remove(id) }))

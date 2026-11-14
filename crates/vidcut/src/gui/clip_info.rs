@@ -452,7 +452,7 @@ impl Workspace {
         let mut open = true;
         super::dialog::tool_window(ctx, "Clip Info", &mut open, [520.0, 620.0], |ui| {
             let Some(m) = &m else {
-                super::dialog::note(ui, "Select a clip in the Media Pool");
+                super::dialog::note(ui, "Select a clip in Media");
                 return;
             };
             let read = match &self.clip_info.read {
