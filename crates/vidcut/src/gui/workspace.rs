@@ -2076,6 +2076,7 @@ impl Workspace {
         self.relink_window(&ctx);
         self.remove_media_window(&ctx);
         self.delete_all_window(&ctx);
+        self.stop_tracks_window(&ctx);
         self.speech_window(&ctx);
         self.isolation_prompt(&ctx);
         self.models_prompt(&ctx);

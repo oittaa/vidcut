@@ -1953,7 +1953,7 @@ impl Workspace {
             self.send(method, params);
         }
         if stop {
-            self.stop_tracks();
+            self.inspector.stopping = Some(true);
         }
         if !tracks.is_empty() {
             self.ask(tracks, None);
@@ -2317,6 +2317,7 @@ pub struct Inspector {
     find_better: bool,
     find_error: bool,
     finding: Option<Finding>,
+    pub(super) stopping: Option<bool>,
     pub(super) pattern_picked: Option<(String, String, usize)>,
     tab: Tab,
     effect_picked: Option<usize>,
@@ -4915,6 +4916,44 @@ impl Workspace {
     pub(super) fn stop_tracks(&mut self) {
         for id in self.tracks_running() {
             self.send("jobs.cancel", json!({ "job": id }));
+        }
+    }
+
+    pub(super) fn stop_tracks_window(&mut self, ctx: &egui::Context) {
+        let Some(fresh) = self.inspector.stopping.as_mut() else {
+            return;
+        };
+        let fresh = std::mem::replace(fresh, false);
+        if self.tracks_running().is_empty() {
+            self.inspector.stopping = None;
+            return;
+        }
+        let mut done = None;
+        let modal = egui::Modal::new(egui::Id::unique("stop-tracking")).show(ctx, |ui| {
+            ui.set_max_width(super::dialog::WIDTH);
+            ui.label(RichText::new("Stop Tracking?").strong());
+            super::dialog::footer(ui, |ui| {
+                if super::dialog::main_button(ui, "Stop", true) {
+                    done = Some(true);
+                }
+                let cancel = ui.button("Cancel");
+                if fresh {
+                    cancel.request_focus();
+                }
+                if cancel.clicked() {
+                    done = Some(false);
+                }
+            });
+        });
+        if done.is_none() && super::workspace::escape_cancels(ctx, &modal) {
+            done = Some(false);
+        }
+        let Some(stop) = done else {
+            return;
+        };
+        self.inspector.stopping = None;
+        if stop {
+            self.stop_tracks();
         }
     }
 
