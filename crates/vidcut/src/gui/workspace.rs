@@ -5,7 +5,7 @@ use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::model::{Marker, PictureTool, Project, RenderCache};
 use vidcut_core::preferences::Scope;
-use vidcut_core::request::ViewerMode;
+use vidcut_core::request::{Page, ViewerMode};
 use vidcut_core::shortcuts::Action;
 use vidcut_core::time::{Rational, format_timecode};
 
@@ -111,6 +111,7 @@ pub struct Workspace {
     pub(super) export: super::export::ExportUi,
     pub(super) show_mixer: bool,
     pub(super) key_tray: bool,
+    pub(super) effects_page: super::effects_page::EffectsPage,
     pub(super) mixer: super::mixer::Mixer,
     pub(super) preferences: super::preferences::PreferencesUi,
     pub(super) help: super::help::HelpUi,
@@ -212,6 +213,7 @@ impl Workspace {
             export: Default::default(),
             show_mixer: false,
             key_tray: false,
+            effects_page: Default::default(),
             mixer: Default::default(),
             preferences: Default::default(),
             help: Default::default(),
@@ -292,9 +294,6 @@ impl Workspace {
             GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
-            GuiPanel::EffectArea => self.show_effect_area(),
-            GuiPanel::Blur => self.blur_tool(true),
-            GuiPanel::Find => self.find_tool(true),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
         }
     }
@@ -326,6 +325,12 @@ impl Workspace {
                 }
                 live::GuiChange::Show(panel) => self.show_panel(panel, ctx),
                 live::GuiChange::Close(panel) => self.close_panel(panel),
+                live::GuiChange::Page(Page::Effects) if self.project().is_none() => {
+                    return Err("Open a project first".into());
+                }
+                live::GuiChange::Page(page) => self.set_page(page),
+                live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
+                live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
         }
         Ok(())
@@ -387,9 +392,6 @@ impl Workspace {
                     g.tool = None;
                 }
             }
-            GuiPanel::EffectArea => self.effects_tool(false),
-            GuiPanel::Blur => self.blur_tool(false),
-            GuiPanel::Find => self.find_tool(false),
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
         }
     }
@@ -433,13 +435,17 @@ impl Workspace {
                 GuiPanel::DynamicZoom,
                 tool == Some(PictureTool::DynamicZoom),
             ),
-            (GuiPanel::EffectArea, self.timeline.picture_grab.effects),
-            (GuiPanel::Blur, self.timeline.picture_grab.blurring()),
-            (GuiPanel::Find, self.timeline.picture_grab.find),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
         ];
         let (edit, edits) = self.selected_edit_points();
+        let page = self.effects_page.page;
         live::GuiState {
+            page,
+            clip: (page == Page::Effects)
+                .then(|| self.effects_clip())
+                .flatten(),
+            nodes: self.effects_page.nodes.clone(),
+            time: self.page_clock(),
             edit,
             edits,
             target: self
@@ -1192,6 +1198,7 @@ impl Workspace {
         use Status as S;
         let decoding = decoding(&self.snap.active().hwdec);
         let open = self.project().is_some();
+        let left: Vec<Status> = open.then_some(S::Pages).into_iter().collect();
         let right: Vec<Status> = [
             open.then_some(S::Format),
             open.then_some(S::Edited),
@@ -1203,7 +1210,7 @@ impl Workspace {
         .flatten()
         .collect();
         let row = super::row::Row {
-            left: &[],
+            left: &left,
             fill: Some((S::Notices, egui::Align::Min)),
             right: &right,
             leaving: &[S::Pid, S::Decoding, S::Format, S::Edited, S::Version],
@@ -1212,6 +1219,17 @@ impl Workspace {
         let dim = |text: String| RichText::new(text).color(theme::colors().text_dim);
         ui.horizontal(|ui| {
             self.fit_row(ui, row, |ws, ui, s| match s {
+                S::Pages => {
+                    ui.horizontal(|ui| {
+                        for (page, text) in [(Page::Cut, "Cut"), (Page::Effects, "Effects")] {
+                            let on = ws.effects_page.page == page;
+                            if ui.selectable_label(on, text).clicked() && !on {
+                                ws.send("gui.page", json!({ "page": page }));
+                            }
+                        }
+                    })
+                    .response
+                }
                 S::Notices => ui.scope(|ui| ws.notices(ui)).response,
                 S::Format => {
                     let p = ws.project().expect("open");
@@ -1429,6 +1447,10 @@ impl Workspace {
             self.open_preferences(ctx);
         }
         if self.snap.project.is_none() {
+            return;
+        }
+        if self.effects_page.page == Page::Effects {
+            self.effects_keys(&fired, &input);
             return;
         }
         let viewer = self.snap.viewer;
@@ -2092,7 +2114,15 @@ impl Workspace {
             self.history.window.close();
         }
         if self.snap.project.is_none() {
+            self.set_page(Page::Cut);
             egui::CentralPanel::default().show(ui, |ui| self.start_screen(ui));
+            return;
+        }
+        if self.effects_page.page == Page::Effects {
+            self.effects_page_ui(ui);
+            if let Some(tiles) = &mut self.tiles {
+                tiles.end_frame();
+            }
             return;
         }
         let frame = theme::card(panel);
@@ -2164,7 +2194,6 @@ impl Workspace {
         if self.left != LeftTab::Titles {
             self.end_title_hover();
         }
-        self.sync_effect_area();
         if self.left != LeftTab::Inspector {
             self.leave_inspector();
             self.watch_inspector();
@@ -2215,6 +2244,7 @@ impl Workspace {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Status {
+    Pages,
     Notices,
     Format,
     Edited,

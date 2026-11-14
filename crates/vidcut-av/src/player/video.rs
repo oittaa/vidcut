@@ -405,7 +405,12 @@ impl Decoder {
                         self.make_cost
                     };
                     let lead = cost.as_secs_f64() * plan.fps().as_f64() * speed;
-                    after(&plan, snap.looping, focus, lead.ceil() as i64)
+                    after(
+                        &plan,
+                        (snap.looping, snap.bounds),
+                        focus,
+                        lead.ceil() as i64,
+                    )
                 }
                 _ => focus,
             };
@@ -463,7 +468,7 @@ impl Decoder {
                 };
                 let onward = |t: i64| !made || self.next.is_none_or(|n| t >= n);
                 (first..=ahead.max(first))
-                    .map(|k| after(&plan, snap.looping, anchor, k))
+                    .map(|k| after(&plan, (snap.looping, snap.bounds), anchor, k))
                     .find(|&t| t != anchor && missing(t) && onward(t))
                     .map(|t| (t, Reach::Forward))
             }
@@ -853,11 +858,14 @@ impl Decoder {
     }
 }
 
-fn after(plan: &Plan, looping: Option<(i64, i64)>, from: i64, k: i64) -> i64 {
+type Span = Option<(i64, i64)>;
+
+fn after(plan: &Plan, spans: (Span, Span), from: i64, k: i64) -> i64 {
     let t = from + k;
-    plan.clamp(match looping {
-        Some((a, b)) if from < b && t >= b => a + (t - b) % (b - a),
-        Some((a, b)) if t > plan.last() => a + (t - plan.last() - 1) % (b - a),
+    plan.clamp(match spans {
+        (Some((a, b)), _) if from < b && t >= b => a + (t - b) % (b - a),
+        (Some((a, b)), _) if t > plan.last() => a + (t - plan.last() - 1) % (b - a),
+        (None, Some((a, b))) if from < b && t >= b => (b - 1).max(a),
         _ => t,
     })
 }

@@ -203,6 +203,7 @@ pub(crate) struct Control {
     scrubbing: bool,
     pub scrub: Option<(i64, u64)>,
     pub looping: Option<(i64, i64)>,
+    pub bounds: Option<(i64, i64)>,
     pub hardware: bool,
     pub motion: f64,
     pub followed: bool,
@@ -285,6 +286,7 @@ pub(crate) struct Snap {
     pub followed: bool,
     pub prepared: Option<(Arc<Plan>, i64)>,
     pub looping: Option<(i64, i64)>,
+    pub bounds: Option<(i64, i64)>,
 }
 
 pub(crate) struct AudioSnap {
@@ -296,6 +298,7 @@ pub(crate) struct AudioSnap {
     pub muted: bool,
     pub scrub: Option<(i64, u64)>,
     pub looping: Option<(i64, i64)>,
+    pub bounds: Option<(i64, i64)>,
     pub changes: u64,
 }
 
@@ -530,14 +533,26 @@ impl Shared {
             Mode::Paused { at } => return (at, false),
             Mode::Playing { from, speed, epoch } => (from, speed, epoch),
         };
-        let end = ctl.plan.samples as f64;
+        let plan = &ctl.plan;
+        let (mut lo, mut hi) = (0.0, plan.samples as f64);
+        let mut last = plan.last();
+        if let (None, Some((a, b))) = (ctl.looping, ctl.bounds) {
+            let (sa, sb) = (plan.sample(a) as f64, plan.sample(b) as f64);
+            if speed > 0.0 && (from as f64) < sb {
+                hi = sb;
+                last = (b - 1).max(a);
+            }
+            if speed < 0.0 && (from as f64) > sa {
+                lo = sa;
+            }
+        }
         let heard = self.clock_sample(epoch, at);
         if heard.is_some() && crate::debug() {
             self.heard_first(ctl, epoch);
         }
-        let s = heard.unwrap_or(from as f64).clamp(0.0, end);
-        let ended = ctl.looping.is_none() && if speed > 0.0 { s >= end } else { s <= 0.0 };
-        (ctl.plan.frame_at_sample(s.floor() as i64), ended)
+        let s = heard.unwrap_or(from as f64).clamp(lo, hi);
+        let ended = ctl.looping.is_none() && if speed > 0.0 { s >= hi } else { s <= lo };
+        (plan.frame_at_sample(s.floor() as i64).min(last), ended)
     }
 
     fn glide(&self, ctl: &Control, now: Instant) -> Option<Glide> {
@@ -653,6 +668,7 @@ impl Shared {
             followed: ctl.followed,
             prepared: ctl.prepared.clone(),
             looping: ctl.looping,
+            bounds: ctl.bounds,
         })
     }
 
@@ -670,6 +686,7 @@ impl Shared {
             muted: ctl.muted,
             scrub: ctl.scrub,
             looping: ctl.looping,
+            bounds: ctl.bounds,
             changes: ctl.changes,
         })
     }
@@ -799,6 +816,7 @@ impl Player {
                 scrubbing: config.audio_scrubbing,
                 scrub: None,
                 looping: None,
+                bounds: None,
                 hardware: config.hardware,
                 motion: 0.0,
                 followed: false,
@@ -976,6 +994,14 @@ impl Player {
         self.shared.change(false, |ctl, _, _| ctl.looping = range);
     }
 
+    pub fn set_bounds(&self, range: Option<(i64, i64)>) {
+        let range = range.filter(|(a, b)| b > a);
+        if self.shared.control().bounds == range {
+            return;
+        }
+        self.shared.change(false, |ctl, _, _| ctl.bounds = range);
+    }
+
     pub fn play(&self, speed: f64) {
         if speed == 0.0 || !speed.is_finite() {
             return self.pause();
@@ -985,13 +1011,13 @@ impl Player {
             let from = match (ctl.mode, sample) {
                 (Mode::Playing { .. }, Some(s)) => s.round() as i64,
                 _ => {
+                    let (first, last) = match ctl.bounds {
+                        Some((a, b)) => (a, (b - 1).max(a)),
+                        None => (ctl.plan.first(), ctl.plan.last()),
+                    };
                     let at = match ctl.mode {
-                        Mode::Paused { at } if speed > 0.0 && at >= ctl.plan.last() => {
-                            ctl.plan.first()
-                        }
-                        Mode::Paused { at } if speed < 0.0 && at <= ctl.plan.first() => {
-                            ctl.plan.last()
-                        }
+                        Mode::Paused { at } if speed > 0.0 && at >= last => first,
+                        Mode::Paused { at } if speed < 0.0 && at <= first => last,
                         _ => pos,
                     };
                     start_sample(&ctl.plan, at, speed)

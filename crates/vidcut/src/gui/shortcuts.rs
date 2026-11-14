@@ -112,11 +112,15 @@ pub(crate) struct Fired(Vec<(Action, bool)>);
 
 impl Fired {
     pub(crate) fn of(b: &Bindings, input: &egui::InputState) -> Self {
+        Self::of_panel(b, input, Panel::App)
+    }
+
+    pub(crate) fn of_panel(b: &Bindings, input: &egui::InputState, panel: Panel) -> Self {
         Self(
             input
                 .events
                 .iter()
-                .filter_map(|e| owner(b, Panel::App, e))
+                .filter_map(|e| owner(b, panel, e))
                 .collect(),
         )
     }

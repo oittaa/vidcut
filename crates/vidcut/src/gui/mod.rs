@@ -8,6 +8,7 @@ mod compressor;
 mod dialog;
 mod ducking;
 mod effect_browser;
+mod effects_page;
 mod equalizer;
 pub mod export;
 mod file_manager;

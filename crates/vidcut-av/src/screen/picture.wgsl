@@ -80,6 +80,9 @@ fn read_as(a: f32) -> f32 {
 }
 
 fn opacity(u: vec2<f32>) -> f32 {
+    if p.per.w == 3u {
+        return textureSampleLevel(halved, bilinear, stored(u), 0.0).a;
+    }
     if p.site.z > 0.5 && p.site.z < 1.5 {
         return 1.0;
     }
@@ -602,6 +605,27 @@ fn fs_halve(in: Out) -> @location(0) vec4<f32> {
     let size = vec2<f32>(textureDimensions(halved));
     let at = min(floor(in.position.xy) * 2.0 + 1.0, size - 0.5);
     return textureSampleLevel(halved, bilinear, at / size, 0.0);
+}
+
+@fragment
+fn fs_composed_in(in: Out) -> @location(0) vec4<f32> {
+    let u = in.position.xy / p.upright.xy;
+    let c = textureLoad(halved, vec2<i32>(stored(u) * stored_size()), 0);
+    let a = opacity(u);
+    return vec4<f32>(select(c.rgb * a, c.rgb, premultiplied()), a);
+}
+
+@fragment
+fn fs_composed_out(in: Out) -> @location(0) vec4<f32> {
+    let s = in.position.xy / stored_size();
+    var u = s;
+    switch p.flags.y {
+        case 1u: { u = vec2<f32>(1.0 - s.y, s.x); }
+        case 2u: { u = vec2<f32>(1.0 - s.x, 1.0 - s.y); }
+        case 3u: { u = vec2<f32>(s.y, 1.0 - s.x); }
+        default: {}
+    }
+    return textureLoad(halved, vec2<i32>(u * p.upright.xy), 0);
 }
 
 fn placed(px: vec2<f32>) -> vec4<f32> {
@@ -1233,78 +1257,6 @@ fn effect_mixed(px: vec2<i32>, made: vec4<f32>, blend: f32, use_alpha: f32) -> v
     return mix(was, out, blend);
 }
 
-struct Masking {
-    how: vec4<f32>,
-    more: vec4<f32>,
-};
-
-@group(0) @binding(0) var<uniform> masking: Masking;
-@group(0) @binding(3) var<storage, read> area_maps: array<f32>;
-
-fn area_point(i: i32) -> vec2<f32> {
-    let o = i32(masking.how.w) * 9 + i * 2;
-    return vec2<f32>(area_maps[o], area_maps[o + 1]);
-}
-
-fn area_sides(p: vec2<f32>) -> f32 {
-    let n = i32(masking.more.x);
-    var near = 1e18;
-    var sign = 1.0;
-    var b = area_point(n - 1);
-    for (var i = 0; i < n; i++) {
-        let a = area_point(i);
-        let e = b - a;
-        let w = p - a;
-        let along = clamp(dot(w, e) / max(dot(e, e), 1e-12), 0.0, 1.0);
-        let off = w - e * along;
-        near = min(near, dot(off, off));
-        let up = p.y >= a.y;
-        let under = p.y < b.y;
-        let left = e.x * w.y > e.y * w.x;
-        if (up && under && left) || (!up && !under && !left) {
-            sign = -sign;
-        }
-        b = a;
-    }
-    return sign * sqrt(near);
-}
-
-fn area_reach(i: i32, at: vec3<f32>) -> f32 {
-    let o = i * 9;
-    let across = vec3<f32>(area_maps[o], area_maps[o + 1], area_maps[o + 2]);
-    let down = vec3<f32>(area_maps[o + 3], area_maps[o + 4], area_maps[o + 5]);
-    let far = vec3<f32>(area_maps[o + 6], area_maps[o + 7], area_maps[o + 8]);
-    let depth = dot(far, at);
-    if depth <= 1e-6 {
-        return 1e9;
-    }
-    let q = vec2<f32>(dot(across, at), dot(down, at)) / depth;
-    if masking.how.x > 1.5 {
-        return 1.0 + 2.0 * area_sides(q * 0.5 + 0.5);
-    }
-    return select(length(q), max(abs(q.x), abs(q.y)), masking.how.x > 0.5);
-}
-
-fn area_inside(i: i32, xy: vec2<f32>) -> f32 {
-    let r = area_reach(i, vec3<f32>(xy, 1.0));
-    let across = area_reach(i, vec3<f32>(xy + vec2<f32>(1.0, 0.0), 1.0));
-    let down = area_reach(i, vec3<f32>(xy + vec2<f32>(0.0, 1.0), 1.0));
-    let band = max(max(masking.how.y, abs(across - r) + abs(down - r)), 1e-6);
-    let t = clamp((1.0 - r) / band, 0.0, 1.0);
-    return t * t * (3.0 - 2.0 * t);
-}
-
-@fragment
-fn fs_area(in: Out) -> @location(0) vec4<f32> {
-    let px = vec2<i32>(in.position.xy);
-    var outside = 1.0;
-    for (var i = 0; i < i32(masking.how.w); i++) {
-        outside *= 1.0 - area_inside(i, in.position.xy);
-    }
-    let share = select(1.0 - outside, outside, masking.how.z > 0.5);
-    return mix(textureLoad(blur_start, px, 0), textureLoad(blur_source, px, 0), share);
-}
-
 fn blur_end(d: f32) -> vec4<f32> {
     if blurring.window.x < 0.5 {
         return vec4<f32>(1.0);
@@ -1333,6 +1285,150 @@ fn fs_blur(in: Out) -> @location(0) vec4<f32> {
         return effect_mixed(px, out, blurring.blend.x, blurring.blend.y);
     }
     return out;
+}
+
+fn box_part(c: f32, s: f32, wide: f32) -> f32 {
+    return max(min(c + 0.5 * s, 0.5 * wide) - max(c - 0.5 * s, -0.5 * wide), 0.0);
+}
+
+@fragment
+fn fs_boxes(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let size = vec2<i32>(textureDimensions(blur_source));
+    let step = blurring.way.y;
+    let wide = blurring.spread.x;
+    var sum = vec4<f32>(0.0);
+    var total = 0.0;
+    for (var j = -blurring.way.z; j <= blurring.way.z; j++) {
+        let w = box_part(f32(j * step), f32(step), wide);
+        if w > 0.0 {
+            sum += blur_tap(px, j * step, size) * w;
+            total += w;
+        }
+    }
+    let c = blur_tap(px, 0, size);
+    var out = c;
+    if total > 0.0 {
+        out = select(c, sum / total, blurring.window > vec4<f32>(0.5));
+    }
+    if blurring.blend.z > 0.5 {
+        return effect_mixed(px, out, blurring.blend.x, blurring.blend.y);
+    }
+    return out;
+}
+
+struct Shape {
+    middle: vec4<f32>,
+    half: vec4<f32>,
+    edge: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> shaping: Shape;
+@group(0) @binding(3) var<storage, read> shape_points: array<f32>;
+
+fn shape_point(i: i32) -> vec2<f32> {
+    return vec2<f32>(shape_points[2 * i], shape_points[2 * i + 1]);
+}
+
+fn ellipse_distance(q: vec2<f32>, axes: vec2<f32>) -> f32 {
+    let ab = max(axes, vec2<f32>(1e-3));
+    let p = abs(q);
+    var w = select(0.0, 1.5707964, ab.x * (p.x - ab.x) < ab.y * (p.y - ab.y));
+    for (var i = 0; i < 8; i++) {
+        let cs = vec2<f32>(cos(w), sin(w));
+        let u = ab * cs;
+        let v = ab * vec2<f32>(-cs.y, cs.x);
+        w = clamp(w + dot(p - u, v) / (dot(p - u, u) + dot(v, v)), 0.0, 1.5707964);
+    }
+    let d = length(p - ab * vec2<f32>(cos(w), sin(w)));
+    return select(-d, d, dot(p / ab, p / ab) > 1.0);
+}
+
+fn box_distance(q: vec2<f32>, half: vec2<f32>, r: f32) -> f32 {
+    let e = abs(q) - half + r;
+    return length(max(e, vec2<f32>(0.0))) + min(max(e.x, e.y), 0.0) - r;
+}
+
+fn polygon_distance(q: vec2<f32>) -> f32 {
+    let n = i32(shaping.half.w);
+    if n < 1 {
+        return 1e9;
+    }
+    var near = 1e18;
+    var wound = 0;
+    var b = shape_point(n - 1);
+    for (var i = 0; i < n; i++) {
+        let a = shape_point(i);
+        let e = a - b;
+        let w = q - b;
+        let t = clamp(dot(w, e) / max(dot(e, e), 1e-12), 0.0, 1.0);
+        let off = w - e * t;
+        near = min(near, dot(off, off));
+        let left = e.x * w.y - e.y * w.x;
+        if b.y <= q.y {
+            if a.y > q.y && left > 0.0 {
+                wound += 1;
+            }
+        } else if a.y <= q.y && left < 0.0 {
+            wound -= 1;
+        }
+        b = a;
+    }
+    let inside = select(wound % 2 != 0, wound != 0, shaping.edge.z > 0.5);
+    return select(sqrt(near), -sqrt(near), inside);
+}
+
+@fragment
+fn fs_shape(in: Out) -> @location(0) vec4<f32> {
+    let at = in.position.xy;
+    let kind = shaping.middle.w;
+    var d = 0.0;
+    if kind > 1.5 {
+        d = polygon_distance(at);
+    } else {
+        let l = vec2<f32>(at.x - shaping.middle.x, shaping.middle.y - at.y);
+        let c = cos(shaping.middle.z);
+        let s = sin(shaping.middle.z);
+        let q = vec2<f32>(c * l.x + s * l.y, c * l.y - s * l.x);
+        if kind > 0.5 {
+            d = box_distance(q, shaping.half.xy, shaping.half.z);
+        } else {
+            d = ellipse_distance(q, shaping.half.xy);
+        }
+    }
+    let border = shaping.edge.x;
+    let band = abs(border);
+    var cover = clamp(min(d + 0.5, band) - max(d - 0.5, -band), 0.0, 1.0);
+    if shaping.edge.y > 0.5 {
+        cover = clamp(0.5 - (d - border), 0.0, 1.0);
+    }
+    if shaping.edge.w > 0.5 {
+        cover = max(cover, textureLoad(blur_source, vec2<i32>(at), 0).r);
+    }
+    return vec4<f32>(cover);
+}
+
+struct Joining {
+    how: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> joining: Joining;
+@group(0) @binding(15) var tool_mask: texture_2d<f32>;
+
+@fragment
+fn fs_mask_join(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let s = textureLoad(blur_source, px, 0).r;
+    let own = joining.how.x * select(s, 1.0 - s, joining.how.y > 0.5);
+    let a = select(textureLoad(blur_start, px, 0).r, 0.0, joining.how.z > 0.5);
+    return vec4<f32>(own + a - own * a);
+}
+
+@fragment
+fn fs_masked(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let m = textureLoad(tool_mask, px, 0).r;
+    return mix(textureLoad(blur_start, px, 0), textureLoad(blur_source, px, 0), m);
 }
 
 struct Vignetting {

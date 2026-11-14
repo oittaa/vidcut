@@ -89,6 +89,15 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("picture.set", &["clips"]),
     ("picture.clear", &["clips"]),
     ("effects.add", &["clips", "kind"]),
+    ("comp.add", &["clip", "tool"]),
+    ("comp.set", &["clip", "node"]),
+    ("comp.connect", &["clip", "node"]),
+    ("comp.rename", &["clip", "node", "to"]),
+    ("comp.remove", &["clip", "node"]),
+    ("comp.paste", &["clip", "node"]),
+    ("comp.key", &["clip", "node"]),
+    ("comp.reset", &["clip", "node"]),
+    ("comp.loop", &["clip"]),
     ("effects.set", &["clip", "effect"]),
     ("effects.key", &["clip", "effect"]),
     ("effects.reset", &["clip", "effect"]),
@@ -98,7 +107,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("motion.set", &["clip", "path"]),
     ("motion.remove", &["clip"]),
     ("motion.find", &["clips"]),
-    ("motion.track", &["clip", "effect"]),
+    ("motion.track", &["clip", "node"]),
     ("motion.follow", &["clip"]),
     ("edit.append", &["media"]),
     ("edit.smart_insert", &["media"]),
@@ -153,9 +162,13 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("player.stats", &["show"]),
     ("player.audio_scrubbing", &["on"]),
     ("player.loop", &["on"]),
+    ("player.bounds", &["from", "to"]),
     ("mixer.preview", &["track", "volume_db"]),
     ("gui.show", &["panel"]),
     ("gui.close", &["panel"]),
+    ("gui.page", &["page"]),
+    ("gui.nodes", &["nodes"]),
+    ("gui.page_time", &["at"]),
     ("gui.target", &["track"]),
     ("gui.trim_editor", &["at"]),
 ];
@@ -171,6 +184,10 @@ const GROUPS: &[(&str, &str)] = &[
         "The render cache: what it renders, Render and Delete",
     ),
     ("clip", "Clip properties"),
+    (
+        "comp",
+        "The nodes of a clip's composition: tools and masks on its own picture, before its transform",
+    ),
     ("decoders", "Hardware decoders that work here"),
     ("edit", "Edit the timeline"),
     (
@@ -440,21 +457,52 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut effects set c3 2 --center 0.25,0.75 --transparency 0.5 --composite-type screen\n  \
          vidcut effects set c3 3 --sharpen-amount 2.5 --fine-detail-size 0.03\n  \
          vidcut effects set c3 3 --fine-details 2 --large-details 3 --sharpen-chroma 1.5\n  \
-         vidcut effects set c3 0 --strength 0.6 --at 2s\n  \
-         vidcut effects set c3 1 --area '{\"center\":[0.3,0.4],\"size\":[0.2,0.3]}'\n  \
-         vidcut effects set c3 1 --area '{\"shape\":\"box\",\"rotation\":15,\"softness\":0.3}'\n  \
-         vidcut effects set c3 1 --area \
-         '{\"shape\":\"polygon\",\"points\":[[0.5,0],[1,1],[0,1]]}'\n  \
-         vidcut effects set c3 1 --area '{\"invert\":true}'\n  \
-         vidcut effects set c3 1 --area '{\"follows\":\"p1\",\"size\":[1.2,1.2]}'\n  \
-         vidcut effects set c3 1 --area '{\"follows\":\"face\",\"size\":[1.3,1.3]}'\n  \
-         vidcut effects set c3 1 --area '{\"follows\":null}'\n  \
-         vidcut effects set c3 1 --area null",
+         vidcut effects set c3 0 --strength 0.6 --at 2s",
+    ),
+    (
+        "comp.add",
+        "vidcut comp add c3 blur --after MediaIn1
+  vidcut comp add c3 ellipse --after Blur1
+  vidcut comp add c3 tracker --after MediaIn1
+           vidcut comp add c3 gaussian_blur --after Blur1
+  vidcut comp add V2@10s rectangle",
+    ),
+    (
+        "comp.set",
+        "vidcut comp set c3 Blur1 --size 5
+           vidcut comp set c3 Blur1 --filter box --lock-xy false --y-size 2
+           vidcut comp set c3 Ellipse1 --center 0.4,0.6 --width 0.2 --height 0.3 --soft-edge 0.05
+           vidcut comp set c3 Rectangle1 --corner-radius 0.3 --angle 15 --invert true
+           vidcut comp set c3 Polygon1 --points '[[0,0.2],[-0.1,-0.1],[0.1,-0.1]]'
+           vidcut comp set c3 GaussianBlur1 --strength 0.6 --blend 0.5
+           vidcut comp set c3 Blur1 --pass-through true
+           vidcut comp set c3 Blur1 --size 8 --frame 60
+           vidcut comp set c3 Tracker1 --add-pattern
+           vidcut comp set c3 Tracker1 --pattern 2 --pattern-center 0.3,0.6 --pattern-offset 0,0.05
+           vidcut comp set c3 Ellipse1 --connect '{\"tracker\":\"Tracker1\",\"pattern\":1,\"size\":true}'",
+    ),
+    (
+        "comp.connect",
+        "vidcut comp connect c3 MediaOut1 --from Blur1
+           vidcut comp connect c3 Blur1 --input effect_mask --from Ellipse1
+           vidcut comp connect c3 Blur1 --input effect_mask",
+    ),
+    (
+        "comp.paste",
+        "vidcut comp paste c3 Blur1 --after Blur1
+  vidcut comp paste c4 Blur1 --from c3 --after MediaIn1
+  vidcut comp paste c3 Blur1 --place 2,3
+  vidcut comp paste c3 Blur1 --replace GaussianBlur1",
+    ),
+    (
+        "comp.key",
+        "vidcut comp key c3 Ellipse1 --frame 60
+  vidcut comp key c3 Ellipse1 --frame 60 --value soft_edge
+  vidcut comp key c3 Ellipse1 --frame 60 --ease ease_in_out",
     ),
     (
         "effects.key",
-        "vidcut effects key c3 0 --at 2s\n  vidcut effects key c3 0 --at 2s --ease ease_in_out\n  \
-         vidcut effects key c3 1 --at 2s --area",
+        "vidcut effects key c3 0 --at 2s\n  vidcut effects key c3 0 --at 2s --ease ease_in_out",
     ),
     (
         "motion.list",
@@ -482,11 +530,13 @@ const EXAMPLES: &[(&str, &str)] = &[
         "vidcut motion find c3 --download\n  vidcut motion find V1@10s,c7 --subject face\n  \
          vidcut motion find c3 --subject text --download\n  \
          vidcut motion find c3 --subject person --download\n  \
-         vidcut motion find c3 --subject vehicle\n  vidcut motion find c3 --replace\n  vidcut motion find c3 --subject vehicle --size 1920 --replace\n  vidcut motion find c3 --subject person --shortest 0.5 --steady 0.6 --replace",
+         vidcut motion find c3 --subject vehicle\n  vidcut motion find c3 --replace\n  \
+         vidcut motion find c3 --subject face --tracker Tracker1\n  vidcut motion find c3 --subject vehicle --size 1920 --replace\n  vidcut motion find c3 --subject person --shortest 0.5 --steady 0.6 --replace",
     ),
     (
         "motion.track",
-        "vidcut motion track c3 0 --download\n  vidcut motion track c3 1 --at 12s --way forward",
+        "vidcut motion track c3 Tracker1 --download\n  \
+         vidcut motion track c3 Tracker1 --pattern 2 --frame 40 --way forward",
     ),
     (
         "motion.follow",

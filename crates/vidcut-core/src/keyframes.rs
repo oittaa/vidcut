@@ -1,6 +1,7 @@
+use crate::effect_keys::Keyed;
 use crate::model::{
-    Clip, ClipAudio, Crop, Ease, Effect, Handle, Keyframe, Picture, PositionHandles, Title,
-    TitleKind,
+    Clip, ClipAudio, Composition, Crop, Ease, Effect, Handle, Keyframe, Node, Picture,
+    PositionHandles, Title, TitleKind,
 };
 use crate::otio::effects::rounded;
 use crate::validate::GAIN;
@@ -638,9 +639,18 @@ fn write_plain(p: &mut Picture, v: PictureValue, value: [f64; 2]) {
 }
 
 impl Picture {
+    pub fn nodes(&self) -> impl Iterator<Item = &Node> {
+        self.composition.iter().flat_map(|c| &c.nodes)
+    }
+
+    pub fn node(&self, name: &str) -> Option<&Node> {
+        self.composition.as_ref()?.node(name)
+    }
+
     pub fn is_keyed(&self) -> bool {
         PictureValue::ALL.into_iter().any(|v| self.has_keys(v))
             || self.effects.iter().any(Effect::has_keys)
+            || self.nodes().any(Node::has_keys)
     }
 
     pub fn has_keys(&self, v: PictureValue) -> bool {
@@ -797,6 +807,9 @@ impl Picture {
         }
         if edited.effects != baseline.effects {
             p.effects = previewed_effects(&self.effects, &baseline.effects, &edited.effects, frame);
+        }
+        if edited.composition != baseline.composition {
+            p.composition = previewed_nodes(self, baseline, edited, frame);
         }
         p
     }
@@ -1207,6 +1220,24 @@ pub fn retarget_channel(
     if let Some(y) = y {
         *y = rows.into_iter().map(|(_, v)| v).collect();
     }
+}
+
+fn previewed_nodes(
+    stored: &Picture,
+    baseline: &Picture,
+    edited: &Picture,
+    frame: i64,
+) -> Option<Composition> {
+    let mut out = edited.composition.clone()?;
+    for n in &mut out.nodes {
+        let pair = (stored.node(&n.name), baseline.node(&n.name));
+        if let (Some(s), Some(b)) = pair
+            && s.tool.base() == n.tool.base()
+        {
+            *n = s.previewed(b, n, frame);
+        }
+    }
+    Some(out)
 }
 
 fn previewed_effects(

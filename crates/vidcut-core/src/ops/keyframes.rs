@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use serde_json::{Value, json};
 
 use super::locate;
+use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::generators::{Axis, CENTER, checked_center};
 use crate::keyframes::{
@@ -1060,7 +1061,7 @@ fn owned_picture(p: &Project, id: &str, v: PictureValue) -> Result<(Picture, Cli
     if let Some(t) = &c.title {
         if !t.takes_keys(v) {
             return Err(Error::invalid(format!(
-                "{id} is a {}, which has no {} keyframes",
+                "{id} ({}) has no {} keyframes",
                 if t.moves() { "scroll" } else { "title" },
                 v.name().replace('_', " ")
             )));
@@ -1355,6 +1356,7 @@ fn listed(p: &Project, c: &Clip, picture: &Picture, v: PictureValue) -> Vec<Valu
 
 #[cfg(test)]
 mod tests {
+    use crate::effect_keys::Keyed;
     use crate::keyframes::PictureValue;
     use crate::model::{Effect, EffectValue};
     use crate::test_support::Fixture;

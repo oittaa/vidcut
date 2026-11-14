@@ -1,11 +1,12 @@
 use serde_json::{Value, json};
 
+use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::model::{
     Ease, Effect, EffectKind, EffectType, EffectValue, FilmGrain, GaussianBlur, Glow, MosaicBlur,
     Project, Sharpen, Vignette,
 };
-use crate::request::EffectChange;
+use crate::request::{EffectChange, KindChange};
 
 use super::locate;
 use super::picture::{checked, effect_checked, takes};
@@ -65,7 +66,7 @@ fn given<T>(from: &mut Option<T>, to: &mut Option<T>) {
     }
 }
 
-fn gaussian_values(c: &mut EffectChange, b: &mut GaussianBlur) -> Result<()> {
+fn gaussian_values(c: &mut KindChange, b: &mut GaussianBlur) -> Result<()> {
     given(&mut c.strength, &mut b.strength);
     taken(&mut c.split, &mut b.split);
     given(&mut c.vertical_strength, &mut b.vertical_strength);
@@ -79,7 +80,7 @@ fn gaussian_values(c: &mut EffectChange, b: &mut GaussianBlur) -> Result<()> {
     Ok(())
 }
 
-fn mosaic_values(c: &mut EffectChange, m: &mut MosaicBlur) -> Result<()> {
+fn mosaic_values(c: &mut KindChange, m: &mut MosaicBlur) -> Result<()> {
     given(&mut c.pixel_frequency, &mut m.pixel_frequency);
     given(&mut c.smooth_strength, &mut m.smooth_strength);
     given(&mut c.cell_shape, &mut m.cell_shape);
@@ -108,7 +109,7 @@ fn color(what: &str, raw: Option<Vec<f64>>, to: &mut Option<[f64; 3]>) -> Result
     Ok(())
 }
 
-fn glow_values(c: &mut EffectChange, g: &mut Glow) -> Result<()> {
+fn glow_values(c: &mut KindChange, g: &mut Glow) -> Result<()> {
     given(&mut c.output, &mut g.output);
     given(&mut c.input_alpha, &mut g.input_alpha);
     given(&mut c.threshold, &mut g.threshold);
@@ -148,7 +149,7 @@ fn glow_values(c: &mut EffectChange, g: &mut Glow) -> Result<()> {
     Ok(())
 }
 
-fn grain_values(c: &mut EffectChange, g: &mut FilmGrain) -> Result<()> {
+fn grain_values(c: &mut KindChange, g: &mut FilmGrain) -> Result<()> {
     if let Some(preset) = c.preset.take() {
         g.take_preset(preset);
     }
@@ -177,7 +178,7 @@ fn grain_values(c: &mut EffectChange, g: &mut FilmGrain) -> Result<()> {
     Ok(())
 }
 
-fn vignette_values(c: &mut EffectChange, v: &mut Vignette) -> Result<()> {
+fn vignette_values(c: &mut KindChange, v: &mut Vignette) -> Result<()> {
     given(&mut c.operating_mode, &mut v.operating_mode);
     given(&mut c.border_shape, &mut v.border_shape);
     given(&mut c.size, &mut v.size);
@@ -195,7 +196,7 @@ fn vignette_values(c: &mut EffectChange, v: &mut Vignette) -> Result<()> {
     Ok(())
 }
 
-fn sharpen_values(c: &mut EffectChange, s: &mut Sharpen) {
+fn sharpen_values(c: &mut KindChange, s: &mut Sharpen) {
     given(&mut c.sharpen_amount, &mut s.sharpen_amount);
     given(&mut c.fine_detail_size, &mut s.fine_detail_size);
     given(&mut c.fine_details, &mut s.fine_details);
@@ -211,20 +212,7 @@ fn applied(e: &Effect, change: &EffectChange) -> Result<Effect> {
     given(&mut left.blend, &mut next.blend);
     taken(&mut left.use_alpha, &mut next.use_alpha);
     taken(&mut left.render_cache, &mut next.render_cache);
-    if let Some(area) = left.area.take() {
-        next.area = area.map(|change| change.on(next.area.take().unwrap_or_default()));
-        if next.area.is_none() {
-            next.keys.retain(|k| !k.value.of_area());
-        }
-    }
-    match &mut next.kind {
-        EffectKind::GaussianBlur(b) => gaussian_values(&mut left, b)?,
-        EffectKind::MosaicBlur(m) => mosaic_values(&mut left, m)?,
-        EffectKind::Glow(g) => glow_values(&mut left, g)?,
-        EffectKind::FilmGrain(g) => grain_values(&mut left, g)?,
-        EffectKind::Vignette(v) => vignette_values(&mut left, v)?,
-        EffectKind::Sharpen(s) => sharpen_values(&mut left, s),
-    }
+    kind_applied(&mut next.kind, &mut left.values)?;
     if left != EffectChange::default() {
         return Err(Error::invalid(format!(
             "effects.set has a value that a {} doesn't have",
@@ -232,6 +220,18 @@ fn applied(e: &Effect, change: &EffectChange) -> Result<Effect> {
         )));
     }
     Ok(next)
+}
+
+pub(super) fn kind_applied(kind: &mut EffectKind, c: &mut KindChange) -> Result<()> {
+    match kind {
+        EffectKind::GaussianBlur(b) => gaussian_values(c, b)?,
+        EffectKind::MosaicBlur(m) => mosaic_values(c, m)?,
+        EffectKind::Glow(g) => glow_values(c, g)?,
+        EffectKind::FilmGrain(g) => grain_values(c, g)?,
+        EffectKind::Vignette(v) => vignette_values(c, v)?,
+        EffectKind::Sharpen(s) => sharpen_values(c, s),
+    }
+    Ok(())
 }
 
 fn named_values(e: &Effect, change: &EffectChange) -> Result<Vec<EffectValue>> {
@@ -247,7 +247,7 @@ fn named_values(e: &Effect, change: &EffectChange) -> Result<Vec<EffectValue>> {
         .collect())
 }
 
-fn source_frame(p: &Project, id: &str, at: i64) -> Result<i64> {
+pub(super) fn source_frame(p: &Project, id: &str, at: i64) -> Result<i64> {
     let (ti, ci) = locate(p, id)?;
     Ok(p.tracks[ti].clips[ci].content_at(at))
 }
@@ -263,22 +263,8 @@ pub fn set(
         return Err(Error::usage("effects.set needs a value to change"));
     }
     let frame = at.map(|t| source_frame(p, id, t)).transpose()?;
-    let (ti, ci) = locate(p, id)?;
-    let paths: Vec<String> = p.tracks[ti].clips[ci]
-        .motion
-        .iter()
-        .map(|m| m.id.clone())
-        .collect();
     let e = &mut effects_of(p, id, n)?[n];
     let mut next = applied(e, change)?;
-    if let Some(path) = next.area.as_ref().and_then(|a| a.follows.as_ref())
-        && crate::model::Subject::named(path).is_none()
-        && !paths.contains(path)
-    {
-        return Err(Error::not_found(format!(
-            "{id} has no motion path {path} for the area to follow"
-        )));
-    }
     let named = named_values(e, change)?;
     for value in e.keys.iter().map(|k| k.value).filter(|v| named.contains(v)) {
         let Some(frame) = frame else {
@@ -297,33 +283,20 @@ pub fn set(
     Ok(())
 }
 
-pub fn key(
-    p: &mut Project,
-    id: &str,
-    n: usize,
-    at: i64,
-    ease: Option<Ease>,
-    area: bool,
-) -> Result<Value> {
+pub fn key(p: &mut Project, id: &str, n: usize, at: i64, ease: Option<Ease>) -> Result<Value> {
     let frame = source_frame(p, id, at)?;
     let e = &mut effects_of(p, id, n)?[n];
-    if area && e.area.is_none() {
-        return Err(Error::invalid(format!(
-            "effect {n} of {id} has no area: first give it one (effects.set)"
-        )));
-    }
     let keyed = match ease {
-        Some(ease) if e.has_key_at(frame, area) => {
-            e.ease_keys(frame, ease, area);
+        Some(ease) if e.has_key_at(frame) => {
+            e.ease_keys(frame, ease);
             true
         }
         Some(_) => {
-            let what = if area { "the area of effect" } else { "effect" };
             return Err(Error::invalid(format!(
-                "{what} {n} of {id} has no keyframes on source frame {frame}"
+                "effect {n} of {id} has no keyframes on source frame {frame}"
             )));
         }
-        None => e.toggle_keys(frame, area),
+        None => e.toggle_keys(frame),
     };
     *e = effect_checked(e)?;
     Ok(json!({ "clip": id, "effect": n, "frame": frame, "keyed": keyed }))
@@ -334,8 +307,6 @@ pub fn reset(p: &mut Project, id: &str, n: usize) -> Result<()> {
     if e.on {
         *e = Effect {
             render_cache: e.render_cache,
-            keys: e.area_keys().cloned().collect(),
-            area: e.area.take(),
             ..e.kind().made()
         };
     }

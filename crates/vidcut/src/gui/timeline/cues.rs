@@ -556,7 +556,7 @@ impl Workspace {
         });
     }
 
-    fn send_all(&self, commands: Vec<Value>, label: &str) {
+    pub(crate) fn send_all(&self, commands: Vec<Value>, label: &str) {
         match commands.as_slice() {
             [] => {}
             [one] => self.send(

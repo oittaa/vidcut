@@ -186,11 +186,60 @@ pub const SIDES: (u32, u32) = (320, 3840);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Follow {
-    pub look: Look,
-    pub at: f64,
+    pub at: i64,
+    pub frames: (i64, i64),
     pub area: [f32; 4],
     pub backward: bool,
     pub forward: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Tracked {
+    pub first: i64,
+    pub found: Vec<Found>,
+    pub whole: bool,
+}
+
+impl Tracked {
+    const TAG: &'static [u8; 4] = b"vct1";
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Self::TAG.to_vec();
+        out.extend_from_slice(&(self.first as u64).to_le_bytes());
+        out.extend_from_slice(&(self.found.len() as u64).to_le_bytes());
+        for f in &self.found {
+            let [x, y] = f.center;
+            let [w, h] = f.size;
+            for v in [x, y, w, h, f.rotation, f.score] {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        let mut r = Bytes(b.strip_prefix(Self::TAG)?);
+        let first = r.u64()? as i64;
+        let n = usize::try_from(r.u64()?).ok()?;
+        let mut found = Vec::new();
+        for _ in 0..n {
+            found.push(Found {
+                center: [r.f32()?, r.f32()?],
+                size: [r.f32()?, r.f32()?],
+                rotation: r.f32()?,
+                score: r.f32()?,
+            });
+        }
+        Some(Self {
+            first,
+            found,
+            whole: true,
+        })
+    }
+
+    pub fn end(&self) -> i64 {
+        self.first + self.found.len() as i64
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -251,11 +300,6 @@ impl Detections {
     pub fn shown(&self, time: f64) -> &[Found] {
         let found = self.found.get(self.seen(time)).or(self.found.last());
         found.map_or(&[], Vec::as_slice)
-    }
-
-    pub fn scene_shown(&self, time: f64) -> f32 {
-        let scene = self.scene.get(self.seen(time));
-        scene.copied().unwrap_or(0.0)
     }
 
     pub fn cut(&self, before: f64, at: f64) -> bool {

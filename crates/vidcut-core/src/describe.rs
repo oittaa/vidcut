@@ -305,11 +305,6 @@ pub fn describe_at(
         "picture.set" => d.picture_set(),
         "effects.add" => format!("Add {} to {}", d.effect_name(), d.clips("clips")),
         "effects.set" => format!("Change effect {} of {}", d.effect(), d.clips("clip")),
-        "effects.key" if d.flag("area") => format!(
-            "Key the area of effect {} of {}",
-            d.effect(),
-            d.clips("clip")
-        ),
         "effects.key" => format!("Key effect {} of {}", d.effect(), d.clips("clip")),
         "effects.reset" => format!("Reset effect {} of {}", d.effect(), d.clips("clip")),
         "effects.remove" => format!("Remove effect {} of {}", d.effect(), d.clips("clip")),
@@ -319,6 +314,53 @@ pub fn describe_at(
             d.clips("clip"),
             d.params["to"].as_u64().unwrap_or(0) + 1
         ),
+        "comp.add" => format!(
+            "Add {} to the composition of {}",
+            d.text("tool").replace('_', " "),
+            d.clips("clip")
+        ),
+        "comp.set" => format!("Change {} of {}", d.text("node"), d.clips("clip")),
+        "comp.connect" => match d.params["from"].as_str() {
+            Some(from) => format!("Join {from} to {} of {}", d.text("node"), d.clips("clip")),
+            None => format!("Part an input of {} of {}", d.text("node"), d.clips("clip")),
+        },
+        "comp.rename" => format!(
+            "Rename {} of {} to {}",
+            d.text("node"),
+            d.clips("clip"),
+            d.text("to")
+        ),
+        "comp.remove" => format!("Remove {} of {}", d.text("node"), d.clips("clip")),
+        "comp.paste" => {
+            let copies = d.params["copy"].as_array().map_or(0, Vec::len);
+            let what = match (d.params["node"].as_str(), copies) {
+                (Some(n), _) => n.to_string(),
+                (None, 1) => d.params["copy"][0]["name"]
+                    .as_str()
+                    .unwrap_or("a node")
+                    .to_string(),
+                (None, n) if n > 1 => format!("{n} nodes"),
+                _ => "a node".to_string(),
+            };
+            format!("Paste {what} into {}", d.clips("clip"))
+        }
+        "comp.key" => match d.params["value"].as_str() {
+            Some(v) => format!(
+                "Key {} of {} of {}",
+                v.replace('_', " "),
+                d.text("node"),
+                d.clips("clip")
+            ),
+            None => format!("Key {} of {}", d.text("node"), d.clips("clip")),
+        },
+        "comp.reset" => format!("Reset {} of {}", d.text("node"), d.clips("clip")),
+        "comp.loop" => match (d.params["on"].as_bool(), d.params["ping_pong"].as_bool()) {
+            (Some(false), _) => format!("Turn off the loop of {}", d.clips("clip")),
+            (_, Some(true)) => format!("Loop {} with Ping Pong", d.clips("clip")),
+            (_, Some(false)) => format!("Loop {} without Ping Pong", d.clips("clip")),
+            (Some(true), None) => format!("Loop {}", d.clips("clip")),
+            (None, None) => format!("Turn the loop of {} on or off", d.clips("clip")),
+        },
         "motion.add" => format!("Add a motion path to {}", d.clips("clip")),
         "motion.set" => format!(
             "Change motion path {} of {}",
@@ -332,8 +374,8 @@ pub fn describe_at(
             d.clips("clips")
         ),
         "motion.track" => format!(
-            "Track the area of effect {} of {}",
-            d.params["effect"],
+            "Track {} of {}",
+            d.params["node"].as_str().unwrap_or("a mask"),
             d.clips("clip")
         ),
         "motion.follow" => match d.params["path"].as_str() {
@@ -344,6 +386,7 @@ pub fn describe_at(
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
             Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),
             Some("composite") => format!("Reset the composite of {}", d.clips("clips")),
+            Some("composition") => format!("Remove the composition of {}", d.clips("clips")),
             Some(_) => format!("Reset the transform of {}", d.clips("clips")),
             None => format!("Reset the picture of {}", d.clips("clips")),
         },
@@ -478,6 +521,8 @@ pub fn describe_at(
             Some(false) => "Loop playback off".into(),
             None => "Loop playback on or off".into(),
         },
+        "player.bounds" if params["from"].is_null() => "Play without bounds".into(),
+        "player.bounds" => format!("Play bounds: {}", compact(params)),
         "mixer.preview" => format!(
             "{} fader at {} (heard, not kept)",
             d.text("track"),
@@ -511,6 +556,9 @@ pub fn describe_at(
         }
         "gui.show" => format!("Show {}", d.text("panel")),
         "gui.close" => format!("Close {}", d.text("panel")),
+        "gui.page" => format!("Show the {} page", d.text("page")),
+        "gui.nodes" => format!("Select nodes {}", d.list("nodes").join(", ")),
+        "gui.page_time" => format!("Effects page playhead: {}", compact(params)),
         "gui.target" => format!("Target track {}", d.text("track")),
         "gui.timeline" => format!("Timeline view: {}", compact(params)),
         "gui.screenshot" => "Screenshot".into(),

@@ -2997,14 +2997,6 @@ impl Workspace {
                     ui.close();
                 }
             }
-            if ui.button("Blur").clicked() {
-                self.blur_tool(true);
-                self.send("selection.set", json!({ "clips": [c.id] }));
-                if !(c.start..c.end()).contains(&at) {
-                    self.send("player.seek", json!({ "at": c.start }));
-                }
-                ui.close();
-            }
             for (label, tool) in [
                 ("Reset Transform", "transform"),
                 ("Reset Crop", "crop"),

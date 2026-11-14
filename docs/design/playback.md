@@ -67,6 +67,10 @@ flowchart TD
 - `Control` holds the plan and the `mode`: `Mode::Paused` at a frame, or `Mode::Playing` from a sample at a speed.
 - It also holds the fader `trims`, the mute, a `scrub` request, a followed position (`Player::follow`) and the `prepared` frame.
 - A `looping` range (`Player::set_loop`, spec D51) keeps `Mode::Playing` going past its end. The audio thread reads on from the start, and queues the `Marker` of the jump. Thus the ring and the clock run on.
+- A `bounds` range (`Player::set_bounds`) holds play between two frames. It is for the Effects page.
+  - Play that starts inside stops at the ends. The clock, the audio thread and the frames read ahead stop at the edge.
+  - Play forward from the last frame starts at the first frame. Play backward from the first frame starts at the last frame.
+  - With a `looping` range too, play goes on from the other end.
 - `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, color reading, source position, layers over it), not where it shows. Thus kept pictures survive edits that move them.
   - Each layer over it adds its level.
   - A wipe, a Push or a Slide is not in the `Id`. The `Placed` pictures of the frame hold it (`Placed::moving`). The viewer draws again when they change.
@@ -163,7 +167,7 @@ flowchart TD
   - The key of such a frame holds the process, the Super Scale, the placement, the timeline size and the timeline colors (`source_key`). Why: the frame is made at its placement, and the viewer draws it with that placement and its opacity.
   - Why the timeline colors: an HDR picture goes to the AI stages only in an SDR timeline, tone-mapped.
   - The `Id` also holds the exact source position (`Plan::id`). Thus each made frame is a kept picture of its own.
-  - The `Id` also holds the keyframe position of the frame and the place of its Dynamic Zoom (`placed_now`). The keyframe position is in it only when the picture has keyframes, or when the area of an effect follows a motion path.
+  - The `Id` also holds the keyframe position of the frame and the place of its Dynamic Zoom (`placed_now`). The keyframe position is in it only when the picture has keyframes, or when a mask of its composition follows a motion path.
   - The `Id` also holds a stamp of the box of each followed path at the frame (`Followed::stamp_at`). Thus a change of a sample makes the frame again.
   - Why: the made frame keeps the placement of its frame (`Sampling::Placed`), and the draw uses that placement.
   - A cut of the piece (`VideoPiece::part`) does not change these values. Thus a piece that plays in part from the cache keeps the `Id` of each frame.

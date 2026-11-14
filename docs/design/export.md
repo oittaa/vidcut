@@ -577,13 +577,11 @@ Dynamic Zoom and keyframes (D75):
 - `Effect::sampled` reads each keyed value of an effect at that frame. `Working::of` then builds the work of the effect from plain values.
 - `layer_size` fits the layer for the closer Dynamic Zoom box (`DynamicZoom::closest`) and the largest zoom key (`place::detail`).
 - The viewer and the export both take this `Placing`. Thus there is one draw path.
-- `Placed` also holds the motion paths that the areas of its effects follow (`render::Followed`, [model](model.md#motion-paths)).
-  - `Followed::of` takes them from the clip, with the pace of the clip and the source frame of its first frame.
+- `Placed` also holds the motion paths of the patterns that the masks of its composition follow (`render::Followed`, [model](model.md#motion-paths)).
+  - `Followed::of` takes them from the clip, with a `FileClock` of the clip (`FileClock::plain`). The plan of a clip of footage then gives that clock the frame rates (`FileClock::of`).
   - A path shares its samples with the clip (`MotionPath.samples`). Thus a placed picture copies no sample, and two plans of one project compare them by their place in memory.
-  - `Followed::bases` gives the area of each followed path at the frame (`MotionPath::base_at`). It goes from the keyframe frame to the source frame through the pace.
-  - `follows` names one path by its id, or each path of a subject (`MotionPath::follows`).
-  - `place::Masking` holds one map for each of these areas, and `fs_area` joins them in one pass. With no area at the frame, `Working::of` gives no work for the effect. With `invert` on, it then gives the work with no mask: the effect is on the whole picture.
-  - Why: a path is on source frames, and the keyframe frame of a clip with a speed is a frame of the retimed source.
+  - `Followed::frame` takes a keyframe frame to the frame of the file (`FileClock::frame`). `Pattern::area_at` then gives the box of the pattern there.
+  - Why: a path is on frames of the file. The keyframe frame of a clip with a speed is a frame of the retimed source.
   - The paths are behind an `Arc`. Thus `Placed::after` copies no sample.
 
 Soft crop edges:
@@ -623,13 +621,6 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - The fit of the picture sets its size (`OnFrame.fit`). Thus a Zoom and a Pan do not change the shape.
 - `place::Sharpening` holds the gain of each band of a Sharpen, for the brightness and for the colors.
   - A Sharpen with all gains at 0 and Use Alpha on is no work at all (`Sharpening::still`).
-- `place::Masking` holds the area of an effect at the frame (`Working.area`, [model](model.md#pictures)).
-  - Its `rows` map a pixel of the canvas to the axes of the area. On these axes, the edge of the area is at 1.
-  - The rows join the map of the placement (`Level.back`) with the place of the area on the source picture.
-  - That map gives a point of the source picture. Thus the area stays on the content through a flip, a Dynamic Zoom, a pitch and a yaw.
-  - The source picture counts with square pixels, at its fitted shape (`OnFrame.fit`). Thus an ellipse on a wide picture is a true ellipse.
-  - `Placing::new` gives `Working::of` the base box of the area: the whole picture, or the area of the followed path at the frame.
-  - An area that follows a path that the plan does not hold takes the whole picture as its base box.
 
 The draw:
 
@@ -682,12 +673,7 @@ The draw:
   - The color planes are made only when a color gain is not 0. At a Sharpen Chroma of 1 the color gains are 0 (`Sharpening`).
 - `fs_sharpen` adds the changes to the colors. Each change is for the output, so the colors need no second conversion.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
-- `blur::landed` ends each effect, of each kind:
-  - With an area, `fs_area` mixes the result with the picture that came in, by the area (`blur::area_bytes`). Without an area, it copies the result.
-  - `fs_area` fades the edge of an area over one pixel at least (`area_inside`). The softness makes that band wider, toward the middle.
-  - `blur::area_maps` gives the shader the map of each area. A pixel takes the effect by the areas together (`area_reach`).
-  - For a polygon, `area_sides` gives the distance of a pixel to the nearest side, less than 0 inside. The points follow the maps in the same buffer.
-  - The coverage of a made frame goes through the same end. Thus its alpha changes only inside the area.
+- `blur::landed` ends each effect, of each kind. A clip effect has no mask, thus `blur::landed` copies the result.
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
@@ -724,6 +710,72 @@ The passes:
 - The first pass takes each pixel. A later pass takes each nth pixel.
 - The passes before it already blur the picture by more than n pixels. Thus the gaps do not show.
 - Above a sigma of 128 pixels, Black and Replicate borders thus differ a little from one pass.
+
+## Compositions
+
+The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500), [model](model.md#compositions)):
+
+- `Placing::new` samples each node at the frame of the composition that the picture shows (`Placed.clock`, `Composition::start`). Then `place::composed` gives the work of the composition (`Placing.composed`).
+  - It takes the tools of `Composition::chain`, in their order. A tool with `pass_through` is left out.
+  - Without a chain, it gives one `Work::Clear`. The clip then shows nothing.
+  - It works in the pixels of the picture, upright. A size in the composition follows these pixels, not the frame.
+- `Working::of_blur` gives the work of a Blur tool:
+  - Fast Gaussian and Gaussian give a `place::Blurring` for `fs_blur`. A channel that is off has a sigma of 0.
+  - Box, Bartlett and Multi-box give a `place::Boxing`: the width of one box across and down, and the number of boxes.
+  - Clipping Mode None gives the black border. Frame and Domain give the replicate border.
+- An effect tool gives the work of its clip effect, through `Working::of`. Its sizes follow the picture, as on a frame of the same size (`place::OnFrame`).
+  - With `blur_alpha` off, a Gaussian Blur has no sigma on the alpha.
+- `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out.
+  - `place::Shaping` holds one mask in the pixels of the picture: a `place::Figure` for each place of the mask, its border, Solid, Level and Invert.
+  - Its `place::Softening` is the blur of its soft edge.
+  - A `place::Figure` holds a `place::Outline` and its middle.
+  - `Shaping::tilted` turns, tilts and sizes the points of a polygon on the CPU. The shader thus gets the points in pixels.
+- A `place::MaskBase` is the box that a mask takes as its picture (`MaskBase::all`):
+  - Without `connect`, it is the whole picture (`MaskBase::whole`).
+  - With `connect`, it has the size of the whole picture. Its middle is the middle of the pattern at the frame plus the offset of the pattern.
+  - With `size` also, it is the box of the pattern at the frame (`MaskBase::of`), moved by the offset. `place::composed` gets the boxes of the patterns (`place::Areas`).
+  - With no path at the frame, the mask has no figure. It then covers nothing, and with Invert it covers all.
+  - `Shaping::figure` puts the shape of the mask into one base. The turn of the box adds to the turn of the mask.
+  - The border and the soft edge stay parts of the width of the picture. Why: a soft edge then looks the same on each box.
+
+The draw:
+
+- `Slot::prepare_with` runs the composition on the converted picture, before its smaller copies:
+  - `fs_composed_in` makes the upright picture with premultiplied colors and its alpha, in the picture of a `blur::Composer`.
+  - `blur::effects_into` runs the work there, as it runs the effects of a layer.
+  - `fs_composed_out` writes the result back into the converted picture, at its stored turn.
+- The converted picture then holds the alpha. Its parameters say so (`COMPOSED_ALPHA`, `COMPOSED_MODE`). Then `opacity` reads the alpha from it, and `placed` takes the colors as premultiplied.
+- `Slot.converted_from` also holds the work. Thus a change of the composition draws the picture again.
+- A slot without a composition drops its `blur::Composer`.
+- A frame of the render cache already holds the composition (`Sampling::Placed`). The draw does not run it again.
+- The composition of a compound clip runs on the picture of its tracks, before its placement (`Blurred::composed`, `MixDraw::finished`).
+
+The masks:
+
+- `blur::mask_made` makes the mask of a tool before its passes. It uses the two pictures of the passes and two pictures of `Worked.masks`.
+  - It draws each figure of a mask into one picture before the soft edge. `fs_shape` keeps the larger cover of the figures there.
+- `fs_shape` draws the coverage of one mask from the distance to its edge. Each edge thus fades over one pixel.
+  - `ellipse_distance` finds the nearest point of the ellipse by Newton steps. `box_distance` gives the distance to a box with round corners.
+  - `polygon_distance` takes the nearest side, and the winding number for the inside.
+  - Alternate takes an odd winding number as inside. Non Zero Winding takes each winding number that is not 0.
+  - A border moves the edge by its pixels. Without Solid, the coverage is the band within the border on each side of the edge.
+- The Soft Edge blurs the coverage with the replicate border (`blur::soft_steps`).
+- `fs_mask_join` gives the mask its Invert and its Level, then adds the masks before it: a + b − a × b.
+- `blur::landed` ends the tool. `fs_masked` mixes its result with the picture that came in, by the mask.
+
+The boxes:
+
+- `fs_boxes` gives one flat box. The two end pixels take the part of the width that they cover.
+- A box of more than 257 pixels takes two passes (`blur::box_passes`). The first is a box of an odd width n. The second takes each nth pixel.
+- Why: a pass then has at most 129 taps on each side.
+- The two passes give a box of the same width. Its ends are less sharp: each end falls within n pixels.
+- A box wider than 65536 pixels gets that width.
+
+Other parts:
+
+- `render_cache::own_effects` drops the compositions of the compound clips around a picture. They work later, at the draw, as their effects do.
+- `Composition::moves_by_itself` is true for an effect tool that moves by itself. Then `render_cache` keeps a frame for each frame of the clip.
+- `export::prepare` stops an export with an error when a clip in it has a composition without a chain (`RenderPlan::broken_composition`).
 
 ## Proxies
 
