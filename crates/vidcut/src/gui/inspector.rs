@@ -1822,7 +1822,7 @@ impl Workspace {
                     if let Some(v) = offset_row(ui, (id, name), now[axis]) {
                         let mut to = now;
                         to[axis] = v;
-                        sends.push(set(json!({ "pattern": pick + 1, "offset": to })));
+                        sends.push(set(json!({ "pattern": pick + 1, "pattern_offset": to })));
                     }
                 }
             }

@@ -561,7 +561,8 @@ Writing:
   - `ops::comp::Landing` tells where the copies go: after a node, at a place, over a node, or under all the nodes.
   - Over a node, one copy takes its place and its joins (`replaced`). A join that the copy cannot take goes.
   - `comp.set` takes a `NodeChange`. Its `values` are a `KindChange`: the values of an effect's kind, which `effects.set` also takes in its `EffectChange`.
-  - A blur takes its `size`, and a mask its `center`, from the `KindChange`. Why: the names in the request are then those of the model.
+  - A blur takes its `size`, a mask its `center` and `invert`, and a Gaussian Blur node its `blur_alpha`, from the `KindChange`.
+  - Why: the names in the request are then those of the model. Each name has one field, and thus one text in the schema and in `--help`.
 - `ops::picture::composition_checked` checks the names, the joins, the loops and each node (`ops::picture::node_checked`). It is part of `ops::picture::checked`.
 - The keyframes of a node are in its `keys`, one `EffectKeys` for each `EffectValue` with keyframes.
   - The trait `effect_keys::Keyed` holds the keyframe work of an `Effect` and of a `Node`: read, write, sample, split, hold, scale, retime and retarget.

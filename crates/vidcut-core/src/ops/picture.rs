@@ -629,14 +629,14 @@ fn connect_checked(c: &Composition, n: &Node) -> Result<()> {
     };
     if c.node(&k.tracker).and_then(|t| t.tool.tracker()).is_none() {
         return Err(Error::invalid(format!(
-            "{} follows {}, which is no tracker",
-            n.name, k.tracker
+            "{} follows {}, but the composition has no tracker {}",
+            n.name, k.tracker, k.tracker
         )));
     }
     if c.pattern(k).is_none() {
         return Err(Error::invalid(format!(
-            "{} follows pattern {} of {}, which it has not",
-            n.name, k.pattern, k.tracker
+            "{} follows pattern {} of {}, but {} has no pattern {}",
+            n.name, k.pattern, k.tracker, k.tracker, k.pattern
         )));
     }
     let own = n.tool.mask().and_then(|m| m.center);

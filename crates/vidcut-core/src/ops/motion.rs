@@ -467,12 +467,17 @@ fn pattern_of<'a>(c: &'a Clip, id: &str, tracker: &str, k: u32) -> Result<&'a Pa
         ))
     })?;
     let i = (k as usize).checked_sub(1);
-    i.and_then(|i| t.patterns.get(i)).ok_or_else(|| {
-        Error::invalid(format!(
-            "{tracker} has no pattern {k}: its patterns are 1 to {}",
-            t.patterns.len()
-        ))
-    })
+    i.and_then(|i| t.patterns.get(i))
+        .ok_or_else(|| no_pattern(tracker, k, t.patterns.len()))
+}
+
+pub(super) fn no_pattern(tracker: &str, k: u32, count: usize) -> Error {
+    let have = match count {
+        0 => "it has no patterns".to_string(),
+        1 => "it has pattern 1".to_string(),
+        all => format!("its patterns are 1 to {all}"),
+    };
+    Error::invalid(format!("{tracker} has no pattern {k}: {have}"))
 }
 
 pub fn start(p: &Project, id: &str, tracker: &str, k: u32, frame: i64) -> Result<Start> {

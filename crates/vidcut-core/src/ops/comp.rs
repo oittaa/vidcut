@@ -436,7 +436,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
         &next.tool,
         Tool::Effect(crate::model::EffectKind::GaussianBlur(_))
     ) {
-        taken(&mut left.blur_alpha, &mut next.blur_alpha);
+        taken(&mut left.values.blur_alpha, &mut next.blur_alpha);
     }
     let polygon = matches!(next.tool, Tool::Polygon(_));
     let rectangle = matches!(next.tool, Tool::Rectangle(_));
@@ -457,7 +457,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.filter, &mut m.filter);
             given(&mut left.passes, &mut m.passes);
             given(&mut left.border_width, &mut m.border_width);
-            taken(&mut left.invert, &mut m.invert);
+            taken(&mut left.values.invert, &mut m.invert);
             taken(&mut left.solid, &mut m.solid);
             taken(&mut left.show_view_controls, &mut m.show_view_controls);
             if let Some(connect) = left.connect.take() {
@@ -495,18 +495,14 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 || left.pattern_center.is_some()
                 || left.pattern_width.is_some()
                 || left.pattern_height.is_some()
-                || left.offset.is_some()
+                || left.pattern_offset.is_some()
                 || left.remove_pattern;
             if touched {
                 let i = (k as usize)
                     .checked_sub(1)
                     .filter(|i| *i < t.patterns.len());
                 let Some(i) = i else {
-                    return Err(Error::invalid(format!(
-                        "{} has no pattern {k}: its patterns are 1 to {}",
-                        n.name,
-                        t.patterns.len()
-                    )));
+                    return Err(super::motion::no_pattern(&n.name, k, t.patterns.len()));
                 };
                 let pattern = &mut t.patterns[i];
                 taken(&mut left.pattern_name, &mut pattern.name);
@@ -514,7 +510,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 given(&mut left.pattern_center, &mut pattern.center);
                 given(&mut left.pattern_width, &mut pattern.width);
                 given(&mut left.pattern_height, &mut pattern.height);
-                given(&mut left.offset, &mut pattern.offset);
+                given(&mut left.pattern_offset, &mut pattern.offset);
                 if left.remove_pattern {
                     t.patterns.remove(i);
                     left.remove_pattern = false;
@@ -529,7 +525,8 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
     }
     if left != NodeChange::default() {
         return Err(Error::invalid(format!(
-            "comp.set has a value that a {} doesn't have",
+            "comp.set has a value that {} ({}) doesn't have",
+            n.name,
             n.tool.label()
         )));
     }

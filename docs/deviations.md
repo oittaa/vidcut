@@ -1619,6 +1619,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - X Offset and Y Offset can have keyframes. The Tracker Offset button of the viewer moves the offset point (p. 1789).
   - Connect To joins a Center to the Offset Position of a pattern (p. 1789). Only the center then moves.
   - The Operation tab does Match Move, Corner Positioning and stabilization (p. 1789).
+  - In 21.2, a Tracker also has a Foreground input and an Effect Mask input.
 - **vidcut:**
   - A model tracks each pattern ([X165](#x165-a-clip-has-motion-paths)). The track gives the box of the thing on each frame: its place and its size.
   - The model reads the clip's own picture. Nodes before the Tracker do not change what it sees.
@@ -1629,7 +1630,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A drag of a pattern box on a frame of its path changes the box of the path on that frame.
   - X Offset and Y Offset have no keyframes, and the viewer has no Tracker Offset button.
   - Follow Size: a mask whose Center connects to a pattern can also take the box of the pattern as its picture. It then grows and shrinks with the box.
-  - Track Fwd Then Reverse and the Operation tab are not built ([todo](todo/motion-tracking.md)).
+  - Track Fwd Then Reverse, the Operation tab, and the Foreground and Effect Mask inputs are not built ([todo](todo/motion-tracking.md)).
+  - A mask added with a Tracker selected thus joins nothing.
 - **Why:**
   - vidcut has a tracking model, and no tracker of pixel patterns.
   - The model reads the decoded frames of the file. A render of the nodes before the Tracker on each frame of a track is not built.

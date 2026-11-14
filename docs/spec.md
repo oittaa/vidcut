@@ -2529,6 +2529,7 @@ The shapes:
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
+  - vidcut: a Tracker has no effect mask. A mask added with a Tracker selected joins nothing ([X168](deviations.md#x168-the-tracker-tracks-with-a-model)).
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.

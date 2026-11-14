@@ -114,7 +114,7 @@ In this file, a path is never a track of the timeline.
   - Measure `tracking::LOST` on a clip where the thing leaves the picture, or goes behind another thing. No test clip has one.
   - A track follows no turn and no change of perspective.
   - Track Fwd Then Reverse of Resolve 21.2. Measure where it starts and where it is in the row of buttons.
-  - The Operation tab: Match Move, Corner Positioning and stabilization (p. 1789).
+  - The Operation tab: Match Move, Corner Positioning and stabilization (p. 1789). Then the Foreground and Effect Mask inputs of a Tracker.
   - The outputs other than Offset Position, for example Steady Position.
   - Keyframes on X Offset and Y Offset, and the Tracker Offset button of the viewer (p. 1789).
   - A track of the picture on the input of the Tracker. The model now reads the clip's own picture.

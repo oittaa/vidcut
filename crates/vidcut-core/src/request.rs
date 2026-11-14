@@ -2777,9 +2777,9 @@ pub enum Request {
     ///
     /// With `after` a tool or `media_in`, a tool goes into the picture's way
     /// after it, and each node that took that picture takes the new tool.
-    /// With `after` a tool, a mask goes on its effect mask, after the masks
-    /// that are there. With `after` a mask, a mask goes after it in its
-    /// chain. Any other new node joins nothing.
+    /// With `after` a tool other than a tracker, a mask goes on its effect
+    /// mask, after the masks that are there. With `after` a mask, a mask
+    /// goes after it in its chain. Any other new node joins nothing.
     /// Returns the clip and the `node`'s name.
     #[serde(rename = "comp.add")]
     CompAdd {
@@ -5077,9 +5077,6 @@ pub struct NodeChange {
     /// How much of a `blur` or an `effect` shows, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<f64>,
-    /// Off, a Gaussian Blur does not blur the alpha.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blur_alpha: Option<bool>,
     /// Its place in the node editor, `[x, y]` in node widths and heights.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub place: Option<[f64; 2]>,
@@ -5110,9 +5107,6 @@ pub struct NodeChange {
     /// How far a mask's edge moves out, from -1 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_width: Option<f64>,
-    /// On, a mask is the part outside its shape.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub invert: Option<bool>,
     /// Off, a mask is only a band about its edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solid: Option<bool>,
@@ -5184,7 +5178,7 @@ pub struct NodeChange {
     /// How far the point that a mask follows is from the middle of the
     /// pattern, `[x, y]` as fractions of the picture, up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub offset: Option<[f64; 2]>,
+    pub pattern_offset: Option<[f64; 2]>,
     /// On, a tracker gets a new pattern at the end of its list, with the
     /// first free name.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -5271,7 +5265,8 @@ pub struct KindChange {
     pub antialias: Option<bool>,
     /// On, a Mosaic Blur's cell also takes the mean of the alpha. Off, the
     /// picture keeps its own alpha and the cells keep their colors, so a
-    /// clear part adds its cell's color to the tracks below.
+    /// clear part adds its cell's color to the tracks below. Off, a Gaussian
+    /// Blur node does not blur the alpha.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blur_alpha: Option<bool>,
     /// With `blur_alpha` on, only a Mosaic Blur's cell with no clear part in
@@ -5368,7 +5363,7 @@ pub struct KindChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// A Glow on the picture's negative, which gives the negative of the
-    /// result.
+    /// result. On a mask node, the mask is the part outside its shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invert: Option<bool>,
     /// Takes a Glow away where the picture shines, from 0 to 5.

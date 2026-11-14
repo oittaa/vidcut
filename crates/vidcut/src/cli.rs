@@ -477,8 +477,8 @@ const EXAMPLES: &[(&str, &str)] = &[
            vidcut comp set c3 GaussianBlur1 --strength 0.6 --blend 0.5
            vidcut comp set c3 Blur1 --pass-through true
            vidcut comp set c3 Blur1 --size 8 --frame 60
-           vidcut comp set c3 Tracker1 --add-pattern true
-           vidcut comp set c3 Tracker1 --pattern 2 --pattern-center 0.3,0.6 --offset 0,0.05
+           vidcut comp set c3 Tracker1 --add-pattern
+           vidcut comp set c3 Tracker1 --pattern 2 --pattern-center 0.3,0.6 --pattern-offset 0,0.05
            vidcut comp set c3 Ellipse1 --connect '{\"tracker\":\"Tracker1\",\"pattern\":1,\"size\":true}'",
     ),
     (
