@@ -650,7 +650,7 @@ impl Default for Gpu {
     }
 }
 
-/// The Media Pool's thumbnails and the timeline's filmstrip pictures.
+/// The Media tab's thumbnails and the timeline's filmstrip pictures.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Thumbnails {

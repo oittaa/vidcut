@@ -1,6 +1,6 @@
 # Project model
 
-- A project is one `Project` value in vidcut-core: settings, a media pool, tracks of clips, subtitle tracks of cues, marks, markers and bins.
+- A project is one `Project` value in vidcut-core: settings, its media, tracks of clips, subtitle tracks of cues, marks, markers and bins.
 - It is saved as one `.vidcut` JSON file. Only the editor changes it ([requests](requests.md)).
 - This page tells about the types, time, ids, the file, OpenTimelineIO and the preferences.
 
@@ -735,7 +735,7 @@ Import:
     - `Shown::held` is the frame of the layout that each frame of the clip shows.
     - A compound clip on a side of that transition takes the frames and the held frame of the track around it. Thus the side shows on each frame of the frozen clip.
   - `ops::compound::nest_range` cuts every track at the two marks, and nests what is between them. The lowest track with clips in the range becomes inner V1 or A1.
-  - Each compound clip made here also has a copy in the Media Pool (`PooledCompound`, `keep_copy`). `pool_range` makes one on a clone of the project, so the timeline does not change.
+  - Each compound clip made here also has a copy in the Media tab (`PooledCompound`, `keep_copy`). `pool_range` makes one on a clone of the project, so the timeline does not change.
   - `place_pooled` puts a copy on a video track and on the audio track of its number. `Place` tells how. `compound_preview` gives the requests of a drag.
   - `ops::compound::unnest` restores `made_from` when the two blocks are still tied. A block without the other brings only its own `tracks`, so that nothing is there twice.
   - `ops::compound::target` gives the track of each inner track, for a compound clip made here and for an imported one.

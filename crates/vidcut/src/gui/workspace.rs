@@ -270,7 +270,7 @@ impl Workspace {
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
-            GuiPanel::MediaPool => self.left = LeftTab::Pool,
+            GuiPanel::Media => self.left = LeftTab::Pool,
             GuiPanel::SyncBin => {
                 self.left = LeftTab::SyncBin;
                 self.show_timeline();
@@ -350,7 +350,7 @@ impl Workspace {
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
             GuiPanel::SyncClips => self.close_sync_clips(),
-            GuiPanel::MediaPool => {
+            GuiPanel::Media => {
                 if self.left == LeftTab::Pool {
                     self.left = LeftTab::Hidden;
                 }
@@ -411,7 +411,7 @@ impl Workspace {
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
-            (GuiPanel::MediaPool, self.left == LeftTab::Pool),
+            (GuiPanel::Media, self.left == LeftTab::Pool),
             (GuiPanel::SyncBin, self.left == LeftTab::SyncBin),
             (GuiPanel::SyncClips, self.sync_clips.open),
             (GuiPanel::Transitions, self.left == LeftTab::Transitions),

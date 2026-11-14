@@ -122,7 +122,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 
 ## Scope
 
-**The values.** Transform, Crop and the volume line use `Keyframe`. The spec is [§8.15](../spec.md#815-transform-and-crop-pp-766768) and D75. The buttons are in [X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels).
+**The values.** Transform, Crop and the volume line use `Keyframe`. The spec is [§8.15](../spec.md#815-transform-and-crop-pp-766768) and D75. The buttons are in [X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-tab-in-frame-pixels).
 
 **The Keyframes tab** sits beside the Inspector. The Timeline menu opens it. The spec is [§2](../spec.md#2-layout-pp-636637).
 

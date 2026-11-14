@@ -14,7 +14,7 @@ use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, label_frames
 
 pub const STILL_LIMIT_SECS: f64 = 63_600.0;
 
-/// A whole project: one timeline (deviation X2) plus its media pool.
+/// A whole project: one timeline (deviation X2) plus its media.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Project {
     /// Increases with every change, including undo/redo. Mutations may pass
@@ -26,11 +26,11 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited: Option<u64>,
     pub settings: Settings,
-    /// The media pool, in pool order.
+    /// The media, in pool order.
     pub media: Vec<Media>,
     /// Video tracks `V1…` first, then audio tracks `A1…`.
     pub tracks: Vec<Track>,
-    /// The compound clips in the Media Pool. Left out when there are none.
+    /// The compound clips in the Media tab. Left out when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub compounds: Vec<PooledCompound>,
     /// Timeline In/Out marks.
@@ -45,7 +45,7 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subtitles: Vec<SubtitleTrack>,
     pub next_id: NextIds,
-    /// Media Pool bins, as `/`-separated paths below the top level
+    /// Bins of the Media tab, as `/`-separated paths below the top level
     /// (`Interviews`, `Interviews/Day 1`), sorted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bins: Vec<String>,
@@ -375,7 +375,7 @@ impl GroupClip {
     }
 }
 
-/// A file in the media pool.
+/// A media file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Media {
     /// `m<N>`, never reused.
@@ -535,7 +535,7 @@ pub struct ChangedWord {
     pub joined: bool,
 }
 
-/// A subtitle file in the Media Pool.
+/// A subtitle file in the Media tab.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SubtitleFile {
     pub format: crate::request::SubtitleFormat,
@@ -5542,7 +5542,7 @@ pub struct Compound {
     pub made_from: Vec<Track>,
 }
 
-/// A compound clip in the Media Pool: a copy that can go on the timeline
+/// A compound clip in the Media tab: a copy that can go on the timeline
 /// again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PooledCompound {

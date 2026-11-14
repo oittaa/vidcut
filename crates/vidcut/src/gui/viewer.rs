@@ -414,9 +414,9 @@ impl Workspace {
                     (Some(e), _) => format!("No preview: {e}"),
                     (None, ViewerMode::Timeline) => "The timeline is empty".to_string(),
                     (None, ViewerMode::SourceClip) => {
-                        "Double-click a clip in the Media Pool to open it".to_string()
+                        "Double-click a clip in Media to open it".to_string()
                     }
-                    (None, ViewerMode::SourceTape) => "The Media Pool is empty".to_string(),
+                    (None, ViewerMode::SourceTape) => "Media is empty".to_string(),
                     (None, ViewerMode::MultiSource) => String::new(),
                 };
                 if !player.loaded {
