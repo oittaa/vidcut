@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::lru::ByBytes;
 use crate::model::{
-    AlphaMode, ClipCache, CompositeMode, Effect, Media, Project, RenderCache, Retime, SuperScale,
+    AlphaMode, ClipCache, CompositeMode, Effect, Media, Project, RenderCache, Retime, Upscale,
     Upscaler,
 };
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
@@ -30,7 +30,7 @@ pub enum Reason {
     Speed,
     Retime(Retime),
     AiRetime(Retime),
-    SuperScale(Upscaler),
+    Upscale(Upscaler),
     Transition,
     Opacity,
     Composite,
@@ -46,7 +46,7 @@ impl Reason {
             Self::Speed => "Speed Change",
             Self::Retime(_) => "Retime Process",
             Self::AiRetime(_) => "AI Retime Process",
-            Self::SuperScale(_) => "AI Super Scale",
+            Self::Upscale(_) => "AI Upscale",
             Self::Transition => "Transition",
             Self::Opacity => "Opacity",
             Self::Composite => "Composite Mode",
@@ -63,7 +63,7 @@ impl Reason {
                 | Self::Speed
                 | Self::Retime(_)
                 | Self::AiRetime(_)
-                | Self::SuperScale(_)
+                | Self::Upscale(_)
         )
     }
 
@@ -72,7 +72,7 @@ impl Reason {
             Self::On | Self::Effect => true,
             Self::Transition => prefs.transitions,
             Self::Opacity | Self::Composite => prefs.composites,
-            Self::AiRetime(_) | Self::SuperScale(_) => prefs.ai,
+            Self::AiRetime(_) | Self::Upscale(_) => prefs.ai,
             Self::Media | Self::Speed | Self::Retime(_) | Self::Drops => false,
         }
     }
@@ -116,7 +116,7 @@ pub struct Setup<'a> {
     pub look: &'a Look,
 }
 
-pub type Upscaled = dyn Fn(Shape, (u32, u32), &[Placed], SuperScale) -> Option<(u32, u32)>;
+pub type Upscaled = dyn Fn(Shape, (u32, u32), &[Placed], Upscale) -> Option<(u32, u32)>;
 
 impl Setup<'_> {
     fn kept(&self, r: &Reason) -> bool {
@@ -192,7 +192,7 @@ impl Setup<'_> {
     fn sized(&self, layer: &VideoPiece) -> Option<(u32, u32)> {
         let VideoPiece::Source {
             media,
-            super_scale,
+            upscale,
             placed,
             ..
         } = layer
@@ -224,7 +224,7 @@ impl Setup<'_> {
                 ((w, h), shape)
             }
         };
-        Some((self.upscaled)(shape, out, placed, *super_scale).unwrap_or(size))
+        Some((self.upscaled)(shape, out, placed, *upscale).unwrap_or(size))
     }
 
     fn shape(&self, layer: &VideoPiece) -> Option<Shape> {
@@ -305,17 +305,17 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
     let retimed = retimed(layer);
     let mut out = layer.clone();
     if let VideoPiece::Source {
-        super_scale,
+        upscale,
         placed,
         cache,
         excluded,
         ..
     } = &mut out
     {
-        match (placing, super_scale.ai()) {
+        match (placing, upscale.ai()) {
             (true, _) => {}
-            (false, true) => super_scale.sharpness = Default::default(),
-            (false, false) => *super_scale = Default::default(),
+            (false, true) => upscale.sharpness = Default::default(),
+            (false, false) => *upscale = Default::default(),
         }
         match placing {
             false => placed.clear(),
@@ -404,7 +404,7 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
             media,
             image,
             pace,
-            super_scale,
+            upscale,
             retime,
             placed,
             cache,
@@ -446,10 +446,7 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
                 Reason::Retime(*retime),
             ),
             (mixed && !still && retime.ai(), Reason::AiRetime(*retime)),
-            (
-                own && super_scale.ai(),
-                Reason::SuperScale(super_scale.upscaler),
-            ),
+            (own && upscale.ai(), Reason::Upscale(upscale.upscaler)),
             (mixed && moved, Reason::Transition),
             (mixed && faded(placed), Reason::Opacity),
             (mixed && composited(placed), Reason::Composite),
@@ -577,7 +574,7 @@ pub struct Part {
     pub frames: i64,
     pub reasons: Vec<Reason>,
     pub cached: Vec<(i64, i64)>,
-    pub super_scales: Vec<SuperScale>,
+    pub upscales: Vec<Upscale>,
     pub retimes: Vec<Retime>,
 }
 
@@ -791,7 +788,7 @@ impl Cache {
                     frames,
                     reasons,
                     cached,
-                    super_scales: piece.super_scales(),
+                    upscales: piece.upscales(),
                     retimes: piece.retimes(),
                 });
             }
@@ -991,7 +988,7 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
         pace: Default::default(),
         color_space: Default::default(),
         alpha_mode: Default::default(),
-        super_scale: Default::default(),
+        upscale: Default::default(),
         retime: Default::default(),
         placed: Vec::new(),
         cache: ClipCache::Auto,
@@ -1021,7 +1018,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         pace,
         color_space,
         alpha_mode,
-        super_scale,
+        upscale,
         retime,
         placed,
         made,
@@ -1040,10 +1037,10 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         *retime = Default::default();
         *input_lut = None;
         match placing {
-            false if super_scale.ai() => super_scale.upscaler = Upscaler::Classic,
+            false if upscale.ai() => upscale.upscaler = Upscaler::Classic,
             false => {}
             true => {
-                *super_scale = Default::default();
+                *upscale = Default::default();
                 *made = shape;
                 if retimed {
                     for e in placed.iter_mut().flat_map(|p| &mut p.picture.effects) {
@@ -1351,8 +1348,7 @@ fn is_lower_hex(text: &str, len: usize) -> bool {
 mod tests {
     use super::{Cache, Index, Look, Reason, Setup, bare, is_cache_file, is_cache_video, reasons};
     use crate::model::{
-        Effect, EffectKind, GaussianBlur, Picture, Project, RenderCache, Settings, SuperScale,
-        Title,
+        Effect, EffectKind, GaussianBlur, Picture, Project, RenderCache, Settings, Title, Upscale,
     };
     use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
     use crate::render::{Placed, RenderPlan, Run, Shape, ShownTitle, VideoPiece};
@@ -1430,7 +1426,7 @@ mod tests {
         let prefs = RenderCachePrefs::default();
         let look = Look::of(&project, (1920, ProxyCodec::Auto), CacheCodec::Auto);
         let slow = |_: &str| false;
-        let up = |_: Shape, _: (u32, u32), _: &[Placed], _: SuperScale| None;
+        let up = |_: Shape, _: (u32, u32), _: &[Placed], _: Upscale| None;
         let setup = Setup {
             mode: RenderCache::Smart,
             prefs: &prefs,
@@ -1489,7 +1485,7 @@ mod tests {
         let prefs = RenderCachePrefs::default();
         let look = Look::of(&project, (1920, ProxyCodec::Auto), CacheCodec::Auto);
         let slow = |_: &str| false;
-        let up = |_: Shape, _: (u32, u32), _: &[Placed], _: SuperScale| None;
+        let up = |_: Shape, _: (u32, u32), _: &[Placed], _: Upscale| None;
         let setup = Setup {
             mode: RenderCache::Smart,
             prefs: &prefs,

@@ -300,7 +300,7 @@ impl Workspace {
     pub(super) fn left_tabs(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             for (tab, label) in [
-                (LeftTab::Pool, "Media Pool"),
+                (LeftTab::Pool, "Media"),
                 (LeftTab::SyncBin, "Sync Bin"),
                 (LeftTab::Transitions, "Transitions"),
                 (LeftTab::Titles, "Titles"),

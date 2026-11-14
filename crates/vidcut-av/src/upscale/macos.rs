@@ -314,7 +314,7 @@ mod imp {
                 processor.startSessionWithConfiguration_error(ProtocolObject::from_ref(&*config))
             }
             .map_err(failed)?;
-            crate::super_scale::runs_on(Upscaler::Macos, "macOS".into());
+            crate::upscale::runs_on(Upscaler::Macos, "macOS".into());
             crate::debug!(
                 "ai",
                 "macOS: {}x{} to {}x{} at {factor}x, then to {}x{}, pictures as {}",
@@ -349,7 +349,7 @@ mod imp {
             let wrote = clock.elapsed();
             let enlarged = self.enlarge(index, &source)?;
             let fixed = buffer(&self.outputs, WHAT)?;
-            crate::super_scale::fix::on_buffers(&self.fix, (&source, &enlarged, &fixed))?;
+            crate::upscale::fix::on_buffers(&self.fix, (&source, &enlarged, &fixed))?;
             let scaled = clock.elapsed();
             let big = self
                 .frames

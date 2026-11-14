@@ -539,7 +539,7 @@ pub(super) type Span = (i64, i64, Option<Vec<String>>);
 
 pub(crate) fn render_all(
     (project, file): (&Project, &Path),
-    show_super_scale: bool,
+    show_upscale: bool,
     cancel: Arc<AtomicBool>,
     dry_run: bool,
 ) -> vidcut_core::Result<Value> {
@@ -554,7 +554,7 @@ pub(crate) fn render_all(
     let end = project.end();
     if end > 0 && project.settings.render_cache != Mode::Off {
         let (plan, _) = vidcut_core::render::flatten_lanes(project, 0, end)?;
-        let base = Arc::new(super::shown(plan, show_super_scale));
+        let base = Arc::new(super::shown(plan, show_upscale));
         let start = base.range.0;
         background.base = Some(base.clone());
         let gpu = crate::preferences::gpu_decoding().own_decoder();

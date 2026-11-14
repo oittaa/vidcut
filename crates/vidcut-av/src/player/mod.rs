@@ -121,7 +121,7 @@ impl Default for Config {
 pub struct Stats {
     pub position: i64,
     pub shown: Option<Shown>,
-    pub super_scales: Vec<vidcut_core::model::SuperScale>,
+    pub upscales: Vec<vidcut_core::model::Upscale>,
     pub retimes: Vec<vidcut_core::model::Retime>,
     pub frames: u64,
     pub late: u64,
@@ -1185,7 +1185,7 @@ impl Player {
         Stats {
             position,
             shown,
-            super_scales: plan.super_scales_at(position),
+            upscales: plan.upscales_at(position),
             retimes: plan.retimes_at(position),
             frames,
             late,

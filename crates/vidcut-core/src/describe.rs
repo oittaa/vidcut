@@ -528,7 +528,7 @@ pub fn describe_at(
             d.text("track"),
             db(&params["volume_db"])
         ),
-        "pool.set" => format!("Media Pool: {}", compact(params)),
+        "pool.set" => format!("Media: {}", compact(params)),
         "selection.set" if !params["edit"].is_null() => format!(
             "{} {} nearest {} on {}",
             if params["add"] == true {

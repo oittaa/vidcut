@@ -14,7 +14,7 @@ vidcut has no matte of a person, and no matte of a subject the user points at.
 
 - A source with an alpha channel composites over the tracks below it.
 - The composite is straight alpha.
-- Voice Isolation, Super Scale and Retime Process run local models.
+- Voice Isolation, Upscale and Retime Process run local models.
 - Each missing model asks for a download and checks a SHA-256 (`isolate`, `models`).
 
 **To do:**

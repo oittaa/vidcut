@@ -111,7 +111,6 @@ In this file, a path is never a track of the timeline.
   - Text that comes into the picture has no blur on its first frames, as a face has not.
   - The detector takes most of the time of a text find. Try the model on the GPU.
 - **The Tracker, what is left:** one pull request for each part.
-  - Stop Tracking asks the user to confirm before it stops a track. vidcut stops at once.
   - Point patterns: Add Point, the search area in the viewer, the channel, Adaptive Mode, Match Tolerance and the pattern flipbooks (pp. 1783–1788).
     - The handle at the top left of the box of a Point pattern (pp. 1783–1784).
     - Path Center with Track Center (Append) (p. 1788), and the path tools of the viewer (p. 1787).

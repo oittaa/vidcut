@@ -530,7 +530,7 @@ impl Workspace {
         };
         let mut search_below = false;
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Media Pool").strong());
+            ui.label(RichText::new("Media").strong());
             let open = project.is_some();
             for (glyph, name, folder) in [
                 (egui_phosphor::regular::FILE_PLUS, "Import Media", false),
@@ -2147,34 +2147,34 @@ impl Workspace {
                 }
             });
             let mut put = None;
-            ui.menu_button("Super Scale", |ui| {
-                use super::super_scale::{SHARPNESS, UPSCALERS};
+            ui.menu_button("Upscale", |ui| {
+                use super::upscale::{SHARPNESS, UPSCALERS};
                 use vidcut_core::model::Upscaler;
-                let now = m.super_scale;
+                let now = m.upscale;
                 let settings = self.project_shared().map(|p| p.settings.clone());
                 let project = settings
                     .as_ref()
                     .map_or_else(Default::default, |s| s.upscaler);
                 let shown = settings.as_ref().map_or_else(Default::default, |s| {
-                    vidcut_core::render::super_scale_of(now, s)
+                    vidcut_core::render::upscale_of(now, s)
                 });
                 for (on, label) in [(false, "Off"), (true, "On")] {
                     if ui.radio(now.on == on, label).clicked() {
-                        put = Some(json!({ "super_scale": on }));
+                        put = Some(json!({ "upscale": on }));
                     }
                 }
                 ui.separator();
                 ui.add_enabled_ui(!now.is_off(), |ui| {
                     ui.menu_button("Upscaler", |ui| {
                         for &(upscaler, label) in UPSCALERS {
-                            let text = super::super_scale::upscaler_text(upscaler, label, project);
+                            let text = super::upscale::upscaler_text(upscaler, label, project);
                             if ui.radio(now.upscaler == upscaler, text).clicked() {
                                 put = Some(json!({ "upscaler": upscaler }));
                             }
                         }
                     });
                     let timeline = self.timeline_colors();
-                    if let Some(text) = super::super_scale::unfit(shown, [m], timeline) {
+                    if let Some(text) = super::upscale::unfit(shown, [m], timeline) {
                         super::dialog::warn(ui, text);
                     }
                     ui.add_enabled_ui(shown.upscaler == Upscaler::Classic, |ui| {
@@ -2192,7 +2192,7 @@ impl Workspace {
                 }
             });
             if let Some(params) = put {
-                self.set_super_scale(&ids, params);
+                self.set_upscale(&ids, params);
             }
         }
         if let Some(p) = self.project_shared() {
@@ -2291,7 +2291,7 @@ impl Workspace {
                 1 => "1 item".to_string(),
                 n => format!("{n} items"),
             };
-            ui.label(RichText::new(format!("Remove {items} from the Media Pool?")).strong());
+            ui.label(RichText::new(format!("Remove {items} from Media?")).strong());
             if clips > 0 {
                 let it = if ids.len() == 1 { "it" } else { "them" };
                 let clips = match clips {
@@ -2327,7 +2327,7 @@ impl Workspace {
                 _ => self.send(
                     "apply",
                     json!({
-                        "label": format!("Remove {} items from the Media Pool", ids.len()),
+                        "label": format!("Remove {} items from Media", ids.len()),
                         "commands": ids
                             .iter()
                             .map(|id| json!({ "method": "media.remove", "params": remove(id) }))

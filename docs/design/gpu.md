@@ -181,23 +181,23 @@ Frames that come down:
 - `encoders.testing` names the process that tests. When that process dies, the next test skips Vulkan.
 - Jobs use the encoders of the GPU in use (`Availability::in_use`).
 
-## Super Scale
+## Upscale
 
-Super Scale (`SuperScale`) sets the upscaler of a picture that is enlarged.
+Upscale (`Upscale`) sets the upscaler of a picture that is enlarged.
 
-- `render::super_scale_of` gives each piece its upscaler: its own, or the project's (`MediaUpscaler`, `ProjectUpscaler`). Auto is the scaler of macOS on macOS, and AI Fast elsewhere.
+- `render::upscale_of` gives each piece its upscaler: its own, or the project's (`MediaUpscaler`, `ProjectUpscaler`). Auto is the scaler of macOS on macOS, and AI Fast elsewhere.
 - Classic enlarges in the shader of the viewer and the export, with the kernel of the picture's `Sharpness` (`screen::kernel`).
 - `layer_size` lets the picture of an AI upscaler grow past its source size.
 - The result of an AI upscaler is its own. It is not meant to match the CPU.
-- The export's report names each file that Super Scale enlarged (`UpscaleNote`, `super_scale::named`).
+- The export's report names each file that Upscale enlarged (`UpscaleNote`, `upscale::named`).
   - An AI upscaler tells this when `ai_picture` gives a picture.
   - Classic has no such step, because the shader enlarges later. Thus `note_classic` applies the rule of `enlarged` to each frame.
   - A file on two tracks has two readers, and each reader tells. The report keeps one entry for the file.
 
 The AI upscalers share one path in the reader:
 
-- `Source::ai_picture` finds the size to make (`super_scale::made_size`).
-- A picture has a key (`PictureId`). It comes from a run of the upscaler (`Session`, `super_scale::Run`), which starts at `super_scale::first_frame`.
+- `Source::ai_picture` finds the size to make (`upscale::made_size`).
+- A picture has a key (`PictureId`). It comes from a run of the upscaler (`Session`, `upscale::Run`), which starts at `upscale::first_frame`.
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
 - A picture of AI Fast or AI Slow stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`).
@@ -205,28 +205,28 @@ The AI upscalers share one path in the reader:
   - The models of vidcut refuse 8-bit pictures. Retime Process takes 16 bits too.
   - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast and AI Slow came nearer to the real frames with 16 bits than with 8 bits.
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
-- `super_scale::report` tells what the upscaler makes now and its last work. The stats panel shows it (`SuperScaleStats`).
+- `upscale::report` tells what the upscaler makes now and its last work. The stats panel shows it (`UpscaleStats`).
 - Each kept picture tells its own upscaler and sizes (`Origin`, [playback](playback.md#the-engine)).
 
 Refusals:
 
-- The viewer and the export use one rule (`super_scale::why_not`) and one message (`super_scale::refusal`).
+- The viewer and the export use one rule (`upscale::why_not`) and one message (`upscale::refusal`).
   - Why: a picture that plays in the viewer also exports, and a picture that an export refuses shows the same error in the viewer.
 - The rule applies only to a picture that needs enlarging (`ai_sizes`).
   - Why: a picture that needs no enlarging does not go to the upscaler.
-- `super_scale::check` applies the rule to each layer of the plans before an export starts (`enlarging`). `ai_picture` applies it to each frame.
+- `upscale::check` applies the rule to each layer of the plans before an export starts (`enlarging`). `ai_picture` applies it to each frame.
 - The check asks for a model only when a layer needs that model.
-- `super_scale::unfit` applies the rule to a media at any size. The Inspector and the pool show its result.
+- `upscale::unfit` applies the rule to a media at any size. The Inspector and the pool show its result.
 - The viewer plays the original of a clip that is unfit, not its proxy (`apply_proxies`).
   - Why: the original gives the size and the colors that the export reads. Thus the viewer takes the same decision as the export.
 
 GPU memory:
 
-- Each AI model has one engine for the whole process. Each upscaler has a static `super_scale::Slot`, and the Retime Processes have the `ENGINE` of `interpolate`.
+- Each AI model has one engine for the whole process. Each upscaler has a static `upscale::Slot`, and the Retime Processes have the `ENGINE` of `interpolate`.
   - The viewer, the exports of the GUI and the background render of the render cache share these engines.
   - Thus the render cache uses the model that the viewer has loaded. It does not load a second copy.
-- Each `Source` that uses an AI upscaler holds a `super_scale::User`.
-- When the last user goes, `super_scale::Slot::release` frees the GPU memory of that upscaler.
+- Each `Source` that uses an AI upscaler holds a `upscale::User`.
+- When the last user goes, `upscale::Slot::release` frees the GPU memory of that upscaler.
   - Why: two AI upscalers do not hold memory at the same time.
 - An AI upscaler borrows the GPU memory of the viewer's kept pictures (`player::lend_on`, `player::room_on`, `store::Lent`).
   - Why: if they do not fit together, the driver moves GPU memory to main memory, and a picture can take minutes.
@@ -252,7 +252,7 @@ AI Slow (`flashvsr`):
 - After the decoder, a color fix gives each picture the low frequencies of its enlarged input picture (`fix::run`).
   - It is the wavelet color correction of FlashVSR+. That code has it as an option, which is off by default.
   - The blur is linear. Thus the shader blurs only the difference between the two pictures, and adds it to the result.
-  - Why: the network shifts the colors and the light of large areas ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)).
+  - Why: the network shifts the colors and the light of large areas ([X91](../deviations.md#x91-upscale-uses-the-upscaler-of-the-gpu)).
 
 The scaler of macOS (`macos`):
 
@@ -263,14 +263,14 @@ The scaler of macOS (`macos`):
 - It takes pictures up to `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
 - The draw puts each frame into a VideoToolbox frame in the timeline color space, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
-  - The frame is P416, as for Retime Process. Why: Super Scale gets the picture in full color ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
+  - The frame is P416, as for Retime Process. Why: Upscale gets the picture in full color ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
 - The drawn frames come from a few VideoToolbox pools of vidcut's own, one for each size (`Surfaces`).
   - In an SDR timeline, the draw tone-maps an HDR frame. It deinterlaces an interlaced frame.
-- It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
+- It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`upscale::made_size`).
   - Why: a picture of 4 times the source fills the cache of the viewer.
 - Its buffers lose the color labels of the transfers. Why: with labels, it makes less detail.
-- AI Fast and AI Slow are off on macOS (`super_scale::off_here`).
-  - Why: macOS has its own AI scaler. Auto takes it there, so a project moves between systems ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)).
+- AI Fast and AI Slow are off on macOS (`upscale::off_here`).
+  - Why: macOS has its own AI scaler. Auto takes it there, so a project moves between systems ([X91](../deviations.md#x91-upscale-uses-the-upscaler-of-the-gpu)).
 
 ## Frame interpolation
 
@@ -406,7 +406,7 @@ A scope that is off:
 - `crates/vidcut-av/src/lanczos.rs`
 - `crates/vidcut-av/src/screen/`
 - `crates/vidcut-av/src/metal.rs`
-- `crates/vidcut-av/src/super_scale/`
+- `crates/vidcut-av/src/upscale/`
 - `crates/vidcut-av/src/interpolate/`
 - `crates/vidcut-av/src/route.rs`
 - `crates/vidcut-av/src/decode.rs`

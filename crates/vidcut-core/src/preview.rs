@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::model::{ColorSpace, Media, Project, SuperScale};
+use crate::model::{ColorSpace, Media, Project, Upscale};
 use crate::render::{RenderPlan, VideoPiece};
 
 pub fn apply_proxies(
@@ -8,7 +8,7 @@ pub fn apply_proxies(
     project: &Project,
     proxies: &Path,
     exists: impl Fn(&Path) -> bool,
-    unfit: impl Fn(&Media, SuperScale) -> bool,
+    unfit: impl Fn(&Media, Upscale) -> bool,
 ) {
     if !project.settings.use_proxies {
         return;
@@ -19,13 +19,13 @@ pub fn apply_proxies(
             path,
             image,
             color_space,
-            super_scale,
+            upscale,
             ..
         } = piece
         else {
             continue;
         };
-        let Some(m) = project.media(media).filter(|m| !unfit(m, *super_scale)) else {
+        let Some(m) = project.media(media).filter(|m| !unfit(m, *upscale)) else {
             continue;
         };
         let Some(proxy) = m.fresh_proxy() else {

@@ -1,6 +1,6 @@
 # Project model
 
-- A project is one `Project` value in vidcut-core: settings, a media pool, tracks of clips, subtitle tracks of cues, marks, markers and bins.
+- A project is one `Project` value in vidcut-core: settings, its media, tracks of clips, subtitle tracks of cues, marks, markers and bins.
 - It is saved as one `.vidcut` JSON file. Only the editor changes it ([requests](requests.md)).
 - This page tells about the types, time, ids, the file, OpenTimelineIO and the preferences.
 
@@ -28,7 +28,7 @@ classDiagram
     path, name, bin, color, camera
     size, mtime_ns, fingerprint
     info: MediaInfo
-    color_space, alpha_mode, super_scale, left_out
+    color_space, alpha_mode, upscale, left_out
     sequence, still_secs, subtitles, words
     subclip, markers
   }
@@ -216,9 +216,9 @@ Media fields:
 - `alpha_mode` (`AlphaMode`, spec §3) tells how to read the alpha channel of the pictures.
   - `VideoPiece::Source` carries it. `Picture::alpha_mode` gives it to the draw ([playback](playback.md#gpu-pictures)).
   - `Media::opaque` is true for a picture with no alpha channel, or with the mode None.
-- `super_scale` (`SuperScale`, spec §3) enlarges the pictures with a better upscaler before they are fitted.
-  - `upscaler` (`Upscaler`) is AI Fast, AI Slow or Classic. [gpu](gpu.md#super-scale) tells which upscaler each path uses.
-  - Proxies do not use it. The viewer uses it only with `viewer.super_scale` ([playback](playback.md)).
+- `upscale` (`Upscale`, spec §3) enlarges the pictures with a better upscaler before they are fitted.
+  - `upscaler` (`Upscaler`) is AI Fast, AI Slow or Classic. [gpu](gpu.md#upscale) tells which upscaler each path uses.
+  - Proxies do not use it. The viewer uses it only with `viewer.upscale` ([playback](playback.md)).
 - `left_out` holds the source frames that the Delete of the Transcription window left out (`media.leave_out`, `ops::leave_out`).
   - Each edit of the media leaves these frames out. `resolve_sources` cuts each source range around them (`model::uncovered`).
   - An edit that fills the timeline In to Out can need more frames than the range. Then the frames after the range also skip them (`fit_to`).
@@ -735,7 +735,7 @@ Import:
     - `Shown::held` is the frame of the layout that each frame of the clip shows.
     - A compound clip on a side of that transition takes the frames and the held frame of the track around it. Thus the side shows on each frame of the frozen clip.
   - `ops::compound::nest_range` cuts every track at the two marks, and nests what is between them. The lowest track with clips in the range becomes inner V1 or A1.
-  - Each compound clip made here also has a copy in the Media Pool (`PooledCompound`, `keep_copy`). `pool_range` makes one on a clone of the project, so the timeline does not change.
+  - Each compound clip made here also has a copy in the Media tab (`PooledCompound`, `keep_copy`). `pool_range` makes one on a clone of the project, so the timeline does not change.
   - `place_pooled` puts a copy on a video track and on the audio track of its number. `Place` tells how. `compound_preview` gives the requests of a drag.
   - `ops::compound::unnest` restores `made_from` when the two blocks are still tied. A block without the other brings only its own `tracks`, so that nothing is there twice.
   - `ops::compound::target` gives the track of each inner track, for a compound clip made here and for an imported one.

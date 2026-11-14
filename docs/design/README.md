@@ -113,9 +113,9 @@ A clip skips each step that it does not use. The steps run in this order:
 - `fs_convert` puts the picture into the timeline color space, at the size of the picture (`color::shader_colors`). In an SDR timeline, it tone-maps HDR.
 - `fs_convert_lut` is `fs_convert` with the input LUT of the clip's media after the conversion ([the LUT files](#lut-files)).
 - `fs_bwdif` weaves an interlaced frame after that conversion ([gpu](gpu.md#deinterlacing-and-hdr)). It uses the frames before it, at it and after it (`Woven`).
-- `Source::ai_picture` enlarges the converted picture when Super Scale uses an AI upscaler ([gpu](gpu.md#super-scale)). An interlaced source is woven first.
+- `Source::ai_picture` enlarges the converted picture when Upscale uses an AI upscaler ([gpu](gpu.md#upscale)). An interlaced source is woven first.
 - `VideoFrames::retimed_frame` makes a frame from two pictures that are already converted, woven and enlarged ([export](export.md#which-source-frame)).
-  - The draw sizes and places each picture of the pair first. That is Classic Super Scale, Transform, Crop and Dynamic Zoom.
+  - The draw sizes and places each picture of the pair first. That is Classic Upscale, Transform, Crop and Dynamic Zoom.
   - The draw also applies the effects of the clip to each picture of the pair ([export](export.md#effects)). Thus the effects come before the speed change, as in the spec (§13).
   - The made frame is already placed (`Sampling::Placed`). The later draw takes its edges, its opacity and its mode from `place::Placing`.
 - `VideoFrames::reversed_frame` chooses an earlier source frame that was made forward.
@@ -177,11 +177,11 @@ The [spec](../spec.md#the-lut-tables) gives the math of a table. vidcut reads a 
 - **The file is the truth.** A command reads and writes the `.vidcut` file. A running GUI watches it and reloads. The revision of the project (`if_rev`) catches edits that cross.
 - **The core is pure.** vidcut-core reaches media only through the `Env` trait: `AvEnv` in the app, `FakeEnv` in tests. Thus edits, plans and decisions are tested without FFmpeg.
 - **One decode and mix stack.** The player and exports read a `RenderPlan` through the same `VideoFrames` and `AudioMix`, and draw with the same `Screen`.
-  - The viewer plan can leave Super Scale off, and can read the render cache and a proxy (`preview_plan`, `Cache::apply`, `apply_proxies`). An export reads the timeline as stored.
+  - The viewer plan can leave Upscale off, and can read the render cache and a proxy (`preview_plan`, `Cache::apply`, `apply_proxies`). An export reads the timeline as stored.
 - **The GPU first.** Decoding, scaling, mixing and encoding stay on the GPU wherever it gives correct results ([gpu](gpu.md)).
 - **AI features name roles.** Where vidcut picks the model, the app, the requests and the files name its role. The roles are AI Fast, AI Slow, and AI for the own model of macOS.
   - Where the user picks the model, as for speech, they name the model.
-  - In code, a feature is a module (`super_scale`, `interpolate`). Each model that vidcut runs with its own code is a module in it (`nanovsr`, `flashvsr`, `macos`, `rife`, `ema`).
+  - In code, a feature is a module (`upscale`, `interpolate`). Each model that vidcut runs with its own code is a module in it (`nanovsr`, `flashvsr`, `macos`, `rife`, `ema`).
   - Model names show in `vidcut models`, in Stats for Nerds and in the docs.
 - **A thread for each purpose.** Each thread waits on one thing. Media jobs run at the lowest priority and yield to playback ([threads](threads.md)).
 

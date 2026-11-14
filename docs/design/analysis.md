@@ -355,7 +355,7 @@ flowchart TD
   - `Direction::Most`: the value must not be above the limit.
   - `Direction::Least`: the value must not be below the limit, for example the GPU memory of a speech model.
   - `Direction::Reached`: a count of the result, for example the speakers. At the limit, more people can share one number.
-- `speech_api::transcribe`, `super_scale::unfit`, `transcribe::short_of_memory` and `transcript::channels_of` call it.
+- `speech_api::transcribe`, `upscale::unfit`, `transcribe::short_of_memory` and `transcript::channels_of` call it.
 - `SpeechModel::longest_secs` and `SpeechModel::max_speakers` read the limits of Gemini from `catalog::GOOGLE`. `SpeakerModel::max_speakers` reads Sortformer's from `catalog::SORTFORMER`. `models.check` compares that with what transcribe.cpp reports.
 - The editor and the GUI refuse an xAI file with more channels than `catalog::XAI` allows, before they ask for `send`.
 

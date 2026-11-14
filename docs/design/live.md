@@ -402,7 +402,7 @@ The bar and the Jobs button:
 
 - T, Shift+T, Alt+T, the clip menu, the Tools row (`Workspace::picture_tools_row`) and `gui.show` set the viewer's tool (`placing::Grab`). The Tools row has Transform, Crop and Dynamic Zoom.
 - `Guides::overlay` builds the framing and safe-area guides in egui, not `Screen::draw`. Thus an export leaves them out ([deviation X80](../deviations.md#x80-safe-area-guides-skip-the-trim-editor-and-dynamic-trim)).
-- `viewer.guides` changes `ViewerPrefs`. The snapshot carries `guides` and `show_super_scale`.
+- `viewer.guides` changes `ViewerPrefs`. The snapshot carries `guides` and `show_upscale`.
 - `viewer.scopes` changes `ViewerPrefs` too, and the snapshot carries `scopes`.
   - `Workspace::scopes_menu` is in the View menu and in the header of the viewer. Each button sends `viewer.scopes`.
   - `Workspace::scope_column` takes a column at the right of the viewer's area. `Workspace::paint_scopes` paints each scope with its marks in egui ([gpu](gpu.md#the-scopes)).
@@ -460,7 +460,8 @@ The bar and the Jobs button:
   - The track buttons send one `motion.track` for each enabled pattern, with the `frame` and the `way`.
     - Track Reverse, Track Fwd Then Reverse and Track Forward start at the playhead, with the `way` `backward`, `both` and `forward`.
     - The One Frame buttons start at the playhead, with the `length` 1. Then they send `gui.page_time` to the next frame.
-    - Stop Tracking and Escape cancel the jobs of kind `track` (`Workspace::stop_tracks`).
+    - Escape cancels the jobs of kind `track` (`Workspace::stop_tracks`).
+    - Stop Tracking asks first (`Workspace::stop_tracks_window`).
     - While a job of kind `track` runs, the Node Editor and its keys take no work (`Workspace::tracks_running`).
   - The Trim row sends `comp.set` with `pattern_trim` for the picked pattern, and the `frame` of the playhead.
   - The pattern list has a check box, the name and Delete for each pattern, and Add Pattern. A click on a name picks the pattern.
@@ -648,7 +649,7 @@ The bar and the Jobs button:
 - `Live.multi_marks` holds the marks of the grid, for this session. Why: a change of bin clears them, and they are not on a file.
 - `Live.multi_alone` tells that one camera is open. `Live::open_camera` gives the file the marks with `SourceGrid::file_marks`. Then the ordinary source clip code draws the picture, the marks and the edits.
 - `SourceGrid::part` gives the frames of an edit in the grid. `SourceParams.lead` keeps the part before the file empty.
-- `SourceLining::Grid` is the reference rule of Source Overwrite in the grid. Why: it is not the rule of the Media Pool view.
+- `SourceLining::Grid` is the reference rule of Source Overwrite in the grid. Why: it is not the rule of the Media tab.
 - `Workspace::multi_view` gives each cell the frame of its file. `Workspace::camera_grid` draws the grid.
 
 **The Sync Bin** ([spec §7.4](../spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).

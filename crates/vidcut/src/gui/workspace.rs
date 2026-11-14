@@ -270,7 +270,7 @@ impl Workspace {
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
-            GuiPanel::MediaPool => self.left = LeftTab::Pool,
+            GuiPanel::Media => self.left = LeftTab::Pool,
             GuiPanel::SyncBin => {
                 self.left = LeftTab::SyncBin;
                 self.show_timeline();
@@ -350,7 +350,7 @@ impl Workspace {
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
             GuiPanel::SyncClips => self.close_sync_clips(),
-            GuiPanel::MediaPool => {
+            GuiPanel::Media => {
                 if self.left == LeftTab::Pool {
                     self.left = LeftTab::Hidden;
                 }
@@ -411,7 +411,7 @@ impl Workspace {
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
-            (GuiPanel::MediaPool, self.left == LeftTab::Pool),
+            (GuiPanel::Media, self.left == LeftTab::Pool),
             (GuiPanel::SyncBin, self.left == LeftTab::SyncBin),
             (GuiPanel::SyncClips, self.sync_clips.open),
             (GuiPanel::Transitions, self.left == LeftTab::Transitions),
@@ -1124,12 +1124,9 @@ impl Workspace {
             ui.menu_button("View", |ui| {
                 ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
                 ui.menu_button("Scopes", |ui| self.scopes_menu(ui));
-                let mut on = self.snap.show_super_scale;
-                if ui.checkbox(&mut on, "Show Super Scale").clicked() {
-                    self.send(
-                        "preferences.set",
-                        json!({ "viewer": { "super_scale": on } }),
-                    );
+                let mut on = self.snap.show_upscale;
+                if ui.checkbox(&mut on, "Show Upscale").clicked() {
+                    self.send("preferences.set", json!({ "viewer": { "upscale": on } }));
                     ui.close();
                 }
             });
@@ -2076,6 +2073,7 @@ impl Workspace {
         self.relink_window(&ctx);
         self.remove_media_window(&ctx);
         self.delete_all_window(&ctx);
+        self.stop_tracks_window(&ctx);
         self.speech_window(&ctx);
         self.isolation_prompt(&ctx);
         self.models_prompt(&ctx);
@@ -2127,14 +2125,14 @@ impl Workspace {
         }
         let frame = theme::card(panel);
         let spacing = ctx.global_style().spacing.clone();
-        let wanted = self.timeline_wanted().unwrap_or(300.0)
-            + frame.total_margin().sum().y
-            + spacing.interact_size.y
-            + spacing.item_spacing.y;
+        let chrome =
+            frame.total_margin().sum().y + spacing.interact_size.y + spacing.item_spacing.y;
+        let wanted = self.timeline_wanted().unwrap_or(300.0) + chrome;
+        let least = self.timeline_least(&spacing).map_or(140.0, |h| h + chrome);
         egui::Panel::bottom("timeline")
             .resizable(true)
-            .default_size(wanted.min(ctx.content_rect().height() * 0.6).max(140.0))
-            .min_size(140.0)
+            .default_size(wanted.min(ctx.content_rect().height() * 0.6).max(least))
+            .min_size(least)
             .frame(frame)
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| self.timeline_panel(ui))

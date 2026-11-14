@@ -1953,7 +1953,7 @@ impl Workspace {
             self.send(method, params);
         }
         if stop {
-            self.stop_tracks();
+            self.inspector.stopping = Some(true);
         }
         if !tracks.is_empty() {
             self.ask(tracks, None);
@@ -2317,6 +2317,7 @@ pub struct Inspector {
     find_better: bool,
     find_error: bool,
     finding: Option<Finding>,
+    pub(super) stopping: Option<bool>,
     pub(super) pattern_picked: Option<(String, String, usize)>,
     tab: Tab,
     effect_picked: Option<usize>,
@@ -4918,6 +4919,44 @@ impl Workspace {
         }
     }
 
+    pub(super) fn stop_tracks_window(&mut self, ctx: &egui::Context) {
+        let Some(fresh) = self.inspector.stopping.as_mut() else {
+            return;
+        };
+        let fresh = std::mem::replace(fresh, false);
+        if self.tracks_running().is_empty() {
+            self.inspector.stopping = None;
+            return;
+        }
+        let mut done = None;
+        let modal = egui::Modal::new(egui::Id::unique("stop-tracking")).show(ctx, |ui| {
+            ui.set_max_width(super::dialog::WIDTH);
+            ui.label(RichText::new("Stop Tracking?").strong());
+            super::dialog::footer(ui, |ui| {
+                if super::dialog::main_button(ui, "Stop", true) {
+                    done = Some(true);
+                }
+                let keep = ui.button("Keep Tracking");
+                if fresh {
+                    keep.request_focus();
+                }
+                if keep.clicked() {
+                    done = Some(false);
+                }
+            });
+        });
+        if done.is_none() && super::workspace::escape_cancels(ctx, &modal) {
+            done = Some(false);
+        }
+        let Some(stop) = done else {
+            return;
+        };
+        self.inspector.stopping = None;
+        if stop {
+            self.stop_tracks();
+        }
+    }
+
     fn ask(&mut self, asks: Vec<(&'static str, Value)>, subject: Option<Subject>) {
         if model_needs(subject).is_empty() {
             for (method, params) in asks {
@@ -4958,8 +4997,8 @@ impl Workspace {
         }
     }
 
-    fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
-        use super::super_scale::{SHARPNESS, UPSCALERS, label_of, unfit, upscaler_text};
+    fn upscale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
+        use super::upscale::{SHARPNESS, UPSCALERS, label_of, unfit, upscaler_text};
         let mut media: Vec<String> = chosen
             .iter()
             .filter_map(|c| p.clip(&c.id))
@@ -4967,11 +5006,7 @@ impl Workspace {
             .collect();
         media.sort_unstable();
         media.dedup();
-        let Some(now) = media
-            .first()
-            .and_then(|id| p.media(id))
-            .map(|m| m.super_scale)
-        else {
+        let Some(now) = media.first().and_then(|id| p.media(id)).map(|m| m.upscale) else {
             return;
         };
         let mut put = None;
@@ -4982,14 +5017,14 @@ impl Workspace {
             })
             .inner
         };
-        let shown = vidcut_core::render::super_scale_of(now, &p.settings);
-        let cleared = group(ui, "Super Scale", header, |ui| {
+        let shown = vidcut_core::render::upscale_of(now, &p.settings);
+        let cleared = group(ui, "Upscale", header, |ui| {
             let on = !now.is_off();
-            label(ui, "Super Scale", on);
+            label(ui, "Upscale", on);
             dialog::switch(ui, |ui| {
                 for (value, text) in [(false, "Off"), (true, "On")] {
                     if ui.selectable_label(on == value, text).clicked() && on != value {
-                        put = Some(json!({ "super_scale": value }));
+                        put = Some(json!({ "upscale": value }));
                     }
                 }
             });
@@ -5039,10 +5074,10 @@ impl Workspace {
             });
         });
         if cleared {
-            put = Some(json!({ "super_scale": false }));
+            put = Some(json!({ "upscale": false }));
         }
         if let Some(params) = put {
-            self.set_super_scale(&media, params);
+            self.set_upscale(&media, params);
         }
     }
 
@@ -5565,7 +5600,7 @@ impl Workspace {
                     dynamic_zoom(ui, i, p, at, &chosen, boxes, &mut acts);
                     composite(ui, i, p, at, &chosen, &mut acts);
                     self.input_lut_section(ui, p, &chosen);
-                    self.super_scale_section(ui, p, &chosen);
+                    self.upscale_section(ui, p, &chosen);
                 }
                 if tab == Tab::Effects && !chosen.is_empty() {
                     effects(ui, &self.inspector, &chosen[0], &mut acts);

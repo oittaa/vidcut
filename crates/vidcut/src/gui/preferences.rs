@@ -1056,12 +1056,12 @@ fn memory(
                 let viewer_about = state["player_memory_lent_mb"]
                     .as_u64()
                     .filter(|&mb| mb < viewer_set)
-                    .map(|mb| format!("{} GB now, while AI Super Scale works", about_gb(mb)));
+                    .map(|mb| format!("{} GB now, while AI Upscale works", about_gb(mb)));
                 let video_about = if gpu_decodes {
                     state["player_video_memory_lent_mb"]
                         .as_u64()
                         .filter(|&mb| mb < video_set)
-                        .map(|mb| format!("{} GB now, while AI Super Scale works", about_gb(mb)))
+                        .map(|mb| format!("{} GB now, while AI Upscale works", about_gb(mb)))
                 } else {
                     Some("Not used while the CPU decodes".to_string())
                 };

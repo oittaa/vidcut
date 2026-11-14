@@ -27,7 +27,7 @@ const PICTURES: &[&str] = &[
 
 const MAX_PICTURE: u64 = 8 << 20;
 
-const INSTRUCTIONS: &str = "vidcut edits a video timeline: a media pool, a magnetic Track 1, B-roll \
+const INSTRUCTIONS: &str = "vidcut edits a video timeline: its media, a magnetic Track 1, B-roll \
 tracks above it and audio tracks below; these tools are the same requests the vidcut CLI and GUI make. Choose the project with use_project \
 (create: true makes a new one). Times are strings with a unit: \"450f\" (frames), \"15s\", \"1m30s\", \
 \"00:01:00:00\"; a bare number is a frame. Ranges: \"10s..20s\" or \"1m..+5s\". Clips: their id \

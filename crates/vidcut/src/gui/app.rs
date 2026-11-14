@@ -299,7 +299,7 @@ impl eframe::App for App {
         let _open = gate.opened();
         let (texture, has_frame) =
             self.viewer
-                .sync(&self.render, self.ws.want, self.ws.snap.show_super_scale);
+                .sync(&self.render, self.ws.want, self.ws.snap.show_upscale);
         self.ws.picture = Picture { texture, has_frame };
         self.ws.scope_pictures =
             self.viewer

@@ -72,7 +72,7 @@ pub enum Request {
         start_tc: Option<TimeSpec>,
     },
 
-    /// Add files to the media pool (probing them); returns their media ids.
+    /// Add files to the project's media (probing them); returns their media ids.
     /// A subtitle file (SRT, WebVTT, TTML) becomes a subtitle item, with no
     /// pictures or sound, for `subtitles.import` with `media`.
     #[serde(rename = "media.add")]
@@ -554,15 +554,15 @@ pub enum Request {
         /// channel refuse it.
         #[serde(default)]
         alpha_mode: Option<crate::model::AlphaMode>,
-        /// Super Scale on or off. Where its pictures are enlarged, they get
+        /// Upscale on or off. Where its pictures are enlarged, they get
         /// the upscaler that `upscaler` names, as much as they need, up to 4
         /// times their source.
         #[serde(default)]
-        super_scale: Option<bool>,
+        upscale: Option<bool>,
         /// The detail of the classic upscaler: `low`, `medium` or `high`.
         #[serde(default)]
         sharpness: Option<crate::model::Sharpness>,
-        /// The upscaler of Super Scale: `project` (the default: the upscaler
+        /// The upscaler: `project` (the default: the upscaler
         /// of the project settings), `macos` (macOS 26 and later, called AI
         /// there), `ai_slow`, `ai_fast` or `classic`. `ai_slow` and `ai_fast`
         /// are off on macOS.
@@ -687,10 +687,10 @@ pub enum Request {
     /// projects in that folder. Other files stay. There is no undo.
     #[serde(rename = "cache.clear")]
     CacheClear { projects: OneOrMany<PathBuf> },
-    /// The Media Pool's bins.
+    /// The bins of the Media tab.
     #[serde(rename = "bins.list")]
     BinsList {},
-    /// Add a Media Pool bin, like `Interviews/Day 1`; missing parents are added
+    /// Add a bin, like `Interviews/Day 1`; missing parents are added
     /// too.
     #[serde(rename = "bins.add")]
     BinsAdd { path: String },
@@ -1200,7 +1200,7 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         name: Option<String>,
-        /// The bin of its copy in the Media Pool. Default: the top level.
+        /// The bin of its copy in the Media tab. Default: the top level.
         #[serde(default)]
         bin: Option<String>,
     },
@@ -1218,12 +1218,12 @@ pub enum Request {
         range: Option<RangeSpec>,
         #[serde(default)]
         name: Option<String>,
-        /// The bin of its copy in the Media Pool. Default: the top level.
+        /// The bin of its copy in the Media tab. Default: the top level.
         #[serde(default)]
         bin: Option<String>,
     },
     /// Create Compound Clip: makes a compound clip of what is between the
-    /// marks, only in the Media Pool. The timeline does not change. `range`
+    /// marks, only in the Media tab. The timeline does not change. `range`
     /// defaults to the timeline's marks. With one mark, the range runs from
     /// the start of the timeline or to its end. Returns its `compound` id.
     #[serde(rename = "media.compound")]
@@ -1236,11 +1236,11 @@ pub enum Request {
         #[serde(default)]
         bin: Option<String>,
     },
-    /// Delete a compound clip from the Media Pool. Copies on the timeline
+    /// Delete a compound clip from the Media tab. Copies on the timeline
     /// stay.
     #[serde(rename = "media.compound_remove")]
     MediaCompoundRemove { compound: String },
-    /// Put a compound clip of the Media Pool on the video track `track` and
+    /// Put a compound clip of the Media tab on the video track `track` and
     /// on the audio track of its number, at `at`. Defaults: V1 and A1, the
     /// end of the timeline, and `overwrite`. On V1, `insert` opens the
     /// timeline at `at`, and `replace` takes the place of the clip under
@@ -1754,7 +1754,7 @@ pub enum Request {
         retime: Option<crate::model::ClipRetime>,
         /// Render Cache: `auto` follows the mode of the project, and `on`
         /// renders the clips in both modes. `off` keeps their slow media and
-        /// AI Super Scale out of both.
+        /// AI Upscale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
         /// Download Voice Isolation's model, or the model of the Retime
@@ -3696,7 +3696,7 @@ pub enum Request {
     /// timeline's mix (muted, left out by solo, or empty) is an error.
     #[serde(rename = "mixer.preview")]
     MixerPreview { track: String, volume_db: f64 },
-    /// The Media Pool view: the bin shown, the sort order and how it shows
+    /// The Media tab: the bin shown, the sort order and how it shows
     /// its items. Source Tape strings together that bin's media, and its
     /// bins', in that order.
     #[serde(rename = "pool.set")]
@@ -3796,10 +3796,10 @@ pub enum Request {
     /// `help` (the keyboard shortcuts, and what each upscaler and Retime
     /// Process does), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
-    /// Media Pool), `clip_info` (the media selected in the pool),
-    /// `media_pool` (`gui.close` hides the pool, and the viewer takes its room),
+    /// Media tab), `clip_info` (the media selected in the pool),
+    /// `media` (`gui.close` hides the pool, and the viewer takes its room),
     /// `transitions`, `titles`, `inspector` or `keyframes` (tabs in the Media
-    /// Pool's place), or the
+    /// tab's place), or the
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), or
     /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
@@ -4698,7 +4698,7 @@ pub enum DynamicTrimMode {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Page {
-    /// The timeline, the viewer and the Media Pool.
+    /// The timeline, the viewer and the Media tab.
     #[default]
     Cut,
     /// The node editor of a clip's composition, its viewer and its
@@ -4730,7 +4730,7 @@ pub enum GuiPanel {
     /// The Transcription window: the words of the source clip or the
     /// timeline, from their media's transcripts.
     Transcription,
-    /// The metadata strip at the top of the Media Pool: the selected
+    /// The metadata strip at the top of the Media tab: the selected
     /// media's format at a glance.
     Metadata,
     /// Clip Info: all that is known of the media selected in the pool, its
@@ -4739,31 +4739,31 @@ pub enum GuiPanel {
     /// Manage Render Cache: the render cache of each project that vidcut
     /// opened on this computer (`cache.list`), to clear (`cache.clear`).
     ManageRenderCache,
-    /// The Media Pool tab. `gui.close` hides the pool, and the viewer takes
+    /// The Media tab. `gui.close` hides the pool, and the viewer takes
     /// its room.
-    MediaPool,
-    /// The Sync Bin tab, in the Media Pool's place: a row for each camera of
+    Media,
+    /// The Sync Bin tab, in the Media tab's place: a row for each camera of
     /// the bin, and a grid of the cameras in the viewer.
     SyncBin,
     /// The Sync Clips window: lines up the files of the current bin by hand
     /// or by Auto Sync, and saves them as a synced group.
     SyncClips,
-    /// The Transitions tab, in the Media Pool's place: the transitions to
+    /// The Transitions tab, in the Media tab's place: the transitions to
     /// drag onto an edit.
     Transitions,
-    /// The Titles tab, in the Media Pool's place: the kinds of title to
+    /// The Titles tab, in the Media tab's place: the kinds of title to
     /// drag onto the timeline.
     Titles,
-    /// The Effects tab, in the Media Pool's place: the effects to drag
+    /// The Effects tab, in the Media tab's place: the effects to drag
     /// onto a clip.
     Effects,
     /// The Generators page of the Effects tab: the generators to drag onto
     /// the timeline.
     Generators,
-    /// The Inspector tab, in the Media Pool's place: the transform, crop
+    /// The Inspector tab, in the Media tab's place: the transform, crop
     /// and Dynamic Zoom of the selected clips, as numbers to type or drag.
     Inspector,
-    /// The Keyframes tab, in the Media Pool's place: the keyed values of
+    /// The Keyframes tab, in the Media tab's place: the keyed values of
     /// the first selected clip.
     Keyframes,
     /// The keyframe tray under the timeline's tracks: the keyed values of
@@ -4782,7 +4782,7 @@ pub enum GuiPanel {
     Tools,
 }
 
-/// Media Pool sort orders.
+/// Media tab sort orders.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PoolSort {
@@ -4813,7 +4813,7 @@ pub enum PoolSort {
     OnlineStatus,
 }
 
-/// How the Media Pool shows its items (spec §3).
+/// How the Media tab shows its items (spec §3).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PoolMode {
@@ -5029,7 +5029,7 @@ pub struct ProjectSet {
     /// or exports, and Nearest to the rest.
     #[serde(default)]
     pub retime: Option<crate::model::ProjectRetime>,
-    /// The upscaler of Super Scale for the media that follow the project:
+    /// The upscaler for the media that follow the project:
     /// `auto` (the default: the scaler of macOS on macOS, `ai_fast`
     /// elsewhere), `macos`, `ai_slow`, `ai_fast` or `classic`.
     #[serde(default)]

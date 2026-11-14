@@ -178,7 +178,7 @@ const GROUPS: &[(&str, &str)] = &[
         "analyze",
         "Measure media or clips: silences, shots, black, loudness, ducking, the words said",
     ),
-    ("bins", "Media Pool bins"),
+    ("bins", "Bins of the Media tab"),
     (
         "cache",
         "The render cache: what it renders, Render and Delete",
@@ -223,7 +223,7 @@ const GROUPS: &[(&str, &str)] = &[
         "viewer.marks",
         "The In and Out marks of the Multi Source viewer",
     ),
-    ("media", "The Media Pool"),
+    ("media", "The media of the project"),
     ("media.marks", "A media item's source In and Out marks"),
     ("media.transcripts", "A media item's kept transcripts"),
     (
@@ -244,7 +244,7 @@ const GROUPS: &[(&str, &str)] = &[
         "A clip's picture over the frame: moved, zoomed, turned, flipped, cropped, faded",
     ),
     ("player", "The viewer's playback (running GUI)"),
-    ("pool", "The GUI's Media Pool view"),
+    ("pool", "The GUI's Media tab"),
     (
         "preferences",
         "Application preferences (~/.config/vidcut/preferences.toml; on Windows in %APPDATA%\\vidcut, on macOS in ~/Library/Application Support/vidcut)",

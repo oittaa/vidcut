@@ -315,7 +315,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 let path = std::path::Path::new(u["path"].as_str().unwrap_or_default());
                 let name = path.file_name().unwrap_or(path.as_os_str());
                 println!(
-                    "  Super Scale: {}: {}",
+                    "  Upscale: {}: {}",
                     name.to_string_lossy(),
                     u["how"].as_str().unwrap_or_default()
                 );
@@ -1757,7 +1757,7 @@ fn timeline(t: &Value) {
 fn media_list(m: &Value) {
     let items = m.as_array().cloned().unwrap_or_default();
     if items.is_empty() {
-        println!("(media pool is empty)");
+        println!("(no media)");
     }
     for i in items {
         let video = match &i["video"] {

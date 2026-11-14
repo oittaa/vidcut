@@ -1665,7 +1665,7 @@ mod tests {
             color_space: Default::default(),
             input_lut: None,
             alpha_mode: Default::default(),
-            super_scale: Default::default(),
+            upscale: Default::default(),
             left_out: Vec::new(),
             subclip: None,
             markers: Vec::new(),

@@ -10,7 +10,7 @@ use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
 use crate::export::video::{rgb_picture, surface_picture};
 use crate::ffmpeg::frame;
-use crate::super_scale::{Out, Picture};
+use crate::upscale::{Out, Picture};
 
 const FULL: (u32, u32) = (1920, 1080);
 const SMALL: (u32, u32) = (480, 270);
@@ -86,16 +86,16 @@ pub fn run(
             }
         };
         for &u in upscalers {
-            crate::super_scale::get_ready(dir, u, false)?;
+            crate::upscale::get_ready(dir, u, false)?;
             let made = match u {
                 Upscaler::Macos => by_macos(&mut drawn, &source, &clip.path, form)?,
                 _ => upscaled(u, &small)?,
             };
             rows.push(Row {
                 clip: clip.name.clone(),
-                test: "Super Scale",
+                test: "Upscale",
                 coding: coding_name(form),
-                model: crate::super_scale::name(u),
+                model: crate::upscale::name(u),
                 score: mean(&inner, |i| score(&made[i], &truth[i], coding)),
                 baseline: "Classic",
                 base: base.expect("a Classic baseline"),
@@ -181,12 +181,12 @@ pub fn pictures(
     )?)?;
     let mut out = vec![("truth".into(), truth), ("classic".into(), classic)];
     for &u in upscalers {
-        crate::super_scale::get_ready(dir, u, false)?;
+        crate::upscale::get_ready(dir, u, false)?;
         let mut made = match u {
             Upscaler::Macos => by_macos(&mut drawn, &source, path, form)?,
             _ => upscaled(u, &small)?,
         };
-        out.push((crate::super_scale::name(u).into(), made.swap_remove(k)));
+        out.push((crate::upscale::name(u).into(), made.swap_remove(k)));
     }
     Ok(out)
 }
@@ -266,8 +266,8 @@ fn upscaled(u: Upscaler, small: &[frame::Video]) -> Result<Vec<Vec<u8>>> {
 }
 
 fn upscaled_pictures(u: Upscaler, small: &[frame::Video], frames: bool) -> Result<Vec<Picture>> {
-    let name = crate::super_scale::name(u);
-    let made = crate::super_scale::made_size(u, SMALL, FULL);
+    let name = crate::upscale::name(u);
+    let made = crate::upscale::made_size(u, SMALL, FULL);
     if made != FULL {
         return Err(Error::Invalid(format!(
             "{name} makes {}x{}, not {}x{}",
@@ -277,13 +277,13 @@ fn upscaled_pictures(u: Upscaler, small: &[frame::Video], frames: bool) -> Resul
     let mut out: Vec<Option<Picture>> = (0..small.len()).map(|_| None).collect();
     let mut first = 0;
     while first < small.len() {
-        let last = crate::super_scale::last_frame(u, first as i64)
+        let last = crate::upscale::last_frame(u, first as i64)
             .map_or(small.len() - 1, |l| (l as usize).min(small.len() - 1));
         let (tx, rx) = mpsc::channel();
-        let sink: crate::super_scale::Sink = Box::new(move |outs| {
+        let sink: crate::upscale::Sink = Box::new(move |outs| {
             let _ = tx.send(outs);
         });
-        let mut run = crate::super_scale::open(u, SMALL, made, first as i64, sink)?;
+        let mut run = crate::upscale::open(u, SMALL, made, first as i64, sink)?;
         let mut outs = Vec::new();
         for (i, f) in small.iter().enumerate().take(last + 1).skip(first) {
             outs.extend(match frames {
@@ -377,7 +377,7 @@ pub fn speed(
     let once = || -> Result<(Vec<Picture>, usize)> {
         match model {
             Model::Upscaler(u) => {
-                crate::super_scale::get_ready(dir, u, false)?;
+                crate::upscale::get_ready(dir, u, false)?;
                 Ok((upscaled_pictures(u, &inputs, framed)?, inputs.len()))
             }
             Model::Retime(r) => {

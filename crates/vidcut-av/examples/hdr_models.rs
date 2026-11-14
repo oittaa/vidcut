@@ -63,7 +63,7 @@ fn models() -> Vec<Model> {
 
 fn name(m: Model) -> &'static str {
     match m {
-        Model::Upscaler(u) => vidcut_av::super_scale::name(u),
+        Model::Upscaler(u) => vidcut_av::upscale::name(u),
         Model::Retime(r) => vidcut_av::interpolate::name(r),
     }
 }

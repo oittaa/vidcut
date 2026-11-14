@@ -1,8 +1,8 @@
-# Super Scale
+# Upscale
 
 **When:** not decided.
 
-Super Scale enlarges pictures with a better upscaler ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). The viewer and the exports enlarge with the kernel of their shader (`screen::kernel`). These parts are open:
+Upscale enlarges pictures with a better upscaler ([X91](../deviations.md#x91-upscale-uses-the-upscaler-of-the-gpu)). The viewer and the exports enlarge with the kernel of their shader (`screen::kernel`). These parts are open:
 
 - **Only the part that shows:** an AI upscaler enlarges the whole source picture, also when a zoom shows only a part of it.
   - It could enlarge only the shown part, with a margin for its edges. The work then follows the output size, not the zoom.

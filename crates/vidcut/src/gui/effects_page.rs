@@ -2476,7 +2476,7 @@ impl Workspace {
         if self.tracks_running().is_empty() {
             self.node_keys(fired, &mine);
         }
-        if input.key_pressed(egui::Key::Escape) {
+        if input.key_pressed(egui::Key::Escape) && self.inspector.stopping.is_none() {
             self.stop_tracks();
         }
         let Some((_, _, f)) = self.page_frames() else {

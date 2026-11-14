@@ -2625,7 +2625,7 @@ fn mutate(
                     .collect();
                 ready_retimes(env, p, &ids)?;
                 let media = crate::otio::used_media(p, None);
-                let set = ops::SuperScaleSet::default();
+                let set = ops::UpscaleSet::default();
                 for upscaler in ops::ai_upscalers(p, &media, &set) {
                     env.ai_upscaler(upscaler, true)?;
                 }
@@ -2952,13 +2952,13 @@ fn mutate(
             color_space,
             input_lut,
             alpha_mode,
-            super_scale,
+            upscale,
             sharpness,
             upscaler,
             download,
         } => {
-            let set = ops::SuperScaleSet {
-                on: *super_scale,
+            let set = ops::UpscaleSet {
+                on: *upscale,
                 sharpness: *sharpness,
                 upscaler: *upscaler,
             };
@@ -2972,7 +2972,7 @@ fn mutate(
             {
                 return Err(Error::usage(
                     "give color, camera, created, scene, shot, take, comment, color_space, \
-                     input_lut, alpha_mode, or a Super Scale field: super_scale, sharpness or \
+                     input_lut, alpha_mode, or an Upscale field: upscale, sharpness or \
                      upscaler",
                 ));
             }
@@ -3019,7 +3019,7 @@ fn mutate(
                 }
             }
             if !set.is_empty() {
-                ops::set_media_super_scale(p, &media.to_vec(), set)?;
+                ops::set_media_upscale(p, &media.to_vec(), set)?;
             }
             Value::Null
         }
@@ -5320,7 +5320,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia, still:
         color_space: Default::default(),
         input_lut: None,
         alpha_mode: Default::default(),
-        super_scale: Default::default(),
+        upscale: Default::default(),
         left_out: Vec::new(),
         words: Vec::new(),
         still_secs,
@@ -7017,7 +7017,7 @@ pub fn models_used(p: &Project) -> Models {
     }
     (
         retimes,
-        ops::ai_upscalers(p, &media, &ops::SuperScaleSet::default()),
+        ops::ai_upscalers(p, &media, &ops::UpscaleSet::default()),
     )
 }
 
@@ -9057,8 +9057,8 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     if !m.alpha_mode.is_straight() {
         v["alpha_mode"] = json!(m.alpha_mode);
     }
-    if !m.super_scale.is_off() {
-        v["super_scale"] = json!(m.super_scale);
+    if !m.upscale.is_off() {
+        v["upscale"] = json!(m.upscale);
     }
     if m.is_still() {
         v["still"] = json!(true);

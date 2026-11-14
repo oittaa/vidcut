@@ -283,7 +283,7 @@ pub struct Snapshot {
     pub timer1_origin: Timer1Origin,
     pub guides: vidcut_core::preferences::Guides,
     pub scopes: vidcut_core::preferences::Scopes,
-    pub show_super_scale: bool,
+    pub show_upscale: bool,
     pub bindings: Arc<vidcut_core::shortcuts::Bindings>,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,
