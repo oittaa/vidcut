@@ -41,7 +41,10 @@ pub struct AvEnv {
     project_dir: Option<PathBuf>,
     heard_only: bool,
     memos: Arc<Memos>,
+    handed: Handed,
 }
+
+pub type Handed = Vec<(MeasureKey, Arc<Tracked>)>;
 
 impl AvEnv {
     pub fn new() -> Self {
@@ -61,13 +64,70 @@ impl AvEnv {
             ..self
         }
     }
+
+    pub fn with_tracks(self, handed: Handed) -> Self {
+        Self { handed, ..self }
+    }
+
+    pub fn track(
+        &self,
+        media: &Media,
+        plan: &RenderPlan,
+        follow: vidcut_core::analysis::Follow,
+        download: bool,
+    ) -> Result<(MeasureKey, Arc<Tracked>)> {
+        let dir = paths::models_dir();
+        vidcut_av::tracking::get_ready(&dir, download).map_err(av_error)?;
+        let area = follow.area.map(|v| (v * 1e5).round() as i64);
+        let picture = serde_json::to_vec(plan).unwrap_or_default();
+        let key = format!(
+            "{}-{}-{}-{}-{}-{}-{}-{}-{}-{}{}",
+            vidcut_av::tracking::name(),
+            vidcut_core::fingerprint::digest(&picture),
+            follow.at,
+            follow.frames.0,
+            follow.frames.1,
+            area[0],
+            area[1],
+            area[2],
+            area[3],
+            u8::from(follow.backward),
+            u8::from(follow.forward),
+        );
+        let key = analysis_file(media, &key);
+        let memo = || {
+            self.memos
+                .tracks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+        };
+        if let Some((_, v)) = self.handed.iter().find(|(k, _)| *k == key) {
+            return Ok((key, v.clone()));
+        }
+        if let Some(v) = memo().get(&key).cloned() {
+            return Ok((key, v));
+        }
+        if let Some(v) = on_disk(&key, Tracked::from_bytes) {
+            let v = Arc::new(v);
+            memo().insert(key.clone(), v.clone());
+            return Ok((key, v));
+        }
+        let decoder = crate::preferences::gpu_decoding().own_decoder();
+        let ways = (decoder.as_ref(), dir.as_path());
+        let v = vidcut_av::tracking::track(plan, &follow, ways, &media.path).map_err(av_error)?;
+        let v = Arc::new(v);
+        if v.whole {
+            let (file, origin) = &key;
+            let _ = disk_cache::write(file, &origin.stamp(&v.to_bytes()));
+            memo().insert(key.clone(), v.clone());
+        }
+        Ok((key, v))
+    }
 }
 
 const HEARD_KEPT: usize = 8;
 static HEARD: Mutex<Lru<String, Arc<Speech>, HEARD_KEPT>> = Mutex::new(Lru::new());
 static PAID: Mutex<Lru<String, Vec<Arc<Speech>>, HEARD_KEPT>> = Mutex::new(Lru::new());
-const STOPPED_KEPT: usize = 4;
-static STOPPED: Mutex<Lru<MeasureKey, Arc<Tracked>, STOPPED_KEPT>> = Mutex::new(Lru::new());
 const LOUD_KEPT: usize = 4096;
 static LOUD: Mutex<Lru<String, Loudness, LOUD_KEPT>> = Mutex::new(Lru::new());
 
@@ -420,55 +480,7 @@ impl Env for AvEnv {
         follow: vidcut_core::analysis::Follow,
         download: bool,
     ) -> Result<Arc<Tracked>> {
-        let dir = paths::models_dir();
-        vidcut_av::tracking::get_ready(&dir, download).map_err(av_error)?;
-        let area = follow.area.map(|v| (v * 1e5).round() as i64);
-        let picture = serde_json::to_vec(plan).unwrap_or_default();
-        let key = format!(
-            "{}-{}-{}-{}-{}-{}-{}-{}-{}-{}{}",
-            vidcut_av::tracking::name(),
-            vidcut_core::fingerprint::digest(&picture),
-            follow.at,
-            follow.frames.0,
-            follow.frames.1,
-            area[0],
-            area[1],
-            area[2],
-            area[3],
-            u8::from(follow.backward),
-            u8::from(follow.forward),
-        );
-        let key = analysis_file(media, &key);
-        let memo = || {
-            self.memos
-                .tracks
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-        };
-        let stopped = || STOPPED.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(v) = memo().get(&key) {
-            return Ok(v.clone());
-        }
-        if let Some((_, v)) = stopped().remove(&key) {
-            return Ok(v);
-        }
-        if let Some(v) = on_disk(&key, Tracked::from_bytes) {
-            let v = Arc::new(v);
-            memo().insert(key, v.clone());
-            return Ok(v);
-        }
-        let decoder = crate::preferences::gpu_decoding().own_decoder();
-        let ways = (decoder.as_ref(), dir.as_path());
-        let v = vidcut_av::tracking::track(plan, &follow, ways, &media.path).map_err(av_error)?;
-        let v = Arc::new(v);
-        if v.whole {
-            let (file, origin) = &key;
-            let _ = disk_cache::write(file, &origin.stamp(&v.to_bytes()));
-            memo().insert(key, v.clone());
-        } else {
-            stopped().insert(key, v.clone());
-        }
-        Ok(v)
+        self.track(media, plan, follow, download).map(|(_, v)| v)
     }
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {

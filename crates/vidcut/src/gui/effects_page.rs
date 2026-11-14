@@ -217,6 +217,7 @@ struct Boxed {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Edge {
     Corner,
+    Middle,
     Left,
     Right,
     Top,
@@ -247,7 +248,8 @@ fn edge_at(r: Rect, press: Pos2) -> Option<Edge> {
             near(press.y, r.bottom()) && across(r.left(), r.right(), press.x),
         ),
     ];
-    sides.into_iter().find(|(_, on)| *on).map(|(e, _)| e)
+    let side = sides.into_iter().find(|(_, on)| *on).map(|(e, _)| e);
+    side.or_else(|| (r.center().distance(press) <= GRIP).then_some(Edge::Middle))
 }
 
 fn magnified(painter: &egui::Painter, texture: egui::TextureId, r: Rect, picture: Rect) {
@@ -275,7 +277,7 @@ fn boxed_to(b: &Boxed, to: [f64; 2]) -> Area {
     let (lo, hi) = Pattern::SIDES;
     let mut a = b.area;
     match b.edge {
-        Edge::Corner => {
+        Edge::Corner | Edge::Middle => {
             a.center = [
                 to[0] - b.grab[0] + a.size[0] / 2.0,
                 to[1] - b.grab[1] + a.size[1] / 2.0,
@@ -1258,6 +1260,9 @@ impl Workspace {
                 );
                 let corner = Rect::from_center_size(r.left_top(), Vec2::splat(2.0 * HANDLE));
                 painter.rect_filled(corner, CornerRadius::ZERO, color);
+                let (c, stroke) = (r.center(), Stroke::new(1.0, color));
+                painter.line_segment([c - vec2(HANDLE, 0.0), c + vec2(HANDLE, 0.0)], stroke);
+                painter.line_segment([c - vec2(0.0, HANDLE), c + vec2(0.0, HANDLE)], stroke);
                 painter.text(
                     r.left_top() - vec2(0.0, HANDLE + 2.0),
                     Align2::LEFT_BOTTOM,
@@ -1560,7 +1565,7 @@ impl Workspace {
         Ok(())
     }
 
-    fn page_ask(&self, params: Value) {
+    pub(super) fn page_ask(&self, params: Value) {
         self.send("gui.page_time", params);
     }
 

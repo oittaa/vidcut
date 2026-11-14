@@ -144,15 +144,16 @@ flowchart TD
 - `ops::motion::start` gives the box to follow: the box of the pattern on the first frame of the track (`Pattern::area_at`).
   - Without a box of its path there, it is the own box of the pattern (`Pattern::own`).
   - The frames of a track are frames of the file (`Frames::file`), from the In to the Out of the clip.
+  - A `length` keeps the track within that many frames of the composition on each side (`Start::reach`).
 - `render::node_input` gives the picture that the track reads: the composition up to the input of the Tracker (`Composition::cut_at`).
   - The plan has one frame for each frame of the file, at the rate of the file.
   - Why: the Tracker of the spec tracks the picture on its input, on each frame of the file.
 - `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:
   - `Reader` reads the frames of the plan as one stream, at a working size.
-  - `working` chooses that size: the search area of the model then has about its own size. The longer side is from 320 to 1280 pixels.
+  - `working` chooses that size: the search area of the model then has about its own size, within `SIDES`.
   - `Tracker::start` cuts the template around the box. `Tracker::step` cuts the search area around the last box, and takes the place with the best score.
     - The crops, the values of the picture and the window are those of the tracker of OpenCV for this model.
-  - The track goes forward first, then backward. It ends at the In, at the Out, or when the user cancels its job.
+  - The track goes forward first, then backward. It ends at the In, at the Out, after its `length`, or when the user cancels its job.
     - A lost thing or a shot change does not end it, as in the spec.
   - For the way backward, `Reader::part` reads the pictures before the first frame in parts, from the last part to the first. A part holds at most `PART_BYTES` of pictures.
     - Why: a track holds only one part in memory, however long the shot is.
@@ -160,8 +161,8 @@ flowchart TD
   - `Follow` holds the first frame, the frames of the track, the box and the ways.
 - The result is a `Tracked`: its first frame and one box for each frame.
   - A cancelled track gives the boxes that it found, with `whole` off.
-  - `AvEnv::tracked` keeps a whole track in the disk cache. The key has `tracking::name`, the digest of the plan and the `Follow`.
-  - A cancelled track goes to `STOPPED`, for the edit after its job only. Thus a new track of the same frames runs again.
+  - `AvEnv::track` keeps a whole track in the disk cache. The key has `tracking::name`, the digest of the plan and the `Follow`.
+  - A cancelled track goes to no store. Its job hands it to the edit after the job (`Msg::Measured`, `AvEnv::with_tracks`). Thus a new track of the same frames runs again.
 - `motion::followed` makes the samples: the box of the pattern, moved and scaled with the box of the track.
 - `ops::motion::tracked` stores the samples, and the pattern gets the path (`Pattern.path`).
   - A path with `tracked` that only this pattern has gets the new samples. It keeps its id and its name.

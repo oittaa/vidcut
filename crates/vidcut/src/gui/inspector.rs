@@ -4,9 +4,9 @@ use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
-    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LINE_LEFT, ARROW_LINE_RIGHT, ARROW_UP, CARET_LEFT,
-    CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT, CHECK, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL,
-    LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
+    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LINE_LEFT, ARROW_LINE_RIGHT, ARROW_UP,
+    ARROWS_LEFT_RIGHT, CARET_LEFT, CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT, CHECK, DIAMOND,
+    FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
 };
 use serde_json::{Value, json};
 use vidcut_core::effect_keys::Keyed;
@@ -1698,7 +1698,7 @@ impl Workspace {
             params["node"] = json!(node.name);
             ("comp.set", params)
         };
-        let track = |frame: i64, way: &str| -> Vec<(&'static str, Value)> {
+        let track = |frame: i64, way: &str, length: Option<u32>| -> Vec<(&'static str, Value)> {
             let one = |k: &usize| {
                 let params = json!({
                     "clip": clip.id,
@@ -1706,6 +1706,7 @@ impl Workspace {
                     "pattern": k + 1,
                     "frame": frame,
                     "way": way,
+                    "length": length,
                 });
                 ("motion.track", params)
             };
@@ -1723,31 +1724,43 @@ impl Workspace {
         let mut sends: Vec<(&'static str, Value)> = Vec::new();
         let mut tracks: Vec<(&'static str, Value)> = Vec::new();
         let mut stop = false;
+        let mut stepped = None;
         let mut asked = None;
         rows(ui, (0, node.name.as_str()), |ui| {
+            let can = moving && !on.is_empty() && running.is_empty();
             label(ui, "Track", false);
             ui.horizontal(|ui| {
-                let can = moving && !on.is_empty() && running.is_empty();
-                let back = [
-                    (CARET_LINE_LEFT, "Track Reverse", frames.mark_out),
-                    (CARET_LEFT, "Track Reverse From Current Time", at),
+                let whole = [
+                    (
+                        CARET_LINE_LEFT,
+                        "Track Reverse",
+                        frames.mark_out,
+                        "backward",
+                    ),
+                    (ARROWS_LEFT_RIGHT, "Track Fwd Then Reverse", at, "both"),
+                    (CARET_LINE_RIGHT, "Track Forward", frames.mark_in, "forward"),
                 ];
-                for (glyph, name, frame) in back {
+                for (glyph, name, frame, way) in whole {
                     if icon(ui, glyph, name, can) {
-                        tracks = track(frame, "backward");
+                        tracks = track(frame, way, None);
                     }
+                }
+            });
+            ui.end_row();
+            label(ui, "", false);
+            ui.horizontal(|ui| {
+                let back = (at - 1).max(frames.mark_in);
+                if icon(ui, CARET_LEFT, "Track Reverse One Frame", can) {
+                    tracks = track(at, "backward", Some(1));
+                    stepped = Some(back);
                 }
                 if icon(ui, STOP, "Stop Tracking", !running.is_empty()) {
                     stop = true;
                 }
-                let ahead = [
-                    (CARET_RIGHT, "Track Forward From Current Time", at),
-                    (CARET_LINE_RIGHT, "Track Forward", frames.mark_in),
-                ];
-                for (glyph, name, frame) in ahead {
-                    if icon(ui, glyph, name, can) {
-                        tracks = track(frame, "forward");
-                    }
+                let ahead = (at + 1).min(frames.mark_out);
+                if icon(ui, CARET_RIGHT, "Track Forward One Frame", can) {
+                    tracks = track(at, "forward", Some(1));
+                    stepped = Some(ahead);
                 }
             });
             ui.end_row();
@@ -1949,6 +1962,9 @@ impl Workspace {
         }
         if !tracks.is_empty() {
             self.ask(tracks, None);
+            if let Some(at) = stepped {
+                self.page_ask(json!({ "at": at }));
+            }
         }
         if let Some(found) = asked.filter(|_| extra.is_some()) {
             self.ask(vec![found], Some(subject));

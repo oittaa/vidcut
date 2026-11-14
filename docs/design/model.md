@@ -595,6 +595,8 @@ Writing:
 - A path is not keyframes. Why: a new path must not remove the keyframes that the user set, and one path can move several things.
 - `ops::motion` holds the edits: `motion.add`, `motion.set`, `motion.remove`, `motion.find` and `motion.track`. `motion.list` reads the paths.
   - `motion.set` removes a range of samples first (`motion::clear`). Then it puts the new samples on their frames (`motion::put`).
+  - `comp.set` with a box and a `frame` changes the path of the pattern on that frame. Off the path, it changes the first or the last sample.
+    - It also puts the samples next to that frame on the path, at their places. Why: then no other frame of the path moves.
   - A path keeps one sample at least. `motion.remove` takes a path off.
 - A clip has at most `PATHS_KEPT` paths, and a path has at most `SAMPLES_KEPT` samples.
 - `motion::problem` is the check that the requests, `ops::paste` and `validate::violations` share.

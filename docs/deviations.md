@@ -1608,19 +1608,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Text is the next thing that people hide: names, addresses, documents and screens.
   - One request gives the paths and the patterns. A mask then follows a pattern ([spec](spec.md#the-tracker)).
 
-## X168. A drag of a pattern box changes its path
-
-- **Resolve:**
-  - A drag of the handle of a pattern box picks a new pattern (p. 1783).
-  - The path tools of the viewer correct a tracked path (pp. 1787–1788).
-  - What a drag of the box does on a frame of the path is not measured.
-- **vidcut:**
-  - A drag of a pattern box on a frame of its path changes the box of the path on that frame.
-  - On a frame outside the path, the drag moves the box of the pattern.
-  - The viewer has no path tools.
-- **Why:**
-  - A drag on a tracked frame corrects one wrong box of a track.
-
 ## X169. A title follows a motion path
 
 - **Resolve:**

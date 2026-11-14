@@ -657,14 +657,7 @@ fn trimmed(
     };
     let clear = clear.filter(|[a, b]| a <= b);
     let left = |[a, b]: [i64; 2]| samples.iter().any(|s| s.frame < a || s.frame > b);
-    let round = |v: f64| (v * 1e5).round() / 1e5;
-    let edge = at.and_then(|at| m.base_at(at as f64).map(|a| (at, a)));
-    let edge = edge.map(|(frame, a)| PathSample {
-        frame,
-        center: a.center.map(round),
-        size: a.size.map(round),
-        rotation: a.rotation,
-    });
+    let edge = at.and_then(|at| m.base_at(at as f64).map(|a| sample_of(at, &a)));
     match clear {
         Some(span) if left(span) => {
             let edge = edge.as_slice();
@@ -711,11 +704,27 @@ fn moved_path(
     let Some(path) = pattern.and_then(|x| x.path.clone()) else {
         return Ok(());
     };
-    let source = Frames::of(p, c).file(frame);
-    let now = c.motion.iter().find(|m| m.id == path);
-    let Some(now) = now.and_then(|m| m.base_at(source as f64)) else {
+    let Some(m) = c.motion.iter().find(|m| m.id == path) else {
         return Ok(());
     };
+    let Some((first, last)) = m.span() else {
+        return Ok(());
+    };
+    let source = Frames::of(p, c).file(frame);
+    let source = if m.tracked {
+        source.clamp(first, last)
+    } else {
+        source
+    };
+    let Some(now) = m.base_at(source as f64) else {
+        return Ok(());
+    };
+    let near = [source - 1, source + 1]
+        .into_iter()
+        .filter(|f| (first..=last).contains(f) && !m.samples.iter().any(|s| s.frame == *f));
+    let mut samples: Vec<PathSample> = near
+        .filter_map(|f| Some(sample_of(f, &m.area_at(f as f64)?)))
+        .collect();
     let (lo, hi) = Pattern::SIDES;
     let sides = [change.pattern_width, change.pattern_height];
     if sides.iter().flatten().any(|v| !(lo..=hi).contains(v)) {
@@ -734,8 +743,10 @@ fn moved_path(
         ],
         rotation: now.rotation,
     };
+    samples.push(sample);
+    samples.sort_by_key(|s| s.frame);
     let to = super::motion::PathChange {
-        samples: Some(&[sample]),
+        samples: Some(&samples),
         ..Default::default()
     };
     super::motion::set(p, id, &path, to)?;
@@ -743,6 +754,16 @@ fn moved_path(
     change.pattern_width = None;
     change.pattern_height = None;
     Ok(())
+}
+
+fn sample_of(frame: i64, a: &crate::motion::Area) -> PathSample {
+    let round = |v: f64| (v * 1e5).round() / 1e5;
+    PathSample {
+        frame,
+        center: a.center.map(round),
+        size: a.size.map(round),
+        rotation: a.rotation,
+    }
 }
 
 pub fn key(

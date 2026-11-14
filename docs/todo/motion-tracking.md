@@ -111,8 +111,7 @@ In this file, a path is never a track of the timeline.
   - Text that comes into the picture has no blur on its first frames, as a face has not.
   - The detector takes most of the time of a text find. Try the model on the GPU.
 - **The Tracker, what is left:** one pull request for each part.
-  - Track Fwd Then Reverse of Resolve 21.2. Measure where it starts and where it is in the row of buttons.
-  - Measure what a drag of a pattern box does on a frame of the path ([X168](../deviations.md#x168-a-drag-of-a-pattern-box-changes-its-path)).
+  - Measure what a drag of the handle at the top left of a pattern box does on a frame of the path. vidcut changes the path on that frame.
   - Point patterns: Add Point, the search area in the viewer, the channel, Adaptive Mode, Match Tolerance and the pattern flipbooks (pp. 1783–1788).
     - Path Center with Track Center (Append) (p. 1788), and the path tools of the viewer (p. 1787).
   - A track follows no turn and no change of perspective.

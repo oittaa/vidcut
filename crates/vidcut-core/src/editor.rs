@@ -4574,23 +4574,34 @@ fn mutate(
             pattern,
             frame,
             way,
+            length,
             download,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let k = pattern.unwrap_or(1);
             let on = (node.as_str(), k, *frame);
-            let (media, start, plan, follow) = track_start(p, &id, on, playhead, *way)?;
+            let (media, start, plan, follow) = track_start(p, &id, on, playhead, (*way, *length))?;
             let found = env.tracked(&media, &plan, follow, *download)?;
             let (samples, score) =
                 crate::motion::followed(&found, start.base, &start.own, start.bounds);
-            let stop = |on: bool, reached: bool| match (on, reached) {
-                (false, _) => "off",
-                (true, true) => "clip",
-                (true, false) => "stopped",
+            let ends = (start.frames.0 - start.base, start.frames.1 - start.base);
+            let stop = |on: bool, reached: bool, edge: bool| match (on, reached, edge) {
+                (false, _, _) => "off",
+                (true, true, true) => "clip",
+                (true, true, false) => "length",
+                (true, false, _) => "stopped",
             };
             let stops = (
-                stop(way.backward(), found.first <= follow.frames.0),
-                stop(way.forward(), found.end() >= follow.frames.1),
+                stop(
+                    way.backward(),
+                    found.first <= follow.frames.0,
+                    follow.frames.0 <= ends.0,
+                ),
+                stop(
+                    way.forward(),
+                    found.end() >= follow.frames.1,
+                    follow.frames.1 >= ends.1,
+                ),
             );
             let mut out = ops::motion::tracked(p, &id, (node, k), (&start, *way), samples)?;
             out["clip"] = json!(id);
@@ -7048,7 +7059,7 @@ fn track_start(
     id: &str,
     (tracker, k, frame): (&str, u32, Option<i64>),
     playhead: Option<i64>,
-    way: crate::model::TrackWay,
+    (way, length): (crate::model::TrackWay, Option<u32>),
 ) -> Result<(
     Media,
     ops::motion::Start,
@@ -7058,13 +7069,14 @@ fn track_start(
     let frame = comp_frame(p, id, frame, playhead).ok_or_else(|| {
         Error::usage("motion.track needs `frame` (--frame): there is no playhead")
     })?;
-    let start = ops::motion::start(p, id, tracker, k, frame)?;
+    let start = ops::motion::start(p, id, (tracker, k), (frame, length))?;
     let media = p.clip(id).and_then(|c| p.media(&c.media)).cloned();
     let media = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
     let plan = crate::render::node_input(p, id, tracker)?;
+    let (lo, hi) = start.reach.unwrap_or(start.frames);
     let follow = crate::analysis::Follow {
         at: start.frame - start.base,
-        frames: (start.frames.0 - start.base, start.frames.1 - start.base),
+        frames: (lo - start.base, hi - start.base),
         area: start.bounds.map(|v| v as f32),
         backward: way.backward(),
         forward: way.forward(),
@@ -7081,6 +7093,7 @@ pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec
         pattern,
         frame,
         way,
+        length,
         download,
     } = request
     else {
@@ -7088,7 +7101,7 @@ pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec
     };
     let id = resolve_clip(p, clip, playhead).ok();
     let on = (node.as_str(), pattern.unwrap_or(1), *frame);
-    let start = id.and_then(|id| track_start(p, &id, on, playhead, *way).ok());
+    let start = id.and_then(|id| track_start(p, &id, on, playhead, (*way, *length)).ok());
     start
         .map(|(media, _, plan, follow)| (media, plan, follow, *download))
         .into_iter()

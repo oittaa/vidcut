@@ -464,6 +464,7 @@ fn same_thing(kept: &MotionPath, found: &[PathSample]) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Start {
     pub frames: (i64, i64),
+    pub reach: Option<(i64, i64)>,
     pub base: i64,
     pub frame: i64,
     pub own: Area,
@@ -493,7 +494,12 @@ pub(super) fn no_pattern(tracker: &str, k: u32, count: usize) -> Error {
     Error::invalid(format!("{tracker} has no pattern {k}: {have}"))
 }
 
-pub fn start(p: &Project, id: &str, tracker: &str, k: u32, frame: i64) -> Result<Start> {
+pub fn start(
+    p: &Project,
+    id: &str,
+    (tracker, k): (&str, u32),
+    (frame, length): (i64, Option<u32>),
+) -> Result<Start> {
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
     let media = p.media(&c.media).filter(|m| takes(c) && !m.is_still());
@@ -511,13 +517,21 @@ pub fn start(p: &Project, id: &str, tracker: &str, k: u32, frame: i64) -> Result
             f.mark_in, f.mark_out
         )));
     }
+    if length == Some(0) {
+        return Err(Error::usage("a track's length is from 1"));
+    }
     let frames = (f.file(f.mark_in), f.file(f.mark_out) + 1);
+    let reach = length.map(i64::from).map(|n| {
+        let lo = f.file((frame - n).max(f.mark_in));
+        (lo, f.file((frame + n).min(f.mark_out)) + 1)
+    });
     let at = f.file(frame);
     let pattern = pattern_of(c, id, tracker, k)?;
     let own = pattern.area_at(&c.motion, at as f64);
     let own = own.unwrap_or_else(|| pattern.own());
     Ok(Start {
         frames,
+        reach,
         base: f.file(f.first),
         frame: at,
         own,
@@ -536,10 +550,18 @@ pub fn tracked(
     let pattern = pattern_of(c, id, tracker, k)?.clone();
     let old = (pattern.path.as_ref()).and_then(|f| c.motion.iter().find(|m| m.id == *f));
     if let Some(old) = old {
-        let stays = |s: &&PathSample| match way {
-            TrackWay::Both => false,
-            TrackWay::Forward => s.frame < start.frame,
-            TrackWay::Backward => s.frame > start.frame,
+        let beyond = |s: &PathSample| {
+            start
+                .reach
+                .is_some_and(|(lo, hi)| s.frame < lo || s.frame >= hi)
+        };
+        let stays = |s: &&PathSample| {
+            beyond(s)
+                || match way {
+                    TrackWay::Both => false,
+                    TrackWay::Forward => s.frame < start.frame,
+                    TrackWay::Backward => s.frame > start.frame,
+                }
         };
         samples.extend(old.samples.iter().filter(stays).cloned());
         samples.sort_by_key(|s| s.frame);

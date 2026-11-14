@@ -312,8 +312,8 @@ The bar and the Jobs button:
 - A right-click on the Center of a mask opens Connect To (`center_row`, `connect_menu`). It lists each Tracker and its patterns (`hooks`).
   - A connected Center shows the Tracker and the pattern. Follow Size is under it.
 - The viewer draws the box of each pattern of a selected Tracker, with its name (`Workspace::pattern_handles`).
-  - A drag of the handle at the top left moves the box. A drag of an edge resizes it from its middle (`Boxed`, `Edge`).
-  - During a move, `magnified` draws the box larger next to it, with a cross.
+  - A drag of the handle at the top left or of the cross in the middle moves the box. A drag of an edge resizes it from its middle (`Boxed`, `Edge`).
+  - During a move by the handle, `magnified` draws the box larger next to it, with a cross.
   - The release sends one `comp.set` with the box and the `frame` of the playhead.
   - A press on a box picks its pattern in the Inspector (`pattern_picked`).
   - A pattern with an offset has a dashed line to the point that masks follow.
@@ -456,7 +456,8 @@ The bar and the Jobs button:
     - The button and the seeks use the keyframes of the effect (`effect_marks`, `effect_key_times`).
 - `Workspace::tracker_section` shows the controls of a Tracker node.
   - The track buttons send one `motion.track` for each enabled pattern, with the `frame` and the `way`.
-    - Track Reverse starts at the Out, and Track Forward at the In. The two others start at the playhead.
+    - Track Reverse starts at the Out, and Track Forward at the In. Track Fwd Then Reverse starts at the playhead, with the `way` `both`.
+    - The One Frame buttons start at the playhead, with the `length` 1. Then they send `gui.page_time` to the next frame.
     - Stop Tracking and Escape cancel the jobs of kind `track` (`Workspace::stop_tracks`).
     - While a job of kind `track` runs, the Node Editor and its keys take no work (`Workspace::tracks_running`).
   - The Trim row sends `comp.set` with `pattern_trim` for the picked pattern, and the `frame` of the playhead.

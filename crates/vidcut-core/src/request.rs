@@ -3055,23 +3055,26 @@ pub enum Request {
     /// (`c3`, or `V2@15s`). The track looks at the picture that comes into
     /// the tracker, on each frame of the file of the clip. It starts with
     /// the box of the pattern on `frame`, and goes from there in its `way`
-    /// to the In or the Out. It follows the place and the size of the thing
-    /// in the box. A shot change or a thing that goes out of sight does not
-    /// stop it. `jobs.cancel` stops it, and the frames that it tracked stay.
+    /// to the In or the Out, or for its `length`. It follows the place and
+    /// the size of the thing in the box. A shot change or a thing that goes
+    /// out of sight does not stop it. `jobs.cancel` stops it, and the frames
+    /// that it tracked stay.
     ///
     /// The pattern then follows its path: before the first sample of the
     /// path and after its last, it stays where that sample puts it. When
     /// the pattern has a path already, a track of one `way` keeps the
-    /// samples of the other side. A path that an earlier track made for
-    /// the pattern gets the new samples, and keeps its id. Another path
-    /// stays as it is, and the pattern gets a new path, named as the
-    /// pattern.
+    /// samples of the other side. A track with a `length` also keeps the
+    /// samples beyond the frames that it can reach. A path that an earlier
+    /// track made for the pattern gets the new samples, and keeps its id.
+    /// Another path stays as it is, and the pattern gets a new path, named
+    /// as the pattern.
     ///
     /// Returns the path: its `id`, its `name`, the `count` of its samples
     /// and their frames of the file `first` and `last`. It also gives the
     /// `score` (how sure the model is, from 0 to 1, the mean of the
     /// frames), and where the track ended `backward` and `forward`: `clip`
-    /// (the In or the Out), `stopped` (`jobs.cancel`) or `off`.
+    /// (the In or the Out), `length` (after its `length`), `stopped`
+    /// (`jobs.cancel`) or `off`.
     #[serde(rename = "motion.track")]
     MotionTrack {
         clip: ClipRef,
@@ -3086,6 +3089,10 @@ pub enum Request {
         /// The ways the track goes from that frame. Usual: `both`.
         #[serde(default)]
         way: TrackWay,
+        /// The most frames of the composition that the track goes in each
+        /// `way`, from 1. Without it, the track goes to the In or the Out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        length: Option<u32>,
         /// Download the tracking model (715 kB) when it is not on this
         /// computer, checked against its SHA-256. Without it, a missing
         /// model is an error that tells its size.
@@ -5169,8 +5176,9 @@ pub struct NodeChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_enabled: Option<bool>,
     /// The middle of the box of the pattern, `[x, y]` as fractions of the
-    /// picture from its bottom left. On a frame where the path of the
-    /// pattern has a box, it changes the path: a sample on that frame.
+    /// picture from its bottom left. On a `frame` where the path of the
+    /// pattern has a box, it changes the path on that frame only. Before
+    /// or after a tracked path, it changes the first or the last sample.
     /// Elsewhere, it moves the own box of the pattern.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_center: Option<[f64; 2]>,

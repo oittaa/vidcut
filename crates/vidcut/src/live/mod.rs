@@ -37,7 +37,7 @@ pub use player::MakeOutput;
 pub use snapshot::*;
 pub use vidcut_av::thumbs::Image;
 
-use crate::env::AvEnv;
+use crate::env::{AvEnv, Handed};
 use crate::ipc::{self, Instance};
 use crate::paths;
 use crate::threads::Work;
@@ -285,7 +285,7 @@ pub(crate) enum Msg {
     Measured {
         job: Job,
         envelope: Envelope,
-        result: Result<()>,
+        result: Result<Handed>,
         encode: Option<String>,
         project: Option<PathBuf>,
         playhead: Option<i64>,
@@ -1161,13 +1161,14 @@ impl Live {
                 playhead,
             } => {
                 let open = self.open_path();
-                let (job, result) = match result.and(still_open(project, open)) {
+                let measured = result.and_then(|h| still_open(project, open).map(|()| h));
+                let (job, result) = match measured {
                     Err(e) => (job, Err(e)),
-                    Ok(()) => {
+                    Ok(handed) => {
                         let rev = self.project.as_ref().map(|p| p.project().rev);
                         let job = Job { rev, ..job };
                         let at = playhead.unwrap_or_else(|| self.player.position(TIMELINE));
-                        let result = self.edit_at(envelope, job.origin, at);
+                        let result = self.edit_at(envelope, job.origin, at, handed);
                         (job, result)
                     }
                 };
@@ -1866,7 +1867,7 @@ impl Live {
         }
         let download = *download;
         let tx = self.tx.clone();
-        Some(Box::new(move || {
+        Some(plain(move || {
             if isolate {
                 vidcut_av::isolate::get_ready(&paths::models_dir(), true).map_err(|e| {
                     crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
@@ -1901,7 +1902,7 @@ impl Live {
         if plans.is_empty() {
             return None;
         }
-        Some(Box::new(move || {
+        Some(plain(move || {
             let env = AvEnv::new();
             for plan in &plans {
                 env.loudness(plan)?;
@@ -1915,7 +1916,7 @@ impl Live {
         let playhead = Some(self.player.position(TIMELINE));
         if let Request::MotionFind { .. } = &envelope.request {
             let looks = vidcut_core::editor::subject_looks(p, &envelope.request, playhead);
-            return Some(Box::new(move || {
+            return Some(plain(move || {
                 use vidcut_core::Env;
                 for (media, subject, span, download) in &looks {
                     AvEnv::new().subjects(media, *subject, *span, *download)?;
@@ -1926,11 +1927,11 @@ impl Live {
         if let Request::MotionTrack { .. } = &envelope.request {
             let looks = vidcut_core::editor::track_looks(p, &envelope.request, playhead);
             return Some(Box::new(move || {
-                use vidcut_core::Env;
-                for (media, plan, follow, download) in &looks {
-                    AvEnv::new().tracked(media, plan, *follow, *download)?;
-                }
-                Ok(())
+                let env = AvEnv::new();
+                let found = looks.iter().map(|(media, plan, follow, download)| {
+                    env.track(media, plan, *follow, *download)
+                });
+                found.collect()
             }));
         }
         let (clips, sound, speech, download) = match &envelope.request {
@@ -1985,7 +1986,7 @@ impl Live {
                 _ => {}
             }
         }
-        Some(Box::new(move || {
+        Some(plain(move || {
             use vidcut_core::Env;
             for (m, stream) in &needed {
                 match stream {
@@ -3357,7 +3358,7 @@ impl Live {
                     }
                     Ok(())
                 };
-                Step::Measure(Box::new(fetch), Box::new(envelope), None)
+                Step::Measure(plain(fetch), Box::new(envelope), None)
             }
             _ if fetches(&envelope.request)
                 && !envelope.dry_run
@@ -3377,7 +3378,7 @@ impl Live {
                     }
                     Ok(())
                 };
-                Step::Measure(Box::new(fetch), Box::new(envelope), None)
+                Step::Measure(plain(fetch), Box::new(envelope), None)
             }
             Request::Apply { commands, .. }
                 if !envelope.dry_run && commands.iter().any(runs_long) =>
@@ -3394,7 +3395,7 @@ impl Live {
                         .apply(copy, &env, playhead)
                         .map(drop)
                 };
-                Step::Measure(Box::new(measure), Box::new(envelope), playhead)
+                Step::Measure(plain(measure), Box::new(envelope), playhead)
             }
             Request::ClipSet {
                 voice_isolation,
@@ -3416,7 +3417,7 @@ impl Live {
                         crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
                     })
                 };
-                Step::Measure(Box::new(fetch), Box::new(envelope), None)
+                Step::Measure(plain(fetch), Box::new(envelope), None)
             }
             Request::ClipNormalize { .. } => match self.loudness_measure(&envelope) {
                 Some(measure) => Step::Measure(measure, Box::new(envelope), None),
@@ -3456,7 +3457,7 @@ impl Live {
                         .apply(copy, &env, None)
                         .map(drop)
                 };
-                Step::Encode(Box::new(encode), Box::new(envelope), title, "proxy")
+                Step::Encode(plain(encode), Box::new(envelope), title, "proxy")
             }
             Request::SubtitlesTranscribe { .. }
             | Request::AnalyzeWords { .. }
@@ -3479,7 +3480,7 @@ impl Live {
                     Request::MediaTranscribe { .. } => ("Transcribe Audio", "transcript"),
                     _ => ("Create Subtitles from Audio", "subtitles"),
                 };
-                Step::Encode(Box::new(hear), Box::new(envelope), title.into(), kind)
+                Step::Encode(plain(hear), Box::new(envelope), title.into(), kind)
             }
             Request::SubtitlesRetime { .. } | Request::SubtitlesTimeWords { .. } => {
                 let Some(open) = &self.project else {
@@ -3501,7 +3502,7 @@ impl Live {
                     }
                     _ => ("Re-time Subtitles to Speech", "retime"),
                 };
-                Step::Encode(Box::new(hear), Box::new(envelope), title.into(), kind)
+                Step::Encode(plain(hear), Box::new(envelope), title.into(), kind)
             }
             Request::MulticamCreate {
                 sync: vidcut_core::model::AngleSync::Sound,
@@ -3525,12 +3526,12 @@ impl Live {
                 };
                 match envelope.request {
                     Request::MulticamCreate { .. } => Step::Encode(
-                        Box::new(hear),
+                        plain(hear),
                         Box::new(envelope),
                         "Sync by Sound".into(),
                         "sync",
                     ),
-                    _ => Step::Measure(Box::new(hear), Box::new(envelope), None),
+                    _ => Step::Measure(plain(hear), Box::new(envelope), None),
                 }
             }
             Request::TimelineImport {
@@ -3544,7 +3545,7 @@ impl Live {
                         .open_timeline(&path, unpack.as_deref(), true)
                         .map(drop)
                 };
-                Step::Measure(Box::new(unpack_bundle), Box::new(envelope), None)
+                Step::Measure(plain(unpack_bundle), Box::new(envelope), None)
             }
             Request::MediaTranscriptsRemove { .. } => {
                 let result = self.edit(envelope, job.origin);
@@ -3621,7 +3622,7 @@ impl Live {
 
     fn edit(&mut self, envelope: Envelope, origin: Origin) -> Result<Response> {
         let playhead = self.player.position(TIMELINE);
-        self.edit_at(envelope, origin, playhead)
+        self.edit_at(envelope, origin, playhead, Handed::new())
     }
 
     fn edit_at(
@@ -3629,6 +3630,7 @@ impl Live {
         mut envelope: Envelope,
         origin: Origin,
         playhead: i64,
+        handed: Handed,
     ) -> Result<Response> {
         match &mut envelope.request {
             Request::EditPaste { clips, cues, .. } if clips.is_none() && cues.is_none() => {
@@ -3678,7 +3680,8 @@ impl Live {
             .project
             .as_ref()
             .map(|open| AvEnv::for_project(open.store.path()).heard_only())
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .with_tracks(handed);
         let Some(open) = self.project.as_mut() else {
             return Err(no_project());
         };
@@ -5151,7 +5154,11 @@ enum Step {
     Encode(Measure, Box<Envelope>, String, &'static str),
 }
 
-type Measure = Box<dyn FnOnce() -> Result<()> + Send>;
+type Measure = Box<dyn FnOnce() -> Result<Handed> + Send>;
+
+fn plain(measure: impl FnOnce() -> Result<()> + Send + 'static) -> Measure {
+    Box::new(move || measure().map(|()| Handed::new()))
+}
 
 type Make = Box<dyn FnOnce() -> Result<(PathBuf, Vec<String>)> + Send>;
 

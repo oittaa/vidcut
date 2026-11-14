@@ -2630,17 +2630,21 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
 - The viewer shows the box of each pattern of a selected Tracker (p. 1783).
   - A drag of the small handle at the top left moves the box. A zoomed view of the box shows during the drag (pp. 1783–1784).
   - A drag of an edge resizes the box from its middle (p. 1783).
-  - vidcut: a drag of the box on a frame of its path changes the box of the path on that frame ([X168](deviations.md#x168-a-drag-of-a-pattern-box-changes-its-path)).
+  - The middle of the box is a point of the path. On a frame of the path, a drag of this point changes the path on that frame only.
+  - Before the path and after it, the drag changes the first or the last frame of the path. It adds no frame to the path.
+  - vidcut: a drag of the handle at the top left also changes the path in this way.
   - Resolve also shows a search area around the box (p. 1784). vidcut shows none.
-- The track buttons are at the top of the Inspector (pp. 1784–1785):
-  - Track Reverse tracks backward from the end of the render range. Track Reverse From Current Time tracks backward from the playhead (p. 2844).
-  - Track Forward tracks forward from the start of the render range. Track Forward From Current Time tracks forward from the playhead (p. 2844).
+- The track buttons are at the top of the Inspector (pp. 1784–1785). They are in two rows.
+  - The first row has Track Reverse, Track Fwd Then Reverse and Track Forward.
+  - Track Reverse tracks backward from the end of the render range. Track Forward tracks forward from its start (p. 2844).
+  - Track Fwd Then Reverse tracks forward from the playhead to the end of the render range. Then it tracks backward from the playhead to the start.
+  - The second row has Track Reverse One Frame, Stop Tracking and Track Forward One Frame.
+  - A One Frame button tracks one frame from the playhead. Then the playhead is on that frame.
   - The render range is from the In to the Out. A track stops at its end (p. 1785).
   - Stop Tracking and Escape stop a track (p. 1785). The frames that it tracked stay (pp. 1788, 2844).
   - A track does not stop at a lost pattern or at a shot change. The user stops it (p. 1785).
   - The buttons track each enabled pattern (p. 1787). The check box of a pattern in the list enables it.
   - While a track runs, the Node Editor takes no work (p. 1784).
-  - Resolve 21.2 also has Track Fwd Then Reverse. vidcut does not have it yet ([todo](todo/motion-tracking.md)).
 - The Tracker looks at the picture on its input, with the nodes before it (p. 1784). It tracks on each frame of the file.
 - The trim buttons take off the tracking data of the selected patterns (p. 2844):
   - Trim to Start takes off the data before the playhead.
