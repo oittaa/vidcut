@@ -1397,6 +1397,7 @@ mod tests {
                     crossing: false,
                     moving: None,
                     followed: Default::default(),
+                    clock: Default::default(),
                 }],
             }],
         }

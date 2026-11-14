@@ -520,6 +520,7 @@ mod tests {
                 crossing: false,
                 moving: None,
                 followed: Default::default(),
+                clock: Default::default(),
             }],
             cache: Default::default(),
             excluded: false,

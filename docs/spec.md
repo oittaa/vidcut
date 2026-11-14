@@ -2565,7 +2565,12 @@ The shapes:
 - The Time Ruler and the transport controls are under the viewer (p. 1293).
   - The ruler covers the whole source of the clip: the head before its In and the tail after its Out (p. 1293).
   - Yellow lines mark the In and the Out of the clip (p. 1293).
-  - Measured in Resolve Studio 21.2: the ruler counts the frames of the file from the In. The frames of the head have negative numbers.
+  - The ruler counts the frames of the file of the clip. Measured in Resolve Studio 21.2:
+    - Frame 0 is the In of the clip when the composition is made. The frames of the head have negative numbers.
+    - A later trim moves the In on the ruler. The numbers of the frames stay, and the keyframes stay on their frames.
+    - A file of 59.94 frames a second on a timeline of 30 counts about two frames for each frame of the timeline.
+  - The page does not use a speed change of the clip (p. 1641). The ruler counts the frames of the file in their order.
+  - The keyframes of the nodes are on these frames.
   - A click or a drag on the ruler moves the playhead. The playhead cannot leave the source (pp. 1293, 1295).
   - A gray bar with two handles zooms and scrolls the ruler. A drag with the middle mouse button on the ruler scrolls it (p. 1295).
   - The keyframes of the selected node show as tick marks on the Time Ruler (p. 1302).
@@ -2586,6 +2591,8 @@ The shapes:
   - With Ping Pong, play from the head and from the tail starts as it does with Loop.
   - Each composition keeps its own Loop and its own way to loop. Loop is on in a new composition.
   - The timeline playhead follows the playhead of the page only between the In and the Out. In the head and the tail, it stays where it was.
+  - Measured in Resolve Studio 21.2: play shows each frame of the file at the frame rate of the timeline. Thus a file of 60 frames a second on a timeline of 30 plays at half speed, with no sound.
+  - vidcut: play goes at the speed of the file ([X171](deviations.md#x171-the-effects-page-plays-at-the-speed-of-the-file)).
 - The page plays the sound of the timeline (p. 1297).
   - Measured in Resolve Studio 21.2: play in the head has no sound. The same frames had sound between the In and the Out.
   - Measured in Resolve Studio 21.2: play backward in the tail had sound in one run of three. Play backward between the In and the Out had sound in two runs of four.
@@ -2618,6 +2625,7 @@ The shapes:
 
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
 `gui.page_time` moves and plays the playhead of the page. `comp.loop` sets Loop and Ping Pong. `player.bounds` holds play of the timeline between two frames.
+`comp.set` and `comp.key` take a `frame` of the composition. Without it, they take the frame at the playhead.
 `comp.set` with `follows` makes a mask follow a path. `motion.track` with `node` tracks a mask.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)

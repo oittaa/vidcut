@@ -2790,14 +2790,16 @@ pub enum Request {
     },
     /// Change values of one node of a clip's composition. Each value given
     /// replaces its own; a value the node's tool doesn't have is an error.
-    /// A value with keyframes takes a keyframe on `at` and keeps its plain
-    /// value. Without `at`, or a playhead, that is an error.
+    /// A value with keyframes takes a keyframe on `frame` and keeps its
+    /// plain value. A `frame` is a frame of the composition: a frame of the
+    /// clip's file, counted from the composition's frame 0. Without it, it
+    /// is the frame at the playhead; with no playhead, that is an error.
     #[serde(rename = "comp.set")]
     CompSet {
         clip: ClipRef,
         node: String,
         #[serde(default)]
-        at: Option<TimeSpec>,
+        frame: Option<i64>,
         #[serde(flatten)]
         change: Box<NodeChange>,
     },
@@ -2852,15 +2854,18 @@ pub enum Request {
         copy: Vec<Node>,
     },
     /// The Keyframe button of one value of a node of a clip's composition,
-    /// or of all its values without `value`. With a keyframe on `at`, it
+    /// or of all its values without `value`. With a keyframe on `frame`, it
     /// removes the keyframes of those values on that frame. Without one, it
-    /// puts a keyframe on `at` on each of those values. With `ease`, it only
-    /// gives the keyframes on `at` that ease.
+    /// puts a keyframe on `frame` on each of those values. With `ease`, it
+    /// only gives the keyframes on `frame` that ease. A `frame` is a frame
+    /// of the composition, as `comp.set` takes it. Without it, it is the
+    /// frame at the playhead.
     #[serde(rename = "comp.key")]
     CompKey {
         clip: ClipRef,
         node: String,
-        at: TimeSpec,
+        #[serde(default)]
+        frame: Option<i64>,
         #[serde(default)]
         value: Option<EffectValue>,
         #[serde(default)]

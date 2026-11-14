@@ -2278,6 +2278,11 @@ fn length(p: &Project, t: &TimeSpec) -> Result<i64> {
     Ok(ctx(p, None).duration(t)?)
 }
 
+fn comp_frame(p: &Project, id: &str, frame: Option<i64>, playhead: Option<i64>) -> Option<i64> {
+    let c = p.clip(id)?;
+    frame.or_else(|| Some(crate::composition::Frames::of(p, c).at(playhead?)))
+}
+
 pub fn resolve_clip(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<String> {
     if let Some((track, at)) = r.split_once('@') {
         let t = p
@@ -4376,15 +4381,12 @@ fn mutate(
         Request::CompSet {
             clip,
             node,
-            at,
+            frame,
             change,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            let at = match at {
-                Some(t) => Some(resolve(p, t, playhead)?),
-                None => playhead,
-            };
-            ops::comp::set(p, &id, node, change, at)?;
+            let frame = comp_frame(p, &id, *frame, playhead);
+            ops::comp::set(p, &id, node, change, frame)?;
             Value::Null
         }
         Request::CompConnect {
@@ -4434,13 +4436,14 @@ fn mutate(
         Request::CompKey {
             clip,
             node,
-            at,
+            frame,
             value,
             ease,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            let at = resolve(p, at, playhead)?;
-            ops::comp::key(p, &id, node, at, (*value, *ease))?
+            let frame = comp_frame(p, &id, *frame, playhead)
+                .ok_or_else(|| Error::usage("comp.key needs `frame`, or a playhead"))?;
+            ops::comp::key(p, &id, node, frame, (*value, *ease))?
         }
         Request::CompReset { clip, node } => {
             let id = resolve_clip(p, clip, playhead)?;

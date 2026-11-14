@@ -1408,10 +1408,11 @@ fn live(method: &str, r: &Response) -> Option<()> {
             let time = &v["time"];
             if time.is_object() {
                 println!(
-                    "effects playhead {} (source {}..{}, Out {}), speed {}, loop {}",
+                    "effects playhead {} (source {}..{}, In {}, Out {}), speed {}, loop {}",
                     time["at"],
                     time["first"],
                     time["last"],
+                    time["in"],
                     time["out"],
                     time["speed"],
                     match (time["loop"] == true, time["ping_pong"] == true) {

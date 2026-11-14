@@ -1661,6 +1661,21 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - One setting does the work of a tracker node and a connection.
   - A title with keyframes, and a title that stops following, wait for a measurement in Resolve ([todo](todo/motion-tracking.md)).
 
+## X171. The Effects page plays at the speed of the file
+
+- **Resolve:**
+  - The ruler of the Fusion page counts the frames of the file of the clip ([spec §8.19](spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
+  - Play shows each frame of the file at the frame rate of the timeline (21.2).
+  - Thus a file of 60 frames a second on a timeline of 30 plays at half speed. The play has no sound (21.2).
+- **vidcut:**
+  - The ruler counts the frames of the file, as in Resolve.
+  - Play goes at the speed of the file.
+  - Between the In and the Out, the timeline plays, with its frames and its sound.
+  - In the head and the tail, play shows each frame of the file, with no sound.
+- **Why:**
+  - The user sees the motion at its true speed, and hears the sound with it.
+  - A key on each frame of the file stays possible, because the ruler and the steps of one frame are as in Resolve.
+
 ## X170. The Equalizer: Notch, Bell width and OTIO export
 
 The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the controls of the Equalizer. vidcut is different in three things.

@@ -475,7 +475,7 @@ const EXAMPLES: &[(&str, &str)] = &[
            vidcut comp set c3 Polygon1 --points '[[0,0.2],[-0.1,-0.1],[0.1,-0.1]]'
            vidcut comp set c3 GaussianBlur1 --strength 0.6 --blend 0.5
            vidcut comp set c3 Blur1 --pass-through true
-           vidcut comp set c3 Blur1 --size 8 --at 2s",
+           vidcut comp set c3 Blur1 --size 8 --frame 60",
     ),
     (
         "comp.connect",
@@ -490,9 +490,9 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "comp.key",
-        "vidcut comp key c3 Ellipse1 --at 2s
-  vidcut comp key c3 Ellipse1 --at 2s --value soft_edge
-  vidcut comp key c3 Ellipse1 --at 2s --ease ease_in_out",
+        "vidcut comp key c3 Ellipse1 --frame 60
+  vidcut comp key c3 Ellipse1 --frame 60 --value soft_edge
+  vidcut comp key c3 Ellipse1 --frame 60 --ease ease_in_out",
     ),
     (
         "effects.key",

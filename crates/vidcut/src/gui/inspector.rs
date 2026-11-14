@@ -1505,11 +1505,11 @@ impl Workspace {
         }
         let paths = vidcut_core::ops::motion::takes(&clip).then(|| path_rows(&clip));
         let at = self.page_at();
-        let source = clip.content_at(at) as f64;
+        let source = at as f64;
         for &k in &picked {
             let n = &comp.nodes[k];
             for v in n.values() {
-                let m = mark(&clip, n.keys_of(v), at);
+                let m = frame_mark(n.keys_of(v), at);
                 self.inspector.marks.push((node_slot(k), v, m));
             }
         }
@@ -1554,7 +1554,7 @@ impl Workspace {
             shown: picture.clone(),
             stored: picture,
             shape: shape(&p, clip),
-            frame: clip.content_at(self.page_at()),
+            frame: clip.content_at(self.snap.timeline.position),
             effect_keys: Vec::new(),
             paths: path_rows(clip),
             finds: vidcut_core::ops::motion::takes(clip),
@@ -1564,7 +1564,10 @@ impl Workspace {
 
     fn track_node(&mut self, clip: &Clip, node: &Node) {
         let follows = node.tool.mask().and_then(|m| m.follows.as_ref());
-        let at = self.page_at();
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let at = vidcut_core::composition::Frames::of(&p, clip).time(self.page_at());
         let followed = clip.motion.iter().find(|m| Some(&m.id) == follows);
         let first = followed.and_then(|m| m.span()).map(|(first, _)| first);
         let way = match first {
@@ -1646,12 +1649,9 @@ impl Workspace {
                     let Some(v) = node_value_of(f, stored) else {
                         continue;
                     };
-                    let times = stored
-                        .keys_of(v)
-                        .iter()
-                        .map(|k| clip.key_time(k.frame).round() as i64);
+                    let times = stored.keys_of(v).iter().map(|k| k.frame);
                     if let Some(t) = next_key(times, self.page_at(), dir) {
-                        self.send("gui.page_time", json!({ "at": t - clip.start }));
+                        self.send("gui.page_time", json!({ "at": t }));
                     }
                 }
                 Act::NodeReset => self.send_node("comp.reset", clip, stored, json!({})),
@@ -1671,7 +1671,7 @@ impl Workspace {
         params["clip"] = json!(clip.id);
         params["node"] = json!(node.name);
         if method != "comp.reset" {
-            params["at"] = json!(self.page_at());
+            params["frame"] = json!(self.page_at());
         }
         self.send(method, params);
     }
@@ -2317,6 +2317,14 @@ pub(super) fn next_key(times: impl Iterator<Item = i64>, at: i64, dir: i64) -> O
         times.filter(|t| *t < at).max()
     } else {
         times.filter(|t| *t > at).min()
+    }
+}
+
+fn frame_mark(keys: &[Keyframe], at: i64) -> KeyMark {
+    KeyMark {
+        on: keys.iter().any(|k| k.frame == at),
+        prev: keys.iter().any(|k| k.frame < at),
+        next: keys.iter().any(|k| k.frame > at),
     }
 }
 

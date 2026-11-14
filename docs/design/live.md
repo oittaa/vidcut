@@ -279,10 +279,13 @@ The bar and the Jobs button:
 - `EffectsPage` holds the page that shows, the selected nodes, and the state of the Node Editor and of a mask drag.
 - `Workspace::effects_clip` finds the clip of the page: the topmost visible clip at the playhead (`placing::topmost`).
 - The viewer renders that clip alone through `render::composition_alone` and `Cells::show_plan`, at the size of its own picture.
-  - The plan covers the whole source of the clip. `Project::handles` gives the frames of the head and of the tail.
-- The playhead of the page is `Workspace::page_at`. Between the In and the Out, it is the timeline playhead.
+  - The plan covers the whole source of the clip, at the frame rate of its file. Each frame of the plan is a frame of the file.
+  - `composition::Frames` gives the frames of the composition: the first and the last frame of the source, the In and the Out.
+  - The plan has no speed change of the clip. Its motion paths are on the frames of the file (`FileClock::file`).
+- The playhead of the page is `Workspace::page_at`, a frame of the composition. Between the In and the Out, it is the frame at the timeline playhead (`Frames::at`).
   - In the head and the tail, `EffectsPage` keeps it (`Away`). The timeline playhead stays where it was.
-  - Play there runs on the clock of the GUI, with no sound (`Run`).
+  - Between the In and the Out, a frame of the file that no frame of the timeline shows is kept as `Away` too. The timeline playhead goes to the nearest frame (`Frames::time`).
+  - Play in the head and the tail runs on the clock of the GUI, at the frame rate of the file, with no sound (`Run`).
   - At the In or the Out, `Workspace::page_tick` seeks the timeline there and plays it on.
   - Between the In and the Out, the timeline plays. `player.bounds` holds it to the clip, with the Loop and the Ping Pong of the composition (`Workspace::sync_bounds`).
   - With Ping Pong, `Player::bounce` plays back from the edge where play stopped (`Wrap::PingPong`). The tick of the live thread calls it.

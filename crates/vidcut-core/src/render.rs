@@ -563,6 +563,7 @@ impl Smooth {
             crossing: false,
             moving: None,
             followed: Followed::default(),
+            clock: Default::default(),
         }));
     }
 
@@ -624,10 +625,78 @@ pub struct Placed {
     /// when none follows a path.
     #[serde(default, skip_serializing_if = "Followed::is_empty")]
     pub followed: Followed,
+    /// The way from its keyframe position to the frame of its file, for the
+    /// keyframes of its composition. Left out on a clip without a speed
+    /// whose file has the rate of the timeline.
+    #[serde(default, skip_serializing_if = "FileClock::is_plain")]
+    pub clock: FileClock,
 }
 
 fn zero_i64(n: &i64) -> bool {
     *n == 0
+}
+
+/// The way from a keyframe position of a clip to the frame of its file that
+/// the clip shows there.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FileClock {
+    /// How the clip walks its source from its first frame.
+    pub pace: Pace,
+    /// The source frame of the clip's first frame.
+    pub from: i64,
+    /// The keyframe position of the clip's first frame.
+    pub key: i64,
+    /// The frame rate of the timeline and the frame rate of the file, when
+    /// they are not the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rates: Option<[f64; 2]>,
+}
+
+impl FileClock {
+    pub fn of(p: &Project, c: &Clip) -> Self {
+        let fps = p.settings.fps.as_f64();
+        let file = p
+            .media(&c.media)
+            .and_then(|m| m.info.video.as_ref())
+            .filter(|v| !v.still && v.fps.as_f64() > 0.0)
+            .map(|v| v.fps.as_f64());
+        Self {
+            pace: c.pace(),
+            from: c.source_in,
+            key: c.content_at(c.start),
+            rates: file.filter(|f| (f - fps).abs() > 1e-9).map(|f| [fps, f]),
+        }
+    }
+
+    pub fn is_plain(&self) -> bool {
+        self.rates.is_none() && self.pace == Pace::default() && self.from == self.key
+    }
+
+    pub fn rate(&self, fps: f64) -> f64 {
+        self.rates.map_or(fps, |[_, file]| file)
+    }
+
+    pub fn source(&self, key: i64) -> i64 {
+        self.from + self.pace.offset(key - self.key)
+    }
+
+    pub fn file(&self, source: i64) -> i64 {
+        match self.rates {
+            None => source,
+            Some([fps, file]) => (((source as f64 - 0.5) / fps - 1e-6) * file).ceil() as i64,
+        }
+    }
+
+    pub fn source_of(&self, file: f64) -> f64 {
+        match self.rates {
+            None => file,
+            Some([fps, rate]) => file * fps / rate,
+        }
+    }
+
+    pub fn frame(&self, key: i64) -> i64 {
+        self.file(self.source(key))
+    }
 }
 
 /// The motion paths that the masks of a picture's composition follow, with
@@ -775,6 +844,7 @@ impl Placed {
             crossing: false,
             moving: None,
             followed,
+            clock: FileClock::default(),
         }
     }
 
@@ -794,6 +864,7 @@ impl Placed {
             crossing: false,
             moving: None,
             followed,
+            clock: FileClock::default(),
         }
     }
 
@@ -818,6 +889,7 @@ impl Placed {
             crossing: self.crossing,
             moving: self.moving.clone(),
             followed: self.followed.clone(),
+            clock: self.clock.clone(),
         }
     }
 
@@ -2319,6 +2391,7 @@ fn crossing(d: &transitions::Playing, inside: bool) -> Option<Placed> {
         crossing: true,
         moving,
         followed: Followed::default(),
+        clock: Default::default(),
     })
 }
 
@@ -3372,6 +3445,10 @@ impl VideoPlan<'_> {
         }
         let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
         let (path, origin) = origin_of(m);
+        let mut placed = placed_of(c, nest, fills, crossed, x);
+        if let Some(own) = placed.first_mut().filter(|o| o.clip == c.id) {
+            own.clock = FileClock::of(self.p, c);
+        }
         Ok(VideoPiece::Source {
             media: c.media.clone(),
             path,
@@ -3384,7 +3461,7 @@ impl VideoPlan<'_> {
             alpha_mode: m.alpha_mode,
             super_scale: super_scale_of(m.super_scale, s),
             retime: retime_of(c, x, m, s),
-            placed: placed_of(c, nest, fills, crossed, x),
+            placed,
             cache: c.render_cache,
             excluded: false,
             made: None,
@@ -3448,6 +3525,7 @@ impl<'a> Span<'a> {
                     crossing: false,
                     moving: None,
                     followed: Followed::default(),
+                    clock: Default::default(),
                     ..across.clone()
                 };
                 (None, vec![own, across])
@@ -3639,6 +3717,7 @@ impl<'a> Span<'a> {
                 crossing: false,
                 moving: None,
                 followed: Followed::default(),
+                clock: Default::default(),
                 ..c.clone()
             });
             let piece = VideoPiece::Generated {
@@ -3928,21 +4007,41 @@ pub fn composition_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
         .clip(clip)
         .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
         .clone();
-    let (head, tail) = p.handles(&c);
+    let frames = crate::composition::Frames::of(p, &c);
+    let clock = &frames.clock;
     let mut alone = p.clone();
     let own = p.media(&c.media).and_then(|m| m.info.video.as_ref());
     if let Some((w, h)) = own.map(crate::model::VideoInfo::display_size) {
         alone.settings.width = w;
         alone.settings.height = h;
     }
+    if let Some(v) = own.filter(|_| clock.rates.is_some()) {
+        alone.settings.fps = v.fps;
+    }
+    let length = frames.last - frames.first + 1;
     for t in &mut alone.tracks {
         t.clips.retain(|x| x.id == c.id);
         t.transitions.clear();
         t.video_enabled = true;
         for x in &mut t.clips {
             x.enabled = true;
-            x.move_head(-head);
-            x.duration += tail;
+            x.start = 0;
+            x.duration = length;
+            x.source_in = frames.zero + frames.first;
+            x.speed = None;
+            x.audio = None;
+            for m in &mut x.motion {
+                let mut samples: Vec<PathSample> = m
+                    .samples
+                    .iter()
+                    .map(|s| PathSample {
+                        frame: clock.file(s.frame),
+                        ..*s
+                    })
+                    .collect();
+                samples.dedup_by_key(|s| s.frame);
+                m.samples = Arc::new(samples);
+            }
             x.picture = x
                 .picture
                 .take()
@@ -3953,7 +4052,7 @@ pub fn composition_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
                 });
         }
     }
-    let mut plan = flatten(&alone, c.start - head, c.end() + tail)?;
+    let mut plan = flatten(&alone, 0, length)?;
     plan.audio.clear();
     plan.colors = timeline_colors(p);
     Ok(plan)

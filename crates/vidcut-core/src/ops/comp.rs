@@ -1,18 +1,19 @@
 use serde_json::{Value, json};
 
-use crate::composition::cleaned;
+use crate::composition::{Frames, cleaned};
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::model::{Composition, Ease, EffectValue, Node, Project, Subject, Tool, ToolType};
 use crate::request::{NodeChange, NodeInput};
 
-use super::effect::{kind_applied, source_frame};
+use super::effect::kind_applied;
 use super::locate;
 use super::picture::{node_checked, takes};
 
 fn comp_of<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut Composition> {
     let (ti, ci) = locate(p, id)?;
     takes(p, ti, &p.tracks[ti].clips[ci])?;
+    let start = Frames::of(p, &p.tracks[ti].clips[ci]).zero;
     let c = &mut p.tracks[ti].clips[ci];
     if c.generator.is_some() {
         return Err(Error::invalid(format!(
@@ -20,7 +21,10 @@ fn comp_of<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut Composition> {
         )));
     }
     let picture = c.picture.get_or_insert_with(Default::default);
-    Ok(picture.composition.get_or_insert_with(Composition::plain))
+    Ok(picture.composition.get_or_insert_with(|| Composition {
+        start,
+        ..Composition::plain()
+    }))
 }
 
 fn kept<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut Composition> {
@@ -409,7 +413,7 @@ pub fn set(
     id: &str,
     name: &str,
     change: &NodeChange,
-    at: Option<i64>,
+    frame: Option<i64>,
 ) -> Result<()> {
     if *change == NodeChange::default() {
         return Err(Error::usage("comp.set needs a value to change"));
@@ -417,7 +421,6 @@ pub fn set(
     if let Some(Some(named)) = &change.follows {
         follow_checked(p, id, named)?;
     }
-    let frame = at.map(|t| source_frame(p, id, t)).transpose()?;
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
@@ -426,7 +429,7 @@ pub fn set(
     for value in n.keys.iter().map(|k| k.value).filter(|v| named.contains(v)) {
         let Some(frame) = frame else {
             return Err(Error::usage(format!(
-                "{name}'s {} has keyframes: give `at` for the keyframe",
+                "{name}'s {} has keyframes: give `frame` for the keyframe",
                 value.name().replace('_', " ")
             )));
         };
@@ -444,10 +447,9 @@ pub fn key(
     p: &mut Project,
     id: &str,
     name: &str,
-    at: i64,
+    frame: i64,
     (value, ease): (Option<EffectValue>, Option<Ease>),
 ) -> Result<Value> {
-    let frame = source_frame(p, id, at)?;
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
@@ -481,7 +483,7 @@ pub fn key(
         }
         (Some(_), _) => {
             return Err(Error::invalid(format!(
-                "{name} of {id} has no keyframes on source frame {frame}"
+                "{name} of {id} has no keyframes on frame {frame}"
             )));
         }
         (None, Some(v)) => n.toggle_value_key(v, frame),

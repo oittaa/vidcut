@@ -1,8 +1,10 @@
 use std::collections::HashSet;
 
 use crate::model::{
-    Blur, BlurClipping, BlurFilter, Composition, EffectKind, EffectType, Mask, Node, Tool, ToolType,
+    Blur, BlurClipping, BlurFilter, Clip, Composition, EffectKind, EffectType, Mask, Node, Project,
+    Tool, ToolType,
 };
+use crate::render::FileClock;
 
 pub const MEDIA_IN: &str = "MediaIn1";
 pub const MEDIA_OUT: &str = "MediaOut1";
@@ -326,7 +328,96 @@ impl Default for Composition {
             nodes: Vec::new(),
             loop_play: true,
             ping_pong: false,
+            start: 0,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Frames {
+    pub clock: FileClock,
+    pub zero: i64,
+    pub first: i64,
+    pub last: i64,
+    pub mark_in: i64,
+    pub mark_out: i64,
+    start: i64,
+    end: i64,
+    content: i64,
+}
+
+impl Frames {
+    pub fn of(p: &Project, c: &Clip) -> Self {
+        let clock = FileClock::of(p, c);
+        let content = c.content_at(c.start);
+        let opening = clock.frame(content);
+        let closing = clock.frame(c.content_at(c.end() - 1));
+        let zero = c
+            .picture
+            .as_ref()
+            .and_then(|x| x.composition.as_ref())
+            .map_or(opening, |x| x.start);
+        let (first, last) = match p.source_range(c) {
+            Some(have) if have.end > have.start => {
+                (clock.file(have.start), clock.file(have.end) - 1)
+            }
+            _ => (opening.min(closing), opening.max(closing)),
+        };
+        let (mark_in, mark_out) = (opening.min(closing) - zero, opening.max(closing) - zero);
+        Self {
+            clock,
+            zero,
+            first: (first - zero).min(mark_in),
+            last: (last - zero).max(mark_out),
+            mark_in,
+            mark_out,
+            start: c.start,
+            end: c.end(),
+            content,
+        }
+    }
+
+    pub fn at(&self, t: i64) -> i64 {
+        self.clock.frame(self.content + t - self.start) - self.zero
+    }
+
+    pub fn time(&self, f: i64) -> i64 {
+        let (a, b) = (self.start, (self.end - 1).max(self.start));
+        let rising = self.at(b) >= self.at(a);
+        let below = |t: i64| {
+            if rising {
+                self.at(t) < f
+            } else {
+                self.at(t) > f
+            }
+        };
+        let (mut lo, mut hi) = (a, b);
+        if !below(lo) {
+            return lo;
+        }
+        if below(hi) {
+            return hi;
+        }
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if below(mid) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        match (self.at(lo) - f).abs() < (self.at(hi) - f).abs() {
+            true => lo,
+            false => hi,
+        }
+    }
+
+    pub fn inside(&self, f: i64) -> bool {
+        (self.mark_in..=self.mark_out).contains(&f)
+    }
+
+    pub fn source(&self, f: f64) -> f64 {
+        self.clock.source_of(f + self.zero as f64)
     }
 }
 

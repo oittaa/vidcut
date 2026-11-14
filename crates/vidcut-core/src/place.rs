@@ -1124,7 +1124,7 @@ impl Placing {
             own.edge = [-1.0, -1.0, 2.0, 2.0];
         }
         let composed = p.picture.composition.as_ref().map_or(Vec::new(), |c| {
-            let at = p.source as f64;
+            let at = (p.clock.frame(p.source) - c.start) as f64;
             let sampled = Composition {
                 nodes: c.nodes.iter().map(|n| n.sampled(at)).collect(),
                 ..Composition::default()
@@ -1559,6 +1559,7 @@ mod tests {
             crossing: false,
             moving: None,
             followed: Default::default(),
+            clock: Default::default(),
         };
         let frame = (1920.0, 1080.0);
         let level = Placing::whole(&[placed], frame).level;
@@ -1593,6 +1594,7 @@ mod tests {
             crossing: false,
             moving: None,
             followed: Default::default(),
+            clock: Default::default(),
         };
         let placing = Placing::whole(&[placed], (1920.0, 1080.0));
         let Work::Blur(b) = &placing.effects[0].work else {
@@ -1633,6 +1635,7 @@ mod tests {
             crossing: false,
             moving: None,
             followed: Default::default(),
+            clock: Default::default(),
         };
         assert_eq!(detail(&[placed]), 0.4);
     }

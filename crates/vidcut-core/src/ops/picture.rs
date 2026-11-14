@@ -740,6 +740,7 @@ pub fn composition_checked(c: &Composition) -> Result<Composition> {
             .collect::<Result<Vec<_>>>()?,
         loop_play: c.loop_play,
         ping_pong: c.ping_pong,
+        start: c.start,
     })
 }
 

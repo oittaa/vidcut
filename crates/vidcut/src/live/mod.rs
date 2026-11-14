@@ -114,6 +114,8 @@ pub struct PageClock {
     #[serde(rename = "loop")]
     pub looping: bool,
     pub ping_pong: bool,
+    #[serde(rename = "in")]
+    pub mark_in: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]

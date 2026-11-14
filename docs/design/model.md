@@ -537,6 +537,11 @@ Writing:
   - A `Mask` can follow a motion path of its clip, or each path of a subject (`Mask.follows`).
   - `motion.track` refuses a mask with keyframes on its center, its size or its rotation (`ops::motion::start`). Why: a track puts those values back at their usual values.
   - `input` names the node whose picture comes in. `effect_mask` names the last mask of a chain of masks.
+- A composition counts the frames of the file of its clip. `Composition::start` is the frame of the file that is its frame 0.
+  - `ops::comp` sets it to the In of the clip when it makes the composition. A later trim does not change it.
+  - `render::FileClock` takes a keyframe position of the clip to the frame of the file that it shows. It follows the speed of the clip and the two frame rates.
+  - `composition::Frames` gives the frames of a composition: the first and the last frame of the source, the In and the Out.
+  - `Frames::time` and `Frames::at` take a frame of the composition to the timeline and back.
 - The joins are names, not places in the list. Why: a request, the GUI and the OTIO metadata then name a node in one way, and a removal moves no other join.
 - The module `composition` reads a composition:
   - `Composition::chain` follows the inputs from the MediaOut node back to the MediaIn node. It gives the tools in their order, or none when it does not get to the MediaIn node.
@@ -554,7 +559,7 @@ Writing:
 - The keyframes of a node are in its `keys`, one `EffectKeys` for each `EffectValue` with keyframes.
   - The trait `effect_keys::Keyed` holds the keyframe work of an `Effect` and of a `Node`: read, write, sample, split, hold, scale, retime and retarget.
   - An `Effect` and a `Node` give only the slots of their values (`Keyed::read_point`, `Keyed::write`). Why: then one copy of the keyframe work serves both.
-  - The functions of `Picture` that work on keyframes also work on the nodes (`Picture::nodes_mut`).
+  - The functions of `Picture` that work on keyframes do not change the keys of the nodes. Why: the keys are on frames of the file, and a trim or a speed change keeps those frames.
 - `picture.clear` of all the tools keeps the composition. `PictureTool::Composition` takes it off.
 - The draw of a composition is in [export](export.md#compositions).
 

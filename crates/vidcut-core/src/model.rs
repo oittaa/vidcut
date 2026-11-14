@@ -3501,6 +3501,16 @@ pub struct Composition {
     /// on from the other end. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ping_pong: bool,
+    /// The frame of the clip's file that is frame 0 of the composition: the
+    /// frame at the clip's In when the composition was made. The keyframes
+    /// of its nodes and the effects page count frames of the file from it.
+    /// A trim of the clip does not move it. Left out when 0.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub start: i64,
+}
+
+fn is_zero_i64(n: &i64) -> bool {
+    *n == 0
 }
 
 /// A node of a composition: the clip's picture coming in, a tool, a mask,
@@ -3535,8 +3545,8 @@ pub struct Node {
     /// Its place in the node editor, `[x, y]` in node widths across and
     /// node heights down.
     pub place: [f64; 2],
-    /// The keyframes of its values, on source frames. A value with
-    /// keyframes follows them. Left out when it has none.
+    /// The keyframes of its values, on frames of the composition. A value
+    /// with keyframes follows them. Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<EffectKeys>,
 }

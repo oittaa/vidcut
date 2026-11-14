@@ -716,7 +716,7 @@ The passes:
 
 The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500), [model](model.md#compositions)):
 
-- `Placing::new` samples each node at the source frame of the picture. Then `place::composed` gives the work of the composition (`Placing.composed`).
+- `Placing::new` samples each node at the frame of the composition that the picture shows (`Placed.clock`, `Composition::start`). Then `place::composed` gives the work of the composition (`Placing.composed`).
   - It takes the tools of `Composition::chain`, in their order. A tool with `pass_through` is left out.
   - Without a chain, it gives one `Work::Clear`. The clip then shows nothing.
   - It works in the pixels of the picture, upright. A size in the composition follows these pixels, not the frame.

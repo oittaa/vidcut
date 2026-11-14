@@ -643,10 +643,6 @@ impl Picture {
         self.composition.iter().flat_map(|c| &c.nodes)
     }
 
-    pub fn nodes_mut(&mut self) -> impl Iterator<Item = &mut Node> {
-        self.composition.iter_mut().flat_map(|c| &mut c.nodes)
-    }
-
     pub fn node(&self, name: &str) -> Option<&Node> {
         self.composition.as_ref()?.node(name)
     }
@@ -715,9 +711,6 @@ impl Picture {
             }
         }
         p.effects = self.effects.iter().map(|e| e.sampled(frame)).collect();
-        for n in p.nodes_mut() {
-            *n = n.sampled(frame);
-        }
         p.clear_keys();
         p
     }
@@ -739,9 +732,6 @@ impl Picture {
         }
         for e in &mut self.effects {
             e.keys.clear();
-        }
-        for n in self.nodes_mut() {
-            n.keys.clear();
         }
     }
 
@@ -800,9 +790,6 @@ impl Picture {
             }
         }
         p.effects = self.effects.iter().map(|e| e.adopted(frame)).collect();
-        for n in p.nodes_mut() {
-            *n = n.adopted(frame);
-        }
         p
     }
 
@@ -835,9 +822,6 @@ impl Picture {
         for e in &mut self.effects {
             e.split_keys(frame);
         }
-        for n in self.nodes_mut() {
-            n.split_keys(frame);
-        }
     }
 
     pub fn hold_keys(&mut self, at: i64, until: i64) {
@@ -847,9 +831,6 @@ impl Picture {
         }
         for e in &mut self.effects {
             e.hold_keys(at, until);
-        }
-        for n in self.nodes_mut() {
-            n.hold_keys(at, until);
         }
     }
 
@@ -861,9 +842,6 @@ impl Picture {
         for e in &mut self.effects {
             e.scale_key_times(conv, ratio);
         }
-        for n in self.nodes_mut() {
-            n.scale_key_times(conv, ratio);
-        }
     }
 
     pub fn retimed_to(&mut self, old: &Clip, new: &Clip) {
@@ -874,9 +852,6 @@ impl Picture {
         for e in &mut self.effects {
             e.retime_keys(old, new);
         }
-        for n in self.nodes_mut() {
-            n.retime_keys(old, new);
-        }
     }
 
     pub fn retarget(&mut self, map: impl Fn(i64) -> i64) {
@@ -886,9 +861,6 @@ impl Picture {
         }
         for e in &mut self.effects {
             e.retarget_keys(&map);
-        }
-        for n in self.nodes_mut() {
-            n.retarget_keys(&map);
         }
     }
 
