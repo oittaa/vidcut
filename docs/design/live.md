@@ -460,7 +460,8 @@ The bar and the Jobs button:
   - The track buttons send one `motion.track` for each enabled pattern, with the `frame` and the `way`.
     - Track Reverse, Track Fwd Then Reverse and Track Forward start at the playhead, with the `way` `backward`, `both` and `forward`.
     - The One Frame buttons start at the playhead, with the `length` 1. Then they send `gui.page_time` to the next frame.
-    - Stop Tracking and Escape cancel the jobs of kind `track` (`Workspace::stop_tracks`).
+    - Escape cancels the jobs of kind `track` (`Workspace::stop_tracks`).
+    - Stop Tracking asks first (`Workspace::stop_tracks_window`).
     - While a job of kind `track` runs, the Node Editor and its keys take no work (`Workspace::tracks_running`).
   - The Trim row sends `comp.set` with `pattern_trim` for the picked pattern, and the `frame` of the playhead.
   - The pattern list has a check box, the name and Delete for each pattern, and Add Pattern. A click on a name picks the pattern.
