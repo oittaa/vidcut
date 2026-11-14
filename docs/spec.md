@@ -2558,7 +2558,6 @@ The shapes:
 
 #### The Effects page
 
-- Resolve names it the Fusion page. vidcut names it the Effects page ([X171](deviations.md#x171-the-page-of-nodes-is-the-effects-page)).
 - The Effects page shows the composition of the topmost visible clip at the playhead (p. 1332).
 - The viewer shows that clip alone, at the size of its own picture (p. 1332).
 - The Effects Library is at the left and the Inspector is at the right. Both take the full height (p. 1287).
