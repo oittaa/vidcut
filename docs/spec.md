@@ -2539,7 +2539,11 @@ The shapes:
   - The copies keep the joins between them. They join no other node, and they do not go between other nodes.
   - The copies keep their places to each other. Their top left goes one place right of the active node.
   - The copies are then the selected nodes, and the last copy is the active node.
-  - vidcut: with no active node, the copies go under all the nodes.
+- Paste with no node selected: the copies join no node. Their top left goes to the place of the last click in the Node Editor (p. 1408).
+  - A right-click on the empty Node Editor has Paste. The copies go to that place (p. 1408).
+- Paste in the menu of a node replaces that node with the copy. A window asks first (p. 1409).
+  - The copy takes the place and the joins of that node. vidcut: a join that the copy cannot take goes.
+  - vidcut: the item works when one node is copied.
 - Move (p. 1414): a drag of a node moves it. A drag of a selected node moves all the selected nodes.
 - A right-click on a node opens a menu: Rename, Pass Through, Copy, Paste and Delete.
 - Join (pp. 1394–1397):
@@ -2650,7 +2654,7 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
 
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
 `gui.page_time` moves and plays the playhead of the page. `comp.loop` sets Loop and Ping Pong. `player.bounds` holds play of the timeline between two frames.
-`comp.set` and `comp.key` take a `frame` of the composition. Without it, they take the frame at the playhead.
+`comp.set` and `comp.key` take a `frame` of the composition. Without it, they take the frame at the playhead. `comp.paste` takes `after`, `place` or `replace`.
 `comp.set` with `connect` connects the Center of a mask to a pattern. `motion.track` tracks a pattern of a Tracker, and `motion.find` with `tracker` gives it patterns.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)

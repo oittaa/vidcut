@@ -303,6 +303,8 @@ The bar and the Jobs button:
   - A key of `Panel::Effects` wins over the same key of `Panel::App`. Thus Shift+Left goes to the start of the source, not one second back.
   - Delete, Copy, Cut, Paste and the selection keys act on the nodes there.
 - The copied nodes are values in `EffectsPage`. Paste sends them in `comp.paste` as `copy`. Thus a node that changes after Copy pastes as it was.
+  - With no active node, Paste sends the `place` of the last click on the empty Node Editor (`spot`). The menu of the empty Node Editor pastes at its place.
+  - Paste in the menu of a node opens `replace_window`. Replace sends `comp.paste` with `replace`.
 - A drag of a selected node moves all the selected nodes (`Moving`). The new places go as one `apply`.
 - A drag from a knot, or from a half of a join, makes a `Linking`. The drop sends `comp.connect` for the new join, and parts the join that the drag took.
 - Several edits of one key go as one `apply`. Thus one undo step takes them back.

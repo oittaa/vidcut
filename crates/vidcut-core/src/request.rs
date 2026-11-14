@@ -2837,10 +2837,12 @@ pub enum Request {
     /// composition of a clip holds them. One copy goes after `after`, as
     /// `comp.add` puts a new node. Several copies keep the joins between
     /// them and their places to each other. Their top left goes one place
-    /// right of `after`, or under all the nodes without `after`. A copy
-    /// keeps its name while it is free, else it is the name with `_1` or the
-    /// first free number after it. Returns the clip, the names of the copies
-    /// in `nodes`, and the last name in `node`.
+    /// right of `after`. Without `after`, the copies join nothing, and their
+    /// top left goes to `place`, or under all the nodes without it. With
+    /// `replace`, one copy takes the place and the joins of that node, which
+    /// goes. A copy keeps its name while it is free, else it is the name
+    /// with `_1` or the first free number after it. Returns the clip, the
+    /// names of the copies in `nodes`, and the last name in `node`.
     #[serde(rename = "comp.paste")]
     CompPaste {
         clip: ClipRef,
@@ -2850,6 +2852,13 @@ pub enum Request {
         from: Option<ClipRef>,
         #[serde(default)]
         after: Option<String>,
+        /// The place in the node editor for the top left of the copies,
+        /// `[x, y]` in node places. Only without `after` and `replace`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        place: Option<[f64; 2]>,
+        /// The node that one copy replaces.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replace: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         copy: Vec<Node>,
     },

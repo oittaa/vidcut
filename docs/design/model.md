@@ -558,6 +558,8 @@ Writing:
   - A clip without a composition gets `Composition::plain` on its first `comp.add` or `comp.paste`.
   - `ops::comp::paste` puts the copies into a clone of the composition first. Thus a copy that is refused changes nothing.
   - A pasted Tracker keeps only the paths that the clip has (`kept_paths`). A pasted mask keeps its connection when its Tracker is there (`kept_connect`).
+  - `ops::comp::Landing` tells where the copies go: after a node, at a place, over a node, or under all the nodes.
+  - Over a node, one copy takes its place and its joins (`replaced`). A join that the copy cannot take goes.
   - `comp.set` takes a `NodeChange`. Its `values` are a `KindChange`: the values of an effect's kind, which `effects.set` also takes in its `EffectChange`.
   - A blur takes its `size`, and a mask its `center`, from the `KindChange`. Why: the names in the request are then those of the model.
 - `ops::picture::composition_checked` checks the names, the joins, the loops and each node (`ops::picture::node_checked`). It is part of `ops::picture::checked`.

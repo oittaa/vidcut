@@ -490,7 +490,9 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "comp.paste",
         "vidcut comp paste c3 Blur1 --after Blur1
-  vidcut comp paste c4 Blur1 --from c3 --after MediaIn1",
+  vidcut comp paste c4 Blur1 --from c3 --after MediaIn1
+  vidcut comp paste c3 Blur1 --place 2,3
+  vidcut comp paste c3 Blur1 --replace GaussianBlur1",
     ),
     (
         "comp.key",

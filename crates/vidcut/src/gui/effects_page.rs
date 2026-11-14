@@ -90,6 +90,8 @@ pub(super) struct EffectsPage {
     linking: Option<Linking>,
     band: Option<(Pos2, bool)>,
     renaming: Option<Renaming>,
+    replacing: Option<(String, String)>,
+    spot: Option<(String, [f64; 2])>,
     copied: Vec<Node>,
     away: Option<Away>,
     view: (f64, f64),
@@ -114,6 +116,8 @@ impl Default for EffectsPage {
             linking: None,
             band: None,
             renaming: None,
+            replacing: None,
+            spot: None,
             copied: Vec::new(),
             away: None,
             view: (0.0, 1.0),
@@ -136,6 +140,8 @@ impl EffectsPage {
         self.linking = None;
         self.band = None;
         self.renaming = None;
+        self.replacing = None;
+        self.spot = None;
         self.away = None;
         self.zooming = None;
         if let Some(cells) = &mut self.cells {
@@ -728,6 +734,8 @@ impl Workspace {
             self.effects_page.linking = None;
             self.effects_page.band = None;
             self.effects_page.away = None;
+            self.effects_page.replacing = None;
+            self.effects_page.spot = None;
             self.effects_page.view = (0.0, 1.0);
             self.leave_inspector();
         }
@@ -943,16 +951,50 @@ impl Workspace {
     }
 
     fn paste_node(&mut self) {
+        let clip = self.effects_clip();
+        let spot = (self.effects_page.spot.as_ref()).filter(|(c, _)| Some(c) == clip.as_ref());
+        let to = match (self.effects_page.picked(), spot) {
+            (Some(after), _) => json!({ "after": after }),
+            (None, Some((_, at))) => json!({ "place": at }),
+            (None, None) => json!({}),
+        };
+        self.paste_to(to);
+    }
+
+    fn paste_to(&mut self, mut params: Value) {
         let copy = self.effects_page.copied.clone();
         let Some(clip) = self.effects_clip().filter(|_| !copy.is_empty()) else {
             return;
         };
-        let mut params = json!({ "clip": clip, "copy": copy });
-        if let Some(after) = self.effects_page.picked() {
-            params["after"] = json!(after);
-        }
+        params["clip"] = json!(clip);
+        params["copy"] = json!(copy);
         let answer = self.live.request_answered("comp.paste", params);
         self.effects_page.asked.push((answer, Then::Select));
+    }
+
+    fn replace_window(&mut self, ctx: &egui::Context) {
+        let Some((clip, name)) = self.effects_page.replacing.clone() else {
+            return;
+        };
+        let mut open = true;
+        let mut apply = false;
+        let mut cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        super::dialog::window(ctx, "Replace Node", &mut open, |ui| {
+            super::dialog::form(ui, "replace-node-form", |ui| {
+                super::dialog::row(ui, "Node", |ui| ui.label(name.as_str()));
+            });
+            super::dialog::footer(ui, |ui| {
+                apply = super::dialog::main_button(ui, "Replace", true);
+                cancel |= ui.button("Cancel").clicked();
+            });
+        });
+        if !(apply || cancel || !open) {
+            return;
+        }
+        self.effects_page.replacing = None;
+        if apply && self.effects_clip().as_deref() == Some(clip.as_str()) {
+            self.paste_to(json!({ "replace": name }));
+        }
     }
 
     fn node_key_step(&mut self, dir: i64) {
@@ -975,12 +1017,15 @@ impl Workspace {
         };
     }
 
-    fn menu_act(&mut self, act: MenuAct) {
+    fn menu_act(&mut self, act: MenuAct, node: String) {
         match act {
             MenuAct::Rename => self.start_rename(),
             MenuAct::PassThrough => self.pass_through(),
             MenuAct::Copy => self.copy_node(false),
-            MenuAct::Paste => self.paste_node(),
+            MenuAct::Paste => {
+                let clip = self.effects_clip();
+                self.effects_page.replacing = clip.map(|c| (c, node));
+            }
             MenuAct::Delete => self.delete_nodes(self.effects_page.nodes.clone()),
         }
     }
@@ -988,6 +1033,7 @@ impl Workspace {
     pub(super) fn effects_page_ui(&mut self, ui: &mut egui::Ui) {
         self.settle_page(ui.ctx());
         self.rename_window(ui.ctx());
+        self.replace_window(ui.ctx());
         let panel = theme::colors().panel;
         egui::Panel::left("effects-library")
             .resizable(true)
@@ -1936,6 +1982,10 @@ impl Workspace {
         let comp = self.page_composition(&clip);
         let z = self.effects_page.zoom;
         let origin = rect.min + MARGIN * z + self.effects_page.pan;
+        let grid_at = |at: Pos2| {
+            let d = (at - origin) / (CELL * z);
+            [rounded(f64::from(d.x)), rounded(f64::from(d.y))]
+        };
         let moving = self.effects_page.moving.as_ref();
         let place = |n: &Node| -> [f64; 2] {
             let from = moving.and_then(|m| {
@@ -2050,8 +2100,9 @@ impl Workspace {
         }
         let mut picked: Option<(String, Pick)> = None;
         let mut moved: Vec<(String, [f64; 2])> = Vec::new();
-        let mut menu: Option<MenuAct> = None;
+        let mut menu: Option<(MenuAct, String)> = None;
         let mut pointed: Option<String> = None;
+        let one_copied = self.effects_page.copied.len() == 1;
         for n in &comp.nodes {
             let Some(r) = box_of(&n.name) else {
                 continue;
@@ -2121,7 +2172,7 @@ impl Workspace {
                     (MenuAct::Rename, "Rename", true),
                     (MenuAct::PassThrough, "Pass Through", tool),
                     (MenuAct::Copy, "Copy", tool),
-                    (MenuAct::Paste, "Paste", true),
+                    (MenuAct::Paste, "Paste", one_copied),
                     (MenuAct::Delete, "Delete", true),
                 ];
                 for (act, text, on) in items {
@@ -2132,7 +2183,7 @@ impl Workspace {
                         _ => ui.add_enabled(on, egui::Button::new(text)),
                     };
                     if item.clicked() {
-                        menu = Some(act);
+                        menu = Some((act, n.name.clone()));
                         ui.close();
                     }
                 }
@@ -2274,6 +2325,25 @@ impl Workspace {
         if released {
             self.effects_page.band = None;
         }
+        if resp.secondary_clicked()
+            && let Some(at) = ui.input(|i| i.pointer.interact_pos())
+        {
+            self.effects_page.spot = Some((clip.id.clone(), grid_at(at)));
+        }
+        let can_paste = !self.effects_page.copied.is_empty();
+        let mut paste_here = false;
+        resp.context_menu(|ui| {
+            if ui
+                .add_enabled(can_paste, egui::Button::new("Paste"))
+                .clicked()
+            {
+                paste_here = true;
+                ui.close();
+            }
+        });
+        if paste_here && let Some((_, at)) = self.effects_page.spot.clone() {
+            self.paste_to(json!({ "place": at }));
+        }
         self.send_all(commands, "Join Nodes");
         let moves = moved
             .into_iter()
@@ -2286,8 +2356,8 @@ impl Workspace {
         if let Some(name) = pointed {
             self.effects_page.nodes = vec![name];
         }
-        if let Some(act) = menu {
-            self.menu_act(act);
+        if let Some((act, node)) = menu {
+            self.menu_act(act, node);
         }
         match picked {
             Some((name, Pick::Active)) => {
@@ -2309,6 +2379,9 @@ impl Workspace {
             Some((name, Pick::Only)) => self.send("gui.nodes", json!({ "nodes": [name] })),
             None if resp.clicked() => {
                 let press = ui.input(|i| i.pointer.interact_pos());
+                if let Some(at) = press {
+                    self.effects_page.spot = Some((clip.id.clone(), grid_at(at)));
+                }
                 match press.and_then(wire_at).map(|(k, half)| (&wires[k], half)) {
                     Some((w, Half::Input)) => {
                         let off = join_command(&clip.id, (&w.to, w.which), None);

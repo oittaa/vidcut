@@ -175,19 +175,74 @@ fn kept_connect(d: &Composition, n: &mut Node, to: Option<String>) {
     }
 }
 
-pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, after: Option<&str>) -> Result<Value> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Landing<'a> {
+    After(&'a str),
+    At([f64; 2]),
+    Over(&'a str),
+    Apart,
+}
+
+fn replaced(c: &mut Composition, mut node: Node, name: &str) {
+    let Some(i) = c.index(name) else {
+        return;
+    };
+    let old = c.nodes.remove(i);
+    node.place = old.place;
+    node.input = old.input.filter(|_| node.tool.takes_input());
+    node.effect_mask = old.effect_mask.filter(|_| node.tool.takes_mask());
+    let picture = node.tool.flows();
+    let mask = node.tool.is_mask();
+    let patterns = node.tool.tracker().map_or(0, |t| t.patterns.len());
+    for n in &mut c.nodes {
+        if n.input.as_deref() == Some(name) {
+            n.input = picture.then(|| node.name.clone());
+        }
+        if n.effect_mask.as_deref() == Some(name) {
+            n.effect_mask = mask.then(|| node.name.clone());
+        }
+        let Some(m) = n.tool.mask_mut() else {
+            continue;
+        };
+        if let Some(k) = m.connect.as_mut().filter(|k| k.tracker == name) {
+            match (k.pattern as usize) <= patterns {
+                true => k.tracker = node.name.clone(),
+                false => m.connect = None,
+            }
+        }
+    }
+    c.nodes.insert(i, node);
+}
+
+pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, to: Landing) -> Result<Value> {
     let nodes = nodes.iter().map(node_checked).collect::<Result<Vec<_>>>()?;
     let ids: Vec<String> = p
         .clip(id)
         .map(|c| c.motion.iter().map(|m| m.id.clone()).collect())
         .unwrap_or_default();
     let c = comp_of(p, id)?;
-    let spot = match after {
-        Some(a) => {
+    let spot = match to {
+        Landing::After(a) => {
             let a = &c.nodes[found(c, id, a)?];
             [a.place[0] + 1.0, a.place[1]]
         }
-        None => apart(c),
+        Landing::Over(r) => {
+            if nodes.len() != 1 {
+                return Err(Error::usage("comp.paste with `replace` takes one node"));
+            }
+            c.nodes[found(c, id, r)?].place
+        }
+        Landing::At(at) if at.iter().all(|v| v.is_finite()) => at,
+        Landing::At(_) => {
+            return Err(Error::invalid("a node's place is two finite numbers"));
+        }
+        Landing::Apart => apart(c),
+    };
+    let gone: Vec<String> = match to {
+        Landing::Over(r) => (c.node(r).and_then(|n| n.tool.tracker()).into_iter())
+            .flat_map(|t| t.patterns.iter().filter_map(|x| x.path.clone()))
+            .collect(),
+        _ => Vec::new(),
     };
     let mut d = c.clone();
     let start = d.nodes.len();
@@ -220,7 +275,15 @@ pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, after: Option<&str>) -
     {
         node.input = None;
         node.effect_mask = None;
-        insert(&mut d, node, after, id)?;
+        match to {
+            Landing::After(a) => insert(&mut d, node, Some(a), id)?,
+            Landing::Over(r) => replaced(&mut d, node, r),
+            Landing::At(_) => {
+                node.place = spot;
+                d.nodes.push(node);
+            }
+            Landing::Apart => insert(&mut d, node, None, id)?,
+        }
     } else {
         let renamed = |old: &Option<String>| {
             let i = nodes.iter().position(|n| Some(&n.name) == old.as_ref())?;
@@ -241,6 +304,7 @@ pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, after: Option<&str>) -
     }
     *c = d;
     tidied(p, id)?;
+    super::motion::unused(p, id, &gone);
     Ok(json!({ "clip": id, "node": last, "nodes": names }))
 }
 

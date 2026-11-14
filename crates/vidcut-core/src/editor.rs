@@ -4413,9 +4413,22 @@ fn mutate(
             node,
             from,
             after,
+            place,
+            replace,
             copy,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
+            let to = match (after.as_deref(), place, replace.as_deref()) {
+                (Some(a), None, None) => ops::comp::Landing::After(a),
+                (None, Some(at), None) => ops::comp::Landing::At(*at),
+                (None, None, Some(r)) => ops::comp::Landing::Over(r),
+                (None, None, None) => ops::comp::Landing::Apart,
+                _ => {
+                    return Err(Error::usage(
+                        "comp.paste takes one of `after`, `place` and `replace`",
+                    ));
+                }
+            };
             let pasted = match (copy.as_slice(), node) {
                 ([_, ..], None) if from.is_none() => copy.clone(),
                 ([], Some(name)) => {
@@ -4431,7 +4444,7 @@ fn mutate(
                     ));
                 }
             };
-            ops::comp::paste(p, &id, pasted, after.as_deref())?
+            ops::comp::paste(p, &id, pasted, to)?
         }
         Request::CompKey {
             clip,
