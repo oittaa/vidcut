@@ -1927,8 +1927,8 @@ impl Live {
             let looks = vidcut_core::editor::track_looks(p, &envelope.request, playhead);
             return Some(Box::new(move || {
                 use vidcut_core::Env;
-                for (media, follow, download) in &looks {
-                    AvEnv::new().tracked(media, *follow, *download)?;
+                for (media, plan, follow, download) in &looks {
+                    AvEnv::new().tracked(media, plan, *follow, *download)?;
                 }
                 Ok(())
             }));
@@ -2547,9 +2547,9 @@ impl Live {
             "motion.track" => {
                 let frame = |key: &str| r.result[key].as_i64().unwrap_or(0);
                 let frames = frame("last") - frame("first") + 1;
-                let lost = |key: &str| r.result[key].as_str() == Some("lost");
-                match lost("backward") || lost("forward") {
-                    true => format!("Track: {frames} frames, then lost"),
+                let stopped = |key: &str| r.result[key].as_str() == Some("stopped");
+                match stopped("backward") || stopped("forward") {
+                    true => format!("Track: {frames} frames, then stopped"),
                     false => format!("Track: {frames} frames"),
                 }
             }

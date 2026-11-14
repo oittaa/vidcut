@@ -4,7 +4,7 @@ use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vidcut_core::analysis::{
-    AudioLevels, Detections, Look, Loudness, PictureStats, SoundMatch, VoiceActivity,
+    AudioLevels, Detections, Look, Loudness, PictureStats, SoundMatch, Tracked, VoiceActivity,
 };
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::duck::Measured;
@@ -32,6 +32,7 @@ struct Memos {
     pictures: Memo<PictureStats>,
     voices: Memo<VoiceActivity>,
     subjects: Memo<Detections>,
+    tracks: Memo<Tracked>,
     transcripts: Mutex<Lru<(Origin, u32), Vec<Kept>, MEMOS_KEPT>>,
 }
 
@@ -65,6 +66,8 @@ impl AvEnv {
 const HEARD_KEPT: usize = 8;
 static HEARD: Mutex<Lru<String, Arc<Speech>, HEARD_KEPT>> = Mutex::new(Lru::new());
 static PAID: Mutex<Lru<String, Vec<Arc<Speech>>, HEARD_KEPT>> = Mutex::new(Lru::new());
+const STOPPED_KEPT: usize = 4;
+static STOPPED: Mutex<Lru<MeasureKey, Arc<Tracked>, STOPPED_KEPT>> = Mutex::new(Lru::new());
 const LOUD_KEPT: usize = 4096;
 static LOUD: Mutex<Lru<String, Loudness, LOUD_KEPT>> = Mutex::new(Lru::new());
 
@@ -413,21 +416,21 @@ impl Env for AvEnv {
     fn tracked(
         &self,
         media: &Media,
+        plan: &RenderPlan,
         follow: vidcut_core::analysis::Follow,
         download: bool,
-    ) -> Result<Arc<Detections>> {
+    ) -> Result<Arc<Tracked>> {
         let dir = paths::models_dir();
         vidcut_av::tracking::get_ready(&dir, download).map_err(av_error)?;
-        let us = |secs: f64| (secs * 1e6).round() as i64;
-        let look = follow.look;
         let area = follow.area.map(|v| (v * 1e5).round() as i64);
+        let picture = serde_json::to_vec(plan).unwrap_or_default();
         let key = format!(
             "{}-{}-{}-{}-{}-{}-{}-{}-{}-{}{}",
             vidcut_av::tracking::name(),
-            us(look.from),
-            us(look.to),
-            us(look.every),
-            us(follow.at),
+            vidcut_core::fingerprint::digest(&picture),
+            follow.at,
+            follow.frames.0,
+            follow.frames.1,
             area[0],
             area[1],
             area[2],
@@ -435,17 +438,37 @@ impl Env for AvEnv {
             u8::from(follow.backward),
             u8::from(follow.forward),
         );
-        measured(
-            &self.memos.subjects,
-            analysis_file(media, &key),
-            || {
-                let decoder = crate::preferences::gpu_decoding().own_decoder();
-                let input = input_of(media);
-                vidcut_av::tracking::track(&input, &follow, decoder.as_ref(), &dir)
-            },
-            Detections::to_bytes,
-            Detections::from_bytes,
-        )
+        let key = analysis_file(media, &key);
+        let memo = || {
+            self.memos
+                .tracks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+        };
+        let stopped = || STOPPED.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(v) = memo().get(&key) {
+            return Ok(v.clone());
+        }
+        if let Some((_, v)) = stopped().remove(&key) {
+            return Ok(v);
+        }
+        if let Some(v) = on_disk(&key, Tracked::from_bytes) {
+            let v = Arc::new(v);
+            memo().insert(key, v.clone());
+            return Ok(v);
+        }
+        let decoder = crate::preferences::gpu_decoding().own_decoder();
+        let ways = (decoder.as_ref(), dir.as_path());
+        let v = vidcut_av::tracking::track(plan, &follow, ways, &media.path).map_err(av_error)?;
+        let v = Arc::new(v);
+        if v.whole {
+            let (file, origin) = &key;
+            let _ = disk_cache::write(file, &origin.stamp(&v.to_bytes()));
+            memo().insert(key, v.clone());
+        } else {
+            stopped().insert(key, v.clone());
+        }
+        Ok(v)
     }
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {

@@ -2529,7 +2529,7 @@ The shapes:
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
-  - vidcut: a Tracker has no effect mask. A mask added with a Tracker selected joins nothing ([X168](deviations.md#x168-the-tracker-tracks-with-a-model)).
+  - vidcut: a Tracker has no effect mask yet. A mask added with a Tracker selected joins nothing ([todo](todo/motion-tracking.md)).
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
@@ -2597,8 +2597,12 @@ The shapes:
   - With Ping Pong, play from the head and from the tail starts as it does with Loop.
   - Each composition keeps its own Loop and its own way to loop. Loop is on in a new composition.
   - The timeline playhead follows the playhead of the page only between the In and the Out. In the head and the tail, it stays where it was.
-  - Measured in Resolve Studio 21.2: play shows each frame of the file at the frame rate of the timeline. Thus a file of 60 frames a second on a timeline of 30 plays at half speed, with no sound.
-  - vidcut: play goes at the speed of the file ([X171](deviations.md#x171-the-effects-page-plays-at-the-speed-of-the-file)).
+  - Measured in Resolve Studio 21.2: play shows each frame of the file at the frame rate of the file.
+    - Files of 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 frames a second were measured.
+    - Each played at its own rate, on a timeline of 24 and on a timeline of 30.
+  - Measured in Resolve Studio 21.2: a file of 56 minutes at 59.94 frames a second plays at the frame rate of the timeline.
+    - Files of 1, 5 and 15 minutes at 59.94 frames a second play at their own rate.
+  - vidcut: play always goes at the frame rate of the file ([X171](deviations.md#x171-the-effects-page-plays-a-long-file-at-the-speed-of-the-file)).
 - The page plays the sound of the timeline (p. 1297).
   - Measured in Resolve Studio 21.2: play in the head has no sound. The same frames had sound between the In and the Out.
   - Measured in Resolve Studio 21.2: play backward in the tail had sound in one run of three. Play backward between the In and the Out had sound in two runs of four.
@@ -2630,25 +2634,34 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).
   - Each side of the box is from 0.001 to 0.5.
   - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns.
-  - vidcut: a model tracks each pattern. Add Pattern adds a pattern with the name Pattern and a number ([X168](deviations.md#x168-the-tracker-tracks-with-a-model)).
+  - vidcut: a model tracks each pattern. Add IntelliTrack adds a pattern with the next free number. Add Point is not built yet ([todo](todo/motion-tracking.md)).
 - The viewer shows the box of each pattern of a selected Tracker (p. 1783).
   - A drag of the small handle at the top left moves the box. A zoomed view of the box shows during the drag (pp. 1783–1784).
   - A drag of an edge resizes the box from its middle (p. 1783).
+  - vidcut: a drag of the box on a frame of its path changes the box of the path on that frame ([X168](deviations.md#x168-a-drag-of-a-pattern-box-changes-its-path)).
   - Resolve also shows a search area around the box (p. 1784). vidcut shows none.
 - The track buttons are at the top of the Inspector (pp. 1784–1785):
-  - Track Reverse tracks backward from the end of the render range. Track Backward From Current Frame tracks backward from the playhead.
-  - Track Forward tracks forward from the start of the render range. Track Forward From Current Frame tracks forward from the playhead.
+  - Track Reverse tracks backward from the end of the render range. Track Reverse From Current Time tracks backward from the playhead (p. 2844).
+  - Track Forward tracks forward from the start of the render range. Track Forward From Current Time tracks forward from the playhead (p. 2844).
   - The render range is from the In to the Out. A track stops at its end (p. 1785).
-  - Stop Tracking and Escape stop a track (p. 1785).
+  - Stop Tracking and Escape stop a track (p. 1785). The frames that it tracked stay (pp. 1788, 2844).
+  - A track does not stop at a lost pattern or at a shot change. The user stops it (p. 1785).
   - The buttons track each enabled pattern (p. 1787). The check box of a pattern in the list enables it.
-  - Resolve also has Track Fwd Then Reverse. vidcut does not have it yet.
+  - While a track runs, the Node Editor takes no work (p. 1784).
+  - Resolve 21.2 also has Track Fwd Then Reverse. vidcut does not have it yet ([todo](todo/motion-tracking.md)).
+- The Tracker looks at the picture on its input, with the nodes before it (p. 1784). It tracks on each frame of the file.
+- The trim buttons take off the tracking data of the selected patterns (p. 2844):
+  - Trim to Start takes off the data before the playhead.
+  - The Delete button takes off all of it.
+  - Trim to End takes off the data after the playhead.
+  - vidcut: the trim buttons are in the Trim row under the track buttons. They act on the picked pattern.
 - When a track ends, its path is connected to the pattern (p. 1785).
 - X Offset and Y Offset move the point that other nodes follow away from the middle of the pattern (p. 1789).
   - The viewer shows a dashed line from the middle of the pattern to that point (p. 1789).
-- A right-click on the Center of a mask has Connect To (pp. 1789, 1804). Its menu names each Tracker, and each pattern as "Pattern 1: Offset Position".
+- A right-click on the Center of a mask has Connect To (pp. 1789, 1804). Its menu names each Tracker, and each pattern as "IntelliTrack 1: Offset position" (Resolve Studio 21.2).
   - The Center then follows that point.
   - vidcut: the menu of a connected Center also has Disconnect.
-  - vidcut: Follow Size makes the mask also grow and shrink with the box of the pattern ([X168](deviations.md#x168-the-tracker-tracks-with-a-model)).
+  - vidcut: Follow Size makes the mask also grow and shrink with the box of the pattern.
 - vidcut: Find in the Inspector of a Tracker finds the things of a subject in the clip ([X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
   - The Tracker gets a pattern for each thing.
   - Blur there adds a Mosaic Blur before Media Out. For each pattern, it adds a mask on the blur that follows that pattern with Follow Size.

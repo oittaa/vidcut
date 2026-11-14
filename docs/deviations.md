@@ -1576,11 +1576,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Magic Mask takes a stroke out of the tracking at the frame where its subject is fully off screen (p. 3305).
   - The scripting API of Resolve Studio 21.2 has no call that makes or reads a track.
 - **vidcut:**
-  - A clip of footage, a still or an image sequence has motion paths. A motion path tells where one thing is on each source frame: its box.
+  - A clip of footage, a still or an image sequence has motion paths. A motion path tells where one thing is on each frame of the file: its box.
   - `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths. A script gives the samples.
   - A path that `motion.track` made holds its place outside its samples. Before its first sample and after its last, the box is where that sample puts it.
   - Another path lasts from its first sample to its last. Before and after them it has no box. Thus a path that `motion.find` made ends where its thing is gone.
-  - A pattern of a Tracker node on the Effects page has a path ([X168](#x168-the-tracker-tracks-with-a-model)). `motion.find` makes a path for each face or each block of text ([X167](#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+  - A pattern of a Tracker node on the Effects page has a path ([spec](spec.md#the-tracker)). `motion.find` makes a path for each face or each block of text ([X167](#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
 - **Why:**
   - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
   - The path is apart from the keyframes, as the tracking data of the Color page is. Thus a new path keeps the keyframes that the user set.
@@ -1596,7 +1596,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A search of the whole manual finds no tool that finds text in a picture.
     - A number plate is only an example for the Planar Tracker node of the Fusion page, where the user sets the track (p. 2820).
 - **vidcut:**
-  - `motion.find` finds the things of one subject on the source frames that a clip shows. The subjects are `face`, `text`, `person` and `vehicle`.
+  - `motion.find` finds the things of one subject on each frame of the file in a clip. The subjects are `face`, `text`, `person` and `vehicle`.
     - A vehicle is a bicycle, a car, a motorcycle, a bus, a train or a truck.
     - Find in the Inspector of a Tracker node finds each subject. The Tracker gets a pattern for each thing.
   - Each thing gets a motion path of its own.
@@ -1606,40 +1606,20 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - A blur must cover each face of a clip, and the user must not draw each one.
   - Text is the next thing that people hide: names, addresses, documents and screens.
-  - One request gives the paths and the patterns. A mask then follows a pattern ([X168](#x168-the-tracker-tracks-with-a-model)).
+  - One request gives the paths and the patterns. A mask then follows a pattern ([spec](spec.md#the-tracker)).
 
-## X168. The Tracker tracks with a model
+## X168. A drag of a pattern box changes its path
 
 - **Resolve:**
-  - A Tracker node follows a pattern of pixels in the picture on its input (pp. 1783–1785). Each frame, it searches an area around the last place (p. 1784).
-  - A track gives the path of the middle of a pattern. Two patterns give a turn, and three give a size, for stabilization (p. 1786).
-  - Adaptive Mode, the channel of a pattern and the Pattern Flipbooks help a track (pp. 1785–1787).
-  - In 21.2, the first pattern of a new Tracker is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point adds a pattern of pixels.
-  - While a track runs, the Node Editor takes no work (p. 1784).
-  - X Offset and Y Offset can have keyframes. The Tracker Offset button of the viewer moves the offset point (p. 1789).
-  - Connect To joins a Center to the Offset Position of a pattern (p. 1789). Only the center then moves.
-  - The Operation tab does Match Move, Corner Positioning and stabilization (p. 1789).
-  - In 21.2, a Tracker also has a Foreground input and an Effect Mask input.
+  - A drag of the handle of a pattern box picks a new pattern (p. 1783).
+  - The path tools of the viewer correct a tracked path (pp. 1787–1788).
+  - What a drag of the box does on a frame of the path is not measured.
 - **vidcut:**
-  - A model tracks each pattern ([X165](#x165-a-clip-has-motion-paths)). The track gives the box of the thing on each frame: its place and its size.
-  - The model reads the clip's own picture. Nodes before the Tracker do not change what it sees.
-  - A track also stops at a shot change.
-  - The viewer shows no search area. A pattern has no Adaptive Mode, no channel and no flipbook.
-  - Each pattern is of one kind. Add Pattern adds one with the name Pattern and a number.
-  - A track runs as a job. The Jobs window shows its progress, and the page takes work during the track.
   - A drag of a pattern box on a frame of its path changes the box of the path on that frame.
-  - X Offset and Y Offset have no keyframes, and the viewer has no Tracker Offset button.
-  - Follow Size: a mask whose Center connects to a pattern can also take the box of the pattern as its picture. It then grows and shrinks with the box.
-  - Track Fwd Then Reverse, the Operation tab, and the Foreground and Effect Mask inputs are not built ([todo](todo/motion-tracking.md)).
-  - A mask added with a Tracker selected thus joins nothing.
+  - On a frame outside the path, the drag moves the box of the pattern.
+  - The viewer has no path tools.
 - **Why:**
-  - vidcut has a tracking model, and no tracker of pixel patterns.
-  - The model reads the decoded frames of the file. A render of the nodes before the Tracker on each frame of a track is not built.
-  - A blur must not go on a thing of the next shot.
-  - The model sets its search area around the last box (`Tracker::step`).
-  - A long track must not stop the work on the page.
   - A drag on a tracked frame corrects one wrong box of a track.
-  - A blur over a face must grow and shrink with the face. A connection to the Center moves the mask only.
 
 ## X169. A title follows a motion path
 
@@ -1663,20 +1643,16 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - One setting does the work of a tracker node and a connection.
   - A title with keyframes, and a title that stops following, wait for a measurement in Resolve ([todo](todo/motion-tracking.md)).
 
-## X171. The Effects page plays at the speed of the file
+## X171. The Effects page plays a long file at the speed of the file
 
 - **Resolve:**
-  - The ruler of the Fusion page counts the frames of the file of the clip ([spec §8.19](spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
-  - Play shows each frame of the file at the frame rate of the timeline (21.2).
-  - Thus a file of 60 frames a second on a timeline of 30 plays at half speed. The play has no sound (21.2).
+  - The Fusion page plays each frame of the file at the frame rate of the file (21.2).
+  - A file of 56 minutes at 59.94 frames a second plays at the frame rate of the timeline (21.2).
+  - Thus that file plays at half speed on a timeline of 30. This is a fault.
 - **vidcut:**
-  - The ruler counts the frames of the file, as in Resolve.
-  - Play goes at the speed of the file.
-  - Between the In and the Out, the timeline plays, with its frames and its sound.
-  - In the head and the tail, play shows each frame of the file, with no sound.
+  - The Effects page always plays at the frame rate of the file, also for a long file.
 - **Why:**
-  - The user sees the motion at its true speed, and hears the sound with it.
-  - A key on each frame of the file stays possible, because the ruler and the steps of one frame are as in Resolve.
+  - The length of a file does not change the speed of its motion.
 
 ## X170. The Equalizer: Notch, Bell width and OTIO export
 

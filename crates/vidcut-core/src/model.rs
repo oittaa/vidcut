@@ -1885,8 +1885,8 @@ pub struct MotionPath {
     /// then writes its samples again. Left out when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub tracked: bool,
-    /// The area on source frames: at least one sample, one for a frame, in
-    /// the order of the frames.
+    /// The area on frames of the file: at least one sample, one for a
+    /// frame, in the order of the frames.
     pub samples: Arc<Vec<PathSample>>,
 }
 
@@ -1894,7 +1894,7 @@ pub struct MotionPath {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TrackWay {
-    /// Backward and forward.
+    /// Forward, then backward from the same frame.
     #[default]
     Both,
     /// Only forward.
@@ -1969,11 +1969,12 @@ impl Subject {
     }
 }
 
-/// The area of a motion path on one source frame.
+/// The area of a motion path on one frame of the clip's file.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PathSample {
-    /// The source frame, counted as a clip's `source_in` is, at any speed of
-    /// the clip.
+    /// The frame of the file, at the frame rate of the file. It counts from
+    /// the frame where a clip's `source_in` counts from. When the file has
+    /// the frame rate of the timeline, it is the source frame.
     pub frame: i64,
     /// The middle of the area, `[x, y]` as fractions of the source picture
     /// from its top left, each from -10 to 10.
@@ -3592,7 +3593,7 @@ pub struct Tracker {
 /// box is. A field left out is at its usual value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Pattern {
-    /// Its name in the list of the tracker, for example `Pattern 1`.
+    /// Its name in the list of the tracker, for example `IntelliTrack 1`.
     pub name: String,
     /// Off, the track buttons of the effects page pass over the pattern.
     /// `motion.track` still tracks it. Usual: on.

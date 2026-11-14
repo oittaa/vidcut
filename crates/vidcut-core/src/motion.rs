@@ -1,8 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::sync::Arc;
 
-use crate::analysis::{Detections, Found, Look};
+use crate::analysis::{Detections, Found, Look, Tracked};
 use crate::model::{MotionPath, PathSample, Subject};
 
 pub const PATHS_KEPT: usize = 256;
@@ -18,20 +17,15 @@ pub struct Area {
 }
 
 pub fn followed(
-    found: &Detections,
-    origin: f64,
-    fps: f64,
-    (first, end): (i64, i64),
+    found: &Tracked,
+    base: i64,
     own: &Area,
     bounds: [f64; 4],
 ) -> (Vec<PathSample>, f64) {
     let round = |v: f64| (v * 1e5).round() / 1e5;
     let mut samples = Vec::new();
     let mut scores = 0.0;
-    for frame in first..end {
-        let [b] = found.shown(shown_time(origin, fps, frame)) else {
-            continue;
-        };
+    for (frame, b) in (base + found.first..).zip(&found.found) {
         let was = (bounds[2] * bounds[3]).max(1e-12);
         let grown = (f64::from(b.size[0] * b.size[1]) / was).sqrt();
         let center = [0, 1].map(|i| f64::from(b.center[i]) + (own.center[i] - bounds[i]) * grown);
@@ -45,15 +39,6 @@ pub fn followed(
     }
     let score = scores / samples.len().max(1) as f64;
     (samples, (score * 100.0).round() / 100.0)
-}
-
-pub fn stopped(found: &Detections, origin: f64, fps: f64, frame: i64) -> &'static str {
-    let scene = found.scene_shown(shown_time(origin, fps, frame));
-    if f64::from(scene) >= crate::analysis::SCENE_SCORE {
-        "cut"
-    } else {
-        "lost"
-    }
 }
 
 impl PathSample {
@@ -206,16 +191,6 @@ pub fn put(samples: &[PathSample], new: &[PathSample]) -> Vec<PathSample> {
 
 pub fn clear(samples: &mut Vec<PathSample>, (first, last): (i64, i64)) {
     samples.retain(|s| s.frame < first || s.frame > last);
-}
-
-pub fn rescale(paths: &mut [MotionPath], conv: impl Fn(i64) -> i64) {
-    for path in paths {
-        let samples = Arc::make_mut(&mut path.samples);
-        for s in samples.iter_mut() {
-            s.frame = conv(s.frame);
-        }
-        samples.dedup_by_key(|s| s.frame);
-    }
 }
 
 pub const SLACK: f64 = 0.05;

@@ -783,7 +783,10 @@ impl Workspace {
     }
 
     pub(super) fn add_node(&mut self, tool: ToolType) {
-        let Some(clip) = self.effects_clip() else {
+        let Some(clip) = self
+            .effects_clip()
+            .filter(|_| self.tracks_running().is_empty())
+        else {
             return;
         };
         let mut params = json!({ "clip": clip, "tool": tool });
@@ -1216,7 +1219,7 @@ impl Workspace {
         let at = self.page_at();
         let frame = self
             .project_shared()
-            .map_or(at as f64, |p| Frames::of(&p, clip).source(at as f64));
+            .map_or(at, |p| Frames::of(&p, clip).file(at)) as f64;
         let size = picture.size();
         let screen = |[x, y]: [f64; 2]| picture.min + vec2(x as f32 * size.x, y as f32 * size.y);
         let place = |p: Pos2| {
@@ -1347,7 +1350,7 @@ impl Workspace {
         let source = at as f64;
         let frame = self
             .project_shared()
-            .map_or(source, |p| Frames::of(&p, clip).source(source));
+            .map_or(at, |p| Frames::of(&p, clip).file(at)) as f64;
         let areas = |pattern: &Pattern| pattern.area_at(&clip.motion, frame);
         let (w, h) = (f64::from(w), f64::from(h));
         let scale = f64::from(picture.width()) / w;
@@ -1488,8 +1491,15 @@ impl Workspace {
             Some(a) if self.effects_page.seen.as_ref() == Some(&a.clip) => a.at.floor() as i64,
             _ => self
                 .page_frames()
-                .map_or(0, |(_, _, f)| f.at(self.snap.timeline.position)),
+                .map_or(0, |(_, _, f)| self.played_frame(&f)),
         }
+    }
+
+    fn played_frame(&self, f: &Frames) -> i64 {
+        let t = self.snap.timeline.position;
+        let part = self.glided_playhead(t) - t as f64;
+        let (a, b) = (f.at(t), f.at(t + 1));
+        a + ((b - a) as f64 * part).floor() as i64
     }
 
     fn page_frames(&self) -> Option<(Arc<Project>, Clip, Frames)> {
@@ -1650,6 +1660,9 @@ impl Workspace {
         let rate = self.page_rate(&f);
         let player = self.snap.player(PlayerId::Timeline).clone();
         let Some(a) = self.effects_page.away.as_mut() else {
+            if player.playing && f.clock.rates.is_some() {
+                ctx.request_repaint();
+            }
             return;
         };
         if a.clip != c.id {
@@ -1949,6 +1962,11 @@ impl Workspace {
     }
 
     fn node_editor(&mut self, ui: &mut egui::Ui) {
+        if !self.tracks_running().is_empty() {
+            self.effects_page.linking = None;
+            self.effects_page.band = None;
+            ui.disable();
+        }
         let rect = ui.available_rect_before_wrap();
         let resp = ui.allocate_rect(rect, Sense::click_and_drag());
         let painter = ui.painter_at(rect);
@@ -2397,20 +2415,12 @@ impl Workspace {
         }
     }
 
-    pub(super) fn effects_keys(&mut self, fired: &Fired, input: &egui::InputState) {
-        let bindings = self.snap.bindings.clone();
-        let mine = Fired::of_panel(&bindings, input, Panel::Effects);
+    fn node_keys(&mut self, fired: &Fired, mine: &Fired) {
         if mine.pressed(Action::PassThrough) {
             self.pass_through();
         }
         if mine.struck(Action::RenameNode) {
             self.start_rename();
-        }
-        if mine.pressed(Action::PreviousNodeKeyframe) {
-            self.node_key_step(-1);
-        }
-        if mine.pressed(Action::NextNodeKeyframe) {
-            self.node_key_step(1);
         }
         if fired.struck(Action::Delete) {
             self.delete_nodes(self.effects_page.nodes.clone());
@@ -2429,6 +2439,20 @@ impl Workspace {
         }
         if fired.pressed(Action::SelectNothing) {
             self.select_all(false);
+        }
+    }
+
+    pub(super) fn effects_keys(&mut self, fired: &Fired, input: &egui::InputState) {
+        let bindings = self.snap.bindings.clone();
+        let mine = Fired::of_panel(&bindings, input, Panel::Effects);
+        if mine.pressed(Action::PreviousNodeKeyframe) {
+            self.node_key_step(-1);
+        }
+        if mine.pressed(Action::NextNodeKeyframe) {
+            self.node_key_step(1);
+        }
+        if self.tracks_running().is_empty() {
+            self.node_keys(fired, &mine);
         }
         if input.key_pressed(egui::Key::Escape) {
             self.stop_tracks();

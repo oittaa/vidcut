@@ -1046,12 +1046,23 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
         let kept = match tool {
             Some(t) => cleared(&old, t),
             None => Picture {
-                effects: old.effects,
-                composition: old.composition,
+                effects: old.effects.clone(),
+                composition: old.composition.clone(),
                 ..Picture::default()
             },
         };
+        let trackers = old
+            .composition
+            .iter()
+            .filter(|_| kept.composition.is_none());
+        let nodes = trackers
+            .flat_map(|k| &k.nodes)
+            .filter_map(|n| n.tool.tracker());
+        let gone: Vec<String> = nodes
+            .flat_map(|t| t.patterns.iter().filter_map(|x| x.path.clone()))
+            .collect();
         c.picture = (!kept.is_usual()).then_some(kept);
+        super::motion::unused(p, id, &gone);
     }
     Ok(())
 }

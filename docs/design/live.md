@@ -458,7 +458,9 @@ The bar and the Jobs button:
   - The track buttons send one `motion.track` for each enabled pattern, with the `frame` and the `way`.
     - Track Reverse starts at the Out, and Track Forward at the In. The two others start at the playhead.
     - Stop Tracking and Escape cancel the jobs of kind `track` (`Workspace::stop_tracks`).
-  - The pattern list has a check box, the name and Delete for each pattern, and Add Pattern. A click on a name picks the pattern.
+    - While a job of kind `track` runs, the Node Editor and its keys take no work (`Workspace::tracks_running`).
+  - The Trim row sends `comp.set` with `pattern_trim` for the picked pattern, and the `frame` of the playhead.
+  - The pattern list has a check box, the name and Delete for each pattern, and Add IntelliTrack. A click on a name picks the pattern.
   - Name, X Offset and Y Offset are of the picked pattern.
   - For a clip that takes motion paths (`ops::motion::takes`), a row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
     - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.

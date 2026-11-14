@@ -578,10 +578,10 @@ Dynamic Zoom and keyframes (D75):
 - `layer_size` fits the layer for the closer Dynamic Zoom box (`DynamicZoom::closest`) and the largest zoom key (`place::detail`).
 - The viewer and the export both take this `Placing`. Thus there is one draw path.
 - `Placed` also holds the motion paths of the patterns that the masks of its composition follow (`render::Followed`, [model](model.md#motion-paths)).
-  - `Followed::of` takes them from the clip, with the pace of the clip and the source frame of its first frame.
+  - `Followed::of` takes them from the clip, with a `FileClock` of the clip (`FileClock::plain`). The plan of a clip of footage then gives that clock the frame rates (`FileClock::of`).
   - A path shares its samples with the clip (`MotionPath.samples`). Thus a placed picture copies no sample, and two plans of one project compare them by their place in memory.
-  - `Followed::frame` takes a keyframe frame to the source frame through the pace. `Pattern::area_at` then gives the box of the pattern there.
-  - Why: a path is on source frames, and the keyframe frame of a clip with a speed is a frame of the retimed source.
+  - `Followed::frame` takes a keyframe frame to the frame of the file (`FileClock::frame`). `Pattern::area_at` then gives the box of the pattern there.
+  - Why: a path is on frames of the file. The keyframe frame of a clip with a speed is a frame of the retimed source.
   - The paths are behind an `Arc`. Thus `Placed::after` copies no sample.
 
 Soft crop edges:

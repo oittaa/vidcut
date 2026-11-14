@@ -400,7 +400,7 @@ impl Lead {
             held: false,
         };
         let mut placed = Placed::at(a, a.picture.clone().unwrap_or_default(), run, c.start);
-        placed.followed = Followed::named(a, path);
+        placed.followed = Followed::named(p, a, path);
         Some(Self {
             placed,
             path: follow.path.clone(),
@@ -668,6 +668,15 @@ impl FileClock {
         }
     }
 
+    pub fn plain(c: &Clip) -> Self {
+        Self {
+            pace: c.pace(),
+            from: c.source_in,
+            key: c.content_at(c.start),
+            rates: None,
+        }
+    }
+
     pub fn is_plain(&self) -> bool {
         self.rates.is_none() && self.pace == Pace::default() && self.from == self.key
     }
@@ -683,7 +692,10 @@ impl FileClock {
     pub fn file(&self, source: i64) -> i64 {
         match self.rates {
             None => source,
-            Some([fps, file]) => (((source as f64 - 0.5) / fps - 1e-6) * file).ceil() as i64,
+            Some([fps, file]) => {
+                let shown = (((source as f64 - 0.5) / fps - 1e-6) * file).ceil() as i64;
+                if source >= 0 { shown.max(0) } else { shown }
+            }
         }
     }
 
@@ -700,17 +712,14 @@ impl FileClock {
 }
 
 /// The motion paths that the masks of a picture's composition follow, with
-/// the way from a keyframe position of the clip to its source frame.
+/// the way from a keyframe position of the clip to the frame of its file.
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct Followed {
-    /// The paths, on source frames, without their names.
+    /// The paths, on frames of the file, without their names.
     pub paths: Arc<[MotionPath]>,
-    /// How the clip walks its source from its first frame.
-    pub pace: Pace,
-    /// The source frame of the clip's first frame.
-    pub from: i64,
-    /// The keyframe position of the clip's first frame.
-    pub key: i64,
+    /// The way from a keyframe position of the clip to the frame of its
+    /// file.
+    pub clock: FileClock,
 }
 
 impl std::fmt::Debug for Followed {
@@ -726,9 +735,7 @@ impl PartialEq for Followed {
                 && a.subject == b.subject
                 && (Arc::ptr_eq(&a.samples, &b.samples) || a.samples == b.samples)
         };
-        self.from == other.from
-            && self.key == other.key
-            && self.pace == other.pace
+        self.clock == other.clock
             && self.paths.len() == other.paths.len()
             && self.paths.iter().zip(other.paths.iter()).all(same)
     }
@@ -758,21 +765,17 @@ impl Followed {
         }
         Self {
             paths,
-            pace: clip.pace(),
-            from: clip.source_in,
-            key: clip.content_at(clip.start),
+            clock: FileClock::plain(clip),
         }
     }
 
-    pub fn named(clip: &Clip, path: &MotionPath) -> Self {
+    pub fn named(p: &Project, clip: &Clip, path: &MotionPath) -> Self {
         Self {
             paths: Arc::new([MotionPath {
                 name: None,
                 ..path.clone()
             }]),
-            pace: clip.pace(),
-            from: clip.source_in,
-            key: clip.content_at(clip.start),
+            clock: FileClock::of(p, clip),
         }
     }
 
@@ -781,18 +784,17 @@ impl Followed {
     }
 
     pub fn held(&self, named: &str, source: i64) -> Option<Area> {
-        let frame = (self.from + self.pace.offset(source - self.key)) as f64;
         let path = self.paths.iter().find(|m| m.id == named)?;
-        path.held_at(frame)
+        path.held_at(self.frame(source))
     }
 
     pub fn frame(&self, source: i64) -> f64 {
-        (self.from + self.pace.offset(source - self.key)) as f64
+        self.clock.frame(source) as f64
     }
 
     pub fn stamp_at(&self, source: i64) -> u64 {
         use std::hash::{Hash, Hasher};
-        let frame = (self.from + self.pace.offset(source - self.key)) as f64;
+        let frame = self.frame(source);
         let mut hasher = std::hash::DefaultHasher::new();
         for m in self.paths.iter() {
             if let Some(area) = m.base_at(frame) {
@@ -808,7 +810,7 @@ impl Followed {
 
     pub fn at(&self, source: i64) -> Self {
         let held = |m: &MotionPath| {
-            let area = m.base_at((self.from + self.pace.offset(source - self.key)) as f64)?;
+            let area = m.base_at(self.frame(source))?;
             Some(MotionPath {
                 id: m.id.clone(),
                 name: None,
@@ -824,9 +826,7 @@ impl Followed {
         };
         Self {
             paths: self.paths.iter().filter_map(held).collect(),
-            pace: Pace::default(),
-            from: 0,
-            key: 0,
+            clock: FileClock::default(),
         }
     }
 }
@@ -3451,6 +3451,7 @@ impl VideoPlan<'_> {
         let mut placed = placed_of(c, nest, fills, crossed, x);
         if let Some(own) = placed.first_mut().filter(|o| o.clip == c.id) {
             own.clock = FileClock::of(self.p, c);
+            own.followed.clock = own.clock.clone();
         }
         Ok(VideoPiece::Source {
             media: c.media.clone(),
@@ -4006,10 +4007,32 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
 }
 
 pub fn composition_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
+    alone(p, clip, None)
+}
+
+pub fn node_input(p: &Project, clip: &str, node: &str) -> Result<RenderPlan> {
+    alone(p, clip, Some(node))
+}
+
+fn alone(p: &Project, clip: &str, cut: Option<&str>) -> Result<RenderPlan> {
     let c = p
         .clip(clip)
         .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
         .clone();
+    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
+    let input = match cut {
+        None => None,
+        Some(node) => {
+            let n = comp.and_then(|k| k.node(node));
+            let n = n.ok_or_else(|| Error::not_found(format!("{clip} has no node {node}")))?;
+            let input = n.input.clone().ok_or_else(|| {
+                Error::invalid(format!(
+                    "{node} of {clip} has no input: a track follows the picture that comes in"
+                ))
+            })?;
+            Some(input)
+        }
+    };
     let frames = crate::composition::Frames::of(p, &c);
     let clock = &frames.clock;
     let mut alone = p.clone();
@@ -4033,25 +4056,18 @@ pub fn composition_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
             x.source_in = frames.zero + frames.first;
             x.speed = None;
             x.audio = None;
-            for m in &mut x.motion {
-                let mut samples: Vec<PathSample> = m
-                    .samples
-                    .iter()
-                    .map(|s| PathSample {
-                        frame: clock.file(s.frame),
-                        ..*s
-                    })
-                    .collect();
-                samples.dedup_by_key(|s| s.frame);
-                m.samples = Arc::new(samples);
-            }
             x.picture = x
                 .picture
                 .take()
                 .and_then(|p| p.composition)
-                .map(|composition| Picture {
-                    composition: Some(composition),
-                    ..Picture::default()
+                .map(|mut composition| {
+                    if let Some(input) = &input {
+                        composition.cut_at(input);
+                    }
+                    Picture {
+                        composition: Some(composition),
+                        ..Picture::default()
+                    }
                 });
         }
     }

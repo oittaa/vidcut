@@ -9,6 +9,7 @@ use crate::model::{
     TrackWay,
 };
 use crate::motion::{self, Area};
+use crate::render::FileClock;
 
 use super::locate;
 
@@ -79,7 +80,7 @@ pub fn set(p: &mut Project, id: &str, path: &str, change: PathChange) -> Result<
         && first > last
     {
         return Err(Error::usage(format!(
-            "clear is two source frames in order, not {first} then {last}"
+            "clear is two frames of the file in order, not {first} then {last}"
         )));
     }
     if let Some(why) = change
@@ -306,6 +307,9 @@ pub fn follow_violation(p: &Project, c: &Clip) -> Option<String> {
 }
 
 pub fn shift(c: &mut Clip, by: i64) {
+    if by == 0 {
+        return;
+    }
     for m in &mut c.motion {
         for s in Arc::make_mut(&mut m.samples) {
             s.frame += by;
@@ -313,7 +317,7 @@ pub fn shift(c: &mut Clip, by: i64) {
     }
 }
 
-fn shown(c: &Clip, m: &MotionPath, at: Option<i64>, samples: bool) -> Value {
+fn shown(m: &MotionPath, at: Option<i64>, samples: bool) -> Value {
     let mut v = json!({ "id": m.id, "count": m.samples.len() });
     if let Some(name) = &m.name {
         v["name"] = json!(name);
@@ -328,16 +332,15 @@ fn shown(c: &Clip, m: &MotionPath, at: Option<i64>, samples: bool) -> Value {
         v["first"] = json!(first);
         v["last"] = json!(last);
     }
-    if let Some(at) = at {
-        let frame = c.source_at(at);
-        if let Some(area) = m.base_at(frame as f64) {
-            v["area"] = json!({
-                "frame": frame,
-                "center": area.center,
-                "size": area.size,
-                "rotation": area.rotation,
-            });
-        }
+    if let Some(frame) = at
+        && let Some(area) = m.base_at(frame as f64)
+    {
+        v["area"] = json!({
+            "frame": frame,
+            "center": area.center,
+            "size": area.size,
+            "rotation": area.rotation,
+        });
     }
     if samples {
         v["samples"] = json!(m.samples);
@@ -359,7 +362,9 @@ pub fn list(p: &Project, ids: Option<&[String]>, at: Option<i64>, samples: bool)
                 None => !c.motion.is_empty(),
             };
             if wanted {
-                let paths: Vec<Value> = c.motion.iter().map(|m| shown(c, m, at, samples)).collect();
+                let clock = FileClock::of(p, c);
+                let frame = at.map(|t| clock.file(c.source_at(t)));
+                let paths: Vec<Value> = c.motion.iter().map(|m| shown(m, frame, samples)).collect();
                 clips.push(json!({ "clip": c.id, "track": t.id, "paths": paths }));
             }
         }
@@ -392,7 +397,7 @@ fn of_subject(c: &Clip, subject: Subject) -> Vec<String> {
     found.map(|m| m.id.clone()).collect()
 }
 
-pub fn findable(p: &mut Project, id: &str, subject: Subject, replace: bool) -> Result<(i64, i64)> {
+pub fn findable(p: &mut Project, id: &str, subject: Subject, replace: bool) -> Result<()> {
     let c = clip_of(p, id)?;
     let old = of_subject(c, subject);
     if !old.is_empty() && !replace {
@@ -402,7 +407,14 @@ pub fn findable(p: &mut Project, id: &str, subject: Subject, replace: bool) -> R
             subject.name()
         )));
     }
-    Ok(c.shown())
+    Ok(())
+}
+
+pub fn file_frames(p: &Project, c: &Clip) -> ((i64, i64), f64) {
+    let clock = FileClock::of(p, c);
+    let (lo, hi) = c.shown();
+    let rate = clock.rate(p.settings.fps.as_f64());
+    ((clock.file(lo), clock.file(hi)), rate)
 }
 
 fn followed(p: &Project, id: &str) -> Vec<String> {
@@ -452,6 +464,7 @@ fn same_thing(kept: &MotionPath, found: &[PathSample]) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Start {
     pub frames: (i64, i64),
+    pub base: i64,
     pub frame: i64,
     pub own: Area,
     pub bounds: [f64; 4],
@@ -498,14 +511,15 @@ pub fn start(p: &Project, id: &str, tracker: &str, k: u32, frame: i64) -> Result
             f.mark_in, f.mark_out
         )));
     }
-    let frames = c.shown();
-    let source = (f.source(frame as f64).round() as i64).clamp(frames.0, frames.1 - 1);
+    let frames = (f.file(f.mark_in), f.file(f.mark_out) + 1);
+    let at = f.file(frame);
     let pattern = pattern_of(c, id, tracker, k)?;
-    let own = pattern.area_at(&c.motion, source as f64);
+    let own = pattern.area_at(&c.motion, at as f64);
     let own = own.unwrap_or_else(|| pattern.own());
     Ok(Start {
         frames,
-        frame: source,
+        base: f.file(f.first),
+        frame: at,
         own,
         bounds: [own.center[0], own.center[1], own.size[0], own.size[1]],
     })
@@ -560,7 +574,7 @@ pub fn tracked(
         }
     };
     let stored = c.motion.iter().find(|m| m.id == path);
-    let shown = stored.map_or(Value::Null, |m| shown(c, m, None, false));
+    let shown = stored.map_or(Value::Null, |m| shown(m, None, false));
     let comp = c.picture.as_mut().and_then(|x| x.composition.as_mut());
     let node = comp.and_then(|x| x.nodes.iter_mut().find(|n| n.name == tracker));
     if let Some(Tool::Tracker(t)) = node.map(|n| &mut n.tool)
@@ -662,7 +676,7 @@ pub fn found(
             tracked: false,
             samples: Arc::new(track.samples),
         };
-        let mut v = shown(c, &path, None, false);
+        let mut v = shown(&path, None, false);
         v["seen"] = json!(track.seen);
         v["score"] = json!(track.score);
         v["gaps"] = json!(track.gaps);

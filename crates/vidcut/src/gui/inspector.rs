@@ -4,9 +4,9 @@ use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
-    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_UP, CARET_LEFT, CARET_LINE_LEFT, CARET_LINE_RIGHT,
-    CARET_RIGHT, CHECK, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK,
-    STOP, TRASH,
+    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LINE_LEFT, ARROW_LINE_RIGHT, ARROW_UP, CARET_LEFT,
+    CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT, CHECK, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL,
+    LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
 };
 use serde_json::{Value, json};
 use vidcut_core::effect_keys::Keyed;
@@ -1417,7 +1417,7 @@ fn connect_menu(ui: &mut egui::Ui, now: Option<&Connect>, trackers: &[Hooked]) -
                     };
                     let on =
                         now.is_some_and(|c| c.tracker == to.tracker && c.pattern == to.pattern);
-                    let text = format!("{name}: Offset Position");
+                    let text = format!("{name}: Offset position");
                     if ui.radio(on, text).clicked() {
                         put = Some(json!(to));
                         ui.close();
@@ -1730,7 +1730,7 @@ impl Workspace {
                 let can = moving && !on.is_empty() && running.is_empty();
                 let back = [
                     (CARET_LINE_LEFT, "Track Reverse", frames.mark_out),
-                    (CARET_LEFT, "Track Backward From Current Frame", at),
+                    (CARET_LEFT, "Track Reverse From Current Time", at),
                 ];
                 for (glyph, name, frame) in back {
                     if icon(ui, glyph, name, can) {
@@ -1741,12 +1741,30 @@ impl Workspace {
                     stop = true;
                 }
                 let ahead = [
-                    (CARET_RIGHT, "Track Forward From Current Frame", at),
+                    (CARET_RIGHT, "Track Forward From Current Time", at),
                     (CARET_LINE_RIGHT, "Track Forward", frames.mark_in),
                 ];
                 for (glyph, name, frame) in ahead {
                     if icon(ui, glyph, name, can) {
                         tracks = track(frame, "forward");
+                    }
+                }
+            });
+            ui.end_row();
+            label(ui, "Trim", false);
+            ui.horizontal(|ui| {
+                let picked = t.patterns.get(pick).filter(|x| x.path.is_some());
+                let can = moving && picked.is_some() && running.is_empty();
+                let trims = [
+                    (ARROW_LINE_LEFT, "Trim to Start", "start"),
+                    (TRASH, "Delete Selected Tracker Data", "all"),
+                    (ARROW_LINE_RIGHT, "Trim to End", "end"),
+                ];
+                for (glyph, name, trim) in trims {
+                    if icon(ui, glyph, name, can) {
+                        let params =
+                            json!({ "pattern": pick + 1, "pattern_trim": trim, "frame": at });
+                        sends.push(set(params));
                     }
                 }
             });
@@ -1786,7 +1804,7 @@ impl Workspace {
             );
             let full = t.patterns.len() >= vidcut_core::model::Tracker::PATTERNS_KEPT;
             if ui
-                .add_enabled(!full, egui::Button::new("Add Pattern"))
+                .add_enabled(!full, egui::Button::new("Add IntelliTrack"))
                 .clicked()
             {
                 sends.push(set(json!({ "add_pattern": true })));
@@ -4877,7 +4895,7 @@ impl Workspace {
         }
     }
 
-    fn tracks_running(&self) -> Vec<String> {
+    pub(super) fn tracks_running(&self) -> Vec<String> {
         let jobs = self.snap.jobs.iter();
         let tracks = jobs.filter(|j| j.unfinished() && j.kind == "track");
         tracks.map(|j| j.id.clone()).collect()

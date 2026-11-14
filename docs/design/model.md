@@ -575,18 +575,18 @@ Writing:
 
 - A clip of footage, a still or an image sequence can carry motion paths in `Clip.motion` ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
   - `ops::motion::takes` tells which clips take them: not titles, generators, compound clips or sound.
-- A `MotionPath` tells where one thing of the source picture is on the source frames of the clip: its box. It has an id, a name and its samples.
+- A `MotionPath` tells where one thing of the source picture is on the frames of the file of the clip: its box. It has an id, a name and its samples.
   - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). `motion.find` with `replace` takes off the paths of that subject.
     - A path that a pattern or a title has stays (`followed`).
     - A found thing that such a path already follows gets no second path (`same_thing`). Its samples go into that path (`merged`).
     - Between the first and the last new sample, the path keeps only the new samples. Outside them, it keeps its old samples.
     - Thus a second find adds the new things, and a kept path follows its thing on the frames of the new find.
   - A path that `motion.track` made has `tracked`. A later track of the same pattern writes its samples again, and the path keeps its id and its name.
-- A `PathSample` holds the source `frame`, the `center` and the `size` of the box as fractions of the source picture, and the `rotation`.
-  - The `frame` counts as `source_in` does, at each speed of the clip (`Clip::source_at`).
-  - Why: a thing is at one place on a source picture, at any speed that plays that picture.
-  - Thus a trim, a slip, a split, a copy and a speed change do not change a path.
-  - `shift_source` moves the samples with `source_in` when the limits of a subclip change.
+- A `PathSample` holds the `frame` of the file, the `center` and the `size` of the box as fractions of the source picture, and the `rotation`.
+  - The `frame` goes at the frame rate of the file. It counts from the frame where `source_in` counts from. `FileClock::file` takes a source frame to it.
+  - Why: a thing is at one place on a picture of the file, at any speed that plays that picture. A track and a find look at each frame of the file.
+  - Thus a trim, a slip, a split, a copy and a speed change do not change a path. A new frame rate of the timeline does not change it.
+  - `shift_source` moves the samples when the limits of a subclip change. The step in frames of the file is the step of `source_in` at the rate of the file, rounded.
 - `MotionPath::area_at` gives the `motion::Area` on a frame.
   - A path lasts from its first sample to its last. Before and after them it has no box. Between two samples, the box goes in a line.
 - `MotionPath::base_at` gives the box of a pattern on a frame.
@@ -601,7 +601,7 @@ Writing:
 - `timeline.get` names the paths of a clip in `motion`.
 - A pattern of a Tracker can have a path ([compositions](#compositions)). `ops::motion::violation` refuses a pattern with a path that the clip does not have.
   - `motion.remove` refuses a path that a pattern has.
-  - A removal of a pattern or of its Tracker also removes its path when the path has `tracked` and nothing else uses it (`ops::motion::unused`).
+  - A path with `tracked` goes when nothing else uses it (`ops::motion::unused`). This occurs at a removal of its pattern, its Tracker or the composition. A trim of all its samples does the same.
 - A title can follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)). `Title.follows` holds a `Follow`: the id of that clip and the id of the path.
   - `ops::motion::follow` sets it for `motion.follow`. It names the clip that `under` gives, as `ops::motion::settle` does.
     - It puts the title on the thing: the position becomes the middle. `Title::moved` moves the upper line of a lower third by the same amount.
@@ -615,9 +615,9 @@ Writing:
   - `ops::motion::follow_violation` is the check of `validate::violations`.
   - `otio::titles::read` gives a title no `follows`. Why: an import can give the clips new ids.
   - The [export design](export.md#titles) tells how the plan places such a title.
-- An OTIO file keeps the paths of a clip in the `vidcut` metadata of its video item, on the same source frames.
+- An OTIO file keeps the paths of a clip in the `vidcut` metadata of its video item, on the same frames of the file.
   - An import reads them back only when `motion::problem` accepts them (`our_motion`).
-  - An import at another frame rate moves the samples to the project's rate (`motion::rescale`). Two samples that land on one frame leave the first.
+  - An import at another frame rate keeps the samples as they are. Why: the frames of a file do not change with the frame rate of the timeline.
   - `our_picture` reads a mask with no `follows` when the file does not hold that path.
 
 ## Ducking

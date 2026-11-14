@@ -2758,9 +2758,12 @@ fn compound_outside(k: &Compound, media: &str, part: std::ops::Range<i64>) -> Op
     clip_outside(&k.tracks, media, part.clone()).or_else(|| clip_outside(&k.made_from, media, part))
 }
 
-fn shift_source(c: &mut Clip, by: i64) {
+fn shift_source(c: &mut Clip, (by, file_by): (i64, i64)) {
     c.source_in += by;
-    motion::shift(c, by);
+    motion::shift(c, file_by);
+    if let Some(k) = c.picture.as_mut().and_then(|x| x.composition.as_mut()) {
+        k.start += file_by;
+    }
     if c.speed.is_some() {
         return;
     }
@@ -2780,7 +2783,7 @@ fn shift_source(c: &mut Clip, by: i64) {
     }
 }
 
-fn shift_clips(tracks: &mut [Track], media: &str, by: i64) {
+fn shift_clips(tracks: &mut [Track], media: &str, by: (i64, i64)) {
     for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
         if let Some(k) = c.compound.as_mut() {
             shift_compound(k, media, by);
@@ -2791,7 +2794,7 @@ fn shift_clips(tracks: &mut [Track], media: &str, by: i64) {
     }
 }
 
-fn shift_compound(k: &mut Compound, media: &str, by: i64) {
+fn shift_compound(k: &mut Compound, media: &str, by: (i64, i64)) {
     shift_clips(&mut k.tracks, media, by);
     shift_clips(&mut k.made_from, media, by);
 }
@@ -2810,6 +2813,13 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
         )));
     }
     let (by, len, more) = (first - a, b - a, b - end);
+    let fps = p.settings.fps.as_f64();
+    let video = m
+        .info
+        .video
+        .as_ref()
+        .filter(|v| !v.still && v.fps.as_f64() > 0.0);
+    let file_by = (by as f64 * video.map_or(fps, |v| v.fps.as_f64()) / fps).round() as i64;
     let part = -by..len - by;
     let outside = clip_outside(&p.tracks, media, part.clone()).or_else(|| {
         p.compounds
@@ -2838,9 +2848,9 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             }
         }
     }
-    shift_clips(&mut p.tracks, media, by);
+    shift_clips(&mut p.tracks, media, (by, file_by));
     for k in p.compounds.iter_mut().flat_map(PooledCompound::blocks_mut) {
-        shift_compound(k, media, by);
+        shift_compound(k, media, (by, file_by));
     }
     let fps = p.settings.fps;
     let m = p

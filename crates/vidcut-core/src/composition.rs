@@ -180,7 +180,7 @@ impl Pattern {
 
 impl Tracker {
     pub const PATTERNS_KEPT: usize = 256;
-    pub const NAME: &'static str = "Pattern";
+    pub const NAME: &'static str = "IntelliTrack";
 
     pub fn free_name(&self) -> String {
         (1..)
@@ -510,8 +510,8 @@ impl Frames {
         (self.mark_in..=self.mark_out).contains(&f)
     }
 
-    pub fn source(&self, f: f64) -> f64 {
-        self.clock.source_of(f + self.zero as f64)
+    pub fn file(&self, f: i64) -> i64 {
+        f + self.zero
     }
 }
 
@@ -547,6 +547,27 @@ impl Composition {
             .map(|n| format!("{of}_{n}"))
             .find(|name| self.node(name).is_none())
             .unwrap_or_default()
+    }
+
+    pub fn cut_at(&mut self, input: &str) {
+        let mut kept: HashSet<String> = HashSet::new();
+        let mut next = vec![input.to_string()];
+        while let Some(name) = next.pop() {
+            let Some(n) = self.node(&name) else {
+                continue;
+            };
+            if !kept.insert(name) {
+                continue;
+            }
+            next.extend(n.input.iter().chain(&n.effect_mask).cloned());
+            let tracker = n.tool.mask().and_then(|m| m.connect.as_ref());
+            next.extend(tracker.map(|c| c.tracker.clone()));
+        }
+        self.nodes
+            .retain(|n| n.tool == Tool::MediaOut || kept.contains(&n.name));
+        if let Some(out) = self.nodes.iter_mut().find(|n| n.tool == Tool::MediaOut) {
+            out.input = Some(input.to_string());
+        }
     }
 
     pub fn out(&self) -> Option<&Node> {

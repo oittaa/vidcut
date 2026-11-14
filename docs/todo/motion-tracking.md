@@ -40,10 +40,10 @@ In this file, a path is never a track of the timeline.
 - A clip holds motion paths, and `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read them ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
 - Transform, Crop and the values of the effects have keyframes ([keyframes.md](keyframes.md)).
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
-- The Center of a mask of a composition can follow a pattern of a Tracker node ([deviation X168](../deviations.md#x168-the-tracker-tracks-with-a-model)).
+- The Center of a mask of a composition can follow a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
   - The values of a mask have keyframes ([model](../design/model.md#compositions)).
 - `motion.find` finds the faces, the text, the people and the vehicles of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
-- `motion.track` tracks a pattern of a Tracker node ([deviation X168](../deviations.md#x168-the-tracker-tracks-with-a-model)).
+- `motion.track` tracks a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
 - `motion.follow` makes a title follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)).
 - No request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
@@ -110,14 +110,17 @@ In this file, a path is never a track of the timeline.
   - Very small text: try a longer side above 960 pixels for a large source, and measure the time.
   - Text that comes into the picture has no blur on its first frames, as a face has not.
   - The detector takes most of the time of a text find. Try the model on the GPU.
-- **The Tracker, what is left:**
-  - Measure `tracking::LOST` on a clip where the thing leaves the picture, or goes behind another thing. No test clip has one.
-  - A track follows no turn and no change of perspective.
+- **The Tracker, what is left:** one pull request for each part.
   - Track Fwd Then Reverse of Resolve 21.2. Measure where it starts and where it is in the row of buttons.
-  - The Operation tab: Match Move, Corner Positioning and stabilization (p. 1789). Then the Foreground and Effect Mask inputs of a Tracker.
-  - The outputs other than Offset Position, for example Steady Position.
-  - Keyframes on X Offset and Y Offset, and the Tracker Offset button of the viewer (p. 1789).
-  - A track of the picture on the input of the Tracker. The model now reads the clip's own picture.
+  - Measure what a drag of a pattern box does on a frame of the path ([X168](../deviations.md#x168-a-drag-of-a-pattern-box-changes-its-path)).
+  - Point patterns: Add Point, the search area in the viewer, the channel, Adaptive Mode, Match Tolerance and the pattern flipbooks (pp. 1783–1788).
+    - Path Center with Track Center (Append) (p. 1788), and the path tools of the viewer (p. 1787).
+  - A track follows no turn and no change of perspective.
+  - Keyframes on X Offset and Y Offset, the Tracker Offset button of the viewer, and Select Time with Go (p. 1789).
+  - The Foreground and Effect Mask inputs of a Tracker.
+  - The Operation tab: Match Move, Corner Positioning, Perspective Positioning and stabilization (p. 1789).
+  - The outputs other than Offset Position: Perspective Position, and the Steady and Unsteady values (pp. 1793–1794).
+  - The Options tab: the names of the patterns, enlarge on drag and the search scale.
 - **The Tracker in the app:** run each track button, Stop Tracking, Find, Blur, Connect To and Follow Size. Take a find that asks for the download of its model.
 - **A clip follows a path** of another clip: a picture in a picture, or a sticker.
 - **A title that follows a path, what is left:**
