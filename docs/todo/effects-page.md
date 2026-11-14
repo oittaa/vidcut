@@ -35,7 +35,6 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - Ctrl-drag on the ruler, a drag of a yellow line, and Set Render Range and Auto Render Range in the menu of the ruler.
   - A drag of a node to the ruler, and the Render Start and Render End fields at the left of the transport.
   - vidcut: the render range is always the In and the Out of the clip.
-- **The menus of the transport** (p. 1296): the frame increment of the play buttons, and Ping-pong Loop. Measure Ping-pong Loop in Resolve first.
+- **The menu of the play buttons** (p. 1296): the frame increment.
 - **The Audio button** at the left of the transport (p. 1297).
-- **Sound in the head and the tail:** measure what Resolve plays there. vidcut plays no sound there.
 - The CLI, IPC and MCP perform the same action as the GUI, in each step.

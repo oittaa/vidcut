@@ -1127,6 +1127,7 @@ impl Placing {
             let at = p.source as f64;
             let sampled = Composition {
                 nodes: c.nodes.iter().map(|n| n.sampled(at)).collect(),
+                ..Composition::default()
             };
             let areas = |named: &str| p.followed.bases(named, p.source);
             composed(&sampled, pixels, p.frame, &areas)

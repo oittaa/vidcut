@@ -491,6 +491,16 @@ pub fn key(
     Ok(json!({ "clip": id, "node": name, "frame": frame, "keyed": keyed }))
 }
 
+pub fn looping(p: &mut Project, id: &str, on: Option<bool>, ping_pong: Option<bool>) -> Result<()> {
+    let c = comp_of(p, id)?;
+    c.loop_play = match (on, ping_pong) {
+        (None, None) => !c.loop_play,
+        (on, _) => on.unwrap_or(c.loop_play),
+    };
+    c.ping_pong = ping_pong.unwrap_or(c.ping_pong);
+    Ok(())
+}
+
 pub fn reset(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let c = kept(p, id)?;
     let i = found(c, id, name)?;

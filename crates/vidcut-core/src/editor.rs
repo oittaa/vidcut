@@ -4447,6 +4447,15 @@ fn mutate(
             ops::comp::reset(p, &id, node)?;
             Value::Null
         }
+        Request::CompLoop {
+            clip,
+            on,
+            ping_pong,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::looping(p, &id, *on, *ping_pong)?;
+            Value::Null
+        }
         Request::MotionAdd {
             clip,
             name,

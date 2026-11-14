@@ -1414,7 +1414,11 @@ fn live(method: &str, r: &Response) -> Option<()> {
                     time["last"],
                     time["out"],
                     time["speed"],
-                    if time["loop"] == true { "on" } else { "off" }
+                    match (time["loop"] == true, time["ping_pong"] == true) {
+                        (false, _) => "off",
+                        (true, false) => "on",
+                        (true, true) => "ping pong",
+                    }
                 );
             }
             println!("edit {}", edit_point(&v["edit"]));

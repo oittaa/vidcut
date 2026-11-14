@@ -738,6 +738,8 @@ pub fn composition_checked(c: &Composition) -> Result<Composition> {
             .iter()
             .map(node_checked)
             .collect::<Result<Vec<_>>>()?,
+        loop_play: c.loop_play,
+        ping_pong: c.ping_pong,
     })
 }
 

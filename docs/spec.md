@@ -2581,9 +2581,15 @@ The shapes:
   - Play forward from the head goes through the head and on to the Out. Play backward from the tail goes through the tail and on to the In.
   - Play forward from the tail starts at the In. Play backward from the head starts at the Out.
   - With Loop on, play forward from the Out goes on from the In. Play backward from the In goes on from the Out.
-  - Loop is on in a new composition.
+  - A right-click on Loop picks the way it loops (p. 1296). The menu of 21.2 has Loop and Ping Pong.
+  - With Ping Pong, play turns back at the In and at the Out. The manual says that it turns back at the ends of the Time Ruler (p. 1296).
+  - With Ping Pong, play from the head and from the tail starts as it does with Loop.
+  - Each composition keeps its own Loop and its own way to loop. Loop is on in a new composition.
   - The timeline playhead follows the playhead of the page only between the In and the Out. In the head and the tail, it stays where it was.
-- The page plays the sound of the timeline (p. 1297). vidcut: play in the head and the tail has no sound.
+- The page plays the sound of the timeline (p. 1297).
+  - Measured in Resolve Studio 21.2: play in the head has no sound. The same frames had sound between the In and the Out.
+  - Measured in Resolve Studio 21.2: play backward in the tail had sound in one run of three. Play backward between the In and the Out had sound in two runs of four.
+  - vidcut: play in the head and in the tail has no sound. Play backward between the In and the Out has sound.
 - Select:
   - A click on a node selects it. Ctrl-click (Command on a Mac) adds a node to the selection, or takes it out (pp. 1390–1391).
   - One selected node is the active node. New tools go after it (p. 1391).
@@ -2610,8 +2616,8 @@ The shapes:
   - Find there finds the things of a subject in the clip of the page.
   - Blur there adds a Mosaic Blur before Media Out, with a mask on its effect mask that follows the subject.
 
-Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key` and `comp.reset`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
-`gui.page_time` moves and plays the playhead of the page, and sets its Loop. `player.bounds` holds play of the timeline between two frames.
+Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
+`gui.page_time` moves and plays the playhead of the page. `comp.loop` sets Loop and Ping Pong. `player.bounds` holds play of the timeline between two frames.
 `comp.set` with `follows` makes a mask follow a path. `motion.track` with `node` tracks a mask.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)

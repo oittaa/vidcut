@@ -12,6 +12,13 @@ pub type MakeOutput = Arc<dyn Fn() -> Box<dyn AudioOutput> + Send + Sync>;
 
 const PRESENT_AGAIN: Duration = Duration::from_millis(50);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wrap {
+    Stop,
+    Loop,
+    PingPong,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Presenting {
     motion: u64,
@@ -49,7 +56,8 @@ pub struct Player {
     auditioning: bool,
     skips: Option<Vec<(i64, i64)>>,
     looping: (bool, Option<(i64, i64)>),
-    bounds: Option<((i64, i64), bool)>,
+    bounds: Option<((i64, i64), Wrap)>,
+    bouncing: Option<f64>,
     muted: bool,
     scrubbing: bool,
     decoding: crate::preferences::GpuDecoding,
@@ -87,6 +95,7 @@ impl Player {
             skips: None,
             looping: (false, None),
             bounds: None,
+            bouncing: None,
             muted: false,
             scrubbing: true,
             decoding,
@@ -419,6 +428,7 @@ impl Player {
 
     pub fn seek(&mut self, id: PlayerId, frame: i64, sound: bool) -> Option<u64> {
         self.end_audition();
+        self.bouncing = None;
         if id != self.active {
             let c = &mut self.contents[id.index()];
             c.position = match c.plan {
@@ -447,6 +457,7 @@ impl Player {
 
     pub fn step(&mut self, frames: i64) -> u64 {
         self.end_audition();
+        self.bouncing = None;
         let Some(engine) = self.shown_engine().cloned() else {
             let c = &self.contents[self.active.index()];
             let to = c.position.saturating_add(frames).max(0);
@@ -460,13 +471,44 @@ impl Player {
 
     pub fn play(&mut self, speed: f64) {
         self.end_audition();
+        self.bouncing = self.bounced().map(|_| speed);
         if let Some(e) = self.shown_engine() {
             e.play(speed);
         }
     }
 
+    fn bounced(&self) -> Option<(i64, i64)> {
+        match self.bounds {
+            Some((range, Wrap::PingPong)) if self.active == PlayerId::Timeline => Some(range),
+            _ => None,
+        }
+    }
+
+    pub fn bounce(&mut self) {
+        let (Some(speed), Some((a, b))) = (self.bouncing, self.bounced()) else {
+            return;
+        };
+        let Some(e) = self.shown_engine().cloned() else {
+            return;
+        };
+        let s = e.status();
+        if s.playing {
+            return;
+        }
+        let edge = if speed > 0.0 {
+            s.position >= b - 1
+        } else {
+            s.position <= a
+        };
+        self.bouncing = edge.then_some(-speed);
+        if edge {
+            e.play(-speed);
+        }
+    }
+
     pub fn pause(&mut self) {
         self.end_audition();
+        self.bouncing = None;
         if let Some(e) = self.shown_engine() {
             e.pause();
         }
@@ -479,12 +521,14 @@ impl Player {
         }
     }
 
-    pub fn bounds(&self) -> Option<((i64, i64), bool)> {
+    pub fn bounds(&self) -> Option<((i64, i64), Wrap)> {
         self.bounds
     }
 
-    pub fn set_bounds(&mut self, bounds: Option<((i64, i64), bool)>) {
+    pub fn set_bounds(&mut self, bounds: Option<((i64, i64), Wrap)>) {
         self.bounds = bounds;
+        let speed = self.status().filter(|s| s.playing).map(|s| s.speed);
+        self.bouncing = self.bounced().and(speed);
         if !self.auditioning {
             self.apply_loop();
         }
@@ -497,7 +541,7 @@ impl Player {
         match self.bounds.filter(|_| self.active == PlayerId::Timeline) {
             Some((range, wrap)) => {
                 e.set_bounds(Some(range));
-                e.set_loop(wrap.then_some(range));
+                e.set_loop((wrap == Wrap::Loop).then_some(range));
             }
             None => {
                 let (on, marks) = self.looping;

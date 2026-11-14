@@ -2871,6 +2871,20 @@ pub enum Request {
     /// path that it follows.
     #[serde(rename = "comp.reset")]
     CompReset { clip: ClipRef, node: String },
+    /// The Loop button of the effects page, kept in the composition of a
+    /// clip. With `on`, play on the page goes on at the other end of the
+    /// clip. Off, it stops at the In or the Out. With `ping_pong` on, play
+    /// that loops turns back at the In and the Out. A value left out stays.
+    /// Without both, Loop goes on or off. A clip without a composition
+    /// first gets `MediaIn1` joined to `MediaOut1`.
+    #[serde(rename = "comp.loop")]
+    CompLoop {
+        clip: ClipRef,
+        #[serde(default)]
+        on: Option<bool>,
+        #[serde(default)]
+        ping_pong: Option<bool>,
+    },
     /// The motion paths of `clips`, or of every clip that has some. A motion
     /// path tells where one area of a clip's picture is on its source frames:
     /// a face, a number plate or another thing in the picture. Each clip
@@ -3620,10 +3634,11 @@ pub enum Request {
     },
     /// Hold play of the timeline from `from` to `to` (frames, `to` is the
     /// first frame after). Play that starts inside stops at the ends, or
-    /// with `loop` on goes on from the other end. Play forward from the
-    /// last frame starts at `from`, and play backward from `from` starts at
-    /// the last frame. The effects page holds play to its clip. Without
-    /// `from` and `to`, play is not held. Answers what `player.state` does.
+    /// with `loop` on goes on from the other end. With `ping_pong` on too,
+    /// it turns back at the ends. Play forward from the last frame starts
+    /// at `from`, and play backward from `from` starts at the last frame.
+    /// The effects page holds play to its clip. Without `from` and `to`,
+    /// play is not held. Answers what `player.state` does.
     #[serde(rename = "player.bounds")]
     PlayerBounds {
         #[serde(default)]
@@ -3632,6 +3647,8 @@ pub enum Request {
         to: Option<i64>,
         #[serde(default, rename = "loop")]
         looping: bool,
+        #[serde(default)]
+        ping_pong: bool,
     },
     /// Fast Review (decision D97): Play and Space run a long clip faster than
     /// a short one. A clip of 10 seconds or less plays at 1×. A longer clip
@@ -3778,8 +3795,9 @@ pub enum Request {
     /// `fast` marks a scrub: it is left out of the command log. `speed`
     /// plays it (negative: backward, 0 stops). Play forward from the tail
     /// starts at the In, and play backward from the head starts at the Out.
-    /// Play in the head and the tail has no sound. With `loop` on, play
-    /// from the Out goes on from the In. Answers what `gui.state` does.
+    /// Play in the head and the tail has no sound. Inside the clip, play
+    /// follows the Loop of its composition (`comp.loop`). Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.page_time")]
     GuiPageTime {
         #[serde(default)]
@@ -3788,8 +3806,6 @@ pub enum Request {
         fast: bool,
         #[serde(default)]
         speed: Option<f64>,
-        #[serde(default, rename = "loop")]
-        looping: Option<bool>,
     },
     /// What only the GUI keeps: the page, the clip of the effects page, its
     /// nodes selected and its playhead (`time`, in frames from the In), the

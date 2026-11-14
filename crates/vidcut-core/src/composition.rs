@@ -320,6 +320,16 @@ pub fn named_well(name: &str) -> bool {
     !name.is_empty() && cleaned(name) == name
 }
 
+impl Default for Composition {
+    fn default() -> Self {
+        Self {
+            nodes: Vec::new(),
+            loop_play: true,
+            ping_pong: false,
+        }
+    }
+}
+
 impl Composition {
     pub const STEP: [f64; 2] = [1.0, 1.0];
 
@@ -328,6 +338,7 @@ impl Composition {
         out.input = Some(MEDIA_IN.to_string());
         Self {
             nodes: vec![Node::new(MEDIA_IN, Tool::MediaIn, [0.0, 0.0]), out],
+            ..Self::default()
         }
     }
 

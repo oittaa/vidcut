@@ -102,7 +102,6 @@ pub struct PageTime {
     pub at: Option<i64>,
     pub fast: bool,
     pub speed: Option<f64>,
-    pub looping: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
@@ -114,6 +113,7 @@ pub struct PageClock {
     pub speed: f64,
     #[serde(rename = "loop")]
     pub looping: bool,
+    pub ping_pong: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -1419,6 +1419,7 @@ impl Live {
             }
         }
         self.present_due();
+        self.player.bounce();
         let p = &self.player;
         if p.shown < p.motion {
             soonest(now + Duration::from_millis(5));
@@ -2924,9 +2925,19 @@ impl Live {
                 self.sync_loop();
                 Step::Now(Ok(self.state_response()))
             }
-            Request::PlayerBounds { from, to, looping } => {
+            Request::PlayerBounds {
+                from,
+                to,
+                looping,
+                ping_pong,
+            } => {
+                let wrap = match (looping, ping_pong) {
+                    (false, _) => player::Wrap::Stop,
+                    (true, false) => player::Wrap::Loop,
+                    (true, true) => player::Wrap::PingPong,
+                };
                 let bounds = match (from, to) {
-                    (Some(a), Some(b)) if b > a => Some(((a, b), looping)),
+                    (Some(a), Some(b)) if b > a => Some(((a, b), wrap)),
                     (None, None) => None,
                     _ => {
                         return Step::Now(Err(Error::usage(
@@ -3176,23 +3187,13 @@ impl Live {
             Request::GuiNodes { nodes } => {
                 self.gui_change(vec![GuiChange::Nodes(nodes)], |s| json!(s))
             }
-            Request::GuiPageTime {
-                at,
-                fast,
-                speed,
-                looping,
-            } => {
+            Request::GuiPageTime { at, fast, speed } => {
                 if speed.is_some_and(|s| !s.is_finite() || s.abs() > MAX_SPEED) {
                     return Step::Now(Err(Error::usage(format!(
                         "speed must be within -{MAX_SPEED}..{MAX_SPEED}"
                     ))));
                 }
-                let time = PageTime {
-                    at,
-                    fast,
-                    speed,
-                    looping,
-                };
+                let time = PageTime { at, fast, speed };
                 self.gui_change(vec![GuiChange::PageTime(time)], |s| json!(s))
             }
             Request::GuiState {} => self.gui_change(Vec::new(), |s| json!(s)),
@@ -5102,8 +5103,13 @@ impl Live {
             "audio_error": self.player.audio_error,
             "audio_scrubbing": self.audio_scrubbing,
             "loop": self.looping,
-            "bounds": self.player.bounds().map(|((from, to), looping)| {
-                json!({ "from": from, "to": to, "loop": looping })
+            "bounds": self.player.bounds().map(|((from, to), wrap)| {
+                json!({
+                    "from": from,
+                    "to": to,
+                    "loop": wrap != player::Wrap::Stop,
+                    "ping_pong": wrap == player::Wrap::PingPong,
+                })
             }),
             "fast_review": self.fast_review,
             "video_only": self.video_only,

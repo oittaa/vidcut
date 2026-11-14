@@ -354,6 +354,13 @@ pub fn describe_at(
             None => format!("Key {} of {}", d.text("node"), d.clips("clip")),
         },
         "comp.reset" => format!("Reset {} of {}", d.text("node"), d.clips("clip")),
+        "comp.loop" => match (d.params["on"].as_bool(), d.params["ping_pong"].as_bool()) {
+            (Some(false), _) => format!("Turn off the loop of {}", d.clips("clip")),
+            (_, Some(true)) => format!("Loop {} with Ping Pong", d.clips("clip")),
+            (_, Some(false)) => format!("Loop {} without Ping Pong", d.clips("clip")),
+            (Some(true), None) => format!("Loop {}", d.clips("clip")),
+            (None, None) => format!("Turn the loop of {} on or off", d.clips("clip")),
+        },
         "motion.add" => format!("Add a motion path to {}", d.clips("clip")),
         "motion.set" => format!(
             "Change motion path {} of {}",

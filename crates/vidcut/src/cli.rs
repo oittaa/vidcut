@@ -97,6 +97,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("comp.paste", &["clip", "node"]),
     ("comp.key", &["clip", "node"]),
     ("comp.reset", &["clip", "node"]),
+    ("comp.loop", &["clip"]),
     ("effects.set", &["clip", "effect"]),
     ("effects.key", &["clip", "effect"]),
     ("effects.reset", &["clip", "effect"]),

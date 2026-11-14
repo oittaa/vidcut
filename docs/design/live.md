@@ -284,7 +284,8 @@ The bar and the Jobs button:
   - In the head and the tail, `EffectsPage` keeps it (`Away`). The timeline playhead stays where it was.
   - Play there runs on the clock of the GUI, with no sound (`Run`).
   - At the In or the Out, `Workspace::page_tick` seeks the timeline there and plays it on.
-  - Between the In and the Out, the timeline plays. `player.bounds` holds it to the clip, with the Loop of the page (`Workspace::sync_bounds`).
+  - Between the In and the Out, the timeline plays. `player.bounds` holds it to the clip, with the Loop and the Ping Pong of the composition (`Workspace::sync_bounds`).
+  - With Ping Pong, `Player::bounce` plays back from the edge where play stopped (`Wrap::PingPong`). The tick of the live thread calls it.
   - Each move and each play goes through `gui.page_time`. Thus a script and the GUI take one path.
 - The Inspector of the page is `Workspace::node_inspector`. It shows each selected node with the rows of its tool.
   - A drag holds the value (`Inspector::held`) and sends one `comp.set` when it stops. `Workspace::node_preview` shows the held value until then.

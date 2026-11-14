@@ -545,7 +545,7 @@ Writing:
   - `Composition::plain` is the composition of a clip without one: `MediaIn1` joined to `MediaOut1`.
   - `Composition::free_name` gives the name of the tool with the first free number. `Composition::copy_name` adds `_` and the first free number from 1.
   - `composition::cleaned` keeps letters, digits and `_`, with no digit first.
-- `ops::comp` holds the edits: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key` and `comp.reset`.
+- `ops::comp` holds the edits: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`.
   - A clip without a composition gets `Composition::plain` on its first `comp.add` or `comp.paste`.
   - `ops::comp::paste` puts the copies into a clone of the composition first. Thus a copy that is refused changes nothing.
   - `comp.set` takes a `NodeChange`. Its `values` are a `KindChange`: the values of an effect's kind, which `effects.set` also takes in its `EffectChange`.

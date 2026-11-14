@@ -84,10 +84,9 @@ pub(super) struct EffectsPage {
     renaming: Option<Renaming>,
     copied: Vec<Node>,
     away: Option<Away>,
-    looping: bool,
     view: (f64, f64),
     zooming: Option<Zoom>,
-    bounds: Option<((i64, i64), bool)>,
+    bounds: Option<((i64, i64), (bool, bool))>,
 }
 
 impl Default for EffectsPage {
@@ -108,7 +107,6 @@ impl Default for EffectsPage {
             renaming: None,
             copied: Vec::new(),
             away: None,
-            looping: true,
             view: (0.0, 1.0),
             zooming: None,
             bounds: None,
@@ -1225,13 +1223,15 @@ impl Workspace {
         }
         let (p, c) = self.page_source()?;
         let (first, last) = source_span(&p, &c);
+        let comp = stored_composition(&c);
         Some(PageClock {
             at: self.page_at() - c.start,
             first: first - c.start,
             last: last - c.start,
             out: c.duration - 1,
             speed: self.page_speed(),
-            looping: self.effects_page.looping,
+            looping: comp.loop_play,
+            ping_pong: comp.ping_pong,
         })
     }
 
@@ -1242,10 +1242,6 @@ impl Workspace {
         let (p, c) = self
             .page_source()
             .ok_or("There is no clip at the playhead")?;
-        if let Some(on) = t.looping {
-            self.effects_page.looping = on;
-            self.sync_bounds();
-        }
         if let Some(at) = t.at {
             let (first, last) = source_span(&p, &c);
             self.page_go(&c, (c.start + at).clamp(first, last), t.fast);
@@ -1384,13 +1380,21 @@ impl Workspace {
         let want = (self.effects_page.page == Page::Effects)
             .then(|| self.page_source())
             .flatten()
-            .map(|(_, c)| ((c.start, c.end()), self.effects_page.looping));
+            .map(|(_, c)| {
+                let comp = stored_composition(&c);
+                ((c.start, c.end()), (comp.loop_play, comp.ping_pong))
+            });
         if want == self.effects_page.bounds {
             return;
         }
         self.effects_page.bounds = want;
         let params = match want {
-            Some(((from, to), looping)) => json!({ "from": from, "to": to, "loop": looping }),
+            Some(((from, to), (looping, ping_pong))) => json!({
+                "from": from,
+                "to": to,
+                "loop": looping,
+                "ping_pong": ping_pong,
+            }),
             None => json!({}),
         };
         self.send("player.bounds", params);
@@ -1558,7 +1562,7 @@ impl Workspace {
                 };
                 let (first, last) = source_span(p, c);
                 let speed = self.page_speed();
-                let looping = self.effects_page.looping;
+                let comp = stored_composition(c);
                 let big = |s: &str| RichText::new(s).size(16.0);
                 let mut ask = None;
                 if ui.button(big("⏮")).clicked() {
@@ -1576,9 +1580,26 @@ impl Workspace {
                 if ui.button(big("⏭")).clicked() {
                     ask = Some(json!({ "at": last - c.start }));
                 }
-                let repeat = big(egui_phosphor::regular::REPEAT);
-                if ui.selectable_label(looping, repeat).clicked() {
-                    ask = Some(json!({ "loop": !looping }));
+                let icon = match comp.ping_pong {
+                    true => egui_phosphor::regular::ARROWS_LEFT_RIGHT,
+                    false => egui_phosphor::regular::REPEAT,
+                };
+                let r = ui.selectable_label(comp.loop_play, big(icon));
+                let mut looped = None;
+                if r.clicked() {
+                    looped = Some(json!({ "on": !comp.loop_play }));
+                }
+                r.context_menu(|ui| {
+                    for (label, pp) in [("Loop", false), ("Ping Pong", true)] {
+                        if ui.radio(comp.ping_pong == pp, label).clicked() {
+                            looped = Some(json!({ "ping_pong": pp }));
+                            ui.close();
+                        }
+                    }
+                });
+                if let Some(mut params) = looped {
+                    params["clip"] = json!(c.id);
+                    self.send("comp.loop", params);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let mut n = self.page_at() - c.start;

@@ -3488,10 +3488,19 @@ pub struct Effect {
 /// `MediaIn1` joined to `MediaOut1`. Without a `media_out` node, or with
 /// nothing on its input, the clip shows nothing, and an export stops with
 /// an error.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Composition {
     /// The nodes, in the order they were added.
     pub nodes: Vec<Node>,
+    /// The Loop button of the effects page. On, play on the page goes on
+    /// at the other end of the clip. Off, it stops at the In or the Out.
+    /// Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub loop_play: bool,
+    /// On, play that loops turns back at the In and the Out. Off, it goes
+    /// on from the other end. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ping_pong: bool,
 }
 
 /// A node of a composition: the clip's picture coming in, a tool, a mask,
