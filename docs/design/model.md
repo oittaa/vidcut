@@ -547,6 +547,7 @@ Writing:
   - `composition::cleaned` keeps letters, digits and `_`, with no digit first.
 - `ops::comp` holds the edits: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key` and `comp.reset`.
   - A clip without a composition gets `Composition::plain` on its first `comp.add` or `comp.paste`.
+  - `ops::comp::paste` puts the copies into a clone of the composition first. Thus a copy that is refused changes nothing.
   - `comp.set` takes a `NodeChange`. Its `values` are a `KindChange`: the values of an effect's kind, which `effects.set` also takes in its `EffectChange`.
   - A blur takes its `size`, and a mask its `center`, from the `KindChange`. Why: the names in the request are then those of the model.
 - `ops::picture::composition_checked` checks the names, the joins, the loops and each node (`ops::picture::node_checked`). It is part of `ops::picture::checked`.

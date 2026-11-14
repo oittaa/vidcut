@@ -331,14 +331,19 @@ pub fn describe_at(
             d.text("to")
         ),
         "comp.remove" => format!("Remove {} of {}", d.text("node"), d.clips("clip")),
-        "comp.paste" => format!(
-            "Paste {} into {}",
-            d.params["node"]
-                .as_str()
-                .or(d.params["copy"]["name"].as_str())
-                .unwrap_or("a node"),
-            d.clips("clip")
-        ),
+        "comp.paste" => {
+            let copies = d.params["copy"].as_array().map_or(0, Vec::len);
+            let what = match (d.params["node"].as_str(), copies) {
+                (Some(n), _) => n.to_string(),
+                (None, 1) => d.params["copy"][0]["name"]
+                    .as_str()
+                    .unwrap_or("a node")
+                    .to_string(),
+                (None, n) if n > 1 => format!("{n} nodes"),
+                _ => "a node".to_string(),
+            };
+            format!("Paste {what} into {}", d.clips("clip"))
+        }
         "comp.key" => match d.params["value"].as_str() {
             Some(v) => format!(
                 "Key {} of {} of {}",

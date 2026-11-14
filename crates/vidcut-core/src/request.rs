@@ -2829,12 +2829,16 @@ pub enum Request {
     /// its effect mask stay, joined to nothing.
     #[serde(rename = "comp.remove")]
     CompRemove { clip: ClipRef, node: String },
-    /// Put a copy of a node, with its values and keyframes, into the
-    /// composition of `clip`, as `comp.add` puts a new node after `after`.
-    /// The node is `node` of the composition of `from`, or of `clip`. Or it
-    /// is `copy`: a node as the composition of a clip holds it. The copy
+    /// Put copies of nodes, with their values and keyframes, into the
+    /// composition of `clip`. The node is `node` of the composition of
+    /// `from`, or of `clip`. Or the nodes are `copy`: nodes as the
+    /// composition of a clip holds them. One copy goes after `after`, as
+    /// `comp.add` puts a new node. Several copies keep the joins between
+    /// them and their places to each other. Their top left goes one place
+    /// right of `after`, or under all the nodes without `after`. A copy
     /// keeps its name while it is free, else it is the name with `_1` or the
-    /// first free number after it. Returns the clip and the `node`'s name.
+    /// first free number after it. Returns the clip, the names of the copies
+    /// in `nodes`, and the last name in `node`.
     #[serde(rename = "comp.paste")]
     CompPaste {
         clip: ClipRef,
@@ -2844,8 +2848,8 @@ pub enum Request {
         from: Option<ClipRef>,
         #[serde(default)]
         after: Option<String>,
-        #[serde(default)]
-        copy: Option<Box<Node>>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        copy: Vec<Node>,
     },
     /// The Keyframe button of one value of a node of a clip's composition,
     /// or of all its values without `value`. With a keyframe on `at`, it
@@ -5043,6 +5047,9 @@ pub struct NodeChange {
     /// Off, a mask is only a band about its edge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solid: Option<bool>,
+    /// Off, the viewer shows no handles of a mask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_view_controls: Option<bool>,
     /// The width of an ellipse or a rectangle mask.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<f64>,

@@ -24,6 +24,8 @@ const MARGIN: Vec2 = vec2(40.0, 40.0);
 const KNOT: f32 = 5.0;
 const GRIP: f32 = 9.0;
 const HANDLE: f32 = 4.0;
+const RING: f32 = 27.0;
+const RING_STEPS: usize = 48;
 const RULER: f32 = 24.0;
 const TOOLS: f32 = 30.0;
 const TRANSPORT: f32 = 36.0;
@@ -70,7 +72,7 @@ pub(super) struct EffectsPage {
     linking: Option<Linking>,
     band: Option<(Pos2, bool)>,
     renaming: Option<Renaming>,
-    copied: Option<Node>,
+    copied: Vec<Node>,
 }
 
 impl Default for EffectsPage {
@@ -89,7 +91,7 @@ impl Default for EffectsPage {
             linking: None,
             band: None,
             renaming: None,
-            copied: None,
+            copied: Vec::new(),
         }
     }
 }
@@ -125,6 +127,8 @@ struct Held {
     grip: Grip,
     composition: Composition,
     sent: Option<(u64, Instant)>,
+    turn: f64,
+    last: [f64; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -132,12 +136,21 @@ enum Grip {
     Center,
     Width,
     Height,
+    Angle,
     Point(usize),
+}
+
+struct Shown {
+    name: String,
+    base: MaskBase,
+    middle: [f64; 2],
+    turn: f64,
+    spots: Vec<(Grip, Pos2)>,
 }
 
 struct Moving {
     node: String,
-    from: [f64; 2],
+    from: Vec<(String, [f64; 2])>,
     by: Vec2,
 }
 
@@ -163,6 +176,13 @@ struct Renaming {
 enum Then {
     Select,
     Renamed(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Pick {
+    Only,
+    Toggle,
+    Active,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -349,6 +369,7 @@ fn grips(f: &Figure) -> Vec<(Grip, [f64; 2])> {
         Outline::Ellipse { half, turn } | Outline::Rectangle { half, turn, .. } => {
             out.push((Grip::Width, plus(f.middle, turned([half[0], 0.0], *turn))));
             out.push((Grip::Height, plus(f.middle, turned([0.0, -half[1]], *turn))));
+            out.push((Grip::Angle, f.middle));
         }
         Outline::Polygon { points, .. } => {
             out.extend(points.iter().enumerate().map(|(i, p)| (Grip::Point(i), *p)));
@@ -423,6 +444,7 @@ fn grip_change(m: &Mask, grip: Grip) -> (&'static str, Value) {
         Grip::Center => ("center", json!(m.middle())),
         Grip::Width => ("width", json!(m.wide())),
         Grip::Height => ("height", json!(m.high())),
+        Grip::Angle => ("angle", json!(m.turn())),
         Grip::Point(_) => ("points", json!(m.points)),
     }
 }
@@ -432,7 +454,65 @@ fn grip_value(grip: Grip) -> Option<EffectValue> {
         Grip::Center => Some(EffectValue::Center),
         Grip::Width => Some(EffectValue::Width),
         Grip::Height => Some(EffectValue::Height),
+        Grip::Angle => Some(EffectValue::Angle),
         Grip::Point(_) => None,
+    }
+}
+
+fn reach(grip: Grip, at: Pos2, press: Pos2) -> f32 {
+    match grip {
+        Grip::Angle => (at.distance(press) - RING).abs(),
+        _ => at.distance(press),
+    }
+}
+
+fn swept(middle: [f64; 2], from: [f64; 2], to: [f64; 2]) -> f64 {
+    use std::f64::consts::{PI, TAU};
+    let at = |p: [f64; 2]| (middle[1] - p[1]).atan2(p[0] - middle[0]);
+    ((at(to) - at(from) + PI).rem_euclid(TAU) - PI).to_degrees()
+}
+
+fn draw_grips(painter: &egui::Painter, f: &Figure, spots: &[(Grip, Pos2)], turning: bool) {
+    let colors = theme::colors();
+    let stroke = Stroke::new(1.5, colors.accent);
+    for (grip, s) in spots {
+        let s = *s;
+        match grip {
+            Grip::Center => {
+                painter.line_segment([s - vec2(6.0, 0.0), s + vec2(6.0, 0.0)], stroke);
+                painter.line_segment([s - vec2(0.0, 6.0), s + vec2(0.0, 6.0)], stroke);
+            }
+            Grip::Angle => {
+                let color = if turning { colors.error } else { colors.accent };
+                let ring: Vec<Pos2> = (0..=RING_STEPS)
+                    .map(|i| {
+                        let a = std::f32::consts::TAU * i as f32 / RING_STEPS as f32;
+                        s + RING * vec2(a.cos(), a.sin())
+                    })
+                    .collect();
+                painter.extend(egui::Shape::dashed_line(
+                    &ring,
+                    Stroke::new(1.0, color),
+                    4.0,
+                    3.0,
+                ));
+                let turn = match &f.outline {
+                    Outline::Ellipse { turn, .. } | Outline::Rectangle { turn, .. } => *turn,
+                    Outline::Polygon { .. } => 0.0,
+                };
+                if turning {
+                    let to = s + RING * vec2(turn.cos() as f32, -turn.sin() as f32);
+                    painter.line_segment([s, to], Stroke::new(1.5, color));
+                }
+            }
+            _ => {
+                painter.rect_filled(
+                    Rect::from_center_size(s, Vec2::splat(HANDLE * 2.0)),
+                    CornerRadius::ZERO,
+                    colors.accent,
+                );
+            }
+        }
     }
 }
 
@@ -515,14 +595,19 @@ impl Workspace {
                 None => true,
             });
         for (r, then) in done {
-            let Some(node) = r
-                .ok()
-                .and_then(|r| r.result["node"].as_str().map(str::to_owned))
-            else {
+            let Some(result) = r.ok().map(|r| r.result) else {
                 continue;
             };
+            let Some(node) = result["node"].as_str().map(str::to_owned) else {
+                continue;
+            };
+            let all: Option<Vec<String>> = result["nodes"].as_array().map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            });
             self.effects_page.nodes = match then {
-                Then::Select => vec![node],
+                Then::Select => all.unwrap_or_else(|| vec![node]),
                 Then::Renamed(old) => self
                     .effects_page
                     .nodes
@@ -567,18 +652,9 @@ impl Workspace {
         before.into_iter().collect()
     }
 
-    fn delete_nodes(&mut self, only_active: bool) {
+    fn delete_nodes(&mut self, gone: Vec<String>) {
         let Some((clip, comp)) = self.page_clip() else {
             return;
-        };
-        let gone: Vec<String> = match only_active {
-            true => self
-                .effects_page
-                .picked()
-                .map(str::to_owned)
-                .into_iter()
-                .collect(),
-            false => self.effects_page.nodes.clone(),
         };
         let gone: Vec<String> = gone
             .into_iter()
@@ -696,21 +772,26 @@ impl Workspace {
         let Some((_, comp)) = self.page_clip() else {
             return;
         };
-        let Some(n) = self.effects_page.picked().and_then(|n| comp.node(n)) else {
-            return;
-        };
-        if !(n.tool.works() || n.tool.is_mask()) {
+        let copied: Vec<Node> = comp
+            .nodes
+            .iter()
+            .filter(|n| self.effects_page.nodes.contains(&n.name))
+            .filter(|n| n.tool.works() || n.tool.is_mask())
+            .cloned()
+            .collect();
+        if copied.is_empty() {
             return;
         }
-        self.effects_page.copied = Some(n.clone());
+        let names = copied.iter().map(|n| n.name.clone()).collect();
+        self.effects_page.copied = copied;
         if cut {
-            self.delete_nodes(true);
+            self.delete_nodes(names);
         }
     }
 
     fn paste_node(&mut self) {
-        let (Some(clip), Some(copy)) = (self.effects_clip(), self.effects_page.copied.clone())
-        else {
+        let copy = self.effects_page.copied.clone();
+        let Some(clip) = self.effects_clip().filter(|_| !copy.is_empty()) else {
             return;
         };
         let mut params = json!({ "clip": clip, "copy": copy });
@@ -751,7 +832,7 @@ impl Workspace {
             MenuAct::PassThrough => self.pass_through(),
             MenuAct::Copy => self.copy_node(false),
             MenuAct::Paste => self.paste_node(),
-            MenuAct::Delete => self.delete_nodes(false),
+            MenuAct::Delete => self.delete_nodes(self.effects_page.nodes.clone()),
         }
     }
 
@@ -929,17 +1010,8 @@ impl Workspace {
         comp: &Composition,
         (w, h): (u32, u32),
     ) {
-        let Some(name) = self.effects_page.picked().map(str::to_owned) else {
-            return;
-        };
-        let Some(node) = comp.node(&name) else {
-            return;
-        };
         let at = self.snap.timeline.position;
-        let node = node.sampled(clip.content_at(at) as f64);
-        let Some(m) = node.tool.mask() else {
-            return;
-        };
+        let source = clip.content_at(at) as f64;
         let frame = clip.source_at(at) as f64;
         let areas = |named: &str| vidcut_core::motion::areas_of(&clip.motion, named, frame);
         let (w, h) = (f64::from(w), f64::from(h));
@@ -949,67 +1021,86 @@ impl Workspace {
             let d = p - picture.min;
             [f64::from(d.x) / scale, f64::from(d.y) / scale]
         };
-        let bases = MaskBase::all(m, (w, h), &areas);
-        let shaping = Shaping::of(m, &node.tool, w, &bases);
         let painter = ui.painter_at(resp.rect);
         let accent = theme::colors().accent;
-        for f in &shaping.figures {
-            let line: Vec<Pos2> = f.line().into_iter().map(screen).collect();
-            painter.add(egui::Shape::line(line, Stroke::new(1.5, accent)));
-        }
-        let (Some(first), Some(base)) = (shaping.figures.first(), bases.first()) else {
-            return;
-        };
-        let spots = grips(first);
-        for (grip, spot) in &spots {
-            let s = screen(*spot);
-            match grip {
-                Grip::Center => {
-                    painter.line_segment(
-                        [s - vec2(6.0, 0.0), s + vec2(6.0, 0.0)],
-                        Stroke::new(1.5, accent),
-                    );
-                    painter.line_segment(
-                        [s - vec2(0.0, 6.0), s + vec2(0.0, 6.0)],
-                        Stroke::new(1.5, accent),
-                    );
-                }
-                _ => {
-                    painter.rect_filled(
-                        Rect::from_center_size(s, Vec2::splat(HANDLE * 2.0)),
-                        CornerRadius::ZERO,
-                        accent,
-                    );
-                }
+        let turning = self
+            .effects_page
+            .held
+            .as_ref()
+            .filter(|x| x.sent.is_none() && x.clip == clip.id && x.grip == Grip::Angle)
+            .map(|x| x.node.clone());
+        let mut shown = Vec::new();
+        for name in &self.effects_page.nodes {
+            let Some(node) = comp.node(name).map(|n| n.sampled(source)) else {
+                continue;
+            };
+            let Some(m) = node.tool.mask().filter(|m| m.show_view_controls) else {
+                continue;
+            };
+            let bases = MaskBase::all(m, (w, h), &areas);
+            let shaping = Shaping::of(m, &node.tool, w, &bases);
+            for f in &shaping.figures {
+                let line: Vec<Pos2> = f.line().into_iter().map(screen).collect();
+                painter.add(egui::Shape::line(line, Stroke::new(1.5, accent)));
             }
+            let (Some(first), Some(base)) = (shaping.figures.first(), bases.first()) else {
+                continue;
+            };
+            let spots: Vec<(Grip, Pos2)> = grips(first)
+                .into_iter()
+                .map(|(g, s)| (g, screen(s)))
+                .collect();
+            let turned = turning.as_deref() == Some(name.as_str());
+            draw_grips(&painter, first, &spots, turned);
+            shown.push(Shown {
+                name: name.clone(),
+                base: *base,
+                middle: first.middle,
+                turn: m.turn(),
+                spots,
+            });
         }
         let pointer = ui.input(|i| i.pointer.interact_pos());
         if resp.drag_started_by(PointerButton::Primary)
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
         {
-            let near = spots
+            let near = shown
                 .iter()
-                .map(|(g, s)| (*g, screen(*s).distance(press)))
-                .filter(|(_, d)| *d <= GRIP)
-                .min_by(|a, b| a.1.total_cmp(&b.1));
-            if let Some((grip, _)) = near {
+                .rev()
+                .flat_map(|s| {
+                    s.spots
+                        .iter()
+                        .map(move |(g, at)| (s, *g, reach(*g, *at, press)))
+                })
+                .filter(|(_, _, d)| *d <= GRIP)
+                .min_by(|a, b| a.2.total_cmp(&b.2));
+            if let Some((s, grip, _)) = near {
                 self.effects_page.held = Some(Held {
                     clip: clip.id.clone(),
-                    node: name.clone(),
+                    node: s.name.clone(),
                     grip,
                     composition: comp.clone(),
                     sent: None,
+                    turn: s.turn,
+                    last: pixel(press),
                 });
             }
         }
-        let source = clip.content_at(at) as f64;
-        let rev = self.project().map_or(0, |p| p.rev);
-        let held = self
+        let Some(name) = self
             .effects_page
             .held
-            .as_mut()
-            .filter(|x| x.sent.is_none() && x.clip == clip.id && x.node == name);
-        let Some(held) = held else {
+            .as_ref()
+            .filter(|x| x.sent.is_none() && x.clip == clip.id)
+            .map(|x| x.node.clone())
+        else {
+            return;
+        };
+        let Some(s) = shown.iter().find(|s| s.name == name) else {
+            self.effects_page.held = None;
+            return;
+        };
+        let rev = self.project().map_or(0, |p| p.rev);
+        let Some(held) = self.effects_page.held.as_mut() else {
             return;
         };
         if resp.dragged()
@@ -1021,10 +1112,19 @@ impl Workspace {
                 n.key_list_mut().retain(|k| k.value != v);
             }
             let tool = n.sampled(source).tool;
+            let to = pixel(to);
             if let (Some(m), Some(now)) = (n.tool.mask_mut(), tool.mask()) {
                 *m = now.clone();
-                gripped(m, &tool, held.grip, pixel(to), base);
+                match held.grip {
+                    Grip::Angle => {
+                        held.turn += swept(s.middle, held.last, to);
+                        let (lo, hi) = Mask::TURNS;
+                        m.angle = Some(held.turn.clamp(lo, hi));
+                    }
+                    grip => gripped(m, &tool, grip, to, &s.base),
+                }
             }
+            held.last = to;
         }
         if !resp.drag_stopped() {
             return;
@@ -1149,10 +1249,14 @@ impl Workspace {
         let origin = rect.min + MARGIN * z + self.effects_page.pan;
         let moving = self.effects_page.moving.as_ref();
         let place = |n: &Node| -> [f64; 2] {
-            match moving.filter(|m| m.node == n.name) {
-                Some(m) => [
-                    m.from[0] + f64::from(m.by.x / (CELL.x * z)),
-                    m.from[1] + f64::from(m.by.y / (CELL.y * z)),
+            let from = moving.and_then(|m| {
+                let (_, at) = m.from.iter().find(|(name, _)| *name == n.name)?;
+                Some((m.by, *at))
+            });
+            match from {
+                Some((by, at)) => [
+                    at[0] + f64::from(by.x / (CELL.x * z)),
+                    at[1] + f64::from(by.y / (CELL.y * z)),
                 ],
                 None => n.place,
             }
@@ -1255,8 +1359,8 @@ impl Workspace {
                 painter.add(egui::Shape::line(sampled_curve(&b, span), lit));
             }
         }
-        let mut picked: Option<(String, bool)> = None;
-        let mut moved: Option<(String, [f64; 2])> = None;
+        let mut picked: Option<(String, Pick)> = None;
+        let mut moved: Vec<(String, [f64; 2])> = Vec::new();
         let mut menu: Option<MenuAct> = None;
         let mut pointed: Option<String> = None;
         for n in &comp.nodes {
@@ -1311,8 +1415,13 @@ impl Workspace {
                 );
             }
             if node_resp.clicked() {
-                let add = ui.input(|i| i.modifiers.command);
-                picked = Some((n.name.clone(), add));
+                let (add, alt) = ui.input(|i| (i.modifiers.command, i.modifiers.alt));
+                let how = match (alt && selected, add) {
+                    (true, _) => Pick::Active,
+                    (false, true) => Pick::Toggle,
+                    (false, false) => Pick::Only,
+                };
+                picked = Some((n.name.clone(), how));
             }
             if node_resp.secondary_clicked() && !selected {
                 pointed = Some(n.name.clone());
@@ -1340,9 +1449,19 @@ impl Workspace {
                 }
             });
             if node_resp.drag_started_by(PointerButton::Primary) {
+                let group = match selected {
+                    true => self.effects_page.nodes.clone(),
+                    false => vec![n.name.clone()],
+                };
+                let from = comp
+                    .nodes
+                    .iter()
+                    .filter(|g| group.contains(&g.name))
+                    .map(|g| (g.name.clone(), g.place))
+                    .collect();
                 self.effects_page.moving = Some(Moving {
                     node: n.name.clone(),
-                    from: n.place,
+                    from,
                     by: Vec2::ZERO,
                 });
             }
@@ -1358,12 +1477,14 @@ impl Workspace {
             if node_resp.drag_stopped()
                 && let Some(m) = self.effects_page.moving.take().filter(|m| m.node == n.name)
             {
-                let to = [
-                    rounded(m.from[0] + f64::from(m.by.x / (CELL.x * z))),
-                    rounded(m.from[1] + f64::from(m.by.y / (CELL.y * z))),
-                ];
-                if to != m.from {
-                    moved = Some((n.name.clone(), to));
+                for (name, from) in &m.from {
+                    let to = [
+                        rounded(from[0] + f64::from(m.by.x / (CELL.x * z))),
+                        rounded(from[1] + f64::from(m.by.y / (CELL.y * z))),
+                    ];
+                    if to != *from {
+                        moved.push((name.clone(), to));
+                    }
                 }
             }
         }
@@ -1465,12 +1586,14 @@ impl Workspace {
             self.effects_page.band = None;
         }
         self.send_all(commands, "Join Nodes");
-        if let Some((name, to)) = moved {
-            self.send(
-                "comp.set",
-                json!({ "clip": clip.id, "node": name, "place": to }),
-            );
-        }
+        let moves = moved
+            .into_iter()
+            .map(|(name, to)| {
+                let params = json!({ "clip": clip.id, "node": name, "place": to });
+                command("comp.set", params)
+            })
+            .collect();
+        self.send_all(moves, "Move Nodes");
         if let Some(name) = pointed {
             self.effects_page.nodes = vec![name];
         }
@@ -1478,7 +1601,13 @@ impl Workspace {
             self.menu_act(act);
         }
         match picked {
-            Some((name, true)) => {
+            Some((name, Pick::Active)) => {
+                let mut nodes = self.effects_page.nodes.clone();
+                nodes.retain(|n| *n != name);
+                nodes.push(name);
+                self.send("gui.nodes", json!({ "nodes": nodes }));
+            }
+            Some((name, Pick::Toggle)) => {
                 let mut nodes = self.effects_page.nodes.clone();
                 match nodes.iter().position(|n| *n == name) {
                     Some(i) => {
@@ -1488,7 +1617,7 @@ impl Workspace {
                 }
                 self.send("gui.nodes", json!({ "nodes": nodes }));
             }
-            Some((name, false)) => self.send("gui.nodes", json!({ "nodes": [name] })),
+            Some((name, Pick::Only)) => self.send("gui.nodes", json!({ "nodes": [name] })),
             None if resp.clicked() => {
                 let press = ui.input(|i| i.pointer.interact_pos());
                 match press.and_then(wire_at).map(|(k, half)| (&wires[k], half)) {
@@ -1524,7 +1653,7 @@ impl Workspace {
             self.node_key_step(1);
         }
         if fired.struck(Action::Delete) {
-            self.delete_nodes(false);
+            self.delete_nodes(self.effects_page.nodes.clone());
         }
         if fired.struck(Action::Copy) {
             self.copy_node(false);

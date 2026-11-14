@@ -4414,14 +4414,14 @@ fn mutate(
             copy,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            let pasted = match (copy, node) {
-                (Some(copy), None) if from.is_none() => (**copy).clone(),
-                (None, Some(name)) => {
+            let pasted = match (copy.as_slice(), node) {
+                ([_, ..], None) if from.is_none() => copy.clone(),
+                ([], Some(name)) => {
                     let source = match from {
                         Some(f) => resolve_clip(p, f, playhead)?,
                         None => id.clone(),
                     };
-                    ops::comp::copied(p, &source, name)?
+                    vec![ops::comp::copied(p, &source, name)?]
                 }
                 _ => {
                     return Err(Error::usage(

@@ -2496,6 +2496,7 @@ The sizes of the tools follow the clip's own picture, W × H pixels. On a 16:9 p
 
 Each mask has these controls (pp. 2491–2492, 2500):
 
+- Show View Controls: on. Off, the viewer shows no handles of the mask, also when its node is selected (p. 2491).
 - Level: 1, from 0 to 1. The mask is this strong.
 - Soft Edge: 0, from 0 to 1. The slider goes to 0.2. It blurs the mask by its Filter.
 - Filter: Fast Gaussian. Box, Bartlett, Multi-box and Gaussian are the other choices. Measured, at Soft Edge s on a picture W wide:
@@ -2531,8 +2532,14 @@ The shapes:
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
   - With several nodes selected, a Rename window opens for each node in turn (p. 1416).
-- Copy and paste with a node selected: the copy goes after the selected node. It has the same values. Its name is the old name with `_1`.
-  - Copy (Ctrl+C) and Cut (Ctrl+X) take the active node with its values at that moment. Paste (Ctrl+V) puts it after the active node.
+- Copy (Ctrl+C) and Cut (Ctrl+X) take the selected tools and masks, with their values at that moment.
+- Paste (Ctrl+V) of one node: the copy goes after the active node. It has the same values. Its name is the old name with `_1`.
+- Paste of several nodes, measured in Resolve Studio 21.2:
+  - The copies keep the joins between them. They join no other node, and they do not go between other nodes.
+  - The copies keep their places to each other. Their top left goes one place right of the active node.
+  - The copies are then the selected nodes, and the last copy is the active node.
+  - vidcut: with no active node, the copies go under all the nodes.
+- Move (p. 1414): a drag of a node moves it. A drag of a selected node moves all the selected nodes.
 - A right-click on a node opens a menu: Rename, Pass Through, Copy, Paste and Delete.
 - Join (pp. 1394–1397):
   - Drag from an output to an input, or from an input to an output.
@@ -2551,6 +2558,7 @@ The shapes:
 
 #### The Effects page
 
+- Resolve names it the Fusion page. vidcut names it the Effects page ([X171](deviations.md#x171-the-page-of-nodes-is-the-effects-page)).
 - The Effects page shows the composition of the topmost visible clip at the playhead (p. 1332).
 - The viewer shows that clip alone, at the size of its own picture (p. 1332).
 - The Effects Library is at the left and the Inspector is at the right. Both take the full height (p. 1287).
@@ -2560,6 +2568,7 @@ The shapes:
 - Select:
   - A click on a node selects it. Ctrl-click (Command on a Mac) adds a node to the selection, or takes it out (pp. 1390–1391).
   - One selected node is the active node. New tools go after it (p. 1391).
+  - Alt-click (Option on a Mac) on a selected node makes it the active node. The selection stays (p. 1391).
   - A click on the empty Node Editor selects none (p. 1391).
 - A click on a tool in the Effects Library adds it after the active node (p. 1287).
 - The Inspector shows the controls of each selected node (pp. 1313–1314).
@@ -2569,7 +2578,11 @@ The shapes:
   - It puts a keyframe at the playhead. On a keyframe, it removes the keyframe.
   - Its arrows go to the keyframes on each side.
   - After a value has a keyframe, a change on another frame puts a keyframe there.
-- When the active node is a mask, the viewer shows its edge, its center and its handles. A drag of one changes the mask.
+- The viewer shows the edge, the center and the handles of each selected mask with Show View Controls on (p. 2491). A drag of one changes that mask.
+- The Angle of an ellipse or a rectangle has a control in the viewer. The manual names a small circle at the end of a dashed line (p. 2493).
+  - Measured in Resolve Studio 21.2: the control is a dashed ring about the center. The ring keeps its size on the screen.
+  - A drag on the ring turns the shape as far as the pointer turns about the center.
+  - While the shape turns, the ring is red, with a line from the center at the angle.
 - A mask follows a tracked thing when its Center connects to the Offset Position of a tracker (p. 1793).
   - vidcut: Follow in the Inspector of a mask picks a motion path of the clip, or all the paths of a subject ([X168](deviations.md#x168-a-mask-follows-a-thing)).
   - The box of the path then takes the place of the whole picture for the mask. With several paths, the viewer shows the edge of the mask in each box. The handles are on the first box.

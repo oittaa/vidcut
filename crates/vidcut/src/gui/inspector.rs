@@ -1412,6 +1412,8 @@ fn node_rows(
                 ui.end_row();
                 return;
             };
+            let shows = (slot, "Show View Controls", m.show_view_controls, true);
+            check(ui, shows, "show_view_controls", acts);
             if let Some(paths) = paths {
                 let salt = ("node-follow", slot);
                 let set = |v: Value| node_set(slot, "follows", v);

@@ -3640,6 +3640,9 @@ pub enum BlurClipping {
 /// usual value. Its numbers can have keyframes, in the `keys` of its node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Mask {
+    /// Off, the viewer shows no handles of the mask. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub show_view_controls: bool,
     /// How strong the mask is, from 0 to 1. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<f64>,

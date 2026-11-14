@@ -282,12 +282,15 @@ The bar and the Jobs button:
 - The Inspector of the page is `Workspace::node_inspector`. It shows each selected node with the rows of its tool.
   - A drag holds the value (`Inspector::held`) and sends one `comp.set` when it stops. `Workspace::node_preview` shows the held value until then.
   - Each value has its Keyframe button. It sends `comp.key` with the `value`.
-- A drag of a mask handle in the viewer changes a copy of the composition. It sends one `comp.set` when it stops.
+- `Workspace::mask_handles` draws the handles of each selected mask with `show_view_controls` on.
+  - A drag of a handle changes a copy of the composition (`Held`). It sends one `comp.set` when it stops.
+  - A drag of the ring adds the turn of the pointer about the center on each frame (`swept`). Thus the angle can go past 360.
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
 - On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L and the steps of a frame and a second.
   - The keys of `Panel::Effects` work only on the page: Pass Through, Rename and the keyframe steps of the active node.
   - Delete, Copy, Cut, Paste and the selection keys act on the nodes there.
-- A copied node is a value in `EffectsPage`. Paste sends it in `comp.paste` as `copy`. Thus a node that changes after Copy pastes as it was.
+- The copied nodes are values in `EffectsPage`. Paste sends them in `comp.paste` as `copy`. Thus a node that changes after Copy pastes as it was.
+- A drag of a selected node moves all the selected nodes (`Moving`). The new places go as one `apply`.
 - A drag from a knot, or from a half of a join, makes a `Linking`. The drop sends `comp.connect` for the new join, and parts the join that the drag took.
 - Several edits of one key go as one `apply`. Thus one undo step takes them back.
 - A mask that follows a path has its handles on the box of the first path at the frame. A drag works in that box (`MaskBase::own`).

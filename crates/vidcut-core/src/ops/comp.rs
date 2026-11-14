@@ -159,22 +159,62 @@ pub fn copied(p: &mut Project, id: &str, name: &str) -> Result<Node> {
     Ok(c.nodes[found(c, id, name)?].clone())
 }
 
-pub fn paste(p: &mut Project, id: &str, mut node: Node, after: Option<&str>) -> Result<Value> {
-    node = node_checked(&node)?;
-    if let Some(named) = node.tool.mask().and_then(|m| m.follows.as_deref()) {
-        follow_checked(p, id, named)?;
+pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, after: Option<&str>) -> Result<Value> {
+    let nodes = nodes.iter().map(node_checked).collect::<Result<Vec<_>>>()?;
+    for n in &nodes {
+        if let Some(named) = n.tool.mask().and_then(|m| m.follows.as_deref()) {
+            follow_checked(p, id, named)?;
+        }
     }
     let c = comp_of(p, id)?;
-    one_of(c, &node.tool, id)?;
-    if c.node(&node.name).is_some() {
-        node.name = c.copy_name(&node.name);
+    let spot = match after {
+        Some(a) => {
+            let a = &c.nodes[found(c, id, a)?];
+            [a.place[0] + 1.0, a.place[1]]
+        }
+        None => apart(c),
+    };
+    let mut d = c.clone();
+    let start = d.nodes.len();
+    for n in &nodes {
+        one_of(&d, &n.tool, id)?;
+        let mut node = n.clone();
+        if d.node(&node.name).is_some() {
+            node.name = d.copy_name(&node.name);
+        }
+        d.nodes.push(node);
     }
-    node.input = None;
-    node.effect_mask = None;
-    let pasted = node.name.clone();
-    insert(c, node, after, id)?;
+    let names: Vec<String> = d.nodes[start..].iter().map(|n| n.name.clone()).collect();
+    let Some(last) = names.last().cloned() else {
+        return Err(Error::usage("comp.paste has no node to paste"));
+    };
+    if let [_] = names.as_slice()
+        && let Some(mut node) = d.nodes.pop()
+    {
+        node.input = None;
+        node.effect_mask = None;
+        insert(&mut d, node, after, id)?;
+    } else {
+        let renamed = |old: &Option<String>| {
+            let i = nodes.iter().position(|n| Some(&n.name) == old.as_ref())?;
+            names.get(i).cloned()
+        };
+        let corner = nodes.iter().fold([f64::INFINITY; 2], |a, n| {
+            [a[0].min(n.place[0]), a[1].min(n.place[1])]
+        });
+        for (k, n) in nodes.iter().enumerate() {
+            let m = &mut d.nodes[start + k];
+            m.input = renamed(&n.input);
+            m.effect_mask = renamed(&n.effect_mask);
+            m.place = [
+                n.place[0] - corner[0] + spot[0],
+                n.place[1] - corner[1] + spot[1],
+            ];
+        }
+    }
+    *c = d;
     tidied(p, id)?;
-    Ok(json!({ "clip": id, "node": pasted }))
+    Ok(json!({ "clip": id, "node": last, "nodes": names }))
 }
 
 pub fn connect(
@@ -314,6 +354,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.border_width, &mut m.border_width);
             taken(&mut left.invert, &mut m.invert);
             taken(&mut left.solid, &mut m.solid);
+            taken(&mut left.show_view_controls, &mut m.show_view_controls);
             if let Some(follows) = left.follows.take() {
                 m.follows = follows;
             }

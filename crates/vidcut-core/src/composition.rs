@@ -99,6 +99,7 @@ impl BlurClipping {
 impl Default for Mask {
     fn default() -> Self {
         Self {
+            show_view_controls: true,
             level: None,
             soft_edge: None,
             filter: None,
