@@ -778,6 +778,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     }
     add_subtitles(p, params, &settings, &mut outputs)?;
     for o in &outputs {
+        refuse_removed(p, o.plan.media_ids())?;
         if let Some(clip) = o.plan.broken_composition() {
             return Err(Error::invalid(format!(
                 "the composition of {clip} gives no picture: nothing reaches its MediaOut node"
@@ -799,6 +800,19 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         outputs,
         encoder_changed: None,
     })
+}
+
+fn refuse_removed(p: &Project, media: Vec<&str>) -> Result<()> {
+    match media
+        .iter()
+        .find_map(|id| p.media(id).filter(|m| m.removed))
+    {
+        Some(m) => Err(Error::media(format!(
+            "{} is offline: add its file to the pool again",
+            m.name
+        ))),
+        None => Ok(()),
+    }
 }
 
 fn picture_kind(p: &Project, piece: &render::VideoPiece) -> PictureKind {
@@ -1502,6 +1516,7 @@ pub fn frame(
                 )));
             }
             let plan = render::flatten(p, t, t + 1)?;
+            refuse_removed(p, plan.video[0].media_ids())?;
             (
                 plan.video[0].clone(),
                 (p.settings.width, p.settings.height),
@@ -1512,7 +1527,7 @@ pub fn frame(
         }
         (Some(id), None) => {
             let m = p
-                .media(id)
+                .pooled(id)
                 .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
             let v = m
                 .info

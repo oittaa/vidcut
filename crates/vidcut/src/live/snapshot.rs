@@ -118,7 +118,7 @@ impl PoolView {
             self.bin.is_empty() || b == self.bin || b.starts_with(&format!("{}/", self.bin))
         };
         let mut media: Vec<&vidcut_core::model::Media> =
-            p.media.iter().filter(|m| inside(&m.bin)).collect();
+            p.pool_media().filter(|m| inside(&m.bin)).collect();
         use vidcut_core::request::{PoolMode, PoolSort};
         let start = |m: &vidcut_core::model::Media| {
             m.info.timecode.map_or(0.0, |t| t.label_seconds()) + m.skipped()

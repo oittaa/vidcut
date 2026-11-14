@@ -444,15 +444,6 @@ fn clip_set_refuses_a_level_past_eighteen_db() {
 }
 
 #[test]
-fn media_remove_needs_force_when_used() {
-    let mut f = three_clips();
-    f.err(req("media.remove", json!({"media": "m1"})));
-    f.ok(req("media.remove", json!({"media": "m1", "force": true})));
-    assert_eq!(f.v1(), vec![row("c2", 0, 50, 10)]);
-    f.ok(req("media.remove", json!({"media": "m3"})));
-}
-
-#[test]
 fn splitting_inside_an_l_cut_resets_it() {
     let mut f = three_clips();
     f.ok(req(

@@ -145,7 +145,7 @@ fn offline_name(
         ViewerMode::SourceClip | ViewerMode::SourceTape | ViewerMode::MultiSource => source?,
     };
     p.media(media)
-        .filter(|_| missing.contains(media))
+        .filter(|m| m.removed || missing.contains(media))
         .map(|m| m.name.clone())
 }
 

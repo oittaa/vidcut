@@ -98,7 +98,6 @@ pub struct Workspace {
     theme: Option<Arc<crate::themes::Theme>>,
     pub(super) pool_buttons: f32,
     pub(super) pool_focus: bool,
-    pub(super) removing: Option<Vec<String>>,
     pub(super) video_only: bool,
     pub(super) audio_only: bool,
     pub(super) target: Option<String>,
@@ -197,7 +196,6 @@ impl Workspace {
             theme: None,
             pool_buttons: 84.0,
             pool_focus: false,
-            removing: None,
             video_only: false,
             audio_only: false,
             target: None,
@@ -1345,7 +1343,6 @@ impl Workspace {
     pub fn asking(&self) -> bool {
         self.import.asking()
             || self.export.asking(&self.snap.jobs)
-            || self.removing.is_some()
             || self.key_editor.asking()
             || self.sync_clips.open
             || self.preferences.capturing()
@@ -1664,7 +1661,7 @@ impl Workspace {
         if fired.pressed(Action::Delete) || lift {
             if self.pool_focus {
                 let selected = self.snap.selection.media.clone();
-                self.removing = (!selected.is_empty()).then_some(selected);
+                self.remove_media(&selected);
             } else if !self.delete_editor_keys() && !self.delete_keys() {
                 self.delete_key(lift);
             }
@@ -2071,7 +2068,6 @@ impl Workspace {
         self.project_windows(&ctx);
         self.import_window(&ctx);
         self.relink_window(&ctx);
-        self.remove_media_window(&ctx);
         self.delete_all_window(&ctx);
         self.stop_tracks_window(&ctx);
         self.speech_window(&ctx);

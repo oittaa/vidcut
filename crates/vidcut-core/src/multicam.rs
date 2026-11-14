@@ -241,7 +241,7 @@ pub fn layout(
     let mut placed: Vec<Placed<'_>> = Vec::with_capacity(ids.len());
     for id in ids {
         let m = p
-            .media(id)
+            .pooled(id)
             .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
         if placed.iter().any(|(seen, ..)| seen.id == m.id) {
             continue;
@@ -654,8 +654,7 @@ pub fn sync_clips_files<'a>(
     selected: &[String],
 ) -> Result<SyncOpen<'a>> {
     let shown = || {
-        p.media
-            .iter()
+        p.pool_media()
             .filter(move |m| bin.is_empty() || ops::within(&m.bin, bin))
     };
     let picked: Vec<&Media> = shown().filter(|m| selected.contains(&m.id)).collect();
@@ -749,8 +748,7 @@ pub fn sync_rows(p: &Project, bin: &str, at: i64) -> Result<Vec<SyncRow>> {
     }
     let shown = p.shown_clip(at).map(|c| c.media.as_str());
     let files: Vec<&Media> = p
-        .media
-        .iter()
+        .pool_media()
         .filter(|m| !m.is_still() && (bin.is_empty() || ops::within(&m.bin, bin)))
         .collect();
     let group = group_of_bin(p, &files, at);
@@ -778,7 +776,7 @@ pub fn sync_rows(p: &Project, bin: &str, at: i64) -> Result<Vec<SyncRow>> {
 
 pub fn pick(p: &mut Project, media: &str, at: i64) -> Result<Marks> {
     let m = p
-        .media(media)
+        .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
     let frames = p.media_frames(m);
     let group = group_at_playhead(p, at)

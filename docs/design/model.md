@@ -131,6 +131,11 @@ classDiagram
 
 - `Project` holds `rev`, one more for each change, and `edited`: when.
 - `media` is the pool, in pool order. `bins` are slash-separated paths, and each `Media` names its `bin` (spec §3).
+- `media` also keeps the items that `media.remove` took out while clips or compound clips use them (`Media::removed`, with no `bin`).
+  - `Project::pool_media` and `Project::pooled` give only the pool. The pool, the requests that name media, and the lists of the GUI use them.
+  - `Project::media` finds each item. The code that plays, draws or writes clips uses it.
+  - `drop_unused_removed` runs after each change (`Editor::apply`, `history.revert`). It deletes each removed item that no clip and no compound clip uses (`Project::is_used`).
+  - `add_media` and `join_pool` put a removed item of the same file back in the pool, with its id.
 - `tracks` are the video tracks, then the audio tracks. Audio tracks hold sound-only clips.
 - A clip on a video track carries its picture. Its `ClipAudio` carries its sound, with J/L offsets (`head`, `tail`).
 - `tape_marks` holds the In and Out of the source tape.

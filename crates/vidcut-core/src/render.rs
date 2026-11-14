@@ -1430,6 +1430,17 @@ impl VideoPiece {
             .collect()
     }
 
+    pub fn media_ids(&self) -> Vec<&str> {
+        self.with_flat_pieces()
+            .into_iter()
+            .flat_map(|v| v.layers())
+            .filter_map(|(l, _)| match l {
+                Self::Source { media, .. } => Some(media.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn flat_layers_mut(&mut self) -> Vec<&mut VideoPiece> {
         self.layers_mut()
             .into_iter()
@@ -1780,6 +1791,15 @@ impl RenderPlan {
 
     pub fn samples(&self) -> i64 {
         self.fps.frame_to_sample(self.frames, self.sample_rate)
+    }
+
+    pub fn media_ids(&self) -> Vec<&str> {
+        let sounds = self.audio.iter().flatten().filter_map(|a| match a {
+            AudioPiece::Source { media, .. } => Some(media.as_str()),
+            _ => None,
+        });
+        let pictures = self.video.iter().flat_map(VideoPiece::media_ids);
+        pictures.chain(sounds).collect()
     }
 }
 

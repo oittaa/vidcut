@@ -345,8 +345,9 @@ fn clip(
         rect.y_range(),
     )));
     let enabled = c.enabled && t.video_enabled;
-    let offline = assets.missing.contains(&c.media) || c.is_offline();
     let media = assets.pool.get(c.media.as_str()).copied();
+    let offline =
+        assets.missing.contains(&c.media) || media.is_some_and(|m| m.removed) || c.is_offline();
     let tint = c.shown_color(media).and_then(theme::clip_color);
     let fill = if offline {
         theme::colors().offline

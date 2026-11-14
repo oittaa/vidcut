@@ -1673,6 +1673,7 @@ mod tests {
             fingerprint: None,
             subtitles: None,
             still_secs: None,
+            removed: false,
         }
     }
 

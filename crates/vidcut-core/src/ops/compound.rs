@@ -1108,25 +1108,6 @@ mod tests {
     }
 
     #[test]
-    fn media_in_a_compound_clip_needs_force_to_go() {
-        let mut f = Fixture::new(&[(4.0, true)]);
-        let a = f.append("m1", 0, 50);
-        nest(&mut f, &[&a]);
-        f.err(req("media.remove", json!({"media": "m1"})));
-    }
-
-    #[test]
-    fn forced_removal_takes_the_compound_clips_that_hold_the_media() {
-        let mut f = Fixture::new(&[(4.0, true)]);
-        let a = f.append("m1", 0, 50);
-        nest(&mut f, &[&a]);
-        f.ok(req("media.remove", json!({"media": "m1", "force": true})));
-        let p = f.editor.project();
-        let left = (p.tracks[0].clips.len(), p.compounds.len());
-        assert_eq!(left, (0, 0));
-    }
-
-    #[test]
     fn media_used_by_lists_the_compound_clip_that_holds_it() {
         let mut f = Fixture::new(&[(4.0, true)]);
         let a = f.append("m1", 0, 50);

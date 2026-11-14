@@ -271,8 +271,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - An image file, or a GIF or WebP of one frame, comes in as a still (D38).
   - Numbered image files come in as one clip (D39).
 - **Remove** (p. 654):
-  - Delete or Backspace removes the pool entry, after a confirmation.
-  - Only the pool entry goes. The files on disk stay.
+  - Remove from Pool, Delete and Backspace take the selected items out of the pool. The files on disk stay.
+  - There is no question. This follows a measurement of Remove Selected Clip in Resolve Studio 21.2.
+  - The clips and the compound clips that use an item stay, on the timeline and in the pool (measured in Resolve Studio 21.2).
+  - The clips of the item are offline. They are red on the timeline, and the viewer shows Media Offline.
+  - An export or a frame of the timeline that needs an offline clip fails, as with a missing file.
+  - Import of the same file puts the item back in the pool, with its id. Its clips are then online again (measured in Resolve Studio 21.2).
+  - `media.remove` does this. The project keeps the item as `removed` while a clip or a compound clip uses it. When none uses it, the item goes from the project.
+  - A request that names a removed item answers that there is no such media.
 - **Views** (pp. 638, 661–665):
   - **Thumbnail:** a hover scrubs the clip, and I/O mark its source In/Out. A click on the lower-right corner of a thumbnail shows its metadata (deviation X60).
   - **Filmstrip:** each clip is a row of its pictures, as wide as the pool, under its name. Hover and I/O work as on a thumbnail.
@@ -325,7 +331,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - A path at the top (Master › Interviews › Day 1), the Bins menu and a double-click open any bin.
   - New Bin is on the File menu (Shift+Ctrl+N), on the Bins menu and on the right-click menu of the pool.
   - The menu of a bin has Rename Bin and Delete Bin.
-  - Delete Bin deletes the bin and the bins in it (p. 377). It also deletes the media in them. Media that clips use goes as in deviation X6.
+  - Delete Bin deletes the bin and the bins in it (p. 377). It also removes the media in them, as Remove does. The compound clips and the synced groups in them go too.
+  - Delete Bin asks no question, and the clips that use the media of the bin stay, offline (measured in Resolve Studio 21.2).
   - Clips and bins dragged onto a bin, or onto a level of the path, move into it.
   - The menu of a clip has Move to Bin and Create Bin With Selected Clips (p. 656).
   - Imports go into the open bin (p. 377).
