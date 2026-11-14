@@ -15,7 +15,7 @@ use vidcut_core::export::{
 };
 use vidcut_core::fingerprint::short_digest;
 use vidcut_core::looks::checked_name;
-use vidcut_core::model::Generator;
+use vidcut_core::model::{Clip, Generator, TrackKind};
 use vidcut_core::ops::titles::default_length;
 use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan};
@@ -750,6 +750,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         let mut clips = clips;
         clips.sort();
         for (i, (start, id, media)) in clips.iter().enumerate() {
+            refuse_removed(p, p.clip(id))?;
             let plan = render::flatten_clip(&proj, id)?;
             let name = file_name(template, i + 1, &plan.name, id, media);
             outputs.push(Output {
@@ -766,6 +767,11 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             return Err(Error::invalid("no clips in the export range"));
         }
     } else {
+        let heard = |c: &&Clip| {
+            let (x, y) = c.audio_range().unwrap_or((c.start, c.end()));
+            c.start.min(x) < b && c.end().max(y) > a
+        };
+        refuse_removed(p, p.tracks.iter().flat_map(|t| &t.clips).filter(heard))?;
         outputs.push(Output {
             plan: render::flatten(&proj, a, b)?,
             path: params.output.clone(),
@@ -778,7 +784,6 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     }
     add_subtitles(p, params, &settings, &mut outputs)?;
     for o in &outputs {
-        refuse_removed(p, o.plan.media_ids())?;
         if let Some(clip) = o.plan.broken_composition() {
             return Err(Error::invalid(format!(
                 "the composition of {clip} gives no picture: nothing reaches its MediaOut node"
@@ -802,11 +807,9 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     })
 }
 
-fn refuse_removed(p: &Project, media: Vec<&str>) -> Result<()> {
-    match media
-        .iter()
-        .find_map(|id| p.media(id).filter(|m| m.removed))
-    {
+fn refuse_removed<'a>(p: &Project, clips: impl IntoIterator<Item = &'a Clip>) -> Result<()> {
+    let removed = |c: &Clip| p.media.iter().find(|m| m.removed && c.uses(&m.id));
+    match clips.into_iter().find_map(removed) {
         Some(m) => Err(Error::media(format!(
             "{} is offline: add its file to the pool again",
             m.name
@@ -1515,8 +1518,11 @@ pub fn frame(
                     p.end()
                 )));
             }
+            let shown = (p.tracks.iter())
+                .filter(|k| k.kind == TrackKind::Video)
+                .filter_map(|k| k.clip_covering(t).map(|i| &k.clips[i]));
+            refuse_removed(p, shown)?;
             let plan = render::flatten(p, t, t + 1)?;
-            refuse_removed(p, plan.video[0].media_ids())?;
             (
                 plan.video[0].clone(),
                 (p.settings.width, p.settings.height),

@@ -228,7 +228,7 @@ The bar and the Jobs button:
 - The UI marks missing media in the pool and the timeline. It offers Relink Media (`media.relink`), and the viewer shows Media Offline ([spec §3](../spec.md#3-media-pool-ch-34-pp-653675)).
 - The clips of removed media (`Media::removed`) are offline in the same way. Their files are not watched.
   - The timeline paints them in the offline color, and `offline_name` gives the viewer their name.
-  - The player still plays their files. When such a clip is on top, the viewer shows Media Offline over its picture.
+  - The plan plays them as gaps, with no sound (`render::flatten`).
 - The pool marks a lost proxy LOST PROXY.
 - While proxies play, a proxy that is lost or back reloads the plans of the viewers. Thus they play the original or the proxy again.
 - `Live::make_proxies` makes a lost proxy again when the automatic rules pick its media ([spec D41](../spec.md#12-decisions-on-gaps-and-contradictions)).

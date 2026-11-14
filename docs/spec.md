@@ -271,14 +271,13 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - An image file, or a GIF or WebP of one frame, comes in as a still (D38).
   - Numbered image files come in as one clip (D39).
 - **Remove** (p. 654):
-  - Remove from Pool, Delete and Backspace take the selected items out of the pool. The files on disk stay.
-  - There is no question. This follows a measurement of Remove Selected Clip in Resolve Studio 21.2.
+  - Delete or Backspace removes the selected items from the pool, after a confirmation.
+  - Remove from Pool on the right-click menu asks no question (measured in Resolve Studio 21.2).
+  - Only the pool items go. The files on disk stay.
   - The clips and the compound clips that use an item stay, on the timeline and in the pool (measured in Resolve Studio 21.2).
-  - The clips of the item are offline. They are red on the timeline, and the viewer shows Media Offline.
+  - Those clips are offline. They are red on the timeline, and they play no picture and no sound. The viewer shows Media Offline.
   - An export or a frame of the timeline that needs an offline clip fails, as with a missing file.
-  - Import of the same file puts the item back in the pool, with its id. Its clips are then online again (measured in Resolve Studio 21.2).
-  - `media.remove` does this. The project keeps the item as `removed` while a clip or a compound clip uses it. When none uses it, the item goes from the project.
-  - A request that names a removed item answers that there is no such media.
+  - Import of the same file puts the item back in the pool. Its clips are then online again (measured in Resolve Studio 21.2).
 - **Views** (pp. 638, 661–665):
   - **Thumbnail:** a hover scrubs the clip, and I/O mark its source In/Out. A click on the lower-right corner of a thumbnail shows its metadata (deviation X60).
   - **Filmstrip:** each clip is a row of its pictures, as wide as the pool, under its name. Hover and I/O work as on a thumbnail.

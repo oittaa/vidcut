@@ -2251,6 +2251,39 @@ impl Workspace {
         }
     }
 
+    pub(super) fn remove_media_window(&mut self, ctx: &egui::Context) {
+        let Some(ids) = self.removing.clone() else {
+            return;
+        };
+        let mut done = None;
+        let modal = egui::Modal::new(egui::Id::unique("remove-media")).show(ctx, |ui| {
+            ui.set_max_width(super::dialog::WIDTH);
+            let items = match ids.len() {
+                1 => "1 item".to_string(),
+                n => format!("{n} items"),
+            };
+            ui.label(RichText::new(format!("Remove {items} from Media?")).strong());
+            super::dialog::footer(ui, |ui| {
+                if super::dialog::main_button(ui, "Remove", true) {
+                    done = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    done = Some(false);
+                }
+            });
+        });
+        if done.is_none() && super::workspace::escape_cancels(ctx, &modal) {
+            done = Some(false);
+        }
+        if done.is_none() {
+            return;
+        }
+        self.removing = None;
+        if done == Some(true) {
+            self.remove_media(&ids);
+        }
+    }
+
     pub(super) fn remove_media(&mut self, ids: &[String]) {
         match ids {
             [] => {}

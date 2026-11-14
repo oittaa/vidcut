@@ -134,6 +134,7 @@ classDiagram
 - `media` also keeps the items that `media.remove` took out while clips or compound clips use them (`Media::removed`, with no `bin`).
   - `Project::pool_media` and `Project::pooled` give only the pool. The pool, the requests that name media, and the lists of the GUI use them.
   - `Project::media` finds each item. The code that plays, draws or writes clips uses it.
+  - The plans play the clips of removed media as gaps, with no sound. `render::flatten` makes them so in a copy of the project.
   - `drop_unused_removed` runs after each change (`Editor::apply`, `history.revert`). It deletes each removed item that no clip and no compound clip uses (`Project::is_used`).
   - `add_media` and `join_pool` put a removed item of the same file back in the pool, with its id.
 - `tracks` are the video tracks, then the audio tracks. Audio tracks hold sound-only clips.

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1430,17 +1430,6 @@ impl VideoPiece {
             .collect()
     }
 
-    pub fn media_ids(&self) -> Vec<&str> {
-        self.with_flat_pieces()
-            .into_iter()
-            .flat_map(|v| v.layers())
-            .filter_map(|(l, _)| match l {
-                Self::Source { media, .. } => Some(media.as_str()),
-                _ => None,
-            })
-            .collect()
-    }
-
     pub fn flat_layers_mut(&mut self) -> Vec<&mut VideoPiece> {
         self.layers_mut()
             .into_iter()
@@ -1791,15 +1780,6 @@ impl RenderPlan {
 
     pub fn samples(&self) -> i64 {
         self.fps.frame_to_sample(self.frames, self.sample_rate)
-    }
-
-    pub fn media_ids(&self) -> Vec<&str> {
-        let sounds = self.audio.iter().flatten().filter_map(|a| match a {
-            AudioPiece::Source { media, .. } => Some(media.as_str()),
-            _ => None,
-        });
-        let pictures = self.video.iter().flat_map(VideoPiece::media_ids);
-        pictures.chain(sounds).collect()
     }
 }
 
@@ -2562,6 +2542,33 @@ fn split_at_fades(runs: Vec<(i64, i64)>, fades: &[Fading]) -> Vec<(i64, i64)> {
     out
 }
 
+fn offline(p: &Project) -> Option<Project> {
+    let gone: HashSet<&str> = (p.media.iter())
+        .filter(|m| m.removed)
+        .map(|m| m.id.as_str())
+        .collect();
+    if gone.is_empty() {
+        return None;
+    }
+    let mut out = p.clone();
+    for t in &mut out.tracks {
+        unplayed(&mut t.clips, &gone);
+    }
+    Some(out)
+}
+
+fn unplayed(clips: &mut [Clip], gone: &HashSet<&str>) {
+    for c in clips {
+        if gone.contains(c.media.as_str()) {
+            c.video = false;
+            c.audio = None;
+        }
+        for t in c.compound.iter_mut().flat_map(|k| &mut k.tracks) {
+            unplayed(&mut t.clips, gone);
+        }
+    }
+}
+
 fn expanded(p: &Project) -> Option<(Project, Within)> {
     let holds = |p: &Project| p.tracks.iter().any(|t| t.clips.iter().any(plays_inside));
     if !holds(p) {
@@ -3290,6 +3297,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     if a < 0 || b <= a {
         return Err(Error::invalid(format!("nothing to render in {a}..{b}")));
     }
+    let offline = offline(p);
+    let p = offline.as_ref().unwrap_or(p);
     let expanded = expanded(p);
     let (p, within) = match &expanded {
         Some((q, w)) => (q, Some(w)),

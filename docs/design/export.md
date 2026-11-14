@@ -50,7 +50,7 @@ flowchart TD
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
   - A count with no default layout in FFmpeg uses the first channels of the 22.2 layout (`channel_layout`). Why: the mix needs a layout, and a stereo file then goes to the first two channels.
   - An encoder can take fewer channels. Then the export fails with the name of the encoder and the channel count.
-  - A plan that reads removed media fails with the name of the media (`refuse_removed`, `RenderPlan::media_ids`). `export::frame` does the same for a frame of the timeline. Why: the clips of removed media are offline, and the export of a missing file fails too.
+  - An export with a clip of removed media in its range fails with the name of the media (`refuse_removed`). `export::frame` does the same for a frame of the timeline. Why: the clips of removed media are offline, and the export of a missing file fails too.
 - **Models:** `session::export_media` first checks the models of Voice Isolation, Upscale, Retime Process and the Process of each Smooth Cut. A missing model needs `download`.
 
 GPU preferences:
