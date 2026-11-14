@@ -287,7 +287,10 @@ The bar and the Jobs button:
   - Between the In and the Out, a frame of the file that no frame of the timeline shows is kept as `Away` too. The timeline playhead goes to the nearest frame (`Frames::time`).
   - Play in the head and the tail runs on the clock of the GUI, at the frame rate of the file, with no sound (`Run`).
   - At the In or the Out, `Workspace::page_tick` seeks the timeline there and plays it on.
-  - Between the In and the Out, the timeline plays. `player.bounds` holds it to the clip, with the Loop and the Ping Pong of the composition (`Workspace::sync_bounds`).
+  - A clip with a speed change plays on the clock of the GUI from the In to the Out too (`Run`). Thus each frame of the file shows at the frame rate of the file.
+    - The timeline does not play. Thus there is no sound.
+    - When play stops, the timeline playhead goes to the frame (`Workspace::page_go`).
+  - Between the In and the Out of a clip with no speed change, the timeline plays. `player.bounds` holds it to the clip, with the Loop and the Ping Pong of the composition (`Workspace::sync_bounds`).
   - With Ping Pong, `Player::bounce` plays back from the edge where play stopped (`Wrap::PingPong`). The tick of the live thread calls it.
   - Each move and each play goes through `gui.page_time`. Thus a script and the GUI take one path.
 - The Inspector of the page is `Workspace::node_inspector`. It shows each selected node with the rows of its tool.
@@ -312,8 +315,7 @@ The bar and the Jobs button:
 - A right-click on the Center of a mask opens Connect To (`center_row`, `connect_menu`). It lists each Tracker and its patterns (`hooks`).
   - A connected Center shows the Tracker and the pattern. Follow Size is under it.
 - The viewer draws the box of each pattern of a selected Tracker, with its name (`Workspace::pattern_handles`).
-  - A drag of the handle at the top left or of the cross in the middle moves the box. A drag of an edge resizes it from its middle (`Boxed`, `Edge`).
-  - During a move by the handle, `magnified` draws the box larger next to it, with a cross.
+  - A drag of the cross in the middle moves the box. A drag of an edge resizes it from its middle (`Boxed`, `Edge`).
   - The release sends one `comp.set` with the box and the `frame` of the playhead.
   - A press on a box picks its pattern in the Inspector (`pattern_picked`).
   - A pattern with an offset has a dashed line to the point that masks follow.
@@ -461,7 +463,7 @@ The bar and the Jobs button:
     - Stop Tracking and Escape cancel the jobs of kind `track` (`Workspace::stop_tracks`).
     - While a job of kind `track` runs, the Node Editor and its keys take no work (`Workspace::tracks_running`).
   - The Trim row sends `comp.set` with `pattern_trim` for the picked pattern, and the `frame` of the playhead.
-  - The pattern list has a check box, the name and Delete for each pattern, and Add IntelliTrack. A click on a name picks the pattern.
+  - The pattern list has a check box, the name and Delete for each pattern, and Add Pattern. A click on a name picks the pattern.
   - Name, X Offset and Y Offset are of the picked pattern.
   - For a clip that takes motion paths (`ops::motion::takes`), a row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
     - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.

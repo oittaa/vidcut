@@ -1061,7 +1061,7 @@ fn owned_picture(p: &Project, id: &str, v: PictureValue) -> Result<(Picture, Cli
     if let Some(t) = &c.title {
         if !t.takes_keys(v) {
             return Err(Error::invalid(format!(
-                "{id} is a {}, which has no {} keyframes",
+                "{id} ({}) has no {} keyframes",
                 if t.moves() { "scroll" } else { "title" },
                 v.name().replace('_', " ")
             )));

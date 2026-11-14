@@ -180,7 +180,7 @@ impl Pattern {
 
 impl Tracker {
     pub const PATTERNS_KEPT: usize = 256;
-    pub const NAME: &'static str = "IntelliTrack";
+    pub const NAME: &'static str = "Pattern";
 
     pub fn free_name(&self) -> String {
         (1..)
@@ -453,7 +453,7 @@ impl Frames {
             .map_or(opening, |x| x.start);
         let (first, last) = match p.source_range(c) {
             Some(have) if have.end > have.start => {
-                (clock.file(have.start), clock.file(have.end) - 1)
+                (clock.file(have.start), clock.file_end(have.end) - 1)
             }
             _ => (opening.min(closing), opening.max(closing)),
         };

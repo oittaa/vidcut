@@ -699,6 +699,13 @@ impl FileClock {
         }
     }
 
+    pub fn file_end(&self, end: i64) -> i64 {
+        match self.rates {
+            None => end,
+            Some([fps, file]) => (end as f64 / fps * file - 1e-6).ceil() as i64,
+        }
+    }
+
     pub fn source_of(&self, file: f64) -> f64 {
         match self.rates {
             None => file,

@@ -37,4 +37,5 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - vidcut: the render range is always the In and the Out of the clip.
 - **The menu of the play buttons** (p. 1296): the frame increment.
 - **The Audio button** at the left of the transport (p. 1297).
+- **Sound of a clip with a speed change:** measure if the page plays its sound. vidcut plays none.
 - The CLI, IPC and MCP perform the same action as the GUI, in each step.

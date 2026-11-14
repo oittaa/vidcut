@@ -1817,7 +1817,7 @@ impl Workspace {
             );
             let full = t.patterns.len() >= vidcut_core::model::Tracker::PATTERNS_KEPT;
             if ui
-                .add_enabled(!full, egui::Button::new("Add IntelliTrack"))
+                .add_enabled(!full, egui::Button::new("Add Pattern"))
                 .clicked()
             {
                 sends.push(set(json!({ "add_pattern": true })));

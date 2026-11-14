@@ -324,7 +324,7 @@ pub fn connect(
     };
     if !takes {
         return Err(Error::invalid(format!(
-            "{name} is a {}, which has no {} input",
+            "{name} ({}) has no {} input",
             tool.label(),
             match input {
                 NodeInput::Input => "picture",
@@ -340,7 +340,7 @@ pub fn connect(
         };
         if !fits {
             return Err(Error::invalid(format!(
-                "{from} is a {}: an input takes a tool or Media In, and an effect mask takes a mask",
+                "{from} ({}) does not fit: an input takes a tool or Media In, and an effect mask takes a mask",
                 source.label()
             )));
         }
@@ -778,7 +778,7 @@ pub fn key(
     let n = &mut c.nodes[i];
     if n.values().is_empty() {
         return Err(Error::invalid(format!(
-            "{name} is a {}, which has no values to key",
+            "{name} ({}) has no values to key",
             n.tool.label()
         )));
     }
@@ -786,7 +786,7 @@ pub fn key(
         && !n.values().contains(&v)
     {
         return Err(Error::invalid(format!(
-            "{name} is a {}, which has no {}",
+            "{name} ({}) has no {}",
             n.tool.label(),
             v.name().replace('_', " ")
         )));

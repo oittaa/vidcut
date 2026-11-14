@@ -29,7 +29,7 @@ const MARGIN: Vec2 = vec2(40.0, 40.0);
 const KNOT: f32 = 5.0;
 const GRIP: f32 = 9.0;
 const DASH: f32 = 4.0;
-const MAGNIFIED: f32 = 120.0;
+const JUST_BELOW: f64 = 1e-6;
 const HANDLE: f32 = 4.0;
 const RING: f32 = 27.0;
 const RING_STEPS: usize = 48;
@@ -216,7 +216,6 @@ struct Boxed {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Edge {
-    Corner,
     Middle,
     Left,
     Right,
@@ -225,9 +224,6 @@ enum Edge {
 }
 
 fn edge_at(r: Rect, press: Pos2) -> Option<Edge> {
-    if r.left_top().distance(press) <= GRIP {
-        return Some(Edge::Corner);
-    }
     let across = |lo: f32, hi: f32, v: f32| (lo - GRIP..=hi + GRIP).contains(&v);
     let near = |a: f32, b: f32| (a - b).abs() <= HANDLE;
     let sides = [
@@ -252,32 +248,11 @@ fn edge_at(r: Rect, press: Pos2) -> Option<Edge> {
     side.or_else(|| (r.center().distance(press) <= GRIP).then_some(Edge::Middle))
 }
 
-fn magnified(painter: &egui::Painter, texture: egui::TextureId, r: Rect, picture: Rect) {
-    let part = |p: Pos2| {
-        let d = p - picture.min;
-        pos2(d.x / picture.width(), d.y / picture.height())
-    };
-    let uv = Rect::from_min_max(part(r.min), part(r.max));
-    let aspect = (r.width() / r.height().max(1.0)).clamp(0.25, 4.0);
-    let size = match aspect >= 1.0 {
-        true => vec2(MAGNIFIED, MAGNIFIED / aspect),
-        false => vec2(MAGNIFIED * aspect, MAGNIFIED),
-    };
-    let shown = Rect::from_min_size(r.right_top() + vec2(GRIP, 0.0), size);
-    let stroke = Stroke::new(1.0, theme::colors().accent);
-    painter.rect_filled(shown, CornerRadius::ZERO, Color32::BLACK);
-    painter.image(texture, shown, uv, Color32::WHITE);
-    painter.rect_stroke(shown, CornerRadius::ZERO, stroke, StrokeKind::Outside);
-    let c = shown.center();
-    painter.line_segment([pos2(shown.left(), c.y), pos2(shown.right(), c.y)], stroke);
-    painter.line_segment([pos2(c.x, shown.top()), pos2(c.x, shown.bottom())], stroke);
-}
-
 fn boxed_to(b: &Boxed, to: [f64; 2]) -> Area {
     let (lo, hi) = Pattern::SIDES;
     let mut a = b.area;
     match b.edge {
-        Edge::Corner | Edge::Middle => {
+        Edge::Middle => {
             a.center = [
                 to[0] - b.grab[0] + a.size[0] / 2.0,
                 to[1] - b.grab[1] + a.size[1] / 2.0,
@@ -1201,7 +1176,7 @@ impl Workspace {
                 Color32::WHITE,
             );
         }
-        self.pattern_handles(ui, area_resp, (picture, texture), (c, &comp));
+        self.pattern_handles(ui, area_resp, picture, (c, &comp));
         self.mask_handles(ui, area_resp, picture, c, &comp, size);
     }
 
@@ -1209,7 +1184,7 @@ impl Workspace {
         &mut self,
         ui: &mut egui::Ui,
         resp: &egui::Response,
-        (picture, texture): (Rect, Option<egui::TextureId>),
+        picture: Rect,
         (clip, comp): (&Clip, &Composition),
     ) {
         let rev = self.project().map_or(0, |p| p.rev);
@@ -1258,8 +1233,6 @@ impl Workspace {
                     Stroke::new(1.0, color),
                     StrokeKind::Middle,
                 );
-                let corner = Rect::from_center_size(r.left_top(), Vec2::splat(2.0 * HANDLE));
-                painter.rect_filled(corner, CornerRadius::ZERO, color);
                 let (c, stroke) = (r.center(), Stroke::new(1.0, color));
                 painter.line_segment([c - vec2(HANDLE, 0.0), c + vec2(HANDLE, 0.0)], stroke);
                 painter.line_segment([c - vec2(0.0, HANDLE), c + vec2(0.0, HANDLE)], stroke);
@@ -1277,11 +1250,6 @@ impl Workspace {
                     let stroke = Stroke::new(1.0, color);
                     painter.extend(egui::Shape::dashed_line(&line, stroke, DASH, DASH));
                     painter.circle_stroke(to, HANDLE, stroke);
-                }
-                if let (Some(b), Some(texture)) = (held.filter(|b| b.sent.is_none()), texture)
-                    && b.edge == Edge::Corner
-                {
-                    magnified(&painter, texture, r, picture);
                 }
                 spots.push((name.clone(), k, r, area));
             }
@@ -1602,24 +1570,50 @@ impl Workspace {
 
     fn page_play(&mut self, c: &Clip, f: &Frames, speed: f64) {
         let at = self.page_at();
+        let paced = !f.clock.pace.is_normal();
         if speed == 0.0 {
             let rate = self.page_rate(f);
+            let mut stopped = None;
             if let Some(a) = self.effects_page.away.as_mut()
                 && let Some(r) = a.run.take()
             {
-                a.at = if r.speed > 0.0 {
-                    r.at(rate).min((f.mark_in - 1) as f64)
-                } else {
-                    r.at(rate).max((f.mark_out + 1) as f64)
+                a.at = match (paced, r.speed > 0.0) {
+                    (true, _) => r.at(rate).clamp(f.first as f64, f.last as f64),
+                    (false, true) => r.at(rate).min((f.mark_in - 1) as f64),
+                    (false, false) => r.at(rate).max((f.mark_out + 1) as f64),
                 };
+                stopped = paced.then_some(a.at.floor() as i64);
             }
             if self.snap.player(PlayerId::Timeline).playing {
                 self.send("player.pause", json!({ "viewer": "timeline" }));
             }
+            if let Some(n) = stopped {
+                self.page_go(c, f, n, false);
+            }
             return;
         }
         let (head, tail) = (at < f.mark_in, at > f.mark_out);
-        if (head && speed > 0.0) || (tail && speed < 0.0) {
+        if paced {
+            if self.snap.player(PlayerId::Timeline).playing {
+                self.send("player.pause", json!({ "viewer": "timeline" }));
+            }
+            let from = match (head, tail) {
+                (true, _) if speed < 0.0 => f.mark_out,
+                (_, true) if speed > 0.0 => f.mark_in,
+                _ => at,
+            } as f64;
+            self.effects_page.away = Some(Away {
+                clip: c.id.clone(),
+                at: from,
+                run: Some(Run {
+                    speed,
+                    from,
+                    since: Instant::now(),
+                }),
+                landing: None,
+                on: None,
+            });
+        } else if (head && speed > 0.0) || (tail && speed < 0.0) {
             self.effects_page.away = Some(Away {
                 clip: c.id.clone(),
                 at: at as f64,
@@ -1694,6 +1688,29 @@ impl Workspace {
         };
         ctx.request_repaint();
         let t = r.at(rate);
+        if !f.clock.pace.is_normal() {
+            let (lo, hi) = (f.mark_in as f64, (f.mark_out + 1) as f64);
+            let ended = if r.speed > 0.0 { t >= hi } else { t < lo };
+            if !ended {
+                a.at = t;
+                return;
+            }
+            let comp = stored_composition(c);
+            if !comp.loop_play {
+                let edge = if r.speed > 0.0 { f.mark_out } else { f.mark_in };
+                self.page_go(c, &f, edge, false);
+                return;
+            }
+            let speed = if comp.ping_pong { -r.speed } else { r.speed };
+            let from = if speed > 0.0 { lo } else { hi - JUST_BELOW };
+            a.at = from;
+            a.run = Some(Run {
+                speed,
+                from,
+                since: Instant::now(),
+            });
+            return;
+        }
         let crossed = if r.speed > 0.0 {
             t >= f.mark_in as f64
         } else {

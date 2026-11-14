@@ -2571,6 +2571,7 @@ The shapes:
 - The Time Ruler and the transport controls are under the viewer (p. 1293).
   - The ruler covers the whole source of the clip: the head before its In and the tail after its Out (p. 1293).
   - Yellow lines mark the In and the Out of the clip (p. 1293).
+  - The manual says that the frames between the yellow lines "are the only frames visible" (p. 1293). In Resolve Studio 21.2, the page also shows and plays the frames of the head and the tail.
   - The ruler counts the frames of the file of the clip. Measured in Resolve Studio 21.2:
     - Frame 0 is the In of the clip when the composition is made. The frames of the head have negative numbers.
     - A later trim moves the In on the ruler. The numbers of the frames stay, and the keyframes stay on their frames.
@@ -2597,7 +2598,7 @@ The shapes:
   - With Ping Pong, play from the head and from the tail starts as it does with Loop.
   - Each composition keeps its own Loop and its own way to loop. Loop is on in a new composition.
   - The timeline playhead follows the playhead of the page only between the In and the Out. In the head and the tail, it stays where it was.
-  - Play shows each frame of the file at the frame rate of the file.
+  - Play shows each frame of the file at the frame rate of the file. A speed change of the clip does not change this.
 - The page plays the sound of the timeline (p. 1297). Play in the head and in the tail has no sound (Resolve Studio 21.2).
 - Select:
   - A click on a node selects it. Ctrl-click (Command on a Mac) adds a node to the selection, or takes it out (pp. 1390–1391).
@@ -2626,15 +2627,16 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).
   - Each side of the box is from 0.001 to 0.5.
   - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns.
-  - vidcut: a model tracks each pattern. Add IntelliTrack adds a pattern with the next free number. Add Point is not built yet ([todo](todo/motion-tracking.md)).
+  - vidcut: a model tracks each pattern. The patterns are Pattern 1, Pattern 2 and so on. Add Pattern adds a pattern with the next free number. Add Point is not built yet ([todo](todo/motion-tracking.md)).
 - The viewer shows the box of each pattern of a selected Tracker (p. 1783).
-  - A drag of the small handle at the top left moves the box. A zoomed view of the box shows during the drag (pp. 1783–1784).
+  - The box of a Point pattern has a small handle at the top left. A drag of it moves the box, with a zoomed view (pp. 1783–1784).
+    - The path does not change.
+    - The box of the first pattern has no handle at the top left. A press there starts a selection.
   - A drag of an edge resizes the box from its middle (p. 1783).
   - The middle of the box is a point of the path. On a frame of the path, a drag of this point changes the path on that frame only.
   - Before the path and after it, the drag changes the first or the last frame of the path. It adds no frame to the path.
-  - vidcut: a drag of the handle at the top left also changes the path in this way.
   - Resolve also shows a search area around the box (p. 1784). vidcut shows none.
-- The track buttons are at the top of the Inspector (pp. 1784–1785). They are in two rows.
+- The track buttons are at the top of the Inspector (pp. 1784–1785). The rows below are measured in Resolve Studio 21.2. The 21.1 manual lists Track Reverse From Current Time and Track Forward From Current Time instead (p. 2844).
   - The first row has Track Reverse, Track Fwd Then Reverse and Track Forward.
   - Track Reverse tracks backward from the end of the render range. Track Forward tracks forward from its start (p. 2844).
   - Track Fwd Then Reverse tracks forward from the playhead to the end of the render range. Then it tracks backward from the playhead to the start.
@@ -2642,7 +2644,7 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - A One Frame button tracks one frame from the playhead. Then the playhead is on that frame.
   - The render range is from the In to the Out. A track stops at its end (p. 1785).
   - Stop Tracking and Escape stop a track (p. 1785). The frames that it tracked stay (pp. 1788, 2844).
-  - A track does not stop at a lost pattern or at a shot change. The user stops it (p. 1785).
+  - A track does not stop at a lost pattern or at a shot change. The user stops it (pp. 1785, 1788).
   - The buttons track each enabled pattern (p. 1787). The check box of a pattern in the list enables it.
   - While a track runs, the Node Editor takes no work (p. 1784).
 - The Tracker looks at the picture on its input, with the nodes before it (p. 1784). It tracks on each frame of the file.

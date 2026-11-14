@@ -111,8 +111,8 @@ In this file, a path is never a track of the timeline.
   - Text that comes into the picture has no blur on its first frames, as a face has not.
   - The detector takes most of the time of a text find. Try the model on the GPU.
 - **The Tracker, what is left:** one pull request for each part.
-  - Measure what a drag of the handle at the top left of a pattern box does on a frame of the path. vidcut changes the path on that frame.
   - Point patterns: Add Point, the search area in the viewer, the channel, Adaptive Mode, Match Tolerance and the pattern flipbooks (pp. 1783–1788).
+    - The handle at the top left of the box of a Point pattern (pp. 1783–1784).
     - Path Center with Track Center (Append) (p. 1788), and the path tools of the viewer (p. 1787).
   - A track follows no turn and no change of perspective.
   - Keyframes on X Offset and Y Offset, the Tracker Offset button of the viewer, and Select Time with Go (p. 1789).

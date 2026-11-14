@@ -3593,7 +3593,7 @@ pub struct Tracker {
 /// box is. A field left out is at its usual value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Pattern {
-    /// Its name in the list of the tracker, for example `IntelliTrack 1`.
+    /// Its name in the list of the tracker, for example `Pattern 1`.
     pub name: String,
     /// Off, the track buttons of the effects page pass over the pattern.
     /// `motion.track` still tracks it. Usual: on.
