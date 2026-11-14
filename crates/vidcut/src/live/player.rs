@@ -49,6 +49,7 @@ pub struct Player {
     auditioning: bool,
     skips: Option<Vec<(i64, i64)>>,
     looping: (bool, Option<(i64, i64)>),
+    bounds: Option<((i64, i64), bool)>,
     muted: bool,
     scrubbing: bool,
     decoding: crate::preferences::GpuDecoding,
@@ -85,6 +86,7 @@ impl Player {
             auditioning: false,
             skips: None,
             looping: (false, None),
+            bounds: None,
             muted: false,
             scrubbing: true,
             decoding,
@@ -333,6 +335,7 @@ impl Player {
             return self.end_audition();
         }
         engine.set_loop(None);
+        engine.set_bounds(None);
         engine.play(speed);
         self.motion += 1;
         Some(self.motion)
@@ -476,11 +479,32 @@ impl Player {
         }
     }
 
+    pub fn bounds(&self) -> Option<((i64, i64), bool)> {
+        self.bounds
+    }
+
+    pub fn set_bounds(&mut self, bounds: Option<((i64, i64), bool)>) {
+        self.bounds = bounds;
+        if !self.auditioning {
+            self.apply_loop();
+        }
+    }
+
     fn apply_loop(&self) {
-        if let Some(e) = self.shown_engine() {
-            let (on, marks) = self.looping;
-            let frames = self.contents[self.active.index()].frames;
-            e.set_loop(on.then(|| marks.unwrap_or((0, frames))));
+        let Some(e) = self.shown_engine() else {
+            return;
+        };
+        match self.bounds.filter(|_| self.active == PlayerId::Timeline) {
+            Some((range, wrap)) => {
+                e.set_bounds(Some(range));
+                e.set_loop(wrap.then_some(range));
+            }
+            None => {
+                let (on, marks) = self.looping;
+                let frames = self.contents[self.active.index()].frames;
+                e.set_bounds(None);
+                e.set_loop(on.then(|| marks.unwrap_or((0, frames))));
+            }
         }
     }
 

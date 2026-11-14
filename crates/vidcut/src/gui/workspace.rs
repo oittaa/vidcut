@@ -330,6 +330,7 @@ impl Workspace {
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
+                live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
         }
         Ok(())
@@ -444,6 +445,7 @@ impl Workspace {
                 .then(|| self.effects_clip())
                 .flatten(),
             nodes: self.effects_page.nodes.clone(),
+            time: self.page_clock(),
             edit,
             edits,
             target: self

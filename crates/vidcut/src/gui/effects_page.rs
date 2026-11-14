@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use eframe::egui::{
@@ -16,7 +17,7 @@ use super::shortcuts::Fired;
 use super::shuttle::Jkl;
 use super::theme::{self, Deco};
 use super::workspace::{Workspace, dim, fit};
-use crate::live::{Answer, PlayerId};
+use crate::live::{Answer, PageClock, PageTime, PlayerId};
 
 const CELL: Vec2 = vec2(132.0, 64.0);
 const BOX: Vec2 = vec2(104.0, 30.0);
@@ -27,6 +28,15 @@ const HANDLE: f32 = 4.0;
 const RING: f32 = 27.0;
 const RING_STEPS: usize = 48;
 const RULER: f32 = 24.0;
+const BAR: f32 = 10.0;
+const LABEL_GAP: f64 = 60.0;
+const MIN_FRAMES: f64 = 10.0;
+const TICKS: [i64; 19] = [
+    1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000,
+    200_000, 500_000, 1_000_000,
+];
+const RANGE: Color32 = Color32::from_rgb(232, 196, 44);
+const PLAYHEAD: Color32 = Color32::from_rgb(230, 60, 60);
 const TOOLS: f32 = 30.0;
 const TRANSPORT: f32 = 36.0;
 const SETTLE: f64 = 2.0;
@@ -73,6 +83,11 @@ pub(super) struct EffectsPage {
     band: Option<(Pos2, bool)>,
     renaming: Option<Renaming>,
     copied: Vec<Node>,
+    away: Option<Away>,
+    looping: bool,
+    view: (f64, f64),
+    zooming: Option<Zoom>,
+    bounds: Option<((i64, i64), bool)>,
 }
 
 impl Default for EffectsPage {
@@ -92,6 +107,11 @@ impl Default for EffectsPage {
             band: None,
             renaming: None,
             copied: Vec::new(),
+            away: None,
+            looping: true,
+            view: (0.0, 1.0),
+            zooming: None,
+            bounds: None,
         }
     }
 }
@@ -108,6 +128,8 @@ impl EffectsPage {
         self.linking = None;
         self.band = None;
         self.renaming = None;
+        self.away = None;
+        self.zooming = None;
         if let Some(cells) = &mut self.cells {
             cells.close();
         }
@@ -119,6 +141,33 @@ struct Alone {
     clip: String,
     wanted: Option<Composition>,
     plan: RenderPlan,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Run {
+    speed: f64,
+    from: f64,
+    since: Instant,
+}
+
+impl Run {
+    fn at(&self, fps: f64) -> f64 {
+        self.from + self.since.elapsed().as_secs_f64() * fps * self.speed
+    }
+}
+
+struct Away {
+    clip: String,
+    at: f64,
+    run: Option<Run>,
+    landing: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Zoom {
+    Left,
+    Right,
+    Both,
 }
 
 struct Held {
@@ -531,6 +580,7 @@ impl Workspace {
             self.effects_page.leave();
         }
         self.effects_page.page = page;
+        self.sync_bounds();
     }
 
     pub(super) fn pick_nodes(&mut self, nodes: Vec<String>) -> Result<(), String> {
@@ -563,7 +613,7 @@ impl Workspace {
             return h.composition.clone();
         }
         let mut c = stored_composition(clip);
-        let source = clip.content_at(self.snap.timeline.position) as f64;
+        let source = clip.content_at(self.page_at()) as f64;
         self.node_preview(&mut c, source);
         c
     }
@@ -577,8 +627,11 @@ impl Workspace {
             self.effects_page.moving = None;
             self.effects_page.linking = None;
             self.effects_page.band = None;
+            self.effects_page.away = None;
+            self.effects_page.view = (0.0, 1.0);
             self.leave_inspector();
         }
+        self.sync_bounds();
         if let Some((at, since)) = self.effects_page.held.as_ref().and_then(|h| h.sent)
             && (at != rev || since.elapsed().as_secs_f64() > SETTLE)
         {
@@ -814,8 +867,8 @@ impl Workspace {
             .iter()
             .flat_map(|k| k.keys.iter())
             .map(|k| clip.key_time(k.frame).round() as i64);
-        if let Some(t) = super::inspector::next_key(times, self.snap.timeline.position, dir) {
-            self.seek(PlayerId::Timeline, t, false);
+        if let Some(t) = super::inspector::next_key(times, self.page_at(), dir) {
+            self.page_ask(json!({ "at": t - clip.start }));
         }
     }
 
@@ -892,6 +945,9 @@ impl Workspace {
         let clip = self
             .effects_clip()
             .and_then(|id| p.as_ref().and_then(|p| p.clip(&id)).cloned());
+        if let Some(c) = &clip {
+            self.page_tick(ui.ctx(), c);
+        }
         ui.horizontal(|ui| {
             ui.label(RichText::new(vidcut_core::composition::MEDIA_OUT).strong());
             if let (Some(p), Some(c)) = (&p, &clip) {
@@ -899,7 +955,7 @@ impl Workspace {
             }
         });
         let avail = ui.available_rect_before_wrap();
-        let below = RULER + TRANSPORT + TOOLS + 12.0;
+        let below = RULER + BAR + TRANSPORT + TOOLS + 12.0;
         let area = Rect::from_min_max(
             avail.min,
             pos2(avail.max.x, (avail.max.y - below).max(avail.min.y + 40.0)),
@@ -920,8 +976,8 @@ impl Workspace {
             }
         }
         ui.add_space(4.0);
-        self.time_ruler(ui, clip.as_ref());
-        self.transport(ui, PlayerId::Timeline, None);
+        self.time_ruler(ui, p.as_deref(), clip.as_ref());
+        self.page_transport(ui, p.as_deref(), clip.as_ref());
         self.tool_row(ui);
     }
 
@@ -973,9 +1029,9 @@ impl Workspace {
             use eframe::emath::GuiRounding;
             fit(area.shrink(2.0), size.0 as f32 / size.1.max(1) as f32).round_to_pixels(ppp)
         };
-        let player = self.snap.player(PlayerId::Timeline).clone();
-        let speed = if player.playing { player.speed } else { 0.0 };
-        let frame = (player.position - c.start).clamp(0, (c.end() - c.start - 1).max(0));
+        let speed = self.page_speed();
+        let (head, _) = p.handles(c);
+        let frame = (self.page_at() - (c.start - head)).clamp(0, (plan.frames - 1).max(0));
         let gpu_pictures = self.screens.as_ref().map(|s| s.gpu_pictures());
         let ctx = ui.ctx().clone();
         let cells = self
@@ -1010,7 +1066,7 @@ impl Workspace {
         comp: &Composition,
         (w, h): (u32, u32),
     ) {
-        let at = self.snap.timeline.position;
+        let at = self.page_at();
         let source = clip.content_at(at) as f64;
         let frame = clip.source_at(at) as f64;
         let areas = |named: &str| vidcut_core::motion::areas_of(&clip.motion, named, frame);
@@ -1142,32 +1198,268 @@ impl Workspace {
         }
     }
 
-    fn time_ruler(&mut self, ui: &mut egui::Ui, clip: Option<&Clip>) {
+    pub(super) fn page_at(&self) -> i64 {
+        match &self.effects_page.away {
+            Some(a) if self.effects_page.seen.as_ref() == Some(&a.clip) => a.at.floor() as i64,
+            _ => self.snap.timeline.position,
+        }
+    }
+
+    fn page_speed(&self) -> f64 {
+        if let Some(r) = self.effects_page.away.as_ref().and_then(|a| a.run) {
+            return r.speed;
+        }
+        let p = self.snap.player(PlayerId::Timeline);
+        if p.playing { p.speed } else { 0.0 }
+    }
+
+    fn page_source(&self) -> Option<(Arc<Project>, Clip)> {
+        let p = self.project_shared()?;
+        let c = p.clip(&self.effects_clip()?)?.clone();
+        Some((p, c))
+    }
+
+    pub(super) fn page_clock(&self) -> Option<PageClock> {
+        if self.effects_page.page != Page::Effects {
+            return None;
+        }
+        let (p, c) = self.page_source()?;
+        let (first, last) = source_span(&p, &c);
+        Some(PageClock {
+            at: self.page_at() - c.start,
+            first: first - c.start,
+            last: last - c.start,
+            out: c.duration - 1,
+            speed: self.page_speed(),
+            looping: self.effects_page.looping,
+        })
+    }
+
+    pub(super) fn page_time(&mut self, t: PageTime) -> Result<(), String> {
+        if self.effects_page.page != Page::Effects {
+            return Err("Show the effects page first".into());
+        }
+        let (p, c) = self
+            .page_source()
+            .ok_or("There is no clip at the playhead")?;
+        if let Some(on) = t.looping {
+            self.effects_page.looping = on;
+            self.sync_bounds();
+        }
+        if let Some(at) = t.at {
+            let (first, last) = source_span(&p, &c);
+            self.page_go(&c, (c.start + at).clamp(first, last), t.fast);
+        }
+        if let Some(speed) = t.speed {
+            self.page_play(&c, speed);
+        }
+        Ok(())
+    }
+
+    fn page_ask(&self, params: Value) {
+        self.send("gui.page_time", params);
+    }
+
+    fn page_go(&mut self, c: &Clip, t: i64, fast: bool) {
+        let away = self
+            .effects_page
+            .away
+            .as_ref()
+            .is_some_and(|a| a.clip == c.id);
+        if (c.start..c.end()).contains(&t) {
+            self.effects_page.away = away.then(|| Away {
+                clip: c.id.clone(),
+                at: t as f64,
+                run: None,
+                landing: Some(Instant::now()),
+            });
+            self.seek(PlayerId::Timeline, t, fast);
+            return;
+        }
+        if self.snap.player(PlayerId::Timeline).playing {
+            self.send("player.pause", json!({ "viewer": "timeline" }));
+        }
+        self.effects_page.away = Some(Away {
+            clip: c.id.clone(),
+            at: t as f64,
+            run: None,
+            landing: None,
+        });
+    }
+
+    fn page_play(&mut self, c: &Clip, speed: f64) {
+        let at = self.page_at();
+        if speed == 0.0 {
+            let fps = self.fps().as_f64();
+            if let Some(a) = self.effects_page.away.as_mut()
+                && let Some(r) = a.run.take()
+            {
+                a.at = if r.speed > 0.0 {
+                    r.at(fps).min((c.start - 1) as f64)
+                } else {
+                    r.at(fps).max(c.end() as f64)
+                };
+            }
+            if self.snap.player(PlayerId::Timeline).playing {
+                self.send("player.pause", json!({ "viewer": "timeline" }));
+            }
+            return;
+        }
+        let (head, tail) = (at < c.start, at >= c.end());
+        if (head && speed > 0.0) || (tail && speed < 0.0) {
+            self.effects_page.away = Some(Away {
+                clip: c.id.clone(),
+                at: at as f64,
+                run: Some(Run {
+                    speed,
+                    from: at as f64,
+                    since: Instant::now(),
+                }),
+                landing: None,
+            });
+        } else if head {
+            self.hand_off(c, c.end() - 1, speed);
+        } else if tail {
+            self.hand_off(c, c.start, speed);
+        } else {
+            self.send(
+                "player.play",
+                json!({ "speed": speed, "viewer": "timeline" }),
+            );
+        }
+    }
+
+    fn hand_off(&mut self, c: &Clip, t: i64, speed: f64) {
+        self.effects_page.away = Some(Away {
+            clip: c.id.clone(),
+            at: t as f64,
+            run: None,
+            landing: Some(Instant::now()),
+        });
+        self.seek(PlayerId::Timeline, t, false);
+        self.send(
+            "player.play",
+            json!({ "speed": speed, "viewer": "timeline" }),
+        );
+    }
+
+    fn page_tick(&mut self, ctx: &egui::Context, c: &Clip) {
+        let fps = self.fps().as_f64();
+        let player = self.snap.player(PlayerId::Timeline).clone();
+        let Some(a) = self.effects_page.away.as_mut() else {
+            return;
+        };
+        if a.clip != c.id {
+            self.effects_page.away = None;
+            return;
+        }
+        if let Some(since) = a.landing {
+            let landed = player.position == a.at as i64 || player.playing;
+            if landed || since.elapsed().as_secs_f64() > SETTLE {
+                self.effects_page.away = None;
+            } else {
+                ctx.request_repaint();
+            }
+            return;
+        }
+        let Some(r) = a.run else {
+            return;
+        };
+        ctx.request_repaint();
+        let t = r.at(fps);
+        let crossed = if r.speed > 0.0 {
+            t >= c.start as f64
+        } else {
+            t < c.end() as f64
+        };
+        if !crossed {
+            a.at = t;
+            return;
+        }
+        let edge = if r.speed > 0.0 { c.start } else { c.end() - 1 };
+        self.hand_off(c, edge, r.speed);
+    }
+
+    fn sync_bounds(&mut self) {
+        let want = (self.effects_page.page == Page::Effects)
+            .then(|| self.page_source())
+            .flatten()
+            .map(|(_, c)| ((c.start, c.end()), self.effects_page.looping));
+        if want == self.effects_page.bounds {
+            return;
+        }
+        self.effects_page.bounds = want;
+        let params = match want {
+            Some(((from, to), looping)) => json!({ "from": from, "to": to, "loop": looping }),
+            None => json!({}),
+        };
+        self.send("player.bounds", params);
+    }
+
+    fn time_ruler(&mut self, ui: &mut egui::Ui, p: Option<&Project>, clip: Option<&Clip>) {
         let (rect, resp) =
             ui.allocate_exact_size(vec2(ui.available_width(), RULER), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
-        let c = theme::colors();
-        painter.rect_filled(rect, CornerRadius::same(2), c.panel_dark);
-        let Some(clip) = clip else {
+        let colors = theme::colors();
+        painter.rect_filled(rect, CornerRadius::same(2), colors.panel_dark);
+        let (Some(p), Some(clip)) = (p, clip) else {
+            ui.add_space(BAR);
             return;
         };
-        let (a, b) = (clip.start, clip.end().max(clip.start + 1));
-        let span = (b - a) as f32;
-        let x_of = |t: i64| rect.left() + (t - a) as f32 / span * rect.width();
-        let fps = self.fps().as_f64().round().max(1.0) as i64;
-        let step = [1, 5, 10, fps, 5 * fps, 10 * fps, 30 * fps, 60 * fps]
+        let (first, last) = source_span(p, clip);
+        let whole = (last + 1 - first).max(1) as f64;
+        let (v0, v1) = self.effects_page.view;
+        let a = first as f64 + v0 * whole;
+        let span = ((v1 - v0) * whole).max(1.0);
+        let width = f64::from(rect.width().max(1.0));
+        let x_of = |t: f64| rect.left() + ((t - a) / span * width) as f32;
+        let (xi, xo) = (x_of(clip.start as f64), x_of((clip.end() - 1) as f64));
+        let shade = Color32::from_black_alpha(110);
+        if xi > rect.left() {
+            let r = Rect::from_min_max(rect.min, pos2(xi.min(rect.right()), rect.bottom()));
+            painter.rect_filled(r, CornerRadius::ZERO, shade);
+        }
+        if xo < rect.right() {
+            let r = Rect::from_min_max(pos2(xo.max(rect.left()), rect.top()), rect.max);
+            painter.rect_filled(r, CornerRadius::ZERO, shade);
+        }
+        let step = TICKS
             .into_iter()
-            .find(|s| span / (*s as f32) * 8.0 <= rect.width())
-            .unwrap_or(60 * fps)
-            .max(1);
-        let mut t = a + (step - (a % step)) % step;
-        while t < b {
-            let x = x_of(t);
+            .find(|s| *s as f64 * width / span >= LABEL_GAP)
+            .unwrap_or(TICKS[TICKS.len() - 1]);
+        let minor = match step {
+            1 => 1,
+            s if s % 5 == 0 => s / 5,
+            s => s / 2,
+        };
+        let mut n = ((a - clip.start as f64) / minor as f64).floor() as i64 * minor;
+        let end = (a + span).ceil() as i64 - clip.start;
+        while n <= end {
+            let x = x_of((clip.start + n) as f64);
+            let major = n % step == 0;
+            let tall = if major { 8.0 } else { 4.0 };
             painter.line_segment(
-                [pos2(x, rect.bottom() - 6.0), pos2(x, rect.bottom())],
-                Stroke::new(1.0, c.text_dim),
+                [pos2(x, rect.bottom() - tall), pos2(x, rect.bottom())],
+                Stroke::new(1.0, colors.text_dim),
             );
-            t += step;
+            if major {
+                painter.text(
+                    pos2(x + 3.0, rect.top() + 2.0),
+                    Align2::LEFT_TOP,
+                    n.to_string(),
+                    FontId::proportional(10.0),
+                    colors.text_dim,
+                );
+            }
+            n += minor;
+        }
+        for x in [xi, xo] {
+            if rect.x_range().contains(x) {
+                painter.line_segment(
+                    [pos2(x, rect.top()), pos2(x, rect.bottom())],
+                    Stroke::new(1.5, RANGE),
+                );
+            }
         }
         if let Some(n) = self
             .effects_page
@@ -1175,25 +1467,134 @@ impl Workspace {
             .and_then(|name| stored_composition(clip).node(name).cloned())
         {
             for k in n.keys.iter().flat_map(|k| k.keys.iter()) {
-                let x = x_of(clip.key_time(k.frame).round() as i64);
-                painter.line_segment(
-                    [pos2(x, rect.top() + 4.0), pos2(x, rect.bottom() - 4.0)],
-                    Stroke::new(2.0, Color32::WHITE),
-                );
+                let x = x_of(clip.key_time(k.frame));
+                if rect.x_range().contains(x) {
+                    painter.line_segment(
+                        [pos2(x, rect.top() + 4.0), pos2(x, rect.bottom() - 4.0)],
+                        Stroke::new(2.0, Color32::WHITE),
+                    );
+                }
             }
         }
-        let at = self.snap.timeline.position;
-        let x = x_of(at);
-        painter.line_segment(
-            [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(2.0, Color32::from_rgb(230, 60, 60)),
-        );
-        if (resp.clicked() || resp.dragged())
+        let x = x_of(self.page_at() as f64);
+        if rect.x_range().contains(x) {
+            painter.line_segment(
+                [pos2(x, rect.top()), pos2(x, rect.bottom())],
+                Stroke::new(2.0, PLAYHEAD),
+            );
+        }
+        if resp.dragged_by(PointerButton::Middle) {
+            let by = f64::from(resp.drag_delta().x) / width * (v1 - v0);
+            self.effects_page.view = slid((v0, v1), -by);
+        } else if (resp.clicked()
+            || (resp.dragged_by(PointerButton::Primary)
+                && (resp.drag_started() || resp.drag_delta().x != 0.0)))
             && let Some(pos) = resp.interact_pointer_pos()
         {
-            let f = a + ((pos.x - rect.left()) / rect.width() * span).round() as i64;
-            self.seek(PlayerId::Timeline, f.clamp(a, b - 1), resp.dragged());
+            let t = (a + f64::from(pos.x - rect.left()) / width * span).round() as i64;
+            let t = t.clamp(first, last);
+            if t != self.page_at() {
+                self.page_ask(json!({ "at": t - clip.start, "fast": resp.dragged() }));
+            }
         }
+        self.zoom_bar(ui, whole);
+    }
+
+    fn zoom_bar(&mut self, ui: &mut egui::Ui, whole: f64) {
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), BAR), Sense::drag());
+        let painter = ui.painter_at(rect);
+        let colors = theme::colors();
+        let width = f64::from(rect.width().max(1.0));
+        let (v0, v1) = self.effects_page.view;
+        let x_of = |v: f64| rect.left() + (v * width) as f32;
+        let bar = Rect::from_min_max(
+            pos2(x_of(v0), rect.top() + 2.0),
+            pos2(x_of(v1), rect.bottom() - 2.0),
+        );
+        painter.rect_filled(
+            bar,
+            CornerRadius::same(3),
+            colors.text_dim.gamma_multiply(0.45),
+        );
+        for x in [bar.left(), bar.right()] {
+            let grip = Rect::from_center_size(pos2(x, bar.center().y), vec2(4.0, bar.height()));
+            painter.rect_filled(grip, CornerRadius::same(1), colors.text_dim);
+        }
+        if resp.drag_started()
+            && let Some(at) = resp.interact_pointer_pos()
+        {
+            let near = |x: f32| (at.x - x).abs() <= GRIP;
+            self.effects_page.zooming = if near(bar.left()) {
+                Some(Zoom::Left)
+            } else if near(bar.right()) {
+                Some(Zoom::Right)
+            } else if bar.x_range().contains(at.x) {
+                Some(Zoom::Both)
+            } else {
+                None
+            };
+        }
+        if resp.dragged()
+            && let Some(z) = self.effects_page.zooming
+        {
+            let by = f64::from(resp.drag_delta().x) / width;
+            let least = (MIN_FRAMES / whole).min(1.0);
+            self.effects_page.view = match z {
+                Zoom::Left => ((v0 + by).min(v1 - least).max(0.0), v1),
+                Zoom::Right => (v0, (v1 + by).max(v0 + least).min(1.0)),
+                Zoom::Both => slid((v0, v1), by),
+            };
+        }
+        if resp.drag_stopped() {
+            self.effects_page.zooming = None;
+        }
+    }
+
+    fn page_transport(&mut self, ui: &mut egui::Ui, p: Option<&Project>, clip: Option<&Clip>) {
+        ui.allocate_ui(vec2(ui.available_width(), TRANSPORT), |ui| {
+            ui.horizontal_centered(|ui| {
+                let (Some(p), Some(c)) = (p, clip) else {
+                    return;
+                };
+                let (first, last) = source_span(p, c);
+                let speed = self.page_speed();
+                let looping = self.effects_page.looping;
+                let big = |s: &str| RichText::new(s).size(16.0);
+                let mut ask = None;
+                if ui.button(big("⏮")).clicked() {
+                    ask = Some(json!({ "at": first - c.start }));
+                }
+                if ui.selectable_label(speed < 0.0, big("◀")).clicked() {
+                    ask = Some(json!({ "speed": -1.0 }));
+                }
+                if ui.button(big("⏹")).clicked() {
+                    ask = Some(json!({ "speed": 0.0 }));
+                }
+                if ui.selectable_label(speed > 0.0, big("▶")).clicked() {
+                    ask = Some(json!({ "speed": 1.0 }));
+                }
+                if ui.button(big("⏭")).clicked() {
+                    ask = Some(json!({ "at": last - c.start }));
+                }
+                let repeat = big(egui_phosphor::regular::REPEAT);
+                if ui.selectable_label(looping, repeat).clicked() {
+                    ask = Some(json!({ "loop": !looping }));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let mut n = self.page_at() - c.start;
+                    let field = egui::DragValue::new(&mut n)
+                        .range(first - c.start..=last - c.start)
+                        .speed(0.25);
+                    let r = ui.add(field);
+                    if r.changed() {
+                        ask = Some(json!({ "at": n, "fast": r.dragged() }));
+                    }
+                });
+                if let Some(params) = ask {
+                    self.page_ask(params);
+                }
+            });
+        });
     }
 
     fn tool_row(&mut self, ui: &mut egui::Ui) {
@@ -1637,7 +2038,6 @@ impl Workspace {
 
     pub(super) fn effects_keys(&mut self, fired: &Fired, input: &egui::InputState) {
         let bindings = self.snap.bindings.clone();
-        let player = self.snap.player(PlayerId::Timeline).clone();
         let fps = self.fps().as_f64().round().max(1.0) as i64;
         let mine = Fired::of_panel(&bindings, input, Panel::Effects);
         if mine.pressed(Action::PassThrough) {
@@ -1670,34 +2070,63 @@ impl Workspace {
         if fired.pressed(Action::SelectNothing) {
             self.select_all(false);
         }
+        let Some((p, c)) = self.page_source() else {
+            return;
+        };
+        let (first, last) = source_span(&p, &c);
+        let speed = self.page_speed();
+        let at = self.page_at();
+        let to = |t: i64| json!({ "at": t.clamp(first, last) - c.start });
+        let mut asks = Vec::new();
         if fired.pressed(Action::PlayOrStop) {
-            self.send("player.toggle", json!({}));
+            asks.push(json!({ "speed": if speed == 0.0 { 1.0 } else { 0.0 } }));
         }
         if fired.struck(Action::Stop) {
-            self.send("player.pause", json!({}));
+            asks.push(json!({ "speed": 0.0 }));
         }
         for jkl in self.shuttle.input(&bindings, input) {
-            match jkl {
+            asks.push(match jkl {
                 Jkl::Play(dir) => {
-                    let speed = crate::gui::timeline::tools::faster(player.speed, dir);
-                    self.send("player.play", json!({ "speed": speed }));
+                    json!({ "speed": crate::gui::timeline::tools::faster(speed, dir) })
                 }
-                Jkl::Step(dir) => self.send("player.step", json!({ "frames": dir as i64 })),
-                Jkl::Slow(speed) => self.send("player.play", json!({ "speed": speed })),
-                Jkl::Stop => self.send("player.pause", json!({})),
-            }
+                Jkl::Step(dir) => to(at + dir as i64),
+                Jkl::Slow(s) => json!({ "speed": s }),
+                Jkl::Stop => json!({ "speed": 0.0 }),
+            });
         }
-        for (action, frames) in [
-            (Action::FrameBack, -1),
-            (Action::FrameForward, 1),
-            (Action::SecondBack, -fps),
-            (Action::SecondForward, fps),
-        ] {
-            if fired.pressed(action) {
-                self.send("player.step", json!({ "frames": frames }));
-            }
+        let moves = [
+            (fired.pressed(Action::FrameBack), at - 1),
+            (fired.pressed(Action::FrameForward), at + 1),
+            (
+                fired.pressed(Action::SecondBack) && !mine.pressed(Action::SourceStart),
+                at - fps,
+            ),
+            (
+                fired.pressed(Action::SecondForward) && !mine.pressed(Action::SourceEnd),
+                at + fps,
+            ),
+            (mine.pressed(Action::SourceStart), first),
+            (mine.pressed(Action::SourceEnd), last),
+            (mine.pressed(Action::ClipIn), c.start),
+            (mine.pressed(Action::ClipOut), c.end() - 1),
+        ];
+        for (_, t) in moves.into_iter().filter(|(on, _)| *on) {
+            asks.push(to(t));
+        }
+        for params in asks {
+            self.page_ask(params);
         }
     }
+}
+
+fn source_span(p: &Project, c: &Clip) -> (i64, i64) {
+    let (head, tail) = p.handles(c);
+    (c.start - head, c.end() + tail - 1)
+}
+
+fn slid((v0, v1): (f64, f64), by: f64) -> (f64, f64) {
+    let by = by.max(-v0).min(1.0 - v1);
+    (v0 + by, v1 + by)
 }
 
 fn clip_name(p: &Project, c: &Clip) -> String {

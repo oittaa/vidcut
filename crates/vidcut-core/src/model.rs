@@ -6835,6 +6835,17 @@ impl Project {
         }
     }
 
+    pub fn handles(&self, c: &Clip) -> (i64, i64) {
+        let Some(have) = self.source_range(c) else {
+            return (0, 0);
+        };
+        let most = have.end - have.start;
+        (
+            c.room(false, have.clone()).min(most),
+            c.room(true, have).min(most),
+        )
+    }
+
     fn frames_in(&self, secs: f64) -> i64 {
         (secs * self.settings.fps.as_f64() + 0.05).floor().max(0.0) as i64
     }

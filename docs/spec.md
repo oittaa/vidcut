@@ -2563,7 +2563,27 @@ The shapes:
 - The Effects Library is at the left and the Inspector is at the right. Both take the full height (p. 1287).
 - The Node Editor is under the viewer (p. 1287).
 - The Time Ruler and the transport controls are under the viewer (p. 1293).
+  - The ruler covers the whole source of the clip: the head before its In and the tail after its Out (p. 1293).
+  - Yellow lines mark the In and the Out of the clip (p. 1293).
+  - Measured in Resolve Studio 21.2: the ruler counts the frames of the file from the In. The frames of the head have negative numbers.
+  - A click or a drag on the ruler moves the playhead. The playhead cannot leave the source (pp. 1293, 1295).
+  - A gray bar with two handles zooms and scrolls the ruler. A drag with the middle mouse button on the ruler scrolls it (p. 1295).
   - The keyframes of the selected node show as tick marks on the Time Ruler (p. 1302).
+- The transport has six buttons: First Frame, Play Reverse, Stop, Play Forward, Last Frame and Loop (p. 1295).
+  - The first and the last frame are the ends of the source, because the composition covers the whole source (p. 1294).
+  - The Current Time field at the right shows the frame of the playhead. A drag on it or a number typed in it moves the playhead (p. 1297).
+- Keys (pp. 1295–1296):
+  - Space plays and stops. J, K and L play backward, stop and play forward.
+  - Left and Right move one frame. Shift+Left and Shift+Right go to the first and the last frame of the source.
+  - Ctrl+Left and Ctrl+Right (Command on a Mac) go to the In and the Out.
+- Play, measured in Resolve Studio 21.2:
+  - Play forward from a frame between the In and the Out stops at the Out. Play backward stops at the In.
+  - Play forward from the head goes through the head and on to the Out. Play backward from the tail goes through the tail and on to the In.
+  - Play forward from the tail starts at the In. Play backward from the head starts at the Out.
+  - With Loop on, play forward from the Out goes on from the In. Play backward from the In goes on from the Out.
+  - Loop is on in a new composition.
+  - The timeline playhead follows the playhead of the page only between the In and the Out. In the head and the tail, it stays where it was.
+- The page plays the sound of the timeline (p. 1297). vidcut: play in the head and the tail has no sound.
 - Select:
   - A click on a node selects it. Ctrl-click (Command on a Mac) adds a node to the selection, or takes it out (pp. 1390–1391).
   - One selected node is the active node. New tools go after it (p. 1391).
@@ -2591,6 +2611,7 @@ The shapes:
   - Blur there adds a Mosaic Blur before Media Out, with a mask on its effect mask that follows the subject.
 
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key` and `comp.reset`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
+`gui.page_time` moves and plays the playhead of the page, and sets its Loop. `player.bounds` holds play of the timeline between two frames.
 `comp.set` with `follows` makes a mask follow a path. `motion.track` with `node` tracks a mask.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)

@@ -147,6 +147,10 @@ actions! {
     RenameNode "rename_node",
     PreviousNodeKeyframe "previous_node_keyframe",
     NextNodeKeyframe "next_node_keyframe",
+    SourceStart "source_start",
+    SourceEnd "source_end",
+    ClipIn "clip_in",
+    ClipOut "clip_out",
     Undo "undo",
     Redo "redo",
     Import "import",
@@ -162,7 +166,11 @@ impl Action {
             Action::PassThrough
             | Action::RenameNode
             | Action::PreviousNodeKeyframe
-            | Action::NextNodeKeyframe => Panel::Effects,
+            | Action::NextNodeKeyframe
+            | Action::SourceStart
+            | Action::SourceEnd
+            | Action::ClipIn
+            | Action::ClipOut => Panel::Effects,
             _ => Panel::App,
         }
     }
@@ -1374,14 +1382,42 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Next keyframe of the node",
         Some("The playhead goes to the next keyframe of the active node."),
     ),
+    own(
+        Nodes,
+        Action::SourceStart,
+        &["Shift+Left"],
+        "First frame of the source",
+        Some("The playhead goes to the start of the head of the clip."),
+    ),
+    own(
+        Nodes,
+        Action::SourceEnd,
+        &["Shift+Right"],
+        "Last frame of the source",
+        Some("The playhead goes to the end of the tail of the clip."),
+    ),
+    own(
+        Nodes,
+        Action::ClipIn,
+        &["Ctrl+Left"],
+        "In of the clip",
+        None,
+    ),
+    own(
+        Nodes,
+        Action::ClipOut,
+        &["Ctrl+Right"],
+        "Out of the clip",
+        None,
+    ),
     same(Nodes, Action::Delete, "Delete the selected nodes", None),
-    same(Nodes, Action::Copy, "Copy the active node", None),
-    same(Nodes, Action::Cut, "Cut the active node", None),
+    same(Nodes, Action::Copy, "Copy the selected nodes", None),
+    same(Nodes, Action::Cut, "Cut the selected nodes", None),
     same(
         Nodes,
         Action::Paste,
-        "Paste a node",
-        Some("The copy goes after the active node."),
+        "Paste nodes",
+        Some("The copies go after the active node."),
     ),
     same(Nodes, Action::SelectAll, "Select all nodes", None),
     same(Nodes, Action::SelectNothing, "Select no node", None),

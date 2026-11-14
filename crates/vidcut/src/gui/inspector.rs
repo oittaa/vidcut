@@ -1504,7 +1504,7 @@ impl Workspace {
             return;
         }
         let paths = vidcut_core::ops::motion::takes(&clip).then(|| path_rows(&clip));
-        let at = self.snap.timeline.position;
+        let at = self.page_at();
         let source = clip.content_at(at) as f64;
         for &k in &picked {
             let n = &comp.nodes[k];
@@ -1554,7 +1554,7 @@ impl Workspace {
             shown: picture.clone(),
             stored: picture,
             shape: shape(&p, clip),
-            frame: clip.content_at(self.snap.timeline.position),
+            frame: clip.content_at(self.page_at()),
             effect_keys: Vec::new(),
             paths: path_rows(clip),
             finds: vidcut_core::ops::motion::takes(clip),
@@ -1564,7 +1564,7 @@ impl Workspace {
 
     fn track_node(&mut self, clip: &Clip, node: &Node) {
         let follows = node.tool.mask().and_then(|m| m.follows.as_ref());
-        let at = self.snap.timeline.position;
+        let at = self.page_at();
         let followed = clip.motion.iter().find(|m| Some(&m.id) == follows);
         let first = followed.and_then(|m| m.span()).map(|(first, _)| first);
         let way = match first {
@@ -1650,8 +1650,8 @@ impl Workspace {
                         .keys_of(v)
                         .iter()
                         .map(|k| clip.key_time(k.frame).round() as i64);
-                    if let Some(t) = next_key(times, self.snap.timeline.position, dir) {
-                        self.seek(PlayerId::Timeline, t, false);
+                    if let Some(t) = next_key(times, self.page_at(), dir) {
+                        self.send("gui.page_time", json!({ "at": t - clip.start }));
                     }
                 }
                 Act::NodeReset => self.send_node("comp.reset", clip, stored, json!({})),
@@ -1671,7 +1671,7 @@ impl Workspace {
         params["clip"] = json!(clip.id);
         params["node"] = json!(node.name);
         if method != "comp.reset" {
-            params["at"] = json!(self.snap.timeline.position);
+            params["at"] = json!(self.page_at());
         }
         self.send(method, params);
     }

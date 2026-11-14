@@ -3928,6 +3928,7 @@ pub fn composition_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
         .clip(clip)
         .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
         .clone();
+    let (head, tail) = p.handles(&c);
     let mut alone = p.clone();
     let own = p.media(&c.media).and_then(|m| m.info.video.as_ref());
     if let Some((w, h)) = own.map(crate::model::VideoInfo::display_size) {
@@ -3940,6 +3941,8 @@ pub fn composition_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
         t.video_enabled = true;
         for x in &mut t.clips {
             x.enabled = true;
+            x.move_head(-head);
+            x.duration += tail;
             x.picture = x
                 .picture
                 .take()
@@ -3950,7 +3953,7 @@ pub fn composition_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
                 });
         }
     }
-    let mut plan = flatten(&alone, c.start, c.end())?;
+    let mut plan = flatten(&alone, c.start - head, c.end() + tail)?;
     plan.audio.clear();
     plan.colors = timeline_colors(p);
     Ok(plan)

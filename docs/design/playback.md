@@ -67,6 +67,10 @@ flowchart TD
 - `Control` holds the plan and the `mode`: `Mode::Paused` at a frame, or `Mode::Playing` from a sample at a speed.
 - It also holds the fader `trims`, the mute, a `scrub` request, a followed position (`Player::follow`) and the `prepared` frame.
 - A `looping` range (`Player::set_loop`, spec D51) keeps `Mode::Playing` going past its end. The audio thread reads on from the start, and queues the `Marker` of the jump. Thus the ring and the clock run on.
+- A `bounds` range (`Player::set_bounds`) holds play between two frames. It is for the Effects page.
+  - Play that starts inside stops at the ends. The clock, the audio thread and the frames read ahead stop at the edge.
+  - Play forward from the last frame starts at the first frame. Play backward from the first frame starts at the last frame.
+  - With a `looping` range too, play goes on from the other end.
 - `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, color reading, source position, layers over it), not where it shows. Thus kept pictures survive edits that move them.
   - Each layer over it adds its level.
   - A wipe, a Push or a Slide is not in the `Id`. The `Placed` pictures of the frame hold it (`Placed::moving`). The viewer draws again when they change.

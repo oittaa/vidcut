@@ -514,6 +514,8 @@ pub fn describe_at(
             Some(false) => "Loop playback off".into(),
             None => "Loop playback on or off".into(),
         },
+        "player.bounds" if params["from"].is_null() => "Play without bounds".into(),
+        "player.bounds" => format!("Play bounds: {}", compact(params)),
         "mixer.preview" => format!(
             "{} fader at {} (heard, not kept)",
             d.text("track"),
@@ -549,6 +551,7 @@ pub fn describe_at(
         "gui.close" => format!("Close {}", d.text("panel")),
         "gui.page" => format!("Show the {} page", d.text("page")),
         "gui.nodes" => format!("Select nodes {}", d.list("nodes").join(", ")),
+        "gui.page_time" => format!("Effects page playhead: {}", compact(params)),
         "gui.target" => format!("Target track {}", d.text("track")),
         "gui.timeline" => format!("Timeline view: {}", compact(params)),
         "gui.screenshot" => "Screenshot".into(),

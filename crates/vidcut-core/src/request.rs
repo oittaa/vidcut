@@ -3582,6 +3582,7 @@ pub enum Request {
     /// `timecode_display` is how that field counts (decision D91).
     /// `timer1_origin` is each player's Timer 1 zero, `source` and
     /// `timeline`, or null until a reset. The zeros last for this session.
+    /// `bounds` is what `player.bounds` holds, or null.
     #[serde(rename = "player.state")]
     PlayerState {},
     /// Mute what the viewer plays, without changing the project (the monitoring
@@ -3616,6 +3617,21 @@ pub enum Request {
     PlayerLoop {
         #[serde(default)]
         on: Option<bool>,
+    },
+    /// Hold play of the timeline from `from` to `to` (frames, `to` is the
+    /// first frame after). Play that starts inside stops at the ends, or
+    /// with `loop` on goes on from the other end. Play forward from the
+    /// last frame starts at `from`, and play backward from `from` starts at
+    /// the last frame. The effects page holds play to its clip. Without
+    /// `from` and `to`, play is not held. Answers what `player.state` does.
+    #[serde(rename = "player.bounds")]
+    PlayerBounds {
+        #[serde(default)]
+        from: Option<i64>,
+        #[serde(default)]
+        to: Option<i64>,
+        #[serde(default, rename = "loop")]
+        looping: bool,
     },
     /// Fast Review (decision D97): Play and Space run a long clip faster than
     /// a short one. A clip of 10 seconds or less plays at 1×. A longer clip
@@ -3756,9 +3772,29 @@ pub enum Request {
     /// selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes { nodes: Vec<String> },
-    /// What only the GUI keeps: the page, the clip of the effects page and
-    /// its nodes selected, the edit points selected, the target track, the
-    /// timeline's zoom and Timeline Options, and the windows open.
+    /// The playhead of the effects page. It moves over the whole source of
+    /// the clip: the head before its In and the tail after its Out too.
+    /// `at` moves it, in frames from the In (negative: in the head).
+    /// `fast` marks a scrub: it is left out of the command log. `speed`
+    /// plays it (negative: backward, 0 stops). Play forward from the tail
+    /// starts at the In, and play backward from the head starts at the Out.
+    /// Play in the head and the tail has no sound. With `loop` on, play
+    /// from the Out goes on from the In. Answers what `gui.state` does.
+    #[serde(rename = "gui.page_time")]
+    GuiPageTime {
+        #[serde(default)]
+        at: Option<i64>,
+        #[serde(default)]
+        fast: bool,
+        #[serde(default)]
+        speed: Option<f64>,
+        #[serde(default, rename = "loop")]
+        looping: Option<bool>,
+    },
+    /// What only the GUI keeps: the page, the clip of the effects page, its
+    /// nodes selected and its playhead (`time`, in frames from the In), the
+    /// edit points selected, the target track, the timeline's zoom and
+    /// Timeline Options, and the windows open.
     #[serde(rename = "gui.state")]
     GuiState {},
     /// What an edit takes from the source. The two icons at the left of the edit buttons.
@@ -5850,6 +5886,7 @@ impl Request {
                 | Self::PlayerStats { .. }
                 | Self::PlayerAudioScrubbing { .. }
                 | Self::PlayerLoop { .. }
+                | Self::PlayerBounds { .. }
                 | Self::PlayerFastReview { .. }
                 | Self::MixerPreview { .. }
                 | Self::PoolSet { .. }
@@ -5863,6 +5900,7 @@ impl Request {
                 | Self::GuiClose { .. }
                 | Self::GuiPage { .. }
                 | Self::GuiNodes { .. }
+                | Self::GuiPageTime { .. }
                 | Self::GuiState {}
                 | Self::GuiOnly { .. }
                 | Self::GuiTarget { .. }

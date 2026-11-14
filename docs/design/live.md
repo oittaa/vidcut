@@ -279,6 +279,13 @@ The bar and the Jobs button:
 - `EffectsPage` holds the page that shows, the selected nodes, and the state of the Node Editor and of a mask drag.
 - `Workspace::effects_clip` finds the clip of the page: the topmost visible clip at the playhead (`placing::topmost`).
 - The viewer renders that clip alone through `render::composition_alone` and `Cells::show_plan`, at the size of its own picture.
+  - The plan covers the whole source of the clip. `Project::handles` gives the frames of the head and of the tail.
+- The playhead of the page is `Workspace::page_at`. Between the In and the Out, it is the timeline playhead.
+  - In the head and the tail, `EffectsPage` keeps it (`Away`). The timeline playhead stays where it was.
+  - Play there runs on the clock of the GUI, with no sound (`Run`).
+  - At the In or the Out, `Workspace::page_tick` seeks the timeline there and plays it on.
+  - Between the In and the Out, the timeline plays. `player.bounds` holds it to the clip, with the Loop of the page (`Workspace::sync_bounds`).
+  - Each move and each play goes through `gui.page_time`. Thus a script and the GUI take one path.
 - The Inspector of the page is `Workspace::node_inspector`. It shows each selected node with the rows of its tool.
   - A drag holds the value (`Inspector::held`) and sends one `comp.set` when it stops. `Workspace::node_preview` shows the held value until then.
   - Each value has its Keyframe button. It sends `comp.key` with the `value`.
@@ -286,8 +293,10 @@ The bar and the Jobs button:
   - A drag of a handle changes a copy of the composition (`Held`). It sends one `comp.set` when it stops.
   - A drag of the ring adds the turn of the pointer about the center on each frame (`swept`). Thus the angle can go past 360.
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
-- On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L and the steps of a frame and a second.
+- On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L, the steps of a frame and a second, and the jumps.
   - The keys of `Panel::Effects` work only on the page: Pass Through, Rename and the keyframe steps of the active node.
+  - They also jump to the ends of the source and of the clip.
+  - A key of `Panel::Effects` wins over the same key of `Panel::App`. Thus Shift+Left goes to the start of the source, not one second back.
   - Delete, Copy, Cut, Paste and the selection keys act on the nodes there.
 - The copied nodes are values in `EffectsPage`. Paste sends them in `comp.paste` as `copy`. Thus a node that changes after Copy pastes as it was.
 - A drag of a selected node moves all the selected nodes (`Moving`). The new places go as one `apply`.

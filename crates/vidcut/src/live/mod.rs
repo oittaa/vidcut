@@ -94,6 +94,26 @@ pub enum GuiChange {
     Close(GuiPanel),
     Page(Page),
     Nodes(Vec<String>),
+    PageTime(PageTime),
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PageTime {
+    pub at: Option<i64>,
+    pub fast: bool,
+    pub speed: Option<f64>,
+    pub looping: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct PageClock {
+    pub at: i64,
+    pub first: i64,
+    pub last: i64,
+    pub out: i64,
+    pub speed: f64,
+    #[serde(rename = "loop")]
+    pub looping: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -126,6 +146,7 @@ pub struct GuiState {
     pub page: Page,
     pub clip: Option<String>,
     pub nodes: Vec<String>,
+    pub time: Option<PageClock>,
     pub edit: Option<EditPoint>,
     pub edits: Vec<EditPoint>,
     pub target: String,
@@ -2308,7 +2329,9 @@ impl Live {
                     | "jobs.list"
                     | "preferences.get"
             ))
-            || (job.method == "player.seek" && job.params["fast"] == json!(true))
+            || (matches!(job.method.as_str(), "player.seek" | "gui.page_time")
+                && job.params["fast"] == json!(true))
+            || (job.method == "player.bounds" && matches!(job.origin, Origin::Gui { .. }))
             || (job.method == "mixer.preview" && matches!(job.origin, Origin::Gui { .. }))
             || (job.method == "pool.set"
                 && matches!(job.origin, Origin::Gui { .. })
@@ -2901,6 +2924,19 @@ impl Live {
                 self.sync_loop();
                 Step::Now(Ok(self.state_response()))
             }
+            Request::PlayerBounds { from, to, looping } => {
+                let bounds = match (from, to) {
+                    (Some(a), Some(b)) if b > a => Some(((a, b), looping)),
+                    (None, None) => None,
+                    _ => {
+                        return Step::Now(Err(Error::usage(
+                            "player.bounds needs both from and to, with to after from",
+                        )));
+                    }
+                };
+                self.player.set_bounds(bounds);
+                Step::Now(Ok(self.state_response()))
+            }
             Request::PlayerFastReview { on } => {
                 self.fast_review = on.unwrap_or(!self.fast_review);
                 let id = PlayerId::of(self.viewer);
@@ -3139,6 +3175,25 @@ impl Live {
             Request::GuiPage { page } => self.gui_change(vec![GuiChange::Page(page)], |s| json!(s)),
             Request::GuiNodes { nodes } => {
                 self.gui_change(vec![GuiChange::Nodes(nodes)], |s| json!(s))
+            }
+            Request::GuiPageTime {
+                at,
+                fast,
+                speed,
+                looping,
+            } => {
+                if speed.is_some_and(|s| !s.is_finite() || s.abs() > MAX_SPEED) {
+                    return Step::Now(Err(Error::usage(format!(
+                        "speed must be within -{MAX_SPEED}..{MAX_SPEED}"
+                    ))));
+                }
+                let time = PageTime {
+                    at,
+                    fast,
+                    speed,
+                    looping,
+                };
+                self.gui_change(vec![GuiChange::PageTime(time)], |s| json!(s))
             }
             Request::GuiState {} => self.gui_change(Vec::new(), |s| json!(s)),
             Request::GuiOnly {
@@ -5047,6 +5102,9 @@ impl Live {
             "audio_error": self.player.audio_error,
             "audio_scrubbing": self.audio_scrubbing,
             "loop": self.looping,
+            "bounds": self.player.bounds().map(|((from, to), looping)| {
+                json!({ "from": from, "to": to, "loop": looping })
+            }),
             "fast_review": self.fast_review,
             "video_only": self.video_only,
             "audio_only": self.audio_only,

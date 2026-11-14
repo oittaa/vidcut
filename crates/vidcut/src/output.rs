@@ -1299,6 +1299,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
         | "player.mute"
         | "player.audio_scrubbing"
         | "player.loop"
+        | "player.bounds"
         | "viewer.set"
         | "viewer.load"
         | "viewer.guides"
@@ -1379,7 +1380,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
             println!("ok {method}")
         }
         "gui.state" | "gui.show" | "gui.close" | "gui.target" | "gui.timeline" | "gui.page"
-        | "gui.nodes" => {
+        | "gui.nodes" | "gui.page_time" => {
             let t = &v["timeline"];
             let nodes: Vec<&str> = v["nodes"]
                 .as_array()
@@ -1404,6 +1405,18 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 .flatten()
                 .filter_map(Value::as_str)
                 .collect();
+            let time = &v["time"];
+            if time.is_object() {
+                println!(
+                    "effects playhead {} (source {}..{}, Out {}), speed {}, loop {}",
+                    time["at"],
+                    time["first"],
+                    time["last"],
+                    time["out"],
+                    time["speed"],
+                    if time["loop"] == true { "on" } else { "off" }
+                );
+            }
             println!("edit {}", edit_point(&v["edit"]));
             println!("edits {}", edit_points(&v["edits"]));
             println!("target {}", v["target"].as_str().unwrap_or("-"));

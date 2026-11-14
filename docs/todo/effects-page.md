@@ -31,4 +31,11 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - = and − zoom the viewer (p. 1290). Ctrl+1 sets the scale of the Node Editor (p. 1310).
   - Ctrl+F is Find (p. 1421). 1, 2 and ` put a node in a viewer (p. 1393).
   - Ctrl+L locks a node (p. 1424). Ctrl+Shift+V pastes an instance (p. 1413). Ctrl+G makes a group (p. 1427).
+- **The render range** (pp. 1294, 1297):
+  - Ctrl-drag on the ruler, a drag of a yellow line, and Set Render Range and Auto Render Range in the menu of the ruler.
+  - A drag of a node to the ruler, and the Render Start and Render End fields at the left of the transport.
+  - vidcut: the render range is always the In and the Out of the clip.
+- **The menus of the transport** (p. 1296): the frame increment of the play buttons, and Ping-pong Loop. Measure Ping-pong Loop in Resolve first.
+- **The Audio button** at the left of the transport (p. 1297).
+- **Sound in the head and the tail:** measure what Resolve plays there. vidcut plays no sound there.
 - The CLI, IPC and MCP perform the same action as the GUI, in each step.
