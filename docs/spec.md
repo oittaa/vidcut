@@ -2647,7 +2647,6 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - Stop Tracking and Escape stop a track (p. 1785). The frames that it tracked stay (pp. 1788, 2844).
     - The frames of the old path that the track did not reach also stay. This is measured with each button of the first row.
     - Stop Tracking asks "Are you sure you wish to do this?" first.
-      - vidcut asks "Stop Tracking?", with Stop and Cancel.
   - A track does not stop at a lost pattern or at a shot change. The user stops it (pp. 1785, 1788).
   - The buttons track each enabled pattern (p. 1787). The check box of a pattern in the list enables it.
   - While a track runs, the Node Editor takes no work (p. 1784).

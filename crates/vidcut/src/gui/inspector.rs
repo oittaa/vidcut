@@ -4936,11 +4936,11 @@ impl Workspace {
                 if super::dialog::main_button(ui, "Stop", true) {
                     done = Some(true);
                 }
-                let cancel = ui.button("Cancel");
+                let keep = ui.button("Keep Tracking");
                 if fresh {
-                    cancel.request_focus();
+                    keep.request_focus();
                 }
-                if cancel.clicked() {
+                if keep.clicked() {
                     done = Some(false);
                 }
             });
