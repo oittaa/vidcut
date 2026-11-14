@@ -245,8 +245,6 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 
 ## 3. Media Pool (Ch. 34, pp. 653–675)
 
-vidcut calls the Media Pool the Media tab.
-
 - **Import** (p. 654):
   - The Import Media and Import Media Folder buttons are at the top of the Media Pool.
   - Ctrl+I, the Import Media button, or right-click > Import Media opens a file dialog. The dialog can select many files.
