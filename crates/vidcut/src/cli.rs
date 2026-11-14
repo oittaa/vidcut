@@ -463,6 +463,7 @@ const EXAMPLES: &[(&str, &str)] = &[
         "comp.add",
         "vidcut comp add c3 blur --after MediaIn1
   vidcut comp add c3 ellipse --after Blur1
+  vidcut comp add c3 tracker --after MediaIn1
            vidcut comp add c3 gaussian_blur --after Blur1
   vidcut comp add V2@10s rectangle",
     ),
@@ -475,7 +476,10 @@ const EXAMPLES: &[(&str, &str)] = &[
            vidcut comp set c3 Polygon1 --points '[[0,0.2],[-0.1,-0.1],[0.1,-0.1]]'
            vidcut comp set c3 GaussianBlur1 --strength 0.6 --blend 0.5
            vidcut comp set c3 Blur1 --pass-through true
-           vidcut comp set c3 Blur1 --size 8 --frame 60",
+           vidcut comp set c3 Blur1 --size 8 --frame 60
+           vidcut comp set c3 Tracker1 --add-pattern true
+           vidcut comp set c3 Tracker1 --pattern 2 --pattern-center 0.3,0.6 --offset 0,0.05
+           vidcut comp set c3 Ellipse1 --connect '{\"tracker\":\"Tracker1\",\"pattern\":1,\"size\":true}'",
     ),
     (
         "comp.connect",
@@ -524,12 +528,13 @@ const EXAMPLES: &[(&str, &str)] = &[
         "vidcut motion find c3 --download\n  vidcut motion find V1@10s,c7 --subject face\n  \
          vidcut motion find c3 --subject text --download\n  \
          vidcut motion find c3 --subject person --download\n  \
-         vidcut motion find c3 --subject vehicle\n  vidcut motion find c3 --replace\n  vidcut motion find c3 --subject vehicle --size 1920 --replace\n  vidcut motion find c3 --subject person --shortest 0.5 --steady 0.6 --replace",
+         vidcut motion find c3 --subject vehicle\n  vidcut motion find c3 --replace\n  \
+         vidcut motion find c3 --subject face --tracker Tracker1\n  vidcut motion find c3 --subject vehicle --size 1920 --replace\n  vidcut motion find c3 --subject person --shortest 0.5 --steady 0.6 --replace",
     ),
     (
         "motion.track",
-        "vidcut motion track c3 Ellipse1 --download\n  \
-         vidcut motion track c3 Rectangle1 --at 12s --way forward",
+        "vidcut motion track c3 Tracker1 --download\n  \
+         vidcut motion track c3 Tracker1 --pattern 2 --frame 40 --way forward",
     ),
     (
         "motion.follow",

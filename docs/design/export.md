@@ -577,11 +577,10 @@ Dynamic Zoom and keyframes (D75):
 - `Effect::sampled` reads each keyed value of an effect at that frame. `Working::of` then builds the work of the effect from plain values.
 - `layer_size` fits the layer for the closer Dynamic Zoom box (`DynamicZoom::closest`) and the largest zoom key (`place::detail`).
 - The viewer and the export both take this `Placing`. Thus there is one draw path.
-- `Placed` also holds the motion paths that the masks of its composition follow (`render::Followed`, [model](model.md#motion-paths)).
+- `Placed` also holds the motion paths of the patterns that the masks of its composition follow (`render::Followed`, [model](model.md#motion-paths)).
   - `Followed::of` takes them from the clip, with the pace of the clip and the source frame of its first frame.
   - A path shares its samples with the clip (`MotionPath.samples`). Thus a placed picture copies no sample, and two plans of one project compare them by their place in memory.
-  - `Followed::bases` gives the box of each followed path at the frame (`MotionPath::base_at`). It goes from the keyframe frame to the source frame through the pace.
-  - `follows` names one path by its id, or each path of a subject (`MotionPath::follows`).
+  - `Followed::frame` takes a keyframe frame to the source frame through the pace. `Pattern::area_at` then gives the box of the pattern there.
   - Why: a path is on source frames, and the keyframe frame of a clip with a speed is a frame of the retimed source.
   - The paths are behind an `Arc`. Thus `Placed::after` copies no sample.
 
@@ -732,8 +731,9 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - A `place::Figure` holds a `place::Outline` and its middle.
   - `Shaping::tilted` turns, tilts and sizes the points of a polygon on the CPU. The shader thus gets the points in pixels.
 - A `place::MaskBase` is the box that a mask takes as its picture (`MaskBase::all`):
-  - Without `follows`, it is the whole picture (`MaskBase::whole`).
-  - With `follows`, it is the box of each followed path at the frame (`MaskBase::of`). `place::composed` gets these boxes through `Followed::bases`.
+  - Without `connect`, it is the whole picture (`MaskBase::whole`).
+  - With `connect`, it has the size of the whole picture. Its middle is the middle of the pattern at the frame plus the offset of the pattern.
+  - With `size` also, it is the box of the pattern at the frame (`MaskBase::of`), moved by the offset. `place::composed` gets the boxes of the patterns (`place::Areas`).
   - With no path at the frame, the mask has no figure. It then covers nothing, and with Invert it covers all.
   - `Shaping::figure` puts the shape of the mask into one base. The turn of the box adds to the turn of the mask.
   - The border and the soft edge stay parts of the width of the picture. Why: a soft edge then looks the same on each box.

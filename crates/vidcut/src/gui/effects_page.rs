@@ -8,7 +8,10 @@ use eframe::egui::{
 use serde_json::{Value, json};
 use vidcut_core::composition::Frames;
 use vidcut_core::effect_keys::Keyed;
-use vidcut_core::model::{Clip, Composition, EffectValue, Mask, Node, Project, Tool, ToolType};
+use vidcut_core::model::{
+    Clip, Composition, EffectValue, Mask, Node, Pattern, Project, Tool, ToolType,
+};
+use vidcut_core::motion::Area;
 use vidcut_core::place::{Figure, MaskBase, Outline, Shaping, turned};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::request::{NodeInput, Page};
@@ -25,6 +28,8 @@ const BOX: Vec2 = vec2(104.0, 30.0);
 const MARGIN: Vec2 = vec2(40.0, 40.0);
 const KNOT: f32 = 5.0;
 const GRIP: f32 = 9.0;
+const DASH: f32 = 4.0;
+const MAGNIFIED: f32 = 120.0;
 const HANDLE: f32 = 4.0;
 const RING: f32 = 27.0;
 const RING_STEPS: usize = 48;
@@ -46,12 +51,13 @@ const ZOOMS: (f32, f32) = (0.3, 3.0);
 const ROUND: f64 = 100.0;
 const WIRE_HIT: f32 = 6.0;
 const STEPS: usize = 24;
-const LIBRARY: [(&str, &[ToolType]); 3] = [
+const LIBRARY: [(&str, &[ToolType]); 4] = [
     ("Tools", &[ToolType::Blur]),
     (
         "Masks",
         &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
     ),
+    ("Tracking", &[ToolType::Tracker]),
     (
         "Effects",
         &[
@@ -76,6 +82,7 @@ pub(super) struct EffectsPage {
     alone: Option<Alone>,
     cells: Option<super::cells::Cells>,
     held: Option<Held>,
+    boxed: Option<Boxed>,
     pan: Vec2,
     zoom: f32,
     moving: Option<Moving>,
@@ -99,6 +106,7 @@ impl Default for EffectsPage {
             alone: None,
             cells: None,
             held: None,
+            boxed: None,
             pan: Vec2::ZERO,
             zoom: 1.0,
             moving: None,
@@ -123,6 +131,7 @@ impl EffectsPage {
     pub(super) fn leave(&mut self) {
         self.alone = None;
         self.held = None;
+        self.boxed = None;
         self.moving = None;
         self.linking = None;
         self.band = None;
@@ -187,6 +196,98 @@ enum Grip {
     Height,
     Angle,
     Point(usize),
+}
+
+struct Boxed {
+    clip: String,
+    node: String,
+    pattern: usize,
+    edge: Edge,
+    area: Area,
+    grab: [f64; 2],
+    sent: Option<(u64, Instant)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Edge {
+    Corner,
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+fn edge_at(r: Rect, press: Pos2) -> Option<Edge> {
+    if r.left_top().distance(press) <= GRIP {
+        return Some(Edge::Corner);
+    }
+    let across = |lo: f32, hi: f32, v: f32| (lo - GRIP..=hi + GRIP).contains(&v);
+    let near = |a: f32, b: f32| (a - b).abs() <= HANDLE;
+    let sides = [
+        (
+            Edge::Left,
+            near(press.x, r.left()) && across(r.top(), r.bottom(), press.y),
+        ),
+        (
+            Edge::Right,
+            near(press.x, r.right()) && across(r.top(), r.bottom(), press.y),
+        ),
+        (
+            Edge::Top,
+            near(press.y, r.top()) && across(r.left(), r.right(), press.x),
+        ),
+        (
+            Edge::Bottom,
+            near(press.y, r.bottom()) && across(r.left(), r.right(), press.x),
+        ),
+    ];
+    sides.into_iter().find(|(_, on)| *on).map(|(e, _)| e)
+}
+
+fn magnified(painter: &egui::Painter, texture: egui::TextureId, r: Rect, picture: Rect) {
+    let part = |p: Pos2| {
+        let d = p - picture.min;
+        pos2(d.x / picture.width(), d.y / picture.height())
+    };
+    let uv = Rect::from_min_max(part(r.min), part(r.max));
+    let aspect = (r.width() / r.height().max(1.0)).clamp(0.25, 4.0);
+    let size = match aspect >= 1.0 {
+        true => vec2(MAGNIFIED, MAGNIFIED / aspect),
+        false => vec2(MAGNIFIED * aspect, MAGNIFIED),
+    };
+    let shown = Rect::from_min_size(r.right_top() + vec2(GRIP, 0.0), size);
+    let stroke = Stroke::new(1.0, theme::colors().accent);
+    painter.rect_filled(shown, CornerRadius::ZERO, Color32::BLACK);
+    painter.image(texture, shown, uv, Color32::WHITE);
+    painter.rect_stroke(shown, CornerRadius::ZERO, stroke, StrokeKind::Outside);
+    let c = shown.center();
+    painter.line_segment([pos2(shown.left(), c.y), pos2(shown.right(), c.y)], stroke);
+    painter.line_segment([pos2(c.x, shown.top()), pos2(c.x, shown.bottom())], stroke);
+}
+
+fn boxed_to(b: &Boxed, to: [f64; 2]) -> Area {
+    let (lo, hi) = Pattern::SIDES;
+    let mut a = b.area;
+    match b.edge {
+        Edge::Corner => {
+            a.center = [
+                to[0] - b.grab[0] + a.size[0] / 2.0,
+                to[1] - b.grab[1] + a.size[1] / 2.0,
+            ];
+        }
+        Edge::Left | Edge::Right => {
+            a.size[0] = (2.0 * (to[0] - a.center[0]).abs()).clamp(lo, hi);
+        }
+        Edge::Top | Edge::Bottom => {
+            a.size[1] = (2.0 * (to[1] - a.center[1]).abs()).clamp(lo, hi);
+        }
+    }
+    let (lo, hi) = Pattern::PLACES;
+    a.center = [
+        a.center[0].clamp(lo, hi),
+        a.center[1].clamp(1.0 - hi, 1.0 - lo),
+    ];
+    a
 }
 
 struct Shown {
@@ -732,7 +833,7 @@ impl Workspace {
             .nodes
             .iter()
             .filter_map(|n| comp.node(n))
-            .filter(|n| n.tool.works() || n.tool.is_mask())
+            .filter(|n| n.tool.flows() || n.tool.is_mask())
             .map(|n| {
                 let params = json!({
                     "clip": clip.id,
@@ -828,7 +929,7 @@ impl Workspace {
             .nodes
             .iter()
             .filter(|n| self.effects_page.nodes.contains(&n.name))
-            .filter(|n| n.tool.works() || n.tool.is_mask())
+            .filter(|n| n.tool.flows() || n.tool.is_mask())
             .cloned()
             .collect();
         if copied.is_empty() {
@@ -1049,7 +1150,142 @@ impl Workspace {
                 Color32::WHITE,
             );
         }
+        self.pattern_handles(ui, area_resp, (picture, texture), (c, &comp));
         self.mask_handles(ui, area_resp, picture, c, &comp, size);
+    }
+
+    fn pattern_handles(
+        &mut self,
+        ui: &mut egui::Ui,
+        resp: &egui::Response,
+        (picture, texture): (Rect, Option<egui::TextureId>),
+        (clip, comp): (&Clip, &Composition),
+    ) {
+        let rev = self.project().map_or(0, |p| p.rev);
+        if let Some((at, since)) = self.effects_page.boxed.as_ref().and_then(|b| b.sent)
+            && (at != rev || since.elapsed().as_secs_f64() > SETTLE)
+        {
+            self.effects_page.boxed = None;
+        }
+        let at = self.page_at();
+        let frame = self
+            .project_shared()
+            .map_or(at as f64, |p| Frames::of(&p, clip).source(at as f64));
+        let size = picture.size();
+        let screen = |[x, y]: [f64; 2]| picture.min + vec2(x as f32 * size.x, y as f32 * size.y);
+        let place = |p: Pos2| {
+            let d = p - picture.min;
+            [f64::from(d.x / size.x), f64::from(d.y / size.y)]
+        };
+        let painter = ui.painter_at(resp.rect);
+        let colors = theme::colors();
+        let picked = self.inspector.pattern_picked.clone();
+        let mut spots: Vec<(String, usize, Rect, Area)> = Vec::new();
+        for name in &self.effects_page.nodes {
+            let Some(t) = comp.node(name).and_then(|n| n.tool.tracker()) else {
+                continue;
+            };
+            for (k, pattern) in t.patterns.iter().enumerate() {
+                let held = (self.effects_page.boxed.as_ref())
+                    .filter(|b| b.clip == clip.id && b.node == *name && b.pattern == k);
+                let area = match held {
+                    Some(b) => b.area,
+                    None => (pattern.area_at(&clip.motion, frame)).unwrap_or_else(|| pattern.own()),
+                };
+                let half = [area.size[0] / 2.0, area.size[1] / 2.0];
+                let r = Rect::from_min_max(
+                    screen([area.center[0] - half[0], area.center[1] - half[1]]),
+                    screen([area.center[0] + half[0], area.center[1] + half[1]]),
+                );
+                let on = picked
+                    .as_ref()
+                    .is_some_and(|(c, n, i)| *c == clip.id && n == name && *i == k);
+                let color = if on { colors.accent } else { Color32::WHITE };
+                painter.rect_stroke(
+                    r,
+                    CornerRadius::ZERO,
+                    Stroke::new(1.0, color),
+                    StrokeKind::Middle,
+                );
+                let corner = Rect::from_center_size(r.left_top(), Vec2::splat(2.0 * HANDLE));
+                painter.rect_filled(corner, CornerRadius::ZERO, color);
+                painter.text(
+                    r.left_top() - vec2(0.0, HANDLE + 2.0),
+                    Align2::LEFT_BOTTOM,
+                    &pattern.name,
+                    FontId::proportional(11.0),
+                    color,
+                );
+                let [x, y] = pattern.shift();
+                if x != 0.0 || y != 0.0 {
+                    let to = screen([area.center[0] + x, area.center[1] - y]);
+                    let line = [r.center(), to];
+                    let stroke = Stroke::new(1.0, color);
+                    painter.extend(egui::Shape::dashed_line(&line, stroke, DASH, DASH));
+                    painter.circle_stroke(to, HANDLE, stroke);
+                }
+                if let (Some(b), Some(texture)) = (held.filter(|b| b.sent.is_none()), texture)
+                    && b.edge == Edge::Corner
+                {
+                    magnified(&painter, texture, r, picture);
+                }
+                spots.push((name.clone(), k, r, area));
+            }
+        }
+        if resp.drag_started_by(PointerButton::Primary)
+            && self.effects_page.held.is_none()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            let hit = spots
+                .iter()
+                .rev()
+                .find_map(|(name, k, r, area)| Some((name, *k, edge_at(*r, press)?, *area)));
+            if let Some((name, k, edge, area)) = hit {
+                let start = place(press);
+                let corner = [
+                    area.center[0] - area.size[0] / 2.0,
+                    area.center[1] - area.size[1] / 2.0,
+                ];
+                self.effects_page.boxed = Some(Boxed {
+                    clip: clip.id.clone(),
+                    node: name.clone(),
+                    pattern: k,
+                    edge,
+                    area,
+                    grab: [start[0] - corner[0], start[1] - corner[1]],
+                    sent: None,
+                });
+                self.inspector.pattern_picked = Some((clip.id.clone(), name.clone(), k));
+            }
+        }
+        let Some(b) = self
+            .effects_page
+            .boxed
+            .as_mut()
+            .filter(|b| b.sent.is_none() && b.clip == clip.id)
+        else {
+            return;
+        };
+        if resp.dragged()
+            && let Some(to) = ui.input(|i| i.pointer.interact_pos())
+        {
+            b.area = boxed_to(b, place(to));
+        }
+        if !resp.drag_stopped() {
+            return;
+        }
+        b.sent = Some((rev, Instant::now()));
+        let a = b.area;
+        let params = json!({
+            "clip": clip.id,
+            "node": b.node,
+            "pattern": b.pattern + 1,
+            "pattern_center": [a.center[0], 1.0 - a.center[1]],
+            "pattern_width": a.size[0],
+            "pattern_height": a.size[1],
+            "frame": at,
+        });
+        self.send("comp.set", params);
     }
 
     fn mask_handles(
@@ -1066,7 +1302,7 @@ impl Workspace {
         let frame = self
             .project_shared()
             .map_or(source, |p| Frames::of(&p, clip).source(source));
-        let areas = |named: &str| vidcut_core::motion::areas_of(&clip.motion, named, frame);
+        let areas = |pattern: &Pattern| pattern.area_at(&clip.motion, frame);
         let (w, h) = (f64::from(w), f64::from(h));
         let scale = f64::from(picture.width()) / w;
         let screen = |[x, y]: [f64; 2]| picture.min + vec2((x * scale) as f32, (y * scale) as f32);
@@ -1090,7 +1326,7 @@ impl Workspace {
             let Some(m) = node.tool.mask().filter(|m| m.show_view_controls) else {
                 continue;
             };
-            let bases = MaskBase::all(m, (w, h), &areas);
+            let bases = MaskBase::all(m, comp, (w, h), &areas);
             let shaping = Shaping::of(m, &node.tool, w, &bases);
             for f in &shaping.figures {
                 let line: Vec<Pos2> = f.line().into_iter().map(screen).collect();
@@ -1101,6 +1337,7 @@ impl Workspace {
             };
             let spots: Vec<(Grip, Pos2)> = grips(first)
                 .into_iter()
+                .filter(|(g, _)| *g != Grip::Center || m.connect.is_none())
                 .map(|(g, s)| (g, screen(s)))
                 .collect();
             let turned = turning.as_deref() == Some(name.as_str());
@@ -1115,6 +1352,11 @@ impl Workspace {
         }
         let pointer = ui.input(|i| i.pointer.interact_pos());
         if resp.drag_started_by(PointerButton::Primary)
+            && self
+                .effects_page
+                .boxed
+                .as_ref()
+                .is_none_or(|b| b.sent.is_some())
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
         {
             let near = shown
@@ -1873,7 +2115,7 @@ impl Workspace {
             if node_resp.secondary_clicked() && !selected {
                 pointed = Some(n.name.clone());
             }
-            let tool = n.tool.works() || n.tool.is_mask();
+            let tool = n.tool.flows() || n.tool.is_mask();
             node_resp.context_menu(|ui| {
                 let items = [
                     (MenuAct::Rename, "Rename", true),
@@ -2114,6 +2356,9 @@ impl Workspace {
         }
         if fired.pressed(Action::SelectNothing) {
             self.select_all(false);
+        }
+        if input.key_pressed(egui::Key::Escape) {
+            self.stop_tracks();
         }
         let Some((_, _, f)) = self.page_frames() else {
             return;

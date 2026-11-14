@@ -2,7 +2,8 @@
 
 **When:** now, one pull request for each step below.
 
-A motion path is the path of a box of the picture through the frames of a clip. A clip stores motion paths, and a mask on the Effects page follows a path ([model](../design/model.md#motion-paths)). `motion.find` makes a path for each thing of one kind in a clip ([analysis](../design/analysis.md#subjects)). `motion.track` makes a path for the thing under a mask.
+A motion path is the path of a box of the picture through the frames of a clip.
+A clip stores motion paths, and a pattern of a Tracker node on the Effects page has a path ([model](../design/model.md#motion-paths)). `motion.find` makes a path for each thing of one kind in a clip ([analysis](../design/analysis.md#subjects)). `motion.track` makes a path for a pattern.
 
 In this file, a path is never a track of the timeline.
 
@@ -39,10 +40,10 @@ In this file, a path is never a track of the timeline.
 - A clip holds motion paths, and `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read them ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
 - Transform, Crop and the values of the effects have keyframes ([keyframes.md](keyframes.md)).
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
-- A mask of a composition can follow a motion path ([deviation X168](../deviations.md#x168-a-mask-follows-a-thing)).
+- The Center of a mask of a composition can follow a pattern of a Tracker node ([deviation X168](../deviations.md#x168-the-tracker-tracks-with-a-model)).
   - The values of a mask have keyframes ([model](../design/model.md#compositions)).
 - `motion.find` finds the faces, the text, the people and the vehicles of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
-- `motion.track` follows the thing under a mask ([deviation X168](../deviations.md#x168-a-mask-follows-a-thing)).
+- `motion.track` tracks a pattern of a Tracker node ([deviation X168](../deviations.md#x168-the-tracker-tracks-with-a-model)).
 - `motion.follow` makes a title follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)).
 - No request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
@@ -79,7 +80,7 @@ In this file, a path is never a track of the timeline.
 
 - **Mask keyframes, what is left:**
   - The points of a polygon take no keyframes. Resolve animates a polygon window (manual p. 3273).
-  - `motion.track` refuses a mask with keyframes on its center, its size or its rotation. In Resolve, the keyframed transform of a window is an offset from the track (p. 3309).
+  - `comp.set` refuses a connection of a Center with keyframes. Measure on the Fusion page what a connection does to a Center with keyframes.
 - **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
   - Try how many frames a found path must start early and end late.
 - **Faces, what is left:**
@@ -92,8 +93,7 @@ In this file, a path is never a track of the timeline.
     - Check a close shot where a face is larger than 300 of those pixels, and a wide shot with faces under 10.
     - Decide whether the model also sees the picture at another size.
 - **More subjects:** number plates, animals and screens. The things that people blur most must be one choice each.
-  - The Follow menu of a mask lists the subjects of `SUBJECTS` in `crates/vidcut/src/gui/inspector.rs`: faces and text.
-    - Only `comp.set` of the CLI, IPC and MCP makes a mask follow all the people or all the vehicles.
+  - The Subject menu of a Tracker lists each subject (`Subject::ALL`).
   - A search on 2026-11-10 found no number plate model that has a clear license, a small size and plates of many countries.
     - The models with a clear license know the plates of one country, or have about 40 MB and attention layers.
   - Check on a picture with a number plate whether the text subject finds its characters. No test clip has a number plate.
@@ -105,15 +105,20 @@ In this file, a path is never a track of the timeline.
     - Measured on 2026-11-11, on 16 threads, with the file decoded on the GPU:
     - A 720p file at 24 fps gives from 21 to 24 pictures in a second. The model takes 94 % of that time.
     - A 2160p file at 59.94 fps in a project of 24 fps gives from 16 to 17 pictures in a second. The model takes 70 % of that time.
-- **The values of a find in the app:** try the Advanced fields of the Motion section in the app. The fields do not stay after the app closes.
+- **The values of a find in the app:** try the Advanced fields of a Tracker in the app. The fields do not stay after the app closes.
 - **Text, the open parts:**
   - Very small text: try a longer side above 960 pixels for a large source, and measure the time.
   - Text that comes into the picture has no blur on its first frames, as a face has not.
   - The detector takes most of the time of a text find. Try the model on the GPU.
-- **The track of a mask, what is left:**
+- **The Tracker, what is left:**
   - Measure `tracking::LOST` on a clip where the thing leaves the picture, or goes behind another thing. No test clip has one.
   - A track follows no turn and no change of perspective.
-- **The Motion section in the app:** click Blur in a window, and take a find that asks for the download of its model. Find ran from its button.
+  - Track Fwd Then Reverse of Resolve 21.2. Measure where it starts and where it is in the row of buttons.
+  - The Operation tab: Match Move, Corner Positioning and stabilization (p. 1789).
+  - The outputs other than Offset Position, for example Steady Position.
+  - Keyframes on X Offset and Y Offset, and the Tracker Offset button of the viewer (p. 1789).
+  - A track of the picture on the input of the Tracker. The model now reads the clip's own picture.
+- **The Tracker in the app:** run each track button, Stop Tracking, Find, Blur, Connect To and Follow Size. Take a find that asks for the download of its model.
 - **A clip follows a path** of another clip: a picture in a picture, or a sticker.
 - **A title that follows a path, what is left:**
   - Try Follow in the app: the menu, a drag of a title that follows a path, and its zoom and turn handles.

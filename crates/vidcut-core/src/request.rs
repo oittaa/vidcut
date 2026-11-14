@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    BlurClipping, BlurFilter, Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease,
-    EbuLevel, EffectType, EffectValue, FillMethod, GeneratorKind, GlowAlpha, GlowFraming,
+    BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom,
+    Ease, EbuLevel, EffectType, EffectValue, FillMethod, GeneratorKind, GlowAlpha, GlowFraming,
     GlowOutput, GrainComposite, GrainPreset, Handle, LowerThirdLine, Node, PathSample, PictureTool,
     PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
     TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape, ZoomBox,
@@ -2945,9 +2945,9 @@ pub enum Request {
         #[serde(default)]
         clear: Option<[i64; 2]>,
     },
-    /// Take motion paths off a clip: `paths`, or all of them. A path that
-    /// a mask follows by its id stays, and the request fails: first give
-    /// that mask another `follows`, or none (`comp.set`).
+    /// Take motion paths off a clip: `paths`, or all of them. A path of a
+    /// pattern of a tracker stays, and the request fails: first remove that
+    /// pattern (`comp.set` with `remove_pattern`).
     #[serde(rename = "motion.remove")]
     MotionRemove {
         clip: ClipRef,
@@ -2986,7 +2986,7 @@ pub enum Request {
         subject: Subject,
         /// Take the paths that an earlier `motion.find` of this subject made
         /// off the clip first. Without it, a clip that has such paths is an
-        /// error. A path that a mask or a title follows stays.
+        /// error. A path of a pattern of a tracker, or of a title, stays.
         /// A thing that such a path follows gets no second path: its new
         /// samples go into that path.
         #[serde(default)]
@@ -3030,40 +3030,43 @@ pub enum Request {
         /// to 1. Usual: 0.8 for `text`, 0.5 for the others.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         steady: Option<f64>,
+        /// A tracker node of the composition of the clip, with one clip in
+        /// `clips`. The tracker then gets a pattern for each path of the
+        /// subject, named as the path, in place of its patterns of earlier
+        /// paths of the subject. Its other patterns stay.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tracker: Option<String>,
     },
-    /// Follow the thing under the mask `node` of the composition of a clip
-    /// (`c3`, or `V2@15s`). The track starts on the frame at `at`, which the
-    /// clip must show, and goes backward and forward from there. It follows the place and the size of the thing.
-    /// It stops at a shot change, where it loses the thing, and at the ends
-    /// of the clip.
+    /// Track a pattern of the tracker `node` of the composition of a clip
+    /// (`c3`, or `V2@15s`). The track starts with the box of the pattern on
+    /// `frame`, and goes from there in its `way`. It follows the
+    /// place and the size of the thing in the box. It stops at a shot
+    /// change, where it loses the thing, and at the In and the Out.
     ///
-    /// The clip gets a motion path named `Track 1`, `Track 2`, and so on.
-    /// The mask then follows that path with its own shape. Before the first
-    /// sample of the path and after its last, it stays where that sample
-    /// puts it. When it follows a path already, a track of one `way` keeps
-    /// the samples of the other side. A path that an earlier track made for
-    /// this mask gets the new samples, and keeps its id and its name.
-    /// Another path stays as it is, and the mask gets a new path.
-    ///
-    /// The path of an ellipse or a rectangle is its own box: its center goes
-    /// to the middle of the box, its width and its height to 1, and its
-    /// angle to 0. The path of a polygon is the box around it: its points
-    /// become fractions of that box, with a size of 1 and no rotation. A
-    /// mask with keyframes on its center, its size or its rotation is an
-    /// error: first remove those keyframes (`comp.key`).
+    /// The pattern then follows its path: before the first sample of the
+    /// path and after its last, it stays where that sample puts it. When
+    /// the pattern has a path already, a track of one `way` keeps the
+    /// samples of the other side. A path that an earlier track made for
+    /// the pattern gets the new samples, and keeps its id. Another path
+    /// stays as it is, and the pattern gets a new path, named as the
+    /// pattern.
     ///
     /// Returns the path: its `id`, its `name`, the `count` of its samples
     /// and their source frames `first` and `last`. It also gives the
     /// `score` (how sure the model is, from 0 to 1, the mean of the
     /// frames), and why the track stopped `backward` and `forward`: `cut`,
-    /// `lost`, `clip` (an end of the clip) or `off`.
+    /// `lost`, `clip` (the In or the Out) or `off`.
     #[serde(rename = "motion.track")]
     MotionTrack {
         clip: ClipRef,
         node: String,
-        /// The frame where the track starts. Default: the playhead.
+        /// The pattern of the tracker, from 1. Usual: 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        at: Option<TimeSpec>,
+        pattern: Option<u32>,
+        /// The frame of the composition where the track starts, from the
+        /// In to the Out. Without it, the frame at the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frame: Option<i64>,
         /// The ways the track goes from that frame. Usual: `both`.
         #[serde(default)]
         way: TrackWay,
@@ -5134,14 +5137,53 @@ pub struct NodeChange {
     /// The corners of a polygon mask, each `[x, y]` from its middle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub points: Option<Vec<[f64; 2]>>,
-    /// The motion path that a mask follows, as `p1`, or a subject, as
-    /// `face` (`motion.list`). Null stops it.
+    /// The pattern of a tracker that a mask's center follows, as
+    /// `{"tracker": "Tracker1", "pattern": 1}`. With `"size": true`, the
+    /// mask also grows, shrinks and turns with the box of the pattern. The
+    /// mask's own center goes to `[0.5, 0.5]`. A mask with keyframes on its
+    /// center is an error. Null stops it.
     #[serde(
         default,
         deserialize_with = "given",
         skip_serializing_if = "Option::is_none"
     )]
-    pub follows: Option<Option<String>>,
+    pub connect: Option<Option<Connect>>,
+    /// The pattern of a tracker that the pattern values change, from 1.
+    /// Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<u32>,
+    /// The new name of the pattern.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_name: Option<String>,
+    /// Off, the track buttons of the effects page pass over the pattern.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_enabled: Option<bool>,
+    /// The middle of the box of the pattern, `[x, y]` as fractions of the
+    /// picture from its bottom left. On a frame where the path of the
+    /// pattern has a box, it changes the path: a sample on that frame.
+    /// Elsewhere, it moves the own box of the pattern.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_center: Option<[f64; 2]>,
+    /// The width of the box of the pattern, from 0.001 to 0.5. It changes
+    /// the box in the same way as `pattern_center`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_width: Option<f64>,
+    /// The height of the box of the pattern, from 0.001 to 0.5. It changes
+    /// the box in the same way as `pattern_center`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_height: Option<f64>,
+    /// How far the point that a mask follows is from the middle of the
+    /// pattern, `[x, y]` as fractions of the picture, up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 2]>,
+    /// On, a tracker gets a new pattern at the end of its list, with the
+    /// first free name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub add_pattern: bool,
+    /// On, the pattern goes from the tracker. A mask that follows it then
+    /// has its own center again. A later pattern keeps its masks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remove_pattern: bool,
     #[serde(flatten)]
     pub values: KindChange,
 }

@@ -3,7 +3,9 @@ use serde_json::{Value, json};
 use crate::composition::{Frames, cleaned};
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
-use crate::model::{Composition, Ease, EffectValue, Node, Project, Subject, Tool, ToolType};
+use crate::model::{
+    Composition, Connect, Ease, EffectValue, Node, PathSample, Pattern, Project, Tool, ToolType,
+};
 use crate::request::{NodeChange, NodeInput};
 
 use super::effect::kind_applied;
@@ -92,9 +94,9 @@ fn insert(c: &mut Composition, mut node: Node, after: Option<&str>, id: &str) ->
         Some(a) => Some(c.nodes[found(c, id, a)?].clone()),
         None => None,
     };
-    let picture = |a: &Node| a.tool.works() || a.tool == Tool::MediaIn;
+    let picture = |a: &Node| a.tool.flows() || a.tool == Tool::MediaIn;
     match after {
-        Some(a) if node.tool.works() && picture(&a) => {
+        Some(a) if node.tool.flows() && picture(&a) => {
             let spot = [a.place[0] + 1.0, a.place[1]];
             shifted(c, spot);
             node.place = spot;
@@ -146,30 +148,39 @@ pub fn add(p: &mut Project, id: &str, tool: ToolType, after: Option<&str>) -> Re
     Ok(json!({ "clip": id, "node": name }))
 }
 
-fn follow_checked(p: &Project, id: &str, named: &str) -> Result<()> {
-    let has = p
-        .clip(id)
-        .is_some_and(|c| c.motion.iter().any(|m| m.id == named));
-    match has || Subject::named(named).is_some() {
-        true => Ok(()),
-        false => Err(Error::not_found(format!(
-            "{id} has no motion path {named} for a mask to follow"
-        ))),
-    }
-}
-
 pub fn copied(p: &mut Project, id: &str, name: &str) -> Result<Node> {
     let c = kept(p, id)?;
     Ok(c.nodes[found(c, id, name)?].clone())
 }
 
-pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, after: Option<&str>) -> Result<Value> {
-    let nodes = nodes.iter().map(node_checked).collect::<Result<Vec<_>>>()?;
-    for n in &nodes {
-        if let Some(named) = n.tool.mask().and_then(|m| m.follows.as_deref()) {
-            follow_checked(p, id, named)?;
+fn kept_paths(n: &mut Node, ids: &[String]) {
+    if let Tool::Tracker(t) = &mut n.tool {
+        for pattern in &mut t.patterns {
+            pattern.path = pattern.path.take().filter(|path| ids.contains(path));
         }
     }
+}
+
+fn kept_connect(d: &Composition, n: &mut Node, to: Option<String>) {
+    let Some(m) = n.tool.mask_mut() else {
+        return;
+    };
+    let tracker = |name: &str| d.node(name).and_then(|t| t.tool.tracker()).is_some();
+    m.connect = m.connect.take().and_then(|k| {
+        let name = to.unwrap_or(k.tracker);
+        tracker(&name).then_some(Connect { tracker: name, ..k })
+    });
+    if m.connect.is_some() {
+        m.center = None;
+    }
+}
+
+pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, after: Option<&str>) -> Result<Value> {
+    let nodes = nodes.iter().map(node_checked).collect::<Result<Vec<_>>>()?;
+    let ids: Vec<String> = p
+        .clip(id)
+        .map(|c| c.motion.iter().map(|m| m.id.clone()).collect())
+        .unwrap_or_default();
     let c = comp_of(p, id)?;
     let spot = match after {
         Some(a) => {
@@ -192,6 +203,18 @@ pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, after: Option<&str>) -
     let Some(last) = names.last().cloned() else {
         return Err(Error::usage("comp.paste has no node to paste"));
     };
+    let copied = |old: &str| {
+        let i = nodes.iter().position(|n| n.name == old)?;
+        names.get(i).cloned()
+    };
+    for k in start..d.nodes.len() {
+        let mut node = d.nodes[k].clone();
+        kept_paths(&mut node, &ids);
+        let tracker = node.tool.mask().and_then(|m| m.connect.as_ref());
+        let to = tracker.and_then(|t| copied(&t.tracker));
+        kept_connect(&d, &mut node, to);
+        d.nodes[k] = node;
+    }
     if let [_] = names.as_slice()
         && let Some(mut node) = d.nodes.pop()
     {
@@ -291,6 +314,10 @@ pub fn rename(p: &mut Project, id: &str, name: &str, to: &str) -> Result<Value> 
                 *join = Some(next.clone());
             }
         }
+        let connect = n.tool.mask_mut().and_then(|m| m.connect.as_mut());
+        if let Some(k) = connect.filter(|k| k.tracker == name) {
+            k.tracker = next.clone();
+        }
     }
     c.nodes[i].name = next.clone();
     Ok(json!({ "clip": id, "node": next }))
@@ -299,8 +326,16 @@ pub fn rename(p: &mut Project, id: &str, name: &str, to: &str) -> Result<Value> 
 pub fn remove(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let c = kept(p, id)?;
     let gone = c.nodes.remove(found(c, id, name)?);
-    let passes = gone.tool.works();
+    let paths: Vec<String> = (gone.tool.tracker().into_iter())
+        .flat_map(|t| t.patterns.iter().filter_map(|x| x.path.clone()))
+        .collect();
+    let passes = gone.tool.flows();
     for n in &mut c.nodes {
+        if let Some(m) = n.tool.mask_mut()
+            && m.connect.as_ref().is_some_and(|k| k.tracker == name)
+        {
+            m.connect = None;
+        }
         if n.input.as_deref() == Some(name) {
             n.input = gone.input.clone().filter(|_| passes);
         }
@@ -308,7 +343,9 @@ pub fn remove(p: &mut Project, id: &str, name: &str) -> Result<()> {
             n.effect_mask = gone.effect_mask.clone().filter(|_| gone.tool.is_mask());
         }
     }
-    tidied(p, id)
+    tidied(p, id)?;
+    super::motion::unused(p, id, &paths);
+    Ok(())
 }
 
 fn taken<T>(from: &mut Option<T>, to: &mut T) {
@@ -359,8 +396,11 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             taken(&mut left.invert, &mut m.invert);
             taken(&mut left.solid, &mut m.solid);
             taken(&mut left.show_view_controls, &mut m.show_view_controls);
-            if let Some(follows) = left.follows.take() {
-                m.follows = follows;
+            if let Some(connect) = left.connect.take() {
+                m.connect = connect;
+                if m.connect.is_some() {
+                    m.center = None;
+                }
             }
             if let Some(c) = left.values.center.take() {
                 let [x, y] = c[..] else {
@@ -382,6 +422,43 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             }
             if rectangle {
                 given(&mut left.corner_radius, &mut m.corner_radius);
+            }
+        }
+        Tool::Tracker(t) => {
+            let k = left.pattern.take().unwrap_or(1);
+            let touched = left.pattern_name.is_some()
+                || left.pattern_enabled.is_some()
+                || left.pattern_center.is_some()
+                || left.pattern_width.is_some()
+                || left.pattern_height.is_some()
+                || left.offset.is_some()
+                || left.remove_pattern;
+            if touched {
+                let i = (k as usize)
+                    .checked_sub(1)
+                    .filter(|i| *i < t.patterns.len());
+                let Some(i) = i else {
+                    return Err(Error::invalid(format!(
+                        "{} has no pattern {k}: its patterns are 1 to {}",
+                        n.name,
+                        t.patterns.len()
+                    )));
+                };
+                let pattern = &mut t.patterns[i];
+                taken(&mut left.pattern_name, &mut pattern.name);
+                taken(&mut left.pattern_enabled, &mut pattern.enabled);
+                given(&mut left.pattern_center, &mut pattern.center);
+                given(&mut left.pattern_width, &mut pattern.width);
+                given(&mut left.pattern_height, &mut pattern.height);
+                given(&mut left.offset, &mut pattern.offset);
+                if left.remove_pattern {
+                    t.patterns.remove(i);
+                    left.remove_pattern = false;
+                }
+            }
+            if left.add_pattern {
+                t.patterns.push(Pattern::new(t.free_name()));
+                left.add_pattern = false;
             }
         }
         Tool::MediaIn | Tool::MediaOut => {}
@@ -418,12 +495,25 @@ pub fn set(
     if *change == NodeChange::default() {
         return Err(Error::usage("comp.set needs a value to change"));
     }
-    if let Some(Some(named)) = &change.follows {
-        follow_checked(p, id, named)?;
-    }
+    let mut change = change.clone();
+    moved_path(p, id, name, &mut change, frame)?;
+    let pattern = change.pattern.unwrap_or(1);
+    let change = &change;
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    if matches!(change.connect, Some(Some(_))) && !n.keys_of(EffectValue::Center).is_empty() {
+        return Err(Error::invalid(format!(
+            "{name}'s center has keyframes: first remove them (comp.key), then connect it"
+        )));
+    }
+    let gone = match &n.tool {
+        Tool::Tracker(t) if change.remove_pattern => {
+            let k = (pattern as usize).checked_sub(1);
+            k.and_then(|k| t.patterns.get(k)?.path.clone())
+        }
+        _ => None,
+    };
     let mut next = applied(n, change)?;
     let named = named_values(n, change)?;
     for value in n.keys.iter().map(|k| k.value).filter(|v| named.contains(v)) {
@@ -440,6 +530,81 @@ pub fn set(
         next.write_point(value, n.point(value));
     }
     *n = node_checked(&next)?;
+    if change.remove_pattern {
+        unhooked(c, name, pattern);
+    }
+    tidied(p, id)?;
+    super::motion::unused(p, id, gone.as_slice());
+    Ok(())
+}
+
+fn unhooked(c: &mut Composition, tracker: &str, gone: u32) {
+    for m in c.nodes.iter_mut().filter_map(|n| n.tool.mask_mut()) {
+        let Some(k) = m.connect.as_mut().filter(|k| k.tracker == tracker) else {
+            continue;
+        };
+        match k.pattern.cmp(&gone) {
+            std::cmp::Ordering::Equal => m.connect = None,
+            std::cmp::Ordering::Greater => k.pattern -= 1,
+            std::cmp::Ordering::Less => {}
+        }
+    }
+}
+
+fn moved_path(
+    p: &mut Project,
+    id: &str,
+    name: &str,
+    change: &mut NodeChange,
+    frame: Option<i64>,
+) -> Result<()> {
+    let boxed = change.pattern_center.is_some()
+        || change.pattern_width.is_some()
+        || change.pattern_height.is_some();
+    let Some(frame) = frame.filter(|_| boxed) else {
+        return Ok(());
+    };
+    let Some(c) = p.clip(id) else {
+        return Ok(());
+    };
+    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
+    let tracker = comp.and_then(|k| k.node(name)?.tool.tracker());
+    let k = change.pattern.unwrap_or(1) as usize;
+    let pattern = tracker.and_then(|t| t.patterns.get(k.checked_sub(1)?));
+    let Some(path) = pattern.and_then(|x| x.path.clone()) else {
+        return Ok(());
+    };
+    let source = Frames::of(p, c).source(frame as f64).round() as i64;
+    let now = c.motion.iter().find(|m| m.id == path);
+    let Some(now) = now.and_then(|m| m.base_at(source as f64)) else {
+        return Ok(());
+    };
+    let (lo, hi) = Pattern::SIDES;
+    let sides = [change.pattern_width, change.pattern_height];
+    if sides.iter().flatten().any(|v| !(lo..=hi).contains(v)) {
+        return Err(Error::invalid(
+            "a pattern's width and height are from 0.001 to 0.5",
+        ));
+    }
+    let sample = PathSample {
+        frame: source,
+        center: change
+            .pattern_center
+            .map_or(now.center, |[x, y]| [x, 1.0 - y]),
+        size: [
+            change.pattern_width.unwrap_or(now.size[0]),
+            change.pattern_height.unwrap_or(now.size[1]),
+        ],
+        rotation: now.rotation,
+    };
+    let to = super::motion::PathChange {
+        samples: Some(&[sample]),
+        ..Default::default()
+    };
+    super::motion::set(p, id, &path, to)?;
+    change.pattern_center = None;
+    change.pattern_width = None;
+    change.pattern_height = None;
     Ok(())
 }
 
@@ -507,10 +672,10 @@ pub fn reset(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
-    let follows = n.tool.mask().and_then(|m| m.follows.clone());
+    let connect = n.tool.mask().and_then(|m| m.connect.clone());
     let mut tool = n.tool.made();
     if let Some(m) = tool.mask_mut() {
-        m.follows = follows;
+        m.connect = connect;
     }
     *n = Node {
         name: n.name.clone(),

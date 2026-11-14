@@ -2,10 +2,12 @@ use crate::effect_keys::Keyed;
 use crate::model::{
     Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Composition, Effect,
     EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, Mask,
-    Media, MosaicBlur, Picture, Sharpen, Tool, Vignette, VignetteMode, VignetteShape,
+    Media, MosaicBlur, Pattern, Picture, Sharpen, Tool, Vignette, VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
+
+pub type Areas<'a> = dyn Fn(&Pattern) -> Option<Area> + 'a;
 
 const LEAST_ZOOM: f64 = 1e-9;
 const LEAST_BAR: f64 = 0.2;
@@ -149,11 +151,26 @@ impl MaskBase {
         }
     }
 
-    pub fn all(m: &Mask, (w, h): (f64, f64), areas: &dyn Fn(&str) -> Vec<Area>) -> Vec<Self> {
-        match m.follows.as_deref() {
-            None => vec![Self::whole((w, h))],
-            Some(named) => areas(named).iter().map(|a| Self::of(a, (w, h))).collect(),
-        }
+    pub fn all(m: &Mask, comp: &Composition, (w, h): (f64, f64), areas: &Areas) -> Vec<Self> {
+        let Some(c) = &m.connect else {
+            return vec![Self::whole((w, h))];
+        };
+        let Some(p) = comp.pattern(c) else {
+            return Vec::new();
+        };
+        let Some(a) = areas(p) else {
+            return Vec::new();
+        };
+        let mut base = match c.size {
+            true => Self::of(&a, (w, h)),
+            false => Self {
+                middle: [a.center[0] * w, a.center[1] * h],
+                ..Self::whole((w, h))
+            },
+        };
+        let [x, y] = p.shift();
+        base.middle = [base.middle[0] + x * w, base.middle[1] - y * h];
+        vec![base]
     }
 
     pub fn unturned(&self) -> Self {
@@ -860,12 +877,7 @@ impl Working {
     }
 }
 
-pub fn composed(
-    c: &Composition,
-    (w, h): (f64, f64),
-    frame: i64,
-    areas: &dyn Fn(&str) -> Vec<Area>,
-) -> Vec<Working> {
+pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) -> Vec<Working> {
     let Some(chain) = c.chain() else {
         return vec![Working::plain(Work::Clear, 1.0)];
     };
@@ -905,7 +917,7 @@ pub fn composed(
                 .filter(|m| !m.pass_through)
                 .filter_map(|m| {
                     let mask = m.tool.mask()?;
-                    let bases = MaskBase::all(mask, (w, h), areas);
+                    let bases = MaskBase::all(mask, c, (w, h), areas);
                     Some(Shaping::of(mask, &m.tool, w, &bases))
                 })
                 .collect();
@@ -1129,7 +1141,8 @@ impl Placing {
                 nodes: c.nodes.iter().map(|n| n.sampled(at)).collect(),
                 ..Composition::default()
             };
-            let areas = |named: &str| p.followed.bases(named, p.source);
+            let frame = p.followed.frame(p.source);
+            let areas = |pattern: &Pattern| pattern.area_at(&p.followed.paths, frame);
             composed(&sampled, pixels, p.frame, &areas)
         });
         Self {

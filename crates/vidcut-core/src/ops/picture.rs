@@ -6,9 +6,10 @@ use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
     Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode, Composition, Crop,
-    DynamicZoom, Effect, EffectKeys, EffectKind, FillMethod, FilmGrain, GaussianBlur, Glow,
-    GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, MosaicBlur, Node, Picture,
-    PictureTool, Project, Sharpen, Tool, TrackKind, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    DynamicZoom, Effect, EffectKeys, EffectKind, EffectValue, FillMethod, FilmGrain, GaussianBlur,
+    Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, MosaicBlur, Node, Pattern,
+    Picture, PictureTool, Project, Sharpen, Tool, TrackKind, Tracker, Vignette, VignetteMode,
+    VignetteShape, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -553,6 +554,7 @@ fn plain_node_checked(n: &Node) -> Result<Node> {
         Tool::Ellipse(m) => Tool::Ellipse(mask_checked(m, "ellipse")?),
         Tool::Rectangle(m) => Tool::Rectangle(mask_checked(m, "rectangle")?),
         Tool::Polygon(m) => Tool::Polygon(mask_checked(m, "polygon")?),
+        Tool::Tracker(t) => Tool::Tracker(tracker_checked(t)?),
         t => t.clone(),
     };
     Ok(Node {
@@ -580,6 +582,71 @@ fn blur_checked(b: &Blur) -> Result<Blur> {
         channels: b.channels.filter(|c| *c != Blur::ALL),
         ..b.clone()
     })
+}
+
+fn tracker_checked(t: &Tracker) -> Result<Tracker> {
+    if t.patterns.len() > Tracker::PATTERNS_KEPT {
+        return Err(Error::invalid(format!(
+            "a tracker has {} patterns at most",
+            Tracker::PATTERNS_KEPT
+        )));
+    }
+    let patterns = t.patterns.iter().map(pattern_checked);
+    Ok(Tracker {
+        patterns: patterns.collect::<Result<Vec<_>>>()?,
+    })
+}
+
+fn pattern_checked(p: &Pattern) -> Result<Pattern> {
+    let name = p.name.trim().to_string();
+    if name.is_empty() {
+        return Err(Error::invalid("a pattern of a tracker has a name"));
+    }
+    for v in p.center.into_iter().flatten() {
+        let why = "a pattern's center is two fractions, each from -10 to 10";
+        within(Some(v), Pattern::PLACES, why)?;
+    }
+    for v in p.offset.into_iter().flatten() {
+        let why = "a pattern's offset is two fractions, each from -10 to 10";
+        within(Some(v), Pattern::PLACES, why)?;
+    }
+    let why = "a pattern's width and height are from 0.001 to 0.5";
+    within(p.width, Pattern::SIDES, why)?;
+    within(p.height, Pattern::SIDES, why)?;
+    Ok(Pattern {
+        name,
+        center: p.center.filter(|c| *c != Pattern::CENTER),
+        width: p.width.filter(|v| *v != Pattern::WIDTH),
+        height: p.height.filter(|v| *v != Pattern::HEIGHT),
+        offset: p.offset.filter(|o| *o != [0.0, 0.0]),
+        ..p.clone()
+    })
+}
+
+fn connect_checked(c: &Composition, n: &Node) -> Result<()> {
+    let Some(k) = n.tool.mask().and_then(|m| m.connect.as_ref()) else {
+        return Ok(());
+    };
+    if c.node(&k.tracker).and_then(|t| t.tool.tracker()).is_none() {
+        return Err(Error::invalid(format!(
+            "{} follows {}, which is no tracker",
+            n.name, k.tracker
+        )));
+    }
+    if c.pattern(k).is_none() {
+        return Err(Error::invalid(format!(
+            "{} follows pattern {} of {}, which it has not",
+            n.name, k.pattern, k.tracker
+        )));
+    }
+    let own = n.tool.mask().and_then(|m| m.center);
+    if own.is_some_and(|v| v != Mask::MIDDLE) || !n.keys_of(EffectValue::Center).is_empty() {
+        return Err(Error::invalid(format!(
+            "{} follows a tracker, so its own center is [0.5, 0.5], with no keyframes",
+            n.name
+        )));
+    }
+    Ok(())
 }
 
 fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
@@ -724,8 +791,9 @@ pub fn composition_checked(c: &Composition) -> Result<Composition> {
                 n.name
             )));
         }
-        joined(&n.input, |t| t.works() || *t == Tool::MediaIn, "input")?;
+        joined(&n.input, |t| t.flows() || *t == Tool::MediaIn, "input")?;
         joined(&n.effect_mask, Tool::is_mask, "effect mask")?;
+        connect_checked(c, n)?;
     }
     if let Some(at) = c.loops() {
         return Err(Error::invalid(format!(

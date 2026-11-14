@@ -91,10 +91,6 @@ impl PathSample {
 }
 
 impl MotionPath {
-    pub fn follows(&self, named: &str) -> bool {
-        self.id == named || self.subject.is_some_and(|s| s.name() == named)
-    }
-
     pub fn area_at(&self, frame: f64) -> Option<Area> {
         let s = &self.samples;
         let (first, last) = self.span()?;
@@ -131,11 +127,6 @@ impl MotionPath {
     pub fn span(&self) -> Option<(i64, i64)> {
         Some((self.samples.first()?.frame, self.samples.last()?.frame))
     }
-}
-
-pub fn areas_of(paths: &[MotionPath], named: &str, frame: f64) -> Vec<Area> {
-    let followed = paths.iter().filter(|m| m.follows(named));
-    followed.filter_map(|m| m.base_at(frame)).collect()
 }
 
 pub fn samples_problem(samples: &[PathSample]) -> Option<String> {

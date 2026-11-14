@@ -2465,6 +2465,7 @@ This section follows the Fusion page. The facts without a page are measured in R
   - Measured: Resolve then stops a render with "The Fusion composition at 01:00:00:00 could not be processed successfully". An export of vidcut also stops with an error.
 - Tools:
   - Blur: the Blur tool of the Fusion page (pp. 2108–2111). See below.
+  - Tracker: it follows patterns in the picture, and passes its input on as it is (pp. 1783–1789). See [The Tracker](#the-tracker).
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
@@ -2615,18 +2616,42 @@ The shapes:
   - Measured in Resolve Studio 21.2: the control is a dashed ring about the center. The ring keeps its size on the screen.
   - A drag on the ring turns the shape as far as the pointer turns about the center.
   - While the shape turns, the ring is red, with a line from the center at the angle.
-- A mask follows a tracked thing when its Center connects to the Offset Position of a tracker (p. 1793).
-  - vidcut: Follow in the Inspector of a mask picks a motion path of the clip, or all the paths of a subject ([X168](deviations.md#x168-a-mask-follows-a-thing)).
-  - The box of the path then takes the place of the whole picture for the mask. With several paths, the viewer shows the edge of the mask in each box. The handles are on the first box.
-  - vidcut: Track under the controls of a mask makes a motion path for the thing under the mask, and the mask follows it.
-- vidcut: the Motion section is at the bottom of the Inspector of the page ([X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
-  - Find there finds the things of a subject in the clip of the page.
-  - Blur there adds a Mosaic Blur before Media Out, with a mask on its effect mask that follows the subject.
+
+#### The Tracker
+
+The Tracker node follows patterns in the picture on its input (pp. 1783–1789). The facts without a page are measured in Resolve Studio 21.2.
+
+- A new Tracker has one pattern (p. 1783).
+  - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).
+  - Each side of the box is from 0.001 to 0.5.
+  - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns.
+  - vidcut: a model tracks each pattern. Add Pattern adds a pattern with the name Pattern and a number ([X168](deviations.md#x168-the-tracker-tracks-with-a-model)).
+- The viewer shows the box of each pattern of a selected Tracker (p. 1783).
+  - A drag of the small handle at the top left moves the box. A zoomed view of the box shows during the drag (pp. 1783–1784).
+  - A drag of an edge resizes the box from its middle (p. 1783).
+  - Resolve also shows a search area around the box (p. 1784). vidcut shows none.
+- The track buttons are at the top of the Inspector (pp. 1784–1785):
+  - Track Reverse tracks backward from the end of the render range. Track Backward From Current Frame tracks backward from the playhead.
+  - Track Forward tracks forward from the start of the render range. Track Forward From Current Frame tracks forward from the playhead.
+  - The render range is from the In to the Out. A track stops at its end (p. 1785).
+  - Stop Tracking and Escape stop a track (p. 1785).
+  - The buttons track each enabled pattern (p. 1787). The check box of a pattern in the list enables it.
+  - Resolve also has Track Fwd Then Reverse. vidcut does not have it yet.
+- When a track ends, its path is connected to the pattern (p. 1785).
+- X Offset and Y Offset move the point that other nodes follow away from the middle of the pattern (p. 1789).
+  - The viewer shows a dashed line from the middle of the pattern to that point (p. 1789).
+- A right-click on the Center of a mask has Connect To (pp. 1789, 1804). Its menu names each Tracker, and each pattern as "Pattern 1: Offset Position".
+  - The Center then follows that point.
+  - vidcut: the menu of a connected Center also has Disconnect.
+  - vidcut: Follow Size makes the mask also grow and shrink with the box of the pattern ([X168](deviations.md#x168-the-tracker-tracks-with-a-model)).
+- vidcut: Find in the Inspector of a Tracker finds the things of a subject in the clip ([X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+  - The Tracker gets a pattern for each thing.
+  - Blur there adds a Mosaic Blur before Media Out. For each pattern, it adds a mask on the blur that follows that pattern with Follow Size.
 
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
 `gui.page_time` moves and plays the playhead of the page. `comp.loop` sets Loop and Ping Pong. `player.bounds` holds play of the timeline between two frames.
 `comp.set` and `comp.key` take a `frame` of the composition. Without it, they take the frame at the playhead.
-`comp.set` with `follows` makes a mask follow a path. `motion.track` with `node` tracks a mask.
+`comp.set` with `connect` connects the Center of a mask to a pattern. `motion.track` tracks a pattern of a Tracker, and `motion.find` with `tracker` gives it patterns.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

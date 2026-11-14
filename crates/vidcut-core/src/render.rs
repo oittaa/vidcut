@@ -736,11 +736,15 @@ impl PartialEq for Followed {
 
 impl Followed {
     pub fn of(clip: &Clip, picture: &Picture) -> Self {
-        let nodes = picture.composition.iter().flat_map(|c| &c.nodes);
-        let named: Vec<String> = nodes
-            .filter_map(|n| n.tool.mask()?.follows.clone())
-            .collect();
-        let follows = |m: &&MotionPath| named.iter().any(|n| m.follows(n));
+        let mut named: Vec<&str> = Vec::new();
+        if let Some(c) = &picture.composition {
+            let connected = c
+                .nodes
+                .iter()
+                .filter_map(|n| n.tool.mask()?.connect.as_ref());
+            named.extend(connected.filter_map(|k| c.pattern(k)?.path.as_deref()));
+        }
+        let follows = |m: &&MotionPath| named.contains(&m.id.as_str());
         let shared = |m: &MotionPath| MotionPath {
             id: m.id.clone(),
             name: None,
@@ -782,9 +786,8 @@ impl Followed {
         path.held_at(frame)
     }
 
-    pub fn bases(&self, named: &str, source: i64) -> Vec<Area> {
-        let frame = (self.from + self.pace.offset(source - self.key)) as f64;
-        crate::motion::areas_of(&self.paths, named, frame)
+    pub fn frame(&self, source: i64) -> f64 {
+        (self.from + self.pace.offset(source - self.key)) as f64
     }
 
     pub fn stamp_at(&self, source: i64) -> u64 {

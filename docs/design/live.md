@@ -306,16 +306,15 @@ The bar and the Jobs button:
 - A drag of a selected node moves all the selected nodes (`Moving`). The new places go as one `apply`.
 - A drag from a knot, or from a half of a join, makes a `Linking`. The drop sends `comp.connect` for the new join, and parts the join that the drag took.
 - Several edits of one key go as one `apply`. Thus one undo step takes them back.
-- A mask that follows a path has its handles on the box of the first path at the frame. A drag works in that box (`MaskBase::own`).
-- The Follow menu of a mask lists None, one entry for each subject of `SUBJECTS` (`all_of`) and the motion paths of the clip (`follow_row`, `PathRow`).
-  - A subject entry sends the name of the subject in `follows`. It is there also when the clip has no path of that subject.
-  - The menu shows the name of each `Subject` that a mask follows (`Subject::named`), also of one that it does not list.
-  - `SUBJECTS` lists the subjects that the menu shows: `Subject::Face` and `Subject::Text`.
-- Track on a mask sends `motion.track` with the `node` (`Workspace::track_node`).
-  - It goes both ways when the mask follows no path.
-  - When the mask follows a path, it goes forward from the playhead. On the first frame of that path, it goes backward.
-  - It asks before the download of the model, as Find does (`Finding`, `model_needs`).
-- The Motion section is at the bottom of the Inspector of the page (`Workspace::page_motion`).
+- A connected mask has its handles in its box at the frame (`MaskBase::all`). It has no center handle. A drag works in that box (`MaskBase::own`).
+- A right-click on the Center of a mask opens Connect To (`center_row`, `connect_menu`). It lists each Tracker and its patterns (`hooks`).
+  - A connected Center shows the Tracker and the pattern. Follow Size is under it.
+- The viewer draws the box of each pattern of a selected Tracker, with its name (`Workspace::pattern_handles`).
+  - A drag of the handle at the top left moves the box. A drag of an edge resizes it from its middle (`Boxed`, `Edge`).
+  - During a move, `magnified` draws the box larger next to it, with a cross.
+  - The release sends one `comp.set` with the box and the `frame` of the playhead.
+  - A press on a box picks its pattern in the Inspector (`pattern_picked`).
+  - A pattern with an offset has a dashed line to the point that masks follow.
 
 **View state.**
 
@@ -453,21 +452,25 @@ The bar and the Jobs button:
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.
   - The Keyframe button and its ease menu send `effects.key`. Previous and Next seek (`step_effect`).
     - The button and the seeks use the keyframes of the effect (`effect_marks`, `effect_key_times`).
-- `Workspace::motion_section` shows for the clip of the Effects page when it takes motion paths (`ops::motion::takes`).
-  - Its first row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
+- `Workspace::tracker_section` shows the controls of a Tracker node.
+  - The track buttons send one `motion.track` for each enabled pattern, with the `frame` and the `way`.
+    - Track Reverse starts at the Out, and Track Forward at the In. The two others start at the playhead.
+    - Stop Tracking and Escape cancel the jobs of kind `track` (`Workspace::stop_tracks`).
+  - The pattern list has a check box, the name and Delete for each pattern, and Add Pattern. A click on a name picks the pattern.
+  - Name, X Offset and Y Offset are of the picked pattern.
+  - For a clip that takes motion paths (`ops::motion::takes`), a row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
     - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.
     - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
     - Each field tells on hover what it sets, and what a lower or a higher number does.
-    - Find and Blur send the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
-  - Find sends `motion.find` (`find_request`), with `replace` when the clip has paths of that subject.
-  - Blur sends one `apply` (`page_blur`). It has `motion.find` when the clip has no such path.
-    - Then it has `comp.add` of a Mosaic Blur before Media Out, `comp.add` of a mask on it, and `comp.set` of the mask with `follows`.
+    - Find sends the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
+  - Find sends `motion.find` with the `tracker` (`find_request`), and with `replace` when the clip has paths of that subject.
+  - Blur sends one `apply` (`page_blur`): `comp.add` of a Mosaic Blur before Media Out, and a chain of masks on its effect mask.
+    - Each pattern gets one mask, with `comp.set` of `connect`, Follow Size and the size `BLUR_SIZE`.
     - The mask is a rectangle for text, a person or a vehicle, and an ellipse for a face (`boxed`).
-    - It leaves the blur out when a mask of the composition follows the subject. With nothing to send, the button is off.
-    - The live core runs an `apply` with `motion.find` as a long edit (`runs_long`): it measures on a job thread first.
+    - With no pattern, the button is off.
+  - The live core runs an `apply` with `motion.find` as a long edit (`runs_long`): it measures on a job thread first.
   - A `motion.find` and a `motion.track` of their own run as jobs (`start_encode`, kinds `find` and `track`). The Jobs window shows each with its progress, and Cancel stops it.
-    - The `apply` of Blur measures with no job, and shows no progress.
-  - `Workspace::find` asks before a download when the model of the subject is not there (`subjects::needed`, `Finding`). `Workspace::motion_prompt` shows the question that the other local models use (`ask_download`), and `with_model` then sets `download` on `motion.find`.
+  - `Workspace::ask` asks before a download when a model is not there (`model_needs`, `Finding`). `Workspace::motion_prompt` shows the question that the other local models use (`ask_download`), and `with_model` then sets `download`.
   - The rows below list the motion paths of the clip.
   - A name goes with `motion.set` when its field loses the focus (`Naming`). Escape drops the typed name. Delete sends `motion.remove`.
   - The rows read the paths from the shared project of the snapshot. The snapshot holds no copy of the samples.

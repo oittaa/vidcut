@@ -140,9 +140,9 @@ flowchart TD
 
 ## Tracks
 
-- `motion.track` follows the thing under a mask ([deviation X168](../deviations.md#x168-a-mask-follows-a-thing)).
-- `ops::motion::start` gives the box to follow. It takes the outline of the mask on the first frame of the track (`Shaping::figure`, `Figure::line`). The box to follow is the box around it.
-  - The path of an ellipse or a rectangle is its own box. The path of a polygon is the box around it, with no turn.
+- `motion.track` tracks a pattern of a Tracker node ([deviation X168](../deviations.md#x168-the-tracker-tracks-with-a-model)).
+- `ops::motion::start` gives the box to follow: the box of the pattern on the first frame of the track (`Pattern::area_at`).
+  - Without a box of its path there, it is the own box of the pattern (`Pattern::own`).
 - `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:
   - It reads the pictures that `subjects::find` reads: the first decoded frame at or after each time of the `Look`.
   - `Seeing::start` chooses the size of the pictures: the search area of the model then has about its own size. The longer side is from 320 to 1280 pixels.
@@ -157,13 +157,11 @@ flowchart TD
   - `Follow` holds the `Look`, the first time, the box and the ways.
 - The result is a `Detections` with one box on each picture of the track, and no box on the other pictures (`laid`).
   - Thus a track shares the disk cache of `motion.find` (`AvEnv::tracked`). `tracking::name` gives the model file and `LOST` to the name of the file.
-- `motion::followed` makes the samples: the box of the mask, moved and scaled with the box of the track. `motion::stopped` tells why a track ended.
-- `ops::motion::tracked` stores the samples. The mask then follows the path by its id, with no offset.
-  - A path with `tracked` that only this mask follows gets the new samples. It keeps its id and its name.
-  - Else the mask gets a new path, with `tracked` and the name Track and a number. The path that it followed stays as it is.
-  - A track of one way keeps the samples of the other side of a track that the mask followed (`TrackWay`).
-  - A mask then fills the box of the path. An ellipse or a rectangle gets the middle of the box, a width and a height of 1 and no angle.
-  - A polygon gets its points as parts of the box, a size of 1 and no rotation. Thus it keeps its shape on the first frame.
+- `motion::followed` makes the samples: the box of the pattern, moved and scaled with the box of the track. `motion::stopped` tells why a track ended.
+- `ops::motion::tracked` stores the samples, and the pattern gets the path (`Pattern.path`).
+  - A path with `tracked` that only this pattern has gets the new samples. It keeps its id and its name.
+  - Else the pattern gets a new path, with `tracked` and the name of the pattern. The old path stays as it is.
+  - A track of one way keeps the samples of the other side of the old track (`TrackWay`).
 - In a GUI, `Live::measuring` measures first (`editor::track_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model file is `catalog::VITTRACK_ONNX`. `tracking::get_ready` fetches it when the request has `download`.
 

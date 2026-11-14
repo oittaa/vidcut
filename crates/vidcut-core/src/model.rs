@@ -3573,6 +3573,67 @@ pub enum Tool {
     Rectangle(Mask),
     /// A mask with straight sides through its `points`.
     Polygon(Mask),
+    /// A tracker: the place of the thing in each of its patterns on each
+    /// frame. The center of a mask can follow a pattern (`connect`). The
+    /// picture on its `input` goes on as it comes in.
+    Tracker(Tracker),
+}
+
+/// The patterns of a tracker, in their order. A mask names a pattern by its
+/// number in this list, from 1. From 0 to 256 of them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Tracker {
+    pub patterns: Vec<Pattern>,
+}
+
+/// A pattern of a tracker: a box on the clip's own picture, and the motion
+/// path that a track of the box made (`motion.track`). On each frame, the
+/// pattern is where its path puts it. Before a track, it is where its own
+/// box is. A field left out is at its usual value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Pattern {
+    /// Its name in the list of the tracker, for example `Pattern 1`.
+    pub name: String,
+    /// Off, the track buttons of the effects page pass over the pattern.
+    /// `motion.track` still tracks it. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub enabled: bool,
+    /// The id of its motion path on the clip (`motion.list`), as `p1`. A
+    /// track of the pattern makes it, and `motion.find` with `tracker` gives
+    /// a pattern for each thing it finds. Left out before a track.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// The middle of its own box, `[x, y]` as fractions of the picture from
+    /// its bottom left, each from -10 to 10. Usual: `[0.25, 0.75]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// The width of its own box, as a fraction of the width of the picture,
+    /// from 0.001 to 0.5. Usual: 0.03.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    /// The height of its own box, as a fraction of the height of the
+    /// picture, from 0.001 to 0.5. Usual: 0.0534.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+    /// How far the point that a mask follows is from the middle of the
+    /// pattern, `[x, y]` as fractions of the width and the height of the
+    /// picture, up. Each from -10 to 10. Usual: `[0, 0]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 2]>,
+}
+
+/// The pattern of a tracker that the center of a mask follows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Connect {
+    /// The name of the tracker node in the same composition.
+    pub tracker: String,
+    /// The number of the pattern in the list of the tracker, from 1.
+    pub pattern: u32,
+    /// On, the mask also grows, shrinks and turns with the box of the
+    /// pattern: its width, its height and its points are then fractions of
+    /// that box. Off, only its center follows. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub size: bool,
 }
 
 /// The tools that a composition takes: `blur`, the kinds of effect, the
@@ -3590,6 +3651,7 @@ pub enum ToolType {
     Ellipse,
     Rectangle,
     Polygon,
+    Tracker,
     MediaIn,
     MediaOut,
 }
@@ -3738,18 +3800,14 @@ pub struct Mask {
     /// covers nothing. Usual: none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<[f64; 2]>,
-    /// The id of a motion path of the clip, as `p1`, or a subject, as
-    /// `face`: then each path that `motion.find` made for that subject. The
-    /// box of the path at each frame, turned as the path turns it, then
-    /// takes the place of the whole picture. Its `center` is a fraction of
-    /// that box from its bottom left. Its `width`, its `height` and its
-    /// `points` are fractions of the width and the height of that box. With
-    /// several paths, the mask has its shape in the box of each. A path that
+    /// The pattern of a tracker that its center follows. Its center is then
+    /// the middle of the pattern on each frame, plus the `offset` of the
+    /// pattern, and its own `center` is `[0.5, 0.5]`. A path that
     /// `motion.track` made keeps its first box before it starts and its last
-    /// box after it ends. Another path gives no shape there. Left out, the
-    /// mask is on the whole picture.
+    /// box after it ends. A path of `motion.find` gives no shape there.
+    /// Left out, the mask has its own center.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub follows: Option<String>,
+    pub connect: Option<Connect>,
 }
 
 /// Which parts a polygon whose sides cross covers.

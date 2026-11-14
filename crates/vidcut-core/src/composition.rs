@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
 use crate::model::{
-    Blur, BlurClipping, BlurFilter, Clip, Composition, EffectKind, EffectType, Mask, Node, Project,
-    Tool, ToolType,
+    Blur, BlurClipping, BlurFilter, Clip, Composition, Connect, EffectKind, EffectType, Mask,
+    MotionPath, Node, Pattern, Project, Tool, ToolType, Tracker,
 };
+use crate::motion::Area;
 use crate::render::FileClock;
 
 pub const MEDIA_IN: &str = "MediaIn1";
@@ -120,7 +121,77 @@ impl Default for Mask {
             corner_radius: None,
             fill_method: None,
             points: Vec::new(),
-            follows: None,
+            connect: None,
+        }
+    }
+}
+
+impl Pattern {
+    pub const CENTER: [f64; 2] = [0.25, 0.75];
+    pub const WIDTH: f64 = 0.03;
+    pub const HEIGHT: f64 = 0.0534;
+    pub const SIDES: (f64, f64) = (0.001, 0.5);
+    pub const PLACES: (f64, f64) = (-crate::motion::REACH, crate::motion::REACH);
+
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            enabled: true,
+            path: None,
+            center: None,
+            width: None,
+            height: None,
+            offset: None,
+        }
+    }
+
+    pub fn middle(&self) -> [f64; 2] {
+        self.center.unwrap_or(Self::CENTER)
+    }
+
+    pub fn wide(&self) -> f64 {
+        self.width.unwrap_or(Self::WIDTH)
+    }
+
+    pub fn high(&self) -> f64 {
+        self.height.unwrap_or(Self::HEIGHT)
+    }
+
+    pub fn shift(&self) -> [f64; 2] {
+        self.offset.unwrap_or([0.0, 0.0])
+    }
+
+    pub fn own(&self) -> Area {
+        let [x, y] = self.middle();
+        Area {
+            center: [x, 1.0 - y],
+            size: [self.wide(), self.high()],
+            rotation: 0.0,
+        }
+    }
+
+    pub fn area_at(&self, paths: &[MotionPath], frame: f64) -> Option<Area> {
+        match &self.path {
+            None => Some(self.own()),
+            Some(id) => paths.iter().find(|m| m.id == *id)?.base_at(frame),
+        }
+    }
+}
+
+impl Tracker {
+    pub const PATTERNS_KEPT: usize = 256;
+    pub const NAME: &'static str = "Pattern";
+
+    pub fn free_name(&self) -> String {
+        (1..)
+            .map(|n| format!("{} {n}", Self::NAME))
+            .find(|name| !self.patterns.iter().any(|p| p.name == *name))
+            .unwrap_or_default()
+    }
+
+    pub fn made() -> Self {
+        Self {
+            patterns: vec![Pattern::new(format!("{} 1", Self::NAME))],
         }
     }
 }
@@ -211,6 +282,7 @@ impl Tool {
             Tool::Ellipse(_) => "Ellipse",
             Tool::Rectangle(_) => "Rectangle",
             Tool::Polygon(_) => "Polygon",
+            Tool::Tracker(_) => "Tracker",
         }
     }
 
@@ -223,6 +295,7 @@ impl Tool {
             Tool::Ellipse(_) => "Ellipse",
             Tool::Rectangle(_) => "Rectangle",
             Tool::Polygon(_) => "Polygon",
+            Tool::Tracker(_) => "Tracker",
         }
     }
 
@@ -234,8 +307,19 @@ impl Tool {
         matches!(self, Tool::Blur(_) | Tool::Effect(_))
     }
 
+    pub fn flows(&self) -> bool {
+        self.works() || matches!(self, Tool::Tracker(_))
+    }
+
     pub fn takes_input(&self) -> bool {
-        self.works() || matches!(self, Tool::MediaOut)
+        self.flows() || matches!(self, Tool::MediaOut)
+    }
+
+    pub fn tracker(&self) -> Option<&Tracker> {
+        match self {
+            Tool::Tracker(t) => Some(t),
+            _ => None,
+        }
     }
 
     pub fn takes_mask(&self) -> bool {
@@ -267,6 +351,16 @@ impl Tool {
             Tool::Polygon(m) => Tool::Polygon(Mask {
                 points: m.points.clone(),
                 ..Mask::default()
+            }),
+            Tool::Tracker(t) => Tool::Tracker(Tracker {
+                patterns: t
+                    .patterns
+                    .iter()
+                    .map(|p| Pattern {
+                        offset: None,
+                        ..p.clone()
+                    })
+                    .collect(),
             }),
         }
     }
@@ -459,6 +553,11 @@ impl Composition {
         self.nodes.iter().find(|n| n.tool == Tool::MediaOut)
     }
 
+    pub fn pattern(&self, c: &Connect) -> Option<&Pattern> {
+        let t = self.node(&c.tracker)?.tool.tracker()?;
+        t.patterns.get((c.pattern as usize).checked_sub(1)?)
+    }
+
     pub fn chain(&self) -> Option<Vec<&Node>> {
         let mut seen = HashSet::new();
         let mut at = self.node(self.out()?.input.as_deref()?)?;
@@ -469,7 +568,7 @@ impl Composition {
             }
             match &at.tool {
                 Tool::MediaIn => break,
-                t if t.works() => tools.push(at),
+                t if t.flows() => tools.push(at),
                 _ => return None,
             }
             at = self.node(at.input.as_deref()?)?;
@@ -528,7 +627,7 @@ impl Composition {
 }
 
 impl ToolType {
-    pub const ADDED: [ToolType; 10] = [
+    pub const ADDED: [ToolType; 11] = [
         ToolType::Blur,
         ToolType::GaussianBlur,
         ToolType::MosaicBlur,
@@ -539,6 +638,7 @@ impl ToolType {
         ToolType::Ellipse,
         ToolType::Rectangle,
         ToolType::Polygon,
+        ToolType::Tracker,
     ];
 
     pub fn made(self) -> Tool {
@@ -554,6 +654,7 @@ impl ToolType {
             ToolType::Ellipse => Tool::Ellipse(Mask::default()),
             ToolType::Rectangle => Tool::Rectangle(Mask::default()),
             ToolType::Polygon => Tool::Polygon(Mask::default()),
+            ToolType::Tracker => Tool::Tracker(Tracker::made()),
             ToolType::MediaIn => Tool::MediaIn,
             ToolType::MediaOut => Tool::MediaOut,
         }

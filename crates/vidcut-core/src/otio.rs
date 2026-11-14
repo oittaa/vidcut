@@ -2112,12 +2112,12 @@ fn our_picture(item: &Value) -> Option<Picture> {
         serde_json::from_value(item["metadata"][VIDCUT].get("picture")?.clone()).ok()?;
     let paths = our_motion(item);
     let nodes = p.composition.iter_mut().flat_map(|c| c.nodes.iter_mut());
-    for mask in nodes.filter_map(|n| n.tool.mask_mut()) {
-        if let Some(id) = &mask.follows
-            && crate::model::Subject::named(id).is_none()
-            && !paths.iter().any(|m| m.id == *id)
-        {
-            mask.follows = None;
+    for n in nodes {
+        if let crate::model::Tool::Tracker(t) = &mut n.tool {
+            for pattern in &mut t.patterns {
+                let has = |id: &String| paths.iter().any(|m| m.id == *id);
+                pattern.path = pattern.path.take().filter(has);
+            }
         }
     }
     crate::ops::picture::checked(&p).ok().flatten()
