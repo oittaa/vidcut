@@ -81,6 +81,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
   - **Track controls** (p. 1257):
     - The curve button shows the curve of the value under its track.
+    - A small dot before the name has the color of the value's line in the graph.
   - **Graph** (p. 1261):
     - The Graph button in the header shows one large graph in the place of the tracks. The names of the tracks stay on its left.
     - The graph shows a colored line for each value with keyframes. The curve button of a track takes its line out or puts it back.
@@ -88,6 +89,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - At first, no curve is active. After a click on an empty part of the graph, no curve is active (measured in Resolve Studio 21.2).
     - A click on a dimmed curve makes it the active curve and clears the selection (measured in Resolve Studio 21.2).
     - A click on a track's name also makes that curve active. The selection stays.
+    - The line of a value has the color of its track (p. 1261).
+    - Under the graph, a row shows the keyframes of the active curve, as a track does (p. 1261). With no active curve, the row is empty (measured in Resolve Studio 21.2).
+    - The 21.1 manual says that the Parameters button opens checkboxes for the curves (p. 1262).
+    - In Resolve Studio 21.2, the Parameters button hides or shows the names of the tracks. Then the tracks or the graph take the full width (measured).
     - The ⋯ menu has Auto Zoom Graph Height. It sets the height of the graph from the keyframes, and it is on by default (p. 1264).
     - In Resolve Studio 21.2, it has Off, On and Normalized. A new project has Normalized (measured). vidcut does the same.
     - Normalized gives each curve the full height with its own range. The labels show the range of the active curve.

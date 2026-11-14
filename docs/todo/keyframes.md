@@ -152,7 +152,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - the motion path in the viewer (pp. 1252–1254)
   - Step, Loop, Ping Pong, Reverse and the Shape Box (pp. 1261–1267)
   - keyframes of several selected clips at once (p. 1268)
-  - the Lock and Track Color controls (p. 1257)
+  - the Lock control (p. 1257)
   - the ruler in frames, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
   - Select all (Ctrl+A) and deselect all (Ctrl+Shift+A) in the Keyframes tab and the tray
   - the parts of Resolve's tray that vidcut does not have ([§2](../spec.md#2-layout-pp-636637), Keyframe tray)
