@@ -2128,14 +2128,14 @@ impl Workspace {
         }
         let frame = theme::card(panel);
         let spacing = ctx.global_style().spacing.clone();
-        let wanted = self.timeline_wanted().unwrap_or(300.0)
-            + frame.total_margin().sum().y
-            + spacing.interact_size.y
-            + spacing.item_spacing.y;
+        let chrome =
+            frame.total_margin().sum().y + spacing.interact_size.y + spacing.item_spacing.y;
+        let wanted = self.timeline_wanted().unwrap_or(300.0) + chrome;
+        let least = self.timeline_least(&spacing).map_or(140.0, |h| h + chrome);
         egui::Panel::bottom("timeline")
             .resizable(true)
-            .default_size(wanted.min(ctx.content_rect().height() * 0.6).max(140.0))
-            .min_size(140.0)
+            .default_size(wanted.min(ctx.content_rect().height() * 0.6).max(least))
+            .min_size(least)
             .frame(frame)
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| self.timeline_panel(ui))

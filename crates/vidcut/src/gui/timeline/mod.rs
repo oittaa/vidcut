@@ -486,6 +486,7 @@ const LOWER_ROWS: [f32; 3] = [130.0, 80.0, 60.0];
 const LOWER_SUBTITLE: f32 = 40.0;
 const LOWER_SUBTITLE_MINIMIZED: f32 = 22.0;
 const LOWER_RULER: f32 = 30.0;
+const TRAY_GAP: f32 = 4.0;
 const HEADER: f32 = 200.0;
 const BOX_CONTROL: f32 = 18.0;
 const SWATCH: f32 = 20.0;
@@ -503,6 +504,20 @@ mod icon {
         SLIDERS_HORIZONTAL as TIMELINE_OPTIONS, SPEAKER_HIGH as AUDIO_ON,
         SPEAKER_SLASH as AUDIO_OFF,
     };
+}
+
+fn upper_others(p: &Project) -> f32 {
+    (p.tracks.len().saturating_sub(1) + p.subtitles.len()).min(6) as f32
+}
+
+fn tracks_least(p: &Project) -> f32 {
+    UPPER_RULER
+        + UPPER_TRACK
+        + UPPER_OTHER * upper_others(p)
+        + 6.0
+        + LOWER_RULER
+        + 2.0
+        + LOWER_ROWS[0]
 }
 
 fn icon_toggle(ui: &mut egui::Ui, icon: &str, name: &str, on: bool) -> egui::Response {
@@ -676,9 +691,15 @@ impl Workspace {
         });
     }
 
+    pub(crate) fn timeline_least(&mut self, spacing: &egui::style::Spacing) -> Option<f32> {
+        let p = self.shown_project()?;
+        let tray = self.tray_height(spacing);
+        Some(tracks_least(&p) + if tray > 0.0 { tray + TRAY_GAP } else { 0.0 })
+    }
+
     pub(crate) fn timeline_wanted(&mut self) -> Option<f32> {
         let p = self.shown_project()?;
-        let others = (p.tracks.len().saturating_sub(1) + p.subtitles.len()).min(6) as f32;
+        let others = upper_others(&p);
         let [v1, video, audio] = LOWER_ROWS;
         let subtitle = if self.timeline.options.minimize_subtitles {
             LOWER_SUBTITLE_MINIMIZED
@@ -721,14 +742,15 @@ impl Workspace {
         };
         let shape: &Project = before.as_deref().unwrap_or(&p);
         let full = ui.available_rect_before_wrap();
-        let tray_h = self.tray_height(ui).min(full.height() / 2.0);
+        let room = full.height() - tracks_least(shape) - TRAY_GAP;
+        let tray_h = self.tray_height(ui.spacing()).min(room);
         let tray = (tray_h > 0.0)
             .then(|| Rect::from_min_max(pos2(full.left(), full.bottom() - tray_h), full.max));
         let full = match tray {
-            Some(t) => Rect::from_min_max(full.min, pos2(full.right(), t.top() - 4.0)),
+            Some(t) => Rect::from_min_max(full.min, pos2(full.right(), t.top() - TRAY_GAP)),
             None => full,
         };
-        let others = (shape.tracks.len().saturating_sub(1) + shape.subtitles.len()).min(6) as f32;
+        let others = upper_others(shape);
         let upper_rect = Rect::from_min_size(
             pos2(full.left() + HEADER, full.top()),
             vec2(
