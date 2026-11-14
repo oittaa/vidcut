@@ -2597,16 +2597,8 @@ The shapes:
   - With Ping Pong, play from the head and from the tail starts as it does with Loop.
   - Each composition keeps its own Loop and its own way to loop. Loop is on in a new composition.
   - The timeline playhead follows the playhead of the page only between the In and the Out. In the head and the tail, it stays where it was.
-  - Measured in Resolve Studio 21.2: play shows each frame of the file at the frame rate of the file.
-    - Files of 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 frames a second were measured.
-    - Each played at its own rate, on a timeline of 24 and on a timeline of 30.
-  - Measured in Resolve Studio 21.2: a file of 56 minutes at 59.94 frames a second plays at the frame rate of the timeline.
-    - Files of 1, 5 and 15 minutes at 59.94 frames a second play at their own rate.
-  - vidcut: play always goes at the frame rate of the file ([X171](deviations.md#x171-the-effects-page-plays-a-long-file-at-the-speed-of-the-file)).
-- The page plays the sound of the timeline (p. 1297).
-  - Measured in Resolve Studio 21.2: play in the head has no sound. The same frames had sound between the In and the Out.
-  - Measured in Resolve Studio 21.2: play backward in the tail had sound in one run of three. Play backward between the In and the Out had sound in two runs of four.
-  - vidcut: play in the head and in the tail has no sound. Play backward between the In and the Out has sound.
+  - Play shows each frame of the file at the frame rate of the file.
+- The page plays the sound of the timeline (p. 1297). Play in the head and in the tail has no sound (Resolve Studio 21.2).
 - Select:
   - A click on a node selects it. Ctrl-click (Command on a Mac) adds a node to the selection, or takes it out (pp. 1390–1391).
   - One selected node is the active node. New tools go after it (p. 1391).
