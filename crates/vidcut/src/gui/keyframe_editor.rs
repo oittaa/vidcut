@@ -6,7 +6,7 @@ use eframe::egui::{
 };
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROWS_OUT_LINE_HORIZONTAL, CARET_DOWN, CARET_LEFT, CARET_RIGHT,
-    CHART_LINE, DOTS_THREE, MAGNIFYING_GLASS_PLUS, WAVE_SINE,
+    CHART_LINE, DOTS_THREE, MAGNIFYING_GLASS_PLUS, SIDEBAR_SIMPLE, WAVE_SINE,
 };
 use serde_json::{Value, json};
 use vidcut_core::effect_keys::Keyed;
@@ -31,15 +31,13 @@ use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
 
 const LABEL: f32 = 182.0;
+const DOT: f32 = 8.0;
 const RULER_H: f32 = 20.0;
 const GROUP_H: f32 = 22.0;
 const TRACK_H: f32 = 26.0;
 const CURVE_H: f32 = 110.0;
-const GRAPH_H: f32 = 280.0;
-const GRIP_H: f32 = 6.0;
 const GRAPH_ZOOM_MOST: f64 = 100.0;
 const PAN_W: f32 = 10.0;
-const TRACKS_KEPT: f32 = 3.0;
 const DIMMED: f32 = 0.65;
 const HUES: [Color32; 6] = [
     Color32::from_rgb(240, 140, 60),
@@ -429,10 +427,10 @@ pub struct Editor {
     snap_off: bool,
     closed: Vec<Group>,
     curves: Vec<KeyParam>,
+    names_off: bool,
     graph: bool,
     graph_off: Vec<KeyParam>,
     graph_active: Option<KeyParam>,
-    graph_h: Option<f32>,
     graph_scale: GraphScale,
     graph_zoom: f64,
     graph_pan: Option<f64>,
@@ -1541,13 +1539,15 @@ impl Workspace {
             snap: shift.as_ref().and_then(|s| s.snap),
             tray: true,
         };
+        let all = lanes_of(&clip, false);
         egui::ScrollArea::vertical()
             .id_salt("keyframe-tray")
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for lane in &lanes {
                     let rows = shown_lane(lane, shift.as_ref());
-                    self.track_row(ui, &clip, lane, &rows, plot);
+                    let color = hue(&all, lane.param);
+                    self.track_row(ui, &clip, lane, &rows, plot, color);
                 }
             });
         self.box_select(ui, rect, &clip);
@@ -1585,52 +1585,53 @@ impl Workspace {
         let (lo, hi) = self.key_editor.view.unwrap_or_else(|| clip_span(&clip));
         let frame = shape(&p, &clip);
         let area = ui.available_rect_before_wrap();
-        let width = (area.width() - LABEL - ui.spacing().item_spacing.x).max(48.0);
+        let label = if self.key_editor.names_off {
+            0.0
+        } else {
+            LABEL
+        };
+        let width = (area.width() - lead(label, ui.spacing().item_spacing.x)).max(48.0);
         let plot = Plot {
             lo,
             hi,
-            label: LABEL,
+            label,
             width,
             play,
             snap: shift.as_ref().and_then(|s| s.snap),
             tray: false,
         };
         self.ruler(ui, &p, &clip, plot);
-        let graph = self.key_editor.graph;
-        if graph {
-            self.curve_graph(ui, &clip, &lanes, plot, &frame, shift.as_ref());
-        }
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .max_height(
-                (ui.available_height() - BAR_H - SCROLL_H - ui.spacing().item_spacing.y)
-                    .max(TRACK_H),
-            )
-            .show(ui, |ui| {
-                for group in groups_of(&clip) {
-                    let members: Vec<&Lane> = lanes
-                        .iter()
-                        .filter(|l| group_of(l.param) == group)
-                        .collect();
-                    if members.is_empty() {
-                        continue;
-                    }
-                    self.group_row(ui, &clip, &members, plot, shift.as_ref());
-                    if self.key_editor.closed.contains(&group) {
-                        continue;
-                    }
-                    for lane in &members {
-                        let rows = shown_lane(lane, shift.as_ref());
-                        self.track_row(ui, &clip, lane, &rows, plot);
-                        if !graph
-                            && !lane.keys.is_empty()
-                            && self.key_editor.curves.contains(&lane.param)
-                        {
-                            self.curve_row(ui, &clip, lane, &rows, plot, &frame);
-                        }
-                    }
+        let h =
+            (ui.available_height() - BAR_H - SCROLL_H - ui.spacing().item_spacing.y).max(TRACK_H);
+        if self.key_editor.graph {
+            let size = vec2(ui.available_width(), h);
+            ui.allocate_ui_with_layout(size, Layout::left_to_right(Align::Min), |ui| {
+                if plot.label > 0.0 {
+                    let heads = vec2(plot.label, h);
+                    ui.allocate_ui_with_layout(heads, Layout::top_down(Align::Min), |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("keyframe-heads")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                self.key_rows(ui, &clip, &lanes, plot, &frame, shift.as_ref());
+                            });
+                    });
                 }
+                let graph = vec2(plot.width, h);
+                ui.allocate_ui_with_layout(graph, Layout::top_down(Align::Min), |ui| {
+                    let active = self.curve_graph(ui, &clip, &lanes, plot, &frame, shift.as_ref());
+                    let lane = lanes.iter().find(|l| Some(l.param) == active);
+                    self.graph_keys(ui, &clip, lane, plot, shift.as_ref());
+                });
             });
+        } else {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .max_height(h)
+                .show(ui, |ui| {
+                    self.key_rows(ui, &clip, &lanes, plot, &frame, shift.as_ref());
+                });
+        }
         self.box_select(ui, area, &clip);
         let live = live_marks(&lanes, shift.as_ref());
         self.key_editor.selected.retain(|m| live.contains(m));
@@ -1638,6 +1639,39 @@ impl Workspace {
         self.key_bar(ui, &p, &clip, &lanes, &frame);
         self.zoom_view(ui, area, &clip, plot);
         self.finish_drag(ui, &clip, &lanes, rev);
+    }
+
+    fn key_rows(
+        &mut self,
+        ui: &mut egui::Ui,
+        clip: &Clip,
+        lanes: &[Lane],
+        plot: Plot,
+        frame: &Frame,
+        shift: Option<&Shift>,
+    ) {
+        let graph = self.key_editor.graph;
+        let all = lanes_of(clip, false);
+        for group in groups_of(clip) {
+            let members: Vec<&Lane> = lanes
+                .iter()
+                .filter(|l| group_of(l.param) == group)
+                .collect();
+            if members.is_empty() {
+                continue;
+            }
+            self.group_row(ui, clip, &members, plot, shift);
+            if self.key_editor.closed.contains(&group) {
+                continue;
+            }
+            for lane in &members {
+                let rows = shown_lane(lane, shift);
+                self.track_row(ui, clip, lane, &rows, plot, hue(&all, lane.param));
+                if !graph && !lane.keys.is_empty() && self.key_editor.curves.contains(&lane.param) {
+                    self.curve_row(ui, clip, lane, &rows, plot, frame);
+                }
+            }
+        }
     }
 
     fn select_fresh(&mut self, clip: &Clip, lanes: &[Lane]) {
@@ -2254,6 +2288,13 @@ impl Workspace {
                 {
                     editor.graph = !editor.graph;
                 }
+                if ui
+                    .add(egui::Button::selectable(!editor.names_off, SIDEBAR_SIMPLE))
+                    .on_hover_text("Parameters")
+                    .clicked()
+                {
+                    editor.names_off = !editor.names_off;
+                }
                 if editor.graph && editor.graph_scale == GraphScale::Off {
                     ui.spacing_mut().slider_width = ZOOM_W;
                     let mut zoom = editor.graph_zoom.max(1.0);
@@ -2382,7 +2423,7 @@ impl Workspace {
     }
 
     fn zoom_view(&mut self, ui: &egui::Ui, area: Rect, clip: &Clip, plot: Plot) {
-        let left = area.left() + LABEL + ui.spacing().item_spacing.x;
+        let left = area.left() + lead(plot.label, ui.spacing().item_spacing.x);
         let (hover, zoom, pan) = ui.input(|i| {
             (
                 i.pointer.hover_pos(),
@@ -2517,13 +2558,19 @@ impl Workspace {
         let group = group_of(members[0].param);
         let open = !self.key_editor.closed.contains(&group);
         let mut flip = false;
-        let (rect, resp) = row(ui, GROUP_H, plot, |ui| {
+        let label = |ui: &mut egui::Ui| {
             let icon = if open { CARET_DOWN } else { CARET_RIGHT };
             let text = RichText::new(format!("{icon} {}", group_name(group, clip))).small();
             if ui.add(egui::Button::new(text).frame(false)).clicked() {
                 flip = true;
             }
-        });
+        };
+        let lane_area = if self.key_editor.graph {
+            row_head(ui, GROUP_H, plot.label, label);
+            None
+        } else {
+            Some(row(ui, GROUP_H, plot, label))
+        };
         if flip {
             if open {
                 self.key_editor.closed.push(group);
@@ -2531,6 +2578,9 @@ impl Workspace {
                 self.key_editor.closed.retain(|g| *g != group);
             }
         }
+        let Some((rect, resp)) = lane_area else {
+            return;
+        };
         let items = lane_items(clip, members);
         let mut times: Vec<i64> = items.iter().map(|(_, _, t)| *t).collect();
         times.sort_unstable();
@@ -2596,6 +2646,7 @@ impl Workspace {
         lane: &Lane,
         rows: &[Shown],
         plot: Plot,
+        color: Color32,
     ) {
         let play = plot.play;
         let speed = lane.param == KeyParam::Speed;
@@ -2609,7 +2660,7 @@ impl Workspace {
         let keyable = !speed || (clip.start < play && play < clip.end());
         let prev = times.iter().any(|&t| reached(t) && t < play);
         let next = times.iter().any(|&t| reached(t) && t > play);
-        let graph = self.key_editor.graph;
+        let graph = self.key_editor.graph && !plot.tray;
         let curve = if graph {
             !self.key_editor.graph_off.contains(&lane.param)
         } else {
@@ -2619,7 +2670,7 @@ impl Workspace {
         let picked = self.key_editor.rows.contains(&lane.param);
         let mut act = None;
         let mut named = false;
-        let (rect, resp) = row(ui, TRACK_H, plot, |ui| {
+        let label = |ui: &mut egui::Ui| {
             let head = ui.max_rect();
             named = ui
                 .interact(
@@ -2642,6 +2693,9 @@ impl Workspace {
                     act = Some(RowAct::Curve);
                 }
             }
+            let (dot, _) = ui.allocate_exact_size(vec2(DOT, DOT), Sense::hover());
+            ui.painter()
+                .circle_filled(dot.center(), DOT / 2.0 - 1.0, color);
             ui.add(
                 egui::Label::new(RichText::new(lane_name(lane.param)).small()).selectable(false),
             );
@@ -2675,7 +2729,13 @@ impl Workspace {
                     act = Some(RowAct::Step(-1));
                 }
             });
-        });
+        };
+        let lane_area = if graph {
+            row_head(ui, TRACK_H, plot.label, label);
+            None
+        } else {
+            Some(row(ui, TRACK_H, plot, label))
+        };
         match act {
             Some(RowAct::Curve) => {
                 let list = if graph {
@@ -2732,17 +2792,45 @@ impl Workspace {
         if named {
             self.activate(lane.param);
         }
+        let Some((rect, resp)) = lane_area else {
+            return;
+        };
+        self.key_lane(ui, (rect, &resp), clip, (lane, rows), plot, picked);
+    }
+
+    fn graph_keys(
+        &mut self,
+        ui: &mut egui::Ui,
+        clip: &Clip,
+        lane: Option<&Lane>,
+        plot: Plot,
+        shift: Option<&Shift>,
+    ) {
+        let size = vec2(plot.width, TRACK_H);
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
+        match lane {
+            Some(lane) => {
+                let rows = shown_lane(lane, shift);
+                self.key_lane(ui, (rect, &resp), clip, (lane, &rows), plot, false);
+            }
+            None => {
+                lane_back(&ui.painter_at(rect), clip, rect, plot, false);
+            }
+        }
+    }
+
+    fn key_lane(
+        &mut self,
+        ui: &mut egui::Ui,
+        (rect, resp): (Rect, &egui::Response),
+        clip: &Clip,
+        (lane, rows): (&Lane, &[Shown]),
+        plot: Plot,
+        picked: bool,
+    ) {
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let painter = ui.painter_at(rect);
-        let colors = theme::colors();
-        let (back, band) = if picked {
-            (colors.line, colors.faint)
-        } else {
-            (colors.panel_dark, colors.track)
-        };
-        painter.rect_filled(rect, 2.0, back);
-        painter.rect_filled(clip_band(map, clip, rect), 0.0, band);
-        playhead(&painter, map, rect, plot);
+        lane_back(&painter, clip, rect, plot, picked);
         let mut spots = Vec::new();
         let mut shown = Vec::new();
         for row in rows {
@@ -2772,11 +2860,11 @@ impl Workspace {
                 },
             )
         }));
-        self.open_menu(&resp, lane.param, &spots, false);
+        self.open_menu(resp, lane.param, &spots, false);
         self.poke_keys(
             Press {
                 ui,
-                resp: &resp,
+                resp,
                 clip,
                 lane,
                 map,
@@ -2785,8 +2873,8 @@ impl Workspace {
             None,
             Axis::None,
         );
-        self.empty_press(ui, &resp, clip, lane.param, map, &spots);
-        self.show_menu(&resp, clip, lane, false);
+        self.empty_press(ui, resp, clip, lane.param, map, &spots);
+        self.show_menu(resp, clip, lane, false);
     }
 
     fn empty_press(
@@ -2883,34 +2971,15 @@ impl Workspace {
         plot: Plot,
         frame: &Frame,
         shift: Option<&Shift>,
-    ) {
+    ) -> Option<KeyParam> {
         let shown = graphed(clip, lanes, &self.key_editor.graph_off);
-        let mut active = shown
+        let active = shown
             .iter()
             .find(|(lane, _)| Some(lane.param) == self.key_editor.graph_active)
-            .or(shown.first())
-            .map(|(lane, _)| lane.param);
-        let gap = ui.spacing().item_spacing.y;
-        let most = (ui.available_height()
-            - BAR_H
-            - SCROLL_H
-            - GRIP_H
-            - 3.0 * gap
-            - TRACKS_KEPT * (TRACK_H + gap))
-            .max(CURVE_H);
-        let h = self
-            .key_editor
-            .graph_h
-            .unwrap_or(GRAPH_H)
-            .clamp(CURVE_H, most);
-        let mut named = None;
-        let (rect, resp) = row(ui, h, plot, |ui| {
-            named = legend(ui, h, &shown, active);
-        });
-        if let Some(param) = named {
-            self.activate(param);
-            active = Some(param);
-        }
+            .copied();
+        let keys = TRACK_H + ui.spacing().item_spacing.y;
+        let size = vec2(plot.width, (ui.available_height() - keys).max(TRACK_H));
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 2.0, theme::colors().panel_dark);
         let area = CurveArea {
@@ -2922,39 +2991,57 @@ impl Workspace {
             shared: self.shared_scale(&shown, shift, frame),
         };
         let mut dims = Vec::new();
-        for (lane, color) in shown.iter().filter(|(l, _)| Some(l.param) != active) {
+        for (lane, color) in &shown {
+            if active.is_some_and(|(a, _)| a.param == lane.param) {
+                continue;
+            }
             let rows = shown_lane(lane, shift);
             let lines = dim_curve(&area, &painter, lane, &rows, color.gamma_multiply(DIMMED));
             dims.extend(lines.into_iter().map(|line| (lane.param, line)));
         }
-        if let Some((lane, color)) = shown.iter().find(|(l, _)| Some(l.param) == active) {
+        let spots = active.map(|(lane, color)| {
             let rows = shown_lane(lane, shift);
-            let lines = [*color, color.gamma_multiply(DIMMED)];
-            let spots = self.paint_curve(ui, &area, lane, &rows, lines);
-            if resp
-                .hover_pos()
-                .filter(|at| !spots.hit(*at))
-                .and_then(|at| dim_at(&dims, at))
-                .is_some()
-            {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-            let picked = resp
-                .interact_pointer_pos()
-                .filter(|at| resp.clicked() && !spots.hit(*at))
-                .and_then(|at| dim_at(&dims, at));
-            match picked {
-                Some(param) => {
-                    self.activate(param);
-                    self.key_editor.selected.clear();
-                }
-                None => self.use_curve(ui, &area, lane, &spots),
-            }
-        } else {
+            let lines = [color, color.gamma_multiply(DIMMED)];
+            (lane, self.paint_curve(ui, &area, lane, &rows, lines))
+        });
+        if spots.is_none() {
             playhead(&painter, TimeMap::of(plot.lo, plot.hi, rect), rect, plot);
         }
+        let hit = |at: &Pos2| spots.as_ref().is_some_and(|(_, s)| s.hit(*at));
+        if resp
+            .hover_pos()
+            .filter(|at| !hit(at))
+            .and_then(|at| dim_at(&dims, at))
+            .is_some()
+        {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let click = resp
+            .interact_pointer_pos()
+            .filter(|at| resp.clicked() && !hit(at));
+        if let Some(param) = click.and_then(|at| dim_at(&dims, at)) {
+            self.activate(param);
+            self.key_editor.selected.clear();
+        } else {
+            let on_line = |at: Pos2| {
+                spots
+                    .as_ref()
+                    .is_some_and(|(lane, s)| s.part_at(clip, lane, at).is_some())
+            };
+            let plain = !ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
+            if click.is_some_and(|at| plain && !on_line(at)) {
+                self.key_editor.graph_active = None;
+                self.key_editor.selected.clear();
+                self.key_editor.rows.clear();
+            }
+            if let Some((lane, s)) = &spots {
+                self.use_curve(ui, &area, lane, s);
+            }
+        }
         self.graph_pan(ui, rect);
-        self.graph_grip(ui, plot, h, most);
+        self.key_editor
+            .graph_active
+            .filter(|p| shown.iter().any(|(lane, _)| lane.param == *p))
     }
 
     fn shared_scale(
@@ -3013,24 +3100,6 @@ impl Workspace {
         ui.spacing_mut().slider_width = keep;
         if r.changed() {
             editor.graph_pan = Some(pan);
-        }
-    }
-
-    fn graph_grip(&mut self, ui: &mut egui::Ui, plot: Plot, h: f32, most: f32) {
-        let width = plot.label + ui.spacing().item_spacing.x + plot.width;
-        let (rect, resp) = ui.allocate_exact_size(vec2(width, GRIP_H), Sense::drag());
-        let colors = theme::colors();
-        let busy = resp.hovered() || resp.dragged();
-        if busy {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-        }
-        ui.painter().hline(
-            rect.x_range(),
-            rect.center().y,
-            Stroke::new(1.0, if busy { colors.text_dim } else { colors.line }),
-        );
-        if resp.dragged() {
-            self.key_editor.graph_h = Some((h + resp.drag_delta().y).clamp(CURVE_H, most));
         }
     }
 
@@ -3671,14 +3740,24 @@ fn row(
     label: impl FnOnce(&mut egui::Ui),
 ) -> (Rect, egui::Response) {
     ui.horizontal(|ui| {
-        let size = vec2(plot.label, h);
-        ui.allocate_ui_with_layout(size, Layout::left_to_right(Align::Center), |ui| {
-            ui.set_min_size(size);
-            label(ui);
-        });
+        if plot.label > 0.0 {
+            row_head(ui, h, plot.label, label);
+        }
         ui.allocate_exact_size(vec2(plot.width, h), Sense::click_and_drag())
     })
     .inner
+}
+
+fn lead(label: f32, gap: f32) -> f32 {
+    if label > 0.0 { label + gap } else { 0.0 }
+}
+
+fn row_head(ui: &mut egui::Ui, h: f32, width: f32, label: impl FnOnce(&mut egui::Ui)) {
+    let size = vec2(width, h);
+    ui.allocate_ui_with_layout(size, Layout::left_to_right(Align::Center), |ui| {
+        ui.set_min_size(size);
+        label(ui);
+    });
 }
 
 fn live_marks(lanes: &[Lane], shift: Option<&Shift>) -> Vec<Mark> {
@@ -3796,50 +3875,29 @@ fn has_curve(clip: &Clip, lane: &Lane) -> bool {
 
 fn graphed<'a>(clip: &Clip, lanes: &'a [Lane], off: &[KeyParam]) -> Vec<(&'a Lane, Color32)> {
     let all = lanes_of(clip, false);
-    let hue = |param: KeyParam| {
-        let i = all.iter().position(|l| l.param == param).unwrap_or(0);
-        HUES[i % HUES.len()]
-    };
     lanes
         .iter()
         .filter(|l| has_curve(clip, l) && !off.contains(&l.param))
-        .map(|l| (l, hue(l.param)))
+        .map(|l| (l, hue(&all, l.param)))
         .collect()
 }
 
-fn legend(
-    ui: &mut egui::Ui,
-    h: f32,
-    shown: &[(&Lane, Color32)],
-    active: Option<KeyParam>,
-) -> Option<KeyParam> {
-    if shown.is_empty() {
-        ui.label(dim("No Curves"));
-        return None;
-    }
-    let mut picked = None;
-    egui::ScrollArea::vertical()
-        .id_salt("keyframe-legend")
-        .auto_shrink([false, false])
-        .max_height(h)
-        .show(ui, |ui| {
-            ui.with_layout(Layout::top_down(Align::Min), |ui| {
-                for (lane, color) in shown {
-                    ui.horizontal(|ui| {
-                        let (swatch, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-                        ui.painter().rect_filled(swatch, 2.0, *color);
-                        let name = RichText::new(lane_name(lane.param)).small();
-                        if ui
-                            .selectable_label(active == Some(lane.param), name)
-                            .clicked()
-                        {
-                            picked = Some(lane.param);
-                        }
-                    });
-                }
-            });
-        });
-    picked
+fn hue(all: &[Lane], param: KeyParam) -> Color32 {
+    let i = all.iter().position(|l| l.param == param).unwrap_or(0);
+    HUES[i % HUES.len()]
+}
+
+fn lane_back(painter: &egui::Painter, clip: &Clip, rect: Rect, plot: Plot, picked: bool) {
+    let map = TimeMap::of(plot.lo, plot.hi, rect);
+    let colors = theme::colors();
+    let (back, band) = if picked {
+        (colors.line, colors.faint)
+    } else {
+        (colors.panel_dark, colors.track)
+    };
+    painter.rect_filled(rect, 2.0, back);
+    painter.rect_filled(clip_band(map, clip, rect), 0.0, band);
+    playhead(painter, map, rect, plot);
 }
 
 fn dim_curve(

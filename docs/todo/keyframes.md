@@ -135,7 +135,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - Volume is a track in the Audio group.
 - The curve of a value shows under its track. A drag on an In or Out handle changes that handle and lines up the other one. With Alt, the handle moves alone.
 - A drag on the line between two keyframes moves the values of the two keyframes. Alt and a press on the line adds a keyframe.
-- The Graph button shows the curves together in one large graph, with a height that the user changes ([X160](../deviations.md#x160-the-graph-sits-above-the-tracks)).
+- The Graph button shows the curves together in one large graph in the place of the tracks.
 - One click selects one keyframe. Ctrl-click adds a keyframe to the selection or removes it. Delete removes the selection.
 - A drag from an empty part draws a box. The box replaces the selection with the keyframes in it.
 - Mark > Move Selected Keyframes moves the selection by one frame, or changes its values by one step.
@@ -152,7 +152,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - the motion path in the viewer (pp. 1252–1254)
   - Step, Loop, Ping Pong, Reverse and the Shape Box (pp. 1261–1267)
   - keyframes of several selected clips at once (p. 1268)
-  - the Lock and Track Color controls (p. 1257)
+  - the Lock control (p. 1257)
   - the ruler in frames, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
   - Select all (Ctrl+A) and deselect all (Ctrl+Shift+A) in the Keyframes tab and the tray
   - the parts of Resolve's tray that vidcut does not have ([§2](../spec.md#2-layout-pp-636637), Keyframe tray)
