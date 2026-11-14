@@ -870,7 +870,7 @@ impl Workspace {
         }
         if s.weights {
             let (retimes, upscalers) = self.ai_models();
-            let needs = super::super_scale::needed(&retimes, &upscalers);
+            let needs = super::upscale::needed(&retimes, &upscalers);
             let answer = if needs.is_empty() {
                 Some(false)
             } else {
@@ -918,7 +918,7 @@ impl Workspace {
 
     fn send_start(&self, ctx: &egui::Context, s: &mut Starting) {
         let (retimes, upscalers) = self.ai_models();
-        if !super::super_scale::needed(&retimes, &upscalers).is_empty() {
+        if !super::upscale::needed(&retimes, &upscalers).is_empty() {
             s.weights = true;
         } else {
             s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));
@@ -2208,7 +2208,7 @@ fn detail_rows(j: &JobInfo, rate: Option<f64>) -> Vec<(&'static str, String)> {
             |n| n.to_string_lossy().into(),
         );
         rows.push((
-            if i == 0 { "Super Scale" } else { "" },
+            if i == 0 { "Upscale" } else { "" },
             format!("{name}: {}", u.how),
         ));
     }

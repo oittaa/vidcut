@@ -130,7 +130,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 **The AI models and HDR:** `cargo run --release -p vidcut-av --example hdr_models` (`hdr_check`).
 
 - It runs each AI model through two pipes: 16-bit RGB in PQ or HLG, and 16-bit SDR.
-- Super Scale makes 1920×1080 from 480×270. It compares the result with the real frame, and with Classic.
+- Upscale makes 1920×1080 from 480×270. It compares the result with the real frame, and with Classic.
 - Retime Process makes the frame half way between two frames. It compares it with the real frame between them, and with Frame Blend.
   - It leaves out pairs with a shot change.
 - It prints these measures of each result against the real frame:
@@ -140,7 +140,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `Y`: the mean luminance over the mean luminance of the real frame.
   - `PSNR`: the PSNR of the code values.
 - It scores the frames on all cores.
-- `hdr_models scale` runs only Super Scale, and `hdr_models retime` only Retime Process.
+- `hdr_models scale` runs only Upscale, and `hdr_models retime` only Retime Process.
 - `hdr_models speeds` measures each model in a process of its own: the time per frame and the GPU memory, on Vulkan and DX12 only.
   - Other work on the GPU makes the times longer. `nvidia-smi` shows it on NVIDIA.
 - `hdr_models pictures DIR` writes one frame of each upscaler as 1920×1080 RGB48 files.
@@ -162,7 +162,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - The PNG has the lines of the scale, with no text.
 - The answer names `colors`, which is the timeline color space. It gives `marks`, with the label and the place of each line of the scale.
 
-**The refusals of Super Scale:** `scripts/super-scale-check.sh` asks an export and the viewer about three clips, with the upscaler of macOS. In each case, the two answers must agree.
+**The refusals of Upscale:** `scripts/upscale-check.sh` asks an export and the viewer about three clips, with the upscaler of macOS. In each case, the two answers must agree.
 
 - It builds vidcut and makes its clips with `make_fixture`. It needs no clicks.
 - On macOS, the clip that the scaler enlarges works in both. Elsewhere, both refuse it.

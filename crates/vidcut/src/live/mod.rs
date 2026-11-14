@@ -587,7 +587,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         scopes: crate::preferences::load()
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
-        show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
+        show_upscale: crate::preferences::load().is_ok_and(|p| p.viewer.upscale),
         bindings: Arc::new(crate::preferences::bindings()),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
@@ -690,7 +690,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         scopes: crate::preferences::load()
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
-        show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
+        show_upscale: crate::preferences::load().is_ok_and(|p| p.viewer.upscale),
         bindings: Arc::new(crate::preferences::bindings()),
         audio_noticed: None,
         playing: false,
@@ -960,7 +960,7 @@ struct Live {
     timer1_origin: Timer1Origin,
     guides: vidcut_core::preferences::Guides,
     scopes: vidcut_core::preferences::Scopes,
-    show_super_scale: bool,
+    show_upscale: bool,
     bindings: Arc<vidcut_core::shortcuts::Bindings>,
     audio_noticed: Option<String>,
     playing: bool,
@@ -1226,10 +1226,9 @@ impl Live {
                     self.scopes = scopes;
                     changed = true;
                 }
-                let show_super_scale =
-                    crate::preferences::load().is_ok_and(|p| p.viewer.super_scale);
-                if self.show_super_scale != show_super_scale {
-                    self.show_super_scale = show_super_scale;
+                let show_upscale = crate::preferences::load().is_ok_and(|p| p.viewer.upscale);
+                if self.show_upscale != show_upscale {
+                    self.show_upscale = show_upscale;
                     self.schedule_timeline();
                     self.refresh_source();
                     changed = true;
@@ -1596,7 +1595,7 @@ impl Live {
             timer1_origin: self.timer1_origin,
             guides: self.guides,
             scopes: self.scopes,
-            show_super_scale: self.show_super_scale,
+            show_upscale: self.show_upscale,
             bindings: self.bindings.clone(),
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
@@ -1806,7 +1805,7 @@ impl Live {
                 .collect(),
             upscalers
                 .into_iter()
-                .filter(|u| !vidcut_av::super_scale::needed(&dir, *u).is_empty())
+                .filter(|u| !vidcut_av::upscale::needed(&dir, *u).is_empty())
                 .collect(),
         )
     }
@@ -1820,14 +1819,14 @@ impl Live {
         let Some(open) = self.project.as_ref() else {
             return Vec::new();
         };
-        let set = vidcut_core::ops::SuperScaleSet {
+        let set = vidcut_core::ops::UpscaleSet {
             on,
             sharpness: None,
             upscaler,
         };
         vidcut_core::ops::ai_upscalers(open.project(), media, &set)
             .into_iter()
-            .filter(|u| !vidcut_av::super_scale::needed(&paths::models_dir(), *u).is_empty())
+            .filter(|u| !vidcut_av::upscale::needed(&paths::models_dir(), *u).is_empty())
             .collect()
     }
 
@@ -3334,19 +3333,19 @@ impl Live {
             }
             Request::MediaSet {
                 media,
-                super_scale,
+                upscale,
                 upscaler,
                 download: true,
                 ..
             } if !envelope.dry_run
                 && !self
-                    .ai_missing(&media.to_vec(), super_scale, upscaler)
+                    .ai_missing(&media.to_vec(), upscale, upscaler)
                     .is_empty() =>
             {
-                let wanted = self.ai_missing(&media.to_vec(), super_scale, upscaler);
+                let wanted = self.ai_missing(&media.to_vec(), upscale, upscaler);
                 let fetch = move || {
                     for u in wanted {
-                        vidcut_av::super_scale::get_ready(&paths::models_dir(), u, true).map_err(
+                        vidcut_av::upscale::get_ready(&paths::models_dir(), u, true).map_err(
                             |e| {
                                 crate::export::av_error(
                                     &e,
@@ -3374,7 +3373,7 @@ impl Live {
                         vidcut_av::interpolate::get_ready(&dir, r, true).map_err(failed)?;
                     }
                     for u in upscalers {
-                        vidcut_av::super_scale::get_ready(&dir, u, true).map_err(failed)?;
+                        vidcut_av::upscale::get_ready(&dir, u, true).map_err(failed)?;
                     }
                     Ok(())
                 };
@@ -4154,7 +4153,7 @@ impl Live {
     }
 
     fn shown_plan(&self, plan: RenderPlan) -> RenderPlan {
-        shown(plan, self.show_super_scale)
+        shown(plan, self.show_upscale)
     }
 
     fn proxied(&self, mut plan: RenderPlan) -> RenderPlan {
@@ -4165,7 +4164,7 @@ impl Live {
                 open.project(),
                 &self.proxy_dir,
                 Path::is_file,
-                |m, s| s.ai() && vidcut_av::super_scale::unfit(m, s.upscaler, timeline).is_some(),
+                |m, s| s.ai() && vidcut_av::upscale::unfit(m, s.upscaler, timeline).is_some(),
             );
         }
         plan
@@ -5336,12 +5335,12 @@ fn no_project() -> Error {
     Error::usage("no project is open in this vidcut GUI (project.open opens one)")
 }
 
-fn shown(mut plan: RenderPlan, super_scale: bool) -> RenderPlan {
-    if !super_scale {
+fn shown(mut plan: RenderPlan, upscale: bool) -> RenderPlan {
+    if !upscale {
         for piece in &mut plan.video {
             for layer in piece.flat_layers_mut() {
-                if let render::VideoPiece::Source { super_scale, .. } = layer {
-                    *super_scale = Default::default();
+                if let render::VideoPiece::Source { upscale, .. } = layer {
+                    *upscale = Default::default();
                 }
             }
         }
@@ -5354,8 +5353,8 @@ pub(crate) fn render_cache(
     cancel: Arc<AtomicBool>,
     dry_run: bool,
 ) -> Result<Value> {
-    let super_scale = crate::preferences::load().is_ok_and(|p| p.viewer.super_scale);
-    render_cache::render_all(project, super_scale, cancel, dry_run)
+    let upscale = crate::preferences::load().is_ok_and(|p| p.viewer.upscale);
+    render_cache::render_all(project, upscale, cancel, dry_run)
 }
 
 fn cancelled() -> Error {

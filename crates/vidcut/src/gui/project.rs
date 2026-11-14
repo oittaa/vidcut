@@ -88,7 +88,7 @@ impl Format {
     }
 
     fn edit_ai(&mut self, ui: &mut egui::Ui) {
-        use super::super_scale::{PROJECT_UPSCALERS, label_of, project_upscaler_text};
+        use super::upscale::{PROJECT_UPSCALERS, label_of, project_upscaler_text};
         egui::Grid::new(ui.scope_id().with("ai"))
             .num_columns(2)
             .spacing([12.0, 8.0])
@@ -106,7 +106,7 @@ impl Format {
                     .response
                     .labelled_by(label.id);
                 ui.end_row();
-                let label = ui.label("Super Scale Upscaler");
+                let label = ui.label("Upscaler");
                 let now = label_of(PROJECT_UPSCALERS, self.upscaler);
                 egui::ComboBox::from_id_salt("project upscaler")
                     .selected_text(project_upscaler_text(self.upscaler, now))

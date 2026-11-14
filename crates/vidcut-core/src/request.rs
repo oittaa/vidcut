@@ -554,15 +554,15 @@ pub enum Request {
         /// channel refuse it.
         #[serde(default)]
         alpha_mode: Option<crate::model::AlphaMode>,
-        /// Super Scale on or off. Where its pictures are enlarged, they get
+        /// Upscale on or off. Where its pictures are enlarged, they get
         /// the upscaler that `upscaler` names, as much as they need, up to 4
         /// times their source.
         #[serde(default)]
-        super_scale: Option<bool>,
+        upscale: Option<bool>,
         /// The detail of the classic upscaler: `low`, `medium` or `high`.
         #[serde(default)]
         sharpness: Option<crate::model::Sharpness>,
-        /// The upscaler of Super Scale: `project` (the default: the upscaler
+        /// The upscaler: `project` (the default: the upscaler
         /// of the project settings), `macos` (macOS 26 and later, called AI
         /// there), `ai_slow`, `ai_fast` or `classic`. `ai_slow` and `ai_fast`
         /// are off on macOS.
@@ -1754,7 +1754,7 @@ pub enum Request {
         retime: Option<crate::model::ClipRetime>,
         /// Render Cache: `auto` follows the mode of the project, and `on`
         /// renders the clips in both modes. `off` keeps their slow media and
-        /// AI Super Scale out of both.
+        /// AI Upscale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
         /// Download Voice Isolation's model, or the model of the Retime
@@ -5029,7 +5029,7 @@ pub struct ProjectSet {
     /// or exports, and Nearest to the rest.
     #[serde(default)]
     pub retime: Option<crate::model::ProjectRetime>,
-    /// The upscaler of Super Scale for the media that follow the project:
+    /// The upscaler for the media that follow the project:
     /// `auto` (the default: the scaler of macOS on macOS, `ai_fast`
     /// elsewhere), `macos`, `ai_slow`, `ai_fast` or `classic`.
     #[serde(default)]

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use vidcut_core::model::{Hdr, Media, Project, Sharpness, SuperScale, Upscaler, VideoInfo};
+use vidcut_core::model::{Hdr, Media, Project, Sharpness, Upscale, Upscaler, VideoInfo};
 use vidcut_core::render::{RenderPlan, Shape, VideoPiece};
 
 use vidcut_core::catalog::{self, Measure};
@@ -83,7 +83,7 @@ fn off(files: &str) -> Error {
 
 fn refused(upscaler: Upscaler, files: &str) -> Error {
     Error::Invalid(format!(
-        "{} can't take {files}: set their Upscaler to Classic, or their Super Scale to Off",
+        "{} can't take {files}: set their Upscaler to Classic, or their Upscale to Off",
         name(upscaler)
     ))
 }
@@ -197,7 +197,7 @@ fn slot(upscaler: Upscaler) -> Option<usize> {
 pub(crate) struct User(Upscaler);
 
 impl User {
-    pub(crate) fn of(s: SuperScale) -> Option<Self> {
+    pub(crate) fn of(s: Upscale) -> Option<Self> {
         let i = slot(s.upscaler).filter(|_| s.ai())?;
         users()[i] += 1;
         crate::screen::held::share_again();
@@ -404,7 +404,7 @@ pub fn name(upscaler: Upscaler) -> &'static str {
     }
 }
 
-pub fn named(s: SuperScale) -> String {
+pub fn named(s: Upscale) -> String {
     match s.upscaler {
         Upscaler::Classic => format!(
             "Classic, sharpness {}",
@@ -437,7 +437,7 @@ fn enlarging<'a>(p: &'a Project, plans: &[&RenderPlan]) -> Vec<Enlarging<'a>> {
         {
             let VideoPiece::Source {
                 media,
-                super_scale,
+                upscale,
                 placed,
                 ..
             } = layer
@@ -451,11 +451,11 @@ fn enlarging<'a>(p: &'a Project, plans: &[&RenderPlan]) -> Vec<Enlarging<'a>> {
                 continue;
             };
             let out = (plan.width, plan.height);
-            let sizes = crate::export::video::ai_sizes(shape_of(&v), out, placed, *super_scale);
+            let sizes = crate::export::video::ai_sizes(shape_of(&v), out, placed, *upscale);
             if let Some((from, made)) = sizes {
                 work.push(Enlarging {
                     media: m,
-                    upscaler: super_scale.upscaler,
+                    upscaler: upscale.upscaler,
                     from,
                     made,
                     hdr: v.hdr.is_some() && plan.colors.is_some(),

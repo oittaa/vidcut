@@ -50,7 +50,7 @@ flowchart TD
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
   - A count with no default layout in FFmpeg uses the first channels of the 22.2 layout (`channel_layout`). Why: the mix needs a layout, and a stereo file then goes to the first two channels.
   - An encoder can take fewer channels. Then the export fails with the name of the encoder and the channel count.
-- **Models:** `session::export_media` first checks the models of Voice Isolation, Super Scale, Retime Process and the Process of each Smooth Cut. A missing model needs `download`.
+- **Models:** `session::export_media` first checks the models of Voice Isolation, Upscale, Retime Process and the Process of each Smooth Cut. A missing model needs `download`.
 
 GPU preferences:
 
@@ -223,20 +223,20 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - A frame on the GPU, or a frame with its RGB on the GPU, gets its small picture on the GPU (`held::small_luma`). It is the area average of the BT.709 luma of the RGB, in TV range.
   - Only the small picture comes down. Why: the test does not need the whole frame.
   - A frame in memory gets its small picture from FFmpeg's scaler (`analysis::small_luma`).
-- With an AI upscaler of Super Scale, the upscaler enlarges the two frames of the pair first (`scaled_pair`). The frame is then made from the two enlarged pictures.
-  - Why: Super Scale works on the source, before the retime ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+- With an AI upscaler, the upscaler enlarges the two frames of the pair first (`scaled_pair`). The frame is then made from the two enlarged pictures.
+  - Why: Upscale works on the source, before the retime ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - The `Source` keeps the last two enlarged pictures (`Source::ai_picture`). Thus the later picture of one pair is the earlier picture of the next.
 - An AI upscaler takes the colors of a picture with no alpha in them. Why: its model has three channels.
   - The draw enlarges the alpha of the source frame to the size of the enlarged picture (`Matte`). This occurs at each speed (`VideoFrames::shown`).
   - The layer goes over the layers below as Straight, or as Premultiplied when its media has that Alpha Mode.
-  - Two enlarged pictures of a pair mix with no alpha in them ([todo](../todo/super-scale.md)). Where the alpha changes between the two frames, the edge is then darker or brighter than the pair with no upscaler.
+  - Two enlarged pictures of a pair mix with no alpha in them ([todo](../todo/upscale.md)). Where the alpha changes between the two frames, the edge is then darker or brighter than the pair with no upscaler.
 - With the frame rate conversion of macOS, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
   - The draw puts both frames into P416 VideoToolbox frames in the timeline color space first (`Source::frame_of`). They are sized and placed as the RGB pair is.
 - The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
   - A clip with no placed picture: each frame becomes RGB on the GPU, upright. The size of the RGB is the size that it fills in the frame, rounded up to even (`fitted_size`).
     - The picture has its exact fit in that RGB (`Look::fitted`). Thus the part of a pixel at its edge is in the RGB, and the RGB goes into the frame at a whole pixel.
   - A placed clip: the draw places each frame into RGB with its Transform, Crop and Dynamic Zoom (`Sampling::Colors`). The RGB covers only the bounds of the placed picture (`placed_look`).
-  - Super Scale enlarges each frame with the kernel of its Sharpness, as the draw of an export does (`screen::kernel`).
+  - Upscale enlarges each frame with the kernel of its Sharpness, as the draw of an export does (`screen::kernel`).
   - `Source::rgb_from` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next, while the placing stays the same (`Look`).
   - Each of the two frames keeps its colors and its gray picture in one entry (`Drawings`).
 - With the other processes, `interpolate::between` makes the frame from the two RGB pictures.
@@ -255,7 +255,7 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - The layer goes over the layers below as Premultiplied (`Matte::of`). With a composite mode, the draw first takes the alpha out of the colors (`AlphaUse::TakenOut`). A media with the Alpha Mode Premultiplied keeps its colors.
   - The Alpha Mode None makes no gray picture, and its colors have no alpha in them.
   - A retimed clip with alpha gets no job of the clip level (`Setup::keeps_alpha`). It stays at the timeline level ([playback](playback.md#the-render-cache)).
-  - A job of the clip level with AI Super Scale and no retime makes the alpha of the enlarged frame (`VideoFrames::shown`).
+  - A job of the clip level with AI Upscale and no retime makes the alpha of the enlarged frame (`VideoFrames::shown`).
 
 Seeks:
 
@@ -264,7 +264,7 @@ Seeks:
 - A reader that only looked for the keyframe (`VideoFrames::keyframe_time`) decodes on from it (`VideoReader::from_keyframe`).
 - A piece played backward decodes forward from the keyframe before its pictures, as many pictures at a time as a memory budget holds (`VideoFrames::reversed_frames`).
 - The player reads through the same `VideoFrames`, and both draw with the same `Screen`.
-- The viewer plan can leave Super Scale off, and can read the render cache and a proxy (`preview_plan`, `Cache::apply`, `apply_proxies`). An export reads the timeline as stored.
+- The viewer plan can leave Upscale off, and can read the render cache and a proxy (`preview_plan`, `Cache::apply`, `apply_proxies`). An export reads the timeline as stored.
 
 Pictures:
 
@@ -298,7 +298,7 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - With a `Smooth::mode`, the layers below stay. `Smooth::lay` gives the made frame that mode, and `VideoFrames::smoothed` sets the weight of the outgoing layer to 0.
 - The key of the pair holds both files, both frames, both looks and both sides. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.
 - The morph has no shot-change test. Why: a Smooth Cut always joins two shots.
-- The morph takes the decoded frames. AI Super Scale does not enlarge them.
+- The morph takes the decoded frames. AI Upscale does not enlarge them.
 - The morph draws each side with no frames around it. Thus an interlaced side gives only the rows of its own field ([gpu](gpu.md#deinterlacing-and-hdr)).
 
 ## Timeline colors

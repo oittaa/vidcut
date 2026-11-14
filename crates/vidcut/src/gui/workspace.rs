@@ -1124,12 +1124,9 @@ impl Workspace {
             ui.menu_button("View", |ui| {
                 ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
                 ui.menu_button("Scopes", |ui| self.scopes_menu(ui));
-                let mut on = self.snap.show_super_scale;
-                if ui.checkbox(&mut on, "Show Super Scale").clicked() {
-                    self.send(
-                        "preferences.set",
-                        json!({ "viewer": { "super_scale": on } }),
-                    );
+                let mut on = self.snap.show_upscale;
+                if ui.checkbox(&mut on, "Show Upscale").clicked() {
+                    self.send("preferences.set", json!({ "viewer": { "upscale": on } }));
                     ui.close();
                 }
             });

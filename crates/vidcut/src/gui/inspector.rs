@@ -4958,8 +4958,8 @@ impl Workspace {
         }
     }
 
-    fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
-        use super::super_scale::{SHARPNESS, UPSCALERS, label_of, unfit, upscaler_text};
+    fn upscale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
+        use super::upscale::{SHARPNESS, UPSCALERS, label_of, unfit, upscaler_text};
         let mut media: Vec<String> = chosen
             .iter()
             .filter_map(|c| p.clip(&c.id))
@@ -4967,11 +4967,7 @@ impl Workspace {
             .collect();
         media.sort_unstable();
         media.dedup();
-        let Some(now) = media
-            .first()
-            .and_then(|id| p.media(id))
-            .map(|m| m.super_scale)
-        else {
+        let Some(now) = media.first().and_then(|id| p.media(id)).map(|m| m.upscale) else {
             return;
         };
         let mut put = None;
@@ -4982,14 +4978,14 @@ impl Workspace {
             })
             .inner
         };
-        let shown = vidcut_core::render::super_scale_of(now, &p.settings);
-        let cleared = group(ui, "Super Scale", header, |ui| {
+        let shown = vidcut_core::render::upscale_of(now, &p.settings);
+        let cleared = group(ui, "Upscale", header, |ui| {
             let on = !now.is_off();
-            label(ui, "Super Scale", on);
+            label(ui, "Upscale", on);
             dialog::switch(ui, |ui| {
                 for (value, text) in [(false, "Off"), (true, "On")] {
                     if ui.selectable_label(on == value, text).clicked() && on != value {
-                        put = Some(json!({ "super_scale": value }));
+                        put = Some(json!({ "upscale": value }));
                     }
                 }
             });
@@ -5039,10 +5035,10 @@ impl Workspace {
             });
         });
         if cleared {
-            put = Some(json!({ "super_scale": false }));
+            put = Some(json!({ "upscale": false }));
         }
         if let Some(params) = put {
-            self.set_super_scale(&media, params);
+            self.set_upscale(&media, params);
         }
     }
 
@@ -5565,7 +5561,7 @@ impl Workspace {
                     dynamic_zoom(ui, i, p, at, &chosen, boxes, &mut acts);
                     composite(ui, i, p, at, &chosen, &mut acts);
                     self.input_lut_section(ui, p, &chosen);
-                    self.super_scale_section(ui, p, &chosen);
+                    self.upscale_section(ui, p, &chosen);
                 }
                 if tab == Tab::Effects && !chosen.is_empty() {
                     effects(ui, &self.inspector, &chosen[0], &mut acts);

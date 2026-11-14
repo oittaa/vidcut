@@ -75,7 +75,7 @@ pub struct RenderCachePrefs {
     pub transitions: bool,
     /// The User mode renders opacity and composite modes.
     pub composites: bool,
-    /// The User mode renders AI Super Scale and the AI Retime Processes.
+    /// The User mode renders AI Upscale and the AI Retime Processes.
     pub ai: bool,
     /// The codec of the cache files. A chosen codec goes to the encoder as
     /// it is. When no encoder here makes it, the cache stays empty.
@@ -184,10 +184,10 @@ impl Default for RenderCachePrefs {
 #[serde(default, deny_unknown_fields)]
 pub struct ViewerPrefs {
     pub guides: Guides,
-    /// The viewer shows Super Scale: where it enlarges a picture of a media
-    /// item with Super Scale, it uses a sharper upscaler. Off by default, as
+    /// The viewer shows Upscale: where it enlarges a picture of a media
+    /// item with Upscale, it uses a sharper upscaler. Off by default, as
     /// it costs playback speed.
-    pub super_scale: bool,
+    pub upscale: bool,
     pub scopes: Scopes,
 }
 
@@ -537,7 +537,7 @@ pub struct ViewerPrefsPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guides: Option<GuidesPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub super_scale: Option<bool>,
+    pub upscale: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scopes: Option<ScopesPatch>,
 }
@@ -1096,8 +1096,8 @@ impl Preferences {
         if let Some(g) = patch.viewer.as_ref().and_then(|v| v.guides.as_ref()) {
             p.viewer.guides = p.viewer.guides.patched(g);
         }
-        if let Some(on) = patch.viewer.as_ref().and_then(|v| v.super_scale) {
-            p.viewer.super_scale = on;
+        if let Some(on) = patch.viewer.as_ref().and_then(|v| v.upscale) {
+            p.viewer.upscale = on;
         }
         if let Some(s) = patch.viewer.as_ref().and_then(|v| v.scopes.as_ref()) {
             p.viewer.scopes = p.viewer.scopes.patched(s);

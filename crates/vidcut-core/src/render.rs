@@ -9,9 +9,9 @@ use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
     AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, Compound, DuckDetect,
-    Generator, Gradient, Hdr, Keyframe, Media, MediaSuperScale, MotionPath, PathSample, Picture,
+    Generator, Gradient, Hdr, Keyframe, Media, MediaUpscale, MotionPath, PathSample, Picture,
     PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode,
-    SuperScale, TimelineColors, Title, Track, TrackKind, Transition,
+    TimelineColors, Title, Track, TrackKind, Transition, Upscale,
 };
 use crate::motion::Area;
 use crate::otio::transitions;
@@ -189,10 +189,10 @@ pub enum VideoPiece {
         /// How its pictures' alpha channel is read: the media's `alpha_mode`.
         #[serde(default, skip_serializing_if = "AlphaMode::is_straight")]
         alpha_mode: AlphaMode,
-        /// How its pictures are enlarged: the media's `super_scale`, with
+        /// How its pictures are enlarged: the media's `upscale`, with
         /// the upscaler that its setting gives on this computer.
-        #[serde(default, skip_serializing_if = "SuperScale::is_off")]
-        super_scale: SuperScale,
+        #[serde(default, skip_serializing_if = "Upscale::is_off")]
+        upscale: Upscale,
         /// How it makes a frame between two source frames: its clip's
         /// `retime`, or the project's, as it runs on this computer. Nearest
         /// when each frame lands on a source frame.
@@ -1455,12 +1455,12 @@ impl VideoPiece {
         }
     }
 
-    pub fn super_scales(&self) -> Vec<SuperScale> {
+    pub fn upscales(&self) -> Vec<Upscale> {
         self.layers()
             .into_iter()
             .flat_map(|(l, _)| match l {
-                Self::Source { super_scale, .. } if !super_scale.is_off() => vec![*super_scale],
-                Self::Flat { pieces, .. } => pieces.iter().flat_map(Self::super_scales).collect(),
+                Self::Source { upscale, .. } if !upscale.is_off() => vec![*upscale],
+                Self::Flat { pieces, .. } => pieces.iter().flat_map(Self::upscales).collect(),
                 _ => Vec::new(),
             })
             .collect()
@@ -1533,7 +1533,7 @@ impl VideoPiece {
                 pace,
                 color_space,
                 alpha_mode,
-                super_scale,
+                upscale,
                 retime,
                 placed,
                 cache,
@@ -1553,7 +1553,7 @@ impl VideoPiece {
                     pace: if still { pace.clone() } else { pace.after(k) },
                     color_space: *color_space,
                     alpha_mode: *alpha_mode,
-                    super_scale: *super_scale,
+                    upscale: *upscale,
                     retime: *retime,
                     placed: placed.iter().map(|p| p.after(k)).collect(),
                     cache: *cache,
@@ -2150,8 +2150,8 @@ pub fn retime_at(chosen: ClipRetime, speed: f64, m: &Media, s: &Settings) -> Ret
         .unwrap_or(auto)
 }
 
-pub fn super_scale_of(m: MediaSuperScale, s: &Settings) -> SuperScale {
-    SuperScale {
+pub fn upscale_of(m: MediaUpscale, s: &Settings) -> Upscale {
+    Upscale {
         on: m.on,
         sharpness: m.sharpness,
         upscaler: m.upscaler.upscaler().unwrap_or(s.upscaler.upscaler()),
@@ -3470,7 +3470,7 @@ impl VideoPlan<'_> {
             pace: c.pace().after(x - c.start),
             color_space: m.color_space,
             alpha_mode: m.alpha_mode,
-            super_scale: super_scale_of(m.super_scale, s),
+            upscale: upscale_of(m.upscale, s),
             retime: retime_of(c, x, m, s),
             placed,
             cache: c.render_cache,
@@ -4199,7 +4199,7 @@ pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
             image: image_of(m),
             color_space: m.color_space,
             alpha_mode: m.alpha_mode,
-            super_scale: super_scale_of(m.super_scale, &p.settings),
+            upscale: upscale_of(m.upscale, &p.settings),
             retime: Retime::Nearest,
             placed: Vec::new(),
             cache: Default::default(),
@@ -4275,7 +4275,7 @@ pub fn camera_tape(
                 image: image_of(m),
                 color_space: m.color_space,
                 alpha_mode: m.alpha_mode,
-                super_scale: super_scale_of(m.super_scale, &p.settings),
+                upscale: upscale_of(m.upscale, &p.settings),
                 retime: Retime::Nearest,
                 placed: Vec::new(),
                 cache: Default::default(),
@@ -4418,7 +4418,7 @@ fn laid_out(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     image: image_of(m),
                     color_space: m.color_space,
                     alpha_mode: m.alpha_mode,
-                    super_scale: super_scale_of(m.super_scale, &p.settings),
+                    upscale: upscale_of(m.upscale, &p.settings),
                     retime: Retime::Nearest,
                     placed: Vec::new(),
                     cache: Default::default(),

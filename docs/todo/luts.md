@@ -21,7 +21,7 @@ vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../desi
 - The display LUT, as the viewer's own branch.
 - With a LUT, the export measures light on the resulting frames.
 - AI Slow in an HDR timeline, with a Retime Process, gives `T(C)` on a Premultiplied media item with an input LUT.
-  - Why: the LUT runs on the enlarged frames, and they have no alpha ([super-scale.md](super-scale.md)).
+  - Why: the LUT runs on the enlarged frames, and they have no alpha ([upscale.md](upscale.md)).
 - The Input Lookup Table of the project (manual p. 152). vidcut has an input LUT on a media item only.
 - Measure in Resolve. No script reaches these, so each needs the window of Resolve:
   - The Output LUT of the project: does it use the math of the node LUT?

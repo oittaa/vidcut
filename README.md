@@ -9,7 +9,7 @@ vidcut is a video editor for Linux, Windows and macOS. Each action in its window
 - Timeline editing: insert, append, overwrite, trim and ripple delete, on several tracks.
 - Dissolves, wipes, pushes, slides and cross fades.
 - Clip speed, freeze frames and AI frames between the source frames (Retime Process).
-- AI upscaling (Super Scale).
+- AI upscaling (Upscale).
 - Transform, crop, Dynamic Zoom, opacity and composite modes, with keyframes.
 - Titles and the Solid Color generator.
 - The Mixer, volume keyframes and Voice Isolation.

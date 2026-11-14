@@ -34,7 +34,7 @@ struct State {
     tasks: Vec<Task>,
     engine: Option<Engine>,
     want: [i32; 2],
-    super_scale: bool,
+    upscale: bool,
     scopes: Vec<(Scope, [i32; 2])>,
     scale: ScopeScale,
     target: Option<Target>,
@@ -187,13 +187,13 @@ impl Viewer {
         &mut self,
         render: &RenderState,
         want: [i32; 2],
-        super_scale: bool,
+        upscale: bool,
     ) -> (Option<egui::TextureId>, bool) {
         let (target, has_frame) = {
             let mut s = self.shared.lock();
-            let changed = s.want != want || s.super_scale != super_scale;
+            let changed = s.want != want || s.upscale != upscale;
             s.want = want;
-            s.super_scale = super_scale;
+            s.upscale = upscale;
             if changed {
                 s.woken = true;
                 self.shared.wake.notify_all();
@@ -318,7 +318,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     let mut generation = 0u64;
     let mut next: Option<Instant> = None;
     loop {
-        let (tasks, engine, want, super_scale, scopes, scale) = {
+        let (tasks, engine, want, upscale, scopes, scale) = {
             let mut s = shared.lock();
             while !s.woken && !s.stop {
                 let wait = next.map_or(IDLE, |n| n.saturating_duration_since(Instant::now()));
@@ -339,7 +339,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
                 std::mem::take(&mut s.tasks),
                 s.engine.clone(),
                 s.want,
-                s.super_scale,
+                s.upscale,
                 s.scopes.clone(),
                 s.scale,
             )
@@ -352,7 +352,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             .map(|e| vidcut_av::copies::Guard::set(e.copies()));
         let kernels: Vec<u32> = shown
             .as_ref()
-            .filter(|_| super_scale)
+            .filter(|_| upscale)
             .map(|s| {
                 s.scales
                     .iter()

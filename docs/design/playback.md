@@ -132,7 +132,7 @@ flowchart TD
   - The layers of a dissolve can have different ages.
   - A layer without an `Origin` shows "Not recorded". When no layer has an `Origin`, the panel does not show the group.
   - Until a frame is decoded, the panel shows the `Origin` of the picture that the viewer shows in its place.
-- Why: the reports of the GPU stages (`interpolate::report`, `super_scale::report`) tell only their last work. That work is usually ahead of the playhead. Thus they do not tell about a paused frame or a step back.
+- Why: the reports of the GPU stages (`interpolate::report`, `upscale::report`) tell only their last work. That work is usually ahead of the playhead. Thus they do not tell about a paused frame or a step back.
 - The panel keeps each group and each line for one second after a frame last had it (`HeldGroup`). A kept line shows no value.
   - A group keeps its widest size for one second too.
   - Why: frames that follow each other can have different lines. For example, at 50% speed with a Retime Process, every second frame is made between two source frames. Without this, the panel changes its size on each frame.
@@ -149,12 +149,12 @@ flowchart TD
 - While pictures are dragged, `Player::preview_pictures` puts each dragged picture in place of the picture of its clip.
   - The live core then plans the timeline again with them (`Msg::PreviewPictures`), at most once each `RELOAD_EVERY`. Why: a picture that stops filling the frame needs the tracks below it decoded.
 
-**Super Scale and Retime Process**
+**Upscale and Retime Process**
 
-- `Shown::scales` gives the Super Scale of each layer (`Plan::scales_at`). With `viewer.super_scale` on, the shader enlarges such a layer with a sharper kernel (`sharp`), by its Sharpness, where the viewer enlarges the picture.
+- `Shown::scales` gives the Upscale of each layer (`Plan::scales_at`). With `viewer.upscale` on, the shader enlarges such a layer with a sharper kernel (`sharp`), by its Sharpness, where the viewer enlarges the picture.
 - With an AI upscaler, `VideoFrames` runs `Source::ai_picture` for the viewer too. The viewer then gets the large upright picture of the AI upscaler.
   - With a Retime Process other than Nearest, a made frame comes from two enlarged and placed pictures ([export](export.md#which-source-frame)).
-  - These two pictures always take the kernel of Super Scale, as an export does. `viewer.super_scale` does not change them.
+  - These two pictures always take the kernel of Upscale, as an export does. `viewer.upscale` does not change them.
   - A seek with AI Fast decodes the whole chunk first. The upscaler makes the asked frame first, and the rest of the chunk follows.
   - A seek with AI Slow starts a new stream at the asked frame. Its first picture comes after the first chunk of the stream.
   - While playing, the player skips the frames that it cannot make in time. A replay makes again the frames that it skipped.
@@ -162,9 +162,9 @@ flowchart TD
   - Of the placement, the key holds only the value that sets the size of the enlarged picture: the largest zoom and the Dynamic Zoom (`detail`).
   - Thus a change of Sharpness, position, crop or opacity keeps the frames. A moved clip and a cut of the piece (`VideoPiece::part`) keep them too.
   - The enlarged picture holds no placement (`Sampling::Own`). The draw places it at each frame with the Sharpness of that frame (`Plan::scales_at`).
-- With `viewer.super_scale` off, the live core plans the viewer without Super Scale (`preview_plan`).
+- With `viewer.upscale` off, the live core plans the viewer without Upscale (`preview_plan`).
 - With a Retime Process other than Nearest, `VideoFrames` makes the frames between the source frames for the viewer too ([export](export.md#which-source-frame)).
-  - The key of such a frame holds the process, the Super Scale, the placement, the timeline size and the timeline colors (`source_key`). Why: the frame is made at its placement, and the viewer draws it with that placement and its opacity.
+  - The key of such a frame holds the process, the Upscale, the placement, the timeline size and the timeline colors (`source_key`). Why: the frame is made at its placement, and the viewer draws it with that placement and its opacity.
   - Why the timeline colors: an HDR picture goes to the AI stages only in an SDR timeline, tone-mapped.
   - The `Id` also holds the exact source position (`Plan::id`). Thus each made frame is a kept picture of its own.
   - The `Id` also holds the keyframe position of the frame and the place of its Dynamic Zoom (`placed_now`). The keyframe position is in it only when the picture has keyframes, or when a mask of its composition follows a motion path.
@@ -291,7 +291,7 @@ The audio device:
     - A scale that differs from 1 only by a rounding error counts as no scale.
       - Why: at some frame sizes, the shader's 32-bit floats give a scale just above 1. Two samples then blur each edge of the picture.
     - Above a shrink of 8:1, the filter reads the level of `halvings` where the shrink is 8:1 or less ([X110](../deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).
-  - In an export, the kernels of Super Scale widen when the picture shrinks (`sharp`).
+  - In an export, the kernels of Upscale widen when the picture shrinks (`sharp`).
     - They widen up to 4 times. Above a shrink of 4:1, the draw first halves the converted picture into smaller levels (`halvings`, `fs_halve`).
     - The kernel then reads the level where the shrink is 4:1 or less. The larger shrink of the two axes selects the level.
     - Why: each pixel has the same work at any shrink. A kernel that widens without a limit puts all the work of a small picture on few GPU threads.
@@ -434,10 +434,10 @@ flowchart LR
 What it renders:
 
 - `render_cache::reasons` gives the reasons of each video piece of the plan (`Reason`).
-  - `Reason::Retime` and `Reason::AiRetime` hold the `Retime`. `Reason::SuperScale` holds the `Upscaler`.
+  - `Reason::Retime` and `Reason::AiRetime` hold the `Retime`. `Reason::Upscale` holds the `Upscaler`.
   - `stats::reason_names` names them as Stats for Nerds does. The line, the Stats row and `cache.status` use these names.
 - `Setup::reasons` keeps the reasons of the mode. Smart keeps all. User keeps `Reason::On`, `Reason::Effect` and the kinds that `RenderCachePrefs` turns on.
-- A clip set to `ClipCache::Off` gives no `Reason::Media` and no `Reason::SuperScale`. Its other reasons stay (spec D98).
+- A clip set to `ClipCache::Off` gives no `Reason::Media` and no `Reason::Upscale`. Its other reasons stay (spec D98).
 - An `Effect` with `render_cache` on gives `Reason::Effect`. An effect that is off gives none.
   - A layer takes it only from its own picture (`checked_on_own`). The effects of a compound clip can work on its mix, at the draw.
   - A `Placed` around a title under another track gives it. The cache file holds that title.
@@ -453,7 +453,7 @@ What it renders:
 
 The two levels (spec D98):
 
-- `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Effect`, `Reason::Media`, `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime` and `Reason::SuperScale` go to the clip level. The other reasons go to the timeline level.
+- `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Effect`, `Reason::Media`, `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime` and `Reason::Upscale` go to the clip level. The other reasons go to the timeline level.
 - A reason of a layer goes to the clip level only when all these are true. Otherwise it goes to the timeline level.
   - It is a video file or a still (`lone`).
   - Its media has no alpha channel, or its Alpha Mode is None (`Setup::opaque`). Or the codec is ProRes 4444 or 4444 XQ, and the layer keeps no placement in its job (`Setup::keeps_alpha`).
@@ -465,9 +465,9 @@ The two levels (spec D98):
 - A Retime Process works only on a video file that plays forward (`retimed`), as in the export ([export](export.md#which-source-frame)). Thus a still or a clip that plays backward keeps its placement in a job of the clip level only with a checked effect.
 - `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).
   - The layer keeps its `placed`. The file takes the place of the media, as a proxy does. Thus the Transform and the effects work on it as on the media.
-  - The layer takes the Nearest retime. A layer with a Retime Process or a checked effect also takes no `super_scale`. Why: the file holds its frames as the timeline shows them.
+  - The layer takes the Nearest retime. A layer with a Retime Process or a checked effect also takes no `upscale`. Why: the file holds its frames as the timeline shows them.
   - A placed layer with a Retime Process or a checked effect also takes `made`: the `Shape` of its media (`Setup::shape`). The draw then places the colors of the file as a made frame (`Sampling::Placed`).
-    - The shape is that of the media. With AI Super Scale, the enlarged picture has the shape of the media, with its sides rounded to whole pixels.
+    - The shape is that of the media. With AI Upscale, the enlarged picture has the shape of the media, with its sides rounded to whole pixels.
     - A layer with a Retime Process checks all its effects. Why: the file holds them all, because the effects come before the frames between two source frames.
     - The player's key of such a frame holds the placement (`source_key`). Why: the draw takes the opacity and the composite mode from the placement of the kept picture. A change of these keeps the file.
   - With an AI upscaler and no Retime Process or checked effect, the file holds the enlarged picture. The layer then takes `Upscaler::Classic` with its Sharpness. Thus the draw uses the same kernel, and the AI upscaler does not run again.
@@ -491,8 +491,8 @@ The names of frames:
   - With an AI upscaler and no Retime Process or checked effect, the size is that of the enlarged picture (`Setup::upscaled`, vidcut-av `ai_size`). It comes from the placement and the timeline size, as in an export. Thus a zoom that changes it renders the clip again.
     - `ai_size` takes the size, the pixel shape and the rotation of the media (`Shape`). With proxies on, it takes the size of the proxy.
     - `ai_size` and the reader get the enlarged size from the same function (`enlarged`). Thus the job has the size of the enlarged pictures that playback keeps (`Kept::at`).
-  - With a Retime Process or a checked effect, the size is that of the `Look`. The name also holds the `super_scale` and the placement.
-    - The `super_scale` holds the Sharpness. Why: the job draws the Sharpness into the file (`VideoFrames::colors_frame`).
+  - With a Retime Process or a checked effect, the size is that of the `Look`. The name also holds the `upscale` and the placement.
+    - The `upscale` holds the Sharpness. Why: the job draws the Sharpness into the file (`VideoFrames::colors_frame`).
     - With a Retime Process, it also holds the Retime Process and the exact source position (`VideoPiece::exact`).
     - Thus a change of the Transform or of an effect renders a placed clip again.
     - `alone` keeps only the effects of the clip itself (`render_cache::own_effects`). Why: the effects of a compound clip can work on its mix, at the draw.
@@ -554,8 +554,8 @@ The jobs:
 
 - `Cache::next` gives the next `Job` with its own plan. The draw of the export makes its frames (`encode_plan`), as for proxies.
   - At the timeline level, `render_cache::segment` cuts the plan of the timeline.
-  - At the clip level, the plan holds the one layer (`clip_plan`). Without a Retime Process or a checked effect, it has no placement and the size of the media. With an AI upscaler, the plan has the size of the enlarged picture, and the layer keeps its `super_scale`.
-  - With a Retime Process or a checked effect, the plan has the size of the `Look`. The layer keeps its `retime`, its `super_scale` and its `placed`.
+  - At the clip level, the plan holds the one layer (`clip_plan`). Without a Retime Process or a checked effect, it has no placement and the size of the media. With an AI upscaler, the plan has the size of the enlarged picture, and the layer keeps its `upscale`.
+  - With a Retime Process or a checked effect, the plan has the size of the `Look`. The layer keeps its `retime`, its `upscale` and its `placed`.
   - A job of the clip level draws in the colors mode of the export (`VideoFrames::colors_only`). Thus a placed layer gives its made frames, with no edges and no alpha ([export](export.md#effects)).
   - The job of a layer with an alpha channel keeps the alpha (`Job::alpha`, `VideoFrames::keeping_alpha`).
     - Only the CPU encoder of ProRes 4444 and 4444 XQ takes it, in `YUVA444P10LE` (`cache_encoder`). Another encoder refuses the job. Then the next encoder takes it.
@@ -571,7 +571,7 @@ The jobs:
   - A job of the clip level takes the picture of its layer (`Job::layer`): the kept picture for the bottom layer, or its picture in `over`.
   - The bottom layer of a kept picture with layers over it gives a new picture of the same frame, without them (`Picture::alone`).
   - A job of the clip level takes a layer only when it holds no placement (`Sampling::Own`). Its upright size must be the size of the job.
-  - Thus it takes the decoded frames of a clip with slow media or a speed, and the enlarged pictures of AI Super Scale.
+  - Thus it takes the decoded frames of a clip with slow media or a speed, and the enlarged pictures of AI Upscale.
   - The reader decodes nothing for a kept frame (`Take::Skip`). Each source of the frame only marks that it skipped (`Source::skipped`).
   - The next frame that the job makes reads on from there (`Source::advance`). More than `DECODE_AHEAD` past the last decoded frame, the source seeks. Otherwise it decodes forward.
   - Why the limit: the same rule places a source at the start of a piece (`reads_on`).
@@ -622,9 +622,9 @@ The line and the Stats row:
 - The `Snapshot` carries the parts (`render_cache`). The timeline draws them under both rulers (`paint::cache_line`). `paint::cache_reasons` gives the reasons under the pointer.
 - The timeline draws no line while it shows another project than the current one: a drag, a trim or a step of the history.
 - `PlayerStats::with_cache` adds the Render Cache row for the frame on screen of the timeline. The GUI and `player.state` both call it.
-  - For a picture from the cache, the Super Scale group names the AI upscaler that made it, from the render cache.
-    - Each `Part` keeps the Super Scale of its layers for this (`VideoPiece::super_scales`). Why: the plan of a cached layer has `Upscaler::Classic`.
-    - A frame of the timeline level has no Super Scale in the plan. A layer with a Retime Process or a checked effect at the clip level has none either. The group then takes the first AI upscaler of the part.
+  - For a picture from the cache, the Upscale group names the AI upscaler that made it, from the render cache.
+    - Each `Part` keeps the Upscale of its layers for this (`VideoPiece::upscales`). Why: the plan of a cached layer has `Upscaler::Classic`.
+    - A frame of the timeline level has no Upscale in the plan. A layer with a Retime Process or a checked effect at the clip level has none either. The group then takes the first AI upscaler of the part.
     - Any other layer of the clip level has `Upscaler::Classic` in the plan, where the part has an AI upscaler. The group then takes that upscaler. This also holds while the timeline level of the frame is still to render.
   - The Retime Process group names the Retime Process of a picture from the cache in the same way.
     - Each `Part` keeps the Retime Processes of its layers and its Smooth Cuts (`VideoPiece::retimes`). The player's `retimes_at` uses the same function.
@@ -640,7 +640,7 @@ The background render (`live::render_cache::Background`):
 - After `render_cache.after_secs` without activity, `vidcut-render-cache` starts (`Work::Job`).
   - It renders from the playhead forward, then from the start.
   - It writes one file at a time (vidcut-av `render_cache::write`), and adds it to the index (`Index::add`). The viewer then reloads the plan.
-  - It uses the AI models that the viewer has loaded, with no second copy ([gpu](gpu.md#super-scale)).
+  - It uses the AI models that the viewer has loaded, with no second copy ([gpu](gpu.md#upscale)).
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
   - A frame that fails to write is left out for this plan (`Cache::block`). The render writes the other frames. The line stays red on that frame, because the index does not have it. A change of the plan tries the frame again.
   - Three failed writes in a row stop the pass. After `render_cache.after_secs` with no activity, another pass starts.

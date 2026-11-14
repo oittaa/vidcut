@@ -1625,7 +1625,7 @@ impl Stream {
                     self.last(gpu, model, &ct1, (&t1, &t2, &picture), &mut e);
                     let whole = shown.next_multiple_of(4) as u64;
                     let out = gpu.buffer(whole as usize);
-                    let pictures = crate::super_scale::fix::Pictures::Packed {
+                    let pictures = crate::upscale::fix::Pictures::Packed {
                         frames: &self.frames,
                         made: &picture,
                         out: &out,
@@ -1633,13 +1633,7 @@ impl Stream {
                         base: self.slot(index as u64) * g.plane(),
                     };
                     e.pass(|pass| {
-                        crate::super_scale::fix::run(
-                            gpu,
-                            pass,
-                            &pictures,
-                            (&low.0, &low.1),
-                            (g.w, g.h),
-                        )
+                        crate::upscale::fix::run(gpu, pass, &pictures, (&low.0, &low.1), (g.w, g.h))
                     });
                     e.submit();
                     if let Some(dir) = self.dump.as_ref() {

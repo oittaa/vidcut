@@ -198,7 +198,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - vidcut: F1, or Help in the top bar, opens the Help window.
     - It lists every shortcut, with one action in each row.
     - A ? beside a less obvious action explains it in a few plain words.
-    - Under the shortcuts, it tells in a few words what each upscaler of Super Scale and each Retime Process does.
+    - Under the shortcuts, it tells in a few words what each upscaler and each Retime Process does.
     - It lists only the choices that this computer has. It does not list Auto and Project Settings.
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
 - **Themes:**
@@ -427,11 +427,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Invert: b + (c − b) × (1 − α).
   - Measured in Resolve Studio 21.1.1: a ProRes 4444 with alpha and no tags is Straight.
   - vidcut reads the alpha channel of each file as Straight until `media.set` changes it.
-- **Super Scale** (pp. 288, 432–433; deviation [X91](deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)):
-  - Super Scale enlarges the pictures of a media item with a better upscaler before they are fitted.
+- **Upscale**, Super Scale in Resolve (pp. 288, 432–433; deviation [X91](deviations.md#x91-upscale-uses-the-upscaler-of-the-gpu)):
+  - Upscale enlarges the pictures of a media item with a better upscaler before they are fitted.
   - It is a setting of the media item. Thus it applies to every clip of that item (p. 433).
-  - Right-click the media in the pool, or use the Super Scale section of the Inspector.
-  - Super Scale is Off or On.
+  - Right-click the media in the pool, or use the Upscale section of the Inspector.
+  - Upscale is Off or On.
   - Its Upscaler is Project Settings, the default, AI or Classic. Project Settings has the upscaler of the project: Auto, AI or Classic.
     - AI is a neural network on the GPU. It has no settings.
     - Classic has a Sharpness of Low, Medium or High, which selects the upscaler.
@@ -440,10 +440,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - In an HDR timeline, AI Slow refuses HDR media, and the Inspector shows a warning (X98).
   - A placed picture is made at most 4 times as large as its source, before it is placed.
   - A picture that fills the frame takes the better upscaler for all of its enlargement.
-  - Super Scale works only where a picture is enlarged. A picture that is made smaller is scaled as before.
-  - View > Show Super Scale shows it in the viewer (`viewer.super_scale`). It is off by default, as it costs playback speed.
+  - Upscale works only where a picture is enlarged. A picture that is made smaller is scaled as before.
+  - View > Show Upscale shows it in the viewer (`viewer.upscale`). It is off by default, as it costs playback speed.
   - With AI, the viewer then shows the result of the AI upscaler, as the export makes it.
-  - `media.set` sets `super_scale`, `upscaler` and `sharpness`. With `download`, it downloads the weights first.
+  - `media.set` sets `upscale`, `upscaler` and `sharpness`. With `download`, it downloads the weights first.
 - **Relinking media** (pp. 668–669):
   - An item whose file is missing has the mark MISSING.
   - Its clips are red on the timeline (pp. 509, 530), and the viewer shows Media Offline.
@@ -575,10 +575,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - The right-click menu of the viewer opens a panel over the picture.
   - The panel has a group for each of these:
     - decoding, the picture and how it was made
-    - Super Scale and Retime Process
+    - Upscale and Retime Process
     - the viewer, playback, the kept pictures and the sound
   - The group How It Was Made tells about the picture on the screen, also when playback is paused.
-  - The Super Scale group shows when the clip under the playhead has Super Scale on. It names the upscaler and the factor.
+  - The Upscale group shows when the clip under the playhead has Upscale on. It names the upscaler and the factor.
   - `player stats` shows or hides the panel.
 
 ### 4.4 In/Out (pp. 691–693, 700)
@@ -1835,7 +1835,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
   - vidcut: `effects.add` refuses a generator. A drag of a card onto a generator does nothing, and the double-click and Add to Selected Clips skip it.
 - **Inspector** (vidcut, X70):
-  - The Inspector shows the effects of the first selected clip, after its Super Scale section. A change applies to that clip only.
+  - The Inspector shows the effects of the first selected clip, after its Upscale section. A change applies to that clip only.
   - Each effect is a section with an on/off box, Move Up, Move Down, Reset and Delete.
   - An effect that is off stays on the clip and does nothing.
   - On an effect that is on, Reset puts back the usual values and leaves it on.
@@ -4973,7 +4973,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Playback > Render Cache sets it. `project.set` with `render_cache` also sets it.
   - Each clip has a Render Cache value: Auto, On or Off.
     - The menu of a clip has Render Cache (p. 205). `clip.set` with `render_cache` also sets it.
-    - Off keeps the slow media and the AI Super Scale of the clip out of both modes.
+    - Off keeps the slow media and the AI Upscale of the clip out of both modes.
     - Off does not stop speed changes, Retime Processes, transitions, opacity and composite modes. Resolve caches these in its sequence cache, and no clip setting reaches it (p. 204).
     - With Off, a speed change of the clip renders only at the timeline level.
   - Each effect of a clip has a Render Cache check. It is off, unless set.
@@ -4983,7 +4983,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A video track can be out of the cache.
     - The menu of the track header has Exclude Track from Caching (p. 205). `track.set` with `render_cache` also sets it.
     - In User mode, the track gives none of its speed changes, Retime Processes, transitions, opacity and composite modes. Why: Resolve caches these in its sequence cache (p. 204). The setting is part of the User mode options of that cache (p. 205).
-    - Its clips set to On, its checked effects and its AI Super Scale still render.
+    - Its clips set to On, its checked effects and its AI Upscale still render.
     - The manual gives this setting for User mode only. Thus it does nothing in Smart mode.
   - Smart renders each part of the timeline that has one of these:
     - a clip set to On
@@ -4991,7 +4991,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - media that are slow to decode (X103)
     - a speed change
     - a Retime Process other than Nearest (X103)
-    - AI Super Scale (X103)
+    - AI Upscale (X103)
     - a transition
     - an opacity below 100%, or keyframes of the opacity
     - a composite mode other than Normal
@@ -5009,10 +5009,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - User renders the clips set to On and the checked effects. It also renders the kinds that Preferences turns on:
     - Transitions: off, unless set.
     - Composites: off, unless set. It includes opacity, as in Resolve.
-    - AI: on, unless set. It is AI Super Scale and the AI Retime Processes. It stands in for the Fusion effects of Resolve.
+    - AI: on, unless set. It is AI Upscale and the AI Retime Processes. It stands in for the Fusion effects of Resolve.
   - The cache has two levels, as in Resolve (pp. 203–204).
   - The clip level keeps the picture of one clip, before the tracks mix. It is the Render Cache Fusion Output of Resolve (p. 203).
-    - It holds the clips set to On, media that are slow to decode, speed changes and AI Super Scale.
+    - It holds the clips set to On, media that are slow to decode, speed changes and AI Upscale.
     - It holds stills too.
     - It holds a Retime Process other than Nearest, and the checked effects (p. 204).
       - It holds the frame at the size of the timeline. Why: a Retime Process and an effect make each frame at the size that the clip shows.
@@ -5024,7 +5024,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A move, a split, a trim, or a change of the opacity, the composite mode or an effect after the last checked effect keeps it.
     - A move, a split, a trim or an edit on another track keeps it.
     - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
-    - With AI Super Scale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
+    - With AI Upscale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
     - Media with an alpha channel is at the clip level only with ProRes 4444 or 4444 XQ (p. 201, X106). Its file then keeps the alpha channel.
       - With an Alpha Mode of None, it counts as media with no alpha channel.
       - With an Alpha Mode of Premultiplied, it stays at the timeline level. Why: a file keeps straight alpha, which cannot hold a color above its alpha.
@@ -5085,14 +5085,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Red: the mode renders this part. Blue: the part plays from the cache.
     - A part plays from the cache where its timeline level is cached. A part that needs only the clip level plays from the cache where each of its clips is cached.
     - The pointer over the line shows the reasons of the part.
-    - A Retime Process and AI Super Scale name their process, as Stats for Nerds does. Example: "Retime Process: Frame Blend".
+    - A Retime Process and AI Upscale name their process, as Stats for Nerds does. Example: "Retime Process: Frame Blend".
     - During the preview of a drag, a trim or a step of the history, the line is not shown. Why: the line is of the timeline before the change.
   - Stats for Nerds has a Render Cache row in How It Was Made.
     - It tells for the frame on screen: Cached, To render with the reasons, or Not needed.
     - For a picture from the cache, How It Was Made shows how each layer was made, and when the cache file was written.
     - For a picture from the cache, How It Was Made shows how each layer was made when the cache was written.
     - Cached then also tells when the cache file was written. Example: "Cached, written 2 min ago".
-  - For a picture from the cache, the Super Scale group names the AI upscaler that made it, from the render cache.
+  - For a picture from the cache, the Upscale group names the AI upscaler that made it, from the render cache.
   - The Retime Process group names the Retime Process in the same way.
   - `cache.status` gives the parts to render, their reasons and their cached frames, and the size on disk. `cache.delete` deletes.
   - `cache.list` gives the rows of Manage Render Cache. `cache.clear` deletes the cache of the given project files.
@@ -5123,7 +5123,7 @@ Resolve converts each clip into full-range, uncompressed 32-bit float data when 
 3. The input goes into the timeline color space: Resolve Color Management, or the ACES IDT.
 4. The input LUT.
 5. Deinterlace.
-6. Super Scale.
+6. Upscale.
 
 Then the compositing of the Fusion page.
 

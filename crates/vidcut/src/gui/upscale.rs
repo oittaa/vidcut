@@ -1,6 +1,6 @@
 use eframe::egui;
 use serde_json::{Value, json};
-use vidcut_core::model::{MediaUpscaler, ProjectUpscaler, Retime, Sharpness, SuperScale, Upscaler};
+use vidcut_core::model::{MediaUpscaler, ProjectUpscaler, Retime, Sharpness, Upscale, Upscaler};
 
 use super::workspace::Workspace;
 
@@ -72,7 +72,7 @@ pub(super) fn project_upscaler_text(u: ProjectUpscaler, label: &str) -> String {
     }
 }
 
-pub(super) fn described(s: SuperScale) -> String {
+pub(super) fn described(s: Upscale) -> String {
     match s.upscaler {
         Upscaler::Classic => format!("Classic, Sharpness {}", label_of(&SHARPNESS, s.sharpness)),
         u => label_of(&NAMES, u).to_string(),
@@ -100,7 +100,7 @@ fn does(u: Upscaler) -> &'static str {
 }
 
 pub(super) fn unfit<'a>(
-    s: SuperScale,
+    s: Upscale,
     media: impl IntoIterator<Item = &'a vidcut_core::model::Media>,
     timeline: Option<vidcut_core::model::Hdr>,
 ) -> Option<String> {
@@ -109,7 +109,7 @@ pub(super) fn unfit<'a>(
     }
     media
         .into_iter()
-        .find_map(|m| vidcut_av::super_scale::unfit(m, s.upscaler, timeline))
+        .find_map(|m| vidcut_av::upscale::unfit(m, s.upscaler, timeline))
         .map(|why| format!("{} can't take {why}", label_of(&NAMES, s.upscaler)))
 }
 
@@ -127,7 +127,7 @@ pub(super) fn needed(retimes: &[Retime], upscalers: &[Upscaler]) -> Vec<vidcut_a
         .chain(
             upscalers
                 .iter()
-                .flat_map(|u| vidcut_av::super_scale::needed(&dir, *u)),
+                .flat_map(|u| vidcut_av::upscale::needed(&dir, *u)),
         )
         .collect()
 }
@@ -150,8 +150,8 @@ impl Workspace {
         };
         if method == "media.set" {
             let media: Vec<String> = field(params, "media").unwrap_or_default();
-            let set = vidcut_core::ops::SuperScaleSet {
-                on: field(params, "super_scale"),
+            let set = vidcut_core::ops::UpscaleSet {
+                on: field(params, "upscale"),
                 sharpness: None,
                 upscaler: field(params, "upscaler"),
             };
@@ -192,7 +192,7 @@ impl Workspace {
         }
     }
 
-    pub(super) fn set_super_scale(&mut self, media: &[String], mut params: Value) {
+    pub(super) fn set_upscale(&mut self, media: &[String], mut params: Value) {
         params["media"] = json!(media);
         self.send_asking("media.set", params);
     }

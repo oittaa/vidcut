@@ -125,7 +125,7 @@ pub struct Settings {
     /// when `auto`.
     #[serde(default, skip_serializing_if = "ProjectRetime::is_auto")]
     pub retime: ProjectRetime,
-    /// The upscaler of Super Scale for the media that follow the project;
+    /// The upscaler for the media that follow the project;
     /// left out when `auto`.
     #[serde(default, skip_serializing_if = "ProjectUpscaler::is_auto")]
     pub upscaler: ProjectUpscaler,
@@ -454,11 +454,11 @@ pub struct Media {
     /// `straight`.
     #[serde(default, skip_serializing_if = "AlphaMode::is_straight")]
     pub alpha_mode: AlphaMode,
-    /// Super Scale: its pictures are enlarged with an AI upscaler or the
+    /// Upscale: its pictures are enlarged with an AI upscaler or the
     /// classic one, as much as they need, before they are fitted. Absent
     /// while it is off.
-    #[serde(default, skip_serializing_if = "MediaSuperScale::is_off")]
-    pub super_scale: MediaSuperScale,
+    #[serde(default, skip_serializing_if = "MediaUpscale::is_off")]
+    pub upscale: MediaUpscale,
     /// Source frames left out of every edit of this media (`media.leave_out`,
     /// Delete in the Transcription window), each `[start, end)`, in order and
     /// apart.
@@ -576,30 +576,30 @@ pub fn uncovered(a: i64, b: i64, spans: &[(i64, i64)]) -> Vec<(i64, i64)> {
     out
 }
 
-/// Super Scale of a media item: on or off, and its upscaler.
+/// Upscale of a media item: on or off, and its upscaler.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-pub struct MediaSuperScale {
+pub struct MediaUpscale {
     pub on: bool,
     pub sharpness: Sharpness,
     pub upscaler: MediaUpscaler,
 }
 
-impl MediaSuperScale {
+impl MediaUpscale {
     pub fn is_off(&self) -> bool {
         !self.on
     }
 }
 
-/// How Super Scale enlarges a picture, with the upscaler that runs on this
+/// How Upscale enlarges a picture, with the upscaler that runs on this
 /// computer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-pub struct SuperScale {
+pub struct Upscale {
     pub on: bool,
     pub sharpness: Sharpness,
     pub upscaler: Upscaler,
 }
 
-impl SuperScale {
+impl Upscale {
     pub fn is_off(&self) -> bool {
         !self.on
     }
@@ -609,7 +609,7 @@ impl SuperScale {
     }
 }
 
-/// The upscaler of Super Scale.
+/// The upscaler.
 #[derive(
     Debug,
     Clone,
@@ -648,7 +648,7 @@ pub enum Upscaler {
     Classic,
 }
 
-/// The upscaler of a media item's Super Scale: the project's, or one of
+/// The upscaler of a media item's Upscale: the project's, or one of
 /// its own.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -688,7 +688,7 @@ pub enum RenderCache {
     Off,
     /// The parts that are slow to make: the clips set to `on`, the effects
     /// with `render_cache`, slow media, speed changes, Retime Processes, AI
-    /// Super Scale, transitions, opacity and composite modes.
+    /// Upscale, transitions, opacity and composite modes.
     Smart,
     /// The clips set to `on`, the effects with `render_cache`, and the
     /// kinds that the preferences turn on. A track with `render_cache` off
@@ -720,7 +720,7 @@ pub enum ClipCache {
     Auto,
     /// Rendered in the Smart mode and in the User mode.
     On,
-    /// Its slow media and AI Super Scale are not rendered. Speed changes,
+    /// Its slow media and AI Upscale are not rendered. Speed changes,
     /// Retime Processes, transitions, opacity and composite modes still
     /// are.
     Off,
@@ -740,7 +740,7 @@ impl ClipCache {
     }
 }
 
-/// The project's upscaler of Super Scale, for the media that follow it.
+/// The project's upscaler, for the media that follow it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectUpscaler {
@@ -774,7 +774,7 @@ impl ProjectUpscaler {
     }
 }
 
-/// How much detail Super Scale gives the enlarged pictures.
+/// How much detail Upscale gives the enlarged pictures.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Sharpness {
@@ -1854,7 +1854,7 @@ pub struct Clip {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     /// Its Render Cache: `on` renders it in both modes. `off` keeps its
-    /// slow media and AI Super Scale out of both. Left out at `auto`.
+    /// slow media and AI Upscale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
     /// Its motion paths: where things in its picture are on its source
