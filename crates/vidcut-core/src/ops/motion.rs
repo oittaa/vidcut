@@ -551,7 +551,13 @@ pub fn tracked(
         let frames = samples.iter().map(|s| s.frame);
         let covered = frames.clone().min().zip(frames.max());
         let stays = |s: &&PathSample| covered.is_none_or(|(a, b)| s.frame < a || s.frame > b);
+        let edges = covered.into_iter().flat_map(|(a, b)| [a - 1, b + 1]);
+        let pinned: Vec<PathSample> = edges
+            .filter(|f| !old.samples.iter().any(|s| s.frame == *f))
+            .filter_map(|f| Some(super::comp::sample_of(f, &old.area_at(f as f64)?)))
+            .collect();
         samples.extend(old.samples.iter().filter(stays).cloned());
+        samples.extend(pinned);
         samples.sort_by_key(|s| s.frame);
     }
     let samples = motion::simplified(&samples);

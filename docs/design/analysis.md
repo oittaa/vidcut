@@ -168,6 +168,7 @@ flowchart TD
   - A path with `tracked` that only this pattern has gets the new samples. It keeps its id and its name.
   - Else the pattern gets a new path, with `tracked` and the name of the pattern. The old path stays as it is.
   - The old path keeps its samples on the frames that the track did not reach.
+  - A stored path is simplified. Thus the old box goes in as a sample on the frame before the track and on the frame after it. The frames between them and the next old sample keep their boxes.
 - In a GUI, `Live::measuring` measures first (`editor::track_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model file is `catalog::VITTRACK_ONNX`. `tracking::get_ready` fetches it when the request has `download`.
 

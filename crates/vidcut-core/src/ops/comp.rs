@@ -756,7 +756,7 @@ fn moved_path(
     Ok(())
 }
 
-fn sample_of(frame: i64, a: &crate::motion::Area) -> PathSample {
+pub(super) fn sample_of(frame: i64, a: &crate::motion::Area) -> PathSample {
     let round = |v: f64| (v * 1e5).round() / 1e5;
     PathSample {
         frame,
