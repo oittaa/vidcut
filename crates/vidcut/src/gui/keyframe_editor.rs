@@ -1483,7 +1483,7 @@ impl Workspace {
         Some(clip)
     }
 
-    pub(super) fn tray_height(&self, ui: &egui::Ui) -> f32 {
+    pub(super) fn tray_height(&self, spacing: &egui::style::Spacing) -> f32 {
         if !self.key_tray {
             return 0.0;
         }
@@ -1491,7 +1491,7 @@ impl Workspace {
             .project_shared()
             .and_then(|p| self.first_clip(&p))
             .map_or(0, |c| lanes_of(&c, true).len());
-        let gap = ui.spacing().item_spacing.y;
+        let gap = spacing.item_spacing.y;
         rows.clamp(1, TRAY_ROWS) as f32 * (TRACK_H + gap) + gap
     }
 
