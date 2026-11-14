@@ -499,6 +499,7 @@ Writing:
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
   - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`)
   - its `effects`, in their order: each an `Effect` with an `EffectKind`, a `GaussianBlur`, a `MosaicBlur`, a `Glow`, a `FilmGrain`, a `Vignette` or a `Sharpen` ([export](export.md#effects))
+  - its `composition`: the nodes that work on its own picture before all of the above ([compositions](#compositions))
 - Each value is left out at its usual value. A picture that `Picture::is_usual` accepts is only fitted into the frame.
 - Each value of `keyframes::PictureValue` can hold `Keyframe`s beside the plain value. `Picture::is_usual` is false while a value has keyframes.
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
@@ -512,29 +513,10 @@ Writing:
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
   - `ops::picture::effect_checked` checks an effect. It is part of `ops::picture::checked`.
 - `ops::effect` holds the edits of the effects: `effects.add`, `effects.set`, `effects.key`, `effects.reset`, `effects.remove` and `effects.move`.
-- An `Effect` can have an `EffectArea` ([deviation X166](../deviations.md#x166-an-effect-has-an-area)). The effect then works only in that part of the picture.
-  - The area holds an `AreaShape`, a `center`, a `size`, a `rotation`, a `softness` and `invert`.
-  - A `polygon` also holds its `points`, as fractions of the box of the area (`EffectArea::corners`). At most `POINTS_KEPT` points.
-  - The area is a part of a base box. The base box is the whole source picture (`Area::WHOLE`), or the area of a motion path.
-  - With `follows`, the area names a motion path of the same clip. The base box is then the area of that path at each frame ([export](export.md#placed-pictures)).
-  - `effects.set` refuses a `follows` that names no path of the clip. `motion.remove` refuses a path that an area follows.
-  - `effects.set` takes an `AreaChange`. Its fields replace their own (`AreaChange::on`). Null takes the area off, with the keyframes of the area.
-  - `effects.reset` keeps the area and the keyframes of the area. `ops::picture::effect_checked` checks the area (`area_checked`).
-  - The center, the size, the rotation and the softness of the area take keyframes. They are six values of `EffectValue` (`EffectValue::AREA`).
-    - Their keyframes are in the `keys` of the effect, as the keyframes of its other values are.
-    - Why: the requests, a retime and the OTIO metadata then have one path for each keyframe of an effect.
-    - An effect has these values only while it has an area (`Effect::values`).
-    - `Effect::sampled` writes them into the area at a frame. `place::Masking` then reads that area ([export](export.md#effects)).
-    - Thus keyframes on the center, the size and the rotation move the whole shape. With `follows`, they count from the box of the path at that frame.
-    - `effects.key` with `area` works only on these values. Without `area`, it works only on the other values (`Effect::toggle_keys`).
-    - `effects.set` puts a keyframe on each of these values that the `AreaChange` names and that has keyframes (`named_values`).
-    - The points of a polygon take no keyframes ([todo](../todo/motion-tracking.md)).
-  - `motion.track` refuses an area with keyframes on its center, its size or its rotation (`ops::motion::start`). Why: a track puts those values back at their usual values.
 - The `keys` of an `Effect` hold one `EffectKeys` for each `EffectValue` with keyframes, sorted by value.
   - A point (Position, Center) keeps X in `keys` and Y in `y`, as `Picture` keeps its Position.
   - The functions of `keyframes` that split, hold, scale, move and drop keys keep the two lists in step (`split_channel`, `move_channel`).
-  - `effect_keys` maps each `EffectValue` to its place in the kind of effect, or in the area. An `EffectValue` of another kind has no place, and `ops::picture::effect_checked` refuses it.
-  - `effect_checked` also refuses a value of the area on an effect with no area.
+  - `effect_keys` maps each `EffectValue` to its place in the kind of effect. An `EffectValue` of another kind has no place, and `ops::picture::effect_checked` refuses it.
   - `effect_checked` checks each keyframe as a plain value of the effect.
   - A request names an effect by its place in the list of the clip, from 0.
   - `picture.clear` of all the tools keeps the effects.
@@ -545,25 +527,69 @@ Writing:
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
 - The shader of the viewer and the export holds the sums of the composite modes (D75, `mixed` in `picture.wgsl`).
 
+## Compositions
+
+- A `Picture` can hold a `Composition`: the nodes that work on the clip's own picture, before its crop and its transform ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
+- Each `Node` has a `name`, a `Tool`, its joins, a `place` in the node editor and its `keys`.
+  - `Tool::MediaIn` is the clip's own picture. `Tool::MediaOut` is the picture that the clip shows.
+  - `Tool::Blur` holds a `Blur`. `Tool::Effect` holds an `EffectKind`, one of the kinds of the clip effects.
+  - `Tool::Ellipse`, `Tool::Rectangle` and `Tool::Polygon` hold a `Mask`.
+  - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values. `Tool::flows` gives the tools that pass a picture on, and the Tracker is one of them.
+  - A `Pattern` has a name, its own box, an offset and the id of its motion path. On a frame, its box comes from its path (`Pattern::area_at`).
+  - The Center of a `Mask` can follow a pattern of a Tracker of the same composition (`Mask.connect`, a `Connect`).
+    - The center is then the middle of the pattern plus its offset. With `size`, the mask also takes the box of the pattern as its picture.
+    - `ops::picture::connect_checked` refuses a connection to a pattern that is not there, and a connected mask with its own center.
+    - `comp.set` refuses a connection of a Center with keyframes. A rename of the Tracker renames the connection. A removal of the Tracker or of the pattern takes it off.
+  - `input` names the node whose picture comes in. `effect_mask` names the last mask of a chain of masks.
+- A composition counts the frames of the file of its clip. `Composition::start` is the frame of the file that is its frame 0.
+  - `ops::comp` sets it to the In of the clip when it makes the composition. A later trim does not change it.
+  - `render::FileClock` takes a keyframe position of the clip to the frame of the file that it shows. It follows the speed of the clip and the two frame rates.
+  - `composition::Frames` gives the frames of a composition: the first and the last frame of the source, the In and the Out.
+  - `Frames::time` and `Frames::at` take a frame of the composition to the timeline and back.
+- The joins are names, not places in the list. Why: a request, the GUI and the OTIO metadata then name a node in one way, and a removal moves no other join.
+- The module `composition` reads a composition:
+  - `Composition::chain` follows the inputs from the MediaOut node back to the MediaIn node. It gives the tools in their order, or none when it does not get to the MediaIn node.
+  - `Composition::masks_of` follows the effect masks of a node back. It gives the masks in their order.
+  - `Composition::loops` finds a loop of joins.
+  - `Composition::plain` is the composition of a clip without one: `MediaIn1` joined to `MediaOut1`.
+  - `Composition::free_name` gives the name of the tool with the first free number. `Composition::copy_name` adds `_` and the first free number from 1.
+  - `composition::cleaned` keeps letters, digits and `_`, with no digit first.
+- `ops::comp` holds the edits: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`.
+  - A clip without a composition gets `Composition::plain` on its first `comp.add` or `comp.paste`.
+  - `ops::comp::paste` puts the copies into a clone of the composition first. Thus a copy that is refused changes nothing.
+  - A pasted Tracker keeps only the paths that the clip has (`kept_paths`). A pasted mask keeps its connection when its Tracker is there (`kept_connect`).
+  - `ops::comp::Landing` tells where the copies go: after a node, at a place, over a node, or under all the nodes.
+  - Over a node, one copy takes its place and its joins (`replaced`). A join that the copy cannot take goes.
+  - `comp.set` takes a `NodeChange`. Its `values` are a `KindChange`: the values of an effect's kind, which `effects.set` also takes in its `EffectChange`.
+  - A blur takes its `size`, a mask its `center` and `invert`, and a Gaussian Blur node its `blur_alpha`, from the `KindChange`.
+  - Why: the names in the request are then those of the model. Each name has one field, and thus one text in the schema and in `--help`.
+- `ops::picture::composition_checked` checks the names, the joins, the loops and each node (`ops::picture::node_checked`). It is part of `ops::picture::checked`.
+- The keyframes of a node are in its `keys`, one `EffectKeys` for each `EffectValue` with keyframes.
+  - The trait `effect_keys::Keyed` holds the keyframe work of an `Effect` and of a `Node`: read, write, sample, split, hold, scale, retime and retarget.
+  - An `Effect` and a `Node` give only the slots of their values (`Keyed::read_point`, `Keyed::write`). Why: then one copy of the keyframe work serves both.
+  - The functions of `Picture` that work on keyframes do not change the keys of the nodes. Why: the keys are on frames of the file, and a trim or a speed change keeps those frames.
+- `picture.clear` of all the tools keeps the composition. `PictureTool::Composition` takes it off.
+- The draw of a composition is in [export](export.md#compositions).
+
 ## Motion paths
 
 - A clip of footage, a still or an image sequence can carry motion paths in `Clip.motion` ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
   - `ops::motion::takes` tells which clips take them: not titles, generators, compound clips or sound.
-- A `MotionPath` tells where one area of the source picture is on the source frames of the clip. It has an id, a name and its samples.
+- A `MotionPath` tells where one thing of the source picture is on the frames of the file of the clip: its box. It has an id, a name and its samples.
   - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). `motion.find` with `replace` takes off the paths of that subject.
-    - A path that the area of an effect or a title follows stays (`followed`).
+    - A path that a pattern or a title has stays (`followed`).
     - A found thing that such a path already follows gets no second path (`same_thing`). Its samples go into that path (`merged`).
     - Between the first and the last new sample, the path keeps only the new samples. Outside them, it keeps its old samples.
     - Thus a second find adds the new things, and a kept path follows its thing on the frames of the new find.
-  - A path that `motion.track` made has `tracked`. A later track of the same area writes its samples again, and the path keeps its id and its name.
-- A `PathSample` holds the source `frame`, the `center` and the `size` of the area as fractions of the source picture, and the `rotation`.
-  - The `frame` counts as `source_in` does, at each speed of the clip (`Clip::source_at`).
-  - Why: a thing is at one place on a source picture, at any speed that plays that picture.
-  - Thus a trim, a slip, a split, a copy and a speed change do not change a path.
-  - `shift_source` moves the samples with `source_in` when the limits of a subclip change.
+  - A path that `motion.track` made has `tracked`. A later track of the same pattern writes its samples again, and the path keeps its id and its name.
+- A `PathSample` holds the `frame` of the file, the `center` and the `size` of the box as fractions of the source picture, and the `rotation`.
+  - The `frame` goes at the frame rate of the file. It counts from the frame where `source_in` counts from. `FileClock::file` takes a source frame to it.
+  - Why: a thing is at one place on a picture of the file, at any speed that plays that picture. A track and a find look at each frame of the file.
+  - Thus a trim, a slip, a split, a copy and a speed change do not change a path. A new frame rate of the timeline does not change it.
+  - `shift_source` moves the samples when the limits of a subclip change. The step in frames of the file is the step of `source_in` at the rate of the file, rounded.
 - `MotionPath::area_at` gives the `motion::Area` on a frame.
-  - A path lasts from its first sample to its last. Before and after them it has no area. Between two samples, the area goes in a line.
-- `MotionPath::base_at` gives the area that an effect follows on a frame.
+  - A path lasts from its first sample to its last. Before and after them it has no box. Between two samples, the box goes in a line.
+- `MotionPath::base_at` gives the box of a pattern on a frame.
   - On a path with `tracked`, it gives the first or the last sample outside the samples (`MotionPath::held_at`). Other paths use `area_at`.
   - Why: a tracked window holds its first and its last place. A Magic Mask stroke ends where its thing goes off the picture.
 - A path is not keyframes. Why: a new path must not remove the keyframes that the user set, and one path can move several things.
@@ -573,7 +599,9 @@ Writing:
 - A clip has at most `PATHS_KEPT` paths, and a path has at most `SAMPLES_KEPT` samples.
 - `motion::problem` is the check that the requests, `ops::paste` and `validate::violations` share.
 - `timeline.get` names the paths of a clip in `motion`.
-- The area of an effect can follow a path ([pictures](#pictures)). `ops::motion::violation` refuses an area that follows a path that the clip does not have.
+- A pattern of a Tracker can have a path ([compositions](#compositions)). `ops::motion::violation` refuses a pattern with a path that the clip does not have.
+  - `motion.remove` refuses a path that a pattern has.
+  - A path with `tracked` goes when nothing else uses it (`ops::motion::unused`). This occurs at a removal of its pattern, its Tracker or the composition. A trim of all its samples does the same.
 - A title can follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)). `Title.follows` holds a `Follow`: the id of that clip and the id of the path.
   - `ops::motion::follow` sets it for `motion.follow`. It names the clip that `under` gives, as `ops::motion::settle` does.
     - It puts the title on the thing: the position becomes the middle. `Title::moved` moves the upper line of a lower third by the same amount.
@@ -587,10 +615,10 @@ Writing:
   - `ops::motion::follow_violation` is the check of `validate::violations`.
   - `otio::titles::read` gives a title no `follows`. Why: an import can give the clips new ids.
   - The [export design](export.md#titles) tells how the plan places such a title.
-- An OTIO file keeps the paths of a clip in the `vidcut` metadata of its video item, on the same source frames.
+- An OTIO file keeps the paths of a clip in the `vidcut` metadata of its video item, on the same frames of the file.
   - An import reads them back only when `motion::problem` accepts them (`our_motion`).
-  - An import at another frame rate moves the samples to the project's rate (`motion::rescale`). Two samples that land on one frame leave the first.
-  - `our_picture` reads the area of an effect with no `follows` when the file does not hold that path.
+  - An import at another frame rate keeps the samples as they are. Why: the frames of a file do not change with the frame rate of the timeline.
+  - `our_picture` reads a mask with no `follows` when the file does not hold that path.
 
 ## Ducking
 

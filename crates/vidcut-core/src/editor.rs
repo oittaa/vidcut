@@ -175,10 +175,11 @@ pub trait Env {
     fn tracked(
         &self,
         media: &Media,
+        plan: &RenderPlan,
         follow: crate::analysis::Follow,
         download: bool,
-    ) -> Result<Arc<Detections>> {
-        let _ = (media, follow, download);
+    ) -> Result<Arc<crate::analysis::Tracked>> {
+        let _ = (media, plan, follow, download);
         Err(Error::usage(
             "a thing in a picture is followed by the vidcut program",
         ))
@@ -2278,6 +2279,11 @@ fn length(p: &Project, t: &TimeSpec) -> Result<i64> {
     Ok(ctx(p, None).duration(t)?)
 }
 
+fn comp_frame(p: &Project, id: &str, frame: Option<i64>, playhead: Option<i64>) -> Option<i64> {
+    let c = p.clip(id)?;
+    frame.or_else(|| Some(crate::composition::Frames::of(p, c).at(playhead?)))
+}
+
 pub fn resolve_clip(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<String> {
     if let Some((track, at)) = r.split_once('@') {
         let t = p
@@ -4349,11 +4355,10 @@ fn mutate(
             effect,
             at,
             ease,
-            area,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let at = resolve(p, at, playhead)?;
-            ops::effect::key(p, &id, *effect, at, *ease, *area)?
+            ops::effect::key(p, &id, *effect, at, *ease)?
         }
         Request::EffectsReset { clip, effect } => {
             let id = resolve_clip(p, clip, playhead)?;
@@ -4368,6 +4373,104 @@ fn mutate(
         Request::EffectsMove { clip, effect, to } => {
             let id = resolve_clip(p, clip, playhead)?;
             ops::effect::shift(p, &id, *effect, *to)?;
+            Value::Null
+        }
+        Request::CompAdd { clip, tool, after } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::add(p, &id, *tool, after.as_deref())?
+        }
+        Request::CompSet {
+            clip,
+            node,
+            frame,
+            change,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let frame = comp_frame(p, &id, *frame, playhead);
+            ops::comp::set(p, &id, node, change, frame)?;
+            Value::Null
+        }
+        Request::CompConnect {
+            clip,
+            node,
+            input,
+            from,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::connect(p, &id, node, *input, from.as_deref())?;
+            Value::Null
+        }
+        Request::CompRename { clip, node, to } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::rename(p, &id, node, to)?
+        }
+        Request::CompRemove { clip, node } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::remove(p, &id, node)?;
+            Value::Null
+        }
+        Request::CompPaste {
+            clip,
+            node,
+            from,
+            after,
+            place,
+            replace,
+            copy,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let to = match (after.as_deref(), place, replace.as_deref()) {
+                (Some(a), None, None) => ops::comp::Landing::After(a),
+                (None, Some(at), None) => ops::comp::Landing::At(*at),
+                (None, None, Some(r)) => ops::comp::Landing::Over(r),
+                (None, None, None) => ops::comp::Landing::Apart,
+                _ => {
+                    return Err(Error::usage(
+                        "comp.paste takes one of `after`, `place` and `replace`",
+                    ));
+                }
+            };
+            let pasted = match (copy.as_slice(), node) {
+                ([_, ..], None) if from.is_none() => copy.clone(),
+                ([], Some(name)) => {
+                    let source = match from {
+                        Some(f) => resolve_clip(p, f, playhead)?,
+                        None => id.clone(),
+                    };
+                    vec![ops::comp::copied(p, &source, name)?]
+                }
+                _ => {
+                    return Err(Error::usage(
+                        "comp.paste takes a `node`, with `from` or without, or a `copy`",
+                    ));
+                }
+            };
+            ops::comp::paste(p, &id, pasted, to)?
+        }
+        Request::CompKey {
+            clip,
+            node,
+            frame,
+            value,
+            ease,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let frame = comp_frame(p, &id, *frame, playhead)
+                .ok_or_else(|| Error::usage("comp.key needs `frame`, or a playhead"))?;
+            ops::comp::key(p, &id, node, frame, (*value, *ease))?
+        }
+        Request::CompReset { clip, node } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::reset(p, &id, node)?;
+            Value::Null
+        }
+        Request::CompLoop {
+            clip,
+            on,
+            ping_pong,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::comp::looping(p, &id, *on, *ping_pong)?;
             Value::Null
         }
         Request::MotionAdd {
@@ -4412,6 +4515,7 @@ fn mutate(
             wait,
             shortest,
             steady,
+            tracker,
         } => {
             let usual = crate::motion::Join::of(*subject);
             let rules = crate::motion::Join {
@@ -4433,53 +4537,62 @@ fn mutate(
                 )));
             }
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let fps = p.settings.fps.as_f64();
+            if let Some(tracker) = tracker {
+                let [id] = ids.as_slice() else {
+                    return Err(Error::usage(
+                        "motion.find with a tracker (--tracker) takes one clip",
+                    ));
+                };
+                ops::motion::tracker_checked(p, id, tracker)?;
+            }
             let mut looks = Vec::new();
             for id in &ids {
-                let frames = ops::motion::findable(p, id, *subject, *replace)?;
-                let media = p.clip(id).and_then(|c| p.media(&c.media)).cloned();
-                let media = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
-                looks.push((id, media, frames));
+                ops::motion::findable(p, id, *subject, *replace)?;
+                let c = p.clip(id);
+                let media = c.and_then(|c| Some((p.media(&c.media).cloned()?, c)));
+                let (media, c) =
+                    media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
+                let (frames, rate) = ops::motion::file_frames(p, c);
+                looks.push((id, media, frames, rate));
             }
             let mut out = Vec::new();
-            for (id, media, frames) in looks {
+            for (id, media, frames, rate) in looks {
                 let look = Look {
                     side: *size,
-                    ..subject_look(&media, fps, frames)
+                    ..subject_look(&media, rate, frames)
                 };
                 let found = env.subjects(&media, *subject, look, *download)?;
-                let tracks = crate::motion::joined(&found, media.origin(), fps, frames, &rules);
-                out.push(ops::motion::found(p, id, *subject, tracks)?);
+                let tracks = crate::motion::joined(&found, media.origin(), rate, frames, &rules);
+                let to = (*subject, tracker.as_deref());
+                out.push(ops::motion::found(p, id, to, tracks)?);
             }
             json!({ "subject": subject, "clips": out })
         }
         Request::MotionTrack {
             clip,
-            effect,
-            at,
+            node,
+            pattern,
+            frame,
             way,
             download,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            let (media, start, follow) = track_start(p, &id, *effect, at.as_ref(), playhead, *way)?;
-            let found = env.tracked(&media, follow, *download)?;
-            let fps = p.settings.fps.as_f64();
-            let (origin, frames) = (media.origin(), start.frames);
+            let k = pattern.unwrap_or(1);
+            let on = (node.as_str(), k, *frame);
+            let (media, start, plan, follow) = track_start(p, &id, on, playhead, *way)?;
+            let found = env.tracked(&media, &plan, follow, *download)?;
             let (samples, score) =
-                crate::motion::followed(&found, origin, fps, frames, &start.own, start.bounds);
-            let ends = samples.first().zip(samples.last());
-            let (first, last) =
-                ends.map_or((start.frame, start.frame), |(a, b)| (a.frame, b.frame));
-            let stop = |on: bool, frame: i64| match on {
-                false => "off",
-                true if frame < frames.0 || frame >= frames.1 => "clip",
-                true => crate::motion::stopped(&found, origin, fps, frame),
+                crate::motion::followed(&found, start.base, &start.own, start.bounds);
+            let stop = |on: bool, reached: bool| match (on, reached) {
+                (false, _) => "off",
+                (true, true) => "clip",
+                (true, false) => "stopped",
             };
             let stops = (
-                stop(way.backward(), first - 1),
-                stop(way.forward(), last + 1),
+                stop(way.backward(), found.first <= follow.frames.0),
+                stop(way.forward(), found.end() >= follow.frames.1),
             );
-            let mut out = ops::motion::tracked(p, &id, *effect, (&start, *way), samples)?;
+            let mut out = ops::motion::tracked(p, &id, (node, k), (&start, *way), samples)?;
             out["clip"] = json!(id);
             out["score"] = json!(score);
             out["backward"] = json!(stops.0);
@@ -5686,7 +5799,6 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
             if let Some(picture) = c.picture.as_mut() {
                 picture.scale_times(&conv, &|_| ratio);
             }
-            crate::motion::rescale(&mut c.motion, conv);
             if let Some(title) = c.title.as_mut().filter(|t| t.is_keyed()) {
                 title.each_line(|line| {
                     let mut picture = line.as_picture();
@@ -6934,37 +7046,40 @@ fn subject_look(media: &Media, fps: f64, frames: (i64, i64)) -> Look {
 fn track_start(
     p: &Project,
     id: &str,
-    effect: usize,
-    at: Option<&TimeSpec>,
+    (tracker, k, frame): (&str, u32, Option<i64>),
     playhead: Option<i64>,
     way: crate::model::TrackWay,
-) -> Result<(Media, ops::motion::Start, crate::analysis::Follow)> {
-    let at = match at {
-        Some(t) => resolve(p, t, playhead)?,
-        None => playhead
-            .ok_or_else(|| Error::usage("motion.track needs `at` (--at): there is no playhead"))?,
-    };
-    let start = ops::motion::start(p, id, effect, at)?;
+) -> Result<(
+    Media,
+    ops::motion::Start,
+    RenderPlan,
+    crate::analysis::Follow,
+)> {
+    let frame = comp_frame(p, id, frame, playhead).ok_or_else(|| {
+        Error::usage("motion.track needs `frame` (--frame): there is no playhead")
+    })?;
+    let start = ops::motion::start(p, id, tracker, k, frame)?;
     let media = p.clip(id).and_then(|c| p.media(&c.media)).cloned();
     let media = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
-    let fps = p.settings.fps.as_f64();
+    let plan = crate::render::node_input(p, id, tracker)?;
     let follow = crate::analysis::Follow {
-        look: crate::motion::look(media.origin(), fps, start.frames),
-        at: crate::motion::shown_time(media.origin(), fps, start.frame),
+        at: start.frame - start.base,
+        frames: (start.frames.0 - start.base, start.frames.1 - start.base),
         area: start.bounds.map(|v| v as f32),
         backward: way.backward(),
         forward: way.forward(),
     };
-    Ok((media, start, follow))
+    Ok((media, start, plan, follow))
 }
 
-pub type TrackLook = (Media, crate::analysis::Follow, bool);
+pub type TrackLook = (Media, RenderPlan, crate::analysis::Follow, bool);
 
 pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackLook> {
     let Request::MotionTrack {
         clip,
-        effect,
-        at,
+        node,
+        pattern,
+        frame,
         way,
         download,
     } = request
@@ -6972,9 +7087,10 @@ pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec
         return Vec::new();
     };
     let id = resolve_clip(p, clip, playhead).ok();
-    let start = id.and_then(|id| track_start(p, &id, *effect, at.as_ref(), playhead, *way).ok());
+    let on = (node.as_str(), pattern.unwrap_or(1), *frame);
+    let start = id.and_then(|id| track_start(p, &id, on, playhead, *way).ok());
     start
-        .map(|(media, _, follow)| (media, follow, *download))
+        .map(|(media, _, plan, follow)| (media, plan, follow, *download))
         .into_iter()
         .collect()
 }
@@ -6990,16 +7106,16 @@ pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> V
     else {
         return Vec::new();
     };
-    let fps = p.settings.fps.as_f64();
     let ids = resolve_clips(p, &clips.to_vec(), playhead).unwrap_or_default();
     let clips = ids.iter().filter_map(|id| p.clip(id));
     clips
         .filter(|c| ops::motion::takes(c))
         .filter_map(|c| {
             let media = p.media(&c.media)?;
+            let (frames, rate) = ops::motion::file_frames(p, c);
             let look = Look {
                 side: *size,
-                ..subject_look(media, fps, c.shown())
+                ..subject_look(media, rate, frames)
             };
             Some((media.clone(), *subject, look, *download))
         })
@@ -7376,6 +7492,10 @@ pub fn query(
                 .map(|(t, c)| {
                     let mut v = clip_json(p, c, p.media(&c.media), &t.id);
                     v["source_frame"] = json!(c.source_at(at));
+                    if ops::motion::takes(c) {
+                        let clock = crate::render::FileClock::of(p, c);
+                        v["file_frame"] = json!(clock.file(c.source_at(at)));
+                    }
                     v
                 })
                 .collect();

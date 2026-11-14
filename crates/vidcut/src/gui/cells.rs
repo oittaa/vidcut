@@ -83,6 +83,16 @@ impl Cells {
 
     pub fn show(&mut self, i: usize, p: &Project, piece: &VideoPiece, speed: f64) -> Option<Shown> {
         let (plan, frame) = plan(p, piece)?;
+        self.show_plan(i, plan, frame, speed)
+    }
+
+    pub fn show_plan(
+        &mut self,
+        i: usize,
+        plan: RenderPlan,
+        frame: i64,
+        speed: f64,
+    ) -> Option<Shown> {
         let format = |plan: &RenderPlan| (plan.sample_rate, plan.channels);
         if self.cells.len() <= i {
             self.cells.resize_with(i + 1, || None);

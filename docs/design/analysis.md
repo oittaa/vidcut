@@ -126,7 +126,7 @@ flowchart TD
   - `motion::simplified` keeps the first sample, the last sample, and each sample that the line between its kept neighbors misses.
     - A miss is more than `SLACK` of the size of the box, in the center or in the size, or more than `TURN_SLACK` degrees.
     - Why: the project file holds each sample, and vidcut writes that file after each edit.
-    - Thus an area of 1.2 times the box of a path covers the face on each frame where the model found it.
+    - Thus a mask of 1.2 times the box of a path covers the face on each frame where the model found it.
   - `FoundPath` gives the gaps of a path from its boxes before that step, and the mean of their scores.
 - A still has one picture. `subject_look` asks for it once, and each frame of the clip takes its boxes.
 - `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the subject, the model file, the rules of its model and the `Look` (`subjects::name`).
@@ -140,27 +140,33 @@ flowchart TD
 
 ## Tracks
 
-- `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
-- `ops::motion::start` gives the box to follow: the bounds of the area on the first frame of the track (`Area::within`, `Area::bounds`).
+- `motion.track` tracks a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
+- `ops::motion::start` gives the box to follow: the box of the pattern on the first frame of the track (`Pattern::area_at`).
+  - Without a box of its path there, it is the own box of the pattern (`Pattern::own`).
+  - The frames of a track are frames of the file (`Frames::file`), from the In to the Out of the clip.
+- `render::node_input` gives the picture that the track reads: the composition up to the input of the Tracker (`Composition::cut_at`).
+  - The plan has one frame for each frame of the file, at the rate of the file.
+  - Why: the Tracker of the spec tracks the picture on its input, on each frame of the file.
 - `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:
-  - It reads the pictures that `subjects::find` reads: the first decoded frame at or after each time of the `Look`.
-  - `Seeing::start` chooses the size of the pictures: the search area of the model then has about its own size. The longer side is from 320 to 1280 pixels.
+  - `Reader` reads the frames of the plan as one stream, at a working size.
+  - `working` chooses that size: the search area of the model then has about its own size. The longer side is from 320 to 1280 pixels.
   - `Tracker::start` cuts the template around the box. `Tracker::step` cuts the search area around the last box, and takes the place with the best score.
     - The crops, the values of the picture and the window are those of the tracker of OpenCV for this model.
-  - A score under `tracking::LOST` ends the track. A shot change ends it too (`SCENE_SCORE`, as in `motion.find`).
-  - For the way backward, `backward` reads the pictures before the first frame in parts, from the last part to the first. A part holds at most `PART_BYTES` of pictures.
-    - `Shots::go` seeks to a part, and reads `SEED` pictures before it. Thus the scene score of its first picture is right.
-      - The pictures before the first time of the `Look` have slots below 0. A track does not keep them.
+  - The track goes forward first, then backward. It ends at the In, at the Out, or when the user cancels its job.
+    - A lost thing or a shot change does not end it, as in the spec.
+  - For the way backward, `Reader::part` reads the pictures before the first frame in parts, from the last part to the first. A part holds at most `PART_BYTES` of pictures.
     - Why: a track holds only one part in memory, however long the shot is.
-  - `Shown` reports the progress of both ways: the time that the track covered, as a share of the time that it can cover.
-  - `Follow` holds the `Look`, the first time, the box and the ways.
-- The result is a `Detections` with one box on each picture of the track, and no box on the other pictures (`laid`).
-  - Thus a track shares the disk cache of `motion.find` (`AvEnv::tracked`). `tracking::name` gives the model file and `LOST` to the name of the file.
-- `motion::followed` makes the samples: the box of the area, moved and scaled with the box of the track. `motion::stopped` tells why a track ended.
-- `ops::motion::tracked` stores the samples. The area then follows the path by its id, with no offset.
-  - A path with `tracked` that only this area follows gets the new samples. It keeps its id and its name.
-  - Else the area gets a new path, with `tracked` and the name Track and a number. The path that it followed stays as it is.
-  - A track of one way keeps the samples of the other side of a track that the area followed (`TrackWay`).
+  - `Shown` reports the progress of both ways.
+  - `Follow` holds the first frame, the frames of the track, the box and the ways.
+- The result is a `Tracked`: its first frame and one box for each frame.
+  - A cancelled track gives the boxes that it found, with `whole` off.
+  - `AvEnv::tracked` keeps a whole track in the disk cache. The key has `tracking::name`, the digest of the plan and the `Follow`.
+  - A cancelled track goes to `STOPPED`, for the edit after its job only. Thus a new track of the same frames runs again.
+- `motion::followed` makes the samples: the box of the pattern, moved and scaled with the box of the track.
+- `ops::motion::tracked` stores the samples, and the pattern gets the path (`Pattern.path`).
+  - A path with `tracked` that only this pattern has gets the new samples. It keeps its id and its name.
+  - Else the pattern gets a new path, with `tracked` and the name of the pattern. The old path stays as it is.
+  - A track of one way keeps the samples of the other side of the old track (`TrackWay`).
 - In a GUI, `Live::measuring` measures first (`editor::track_looks`). Headless, `work_first` measures on `vidcut-subjects`.
 - The model file is `catalog::VITTRACK_ONNX`. `tracking::get_ready` fetches it when the request has `download`.
 

@@ -1,0 +1,687 @@
+use std::collections::HashSet;
+
+use crate::model::{
+    Blur, BlurClipping, BlurFilter, Clip, Composition, Connect, EffectKind, EffectType, Mask,
+    MotionPath, Node, Pattern, Project, Tool, ToolType, Tracker,
+};
+use crate::motion::Area;
+use crate::render::FileClock;
+
+pub const MEDIA_IN: &str = "MediaIn1";
+pub const MEDIA_OUT: &str = "MediaOut1";
+
+impl Default for Blur {
+    fn default() -> Self {
+        Self {
+            filter: None,
+            size: None,
+            lock_xy: true,
+            y_size: None,
+            passes: None,
+            clipping: None,
+            channels: None,
+        }
+    }
+}
+
+impl Blur {
+    pub const SIZE: f64 = 1.0;
+    pub const SIZES: (f64, f64) = (0.0, 1e6);
+    pub const PASSES: u32 = 4;
+    pub const MOST_PASSES: u32 = 64;
+    pub const ALL: [bool; 4] = [true; 4];
+    pub const BOX: f64 = 0.002831;
+    pub const BARTLETT: f64 = 0.001445;
+    pub const GAUSSIAN: f64 = 0.000605;
+    pub const FAST: f64 = 0.000598;
+
+    pub fn filter(&self) -> BlurFilter {
+        self.filter.unwrap_or_default()
+    }
+
+    pub fn across(&self) -> f64 {
+        self.size.unwrap_or(Self::SIZE)
+    }
+
+    pub fn down(&self) -> f64 {
+        match self.lock_xy {
+            true => self.across(),
+            false => self.y_size.unwrap_or(Self::SIZE),
+        }
+    }
+
+    pub fn passes(&self) -> u32 {
+        self.passes.unwrap_or(Self::PASSES)
+    }
+
+    pub fn clipping(&self) -> BlurClipping {
+        self.clipping.unwrap_or_default()
+    }
+
+    pub fn channels(&self) -> [bool; 4] {
+        self.channels.unwrap_or(Self::ALL)
+    }
+}
+
+impl BlurFilter {
+    pub const ALL: [BlurFilter; 5] = [
+        BlurFilter::Box,
+        BlurFilter::Bartlett,
+        BlurFilter::MultiBox,
+        BlurFilter::Gaussian,
+        BlurFilter::FastGaussian,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Box => "Box",
+            Self::Bartlett => "Bartlett",
+            Self::MultiBox => "Multi-box",
+            Self::Gaussian => "Gaussian",
+            Self::FastGaussian => "Fast Gaussian",
+        }
+    }
+}
+
+impl BlurClipping {
+    pub const ALL: [BlurClipping; 3] = [
+        BlurClipping::None,
+        BlurClipping::Domain,
+        BlurClipping::Frame,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Domain => "Domain",
+            Self::Frame => "Frame",
+        }
+    }
+}
+
+impl Default for Mask {
+    fn default() -> Self {
+        Self {
+            show_view_controls: true,
+            level: None,
+            soft_edge: None,
+            filter: None,
+            passes: None,
+            border_width: None,
+            invert: false,
+            solid: true,
+            center: None,
+            width: None,
+            height: None,
+            angle: None,
+            size: None,
+            z_rotation: None,
+            x_rotation: None,
+            y_rotation: None,
+            corner_radius: None,
+            fill_method: None,
+            points: Vec::new(),
+            connect: None,
+        }
+    }
+}
+
+impl Pattern {
+    pub const CENTER: [f64; 2] = [0.25, 0.75];
+    pub const WIDTH: f64 = 0.03;
+    pub const HEIGHT: f64 = 0.0534;
+    pub const SIDES: (f64, f64) = (0.001, 0.5);
+    pub const PLACES: (f64, f64) = (-crate::motion::REACH, crate::motion::REACH);
+
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            enabled: true,
+            path: None,
+            center: None,
+            width: None,
+            height: None,
+            offset: None,
+        }
+    }
+
+    pub fn middle(&self) -> [f64; 2] {
+        self.center.unwrap_or(Self::CENTER)
+    }
+
+    pub fn wide(&self) -> f64 {
+        self.width.unwrap_or(Self::WIDTH)
+    }
+
+    pub fn high(&self) -> f64 {
+        self.height.unwrap_or(Self::HEIGHT)
+    }
+
+    pub fn shift(&self) -> [f64; 2] {
+        self.offset.unwrap_or([0.0, 0.0])
+    }
+
+    pub fn own(&self) -> Area {
+        let [x, y] = self.middle();
+        Area {
+            center: [x, 1.0 - y],
+            size: [self.wide(), self.high()],
+            rotation: 0.0,
+        }
+    }
+
+    pub fn area_at(&self, paths: &[MotionPath], frame: f64) -> Option<Area> {
+        match &self.path {
+            None => Some(self.own()),
+            Some(id) => paths.iter().find(|m| m.id == *id)?.base_at(frame),
+        }
+    }
+}
+
+impl Tracker {
+    pub const PATTERNS_KEPT: usize = 256;
+    pub const NAME: &'static str = "IntelliTrack";
+
+    pub fn free_name(&self) -> String {
+        (1..)
+            .map(|n| format!("{} {n}", Self::NAME))
+            .find(|name| !self.patterns.iter().any(|p| p.name == *name))
+            .unwrap_or_default()
+    }
+
+    pub fn made() -> Self {
+        Self {
+            patterns: vec![Pattern::new(format!("{} 1", Self::NAME))],
+        }
+    }
+}
+
+impl Mask {
+    pub const LEVEL: f64 = 1.0;
+    pub const LEVELS: (f64, f64) = (0.0, 1.0);
+    pub const SOFT_EDGES: (f64, f64) = (0.0, 1.0);
+    pub const BORDERS: (f64, f64) = (-1.0, 1.0);
+    pub const MIDDLE: [f64; 2] = [0.5, 0.5];
+    pub const PLACES: (f64, f64) = (-crate::motion::REACH, crate::motion::REACH);
+    pub const SIZE: f64 = 0.5;
+    pub const SIZES: (f64, f64) = (0.0, 1e6);
+    pub const SCALE: f64 = 1.0;
+    pub const TURNS: (f64, f64) = (-1e6, 1e6);
+    pub const CORNERS: (f64, f64) = (0.0, 1.0);
+    pub const POINTS_KEPT: usize = 128;
+    pub const LEAST_POINTS: usize = 3;
+    pub const SOFT: f64 = 0.431;
+    pub const SOFT_GAUSSIAN: f64 = 0.4276;
+    pub const SOFT_BOXES: f64 = 0.4135;
+
+    pub fn level(&self) -> f64 {
+        self.level.unwrap_or(Self::LEVEL)
+    }
+
+    pub fn soft(&self) -> f64 {
+        self.soft_edge.unwrap_or(0.0)
+    }
+
+    pub fn filter(&self) -> BlurFilter {
+        self.filter.unwrap_or_default()
+    }
+
+    pub fn passes(&self) -> u32 {
+        self.passes.unwrap_or(Blur::PASSES)
+    }
+
+    pub fn scale(&self) -> f64 {
+        self.size.unwrap_or(Self::SCALE)
+    }
+
+    pub fn tilts(&self) -> [f64; 3] {
+        [self.z_rotation, self.x_rotation, self.y_rotation].map(|t| t.unwrap_or(0.0))
+    }
+
+    pub fn border(&self) -> f64 {
+        self.border_width.unwrap_or(0.0)
+    }
+
+    pub fn middle(&self) -> [f64; 2] {
+        self.center.unwrap_or(Self::MIDDLE)
+    }
+
+    pub fn wide(&self) -> f64 {
+        self.width.unwrap_or(Self::SIZE)
+    }
+
+    pub fn high(&self) -> f64 {
+        self.height.unwrap_or(Self::SIZE)
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.angle.unwrap_or(0.0)
+    }
+
+    pub fn corner(&self) -> f64 {
+        self.corner_radius.unwrap_or(0.0)
+    }
+}
+
+impl Tool {
+    pub const MASKS: [&'static str; 3] = ["ellipse", "rectangle", "polygon"];
+
+    pub fn base(&self) -> &'static str {
+        match self {
+            Tool::MediaIn => "MediaIn",
+            Tool::MediaOut => "MediaOut",
+            Tool::Blur(_) => "Blur",
+            Tool::Effect(kind) => match EffectType::of(kind) {
+                EffectType::GaussianBlur => "GaussianBlur",
+                EffectType::MosaicBlur => "MosaicBlur",
+                EffectType::Glow => "Glow",
+                EffectType::FilmGrain => "FilmGrain",
+                EffectType::Vignette => "Vignette",
+                EffectType::Sharpen => "Sharpen",
+            },
+            Tool::Ellipse(_) => "Ellipse",
+            Tool::Rectangle(_) => "Rectangle",
+            Tool::Polygon(_) => "Polygon",
+            Tool::Tracker(_) => "Tracker",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Tool::MediaIn => "Media In",
+            Tool::MediaOut => "Media Out",
+            Tool::Blur(_) => "Blur",
+            Tool::Effect(kind) => EffectType::of(kind).name(),
+            Tool::Ellipse(_) => "Ellipse",
+            Tool::Rectangle(_) => "Rectangle",
+            Tool::Polygon(_) => "Polygon",
+            Tool::Tracker(_) => "Tracker",
+        }
+    }
+
+    pub fn is_mask(&self) -> bool {
+        self.mask().is_some()
+    }
+
+    pub fn works(&self) -> bool {
+        matches!(self, Tool::Blur(_) | Tool::Effect(_))
+    }
+
+    pub fn flows(&self) -> bool {
+        self.works() || matches!(self, Tool::Tracker(_))
+    }
+
+    pub fn takes_input(&self) -> bool {
+        self.flows() || matches!(self, Tool::MediaOut)
+    }
+
+    pub fn tracker(&self) -> Option<&Tracker> {
+        match self {
+            Tool::Tracker(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    pub fn takes_mask(&self) -> bool {
+        self.works() || self.is_mask()
+    }
+
+    pub fn mask(&self) -> Option<&Mask> {
+        match self {
+            Tool::Ellipse(m) | Tool::Rectangle(m) | Tool::Polygon(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    pub fn mask_mut(&mut self) -> Option<&mut Mask> {
+        match self {
+            Tool::Ellipse(m) | Tool::Rectangle(m) | Tool::Polygon(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    pub fn made(&self) -> Tool {
+        match self {
+            Tool::MediaIn => Tool::MediaIn,
+            Tool::MediaOut => Tool::MediaOut,
+            Tool::Blur(_) => Tool::Blur(Blur::default()),
+            Tool::Effect(kind) => Tool::Effect(EffectType::of(kind).made().kind),
+            Tool::Ellipse(_) => Tool::Ellipse(Mask::default()),
+            Tool::Rectangle(_) => Tool::Rectangle(Mask::default()),
+            Tool::Polygon(m) => Tool::Polygon(Mask {
+                points: m.points.clone(),
+                ..Mask::default()
+            }),
+            Tool::Tracker(t) => Tool::Tracker(Tracker {
+                patterns: t
+                    .patterns
+                    .iter()
+                    .map(|p| Pattern {
+                        offset: None,
+                        ..p.clone()
+                    })
+                    .collect(),
+            }),
+        }
+    }
+}
+
+impl EffectType {
+    pub fn of(kind: &EffectKind) -> EffectType {
+        match kind {
+            EffectKind::GaussianBlur(_) => EffectType::GaussianBlur,
+            EffectKind::MosaicBlur(_) => EffectType::MosaicBlur,
+            EffectKind::Glow(_) => EffectType::Glow,
+            EffectKind::FilmGrain(_) => EffectType::FilmGrain,
+            EffectKind::Vignette(_) => EffectType::Vignette,
+            EffectKind::Sharpen(_) => EffectType::Sharpen,
+        }
+    }
+}
+
+impl Node {
+    pub fn new(name: &str, tool: Tool, place: [f64; 2]) -> Self {
+        Self {
+            name: name.to_string(),
+            tool,
+            input: None,
+            effect_mask: None,
+            pass_through: false,
+            blend: None,
+            blur_alpha: true,
+            place,
+            keys: Vec::new(),
+        }
+    }
+
+    pub fn mixed(&self) -> f64 {
+        self.blend.unwrap_or(1.0)
+    }
+
+    pub fn joins(&self, name: &str) -> bool {
+        self.input.as_deref() == Some(name) || self.effect_mask.as_deref() == Some(name)
+    }
+}
+
+pub fn cleaned(raw: &str) -> String {
+    let kept: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    kept.trim_start_matches(|c: char| c.is_ascii_digit())
+        .to_string()
+}
+
+pub fn named_well(name: &str) -> bool {
+    !name.is_empty() && cleaned(name) == name
+}
+
+impl Default for Composition {
+    fn default() -> Self {
+        Self {
+            nodes: Vec::new(),
+            loop_play: true,
+            ping_pong: false,
+            start: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Frames {
+    pub clock: FileClock,
+    pub zero: i64,
+    pub first: i64,
+    pub last: i64,
+    pub mark_in: i64,
+    pub mark_out: i64,
+    start: i64,
+    end: i64,
+    content: i64,
+}
+
+impl Frames {
+    pub fn of(p: &Project, c: &Clip) -> Self {
+        let clock = FileClock::of(p, c);
+        let content = c.content_at(c.start);
+        let opening = clock.frame(content);
+        let closing = clock.frame(c.content_at(c.end() - 1));
+        let zero = c
+            .picture
+            .as_ref()
+            .and_then(|x| x.composition.as_ref())
+            .map_or(opening, |x| x.start);
+        let (first, last) = match p.source_range(c) {
+            Some(have) if have.end > have.start => {
+                (clock.file(have.start), clock.file(have.end) - 1)
+            }
+            _ => (opening.min(closing), opening.max(closing)),
+        };
+        let (mark_in, mark_out) = (opening.min(closing) - zero, opening.max(closing) - zero);
+        Self {
+            clock,
+            zero,
+            first: (first - zero).min(mark_in),
+            last: (last - zero).max(mark_out),
+            mark_in,
+            mark_out,
+            start: c.start,
+            end: c.end(),
+            content,
+        }
+    }
+
+    pub fn at(&self, t: i64) -> i64 {
+        self.clock.frame(self.content + t - self.start) - self.zero
+    }
+
+    pub fn time(&self, f: i64) -> i64 {
+        let (a, b) = (self.start, (self.end - 1).max(self.start));
+        let rising = self.at(b) >= self.at(a);
+        let below = |t: i64| {
+            if rising {
+                self.at(t) < f
+            } else {
+                self.at(t) > f
+            }
+        };
+        let (mut lo, mut hi) = (a, b);
+        if !below(lo) {
+            return lo;
+        }
+        if below(hi) {
+            return hi;
+        }
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if below(mid) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        match (self.at(lo) - f).abs() < (self.at(hi) - f).abs() {
+            true => lo,
+            false => hi,
+        }
+    }
+
+    pub fn inside(&self, f: i64) -> bool {
+        (self.mark_in..=self.mark_out).contains(&f)
+    }
+
+    pub fn file(&self, f: i64) -> i64 {
+        f + self.zero
+    }
+}
+
+impl Composition {
+    pub const STEP: [f64; 2] = [1.0, 1.0];
+
+    pub fn plain() -> Self {
+        let mut out = Node::new(MEDIA_OUT, Tool::MediaOut, [3.0, 0.0]);
+        out.input = Some(MEDIA_IN.to_string());
+        Self {
+            nodes: vec![Node::new(MEDIA_IN, Tool::MediaIn, [0.0, 0.0]), out],
+            ..Self::default()
+        }
+    }
+
+    pub fn node(&self, name: &str) -> Option<&Node> {
+        self.nodes.iter().find(|n| n.name == name)
+    }
+
+    pub fn index(&self, name: &str) -> Option<usize> {
+        self.nodes.iter().position(|n| n.name == name)
+    }
+
+    pub fn free_name(&self, base: &str) -> String {
+        (1..)
+            .map(|n| format!("{base}{n}"))
+            .find(|name| self.node(name).is_none())
+            .unwrap_or_default()
+    }
+
+    pub fn copy_name(&self, of: &str) -> String {
+        (1..)
+            .map(|n| format!("{of}_{n}"))
+            .find(|name| self.node(name).is_none())
+            .unwrap_or_default()
+    }
+
+    pub fn cut_at(&mut self, input: &str) {
+        let mut kept: HashSet<String> = HashSet::new();
+        let mut next = vec![input.to_string()];
+        while let Some(name) = next.pop() {
+            let Some(n) = self.node(&name) else {
+                continue;
+            };
+            if !kept.insert(name) {
+                continue;
+            }
+            next.extend(n.input.iter().chain(&n.effect_mask).cloned());
+            let tracker = n.tool.mask().and_then(|m| m.connect.as_ref());
+            next.extend(tracker.map(|c| c.tracker.clone()));
+        }
+        self.nodes
+            .retain(|n| n.tool == Tool::MediaOut || kept.contains(&n.name));
+        if let Some(out) = self.nodes.iter_mut().find(|n| n.tool == Tool::MediaOut) {
+            out.input = Some(input.to_string());
+        }
+    }
+
+    pub fn out(&self) -> Option<&Node> {
+        self.nodes.iter().find(|n| n.tool == Tool::MediaOut)
+    }
+
+    pub fn pattern(&self, c: &Connect) -> Option<&Pattern> {
+        let t = self.node(&c.tracker)?.tool.tracker()?;
+        t.patterns.get((c.pattern as usize).checked_sub(1)?)
+    }
+
+    pub fn chain(&self) -> Option<Vec<&Node>> {
+        let mut seen = HashSet::new();
+        let mut at = self.node(self.out()?.input.as_deref()?)?;
+        let mut tools = Vec::new();
+        loop {
+            if !seen.insert(at.name.as_str()) {
+                return None;
+            }
+            match &at.tool {
+                Tool::MediaIn => break,
+                t if t.flows() => tools.push(at),
+                _ => return None,
+            }
+            at = self.node(at.input.as_deref()?)?;
+        }
+        tools.reverse();
+        Some(tools)
+    }
+
+    pub fn masks_of(&self, node: &Node) -> Vec<&Node> {
+        let mut seen = HashSet::new();
+        let mut masks = Vec::new();
+        let mut next = node.effect_mask.as_deref();
+        while let Some(m) = next.and_then(|n| self.node(n)) {
+            if !m.tool.is_mask() || !seen.insert(m.name.as_str()) {
+                break;
+            }
+            masks.push(m);
+            next = m.effect_mask.as_deref();
+        }
+        masks.reverse();
+        masks
+    }
+
+    pub fn loops(&self) -> Option<&str> {
+        self.nodes.iter().find_map(|start| {
+            let mut seen = HashSet::new();
+            let mut stack = vec![start.name.as_str()];
+            while let Some(name) = stack.pop() {
+                let Some(n) = self.node(name) else { continue };
+                for next in [n.input.as_deref(), n.effect_mask.as_deref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    if next == start.name {
+                        return Some(start.name.as_str());
+                    }
+                    if seen.insert(next) {
+                        stack.push(next);
+                    }
+                }
+            }
+            None
+        })
+    }
+
+    pub fn moves_by_itself(&self) -> bool {
+        self.nodes.iter().any(|n| match &n.tool {
+            Tool::Effect(kind) => crate::model::Effect {
+                kind: kind.clone(),
+                ..EffectType::of(kind).made()
+            }
+            .moves_by_itself(),
+            _ => false,
+        })
+    }
+}
+
+impl ToolType {
+    pub const ADDED: [ToolType; 11] = [
+        ToolType::Blur,
+        ToolType::GaussianBlur,
+        ToolType::MosaicBlur,
+        ToolType::Glow,
+        ToolType::FilmGrain,
+        ToolType::Vignette,
+        ToolType::Sharpen,
+        ToolType::Ellipse,
+        ToolType::Rectangle,
+        ToolType::Polygon,
+        ToolType::Tracker,
+    ];
+
+    pub fn made(self) -> Tool {
+        let effect = |t: EffectType| Tool::Effect(t.made().kind);
+        match self {
+            ToolType::Blur => Tool::Blur(Blur::default()),
+            ToolType::GaussianBlur => effect(EffectType::GaussianBlur),
+            ToolType::MosaicBlur => effect(EffectType::MosaicBlur),
+            ToolType::Glow => effect(EffectType::Glow),
+            ToolType::FilmGrain => effect(EffectType::FilmGrain),
+            ToolType::Vignette => effect(EffectType::Vignette),
+            ToolType::Sharpen => effect(EffectType::Sharpen),
+            ToolType::Ellipse => Tool::Ellipse(Mask::default()),
+            ToolType::Rectangle => Tool::Rectangle(Mask::default()),
+            ToolType::Polygon => Tool::Polygon(Mask::default()),
+            ToolType::Tracker => Tool::Tracker(Tracker::made()),
+            ToolType::MediaIn => Tool::MediaIn,
+            ToolType::MediaOut => Tool::MediaOut,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        self.made().label()
+    }
+}

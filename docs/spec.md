@@ -31,13 +31,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
 - compound clips (§8.18)
+- compositions of nodes on the Effects page: Blur, the six effects, and Ellipse, Rectangle and Polygon masks (§8.19)
 - the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
 **Later (later):**
 - other effects, other transitions, other titles, other generators
 - keyframes other than Transform, Crop, Composite, speed, the clip volume, effect values and the Position, Zoom, Rotation and Opacity of a title
-- color ([todo](todo/auto-color.md)), Fusion
+- color ([todo](todo/auto-color.md)), the Fusion tools that §8.19 does not have
 - the display LUT, and LUT files other than `.cube` ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
@@ -2186,7 +2187,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A paste puts a keyframe of an effect value only on an effect of the same kind.
   - When the last keyframe of a value goes, the value returns to its plain value.
   - Reset removes the keyframes of the effect, as the reset button of a group does.
-  - The area of an effect has its own keyframes ([deviation X166](deviations.md#x166-an-effect-has-an-area)). The Keyframe button and Reset do not change them.
   - The Keyframes tab has a group for each effect with a track for each value. A group name has a number when the clip has two effects of a kind.
   - `keyframes.add` and the other `keyframes` methods take `{"effect": 0, "value": "strength"}` in `param`.
   - A point takes `[x, y]` in `value`.
@@ -2451,6 +2451,225 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - Each section plays at its own speed, in its picture and in its sound, as on a plain clip.
   - vidcut gives an edit to the picture and to the sound of the compound clip.
   - An OTIO file holds them as a `TimeEffect` on the `Stack`, as on a clip. Its source positions count from the start of the compound clip.
+
+### 8.19 Compositions (pp. 1332, 1385, 1403, 1420, 2108–2111, 2472, 2480, 2483, 2490–2492, 2500)
+
+This section follows the Fusion page. The facts without a page are measured in Resolve Studio 21.2.0 on 2026-11-13.
+
+- A clip of footage, a still, an image sequence or a compound clip can have a composition: a set of nodes. A generator has none.
+- The composition works on the clip's own picture, in its own pixels. It works before the crop, the transform and the effects of the clip.
+  - Measured: a clip at Zoom 0.5 with a Blur in its composition keeps a sharp edge.
+- A clip without a composition shows its picture as it is. The Effects page shows it as `MediaIn1` joined to `MediaOut1` (p. 1332).
+- The picture goes from the MediaIn node, through the tools that each input joins, to the MediaOut node.
+  - Without a MediaOut node, or with nothing on its input, the clip shows nothing.
+  - Measured: Resolve then stops a render with "The Fusion composition at 01:00:00:00 could not be processed successfully". An export of vidcut also stops with an error.
+- Tools:
+  - Blur: the Blur tool of the Fusion page (pp. 2108–2111). See below.
+  - Tracker: it follows patterns in the picture, and passes its input on as it is (pp. 1783–1789). See [The Tracker](#the-tracker).
+  - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
+- Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
+  - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
+  - A mask on the effect mask input of a mask adds the two: a + b − a × b. This is the Merge paint mode.
+- Names: the tool's name and the first free number, as `Blur1`, `GaussianBlur1`, `Ellipse1`, `Polygon1`.
+
+#### The tools in clip pixels
+
+The sizes of the tools follow the clip's own picture, W × H pixels. On a 16:9 picture, √(W × H) is 0.75 × W.
+
+- Blur:
+  - The spread follows W, across and down. With Fast Gaussian, the sigma is 0.000598 × Blur Size × W.
+  - Filter: Box, Bartlett, Multi-box, Gaussian or Fast Gaussian. Usual: Fast Gaussian.
+    - Box: one flat box, 0.002831 × Blur Size × W wide.
+    - Bartlett: a triangle. It is the same as Multi-box with 2 passes.
+    - Multi-box: Num Passes flat boxes, with the sigma of Fast Gaussian. Usual: 4 passes.
+    - Gaussian: a sigma of 0.000605 × Blur Size × W.
+  - Lock X/Y: on. Off, Y Blur Size sets the blur down. Blur Size: 1, from 0 to 1000000.
+  - Clipping Mode: Frame. Frame and Domain repeat the edge pixels. None takes clear black beyond the edges.
+  - Red, Green, Blue and Alpha: on. Blend: 1.
+- Gaussian Blur: the sigma is 0.075 × Strength² × √(W × H). On a 16:9 picture, this is the sigma of the clip effect at Zoom 1. A tool also has Blur Alpha: on.
+- Mosaic Blur: a cell is √(W × H) / 50 at Pixel Frequency 100.
+- Glow: the spread follows √(W × H).
+- Vignette: the shape follows the picture's frame, W and H.
+- Film Grain: the grain follows H.
+- Sharpen: it works in the clip's pixels.
+
+#### The masks
+
+Each mask has these controls (pp. 2491–2492, 2500):
+
+- Show View Controls: on. Off, the viewer shows no handles of the mask, also when its node is selected (p. 2491).
+- Level: 1, from 0 to 1. The mask is this strong.
+- Soft Edge: 0, from 0 to 1. The slider goes to 0.2. It blurs the mask by its Filter.
+- Filter: Fast Gaussian. Box, Bartlett, Multi-box and Gaussian are the other choices. Measured, at Soft Edge s on a picture W wide:
+  - Fast Gaussian: a sigma of 0.431 × s × W.
+  - Gaussian: a sigma of 0.4276 × s × W.
+  - Box, Bartlett and Multi-box: one, two or Num Passes flat boxes with a sum of a sigma of 0.4135 × s × W. Num Passes: 4, from 1 to 64.
+- Border Width: 0, from −1 to 1. The slider goes from −0.2 to 0.2. The edge moves out by Border Width / 2 × W.
+- Invert: off. On, the mask is outside its shape.
+- Solid: on. Off, the mask is only a band of Border Width / 2 × W on each side of the edge.
+- Center: (0.5, 0.5), as fractions of the picture from its bottom left. Y goes up.
+
+Measured, a mask with an effect mask input:
+
+- Invert and Level act on its own shape only. Invert comes first, then Level.
+- Then the mask adds what comes in: a + b − a × b.
+- The manual says that Level and Invert act on the whole mask (p. 2491). The render shows otherwise. vidcut follows the render.
+
+The shapes:
+
+- Ellipse: Width and Height 0.5, from 0 to 1000000. The sliders go to 2. Both are fractions of W. Angle: 0, counterclockwise.
+- Rectangle: Width 0.5, a fraction of W. Height 0.5, a fraction of H. Both from 0 to 1000000, and the sliders go to 1. Angle: 0. Corner Radius: 0, from 0 to 1, a fraction of half the shorter side.
+- Polygon (p. 2483): its points, from its center. X is a fraction of W. Y is a fraction of H, up.
+  - Size: 1, from 0 to 1000000. The slider goes to 5. The points move out from the center by this.
+  - Z Rotation, X Rotation and Y Rotation: 0. Measured: Z turns the shape counterclockwise in square pixels. Then X tilts it, and then Y.
+  - The tilts have no perspective. X 60 makes the shape half as high, and Y 60 makes it half as wide.
+  - Fill Method: Alternate. A part that the sides go around twice is a hole. Non Zero Winding fills it.
+
+#### Edits
+
+- Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
+- Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
+  - vidcut: a Tracker has no effect mask yet. A mask added with a Tracker selected joins nothing ([todo](todo/motion-tracking.md)).
+- Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
+- Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
+- Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
+  - With several nodes selected, a Rename window opens for each node in turn (p. 1416).
+- Copy (Ctrl+C) and Cut (Ctrl+X) take the selected tools and masks, with their values at that moment.
+- Paste (Ctrl+V) of one node: the copy goes after the active node. It has the same values. Its name is the old name with `_1`.
+- Paste of several nodes, measured in Resolve Studio 21.2:
+  - The copies keep the joins between them. They join no other node, and they do not go between other nodes.
+  - The copies keep their places to each other. Their top left goes one place right of the active node.
+  - The copies are then the selected nodes, and the last copy is the active node.
+- Paste with no node selected: the copies join no node. Their top left goes to the place of the last click in the Node Editor (p. 1408).
+  - A right-click on the empty Node Editor has Paste. The copies go to that place (p. 1408).
+- Paste in the menu of a node replaces that node with the copy. A window asks first (p. 1409).
+  - The copy takes the place and the joins of that node. vidcut: a join that the copy cannot take goes.
+  - vidcut: the item works when one node is copied.
+- Move (p. 1414): a drag of a node moves it. A drag of a selected node moves all the selected nodes.
+- A right-click on a node opens a menu: Rename, Pass Through, Copy, Paste and Delete.
+- Join (pp. 1394–1397):
+  - Drag from an output to an input, or from an input to an output.
+  - A drop on a node joins its input. A mask joins the effect mask input.
+  - A pointer on a knot shows its name.
+- Part and move a join (pp. 1400–1401):
+  - A pointer on a join shows the half under it in blue.
+  - A click on the input half parts the join.
+  - A drag of a half takes that end of the join. A drop on a knot or a node joins it there. A drop on an empty place parts the join.
+- Select (pp. 1390–1391):
+  - A drag on the empty Node Editor selects the nodes in its box. A Ctrl-drag takes them out of the selection.
+  - Ctrl+A selects all the nodes. Ctrl+Shift+A selects none.
+- Alt+[ and Alt+] move the playhead to the keyframes of the active node (p. 1303).
+- The MediaIn and the MediaOut nodes can be deleted. Undo puts them back.
+- An OTIO export of Resolve holds nothing of a composition. vidcut keeps the composition in its own metadata of the clip, in the picture (§8.16).
+
+#### The Effects page
+
+- The Effects page shows the composition of the topmost visible clip at the playhead (p. 1332).
+- The viewer shows that clip alone, at the size of its own picture (p. 1332).
+- The Effects Library is at the left and the Inspector is at the right. Both take the full height (p. 1287).
+- The Node Editor is under the viewer (p. 1287).
+- The Time Ruler and the transport controls are under the viewer (p. 1293).
+  - The ruler covers the whole source of the clip: the head before its In and the tail after its Out (p. 1293).
+  - Yellow lines mark the In and the Out of the clip (p. 1293).
+  - The ruler counts the frames of the file of the clip. Measured in Resolve Studio 21.2:
+    - Frame 0 is the In of the clip when the composition is made. The frames of the head have negative numbers.
+    - A later trim moves the In on the ruler. The numbers of the frames stay, and the keyframes stay on their frames.
+    - A file of 59.94 frames a second on a timeline of 30 counts about two frames for each frame of the timeline.
+  - The page does not use a speed change of the clip (p. 1641). The ruler counts the frames of the file in their order.
+  - The keyframes of the nodes are on these frames.
+  - A click or a drag on the ruler moves the playhead. The playhead cannot leave the source (pp. 1293, 1295).
+  - A gray bar with two handles zooms and scrolls the ruler. A drag with the middle mouse button on the ruler scrolls it (p. 1295).
+  - The keyframes of the selected node show as tick marks on the Time Ruler (p. 1302).
+- The transport has six buttons: First Frame, Play Reverse, Stop, Play Forward, Last Frame and Loop (p. 1295).
+  - The first and the last frame are the ends of the source, because the composition covers the whole source (p. 1294).
+  - The Current Time field at the right shows the frame of the playhead. A drag on it or a number typed in it moves the playhead (p. 1297).
+- Keys (pp. 1295–1296):
+  - Space plays and stops. J, K and L play backward, stop and play forward.
+  - Left and Right move one frame. Shift+Left and Shift+Right go to the first and the last frame of the source.
+  - Ctrl+Left and Ctrl+Right (Command on a Mac) go to the In and the Out.
+- Play, measured in Resolve Studio 21.2:
+  - Play forward from a frame between the In and the Out stops at the Out. Play backward stops at the In.
+  - Play forward from the head goes through the head and on to the Out. Play backward from the tail goes through the tail and on to the In.
+  - Play forward from the tail starts at the In. Play backward from the head starts at the Out.
+  - With Loop on, play forward from the Out goes on from the In. Play backward from the In goes on from the Out.
+  - A right-click on Loop picks the way it loops (p. 1296). The menu of 21.2 has Loop and Ping Pong.
+  - With Ping Pong, play turns back at the In and at the Out. The manual says that it turns back at the ends of the Time Ruler (p. 1296).
+  - With Ping Pong, play from the head and from the tail starts as it does with Loop.
+  - Each composition keeps its own Loop and its own way to loop. Loop is on in a new composition.
+  - The timeline playhead follows the playhead of the page only between the In and the Out. In the head and the tail, it stays where it was.
+  - Measured in Resolve Studio 21.2: play shows each frame of the file at the frame rate of the file.
+    - Files of 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 frames a second were measured.
+    - Each played at its own rate, on a timeline of 24 and on a timeline of 30.
+  - Measured in Resolve Studio 21.2: a file of 56 minutes at 59.94 frames a second plays at the frame rate of the timeline.
+    - Files of 1, 5 and 15 minutes at 59.94 frames a second play at their own rate.
+  - vidcut: play always goes at the frame rate of the file ([X171](deviations.md#x171-the-effects-page-plays-a-long-file-at-the-speed-of-the-file)).
+- The page plays the sound of the timeline (p. 1297).
+  - Measured in Resolve Studio 21.2: play in the head has no sound. The same frames had sound between the In and the Out.
+  - Measured in Resolve Studio 21.2: play backward in the tail had sound in one run of three. Play backward between the In and the Out had sound in two runs of four.
+  - vidcut: play in the head and in the tail has no sound. Play backward between the In and the Out has sound.
+- Select:
+  - A click on a node selects it. Ctrl-click (Command on a Mac) adds a node to the selection, or takes it out (pp. 1390–1391).
+  - One selected node is the active node. New tools go after it (p. 1391).
+  - Alt-click (Option on a Mac) on a selected node makes it the active node. The selection stays (p. 1391).
+  - A click on the empty Node Editor selects none (p. 1391).
+- A click on a tool in the Effects Library adds it after the active node (p. 1287).
+- The Inspector shows the controls of each selected node (pp. 1313–1314).
+  - Each node has a header with its name and Reset (p. 1314). A click on the name makes it the active node (p. 1391).
+  - The controls of a tool are in the order of the manual (pp. 2110–2111, 2474–2475, 2481–2483, 2491–2493).
+- Each value has a Keyframe button at its right (p. 1519).
+  - It puts a keyframe at the playhead. On a keyframe, it removes the keyframe.
+  - Its arrows go to the keyframes on each side.
+  - After a value has a keyframe, a change on another frame puts a keyframe there.
+- The viewer shows the edge, the center and the handles of each selected mask with Show View Controls on (p. 2491). A drag of one changes that mask.
+- The Angle of an ellipse or a rectangle has a control in the viewer. The manual names a small circle at the end of a dashed line (p. 2493).
+  - Measured in Resolve Studio 21.2: the control is a dashed ring about the center. The ring keeps its size on the screen.
+  - A drag on the ring turns the shape as far as the pointer turns about the center.
+  - While the shape turns, the ring is red, with a line from the center at the angle.
+
+#### The Tracker
+
+The Tracker node follows patterns in the picture on its input (pp. 1783–1789). The facts without a page are measured in Resolve Studio 21.2.
+
+- A new Tracker has one pattern (p. 1783).
+  - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).
+  - Each side of the box is from 0.001 to 0.5.
+  - The first pattern is an IntelliTrack, which uses the DaVinci Neural Engine. Add Point and Add IntelliTrack add patterns.
+  - vidcut: a model tracks each pattern. Add IntelliTrack adds a pattern with the next free number. Add Point is not built yet ([todo](todo/motion-tracking.md)).
+- The viewer shows the box of each pattern of a selected Tracker (p. 1783).
+  - A drag of the small handle at the top left moves the box. A zoomed view of the box shows during the drag (pp. 1783–1784).
+  - A drag of an edge resizes the box from its middle (p. 1783).
+  - vidcut: a drag of the box on a frame of its path changes the box of the path on that frame ([X168](deviations.md#x168-a-drag-of-a-pattern-box-changes-its-path)).
+  - Resolve also shows a search area around the box (p. 1784). vidcut shows none.
+- The track buttons are at the top of the Inspector (pp. 1784–1785):
+  - Track Reverse tracks backward from the end of the render range. Track Reverse From Current Time tracks backward from the playhead (p. 2844).
+  - Track Forward tracks forward from the start of the render range. Track Forward From Current Time tracks forward from the playhead (p. 2844).
+  - The render range is from the In to the Out. A track stops at its end (p. 1785).
+  - Stop Tracking and Escape stop a track (p. 1785). The frames that it tracked stay (pp. 1788, 2844).
+  - A track does not stop at a lost pattern or at a shot change. The user stops it (p. 1785).
+  - The buttons track each enabled pattern (p. 1787). The check box of a pattern in the list enables it.
+  - While a track runs, the Node Editor takes no work (p. 1784).
+  - Resolve 21.2 also has Track Fwd Then Reverse. vidcut does not have it yet ([todo](todo/motion-tracking.md)).
+- The Tracker looks at the picture on its input, with the nodes before it (p. 1784). It tracks on each frame of the file.
+- The trim buttons take off the tracking data of the selected patterns (p. 2844):
+  - Trim to Start takes off the data before the playhead.
+  - The Delete button takes off all of it.
+  - Trim to End takes off the data after the playhead.
+  - vidcut: the trim buttons are in the Trim row under the track buttons. They act on the picked pattern.
+- When a track ends, its path is connected to the pattern (p. 1785).
+- X Offset and Y Offset move the point that other nodes follow away from the middle of the pattern (p. 1789).
+  - The viewer shows a dashed line from the middle of the pattern to that point (p. 1789).
+- A right-click on the Center of a mask has Connect To (pp. 1789, 1804). Its menu names each Tracker, and each pattern as "IntelliTrack 1: Offset position" (Resolve Studio 21.2).
+  - The Center then follows that point.
+  - vidcut: the menu of a connected Center also has Disconnect.
+  - vidcut: Follow Size makes the mask also grow and shrink with the box of the pattern.
+- vidcut: Find in the Inspector of a Tracker finds the things of a subject in the clip ([X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+  - The Tracker gets a pattern for each thing.
+  - Blur there adds a Mosaic Blur before Media Out. For each pattern, it adds a mask on the blur that follows that pattern with Follow Size.
+
+Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
+`gui.page_time` moves and plays the playhead of the page. `comp.loop` sets Loop and Ping Pong. `player.bounds` holds play of the timeline between two frames.
+`comp.set` and `comp.key` take a `frame` of the composition. Without it, they take the frame at the playhead. `comp.paste` takes `after`, `place` or `replace`.
+`comp.set` with `connect` connects the Center of a mask to a pattern. `motion.track` tracks a pattern of a Tracker, and `motion.find` with `tracker` gives it patterns.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

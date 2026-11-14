@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod catalog;
 pub mod change;
+pub mod composition;
 pub mod compressor;
 pub mod cube;
 pub mod describe;

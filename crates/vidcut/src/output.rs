@@ -1299,6 +1299,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
         | "player.mute"
         | "player.audio_scrubbing"
         | "player.loop"
+        | "player.bounds"
         | "viewer.set"
         | "viewer.load"
         | "viewer.guides"
@@ -1378,8 +1379,25 @@ fn live(method: &str, r: &Response) -> Option<()> {
         "gui.quit" | "gui.window" | "gui.trim_editor" | "gui.dynamic_trim" => {
             println!("ok {method}")
         }
-        "gui.state" | "gui.show" | "gui.close" | "gui.target" | "gui.timeline" => {
+        "gui.state" | "gui.show" | "gui.close" | "gui.target" | "gui.timeline" | "gui.page"
+        | "gui.nodes" | "gui.page_time" => {
             let t = &v["timeline"];
+            let nodes: Vec<&str> = v["nodes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            println!("page {}", v["page"].as_str().unwrap_or("-"));
+            println!(
+                "effects clip {}, nodes {}",
+                v["clip"].as_str().unwrap_or("-"),
+                if nodes.is_empty() {
+                    "-".to_string()
+                } else {
+                    nodes.join(" ")
+                }
+            );
             let on = |k: &str| if t[k] == true { "on" } else { "off" };
             let windows: Vec<&str> = v["windows"]
                 .as_array()
@@ -1387,6 +1405,23 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 .flatten()
                 .filter_map(Value::as_str)
                 .collect();
+            let time = &v["time"];
+            if time.is_object() {
+                println!(
+                    "effects playhead {} (source {}..{}, In {}, Out {}), speed {}, loop {}",
+                    time["at"],
+                    time["first"],
+                    time["last"],
+                    time["in"],
+                    time["out"],
+                    time["speed"],
+                    match (time["loop"] == true, time["ping_pong"] == true) {
+                        (false, _) => "off",
+                        (true, false) => "on",
+                        (true, true) => "ping pong",
+                    }
+                );
+            }
             println!("edit {}", edit_point(&v["edit"]));
             println!("edits {}", edit_points(&v["edits"]));
             println!("target {}", v["target"].as_str().unwrap_or("-"));

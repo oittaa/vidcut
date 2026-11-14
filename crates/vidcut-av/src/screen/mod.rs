@@ -59,6 +59,8 @@ pub struct Gpu {
     converting: wgpu::RenderPipeline,
     weaving: wgpu::RenderPipeline,
     halving: wgpu::RenderPipeline,
+    composing_in: wgpu::RenderPipeline,
+    composing_out: wgpu::RenderPipeline,
     blank: wgpu::TextureView,
     wide: bool,
     shares: bool,
@@ -622,6 +624,8 @@ impl Gpu {
         let converting = made(&pipeline_layout, "fs_convert", None, MIXING);
         let weaving = made(&pipeline_layout, "fs_bwdif", None, MIXING);
         let halving = made(&pipeline_layout, "fs_halve", None, MIXING);
+        let composing_in = made(&pipeline_layout, "fs_composed_in", None, MIXING);
+        let composing_out = made(&pipeline_layout, "fs_composed_out", None, MIXING);
         let blank = device
             .create_texture(&wgpu::TextureDescriptor {
                 label: Some("vidcut no halves"),
@@ -662,6 +666,8 @@ impl Gpu {
             converting,
             weaving,
             halving,
+            composing_in,
+            composing_out,
             blank,
             wide: device
                 .features()
@@ -1293,6 +1299,10 @@ impl MixDraw<'_, '_> {
     ) -> wgpu::BindGroup {
         let canvases = self.canvases;
         let canvas = &canvases[depth];
+        if !mix.placing.composed.is_empty() {
+            let works = &mix.placing.composed;
+            self.blurred.composed(self.gpu, canvas, works, encoder);
+        }
         let mut placing = mix.placing.clone();
         let (effects, factor) = bared(&mut placing, &mut 1.0);
         let mode = f64::from(placing.mode.code());
@@ -1524,7 +1534,9 @@ struct Slot {
     rgb: Option<wgpu::Buffer>,
     rgb_matte: Option<wgpu::Buffer>,
     converted: Option<(wgpu::Texture, (u32, u32, u32))>,
-    converted_from: Option<(std::sync::Weak<Picture>, Option<Hdr>)>,
+    converted_from: Option<(std::sync::Weak<Picture>, Option<Hdr>, Vec<Working>)>,
+    composer: Option<blur::Composer>,
+    composed_params: Option<wgpu::Buffer>,
     own: Option<wgpu::Texture>,
     around: Option<Box<[Slot; 2]>>,
 }
@@ -2057,6 +2069,32 @@ impl Slot {
         };
         let bytes = params_of(picture, size, gpu.wide, cover, how, (halvings, alpha));
         gpu.queue.write_buffer(params, 0, &bytes);
+        let params: &wgpu::Buffer = params;
+        let plan: &[Working] = match (how.0, picture.sampling()) {
+            (_, Sampling::Placed { .. }) | (None, _) => &[],
+            (Some((placing, _)), _) => &placing.composed,
+        };
+        if plan.is_empty() {
+            self.composer = None;
+        }
+        let composed = match plan.is_empty() {
+            true => None,
+            false => {
+                let buffer = self.composed_params.get_or_insert_with(|| {
+                    gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("vidcut composed"),
+                        size: PARAMS as u64,
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    })
+                });
+                let mut bytes = bytes.clone();
+                bytes[COMPOSED_ALPHA..COMPOSED_ALPHA + 4].copy_from_slice(&3_u32.to_le_bytes());
+                bytes[COMPOSED_MODE..COMPOSED_MODE + 4].copy_from_slice(&2.0_f32.to_le_bytes());
+                gpu.queue.write_buffer(buffer, 0, &bytes);
+                Some(&*buffer)
+            }
+        };
         let planes = self.planes.as_ref().expect("uploaded");
         let view = |t: &wgpu::Texture| t.create_view(&Default::default());
         let (y, u) = self
@@ -2066,7 +2104,7 @@ impl Slot {
             .unwrap_or_else(|| (view(&planes.y), view(&planes.u)));
         let v = self.v_view.take().unwrap_or_else(|| view(&planes.v));
         let a = self.a_view.take().unwrap_or_else(|| view(&planes.a));
-        let bind = |halved: &wgpu::TextureView| {
+        let bound = |params: &wgpu::Buffer, halved: &wgpu::TextureView| {
             gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("vidcut picture"),
                 layout: &gpu.layout,
@@ -2102,6 +2140,8 @@ impl Slot {
                 ],
             })
         };
+        let bind = |halved: &wgpu::TextureView| bound(params, halved);
+        let shown = |halved: &wgpu::TextureView| bound(composed.unwrap_or(params), halved);
         let wanted = (
             picture.width().max(1),
             picture.height().max(1),
@@ -2127,12 +2167,10 @@ impl Slot {
             self.converted_from = None;
         }
         let converted = &self.converted.as_ref().expect("made above").0;
-        if self
-            .converted_from
-            .as_ref()
-            .is_some_and(|(p, t)| std::ptr::eq(p.as_ptr(), Arc::as_ptr(picture)) && *t == how.2)
-        {
-            return bind(&converted.create_view(&Default::default()));
+        if self.converted_from.as_ref().is_some_and(|(p, t, c)| {
+            std::ptr::eq(p.as_ptr(), Arc::as_ptr(picture)) && *t == how.2 && c == plan
+        }) {
+            return shown(&converted.create_view(&Default::default()));
         }
         let level = |k: u32| {
             converted.create_view(&wgpu::TextureViewDescriptor {
@@ -2242,11 +2280,24 @@ impl Slot {
             }
             None => convert(encoder, &level(0), &bind(&gpu.blank)),
         }
+        if !plan.is_empty() {
+            let (w, h) = (wanted.0, wanted.1);
+            let upright = match picture.rotation() / 90 % 2 {
+                1 => (h, w),
+                _ => (w, h),
+            };
+            let composer = self.composer.get_or_insert_with(Default::default);
+            let canvas = composer.canvas(gpu, upright);
+            draw(encoder, canvas, &gpu.composing_in, &bind(&level(0)));
+            composer.compose(gpu, plan, encoder);
+            let canvas = composer.canvas(gpu, upright);
+            draw(encoder, &level(0), &gpu.composing_out, &bind(canvas));
+        }
         for k in 1..wanted.2 {
             draw(encoder, &level(k), &gpu.halving, &bind(&level(k - 1)));
         }
-        self.converted_from = Some((Arc::downgrade(picture), how.2));
-        bind(&converted.create_view(&Default::default()))
+        self.converted_from = Some((Arc::downgrade(picture), how.2, plan.to_vec()));
+        shown(&converted.create_view(&Default::default()))
     }
 
     fn submitted(&mut self, gpu: &Gpu) {
@@ -3551,6 +3602,10 @@ fn shader() -> &'static str {
 const PER_LEVEL: usize = 5;
 
 const PARAMS: usize = (15 + PER_LEVEL) * 16;
+
+const COMPOSED_ALPHA: usize = 39 * 4;
+
+const COMPOSED_MODE: usize = 54 * 4;
 
 const LETTERING: usize = 4 * 16;
 const KEEP_ALL: [f64; 4] = [-1e6, -1e6, 1e6, 1e6];

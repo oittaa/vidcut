@@ -1,10 +1,13 @@
+use crate::effect_keys::Keyed;
 use crate::model::{
-    AreaShape, Border, CellShape, CompositeMode, Effect, EffectArea, EffectKind, FilmGrain, Glow,
-    GlowAlpha, GlowFraming, GlowOutput, Media, MosaicBlur, Picture, Sharpen, Vignette,
-    VignetteMode, VignetteShape,
+    Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Composition, Effect,
+    EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, Mask,
+    Media, MosaicBlur, Pattern, Picture, Sharpen, Tool, Vignette, VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
+
+pub type Areas<'a> = dyn Fn(&Pattern) -> Option<Area> + 'a;
 
 const LEAST_ZOOM: f64 = 1e-9;
 const LEAST_BAR: f64 = 0.2;
@@ -75,6 +78,7 @@ pub struct Placing {
     pub level: Level,
     pub mode: CompositeMode,
     pub effects: Vec<Working>,
+    pub composed: Vec<Working>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,65 +86,257 @@ pub struct Working {
     pub work: Work,
     pub blend: f64,
     pub use_alpha: bool,
-    pub area: Option<Masking>,
+    pub masks: Vec<Shaping>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Masking {
-    pub maps: Vec<[[f64; 3]; 3]>,
-    pub points: Vec<[f64; 2]>,
-    pub shape: AreaShape,
-    pub softness: f64,
-    pub invert: bool,
+pub enum Outline {
+    Ellipse {
+        half: [f64; 2],
+        turn: f64,
+    },
+    Rectangle {
+        half: [f64; 2],
+        turn: f64,
+        corner: f64,
+    },
+    Polygon {
+        points: Vec<[f64; 2]>,
+        winding: bool,
+    },
 }
 
-impl Masking {
-    const LEAST_HALF: f64 = 1e-9;
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Softening {
+    Gaussian(f64),
+    Boxes { width: f64, count: u32 },
+}
 
-    fn of(area: &EffectArea, bases: &[Area], back: &[f64; 8], fit: [f64; 2]) -> Self {
+#[derive(Debug, Clone, PartialEq)]
+pub struct Figure {
+    pub outline: Outline,
+    pub middle: [f64; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaskBase {
+    pub middle: [f64; 2],
+    pub size: [f64; 2],
+    pub round: f64,
+    pub turn: f64,
+}
+
+pub fn turned([x, y]: [f64; 2], turn: f64) -> [f64; 2] {
+    let (s, c) = turn.sin_cos();
+    [x * c + y * s, -x * s + y * c]
+}
+
+impl MaskBase {
+    pub fn whole((w, h): (f64, f64)) -> Self {
         Self {
-            maps: bases
-                .iter()
-                .map(|b| Self::map(area, b, back, fit))
-                .collect(),
-            points: match area.shape {
-                AreaShape::Polygon => area.corners().to_vec(),
-                _ => Vec::new(),
-            },
-            shape: area.shape,
-            softness: area.soft(),
-            invert: area.invert,
+            middle: [w / 2.0, h / 2.0],
+            size: [w, h],
+            round: w,
+            turn: 0.0,
         }
     }
 
-    fn map(area: &EffectArea, base: &Area, back: &[f64; 8], [fw, fh]: [f64; 2]) -> [[f64; 3]; 3] {
-        let turned = |[x, y]: [f64; 2], degrees: f64| {
-            let (sin, cos) = degrees.to_radians().sin_cos();
-            [x * cos + y * sin, y * cos - x * sin]
+    pub fn of(a: &Area, (w, h): (f64, f64)) -> Self {
+        let size = [a.size[0] * w, a.size[1] * h];
+        Self {
+            middle: [a.center[0] * w, a.center[1] * h],
+            size,
+            round: size[1],
+            turn: a.rotation.to_radians(),
+        }
+    }
+
+    pub fn all(m: &Mask, comp: &Composition, (w, h): (f64, f64), areas: &Areas) -> Vec<Self> {
+        let Some(c) = &m.connect else {
+            return vec![Self::whole((w, h))];
         };
-        let [bw, bh] = [base.size[0] * fw, base.size[1] * fh];
-        let [cx, cy] = area.middle();
-        let [dx, dy] = turned([(cx - 0.5) * bw, (cy - 0.5) * bh], base.rotation);
-        let [px, py] = [base.center[0] * fw + dx, base.center[1] * fh + dy];
-        let [sx, sy] = area.extent();
-        let [hx, hy] = [sx * bw / 2.0, sy * bh / 2.0].map(|h| h.max(Self::LEAST_HALF));
-        let (sin, cos) = (base.rotation + area.turn()).to_radians().sin_cos();
-        let across = [fw * cos / hx, -fh * sin / hx, (py * sin - px * cos) / hx];
-        let down = [fw * sin / hy, fh * cos / hy, -(px * sin + py * cos) / hy];
-        let [a, b, e, c, d, f, g, h] = *back;
-        let through = |[u, v, w]: [f64; 3]| {
-            [
-                u * a + v * c + w * g,
-                u * b + v * d + w * h,
-                u * e + v * f + w,
+        let Some(p) = comp.pattern(c) else {
+            return Vec::new();
+        };
+        let Some(a) = areas(p) else {
+            return Vec::new();
+        };
+        let mut base = match c.size {
+            true => Self::of(&a, (w, h)),
+            false => Self {
+                middle: [a.center[0] * w, a.center[1] * h],
+                ..Self::whole((w, h))
+            },
+        };
+        let [x, y] = p.shift();
+        base.middle = [base.middle[0] + x * w, base.middle[1] - y * h];
+        vec![base]
+    }
+
+    pub fn unturned(&self) -> Self {
+        Self {
+            middle: [self.size[0] / 2.0, self.size[1] / 2.0],
+            turn: 0.0,
+            ..*self
+        }
+    }
+
+    pub fn screen(&self, [x, y]: [f64; 2]) -> [f64; 2] {
+        let [dx, dy] = turned([x - self.size[0] / 2.0, y - self.size[1] / 2.0], self.turn);
+        [self.middle[0] + dx, self.middle[1] + dy]
+    }
+
+    pub fn own(&self, [x, y]: [f64; 2]) -> [f64; 2] {
+        let [dx, dy] = turned([x - self.middle[0], y - self.middle[1]], -self.turn);
+        [dx + self.size[0] / 2.0, dy + self.size[1] / 2.0]
+    }
+}
+
+impl Figure {
+    pub const NONE: Self = Self {
+        outline: Outline::Polygon {
+            points: Vec::new(),
+            winding: false,
+        },
+        middle: [0.0, 0.0],
+    };
+    const ROUND: u32 = 72;
+
+    pub fn line(&self) -> Vec<[f64; 2]> {
+        let at = |[x, y]: [f64; 2], turn: f64| {
+            let [dx, dy] = turned([x, y], turn);
+            [self.middle[0] + dx, self.middle[1] + dy]
+        };
+        match &self.outline {
+            Outline::Ellipse { half, turn } => (0..=Self::ROUND)
+                .map(|i| {
+                    let a = f64::from(i) / f64::from(Self::ROUND) * std::f64::consts::TAU;
+                    at([half[0] * a.cos(), half[1] * a.sin()], *turn)
+                })
+                .collect(),
+            Outline::Rectangle { half, turn, .. } => [
+                [-1.0, -1.0],
+                [1.0, -1.0],
+                [1.0, 1.0],
+                [-1.0, 1.0],
+                [-1.0, -1.0],
             ]
+            .iter()
+            .map(|[x, y]| at([x * half[0], y * half[1]], *turn))
+            .collect(),
+            Outline::Polygon { points, .. } => {
+                let mut out = points.clone();
+                out.extend(points.first());
+                out
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shaping {
+    pub figures: Vec<Figure>,
+    pub border: f64,
+    pub solid: bool,
+    pub level: f64,
+    pub invert: bool,
+    pub soft: Option<Softening>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Boxing {
+    pub across: f64,
+    pub down: f64,
+    pub count: u32,
+    pub channels: [bool; 4],
+    pub border: Border,
+}
+
+fn boxes_of(filter: BlurFilter, passes: u32) -> Option<u32> {
+    match filter {
+        BlurFilter::Box => Some(1),
+        BlurFilter::Bartlett => Some(2),
+        BlurFilter::MultiBox => Some(passes.max(1)),
+        BlurFilter::Gaussian | BlurFilter::FastGaussian => None,
+    }
+}
+
+fn box_width(sigma: f64, count: u32) -> f64 {
+    sigma * (12.0 / f64::from(count)).sqrt()
+}
+
+impl Shaping {
+    pub fn figure(m: &Mask, tool: &Tool, b: &MaskBase) -> Figure {
+        let [cx, cy] = m.middle();
+        let [w, h] = b.size;
+        let own = [cx * w, (1.0 - cy) * h];
+        let turn = m.turn().to_radians() + b.turn;
+        let outline = match tool {
+            Tool::Ellipse(_) => Outline::Ellipse {
+                half: [m.wide() * w / 2.0, m.high() * b.round / 2.0],
+                turn,
+            },
+            Tool::Rectangle(_) => {
+                let half = [m.wide() * w / 2.0, m.high() * h / 2.0];
+                Outline::Rectangle {
+                    half,
+                    turn,
+                    corner: m.corner() * half[0].min(half[1]),
+                }
+            }
+            _ => Outline::Polygon {
+                points: m
+                    .points
+                    .iter()
+                    .map(|p| b.screen(Self::tilted(m, *p, own, (w, h))))
+                    .collect(),
+                winding: m.fill_method == Some(FillMethod::NonZeroWinding),
+            },
         };
-        [through(across), through(down), [g, h, 1.0]]
+        Figure {
+            outline,
+            middle: b.screen(own),
+        }
+    }
+
+    pub fn of(m: &Mask, tool: &Tool, w: f64, bases: &[MaskBase]) -> Self {
+        let s = m.soft();
+        let soft = (s > 0.0).then(|| match boxes_of(m.filter(), m.passes()) {
+            Some(count) => Softening::Boxes {
+                width: box_width(Mask::SOFT_BOXES * s * w, count),
+                count,
+            },
+            None => Softening::Gaussian(match m.filter() {
+                BlurFilter::Gaussian => Mask::SOFT_GAUSSIAN * s * w,
+                _ => Mask::SOFT * s * w,
+            }),
+        });
+        Self {
+            figures: bases.iter().map(|b| Self::figure(m, tool, b)).collect(),
+            border: m.border() * w / 2.0,
+            solid: m.solid,
+            level: m.level(),
+            invert: m.invert,
+            soft,
+        }
+    }
+
+    pub fn tilted(m: &Mask, [x, y]: [f64; 2], [mx, my]: [f64; 2], (w, h): (f64, f64)) -> [f64; 2] {
+        let k = m.scale();
+        let [z, tx, ty] = m.tilts().map(f64::to_radians);
+        let (qx, qy) = (x * w * k, y * h * k);
+        let (sz, cz) = z.sin_cos();
+        let (rx, ry) = (qx * cz - qy * sz, qx * sz + qy * cz);
+        let (sx, cx) = tx.sin_cos();
+        let (sy, cy) = ty.sin_cos();
+        [mx + rx * cy + ry * sx * sy, my - ry * cx]
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Work {
+    Clear,
+    Boxes(Boxing),
     Blur(Blurring),
     Mosaic(Tiling),
     Glow(Box<Glowing>),
@@ -593,19 +789,10 @@ impl Shading {
 }
 
 impl Working {
-    fn of(e: &Effect, on: &OnFrame, bases: Option<&[Area]>) -> Option<Self> {
+    fn of(e: &Effect, on: &OnFrame) -> Option<Self> {
         if !e.on || e.mixed() <= 0.0 {
             return None;
         }
-        let [_, _, fw, fh] = on.fit;
-        let masked = |a: &EffectArea, bases: &[Area]| Masking::of(a, bases, &on.back, [fw, fh]);
-        let area = match (e.area.as_ref(), bases) {
-            (None, _) => None,
-            (Some(a), None) => Some(masked(a, &[Area::WHOLE])),
-            (Some(a), Some([])) if a.invert => None,
-            (Some(_), Some([])) => return None,
-            (Some(a), Some(found)) => Some(masked(a, found)),
-        };
         let work = match &e.kind {
             EffectKind::GaussianBlur(b) => {
                 let (across, down) = b.spreads(on.width);
@@ -635,9 +822,108 @@ impl Working {
             work,
             blend: e.mixed(),
             use_alpha: e.use_alpha,
-            area,
+            masks: Vec::new(),
         })
     }
+
+    fn plain(work: Work, blend: f64) -> Self {
+        Self {
+            work,
+            blend,
+            use_alpha: true,
+            masks: Vec::new(),
+        }
+    }
+
+    fn of_blur(b: &Blur, blend: f64, w: f64) -> Option<Self> {
+        let [x, y] = [b.across(), b.down()].map(|s| s * w);
+        let channels = b.channels();
+        if blend <= 0.0 || x + y <= 0.0 || !channels.contains(&true) {
+            return None;
+        }
+        let border = match b.clipping() {
+            BlurClipping::None => Border::Black,
+            BlurClipping::Domain | BlurClipping::Frame => Border::Replicate,
+        };
+        let work = match boxes_of(b.filter(), b.passes()) {
+            Some(count) => {
+                let wide = match b.filter() {
+                    BlurFilter::Box => Blur::BOX,
+                    BlurFilter::Bartlett => Blur::BARTLETT,
+                    _ => box_width(Blur::FAST, count),
+                };
+                Work::Boxes(Boxing {
+                    across: wide * x,
+                    down: wide * y,
+                    count,
+                    channels,
+                    border,
+                })
+            }
+            None => {
+                let k = match b.filter() {
+                    BlurFilter::Gaussian => Blur::GAUSSIAN,
+                    _ => Blur::FAST,
+                };
+                let on = |s: f64| channels.map(|c| if c { k * s } else { 0.0 });
+                Work::Blur(Blurring {
+                    across: on(x),
+                    down: on(y),
+                    border,
+                })
+            }
+        };
+        Some(Self::plain(work, blend))
+    }
+}
+
+pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) -> Vec<Working> {
+    let Some(chain) = c.chain() else {
+        return vec![Working::plain(Work::Clear, 1.0)];
+    };
+    let on = OnFrame {
+        width: 4.0 / 3.0 * (w * h).sqrt(),
+        size: [w, h],
+        middle: [w / 2.0, h / 2.0],
+        frame,
+        fit: [0.0, 0.0, w, h],
+        canvas: [w, h],
+        back: [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0],
+    };
+    chain
+        .into_iter()
+        .filter(|n| !n.pass_through)
+        .filter_map(|n| {
+            let mut working = match &n.tool {
+                Tool::Blur(b) => Working::of_blur(b, n.mixed(), w)?,
+                Tool::Effect(kind) => {
+                    let effect = Effect {
+                        kind: kind.clone(),
+                        blend: n.blend,
+                        ..EffectType::of(kind).made()
+                    };
+                    let mut working = Working::of(&effect, &on)?;
+                    if let (Work::Blur(b), false) = (&mut working.work, n.blur_alpha) {
+                        b.across[3] = 0.0;
+                        b.down[3] = 0.0;
+                    }
+                    working
+                }
+                _ => return None,
+            };
+            working.masks = c
+                .masks_of(n)
+                .into_iter()
+                .filter(|m| !m.pass_through)
+                .filter_map(|m| {
+                    let mask = m.tool.mask()?;
+                    let bases = MaskBase::all(mask, c, (w, h), areas);
+                    Some(Shaping::of(mask, &m.tool, w, &bases))
+                })
+                .collect();
+            Some(working)
+        })
+        .collect()
 }
 
 pub fn flipped(p: &Picture, [x, y]: [f64; 2]) -> [f64; 2] {
@@ -838,28 +1124,32 @@ impl Placing {
             canvas: [frame.0, frame.1],
             back: own.back,
         };
-        let based = |e: &Effect| {
-            let named = e.area.as_ref()?.follows.as_deref()?;
-            Some(p.followed.bases(named, p.source))
-        };
         let effects = p
             .picture
             .effects
             .iter()
-            .filter_map(|e| {
-                let bases = based(e);
-                Working::of(&e.sampled(p.source as f64), &on, bases.as_deref())
-            })
+            .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
             .collect();
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&own.back, c));
         if own.soft == Soft::default() && no_bars(quad, frame) {
             own.edge = [-1.0, -1.0, 2.0, 2.0];
         }
+        let composed = p.picture.composition.as_ref().map_or(Vec::new(), |c| {
+            let at = (p.clock.frame(p.source) - c.start) as f64;
+            let sampled = Composition {
+                nodes: c.nodes.iter().map(|n| n.sampled(at)).collect(),
+                ..Composition::default()
+            };
+            let frame = p.followed.frame(p.source);
+            let areas = |pattern: &Pattern| pattern.area_at(&p.followed.paths, frame);
+            composed(&sampled, pixels, p.frame, &areas)
+        });
         Self {
             level: own,
             mode: p.picture.mode(),
             effects,
+            composed,
         }
     }
 
@@ -1282,6 +1572,7 @@ mod tests {
             crossing: false,
             moving: None,
             followed: Default::default(),
+            clock: Default::default(),
         };
         let frame = (1920.0, 1080.0);
         let level = Placing::whole(&[placed], frame).level;
@@ -1316,6 +1607,7 @@ mod tests {
             crossing: false,
             moving: None,
             followed: Default::default(),
+            clock: Default::default(),
         };
         let placing = Placing::whole(&[placed], (1920.0, 1080.0));
         let Work::Blur(b) = &placing.effects[0].work else {
@@ -1356,6 +1648,7 @@ mod tests {
             crossing: false,
             moving: None,
             followed: Default::default(),
+            clock: Default::default(),
         };
         assert_eq!(detail(&[placed]), 0.4);
     }

@@ -340,6 +340,7 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
 pub fn own_effects(placed: &mut [Placed]) {
     for p in placed.iter_mut().skip(1) {
         p.picture.effects.clear();
+        p.picture.composition = None;
     }
 }
 
@@ -540,7 +541,12 @@ fn plain_placed(p: &mut Placed, one: bool) {
     if p.ready {
         p.start = 0;
     }
-    if !p.picture.effects.iter().any(Effect::moves_by_itself) {
+    let moves = p.picture.effects.iter().any(Effect::moves_by_itself)
+        || p.picture
+            .composition
+            .as_ref()
+            .is_some_and(|c| c.moves_by_itself());
+    if !moves {
         p.frame = 0;
     }
     p.picture
@@ -1360,7 +1366,6 @@ mod tests {
             use_alpha: true,
             render_cache: true,
             keys: Vec::new(),
-            area: None,
         }
     }
 
@@ -1392,6 +1397,7 @@ mod tests {
                     crossing: false,
                     moving: None,
                     followed: Default::default(),
+                    clock: Default::default(),
                 }],
             }],
         }

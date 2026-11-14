@@ -25,8 +25,9 @@ use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GuiPanel, OneOrMany, PoolMode,
-    ScreenshotTarget, TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
+    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GuiPanel, OneOrMany, Page,
+    PoolMode, ScreenshotTarget, TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame,
+    ViewerMode,
 };
 use vidcut_core::time::{DurationSpec, Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -91,6 +92,30 @@ pub enum GuiChange {
     Timeline(TimelineOptions),
     Show(GuiPanel),
     Close(GuiPanel),
+    Page(Page),
+    Nodes(Vec<String>),
+    PageTime(PageTime),
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PageTime {
+    pub at: Option<i64>,
+    pub fast: bool,
+    pub speed: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct PageClock {
+    pub at: i64,
+    pub first: i64,
+    pub last: i64,
+    pub out: i64,
+    pub speed: f64,
+    #[serde(rename = "loop")]
+    pub looping: bool,
+    pub ping_pong: bool,
+    #[serde(rename = "in")]
+    pub mark_in: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -120,6 +145,10 @@ pub struct TimelineState {
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct GuiState {
+    pub page: Page,
+    pub clip: Option<String>,
+    pub nodes: Vec<String>,
+    pub time: Option<PageClock>,
     pub edit: Option<EditPoint>,
     pub edits: Vec<EditPoint>,
     pub target: String,
@@ -1392,6 +1421,7 @@ impl Live {
             }
         }
         self.present_due();
+        self.player.bounce();
         let p = &self.player;
         if p.shown < p.motion {
             soonest(now + Duration::from_millis(5));
@@ -1897,8 +1927,8 @@ impl Live {
             let looks = vidcut_core::editor::track_looks(p, &envelope.request, playhead);
             return Some(Box::new(move || {
                 use vidcut_core::Env;
-                for (media, follow, download) in &looks {
-                    AvEnv::new().tracked(media, *follow, *download)?;
+                for (media, plan, follow, download) in &looks {
+                    AvEnv::new().tracked(media, plan, *follow, *download)?;
                 }
                 Ok(())
             }));
@@ -2302,7 +2332,9 @@ impl Live {
                     | "jobs.list"
                     | "preferences.get"
             ))
-            || (job.method == "player.seek" && job.params["fast"] == json!(true))
+            || (matches!(job.method.as_str(), "player.seek" | "gui.page_time")
+                && job.params["fast"] == json!(true))
+            || (job.method == "player.bounds" && matches!(job.origin, Origin::Gui { .. }))
             || (job.method == "mixer.preview" && matches!(job.origin, Origin::Gui { .. }))
             || (job.method == "pool.set"
                 && matches!(job.origin, Origin::Gui { .. })
@@ -2515,9 +2547,9 @@ impl Live {
             "motion.track" => {
                 let frame = |key: &str| r.result[key].as_i64().unwrap_or(0);
                 let frames = frame("last") - frame("first") + 1;
-                let lost = |key: &str| r.result[key].as_str() == Some("lost");
-                match lost("backward") || lost("forward") {
-                    true => format!("Track: {frames} frames, then lost"),
+                let stopped = |key: &str| r.result[key].as_str() == Some("stopped");
+                match stopped("backward") || stopped("forward") {
+                    true => format!("Track: {frames} frames, then stopped"),
                     false => format!("Track: {frames} frames"),
                 }
             }
@@ -2895,6 +2927,29 @@ impl Live {
                 self.sync_loop();
                 Step::Now(Ok(self.state_response()))
             }
+            Request::PlayerBounds {
+                from,
+                to,
+                looping,
+                ping_pong,
+            } => {
+                let wrap = match (looping, ping_pong) {
+                    (false, _) => player::Wrap::Stop,
+                    (true, false) => player::Wrap::Loop,
+                    (true, true) => player::Wrap::PingPong,
+                };
+                let bounds = match (from, to) {
+                    (Some(a), Some(b)) if b > a => Some(((a, b), wrap)),
+                    (None, None) => None,
+                    _ => {
+                        return Step::Now(Err(Error::usage(
+                            "player.bounds needs both from and to, with to after from",
+                        )));
+                    }
+                };
+                self.player.set_bounds(bounds);
+                Step::Now(Ok(self.state_response()))
+            }
             Request::PlayerFastReview { on } => {
                 self.fast_review = on.unwrap_or(!self.fast_review);
                 let id = PlayerId::of(self.viewer);
@@ -3129,6 +3184,19 @@ impl Live {
             }
             Request::GuiClose { panel } => {
                 self.gui_change(vec![GuiChange::Close(panel)], |s| json!(s))
+            }
+            Request::GuiPage { page } => self.gui_change(vec![GuiChange::Page(page)], |s| json!(s)),
+            Request::GuiNodes { nodes } => {
+                self.gui_change(vec![GuiChange::Nodes(nodes)], |s| json!(s))
+            }
+            Request::GuiPageTime { at, fast, speed } => {
+                if speed.is_some_and(|s| !s.is_finite() || s.abs() > MAX_SPEED) {
+                    return Step::Now(Err(Error::usage(format!(
+                        "speed must be within -{MAX_SPEED}..{MAX_SPEED}"
+                    ))));
+                }
+                let time = PageTime { at, fast, speed };
+                self.gui_change(vec![GuiChange::PageTime(time)], |s| json!(s))
             }
             Request::GuiState {} => self.gui_change(Vec::new(), |s| json!(s)),
             Request::GuiOnly {
@@ -5037,6 +5105,14 @@ impl Live {
             "audio_error": self.player.audio_error,
             "audio_scrubbing": self.audio_scrubbing,
             "loop": self.looping,
+            "bounds": self.player.bounds().map(|((from, to), wrap)| {
+                json!({
+                    "from": from,
+                    "to": to,
+                    "loop": wrap != player::Wrap::Stop,
+                    "ping_pong": wrap == player::Wrap::PingPong,
+                })
+            }),
             "fast_review": self.fast_review,
             "video_only": self.video_only,
             "audio_only": self.audio_only,

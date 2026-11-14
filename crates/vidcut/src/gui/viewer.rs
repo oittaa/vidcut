@@ -299,7 +299,7 @@ impl Workspace {
         let trim = self.trim_editor_edit();
         let sync_grid = self.sync_grid_on() && !self.sync_clips.open;
         let tools = mode == ViewerMode::Timeline
-            && self.timeline.picture_grab.rowed()
+            && self.timeline.picture_grab.row
             && !dynamic
             && trim.is_none()
             && !sync_grid;
@@ -451,13 +451,9 @@ impl Workspace {
         if mode == ViewerMode::Timeline
             && offline.is_none()
             && played.is_some()
-            && !self.area_controls(ui, &area_resp, picture)
             && !self.picture_controls(ui, &area_resp, picture)
         {
             self.title_controls(ui, &area_resp, picture);
-        }
-        if mode == ViewerMode::Timeline && offline.is_none() && played.is_some() {
-            self.paint_motion(ui, picture);
         }
         if let Some(name) = offline {
             painter.rect_filled(picture, CornerRadius::ZERO, theme::colors().offline);

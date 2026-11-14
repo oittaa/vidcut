@@ -2,7 +2,8 @@
 
 **When:** now, one pull request for each step below.
 
-A motion path is the path of an area of the picture through the frames of a clip. A clip stores motion paths, and the area of an effect follows a path ([model](../design/model.md#motion-paths)). `motion.find` makes a path for each thing of one kind in a clip ([analysis](../design/analysis.md#subjects)). `motion.track` makes a path for a drawn area.
+A motion path is the path of a box of the picture through the frames of a clip.
+A clip stores motion paths, and a pattern of a Tracker node on the Effects page has a path ([model](../design/model.md#motion-paths)). `motion.find` makes a path for each thing of one kind in a clip ([analysis](../design/analysis.md#subjects)). `motion.track` makes a path for a pattern.
 
 In this file, a path is never a track of the timeline.
 
@@ -39,10 +40,10 @@ In this file, a path is never a track of the timeline.
 - A clip holds motion paths, and `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read them ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
 - Transform, Crop and the values of the effects have keyframes ([keyframes.md](keyframes.md)).
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
-- An effect has an area: an ellipse or a box of the source picture, or of the area of a motion path ([deviation X166](../deviations.md#x166-an-effect-has-an-area)).
-  - The center, the size, the rotation and the softness of the area have keyframes ([model](../design/model.md#pictures)).
+- The Center of a mask of a composition can follow a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
+  - The values of a mask have keyframes ([model](../design/model.md#compositions)).
 - `motion.find` finds the faces, the text, the people and the vehicles of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
-- `motion.track` follows the thing under the area of an effect ([deviation X168](../deviations.md#x168-the-area-of-an-effect-follows-a-thing)).
+- `motion.track` tracks a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
 - `motion.follow` makes a title follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)).
 - No request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
@@ -77,10 +78,9 @@ In this file, a path is never a track of the timeline.
 
 **To do:**
 
-- **Area keyframes, what is left:**
-  - The Inspector has no Keyframe button for the area of an effect. `effects.key` with `area` is the request for it.
+- **Mask keyframes, what is left:**
   - The points of a polygon take no keyframes. Resolve animates a polygon window (manual p. 3273).
-  - `motion.track` refuses an area with keyframes on its center, its size or its rotation. In Resolve, the keyframed transform of a window is an offset from the track (p. 3309).
+  - `comp.set` refuses a connection of a Center with keyframes. Measure on the Fusion page what a connection does to a Center with keyframes.
 - **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
   - Try how many frames a found path must start early and end late.
 - **Faces, what is left:**
@@ -93,8 +93,7 @@ In this file, a path is never a track of the timeline.
     - Check a close shot where a face is larger than 300 of those pixels, and a wide shot with faces under 10.
     - Decide whether the model also sees the picture at another size.
 - **More subjects:** number plates, animals and screens. The things that people blur most must be one choice each.
-  - The buttons in the app for people and vehicles. Only `motion.find` of the CLI, IPC and MCP finds them.
-    - The menus and the Blur row of the app list the subjects of `SUBJECTS` in `crates/vidcut/src/gui/inspector.rs`.
+  - The Subject menu of a Tracker lists each subject (`Subject::ALL`).
   - A search on 2026-11-10 found no number plate model that has a clear license, a small size and plates of many countries.
     - The models with a clear license know the plates of one country, or have about 40 MB and attention layers.
   - Check on a picture with a number plate whether the text subject finds its characters. No test clip has a number plate.
@@ -106,15 +105,23 @@ In this file, a path is never a track of the timeline.
     - Measured on 2026-11-11, on 16 threads, with the file decoded on the GPU:
     - A 720p file at 24 fps gives from 21 to 24 pictures in a second. The model takes 94 % of that time.
     - A 2160p file at 59.94 fps in a project of 24 fps gives from 16 to 17 pictures in a second. The model takes 70 % of that time.
-- **The values of a find in the app:** try the Advanced fields of the Motion section in the app. The fields do not stay after the app closes.
+- **The values of a find in the app:** try the Advanced fields of a Tracker in the app. The fields do not stay after the app closes.
 - **Text, the open parts:**
   - Very small text: try a longer side above 960 pixels for a large source, and measure the time.
   - Text that comes into the picture has no blur on its first frames, as a face has not.
   - The detector takes most of the time of a text find. Try the model on the GPU.
-- **The track of an area, what is left:**
-  - Measure `tracking::LOST` on a clip where the thing leaves the picture, or goes behind another thing. No test clip has one.
+- **The Tracker, what is left:** one pull request for each part.
+  - Track Fwd Then Reverse of Resolve 21.2. Measure where it starts and where it is in the row of buttons.
+  - Measure what a drag of a pattern box does on a frame of the path ([X168](../deviations.md#x168-a-drag-of-a-pattern-box-changes-its-path)).
+  - Point patterns: Add Point, the search area in the viewer, the channel, Adaptive Mode, Match Tolerance and the pattern flipbooks (pp. 1783–1788).
+    - Path Center with Track Center (Append) (p. 1788), and the path tools of the viewer (p. 1787).
   - A track follows no turn and no change of perspective.
-- **The Motion section in the app:** click Blur in a window, and take a find that asks for the download of its model. Find ran from its button.
+  - Keyframes on X Offset and Y Offset, the Tracker Offset button of the viewer, and Select Time with Go (p. 1789).
+  - The Foreground and Effect Mask inputs of a Tracker.
+  - The Operation tab: Match Move, Corner Positioning, Perspective Positioning and stabilization (p. 1789).
+  - The outputs other than Offset Position: Perspective Position, and the Steady and Unsteady values (pp. 1793–1794).
+  - The Options tab: the names of the patterns, enlarge on drag and the search scale.
+- **The Tracker in the app:** run each track button, Stop Tracking, Find, Blur, Connect To and Follow Size. Take a find that asks for the download of its model.
 - **A clip follows a path** of another clip: a picture in a picture, or a sticker.
 - **A title that follows a path, what is left:**
   - Try Follow in the app: the menu, a drag of a title that follows a path, and its zoom and turn handles.

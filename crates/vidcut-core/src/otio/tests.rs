@@ -1,4 +1,5 @@
 use super::*;
+use crate::effect_keys::Keyed;
 use crate::model::{AudioInfo, EffectValue, Effects, MediaInfo};
 use crate::test_support::{FakeEnv, Fixture, media_info, still_info};
 

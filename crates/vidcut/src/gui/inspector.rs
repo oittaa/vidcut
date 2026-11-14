@@ -4,20 +4,22 @@ use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
-    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_UP, CARET_LEFT, CARET_RIGHT, CHECK, DIAMOND,
-    FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, TRASH,
+    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LINE_LEFT, ARROW_LINE_RIGHT, ARROW_UP, CARET_LEFT,
+    CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT, CHECK, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL,
+    LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
 };
 use serde_json::{Value, json};
+use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    AreaShape, Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel,
-    Effect, EffectArea, EffectKind, EffectValue, FilmGrain, GaussianBlur, Generator, Glow,
-    GlowAlpha, GlowFraming, GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe,
-    MosaicBlur, MotionPath, Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject,
-    TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, ClipRetime, CompositeMode,
+    Composition, Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue,
+    FillMethod, FilmGrain, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming, GlowOutput,
+    Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, Node, Pattern, Picture,
+    PictureTool, Project, Retime, Sharpen, Speed, Subject, Tool, ToolType, TrackKind, Upscaler,
+    Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
-use vidcut_core::motion::{REACH, TURN};
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
 use vidcut_core::time::TimeSpec;
@@ -38,7 +40,6 @@ const SAME: f64 = 1e-9;
 const FIELD_WIDTH: f32 = 76.0;
 const NAME_WIDTH: f32 = 140.0;
 const BLUR_SIZE: [f64; 2] = [1.3, 1.3];
-pub(super) const SUBJECTS: [Subject; 2] = [Subject::Face, Subject::Text];
 const BETTER_SIDE: u32 = 1920;
 const FIND_VALUES: [(&str, &str, &str, &str); 7] = [
     (
@@ -116,6 +117,7 @@ enum Field {
 enum Key {
     Picture(Field),
     Effect(usize, Knob),
+    Node(usize, EffectValue, usize),
     Center(Axis),
     Volume,
     Pan,
@@ -132,18 +134,7 @@ enum Knob {
     Grain(GrainKnob),
     Vignette(VignetteKnob),
     Sharpen(SharpenKnob),
-    Area(AreaKnob),
     Blend,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum AreaKnob {
-    Softness,
-    CenterX,
-    CenterY,
-    Width,
-    Height,
-    Rotation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -698,58 +689,6 @@ impl SharpenKnob {
     }
 }
 
-impl AreaKnob {
-    fn dial(self) -> Dial {
-        let dial = |label, usual, range, speed| Dial {
-            label,
-            usual,
-            range,
-            speed,
-        };
-        let [x, y] = EffectArea::MIDDLE;
-        let [w, h] = EffectArea::WHOLE;
-        match self {
-            Self::Softness => dial("Area Softness", 0.0, 0.0..=1.0, 0.005),
-            Self::CenterX => dial("Center X", x, -REACH..=REACH, 0.001),
-            Self::CenterY => dial("Center Y", y, -REACH..=REACH, 0.001),
-            Self::Width => dial("Width", w, 0.0..=REACH, 0.001),
-            Self::Height => dial("Height", h, 0.0..=REACH, 0.001),
-            Self::Rotation => dial("Rotation", 0.0, -TURN..=TURN, 0.5),
-        }
-    }
-
-    fn read(self, a: &EffectArea) -> f64 {
-        match self {
-            Self::Softness => a.soft(),
-            Self::CenterX => a.middle()[0],
-            Self::CenterY => a.middle()[1],
-            Self::Width => a.extent()[0],
-            Self::Height => a.extent()[1],
-            Self::Rotation => a.turn(),
-        }
-    }
-
-    fn put(self, a: &mut EffectArea, to: f64) {
-        match self {
-            Self::Softness => a.softness = Some(to),
-            Self::CenterX => a.center = Some([to, a.middle()[1]]),
-            Self::CenterY => a.center = Some([a.middle()[0], to]),
-            Self::Width => a.size = Some([to, a.extent()[1]]),
-            Self::Height => a.size = Some([a.extent()[0], to]),
-            Self::Rotation => a.rotation = Some(to),
-        }
-    }
-
-    fn param(self, a: &EffectArea) -> Value {
-        match self {
-            Self::Softness => json!({ "softness": a.soft() }),
-            Self::CenterX | Self::CenterY => json!({ "center": a.middle() }),
-            Self::Width | Self::Height => json!({ "size": a.extent() }),
-            Self::Rotation => json!({ "rotation": a.turn() }),
-        }
-    }
-}
-
 impl Knob {
     fn dial(self) -> Dial {
         match self {
@@ -759,7 +698,6 @@ impl Knob {
             Knob::Grain(k) => k.dial(),
             Knob::Vignette(k) => k.dial(),
             Knob::Sharpen(k) => k.dial(),
-            Knob::Area(k) => k.dial(),
             Knob::Blend => Dial {
                 label: "Blend",
                 usual: 1.0,
@@ -777,7 +715,6 @@ impl Knob {
             (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.read(g),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.read(s),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.read(s),
-            (Knob::Area(k), _) => e.area.as_ref().map_or(k.dial().usual, |a| k.read(a)),
             (Knob::Blend, _) => e.mixed(),
             _ => self.dial().usual,
         }
@@ -794,11 +731,6 @@ impl Knob {
             (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.put(g, v),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.put(s, v),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.put(s, v),
-            (Knob::Area(k), _) => {
-                if let Some(a) = out.area.as_mut() {
-                    k.put(a, v);
-                }
-            }
             (Knob::Blend, _) => out.blend = Some(v),
             _ => {}
         }
@@ -834,10 +766,6 @@ impl Knob {
             (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.param(g),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.param(s),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.param(s),
-            (Knob::Area(k), _) => {
-                let area = e.area.as_ref();
-                ("area", area.map_or_else(|| json!({}), |a| k.param(a)))
-            }
             _ => ("blend", json!(e.mixed())),
         }
     }
@@ -874,7 +802,6 @@ fn effect_key_times(c: &Clip, n: usize) -> Vec<i64> {
     effects.get(n).map_or_else(Vec::new, |e| {
         e.keys
             .iter()
-            .filter(|k| !k.value.of_area())
             .flat_map(|k| k.keys.iter())
             .map(|k| c.key_time(k.frame).round() as i64)
             .collect()
@@ -1203,6 +1130,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.label(),
             Key::Effect(_, k) => k.dial().label,
+            Key::Node(..) => "",
             Key::Center(Axis::X) => "Center X",
             Key::Center(Axis::Y) => "Center Y",
             Key::Volume => "Volume",
@@ -1227,7 +1155,7 @@ impl Key {
             Key::Volume => " dB",
             Key::Speed => "%",
             Key::Rate => " fps",
-            Key::Effect(..) | Key::Center(_) | Key::Length | Key::Pan => "",
+            Key::Effect(..) | Key::Node(..) | Key::Center(_) | Key::Length | Key::Pan => "",
         }
     }
 
@@ -1235,6 +1163,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.speed(),
             Key::Effect(_, k) => k.dial().speed,
+            Key::Node(_, v, _) => node_speed(v),
             Key::Center(_) => 0.005,
             Key::Volume => 0.1,
             Key::Pan => 0.5,
@@ -1247,7 +1176,7 @@ impl Key {
         match self {
             Key::Picture(Field::Pitch | Field::Yaw) => (0, 3),
             Key::Picture(_) => (0, 2),
-            Key::Effect(..) | Key::Center(_) => (3, 3),
+            Key::Effect(..) | Key::Node(..) | Key::Center(_) => (3, 3),
             Key::Volume | Key::Pan => (1, 1),
             Key::Speed => (0, 2),
             Key::Rate => (0, 3),
@@ -1259,9 +1188,931 @@ impl Key {
         match self {
             Key::Picture(f) => f.usual(),
             Key::Effect(_, k) => k.dial().usual,
+            Key::Node(_, v, _) => node_usual(v),
             Key::Center(_) | Key::Volume | Key::Pan => 0.0,
             Key::Speed => 100.0,
             Key::Rate | Key::Length => 0.0,
+        }
+    }
+}
+
+const NODE: usize = usize::MAX;
+const NODES: usize = 1 << 16;
+
+fn node_slot(k: usize) -> usize {
+    NODE - k
+}
+
+fn slot_node(n: usize) -> Option<usize> {
+    let k = NODE - n;
+    (k < NODES).then_some(k)
+}
+
+fn node_speed(v: EffectValue) -> f64 {
+    match v {
+        EffectValue::Size | EffectValue::YSize => 0.05,
+        EffectValue::Angle
+        | EffectValue::ZRotation
+        | EffectValue::XRotation
+        | EffectValue::YRotation => 0.5,
+        EffectValue::Blend => 0.005,
+        _ => 0.002,
+    }
+}
+
+fn node_usual(v: EffectValue) -> f64 {
+    match v {
+        EffectValue::Size | EffectValue::YSize | EffectValue::Level | EffectValue::Blend => 1.0,
+        EffectValue::Width | EffectValue::Height | EffectValue::Center => 0.5,
+        _ => 0.0,
+    }
+}
+
+fn node_effect(n: &Node) -> Option<Effect> {
+    let Tool::Effect(kind) = &n.tool else {
+        return None;
+    };
+    let mut e = EffectType::of(kind).made();
+    e.kind = kind.clone();
+    e.blend = n.blend;
+    e.keys = n.keys.clone();
+    Some(e)
+}
+
+fn node_value_of(f: Key, n: &Node) -> Option<EffectValue> {
+    match f {
+        Key::Node(_, v, _) => Some(v),
+        Key::Effect(_, k) => node_effect(n)
+            .and_then(|e| k.keyed_value(&e))
+            .map(|(v, _)| v),
+        _ => None,
+    }
+}
+
+fn sensed_label(ui: &mut egui::Ui, text: &str, set: bool) -> egui::Response {
+    let c = theme::colors();
+    let text = RichText::new(text).color(if set { c.accent } else { c.text_dim });
+    ui.add(egui::Label::new(text).sense(egui::Sense::click()))
+}
+
+fn node_value(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n): (usize, &Node),
+    (v, text): (EffectValue, &str),
+    acts: &mut Vec<Act>,
+) -> Option<egui::Response> {
+    let (Some(k), Some((point, (lo, hi)))) = (slot_node(slot), n.read_point(v)) else {
+        return None;
+    };
+    let keys = i.mark_of(slot, v);
+    if !v.pair() {
+        let f = Key::Node(k, v, 0);
+        let set = point[0] != f.usual();
+        let r = sensed_label(ui, text, set);
+        field_rest(
+            ui,
+            f,
+            i,
+            (set, point[0], lo..=hi),
+            Look::default(),
+            keys,
+            acts,
+        );
+        return Some(r);
+    }
+    let fields = [Key::Node(k, v, 0), Key::Node(k, v, 1)];
+    let usual = fields.map(Key::usual);
+    let set = point != usual;
+    let r = sensed_label(ui, text, set);
+    ui.horizontal(|ui| {
+        for (f, now) in fields.into_iter().zip(point) {
+            drag(ui, f, i, (now, lo..=hi), &Look::default(), acts);
+        }
+        if let Some(keys) = keys {
+            key_acts(ui, fields[0], &keys, acts);
+        }
+    });
+    if reset(ui, set) {
+        acts.push(node_set(slot, &v.name(), json!(usual)));
+    }
+    ui.end_row();
+    Some(r)
+}
+
+fn offset_row(ui: &mut egui::Ui, (id, text): (egui::Id, &str), now: f64) -> Option<f64> {
+    let set = now != 0.0;
+    label(ui, text, set);
+    let mut v = ui.data(|d| d.get_temp::<f64>(id)).unwrap_or(now);
+    let (lo, hi) = Pattern::PLACES;
+    let r = ui.add(
+        egui::DragValue::new(&mut v)
+            .range(lo..=hi)
+            .speed(0.001)
+            .max_decimals(4),
+    );
+    if r.dragged() {
+        ui.data_mut(|d| d.insert_temp(id, v));
+    }
+    let mut out = None;
+    if r.drag_stopped() || (r.changed() && !r.dragged()) {
+        ui.data_mut(|d| d.remove::<f64>(id));
+        out = (v != now).then_some(v);
+    }
+    if reset(ui, set) {
+        out = Some(0.0);
+    }
+    ui.end_row();
+    out
+}
+
+fn node_set(slot: usize, put: &str, value: Value) -> Act {
+    let mut params = json!({});
+    params[put] = value;
+    Act::EffectSet(slot, params)
+}
+
+fn passes_row(ui: &mut egui::Ui, slot: usize, (now, usual): (u32, u32), acts: &mut Vec<Act>) {
+    label(ui, "Num Passes", now != usual);
+    let id = ui.scope_id().with(("node-passes", slot));
+    let mut v = ui.data(|d| d.get_temp::<u32>(id)).unwrap_or(now);
+    let r = ui.add(
+        egui::DragValue::new(&mut v)
+            .range(1..=Blur::MOST_PASSES)
+            .speed(0.1),
+    );
+    if r.dragged() {
+        ui.data_mut(|d| d.insert_temp(id, v));
+    }
+    if r.drag_stopped() || (r.changed() && !r.dragged()) {
+        ui.data_mut(|d| d.remove::<u32>(id));
+        if v != now {
+            acts.push(node_set(slot, "passes", json!(v)));
+        }
+    }
+    if reset(ui, now != usual) {
+        acts.push(node_set(slot, "passes", json!(usual)));
+    }
+    ui.end_row();
+}
+
+fn channels_row(ui: &mut egui::Ui, slot: usize, now: [bool; 4], acts: &mut Vec<Act>) {
+    label(ui, "Color Channels", now != Blur::ALL);
+    ui.horizontal(|ui| {
+        for (k, name) in ["Red", "Green", "Blue", "Alpha"].into_iter().enumerate() {
+            let mut on = now[k];
+            if ui.checkbox(&mut on, name).clicked() {
+                let mut to = now;
+                to[k] = on;
+                acts.push(node_set(slot, "channels", json!(to)));
+            }
+        }
+    });
+    if reset(ui, now != Blur::ALL) {
+        acts.push(node_set(slot, "channels", json!(Blur::ALL)));
+    }
+    ui.end_row();
+}
+
+fn fill_label(f: FillMethod) -> &'static str {
+    match f {
+        FillMethod::Alternate => "Alternate",
+        FillMethod::NonZeroWinding => "Non Zero Winding",
+    }
+}
+
+const FILLS: [FillMethod; 2] = [FillMethod::Alternate, FillMethod::NonZeroWinding];
+
+struct Hooked {
+    name: String,
+    patterns: Vec<String>,
+}
+
+fn hooks(comp: &Composition) -> Vec<Hooked> {
+    let trackers = comp
+        .nodes
+        .iter()
+        .filter_map(|n| Some((n, n.tool.tracker()?)));
+    trackers
+        .map(|(n, t)| Hooked {
+            name: n.name.clone(),
+            patterns: t.patterns.iter().map(|p| p.name.clone()).collect(),
+        })
+        .collect()
+}
+
+fn connect_menu(ui: &mut egui::Ui, now: Option<&Connect>, trackers: &[Hooked]) -> Option<Value> {
+    let mut put = None;
+    ui.menu_button("Connect To", |ui| {
+        if trackers.is_empty() {
+            ui.label(dim("No Tracker"));
+        }
+        for t in trackers {
+            ui.menu_button(&t.name, |ui| {
+                for (k, name) in t.patterns.iter().enumerate() {
+                    let to = Connect {
+                        tracker: t.name.clone(),
+                        pattern: k as u32 + 1,
+                        size: now.is_some_and(|c| c.size),
+                    };
+                    let on =
+                        now.is_some_and(|c| c.tracker == to.tracker && c.pattern == to.pattern);
+                    let text = format!("{name}: Offset position");
+                    if ui.radio(on, text).clicked() {
+                        put = Some(json!(to));
+                        ui.close();
+                    }
+                }
+            });
+        }
+    });
+    if now.is_some() && ui.button("Disconnect").clicked() {
+        put = Some(Value::Null);
+        ui.close();
+    }
+    put
+}
+
+fn center_row(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n): (usize, &Node),
+    trackers: &[Hooked],
+    acts: &mut Vec<Act>,
+) {
+    let Some(m) = n.tool.mask() else {
+        return;
+    };
+    let Some(k) = &m.connect else {
+        if let Some(r) = node_value(ui, i, (slot, n), (EffectValue::Center, "Center"), acts) {
+            r.context_menu(|ui| {
+                if let Some(v) = connect_menu(ui, None, trackers) {
+                    acts.push(node_set(slot, "connect", v));
+                }
+            });
+        }
+        return;
+    };
+    let accent = theme::colors().accent;
+    let text = RichText::new("Center").color(accent);
+    let r = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
+    r.context_menu(|ui| {
+        if let Some(v) = connect_menu(ui, Some(k), trackers) {
+            acts.push(node_set(slot, "connect", v));
+        }
+    });
+    let hooked = trackers.iter().find(|t| t.name == k.tracker);
+    let name = hooked.and_then(|t| t.patterns.get(k.pattern as usize - 1));
+    let shown = format!("{}: {}", k.tracker, name.map_or("", String::as_str));
+    ui.label(dim(shown));
+    if reset(ui, true) {
+        acts.push(node_set(slot, "connect", Value::Null));
+    }
+    ui.end_row();
+    label(ui, "Follow Size", k.size);
+    let mut on = k.size;
+    if ui.checkbox(&mut on, "").changed() {
+        let to = Connect {
+            size: on,
+            ..k.clone()
+        };
+        acts.push(node_set(slot, "connect", json!(to)));
+    }
+    ui.end_row();
+}
+
+fn node_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n): (usize, &Node),
+    trackers: &[Hooked],
+    acts: &mut Vec<Act>,
+) {
+    use EffectValue as V;
+    let value = |ui: &mut egui::Ui, acts: &mut Vec<Act>, v: V, text: &str| {
+        node_value(ui, i, (slot, n), (v, text), acts);
+    };
+    let filters = (
+        &BlurFilter::ALL[..],
+        BlurFilter::name as fn(BlurFilter) -> &'static str,
+    );
+    match &n.tool {
+        Tool::Blur(b) => {
+            let filter = (b.filter(), BlurFilter::default());
+            choice_row(ui, (slot, "Filter", "filter"), filter, filters, acts);
+            if b.filter() == BlurFilter::MultiBox {
+                passes_row(ui, slot, (b.passes(), Blur::PASSES), acts);
+            }
+            channels_row(ui, slot, b.channels(), acts);
+            check(ui, (slot, "Lock X/Y", b.lock_xy, true), "lock_xy", acts);
+            value(ui, acts, V::Size, "Blur Size");
+            value(ui, acts, V::YSize, "Y Blur Size");
+            let modes = (
+                &BlurClipping::ALL[..],
+                BlurClipping::name as fn(BlurClipping) -> &'static str,
+            );
+            let mode = (b.clipping(), BlurClipping::default());
+            choice_row(ui, (slot, "Clipping Mode", "clipping"), mode, modes, acts);
+            value(ui, acts, V::Blend, "Blend");
+        }
+        Tool::Effect(kind) => {
+            let Some(e) = node_effect(n) else {
+                return;
+            };
+            match kind {
+                EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (slot, &e, g), acts),
+                EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (slot, &e, m), acts),
+                EffectKind::Glow(g) => glow_rows(ui, i, (slot, &e, g), acts),
+                EffectKind::FilmGrain(g) => grain_rows(ui, i, (slot, &e, g), acts),
+                EffectKind::Vignette(v) => vignette_rows(ui, i, (slot, &e, v), acts),
+                EffectKind::Sharpen(_) => sharpen_rows(ui, i, (slot, &e), acts),
+            }
+            if matches!(kind, EffectKind::GaussianBlur(_)) {
+                check(
+                    ui,
+                    (slot, "Blur Alpha", n.blur_alpha, true),
+                    "blur_alpha",
+                    acts,
+                );
+            }
+            knob(ui, i, (slot, Knob::Blend), &e, acts);
+        }
+        t => {
+            let Some(m) = t.mask() else {
+                ui.label(dim("No values"));
+                ui.end_row();
+                return;
+            };
+            let shows = (slot, "Show View Controls", m.show_view_controls, true);
+            check(ui, shows, "show_view_controls", acts);
+            value(ui, acts, V::Level, "Level");
+            let filter = (m.filter(), BlurFilter::default());
+            choice_row(ui, (slot, "Filter", "filter"), filter, filters, acts);
+            if m.filter() == BlurFilter::MultiBox {
+                passes_row(ui, slot, (m.passes(), Blur::PASSES), acts);
+            }
+            value(ui, acts, V::SoftEdge, "Soft Edge");
+            value(ui, acts, V::BorderWidth, "Border Width");
+            check(ui, (slot, "Invert", m.invert, false), "invert", acts);
+            check(ui, (slot, "Solid", m.solid, true), "solid", acts);
+            center_row(ui, i, (slot, n), trackers, acts);
+            value(ui, acts, V::Width, "Width");
+            value(ui, acts, V::Height, "Height");
+            value(ui, acts, V::CornerRadius, "Corner Radius");
+            value(ui, acts, V::Angle, "Angle");
+            value(ui, acts, V::Size, "Size");
+            value(ui, acts, V::XRotation, "X Rotation");
+            value(ui, acts, V::YRotation, "Y Rotation");
+            value(ui, acts, V::ZRotation, "Z Rotation");
+            if matches!(t, Tool::Polygon(_)) {
+                let fills = (&FILLS[..], fill_label as fn(FillMethod) -> &'static str);
+                let now = (m.fill_method.unwrap_or_default(), FillMethod::default());
+                choice_row(ui, (slot, "Fill Method", "fill_method"), now, fills, acts);
+            }
+        }
+    }
+}
+
+fn node_header(ui: &mut egui::Ui, n: &Node, active: bool, acts: &mut Vec<Act>) {
+    ui.horizontal(|ui| {
+        let name = RichText::new(&n.name).strong();
+        let name = if active {
+            name.color(theme::colors().accent)
+        } else {
+            name
+        };
+        if ui.add(egui::Button::new(name).frame(false)).clicked() && !active {
+            acts.push(Act::NodeActive);
+        }
+        ui.label(dim(n.tool.label()));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let changed = n.tool != n.tool.made() || n.blend.is_some() || !n.keys.is_empty();
+            if ui
+                .add_enabled(changed, egui::Button::new("Reset"))
+                .clicked()
+            {
+                acts.push(Act::NodeReset);
+            }
+        });
+    });
+}
+
+impl Inspector {
+    fn mark_of(&self, slot: usize, v: EffectValue) -> Option<KeyMark> {
+        self.marks
+            .iter()
+            .find(|(n, w, _)| *n == slot && *w == v)
+            .map(|(_, _, m)| m.clone())
+    }
+}
+
+impl Workspace {
+    pub(super) fn node_inspector(&mut self, ui: &mut egui::Ui) {
+        self.inspector.marks.clear();
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let clip = self.effects_clip().and_then(|id| p.clip(&id).cloned());
+        let Some(clip) = clip else {
+            ui.label(dim("No clip at the playhead"));
+            return;
+        };
+        let comp = super::effects_page::stored_composition(&clip);
+        let picked: Vec<usize> = self
+            .effects_page
+            .nodes
+            .iter()
+            .filter_map(|name| comp.index(name))
+            .collect();
+        if picked.is_empty() {
+            ui.label(dim("Select a node"));
+            return;
+        }
+        let trackers = hooks(&comp);
+        let at = self.page_at();
+        let source = at as f64;
+        for &k in &picked {
+            let n = &comp.nodes[k];
+            for v in n.values() {
+                let m = frame_mark(n.keys_of(v), at);
+                self.inspector.marks.push((node_slot(k), v, m));
+            }
+        }
+        let active = self.effects_page.picked().map(str::to_owned);
+        let shown: Vec<Node> = picked
+            .iter()
+            .map(|&k| comp.nodes[k].sampled(source))
+            .collect();
+        let mut all: Vec<Vec<Act>> = Vec::new();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                for (&k, n) in picked.iter().zip(&shown) {
+                    let mut acts = Vec::new();
+                    let on = active.as_deref() == Some(n.name.as_str());
+                    node_header(ui, n, on, &mut acts);
+                    let slot = node_slot(k);
+                    if n.tool.tracker().is_some() {
+                        self.tracker_section(ui, (&clip, &comp), &comp.nodes[k]);
+                    } else {
+                        let i = &self.inspector;
+                        rows(ui, (slot, "node"), |ui| {
+                            node_rows(ui, i, (slot, n), &trackers, &mut acts);
+                        });
+                    }
+                    ui.separator();
+                    all.push(acts);
+                }
+            });
+        for ((&k, n), acts) in picked.iter().zip(&shown).zip(all) {
+            self.node_acts(acts, &clip, (&comp.nodes[k], n));
+        }
+    }
+
+    fn tracker_section(
+        &mut self,
+        ui: &mut egui::Ui,
+        (clip, comp): (&Clip, &Composition),
+        node: &Node,
+    ) {
+        let Some(t) = node.tool.tracker() else {
+            return;
+        };
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let frames = vidcut_core::composition::Frames::of(&p, clip);
+        let at = self.page_at();
+        let moving = vidcut_core::ops::motion::takes(clip);
+        let running = self.tracks_running();
+        let on: Vec<usize> = (0..t.patterns.len())
+            .filter(|&k| t.patterns[k].enabled)
+            .collect();
+        let mine = |c: &String, n: &String| *c == clip.id && *n == node.name;
+        let mut pick = (self.inspector.pattern_picked.as_ref())
+            .filter(|(c, n, _)| mine(c, n))
+            .map_or(0, |x| x.2)
+            .min(t.patterns.len().saturating_sub(1));
+        let set = |mut params: Value| {
+            params["clip"] = json!(clip.id);
+            params["node"] = json!(node.name);
+            ("comp.set", params)
+        };
+        let track = |frame: i64, way: &str| -> Vec<(&'static str, Value)> {
+            let one = |k: &usize| {
+                let params = json!({
+                    "clip": clip.id,
+                    "node": node.name,
+                    "pattern": k + 1,
+                    "frame": frame,
+                    "way": way,
+                });
+                ("motion.track", params)
+            };
+            on.iter().map(one).collect()
+        };
+        let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let mut naming = self.inspector.naming.take();
+        let mut subject = self.inspector.subject;
+        let mut values = std::mem::take(&mut self.inspector.find_values);
+        let mut open = self.inspector.find_open;
+        let mut better = self.inspector.find_better;
+        let wrong = self.inspector.find_error;
+        let extra = find_extra(&values);
+        let mut tried = false;
+        let mut sends: Vec<(&'static str, Value)> = Vec::new();
+        let mut tracks: Vec<(&'static str, Value)> = Vec::new();
+        let mut stop = false;
+        let mut asked = None;
+        rows(ui, (0, node.name.as_str()), |ui| {
+            label(ui, "Track", false);
+            ui.horizontal(|ui| {
+                let can = moving && !on.is_empty() && running.is_empty();
+                let back = [
+                    (CARET_LINE_LEFT, "Track Reverse", frames.mark_out),
+                    (CARET_LEFT, "Track Reverse From Current Time", at),
+                ];
+                for (glyph, name, frame) in back {
+                    if icon(ui, glyph, name, can) {
+                        tracks = track(frame, "backward");
+                    }
+                }
+                if icon(ui, STOP, "Stop Tracking", !running.is_empty()) {
+                    stop = true;
+                }
+                let ahead = [
+                    (CARET_RIGHT, "Track Forward From Current Time", at),
+                    (CARET_LINE_RIGHT, "Track Forward", frames.mark_in),
+                ];
+                for (glyph, name, frame) in ahead {
+                    if icon(ui, glyph, name, can) {
+                        tracks = track(frame, "forward");
+                    }
+                }
+            });
+            ui.end_row();
+            label(ui, "Trim", false);
+            ui.horizontal(|ui| {
+                let picked = t.patterns.get(pick).filter(|x| x.path.is_some());
+                let can = moving && picked.is_some() && running.is_empty();
+                let trims = [
+                    (ARROW_LINE_LEFT, "Trim to Start", "start"),
+                    (TRASH, "Delete Selected Tracker Data", "all"),
+                    (ARROW_LINE_RIGHT, "Trim to End", "end"),
+                ];
+                for (glyph, name, trim) in trims {
+                    if icon(ui, glyph, name, can) {
+                        let params =
+                            json!({ "pattern": pick + 1, "pattern_trim": trim, "frame": at });
+                        sends.push(set(params));
+                    }
+                }
+            });
+            ui.end_row();
+            for (k, pattern) in t.patterns.iter().enumerate() {
+                label(ui, if k == 0 { "Patterns" } else { "" }, false);
+                ui.horizontal(|ui| {
+                    let mut enabled = pattern.enabled;
+                    if ui
+                        .checkbox(&mut enabled, "")
+                        .on_hover_text("Enabled")
+                        .changed()
+                    {
+                        let params = json!({ "pattern": k + 1, "pattern_enabled": enabled });
+                        sends.push(set(params));
+                    }
+                    if ui
+                        .selectable_label(k == pick, pattern.name.as_str())
+                        .clicked()
+                    {
+                        pick = k;
+                    }
+                });
+                if icon(ui, TRASH, "Delete", true) {
+                    sends.push(set(json!({ "pattern": k + 1, "remove_pattern": true })));
+                }
+                ui.end_row();
+            }
+            label(
+                ui,
+                if t.patterns.is_empty() {
+                    "Patterns"
+                } else {
+                    ""
+                },
+                false,
+            );
+            let full = t.patterns.len() >= vidcut_core::model::Tracker::PATTERNS_KEPT;
+            if ui
+                .add_enabled(!full, egui::Button::new("Add IntelliTrack"))
+                .clicked()
+            {
+                sends.push(set(json!({ "add_pattern": true })));
+            }
+            ui.end_row();
+            if let Some(pattern) = t.patterns.get(pick) {
+                label(ui, "Name", false);
+                let typed = (naming.as_ref())
+                    .filter(|n| mine(&n.clip, &n.node) && n.pattern == pick)
+                    .map(|n| n.text.clone());
+                let mut text = typed.clone().unwrap_or_else(|| pattern.name.clone());
+                let field = ui.add(egui::TextEdit::singleline(&mut text).desired_width(NAME_WIDTH));
+                let name = text.trim();
+                if field.lost_focus() && !cancelled && name != pattern.name && !name.is_empty() {
+                    sends.push(set(json!({ "pattern": pick + 1, "pattern_name": name })));
+                }
+                if field.has_focus() {
+                    naming = Some(Naming {
+                        clip: clip.id.clone(),
+                        node: node.name.clone(),
+                        pattern: pick,
+                        text,
+                    });
+                } else if typed.is_some() {
+                    naming = None;
+                }
+                ui.end_row();
+                let now = pattern.shift();
+                for (axis, name) in ["X Offset", "Y Offset"].into_iter().enumerate() {
+                    let id =
+                        ui.scope_id()
+                            .with(("pattern-offset", &clip.id, &node.name, pick, axis));
+                    if let Some(v) = offset_row(ui, (id, name), now[axis]) {
+                        let mut to = now;
+                        to[axis] = v;
+                        sends.push(set(json!({ "pattern": pick + 1, "pattern_offset": to })));
+                    }
+                }
+            }
+            if !moving {
+                return;
+            }
+            label(ui, "Subject", false);
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt(("inspector-motion-subject", &node.name))
+                    .selected_text(subject.many())
+                    .show_ui(ui, |ui| {
+                        for s in Subject::ALL {
+                            ui.selectable_value(&mut subject, s, s.many());
+                        }
+                    });
+                let mut given = extra.clone().unwrap_or(Value::Null);
+                if better && given.is_object() && given.get("size").is_none() {
+                    given["size"] = json!(BETTER_SIDE);
+                }
+                if ui.button("Find").clicked() {
+                    tried = true;
+                    asked = Some(find_request(clip, &node.name, subject, &given));
+                }
+                let blur = page_blur(clip, comp, node);
+                let button = egui::Button::new("Blur");
+                if ui.add_enabled(blur.is_some(), button).clicked() {
+                    sends.extend(blur);
+                }
+                if ui.add(egui::Button::selectable(open, "Advanced")).clicked() {
+                    open = !open;
+                }
+            });
+            ui.end_row();
+            label(ui, "Quality", false);
+            dialog::switch(ui, |ui| {
+                let quick = ui.selectable_label(!better, "Faster");
+                if quick
+                    .on_hover_text("The model looks at a small picture. It is quick.")
+                    .clicked()
+                {
+                    better = false;
+                }
+                let slow = ui.selectable_label(better, "Better");
+                let tip = [
+                    "The model looks at a larger picture.",
+                    "It finds smaller things and takes much longer.",
+                ]
+                .join("\n");
+                if slow.on_hover_text(tip.as_str()).clicked() {
+                    better = true;
+                }
+            });
+            ui.end_row();
+            if !open {
+                return;
+            }
+            let usual = vidcut_core::motion::Join::of(subject);
+            let side = match better {
+                true => BETTER_SIDE,
+                false => vidcut_av::subjects::side(subject),
+            };
+            let hints = [
+                side.to_string(),
+                usual.start.to_string(),
+                usual.keep.to_string(),
+                usual.overlap.to_string(),
+                usual.wait_secs.to_string(),
+                usual.shortest_secs.to_string(),
+                usual.steady.to_string(),
+            ];
+            for (i, (_, name, what, effect)) in FIND_VALUES.iter().enumerate() {
+                let tip = format!("{what}\n{effect}");
+                let set = !values[i].trim().is_empty();
+                let c = theme::colors();
+                let color = if set { c.accent } else { c.text_dim };
+                ui.label(RichText::new(*name).color(color))
+                    .on_hover_text(tip.as_str());
+                ui.add(
+                    egui::TextEdit::singleline(&mut values[i])
+                        .hint_text(hints[i].as_str())
+                        .desired_width(NAME_WIDTH),
+                )
+                .on_hover_text(tip.as_str());
+                ui.end_row();
+            }
+            if wrong {
+                label(ui, "", false);
+                label(ui, "A Value Is Not A Number", true);
+                ui.end_row();
+            }
+        });
+        self.inspector.naming = naming;
+        self.inspector.pattern_picked = Some((clip.id.clone(), node.name.clone(), pick));
+        self.inspector.subject = subject;
+        self.inspector.find_values = values;
+        self.inspector.find_open = open;
+        self.inspector.find_better = better;
+        if tried || extra.is_some() {
+            self.inspector.find_error = extra.is_none();
+        }
+        for (method, params) in sends {
+            self.send(method, params);
+        }
+        if stop {
+            self.stop_tracks();
+        }
+        if !tracks.is_empty() {
+            self.ask(tracks, None);
+        }
+        if let Some(found) = asked.filter(|_| extra.is_some()) {
+            self.ask(vec![found], Some(subject));
+        }
+    }
+
+    fn node_acts(&mut self, acts: Vec<Act>, clip: &Clip, (stored, shown): (&Node, &Node)) {
+        let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
+        for act in acts {
+            match act {
+                Act::Hold(field, value) => {
+                    self.inspector.held = Some(Held {
+                        field,
+                        value,
+                        from: value,
+                        start: Vec::new(),
+                        dragging: true,
+                    });
+                }
+                Act::Drag(field, value) => {
+                    if let Some(h) = self.inspector.held.as_mut().filter(|h| h.field == field) {
+                        h.value = value;
+                    }
+                }
+                Act::Land(field) => {
+                    let held = self
+                        .inspector
+                        .held
+                        .take_if(|h| h.field == field && h.dragging);
+                    if let Some(h) = held.filter(|h| h.value != h.from) {
+                        self.put_node(field, h.value, clip, shown);
+                    }
+                }
+                Act::Put(field, value) => {
+                    if held_on(&self.inspector, field) {
+                        self.inspector.held = None;
+                    }
+                    self.put_node(field, value, clip, shown);
+                }
+                Act::Edit(field, value) => {
+                    if !held_on(&self.inspector, field) {
+                        self.inspector.held = Some(Held {
+                            field,
+                            value,
+                            from: value,
+                            start: Vec::new(),
+                            dragging: false,
+                        });
+                    }
+                }
+                Act::Release(field) => {
+                    let mine = self.inspector.held.as_ref();
+                    if mine.is_some_and(|h| h.field == field && !h.dragging) {
+                        self.inspector.held = None;
+                    }
+                }
+                Act::EffectSet(_, params) => self.send_node("comp.set", clip, stored, params),
+                Act::Tint(_, _, to) => {
+                    let color = to.map(|c| f64::from(c) / 255.0);
+                    self.send_node("comp.set", clip, stored, json!({ "color": color }));
+                }
+                Act::Toggle(f) => {
+                    if let Some(v) = node_value_of(f, stored) {
+                        self.send_node("comp.key", clip, stored, json!({ "value": v }));
+                    }
+                }
+                Act::KeyEase(f, ease) => {
+                    if let Some(v) = node_value_of(f, stored) {
+                        let params = json!({ "value": v, "ease": ease });
+                        self.send_node("comp.key", clip, stored, params);
+                    }
+                }
+                Act::Step(f, dir) => {
+                    let Some(v) = node_value_of(f, stored) else {
+                        continue;
+                    };
+                    let times = stored.keys_of(v).iter().map(|k| k.frame);
+                    if let Some(t) = next_key(times, self.page_at(), dir) {
+                        self.send("gui.page_time", json!({ "at": t }));
+                    }
+                }
+                Act::NodeReset => self.send_node("comp.reset", clip, stored, json!({})),
+                Act::NodeActive => {
+                    let mut nodes = self.effects_page.nodes.clone();
+                    nodes.retain(|x| *x != stored.name);
+                    nodes.push(stored.name.clone());
+                    self.send("gui.nodes", json!({ "nodes": nodes }));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn send_node(&mut self, method: &str, clip: &Clip, node: &Node, mut params: Value) {
+        params["clip"] = json!(clip.id);
+        params["node"] = json!(node.name);
+        if method != "comp.reset" {
+            params["frame"] = json!(self.page_at());
+        }
+        self.send(method, params);
+    }
+
+    fn put_node(&mut self, field: Key, value: f64, clip: &Clip, shown: &Node) {
+        let params = match field {
+            Key::Node(_, v, axis) => {
+                let Some((mut point, _)) = shown.read_point(v) else {
+                    return;
+                };
+                point[axis] = value;
+                let mut params = json!({});
+                params[v.name()] = if v.pair() { json!(point) } else { json!(value) };
+                params
+            }
+            Key::Effect(_, k) => {
+                let Some(e) = node_effect(shown) else {
+                    return;
+                };
+                let (name, v) = k.param(&k.put(&e, value));
+                let mut params = json!({});
+                params[name] = v;
+                params
+            }
+            _ => return,
+        };
+        self.send_node("comp.set", clip, shown, params);
+    }
+
+    pub(super) fn node_preview(&self, comp: &mut Composition, source: f64) {
+        let Some(h) = &self.inspector.held else {
+            return;
+        };
+        let k = match h.field {
+            Key::Node(k, ..) => k,
+            Key::Effect(n, _) => match slot_node(n) {
+                Some(k) => k,
+                None => return,
+            },
+            _ => return,
+        };
+        let Some(n) = comp.nodes.get_mut(k) else {
+            return;
+        };
+        let shown = n.sampled(source);
+        match h.field {
+            Key::Node(_, v, axis) => {
+                n.key_list_mut().retain(|x| x.value != v);
+                let mut point = shown.read_point(v).map_or([0.0; 2], |(p, _)| p);
+                point[axis] = h.value;
+                n.write_point(v, point);
+            }
+            Key::Effect(_, knob) => {
+                let Some(e) = node_effect(&shown) else {
+                    return;
+                };
+                if let Some(v) = node_value_of(h.field, n) {
+                    n.key_list_mut().retain(|x| x.value != v);
+                }
+                let after = knob.put(&e, h.value);
+                n.blend = after.blend;
+                if let Tool::Effect(kind) = &mut n.tool {
+                    *kind = after.kind;
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -1362,28 +2213,12 @@ struct Chosen {
     shape: Shape,
     frame: i64,
     effect_keys: Vec<KeyMark>,
-    paths: Vec<PathRow>,
-    finds: bool,
-}
-
-#[derive(Debug, Clone)]
-struct PathRow {
-    id: String,
-    name: Option<String>,
-    subject: Option<Subject>,
 }
 
 #[derive(Debug, Clone)]
 struct Finding {
-    method: &'static str,
-    params: Value,
+    asks: Vec<(&'static str, Value)>,
     subject: Option<Subject>,
-}
-
-impl PathRow {
-    fn label(&self) -> &str {
-        self.name.as_deref().unwrap_or(&self.id)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -1471,12 +2306,12 @@ pub struct Inspector {
     find_better: bool,
     find_error: bool,
     finding: Option<Finding>,
-    area_edit: Option<usize>,
+    pub(super) pattern_picked: Option<(String, String, usize)>,
     tab: Tab,
     effect_picked: Option<usize>,
     effect_shut: bool,
-    effect_drawn: bool,
     effects_seen: Option<(String, Vec<Effect>)>,
+    marks: Vec<(usize, EffectValue, KeyMark)>,
     watched: Option<(std::sync::Weak<Project>, Vec<String>)>,
 }
 
@@ -1503,7 +2338,8 @@ impl Tab {
 #[derive(Debug)]
 struct Naming {
     clip: String,
-    path: String,
+    node: String,
+    pattern: usize,
     text: String,
 }
 
@@ -1582,8 +2418,6 @@ enum Act {
     Flips([Option<bool>; 2]),
     Zooming(bool),
     Boxes,
-    AreaEdit(usize),
-    AreaTrack(usize),
     Ease(Ease),
     Mode(CompositeMode),
     Swap,
@@ -1604,6 +2438,8 @@ enum Act {
     EffectOpen(usize),
     Tab(Tab),
     Tint(usize, [u8; 3], [u8; 3]),
+    NodeReset,
+    NodeActive,
 }
 
 fn param_name(key: Key) -> Option<&'static str> {
@@ -1844,6 +2680,14 @@ pub(super) fn next_key(times: impl Iterator<Item = i64>, at: i64, dir: i64) -> O
     }
 }
 
+fn frame_mark(keys: &[Keyframe], at: i64) -> KeyMark {
+    KeyMark {
+        on: keys.iter().any(|k| k.frame == at),
+        prev: keys.iter().any(|k| k.frame < at),
+        next: keys.iter().any(|k| k.frame > at),
+    }
+}
+
 pub(super) fn mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
     let time = |k: &Keyframe| c.key_time(k.frame).round() as i64;
     KeyMark {
@@ -1858,8 +2702,7 @@ fn effect_marks(c: &Clip, at: i64) -> Vec<KeyMark> {
     effects
         .iter()
         .map(|e| {
-            let own = e.keys.iter().filter(|k| !k.value.of_area());
-            let keys: Vec<Keyframe> = own.flat_map(|k| k.keys.clone()).collect();
+            let keys: Vec<Keyframe> = e.keys.iter().flat_map(|k| k.keys.clone()).collect();
             mark(c, &keys, at)
         })
         .collect()
@@ -2283,13 +3126,14 @@ fn knob(ui: &mut egui::Ui, i: &Inspector, (n, k): (usize, Knob), e: &Effect, act
     let shown = k.read(e);
     let dial = k.dial();
     let values = (shown != dial.usual, shown, dial.range);
+    let keys = k.keyed_value(e).and_then(|(v, _)| i.mark_of(n, v));
     field(
         ui,
         Key::Effect(n, k),
         i,
         values,
         Look::default(),
-        None,
+        keys,
         acts,
     );
 }
@@ -2832,19 +3676,6 @@ fn sharpen_rows(ui: &mut egui::Ui, i: &Inspector, (n, e): (usize, &Effect), acts
     });
 }
 
-fn path_rows(c: &Clip) -> Vec<PathRow> {
-    let row = |m: &MotionPath| PathRow {
-        id: m.id.clone(),
-        name: m.name.clone(),
-        subject: m.subject,
-    };
-    c.motion.iter().map(row).collect()
-}
-
-fn found(c: &Chosen, subject: Subject) -> bool {
-    c.paths.iter().any(|p| p.subject == Some(subject))
-}
-
 fn find_extra(values: &[String; 7]) -> Option<Value> {
     let mut out = serde_json::Map::new();
     for ((key, _, _, _), text) in FIND_VALUES.iter().zip(values) {
@@ -2869,49 +3700,68 @@ fn with_extra(mut params: Value, extra: &Value) -> Value {
     params
 }
 
-fn find_request(c: &Chosen, subject: Subject, extra: &Value) -> (&'static str, Value) {
-    let mut params = json!({ "clips": [c.id], "subject": subject });
-    if found(c, subject) {
+fn boxed(subject: Subject) -> bool {
+    subject != Subject::Face
+}
+
+fn with_model(method: &str, params: &mut Value) {
+    if method == "motion.find" || method == "motion.track" {
+        params["download"] = json!(true);
+    }
+}
+
+fn find_request(
+    clip: &Clip,
+    tracker: &str,
+    subject: Subject,
+    extra: &Value,
+) -> (&'static str, Value) {
+    let mut params = json!({ "clips": [clip.id], "subject": subject, "tracker": tracker });
+    if clip.motion.iter().any(|m| m.subject == Some(subject)) {
         params["replace"] = json!(true);
     }
     ("motion.find", with_extra(params, extra))
 }
 
-fn boxed(subject: Subject) -> bool {
-    subject != Subject::Face
-}
-
-fn blur_request(
-    id: &str,
-    found: bool,
-    effects: &[Effect],
-    (subject, extra): (Subject, &Value),
-) -> Option<(&'static str, Value)> {
-    let follows =
-        |e: &Effect| e.area.as_ref().and_then(|a| a.follows.as_deref()) == Some(subject.name());
-    let mut commands = Vec::new();
-    if !found {
-        let params = with_extra(json!({ "clips": [id], "subject": subject }), extra);
-        commands.push(json!({ "method": "motion.find", "params": params }));
+fn page_blur(clip: &Clip, comp: &Composition, tracker: &Node) -> Option<(&'static str, Value)> {
+    let t = tracker.tool.tracker().filter(|t| !t.patterns.is_empty())?;
+    let mut taken: Vec<String> = Vec::new();
+    let mut free = |tool: ToolType| {
+        let base = tool.made().base();
+        let name = (1..)
+            .map(|n| format!("{base}{n}"))
+            .find(|x| comp.node(x).is_none() && !taken.contains(x))
+            .unwrap_or_default();
+        taken.push(name.clone());
+        name
+    };
+    let after = comp.out().and_then(|o| o.input.clone());
+    let mut last = free(ToolType::MosaicBlur);
+    let add = json!({ "clip": clip.id, "tool": ToolType::MosaicBlur, "after": after });
+    let mut commands = vec![json!({ "method": "comp.add", "params": add })];
+    let [width, height] = BLUR_SIZE;
+    for (k, p) in t.patterns.iter().enumerate() {
+        let path = p.path.as_ref();
+        let found = path.and_then(|id| clip.motion.iter().find(|m| m.id == *id));
+        let shape = match found.and_then(|m| m.subject).is_some_and(boxed) {
+            true => ToolType::Rectangle,
+            false => ToolType::Ellipse,
+        };
+        let mask = free(shape);
+        let add = json!({ "clip": clip.id, "tool": shape, "after": last });
+        let set = json!({
+            "clip": clip.id,
+            "node": mask,
+            "connect": { "tracker": tracker.name, "pattern": k + 1, "size": true },
+            "width": width,
+            "height": height,
+        });
+        commands.push(json!({ "method": "comp.add", "params": add }));
+        commands.push(json!({ "method": "comp.set", "params": set }));
+        last = mask;
     }
-    if !effects.iter().any(follows) {
-        let mut area = json!({ "follows": subject.name(), "size": BLUR_SIZE });
-        if boxed(subject) {
-            area["shape"] = json!(AreaShape::Box);
-        }
-        let add = json!({ "clips": [id], "kind": "mosaic_blur" });
-        let set = json!({ "clip": id, "effect": effects.len(), "area": area });
-        commands.push(json!({ "method": "effects.add", "params": add }));
-        commands.push(json!({ "method": "effects.set", "params": set }));
-    }
-    let label = format!("Blur {}", subject.many());
-    (!commands.is_empty()).then(|| ("apply", json!({ "commands": commands, "label": label })))
-}
-
-fn finds(method: &str, params: &Value) -> bool {
-    let commands = params["commands"].as_array();
-    method == "motion.find"
-        || commands.is_some_and(|c| c.iter().any(|c| c["method"] == "motion.find"))
+    let label = format!("Blur {}", tracker.name);
+    Some(("apply", json!({ "commands": commands, "label": label })))
 }
 
 fn model_needs(subject: Option<Subject>) -> Vec<vidcut_av::models::Need> {
@@ -2922,161 +3772,15 @@ fn model_needs(subject: Option<Subject>) -> Vec<vidcut_av::models::Need> {
     }
 }
 
-fn with_model(method: &str, params: &mut Value) {
-    if method == "motion.find" || method == "motion.track" {
-        params["download"] = json!(true);
-    }
-    for c in params["commands"].as_array_mut().into_iter().flatten() {
-        if c["method"] == "motion.find" {
-            c["params"]["download"] = json!(true);
-        }
-    }
-}
-
-fn area_label(shape: Option<AreaShape>) -> &'static str {
-    match shape {
-        None => "Off",
-        Some(AreaShape::Ellipse) => "Ellipse",
-        Some(AreaShape::Box) => "Box",
-        Some(AreaShape::Polygon) => "Polygon",
-    }
-}
-
-fn area_set(n: usize, change: Value) -> Act {
-    Act::EffectSet(n, json!({ "area": change }))
-}
-
-pub(super) fn all_of(subject: Subject) -> String {
-    format!("All {}", subject.many())
-}
-
-fn follow_row(
-    ui: &mut egui::Ui,
-    (n, a): (usize, &EffectArea),
-    paths: &[PathRow],
-    acts: &mut Vec<Act>,
-) {
-    let now = a.follows.as_deref();
-    let subject = now.and_then(Subject::named);
-    let followed = paths.iter().find(|p| Some(p.id.as_str()) == now);
-    let shown = match (subject, followed) {
-        (Some(s), _) => all_of(s),
-        (None, Some(p)) => p.label().to_string(),
-        (None, None) => "None".to_string(),
-    };
-    label(ui, "Follow", now.is_some());
-    egui::ComboBox::from_id_salt(("inspector-area-follow", n))
-        .selected_text(shown)
-        .show_ui(ui, |ui| {
-            if ui.selectable_label(now.is_none(), "None").clicked() && now.is_some() {
-                acts.push(area_set(n, json!({ "follows": null })));
-            }
-            for s in SUBJECTS {
-                let on = subject == Some(s);
-                if ui.selectable_label(on, all_of(s)).clicked() && !on {
-                    acts.push(area_set(n, json!({ "follows": s.name() })));
-                }
-            }
-            for p in paths {
-                let on = Some(p.id.as_str()) == now;
-                if ui.selectable_label(on, p.label()).clicked() && !on {
-                    acts.push(area_set(n, json!({ "follows": p.id })));
-                }
-            }
-        });
-    if reset(ui, now.is_some()) {
-        acts.push(area_set(n, json!({ "follows": null })));
-    }
-    ui.end_row();
-}
-
-fn area_rows(
-    ui: &mut egui::Ui,
-    i: &Inspector,
-    (n, e): (usize, &Effect),
-    paths: &[PathRow],
-    acts: &mut Vec<Act>,
-) {
-    let area = |ui: &mut egui::Ui, k: AreaKnob, acts: &mut Vec<Act>| {
-        knob(ui, i, (n, Knob::Area(k)), e, acts);
-    };
-    rows(ui, (n, "area"), |ui| {
-        let now = e.area.as_ref().map(|a| a.shape);
-        label(ui, "Area", now.is_some());
-        let shapes = [
-            None,
-            Some(AreaShape::Ellipse),
-            Some(AreaShape::Box),
-            Some(AreaShape::Polygon),
-        ];
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt(("inspector-area-shape", n))
-                .selected_text(area_label(now))
-                .show_ui(ui, |ui| {
-                    for shape in shapes {
-                        let name = area_label(shape);
-                        if ui.selectable_label(shape == now, name).clicked() && shape != now {
-                            let change = shape.map_or(Value::Null, |s| json!({ "shape": s }));
-                            acts.push(area_set(n, change));
-                        }
-                    }
-                });
-            let edit = egui::Button::selectable(i.area_edit == Some(n), "Edit Shape");
-            if ui.add_enabled(now.is_some(), edit).clicked() {
-                acts.push(Act::AreaEdit(n));
-            }
-            if ui
-                .add_enabled(now.is_some(), egui::Button::new("Track"))
-                .clicked()
-            {
-                acts.push(Act::AreaTrack(n));
-            }
-        });
-        if reset(ui, now.is_some()) {
-            acts.push(area_set(n, Value::Null));
-        }
-        ui.end_row();
-        let Some(a) = &e.area else {
-            return;
-        };
-        label(ui, "Invert Area", a.invert);
-        let mut invert = a.invert;
-        if ui.checkbox(&mut invert, "").clicked() {
-            acts.push(area_set(n, json!({ "invert": invert })));
-        }
-        if reset(ui, a.invert) {
-            acts.push(area_set(n, json!({ "invert": false })));
-        }
-        ui.end_row();
-        area(ui, AreaKnob::Softness, acts);
-        follow_row(ui, (n, a), paths, acts);
-    });
-    if e.area.is_some() {
-        fold(ui, (n, "Area Advanced Controls"), |ui| {
-            for k in [
-                AreaKnob::CenterX,
-                AreaKnob::CenterY,
-                AreaKnob::Width,
-                AreaKnob::Height,
-                AreaKnob::Rotation,
-            ] {
-                area(ui, k, acts);
-            }
-        });
-    }
-}
-
 fn effect_block(
     ui: &mut egui::Ui,
     i: &Inspector,
     (n, count): (usize, usize),
-    (e, marks, paths): (&Effect, &KeyMark, &[PathRow]),
+    (e, marks): (&Effect, &KeyMark),
     acts: &mut Vec<Act>,
 ) {
     let mut fresh = e.kind().made();
     fresh.on = e.on;
-    fresh.area = e.area.clone();
-    fresh.keys = e.area_keys().cloned().collect();
     let changed = *e != fresh;
     let picked = i.effect_picked == Some(n);
     let open = picked && !i.effect_shut;
@@ -3095,16 +3799,6 @@ fn effect_block(
         let title = ui.add(egui::Label::new(name).sense(egui::Sense::click()));
         if title.clicked() && !title.double_clicked() {
             act = Some(Act::EffectOpen(n));
-        }
-        let followed = e.area.as_ref().and_then(|a| a.follows.as_deref());
-        if let Some(named) = followed {
-            let path = paths.iter().find(|p| p.id == named);
-            let covers = match (path, Subject::named(named)) {
-                (Some(p), _) => p.name.clone().unwrap_or_else(|| p.id.clone()),
-                (None, Some(s)) => all_of(s),
-                (None, None) => named.to_string(),
-            };
-            ui.label(dim(covers));
         }
         match key_buttons(ui, marks, &Ease::ALL, None) {
             Some(KeyClick::Step(dir)) => act = Some(Act::EffectStep(n, dir)),
@@ -3144,7 +3838,6 @@ fn effect_block(
             EffectKind::Vignette(v) => vignette_rows(ui, i, (n, e, v), acts),
             EffectKind::Sharpen(_) => sharpen_rows(ui, i, (n, e), acts),
         }
-        area_rows(ui, i, (n, e), paths, acts);
         fold(ui, (n, "Global Blend"), |ui| {
             knob(ui, i, (n, Knob::Blend), e, acts);
             check(ui, (n, "Use Alpha", e.use_alpha, true), "use_alpha", acts);
@@ -3177,7 +3870,7 @@ fn effects(ui: &mut egui::Ui, i: &Inspector, c: &Chosen, acts: &mut Vec<Act>) {
     for (n, e) in c.shown.effects.iter().enumerate() {
         let shown = e.adopted(c.frame as f64);
         let marks = c.effect_keys.get(n).cloned().unwrap_or_default();
-        effect_block(ui, i, (n, count), (&shown, &marks, &c.paths), acts);
+        effect_block(ui, i, (n, count), (&shown, &marks), acts);
     }
 }
 
@@ -3374,8 +4067,6 @@ impl Workspace {
                         shape: shape(&p, c),
                         frame: c.content_at(self.snap.timeline.position),
                         effect_keys: effect_marks(c, self.snap.timeline.position),
-                        paths: path_rows(c),
-                        finds: vidcut_core::ops::motion::takes(c),
                     }
                 })
             })
@@ -3649,22 +4340,6 @@ impl Workspace {
         self.settle_tabs(&chosen, &sounds);
     }
 
-    pub(super) fn pick_effect(&mut self, n: usize) {
-        self.inspector.effect_picked = Some(n);
-        self.inspector.effect_shut = false;
-    }
-
-    pub(super) fn pick_drawn(&mut self, n: usize) {
-        self.pick_effect(n);
-        self.inspector.effect_drawn = true;
-    }
-
-    pub(super) fn sync_effect_area(&mut self) {
-        let picked = self.inspector.effect_picked;
-        let g = &mut self.timeline.picture_grab;
-        g.area = picked.filter(|_| g.effects);
-    }
-
     fn settle_tabs(&mut self, chosen: &[Chosen], sounds: &[Sound]) {
         self.settle_effects(chosen);
         let i = &mut self.inspector;
@@ -3691,10 +4366,8 @@ impl Workspace {
         let was = match seen {
             Some((id, was)) if id == c.id => was,
             _ => {
-                if !std::mem::take(&mut i.effect_drawn) {
-                    i.effect_picked = first;
-                    i.effect_shut = false;
-                }
+                i.effect_picked = first;
+                i.effect_shut = false;
                 i.effects_seen = Some((c.id.clone(), now.clone()));
                 return;
             }
@@ -3710,7 +4383,6 @@ impl Workspace {
                 i.tab = Tab::Effects;
                 i.effect_picked = Some(k);
                 i.effect_shut = false;
-                i.effect_drawn = false;
             }
             std::cmp::Ordering::Less => match picked {
                 Some(p) if p == k => {
@@ -4015,6 +4687,7 @@ impl Workspace {
                 });
             }
             Key::Effect(n, k) => self.send_knob(chosen, (n, k), value),
+            Key::Node(..) => {}
             Key::Center(axis) => self.send_center(axis, value, chosen),
             Key::Volume => self.send_volume(sounds, value),
             Key::Pan => self.send_pan(sounds, value),
@@ -4222,109 +4895,25 @@ impl Workspace {
         }
     }
 
-    pub(super) fn find_things(&mut self, clip: &str, subject: Subject) {
-        let Some(p) = self.project_shared() else {
-            return;
-        };
-        let Some(c) = p.clip(clip).filter(|c| vidcut_core::ops::motion::takes(c)) else {
-            return;
-        };
-        let mut params = json!({ "clips": [clip], "subject": subject });
-        if c.motion.iter().any(|m| m.subject == Some(subject)) {
-            params["replace"] = json!(true);
-        }
-        let mut given = find_extra(&self.inspector.find_values).unwrap_or(Value::Null);
-        if self.inspector.find_better && given.is_object() && given.get("size").is_none() {
-            given["size"] = json!(BETTER_SIDE);
-        }
-        self.find("motion.find", with_extra(params, &given), subject);
+    pub(super) fn tracks_running(&self) -> Vec<String> {
+        let jobs = self.snap.jobs.iter();
+        let tracks = jobs.filter(|j| j.unfinished() && j.kind == "track");
+        tracks.map(|j| j.id.clone()).collect()
     }
 
-    pub(super) fn effect_on(
-        &mut self,
-        clip: &str,
-        path: &str,
-        kind: vidcut_core::model::EffectType,
-    ) {
-        let Some(p) = self.project_shared() else {
-            return;
-        };
-        let Some(c) = p.clip(clip) else {
-            return;
-        };
-        let count = c.picture.as_ref().map_or(0, |x| x.effects.len());
-        let found = c.motion.iter().find(|m| m.id == path);
-        let name = found.and_then(|m| m.name.as_deref()).unwrap_or(path);
-        let mut area = json!({ "follows": path, "size": BLUR_SIZE });
-        if found.and_then(|m| m.subject).is_some_and(boxed) {
-            area["shape"] = json!(AreaShape::Box);
+    pub(super) fn stop_tracks(&mut self) {
+        for id in self.tracks_running() {
+            self.send("jobs.cancel", json!({ "job": id }));
         }
-        let commands = json!([
-            { "method": "effects.add", "params": { "clips": [clip], "kind": kind } },
-            { "method": "effects.set", "params": { "clip": clip, "effect": count, "area": area } },
-        ]);
-        let label = format!("{} On {name}", kind.name());
-        self.send("apply", json!({ "commands": commands, "label": label }));
-        self.left = super::title_browser::LeftTab::Inspector;
     }
 
-    pub(super) fn subject_blur(
-        &self,
-        clip: &str,
-        subject: Subject,
-    ) -> Option<(&'static str, Value)> {
-        let p = self.project_shared()?;
-        let c = p.clip(clip)?;
-        if !vidcut_core::ops::motion::takes(c) {
-            return None;
-        }
-        let found = c.motion.iter().any(|m| m.subject == Some(subject));
-        let effects = c.picture.as_ref().map_or(&[][..], |x| &x.effects);
-        blur_request(clip, found, effects, (subject, &Value::Null))
-    }
-
-    pub(super) fn find(&mut self, method: &'static str, params: Value, subject: Subject) {
-        if finds(method, &params) && !model_needs(Some(subject)).is_empty() {
-            self.inspector.finding = Some(Finding {
-                method,
-                params,
-                subject: Some(subject),
-            });
+    fn ask(&mut self, asks: Vec<(&'static str, Value)>, subject: Option<Subject>) {
+        if model_needs(subject).is_empty() {
+            for (method, params) in asks {
+                self.send(method, params);
+            }
         } else {
-            self.send(method, params);
-        }
-    }
-
-    pub(super) fn track(&mut self, clip: &str, effect: usize) {
-        let Some(p) = self.project_shared() else {
-            return;
-        };
-        let Some(c) = p.clip(clip) else {
-            return;
-        };
-        let effects = c.picture.iter().flat_map(|x| &x.effects);
-        let area = effects
-            .into_iter()
-            .nth(effect)
-            .and_then(|e| e.area.as_ref());
-        let follows = area.and_then(|a| a.follows.as_ref());
-        let at = self.snap.timeline.position;
-        let followed = c.motion.iter().find(|m| Some(&m.id) == follows);
-        let first = followed.and_then(|m| m.span()).map(|(first, _)| first);
-        let way = match first {
-            None => "both",
-            Some(first) if c.source_at(at) <= first => "backward",
-            Some(_) => "forward",
-        };
-        let params = json!({ "clip": clip, "effect": effect, "at": at, "way": way });
-        if model_needs(None).is_empty() {
-            self.send("motion.track", params);
-        } else {
-            self.inspector.finding = Some(Finding {
-                method: "motion.track",
-                params,
-                subject: None,
-            });
+            self.inspector.finding = Some(Finding { asks, subject });
         }
     }
 
@@ -4332,179 +4921,29 @@ impl Workspace {
         let Some(finding) = self.inspector.finding.clone() else {
             return;
         };
-        let (method, mut params) = (finding.method, finding.params);
         let needs = model_needs(finding.subject);
-        if needs.is_empty() {
-            self.inspector.finding = None;
-            self.send(method, params);
-            return;
-        }
-        match super::speech::ask_download(ctx, "motion-download", &needs, "Download") {
-            Some(true) => {
-                self.inspector.finding = None;
-                with_model(method, &mut params);
-                self.send(method, params);
+        let download = match needs.is_empty() {
+            true => Some(false),
+            false => {
+                match super::speech::ask_download(ctx, "motion-download", &needs, "Download") {
+                    Some(true) => Some(true),
+                    Some(false) => {
+                        self.inspector.finding = None;
+                        return;
+                    }
+                    None => None,
+                }
             }
-            Some(false) => self.inspector.finding = None,
-            None => {}
-        }
-    }
-
-    fn motion_section(&mut self, ui: &mut egui::Ui, c: &Chosen) {
-        if !c.finds {
+        };
+        let Some(download) = download else {
             return;
-        }
-        let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
-        let mut naming = self.inspector.naming.take();
-        let mut subject = self.inspector.subject;
-        let mut values = std::mem::take(&mut self.inspector.find_values);
-        let mut open = self.inspector.find_open;
-        let mut better = self.inspector.find_better;
-        let wrong = self.inspector.find_error;
-        let extra = find_extra(&values);
-        let mut tried = false;
-        let mut sends = Vec::new();
-        let mut asked = None;
-        group(
-            ui,
-            "Motion",
-            |_| (),
-            |ui| {
-                label(ui, "Subject", false);
-                ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt("inspector-motion-subject")
-                        .selected_text(subject.many())
-                        .show_ui(ui, |ui| {
-                            for s in Subject::ALL {
-                                ui.selectable_value(&mut subject, s, s.many());
-                            }
-                        });
-                    let mut given = extra.clone().unwrap_or(Value::Null);
-                    if better && given.is_object() && given.get("size").is_none() {
-                        given["size"] = json!(BETTER_SIDE);
-                    }
-                    if ui.button("Find").clicked() {
-                        tried = true;
-                        asked = Some(find_request(c, subject, &given));
-                    }
-                    let had = found(c, subject);
-                    let blur = blur_request(&c.id, had, &c.stored.effects, (subject, &given));
-                    let button = egui::Button::new("Blur");
-                    if ui.add_enabled(blur.is_some(), button).clicked() {
-                        tried = true;
-                        asked = blur;
-                    }
-                    if ui.add(egui::Button::selectable(open, "Advanced")).clicked() {
-                        open = !open;
-                    }
-                });
-                ui.end_row();
-                label(ui, "Quality", false);
-                dialog::switch(ui, |ui| {
-                    let quick = ui.selectable_label(!better, "Faster");
-                    if quick
-                        .on_hover_text("The model looks at a small picture. It is quick.")
-                        .clicked()
-                    {
-                        better = false;
-                    }
-                    let slow = ui.selectable_label(better, "Better");
-                    let tip = [
-                        "The model looks at a larger picture.",
-                        "It finds smaller things and takes much longer.",
-                    ]
-                    .join("\n");
-                    if slow.on_hover_text(tip.as_str()).clicked() {
-                        better = true;
-                    }
-                });
-                ui.end_row();
-                if open {
-                    let usual = vidcut_core::motion::Join::of(subject);
-                    let side = match better {
-                        true => BETTER_SIDE,
-                        false => vidcut_av::subjects::side(subject),
-                    };
-                    let hints = [
-                        side.to_string(),
-                        usual.start.to_string(),
-                        usual.keep.to_string(),
-                        usual.overlap.to_string(),
-                        usual.wait_secs.to_string(),
-                        usual.shortest_secs.to_string(),
-                        usual.steady.to_string(),
-                    ];
-                    for (i, (_, name, what, effect)) in FIND_VALUES.iter().enumerate() {
-                        let tip = format!("{what}\n{effect}");
-                        let set = !values[i].trim().is_empty();
-                        let c = theme::colors();
-                        let color = if set { c.accent } else { c.text_dim };
-                        ui.label(RichText::new(*name).color(color))
-                            .on_hover_text(tip.as_str());
-                        ui.add(
-                            egui::TextEdit::singleline(&mut values[i])
-                                .hint_text(hints[i].as_str())
-                                .desired_width(NAME_WIDTH),
-                        )
-                        .on_hover_text(tip.as_str());
-                        ui.end_row();
-                    }
-                    if wrong {
-                        label(ui, "", false);
-                        label(ui, "A Value Is Not A Number", true);
-                        ui.end_row();
-                    }
-                }
-                for (n, row) in c.paths.iter().enumerate() {
-                    let now = row.name.as_deref().unwrap_or("");
-                    let typed = naming
-                        .as_ref()
-                        .filter(|n| n.clip == c.id && n.path == row.id)
-                        .map(|n| n.text.clone());
-                    let mut text = typed.clone().unwrap_or_else(|| now.to_string());
-                    label(ui, if n == 0 { "Found" } else { "" }, false);
-                    let field = ui.add(
-                        egui::TextEdit::singleline(&mut text)
-                            .hint_text("Name")
-                            .desired_width(NAME_WIDTH),
-                    );
-                    if field.lost_focus() && !cancelled && text.trim() != now {
-                        let params = json!({ "clip": c.id, "path": row.id, "name": text });
-                        sends.push(("motion.set", params));
-                    }
-                    if field.has_focus() {
-                        naming = Some(Naming {
-                            clip: c.id.clone(),
-                            path: row.id.clone(),
-                            text,
-                        });
-                    } else if typed.is_some() {
-                        naming = None;
-                    }
-                    if icon(ui, TRASH, "Delete", true) {
-                        let params = json!({ "clip": c.id, "paths": [row.id] });
-                        sends.push(("motion.remove", params));
-                    }
-                    ui.end_row();
-                }
-            },
-        );
-        self.inspector.naming = naming;
-        self.inspector.subject = subject;
-        self.inspector.find_values = values;
-        self.inspector.find_open = open;
-        self.inspector.find_better = better;
-        if tried || extra.is_some() {
-            self.inspector.find_error = extra.is_none();
-        }
-        if extra.is_none() {
-            asked = None;
-        }
-        for (method, params) in sends {
+        };
+        self.inspector.finding = None;
+        for (method, mut params) in finding.asks {
+            if download {
+                with_model(method, &mut params);
+            }
             self.send(method, params);
-        }
-        if let Some((method, params)) = asked {
-            self.find(method, params, subject);
         }
     }
 
@@ -4732,6 +5171,7 @@ impl Workspace {
     fn inspect(&mut self, act: Act, (chosen, sounds, paced): Lists<'_>) {
         let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
+            Act::NodeReset | Act::NodeActive => {}
             Act::Denoise(on) => {
                 let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
                 self.send(
@@ -4837,7 +5277,9 @@ impl Workspace {
                 match tool {
                     PictureTool::Transform => p.transform_off = !on,
                     PictureTool::Crop => p.crop_off = !on,
-                    PictureTool::DynamicZoom | PictureTool::Composite => return None,
+                    PictureTool::DynamicZoom
+                    | PictureTool::Composite
+                    | PictureTool::Composition => return None,
                 }
                 Some(p)
             }),
@@ -4855,17 +5297,6 @@ impl Workspace {
                 });
                 if on {
                     self.show_boxes(chosen);
-                }
-            }
-            Act::AreaEdit(n) => {
-                let on = !self.timeline.picture_grab.effects;
-                self.pick_effect(n);
-                self.effects_tool(on);
-            }
-            Act::AreaTrack(n) => {
-                if let Some(c) = chosen.first() {
-                    let id = c.id.clone();
-                    self.track(&id, n);
                 }
             }
             Act::Boxes => {
@@ -5053,6 +5484,7 @@ impl Workspace {
         let gone = |k: Key| match k {
             Key::Picture(_) | Key::Center(_) => chosen.is_empty(),
             Key::Effect(n, _) => chosen.first().is_none_or(|c| c.shown.effects.len() <= n),
+            Key::Node(..) => true,
             Key::Volume | Key::Pan => sounds.is_empty(),
             Key::Speed | Key::Rate | Key::Length => paced.is_empty(),
         };
@@ -5123,10 +5555,8 @@ impl Workspace {
                     composite(ui, i, p, at, &chosen, &mut acts);
                     self.input_lut_section(ui, p, &chosen);
                     self.super_scale_section(ui, p, &chosen);
-                    self.motion_section(ui, &chosen[0]);
                 }
                 if tab == Tab::Effects && !chosen.is_empty() {
-                    self.inspector.area_edit = self.timeline.picture_grab.area;
                     effects(ui, &self.inspector, &chosen[0], &mut acts);
                 }
                 if tab == Tab::Audio && !sounds.is_empty() {

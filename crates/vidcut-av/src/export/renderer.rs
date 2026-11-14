@@ -75,13 +75,22 @@ const RGBA: format::Pixel = format::Pixel::RGBA;
 
 pub(crate) fn frames(
     fps: Rational,
+    size: (u32, u32),
+    pixel: format::Pixel,
+    finish: Finish<'_>,
+    decoder: Option<&crate::hw::GpuDecoder>,
+) -> Result<VideoFrames> {
+    Ok(stream(fps, size, pixel, finish, decoder)?.single_frames())
+}
+
+pub(crate) fn stream(
+    fps: Rational,
     (width, height): (u32, u32),
     pixel: format::Pixel,
     (colors, lut): Finish<'_>,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<VideoFrames> {
     let frames = VideoFrames::new(&[], fps, width, height, pixel, None)
-        .single_frames()
         .with_timeline(colors)?
         .with_output_lut(lut)?;
     Ok(match decoder {

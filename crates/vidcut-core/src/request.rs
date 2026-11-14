@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    AreaShape, Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel,
-    EffectArea, EffectType, EffectValue, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput,
-    GrainComposite, GrainPreset, Handle, LowerThirdLine, PathSample, PictureTool,
+    BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom,
+    Ease, EbuLevel, EffectType, EffectValue, FillMethod, GeneratorKind, GlowAlpha, GlowFraming,
+    GlowOutput, GrainComposite, GrainPreset, Handle, LowerThirdLine, Node, PathSample, PictureTool,
     PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
-    TitleStyle, TrackClip, TrackWay, VignetteMode, VignetteShape, ZoomBox,
+    TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -717,7 +717,9 @@ pub enum Request {
         #[serde(default)]
         range: Option<RangeSpec>,
     },
-    /// What is at a frame on each track.
+    /// What is at a frame on each track. Each clip gives its `source_frame`
+    /// there. A clip of footage, a still or an image sequence also gives its
+    /// `file_frame`: the frame of its file, as motion paths count them.
     #[serde(rename = "timeline.at")]
     TimelineAt { at: TimeSpec },
     /// Edit points of V1 (clip boundaries), as the Smart Indicator sees them.
@@ -2706,7 +2708,9 @@ pub enum Request {
     /// (position, zoom, rotation, anchor, pitch, yaw and flips), the `crop`
     /// (its sides and softness), the `dynamic_zoom`, the `composite` (the
     /// composite mode and the opacity), or all of them when no `tool` is
-    /// given.
+    /// given. Their effects and compositions stay. `composition` takes off
+    /// the composition, and each picture comes as it is. The paths that
+    /// its trackers made go too, when nothing else uses them.
     #[serde(rename = "picture.clear")]
     PictureClear {
         clips: OneOrMany<ClipRef>,
@@ -2730,10 +2734,7 @@ pub enum Request {
     /// an error.
     ///
     /// A value with keyframes takes a keyframe on `at` and keeps its plain
-    /// value. Without `at`, or a playhead, that is an error. The `center`,
-    /// the `size`, the `rotation` and the `softness` of the `area` do the
-    /// same: `center` names both of its values, and `size` both. A null
-    /// `area` also removes the keyframes of the area, and needs no `at`.
+    /// value. Without `at`, or a playhead, that is an error.
     #[serde(rename = "effects.set")]
     EffectsSet {
         clip: ClipRef,
@@ -2747,11 +2748,6 @@ pub enum Request {
     /// it removes each keyframe of the effect on that frame. Without one, it
     /// puts a keyframe on `at` on each value of the effect. With `ease`, it
     /// only gives the keyframes on `at` that ease. `effect` counts from 0.
-    ///
-    /// Without `area`, it works on each value except those of the area.
-    /// With `area`, it works only on the values of the area: its center,
-    /// its size, its rotation and its softness. The points of a polygon take
-    /// no keyframes.
     #[serde(rename = "effects.key")]
     EffectsKey {
         clip: ClipRef,
@@ -2759,14 +2755,10 @@ pub enum Request {
         at: TimeSpec,
         #[serde(default)]
         ease: Option<Ease>,
-        /// Work on the keyframes of the area of the effect. An effect with
-        /// no area is an error.
-        #[serde(default)]
-        area: bool,
     },
-    /// Put one effect of a clip back at its usual values. It stays on, and
-    /// keeps its `render_cache`, its `area` and the keyframes of the area.
-    /// An effect that is off does not change.
+    /// Put one effect of a clip back at its usual values, with no
+    /// keyframes. It stays on, and keeps its `render_cache`. An effect that
+    /// is off does not change.
     /// `effect` counts from 0.
     #[serde(rename = "effects.reset")]
     EffectsReset { clip: ClipRef, effect: usize },
@@ -2781,19 +2773,150 @@ pub enum Request {
         effect: usize,
         to: usize,
     },
+    /// Add a node to the composition of a clip: footage, a still, an image
+    /// sequence or a compound clip. A clip without a composition first gets
+    /// `MediaIn1` joined to `MediaOut1`. The node's name is its tool's name
+    /// and the first free number, as `Blur1`.
+    ///
+    /// With `after` a tool or `media_in`, a tool goes into the picture's way
+    /// after it, and each node that took that picture takes the new tool.
+    /// With `after` a tool other than a tracker, a mask goes on its effect
+    /// mask, after the masks that are there. With `after` a mask, a mask
+    /// goes after it in its chain. Any other new node joins nothing.
+    /// Returns the clip and the `node`'s name.
+    #[serde(rename = "comp.add")]
+    CompAdd {
+        clip: ClipRef,
+        tool: ToolType,
+        #[serde(default)]
+        after: Option<String>,
+    },
+    /// Change values of one node of a clip's composition. Each value given
+    /// replaces its own; a value the node's tool doesn't have is an error.
+    /// A value with keyframes takes a keyframe on `frame` and keeps its
+    /// plain value. A `frame` is a frame of the composition: a frame of the
+    /// clip's file, counted from the composition's frame 0. Without it, it
+    /// is the frame at the playhead; with no playhead, that is an error.
+    #[serde(rename = "comp.set")]
+    CompSet {
+        clip: ClipRef,
+        node: String,
+        #[serde(default)]
+        frame: Option<i64>,
+        #[serde(flatten)]
+        change: Box<NodeChange>,
+    },
+    /// Join the output of node `from` to an input of `node`, in place of
+    /// what was there, or with no `from`, leave that input empty. The
+    /// `input` takes a tool or `media_in`, and the `effect_mask` takes a
+    /// mask. A join that makes a loop is an error.
+    #[serde(rename = "comp.connect")]
+    CompConnect {
+        clip: ClipRef,
+        node: String,
+        #[serde(default)]
+        input: NodeInput,
+        #[serde(default)]
+        from: Option<String>,
+    },
+    /// Give a node another name. Each sign that is not a letter, a digit or
+    /// `_` goes, and so do digits at the start. A name that another node has
+    /// is an error. The joins keep the node. Returns the new `node` name.
+    #[serde(rename = "comp.rename")]
+    CompRename {
+        clip: ClipRef,
+        node: String,
+        to: String,
+    },
+    /// Take a node out of a clip's composition. The nodes on each side join
+    /// up: what took its picture takes the picture that came into it, and
+    /// what took its mask takes the masks that came into it. The masks on
+    /// its effect mask stay, joined to nothing.
+    #[serde(rename = "comp.remove")]
+    CompRemove { clip: ClipRef, node: String },
+    /// Put copies of nodes, with their values and keyframes, into the
+    /// composition of `clip`. The node is `node` of the composition of
+    /// `from`, or of `clip`. Or the nodes are `copy`: nodes as the
+    /// composition of a clip holds them. One copy goes after `after`, as
+    /// `comp.add` puts a new node. Several copies keep the joins between
+    /// them and their places to each other. Their top left goes one place
+    /// right of `after`. Without `after`, the copies join nothing, and their
+    /// top left goes to `place`, or under all the nodes without it. With
+    /// `replace`, one copy takes the place and the joins of that node, which
+    /// goes. A copy keeps its name while it is free, else it is the name
+    /// with `_1` or the first free number after it. Returns the clip, the
+    /// names of the copies in `nodes`, and the last name in `node`.
+    #[serde(rename = "comp.paste")]
+    CompPaste {
+        clip: ClipRef,
+        #[serde(default)]
+        node: Option<String>,
+        #[serde(default)]
+        from: Option<ClipRef>,
+        #[serde(default)]
+        after: Option<String>,
+        /// The place in the node editor for the top left of the copies,
+        /// `[x, y]` in node places. Only without `after` and `replace`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        place: Option<[f64; 2]>,
+        /// The node that one copy replaces.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replace: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        copy: Vec<Node>,
+    },
+    /// The Keyframe button of one value of a node of a clip's composition,
+    /// or of all its values without `value`. With a keyframe on `frame`, it
+    /// removes the keyframes of those values on that frame. Without one, it
+    /// puts a keyframe on `frame` on each of those values. With `ease`, it
+    /// only gives the keyframes on `frame` that ease. A `frame` is a frame
+    /// of the composition, as `comp.set` takes it. Without it, it is the
+    /// frame at the playhead.
+    #[serde(rename = "comp.key")]
+    CompKey {
+        clip: ClipRef,
+        node: String,
+        #[serde(default)]
+        frame: Option<i64>,
+        #[serde(default)]
+        value: Option<EffectValue>,
+        #[serde(default)]
+        ease: Option<Ease>,
+    },
+    /// Put one node of a clip's composition back at its usual values, with
+    /// no keyframes. It keeps its name, its joins, its place and the motion
+    /// path that it follows.
+    #[serde(rename = "comp.reset")]
+    CompReset { clip: ClipRef, node: String },
+    /// The Loop button of the effects page, kept in the composition of a
+    /// clip. With `on`, play on the page goes on at the other end of the
+    /// clip. Off, it stops at the In or the Out. With `ping_pong` on, play
+    /// that loops turns back at the In and the Out. A value left out stays.
+    /// Without both, Loop goes on or off. A clip without a composition
+    /// first gets `MediaIn1` joined to `MediaOut1`.
+    #[serde(rename = "comp.loop")]
+    CompLoop {
+        clip: ClipRef,
+        #[serde(default)]
+        on: Option<bool>,
+        #[serde(default)]
+        ping_pong: Option<bool>,
+    },
     /// The motion paths of `clips`, or of every clip that has some. A motion
-    /// path tells where one area of a clip's picture is on its source frames:
-    /// a face, a number plate or another thing in the picture. Each clip
-    /// gives its `track` and its `paths`: the `id`, the `name`, the `count`
-    /// of its samples, and the source frames `first` and `last` of them. A
+    /// path tells where one area of a clip's picture is on the frames of its
+    /// file: a face, a number plate or another thing in the picture. The
+    /// frames of the file go at the frame rate of the file. When the file
+    /// has the frame rate of the timeline, they are the source frames. Each
+    /// clip gives its `track` and its `paths`: the `id`, the `name`, the
+    /// `count` of its samples, and the frames `first` and `last` of them. A
     /// path that `motion.track` made also has `tracked`.
     #[serde(rename = "motion.list")]
     MotionList {
         #[serde(default)]
         clips: Option<OneOrMany<ClipRef>>,
         /// Each path with an area at this time also gives its `area` there: the
-        /// source `frame` of its clip, and the `center`, `size` and `rotation`
-        /// of the area on it.
+        /// `frame` of the file that its clip shows, and the `center`, `size`
+        /// and `rotation` of the area on it.
         #[serde(default)]
         at: Option<TimeSpec>,
         /// Each path also gives every sample.
@@ -2803,8 +2926,8 @@ pub enum Request {
     /// Add a motion path to a clip of footage, a still or an image sequence
     /// (`c3`, or `V2@15s`). The path lasts from its first sample to its last:
     /// before and after them it has no area. Between two samples the area
-    /// moves in a straight line. The path stays on its source frames through
-    /// trims, slips, splits and speed changes.
+    /// moves in a straight line. The path stays on the frames of the file
+    /// through trims, slips, splits and speed changes.
     /// Returns the `clip` and the id of the new `path`.
     #[serde(rename = "motion.add")]
     MotionAdd {
@@ -2812,9 +2935,9 @@ pub enum Request {
         /// What it follows, for example `Face 1`.
         #[serde(default)]
         name: Option<String>,
-        /// The area on source frames: at least one sample, one for a frame,
-        /// in the order of the frames. `timeline.at` gives the source frame
-        /// of a clip at a time.
+        /// The area on frames of the file: at least one sample, one for a
+        /// frame, in the order of the frames. `timeline.at` gives the frame
+        /// of the file of a clip at a time.
         samples: Vec<PathSample>,
     },
     /// Change one motion path of a clip. `clear` works first, then `samples`.
@@ -2826,19 +2949,19 @@ pub enum Request {
         /// Its new name. An empty name takes the name off.
         #[serde(default)]
         name: Option<String>,
-        /// Samples to put on their source frames, in the order of the
+        /// Samples to put on their frames of the file, in the order of the
         /// frames. A sample takes the place of the sample on its frame.
         #[serde(default)]
         samples: Option<Vec<PathSample>>,
-        /// Two source frames: the samples from the first to the second go,
+        /// Two frames of the file: the samples from the first to the second go,
         /// those two frames too. The area then moves in a straight line
         /// across that part.
         #[serde(default)]
         clear: Option<[i64; 2]>,
     },
-    /// Take motion paths off a clip: `paths`, or all of them. A path that
-    /// the area of an effect follows stays, and the request fails: first
-    /// give that area another `follows`, or none (`effects.set`).
+    /// Take motion paths off a clip: `paths`, or all of them. A path of a
+    /// pattern of a tracker stays, and the request fails: first remove that
+    /// pattern (`comp.set` with `remove_pattern`).
     #[serde(rename = "motion.remove")]
     MotionRemove {
         clip: ClipRef,
@@ -2847,7 +2970,7 @@ pub enum Request {
     },
     /// Find things of one kind in the pictures of clips of footage, stills
     /// or image sequences, and give each thing a motion path. It looks at
-    /// the source frames that each clip shows. A thing that is not found for
+    /// each frame of the file in each clip. A thing that is not found for
     /// up to a second, and then shows near the same place, stays on its path.
     /// A shot change inside a clip ends each path, and a thing of the next
     /// shot gets a new one.
@@ -2863,10 +2986,10 @@ pub enum Request {
     /// `Text 1`, `Person 1`, `Vehicle 1`.
     ///
     /// Returns each clip with its new `paths`: the `id`, the `name`, the
-    /// `count` of its samples, the source frames `first` and `last` of them,
-    /// the `score` (how sure the model is, from 0 to 1, the mean of the
-    /// frames it was `seen` on), and the `gaps`: the ranges of source
-    /// frames between them where the thing was not found. The area moves in
+    /// `count` of its samples, the frames of the file `first` and `last` of
+    /// them, the `score` (how sure the model is, from 0 to 1, the mean of
+    /// the frames it was `seen` on), and the `gaps`: the ranges of frames
+    /// between them where the thing was not found. The area moves in
     /// a straight line across a gap.
     #[serde(rename = "motion.find")]
     MotionFind {
@@ -2877,7 +3000,7 @@ pub enum Request {
         subject: Subject,
         /// Take the paths that an earlier `motion.find` of this subject made
         /// off the clip first. Without it, a clip that has such paths is an
-        /// error. A path that the area of an effect or a title follows stays.
+        /// error. A path of a pattern of a tracker, or of a title, stays.
         /// A thing that such a path follows gets no second path: its new
         /// samples go into that path.
         #[serde(default)]
@@ -2921,39 +3044,45 @@ pub enum Request {
         /// to 1. Usual: 0.8 for `text`, 0.5 for the others.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         steady: Option<f64>,
+        /// A tracker node of the composition of the clip, with one clip in
+        /// `clips`. The tracker then gets a pattern for each path of the
+        /// subject, named as the path, in place of its patterns of earlier
+        /// paths of the subject. Its other patterns stay.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tracker: Option<String>,
     },
-    /// Follow the thing under the area of one effect of a clip (`c3`, or
-    /// `V2@15s`). `effect` counts from 0, in the order of the clip's
-    /// effects. The track starts on the frame at `at`, which the clip must
-    /// show, and goes backward and forward from there. It follows the place
-    /// and the size of the thing. It stops at a shot change, where it loses
-    /// the thing, and at the ends of the clip.
+    /// Track a pattern of the tracker `node` of the composition of a clip
+    /// (`c3`, or `V2@15s`). The track looks at the picture that comes into
+    /// the tracker, on each frame of the file of the clip. It starts with
+    /// the box of the pattern on `frame`, and goes from there in its `way`
+    /// to the In or the Out. It follows the place and the size of the thing
+    /// in the box. A shot change or a thing that goes out of sight does not
+    /// stop it. `jobs.cancel` stops it, and the frames that it tracked stay.
     ///
-    /// The clip gets a motion path named `Track 1`, `Track 2`, and so on.
-    /// The area then follows that path with its own shape. Before the first
-    /// sample of the path and after its last, the area stays where that
-    /// sample puts it. When the area follows a path
-    /// already, a track of one `way` keeps the samples of the other side.
-    /// A path that an earlier track made for this area gets the new samples,
-    /// and keeps its id and its name. Another path stays as it is, and the
-    /// area gets a new path.
-    ///
-    /// The track puts the center, the size and the rotation of the area
-    /// back at their usual values. An area with keyframes on one of them is
-    /// an error: first remove those keyframes (`keyframes.remove`).
+    /// The pattern then follows its path: before the first sample of the
+    /// path and after its last, it stays where that sample puts it. When
+    /// the pattern has a path already, a track of one `way` keeps the
+    /// samples of the other side. A path that an earlier track made for
+    /// the pattern gets the new samples, and keeps its id. Another path
+    /// stays as it is, and the pattern gets a new path, named as the
+    /// pattern.
     ///
     /// Returns the path: its `id`, its `name`, the `count` of its samples
-    /// and their source frames `first` and `last`. It also gives the
+    /// and their frames of the file `first` and `last`. It also gives the
     /// `score` (how sure the model is, from 0 to 1, the mean of the
-    /// frames), and why the track stopped `backward` and `forward`: `cut`,
-    /// `lost`, `clip` (an end of the clip) or `off`.
+    /// frames), and where the track ended `backward` and `forward`: `clip`
+    /// (the In or the Out), `stopped` (`jobs.cancel`) or `off`.
     #[serde(rename = "motion.track")]
     MotionTrack {
         clip: ClipRef,
-        effect: usize,
-        /// The frame where the track starts. Default: the playhead.
+        node: String,
+        /// The pattern of the tracker, from 1. Usual: 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        at: Option<TimeSpec>,
+        pattern: Option<u32>,
+        /// The frame of the composition where the track starts, from the
+        /// In to the Out. Without it, the frame at the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frame: Option<i64>,
         /// The ways the track goes from that frame. Usual: `both`.
         #[serde(default)]
         way: TrackWay,
@@ -3491,6 +3620,7 @@ pub enum Request {
     /// `timecode_display` is how that field counts (decision D91).
     /// `timer1_origin` is each player's Timer 1 zero, `source` and
     /// `timeline`, or null until a reset. The zeros last for this session.
+    /// `bounds` is what `player.bounds` holds, or null.
     #[serde(rename = "player.state")]
     PlayerState {},
     /// Mute what the viewer plays, without changing the project (the monitoring
@@ -3525,6 +3655,24 @@ pub enum Request {
     PlayerLoop {
         #[serde(default)]
         on: Option<bool>,
+    },
+    /// Hold play of the timeline from `from` to `to` (frames, `to` is the
+    /// first frame after). Play that starts inside stops at the ends, or
+    /// with `loop` on goes on from the other end. With `ping_pong` on too,
+    /// it turns back at the ends. Play forward from the last frame starts
+    /// at `from`, and play backward from `from` starts at the last frame.
+    /// The effects page holds play to its clip. Without `from` and `to`,
+    /// play is not held. Answers what `player.state` does.
+    #[serde(rename = "player.bounds")]
+    PlayerBounds {
+        #[serde(default)]
+        from: Option<i64>,
+        #[serde(default)]
+        to: Option<i64>,
+        #[serde(default, rename = "loop")]
+        looping: bool,
+        #[serde(default)]
+        ping_pong: bool,
     },
     /// Fast Review (decision D97): Play and Space run a long clip faster than
     /// a short one. A clip of 10 seconds or less plays at 1×. A longer clip
@@ -3647,8 +3795,7 @@ pub enum Request {
     /// `transitions`, `titles`, `inspector` or `keyframes` (tabs in the Media
     /// Pool's place), or the
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
-    /// clip (the topmost clip at the playhead when none is selected), the
-    /// `effect_area` handles on the area of an effect of that clip, or
+    /// clip (the topmost clip at the playhead when none is selected), or
     /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
     /// buttons. Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
@@ -3656,8 +3803,38 @@ pub enum Request {
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
     #[serde(rename = "gui.close")]
     GuiClose { panel: GuiPanel },
-    /// What only the GUI keeps: the edit points selected, the target track,
-    /// the timeline's zoom and Timeline Options, and the windows open.
+    /// Show a page of the window: `cut`, or `effects`, the node editor of
+    /// the composition of the topmost clip at the playhead. Answers what
+    /// `gui.state` does.
+    #[serde(rename = "gui.page")]
+    GuiPage { page: Page },
+    /// Select nodes in the node editor of the effects page, by name. The
+    /// Inspector and the viewer then show the last one. An empty list
+    /// selects none. Answers what `gui.state` does.
+    #[serde(rename = "gui.nodes")]
+    GuiNodes { nodes: Vec<String> },
+    /// The playhead of the effects page. It moves over the whole source of
+    /// the clip: the head before its In and the tail after its Out too.
+    /// `at` moves it, in frames from the In (negative: in the head).
+    /// `fast` marks a scrub: it is left out of the command log. `speed`
+    /// plays it (negative: backward, 0 stops). Play forward from the tail
+    /// starts at the In, and play backward from the head starts at the Out.
+    /// Play in the head and the tail has no sound. Inside the clip, play
+    /// follows the Loop of its composition (`comp.loop`). Answers what
+    /// `gui.state` does.
+    #[serde(rename = "gui.page_time")]
+    GuiPageTime {
+        #[serde(default)]
+        at: Option<i64>,
+        #[serde(default)]
+        fast: bool,
+        #[serde(default)]
+        speed: Option<f64>,
+    },
+    /// What only the GUI keeps: the page, the clip of the effects page, its
+    /// nodes selected and its playhead (`time`, in frames from the In), the
+    /// edit points selected, the target track, the timeline's zoom and
+    /// Timeline Options, and the windows open.
     #[serde(rename = "gui.state")]
     GuiState {},
     /// What an edit takes from the source. The two icons at the left of the edit buttons.
@@ -4190,9 +4367,7 @@ pub enum KeyParam {
     /// A value of an effect, as `{"effect": 0, "value": "strength"}`. Its
     /// numbers are those of `effects.set`. One number of a color has a value
     /// of its own, for example `color_red`. A `position` or a `center` is one
-    /// value with x and y, one keyframe for both, as `[0.5, 0.5]`. The area
-    /// of an effect has `area_center_x`, `area_center_y`, `area_width`,
-    /// `area_height`, `area_rotation` and `area_softness`.
+    /// value with x and y, one keyframe for both, as `[0.5, 0.5]`.
     /// `keyframes.list` names it in the same form.
     #[serde(untagged)]
     Effect(EffectParam),
@@ -4513,6 +4688,18 @@ pub enum DynamicTrimMode {
     Slide,
 }
 
+/// A page of the window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Page {
+    /// The timeline, the viewer and the Media Pool.
+    #[default]
+    Cut,
+    /// The node editor of a clip's composition, its viewer and its
+    /// Inspector.
+    Effects,
+}
+
 /// A window `gui.show` opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -4584,19 +4771,8 @@ pub enum GuiPanel {
     /// The viewer's Dynamic Zoom boxes on the selected clip: the start box
     /// and the end box.
     DynamicZoom,
-    /// The viewer's handles on the area of an effect of the selected clip:
-    /// the first of its effects that has an area.
-    EffectArea,
-    /// The viewer's Blur tool on the selected clip, with the Tools row. A
-    /// drag in the picture then adds a Mosaic Blur with that area, and a drag
-    /// on an area changes it.
-    Blur,
-    /// The viewer's Find tool on the selected clip, with the Tools row. Its
-    /// buttons find faces, people, vehicles or text. A click on the box of a
-    /// found thing picks it for Blur or another effect.
-    Find,
-    /// The viewer's Tools row: Transform, Crop, Dynamic Zoom and Blur, the
-    /// flips, Swap, the ease, Reset, and the shapes and subjects of Blur.
+    /// The viewer's Tools row: Transform, Crop and Dynamic Zoom, the flips,
+    /// Swap, the ease and Reset.
     Tools,
 }
 
@@ -4893,18 +5069,170 @@ pub struct EffectChange {
     /// mode and in its User mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_cache: Option<bool>,
-    /// Where the effect works: an ellipse or a box of the picture, as
-    /// `{"shape": "box", "center": [0.3, 0.4], "size": [0.2, 0.2]}`, or of
-    /// the area of a motion path, as `{"follows": "p1"}`. Each field given
-    /// replaces its own, and `{}` gives an effect with no area the ellipse
-    /// that touches the four sides of the picture. Null takes the area off
-    /// with its keyframes, and the effect works on the whole picture again.
+    #[serde(flatten)]
+    pub values: KindChange,
+}
+
+/// A change to a node of a composition: each value given replaces its own.
+/// Every value of every tool is here, and each tool takes its own
+/// (`ops::comp::set`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct NodeChange {
+    /// On, the node does nothing: it passes on what comes in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pass_through: Option<bool>,
+    /// How much of a `blur` or an `effect` shows, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend: Option<f64>,
+    /// Its place in the node editor, `[x, y]` in node widths and heights.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<[f64; 2]>,
+    /// A blur's shape, or how a mask's soft edge blurs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<BlurFilter>,
+    /// Off, a blur's `y_size` sets the blur down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock_xy: Option<bool>,
+    /// Without `lock_xy`, how much a blur blurs down, from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_size: Option<f64>,
+    /// How many boxes a `multi_box` blur or soft edge uses, from 1 to 64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passes: Option<u32>,
+    /// What a blur takes from beyond the edges of the picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipping: Option<BlurClipping>,
+    /// Which of red, green, blue and alpha a blur blurs, `[r, g, b, a]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channels: Option<[bool; 4]>,
+    /// How strong a mask is, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<f64>,
+    /// How soft a mask's edge is, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_edge: Option<f64>,
+    /// How far a mask's edge moves out, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_width: Option<f64>,
+    /// Off, a mask is only a band about its edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solid: Option<bool>,
+    /// Off, the viewer shows no handles of a mask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_view_controls: Option<bool>,
+    /// The width of an ellipse or a rectangle mask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    /// The height of an ellipse or a rectangle mask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+    /// Degrees an ellipse or a rectangle mask is turned counterclockwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
+    /// Degrees a polygon mask is turned counterclockwise, first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_rotation: Option<f64>,
+    /// Degrees a polygon mask is tilted about its horizontal axis, second.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_rotation: Option<f64>,
+    /// Degrees a polygon mask is tilted about its vertical axis, last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_rotation: Option<f64>,
+    /// How round the corners of a rectangle mask are, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner_radius: Option<f64>,
+    /// Which parts a polygon mask whose sides cross covers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_method: Option<FillMethod>,
+    /// The corners of a polygon mask, each `[x, y]` from its middle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<[f64; 2]>>,
+    /// The pattern of a tracker that a mask's center follows, as
+    /// `{"tracker": "Tracker1", "pattern": 1}`. With `"size": true`, the
+    /// mask also grows, shrinks and turns with the box of the pattern. The
+    /// mask's own center goes to `[0.5, 0.5]`. A mask with keyframes on its
+    /// center is an error. Null stops it.
     #[serde(
         default,
         deserialize_with = "given",
         skip_serializing_if = "Option::is_none"
     )]
-    pub area: Option<Option<AreaChange>>,
+    pub connect: Option<Option<Connect>>,
+    /// The pattern of a tracker that the pattern values change, from 1.
+    /// Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<u32>,
+    /// The new name of the pattern.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_name: Option<String>,
+    /// Off, the track buttons of the effects page pass over the pattern.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_enabled: Option<bool>,
+    /// The middle of the box of the pattern, `[x, y]` as fractions of the
+    /// picture from its bottom left. On a frame where the path of the
+    /// pattern has a box, it changes the path: a sample on that frame.
+    /// Elsewhere, it moves the own box of the pattern.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_center: Option<[f64; 2]>,
+    /// The width of the box of the pattern, from 0.001 to 0.5. It changes
+    /// the box in the same way as `pattern_center`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_width: Option<f64>,
+    /// The height of the box of the pattern, from 0.001 to 0.5. It changes
+    /// the box in the same way as `pattern_center`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_height: Option<f64>,
+    /// How far the point that a mask follows is from the middle of the
+    /// pattern, `[x, y]` as fractions of the picture, up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_offset: Option<[f64; 2]>,
+    /// On, a tracker gets a new pattern at the end of its list, with the
+    /// first free name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub add_pattern: bool,
+    /// On, the pattern goes from the tracker. A mask that follows it then
+    /// has its own center again. A later pattern keeps its masks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remove_pattern: bool,
+    /// Take the tracked samples of the pattern off: `start` takes those
+    /// before `frame`, `end` those after `frame`, and `all` takes each.
+    /// The box on `frame` stays as it was. With no sample left, the pattern has no path, and it goes back to
+    /// its own box. A path that a track made then goes when nothing else
+    /// uses it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_trim: Option<PatternTrim>,
+    #[serde(flatten)]
+    pub values: KindChange,
+}
+
+/// The samples of a pattern that `pattern_trim` takes off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternTrim {
+    /// The samples before `frame`.
+    Start,
+    /// Each sample.
+    All,
+    /// The samples after `frame`.
+    End,
+}
+
+/// An input of a node of a composition.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeInput {
+    /// The picture that comes in.
+    #[default]
+    Input,
+    /// The mask that limits where the tool works.
+    EffectMask,
+}
+
+/// A change to the values of an effect's kind: each value given replaces
+/// its own. Every value of every kind is here, and each kind takes its own
+/// (`ops::effect::set`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct KindChange {
     /// A Gaussian Blur's strength, from 0 (none) to 1; with `split`, across.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strength: Option<f64>,
@@ -4963,7 +5291,8 @@ pub struct EffectChange {
     pub antialias: Option<bool>,
     /// On, a Mosaic Blur's cell also takes the mean of the alpha. Off, the
     /// picture keeps its own alpha and the cells keep their colors, so a
-    /// clear part adds its cell's color to the tracks below.
+    /// clear part adds its cell's color to the tracks below. Off, a Gaussian
+    /// Blur node does not blur the alpha.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blur_alpha: Option<bool>,
     /// With `blur_alpha` on, only a Mosaic Blur's cell with no clear part in
@@ -5060,7 +5389,7 @@ pub struct EffectChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// A Glow on the picture's negative, which gives the negative of the
-    /// result.
+    /// result. On a mask node, the mask is the part outside its shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invert: Option<bool>,
     /// Takes a Glow away where the picture shines, from 0 to 5.
@@ -5133,7 +5462,8 @@ pub struct EffectChange {
     /// The shape of a Vignette, in `advanced`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_shape: Option<VignetteShape>,
-    /// How large a Vignette's shape is, from 0.01 to 2.
+    /// How large a Vignette's shape is, from 0.01 to 2. How much a `blur`
+    /// node blurs, or how large a polygon mask is, from 0 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// Turns a Vignette's shape counter-clockwise, in `advanced`, in degrees
@@ -5145,6 +5475,7 @@ pub struct EffectChange {
     pub anamorphism: Option<f64>,
     /// The middle of a Vignette's shape, in `advanced`, `[x, y]` as fractions
     /// of the picture from its bottom left, each from -1000000 to 1000000.
+    /// The middle of a mask node, the same way, each from -10 to 10.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center: Option<Vec<f64>>,
     /// How much of the picture shows through a Vignette's color, in
@@ -5173,76 +5504,6 @@ pub struct EffectChange {
     /// How strong a Sharpen's detail of the colors is, from 1 to 5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sharpen_chroma: Option<f64>,
-}
-
-/// A change to the area of an effect: each field given replaces its own, and
-/// the rest stay as they are. The area is a part of a base box: the whole
-/// source picture, or with `follows` the area of a motion path at each
-/// frame. It stays on the content of the picture through its transform, its
-/// crop and its flips. A `center`, a `size`, a `rotation` or a `softness`
-/// that has keyframes (`effects.key` with `area`) takes a keyframe on the
-/// `at` of `effects.set`. The other fields take no keyframes.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AreaChange {
-    /// `ellipse`, the ellipse that touches the four sides of the area's
-    /// box, `box`, or `polygon`, a shape with straight sides through
-    /// `points`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub shape: Option<AreaShape>,
-    /// Its middle, `[x, y]` as fractions of the base box from its top left,
-    /// each from -10 to 10: `[0.5, 0.5]` is the middle.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub center: Option<[f64; 2]>,
-    /// Its width and height as fractions of the base box, each from 0 to
-    /// 10: `[1, 1]` is as wide and as high as the base box.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<[f64; 2]>,
-    /// Degrees it is turned counterclockwise on the source picture, from
-    /// -100000 to 100000.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rotation: Option<f64>,
-    /// How soft its edge is, from 0 (a hard edge) to 1: the share of the way
-    /// from its edge to its middle over which the effect fades in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub softness: Option<f64>,
-    /// On, the effect works outside the area.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub invert: Option<bool>,
-    /// The corners of a `polygon`, in their order: each `[x, y]` as
-    /// fractions of the area's own box from its top left, from 3 to 128 of
-    /// them. `[]` gives the four corners of that box again.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub points: Option<Vec<[f64; 2]>>,
-    /// The id of a motion path of the same clip (`motion.list`), as `p1`, or
-    /// a subject, as `face`: then each path that `motion.find` made for that
-    /// subject. The base box is then the area of a path at each frame, so
-    /// the area moves with the path, and the effect works in the area of
-    /// each path on each frame where that path has an area. With a `size` of
-    /// `[1.2, 1.2]`, the
-    /// area is the path's box, a fifth larger. Null stops it, and the base
-    /// box is the whole source picture again.
-    #[serde(
-        default,
-        deserialize_with = "given",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub follows: Option<Option<String>>,
-}
-
-impl AreaChange {
-    pub fn on(&self, a: EffectArea) -> EffectArea {
-        EffectArea {
-            shape: self.shape.unwrap_or(a.shape),
-            center: self.center.or(a.center),
-            size: self.size.or(a.size),
-            rotation: self.rotation.or(a.rotation),
-            softness: self.softness.or(a.softness),
-            invert: self.invert.unwrap_or(a.invert),
-            points: self.points.clone().unwrap_or(a.points),
-            follows: self.follows.clone().unwrap_or(a.follows),
-        }
-    }
 }
 
 /// A change to a clip's Dynamic Zoom: each field given replaces its own,
@@ -5718,6 +5979,7 @@ impl Request {
                 | Self::PlayerStats { .. }
                 | Self::PlayerAudioScrubbing { .. }
                 | Self::PlayerLoop { .. }
+                | Self::PlayerBounds { .. }
                 | Self::PlayerFastReview { .. }
                 | Self::MixerPreview { .. }
                 | Self::PoolSet { .. }
@@ -5729,6 +5991,9 @@ impl Request {
                 | Self::GuiQuit {}
                 | Self::GuiShow { .. }
                 | Self::GuiClose { .. }
+                | Self::GuiPage { .. }
+                | Self::GuiNodes { .. }
+                | Self::GuiPageTime { .. }
                 | Self::GuiState {}
                 | Self::GuiOnly { .. }
                 | Self::GuiTarget { .. }

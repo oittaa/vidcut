@@ -778,6 +778,11 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     }
     add_subtitles(p, params, &settings, &mut outputs)?;
     for o in &outputs {
+        if let Some(clip) = o.plan.broken_composition() {
+            return Err(Error::invalid(format!(
+                "the composition of {clip} gives no picture: nothing reaches its MediaOut node"
+            )));
+        }
         o.named()?;
         if !params.overwrite
             && let Some(taken) = o.taken()

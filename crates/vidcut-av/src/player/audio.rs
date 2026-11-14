@@ -66,6 +66,7 @@ struct Producer {
     trims_gen: Option<u64>,
     muted: bool,
     looping: Option<(i64, i64)>,
+    bounds: Option<(i64, i64)>,
     waiting: Waiting,
 }
 
@@ -83,6 +84,7 @@ pub(crate) fn run(shared: Arc<Shared>) {
         trims_gen: None,
         muted: false,
         looping: None,
+        bounds: None,
         waiting: Waiting::default(),
         shared,
     };
@@ -144,16 +146,19 @@ impl Producer {
             self.trims_gen = Some(snap.trims_gen);
         }
         let plan = &self.plan;
-        let looping = snap
-            .looping
-            .map(|(a, b)| {
-                let (first, end) = (plan.first(), plan.first() + plan.plan.frames);
-                (
-                    plan.sample(a.clamp(first, end)),
-                    plan.sample(b.clamp(first, end)),
-                )
-            })
-            .filter(|(a, b)| b > a);
+        let in_samples = |range: Option<(i64, i64)>| {
+            range
+                .map(|(a, b)| {
+                    let (first, end) = (plan.first(), plan.first() + plan.plan.frames);
+                    (
+                        plan.sample(a.clamp(first, end)),
+                        plan.sample(b.clamp(first, end)),
+                    )
+                })
+                .filter(|(a, b)| b > a)
+        };
+        let looping = in_samples(snap.looping);
+        self.bounds = in_samples(snap.bounds);
         let resume = looping.is_some() && self.looping.is_none();
         self.looping = looping;
         if resume && let Some(at) = self.run.as_ref().filter(|r| r.exhausted).map(|r| r.cursor) {
@@ -265,9 +270,9 @@ impl Producer {
         };
         let Some(mut piece) = run.pending.pop_front() else {
             let edge = if run.speed > 0.0 {
-                self.plan.samples
+                run.cursor.min(self.plan.samples)
             } else {
-                0
+                (run.cursor + 1).max(0)
             };
             self.shared.markers.push(Marker {
                 counter: ring.written(),
@@ -365,8 +370,12 @@ impl Producer {
         let mut parts = Vec::new();
         let mut wrapped = false;
         if run.speed > 0.0 {
-            let end = |cursor: i64, fed: i64| match self.looping {
-                Some((_, b)) if cursor < b || (cursor == b && fed > 0) => b,
+            let end = |cursor: i64, fed: i64| match (self.looping, self.bounds) {
+                (Some((_, b)), _) | (None, Some((_, b)))
+                    if cursor < b || (cursor == b && fed > 0) =>
+                {
+                    b
+                }
                 _ => total,
             };
             if let Some((a, _)) = self.looping
@@ -391,8 +400,12 @@ impl Producer {
                 run.fed += n;
             }
         } else {
-            let floor = |cursor: i64, fed: i64| match self.looping {
-                Some((a, _)) if cursor >= a || (cursor == a - 1 && fed > 0) => a,
+            let floor = |cursor: i64, fed: i64| match (self.looping, self.bounds) {
+                (Some((a, _)), _) | (None, Some((a, _)))
+                    if cursor >= a || (cursor == a - 1 && fed > 0) =>
+                {
+                    a
+                }
                 _ => 0,
             };
             if let Some((_, b)) = self.looping
