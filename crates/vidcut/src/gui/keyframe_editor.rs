@@ -3032,6 +3032,7 @@ impl Workspace {
             if click.is_some_and(|at| plain && !on_line(at)) {
                 self.key_editor.graph_active = None;
                 self.key_editor.selected.clear();
+                self.key_editor.rows.clear();
             }
             if let Some((lane, s)) = &spots {
                 self.use_curve(ui, &area, lane, s);

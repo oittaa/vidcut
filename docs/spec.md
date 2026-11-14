@@ -86,7 +86,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - The Graph button in the header shows one large graph in the place of the tracks. The names of the tracks stay on its left.
     - The graph shows a colored line for each value with keyframes. The curve button of a track takes its line out or puts it back.
     - The active curve has the points and the handles, and each edit in the graph acts on it. The other curves are dimmed.
-    - At first, no curve is active. After a click on an empty part of the graph, no curve is active (measured in Resolve Studio 21.2).
+    - At first, no curve is active. After a click on an empty part of the graph, no curve is active and no track is selected (measured in Resolve Studio 21.2).
     - A click on a dimmed curve makes it the active curve and clears the selection (measured in Resolve Studio 21.2).
     - A click on a track's name also makes that curve active. The selection stays.
     - The line of a value has the color of its track (p. 1261).

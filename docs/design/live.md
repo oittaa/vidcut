@@ -506,7 +506,7 @@ The bar and the Jobs button:
 - A right-click on a selected keyframe keeps the selection. `marks_eases` gives the eases of the selection. `ease_parts` makes one `keyframes.set` for each value.
 - `Editor::graph` turns on the large graph (`Workspace::curve_graph`). `graphed` gives its lines, without those in `Editor::graph_off`.
   - The graph is in the place of the tracks. The rows show only their names (`row_head`).
-  - `Editor::graph_active` is the curve with the points. A click on an empty part of the graph clears it.
+  - `Editor::graph_active` is the curve with the points. A click on an empty part of the graph clears it and `Editor::rows`.
   - Under the graph, `Workspace::graph_keys` draws the keyframes of the active curve. It uses the code of a track (`Workspace::key_lane`).
   - `hue` gives the color of a value. Its line in the graph and the dot before its name have that color.
 - `Editor::names_off` hides the names of the rows. Then the tracks or the graph take the full width (`lead`).
