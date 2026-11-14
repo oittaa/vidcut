@@ -1488,23 +1488,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The effect has no public rules. A spectral gate is the usual way to lower steady noise and it runs in real time.
   - The default effect lowered the noise by 0.4 dB and the quiet lines by up to 6.0 dB (spec). Meeting recordings need the opposite.
 
-## X160. The graph sits above the tracks
-
-- **Resolve:**
-  - The Curve Editor takes the place of the tracks. One keyframe track for the selected curve is at its bottom (p. 1261).
-  - A Parameters menu with checkboxes selects the curves (p. 1262).
-  - After a click on an empty part of the graph, no curve is active (measured in Resolve Studio 21.2).
-  - A larger editor is a window of its own (p. 1260).
-- **vidcut:**
-  - The Graph button shows the graph above all the tracks. The tracks stay under it.
-  - The curve button of each track turns its line on or off in the graph.
-  - One curve is always active. A click on an empty part of the graph clears only the selection.
-  - A drag on the line under the graph changes its height. No window opens.
-- **Why:**
-  - The tracks keep the diamonds of all the values. A box and a group drag still work there.
-  - With one active curve, its points and handles stay ready to use.
-  - Each track already has a curve button. Checkboxes in a menu repeat it.
-
 ## X161. Alt moves a handle alone, and the other handle stops at a keyframe
 
 - **Resolve:**
