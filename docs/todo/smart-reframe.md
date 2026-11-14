@@ -7,7 +7,7 @@ Smart Reframe and Close Up are later Cut page work ([spec §1](../spec.md#1-scop
 **Why:**
 
 - The manual's list of Cut page tools marks Smart Reframe as Studio.
-- The `tiktok` preset writes 1080×1920 (`builtin_presets`).
+- The TikTok presets write 720×1280 or 1080×1920 on a timeline that is higher than it is wide (`builtin_presets`, `Vertical`).
 - The viewer draws a 9:16 guide when that guide is on (`Framing::Social9_16`).
 - The user still sets the crop.
 

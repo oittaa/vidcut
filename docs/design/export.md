@@ -339,6 +339,7 @@ To the encoder:
 The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
 
 - `VideoSettings::written_size` gives the size that the encoder gets. H.264 and HEVC round an odd side up. DNxHR rounds an odd width up, but DNxHR 444 keeps it. The other codecs keep the side.
+- A `Vertical` setting other than `off` can swap the `video.width` and the `video.height` first (`Vertical::turns`). With `timeline`, it swaps them on a timeline that is higher than it is wide.
 - `VideoSettings::drawn_size` gives the size of the draw: the written size with a `video.width` and `video.height`, or else the size of the timeline.
   - Why: a custom size fits the picture into the file's size with one draw ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - `export::validate` refuses a `video.width` or `video.height` outside `TIMELINE_SIDE`.
@@ -422,6 +423,7 @@ Voice Isolation:
   - The presets of one `family` are one item. The first of them with `quick_export` gives the item, and its Resolution menu lists all of them.
 - The Export dialog ([deviation X3](../deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)) starts from a preset. It sends the changes as `set` overrides, with a range, per-clip names and `overwrite`.
 - The dialog shows `export.plan` as its params change.
+- With a custom size, the dialog shows Use Vertical Resolution. Its box shows whether `Vertical::turns` swaps the size on this timeline. A click sets `on` or `off`.
 
 Cancel:
 

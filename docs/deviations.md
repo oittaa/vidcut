@@ -43,12 +43,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Create Subtitles from Audio shows its progress in a dialog box (p. 1235).
   - The Deliver page has the render settings and the Render Queue (pp. 4103–4132).
   - In Resolve Studio 21.2, the Quick Export row is H.264 Master, HyperDeck, H.265 Master, ProRes 422 HQ, YouTube, Vimeo, TikTok, Presentations, Dropbox and Replay.
-  - HyperDeck makes H.264 files for a Blackmagic HyperDeck (p. 4108). Presentations uploads to Blackmagic Cloud (p. 4106).
-  - TikTok has a menu of two resolutions (p. 4106). The manual does not name them.
+  - Presentations has no codec settings. It uploads the timeline to Blackmagic Cloud (p. 4106).
+  - Dropbox and Replay render MP4 files with H.264 and AAC, and can upload them to Dropbox (pp. 4106–4107).
 - **vidcut:**
-  - The Quick Export row is AV1, H.264 Master, H.265 Master, ProRes 422 HQ, YouTube, Vimeo and TikTok.
-  - TikTok is one preset, 1080×1920, with no menu.
-  - It has no HyperDeck, Presentations, Dropbox or Replay.
+  - The Quick Export row is AV1, H.264 Master, HyperDeck, H.265 Master, ProRes 422 HQ, YouTube, Vimeo and TikTok.
+  - It has no Presentations, Dropbox or Replay.
   - The Export dialog also shows the live plan, and gives the export as a shell command.
   - In a running GUI, exports are jobs ([design/export.md](design/export.md#the-guis-exports), [design/live.md](design/live.md#jobs)).
   - Create Subtitles from Audio is a job too. It downloads its models as a job.
@@ -56,8 +55,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The plan and the command let scripts reproduce GUI exports.
   - An export runs beside the editing. A dialog over the timeline for each export interrupts that editing.
-  - vidcut does not upload, and it has no settings for a Blackmagic HyperDeck. The Export dialog has H.264 for other needs.
-  - The two TikTok resolutions are not measured yet.
+  - vidcut does not upload. Thus Presentations has nothing to do in vidcut.
+  - The files of Dropbox and Replay have the settings of Vimeo, and Vimeo has the same three sizes.
 
 ## X6. Removing media deletes the clips that use it
 

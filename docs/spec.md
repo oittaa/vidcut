@@ -2946,11 +2946,20 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
 - **Output:** one file. Individual clips are for the Deliver page, and for our Export dialog.
 - **Preset models** (Deliver page):
   - H.264 Master (QuickTime, AAC 320 kb/s)
+  - HyperDeck: H.264 for a Blackmagic HyperDeck, with AAC at 320 kb/s (p. 4108). Its H.264 settings are locked.
   - H.265 Master (Main10)
   - ProRes 422 HQ (LPCM audio)
   - YouTube 720p–2160p (MP4, H.264 High)
   - Vimeo 720p, 1080p and 2160p (p. 4105)
-  - TikTok (vertical 1080×1920)
+  - TikTok: a menu of two resolutions, MP4, H.264 and Encoding Profile Auto (p. 4106)
+  - Use Vertical Resolution swaps the sides of the resolution. TikTok has it off (p. 4106).
+- **Measured in Resolve Studio 21.2** (scripting API and Deliver page):
+  - HyperDeck: QuickTime or MP4, and only H.264. Encoding Profile Main, Key Frames Automatic and Frame Reordering are locked.
+  - HyperDeck: Network Optimization is on. The Resolution menu has 1920 x 1080 HD, 3840 x 2160 Ultra HD and 4096 x 2160 DCI.
+  - HyperDeck writes 1920 x 1080 on timelines of 1280 x 720, 3840 x 2160 and 1080 x 1920.
+  - The two TikTok resolutions are 720p (1280 x 720) and 1080p (1920 x 1080).
+  - YouTube, Vimeo and TikTok have Use Vertical Resolution. On a timeline of 1080 x 1920, each of their sizes turns: 1080p writes 1080 x 1920.
+  - The Quick Export dialog has no menu of sizes. Its TikTok item shows 1920 x 1080 on a timeline of 1920 x 1080.
 - **User presets:** you can add them to the Quick Export row.
 - **In vidcut:**
   - The Quick Export row, the Export dialog and jobs are deviation X3.
@@ -2959,7 +2968,9 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - The sample rate of AAC is the project's by default. The other choices are 44100 Hz and 48000 Hz.
   - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
   - A project at another rate, for example 96000 Hz, with AAC was not measured.
-  - The TikTok preset has AAC at 256 kb/s. That number was not measured.
+  - HyperDeck has the three sizes of the Resolution menu, with H.264 Main. Its quality is that of H.264 Master.
+  - The presets of YouTube, Vimeo and TikTok set `video.vertical` to `timeline`. Thus a timeline that is higher than it is wide gives the turned size.
+  - The AAC bitrate of the TikTok presets in Resolve was not measured. vidcut uses 320 kb/s, as for YouTube and Vimeo.
   - H.264 and H.265 round an odd side up to even. The side is of the timeline or of a custom size.
     - A size of 1281 x 721 gives a file of 1282 x 722. A size of 1281 x 720 gives a file of 1282 x 720.
     - With a timeline of an odd side, one factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.

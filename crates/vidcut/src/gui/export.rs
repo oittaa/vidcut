@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 use vidcut_av::export::SpeechNote;
 use vidcut_core::export::{
     AAC_BITRATE, AAC_BITRATES, AAC_RATES, AudioCodec, AudioSettings, Container, EncoderChoice,
-    ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings, apply_overrides, validate,
+    ExportSettings, HdrMetadata, HdrMode, Vertical, VideoCodec, VideoSettings, apply_overrides,
+    validate,
 };
 use vidcut_core::request::{FindSpeech, ImportMode, SubtitleFormat, SubtitlesAs};
 use vidcut_core::{Envelope, Error, Response};
@@ -588,11 +589,11 @@ impl Dialog {
 }
 
 fn size_of(p: &PresetInfo) -> String {
-    p.settings
-        .video
-        .as_ref()
-        .and_then(|v| v.height.map(|h| format!("{h}p")))
-        .unwrap_or_else(|| "timeline size".into())
+    match p.settings.video.as_ref().map(|v| (v.width, v.height)) {
+        Some((Some(w), Some(h))) if w * 9 == h * 16 => format!("{h}p"),
+        Some((Some(w), Some(h))) => format!("{w}×{h}"),
+        _ => "timeline size".into(),
+    }
 }
 
 impl Workspace {
@@ -2701,6 +2702,7 @@ fn settings_form(
                                 bit_depth: None,
                                 width: None,
                                 height: None,
+                                vertical: Vertical::Off,
                                 hdr: HdrMode::Auto,
                                 passes: None,
                                 first_pass: Default::default(),
@@ -2832,6 +2834,7 @@ fn settings_form(
                     {
                         v.width = None;
                         v.height = None;
+                        v.vertical = Vertical::Off;
                     }
                     if ui.radio_value(&mut custom, true, "Custom").changed() {
                         v.width = Some(size.0);
@@ -2845,6 +2848,15 @@ fn settings_form(
                     }
                 });
                 ui.end_row();
+
+                if v.width.is_some() {
+                    ui.label("");
+                    let mut on = v.vertical.turns(size);
+                    if ui.checkbox(&mut on, "Use Vertical Resolution").changed() {
+                        v.vertical = if on { Vertical::On } else { Vertical::Off };
+                    }
+                    ui.end_row();
+                }
 
                 ui.label("");
                 ui.horizontal(|ui| {

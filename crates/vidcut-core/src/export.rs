@@ -353,6 +353,9 @@ pub struct VideoSettings {
     pub width: Option<u32>,
     #[serde(default)]
     pub height: Option<u32>,
+    /// Use Vertical Resolution: whether `width` and `height` change places.
+    #[serde(default, skip_serializing_if = "Vertical::is_default")]
+    pub vertical: Vertical,
     /// Dynamic range: `auto` (HDR when most of the shown picture is HDR and
     /// the codec carries it), `sdr` (BT.709, HDR sources tone-mapped), or
     /// HDR with `pq` or `hlg` (BT.2100: BT.2020 colors, 10 bits or more, HEVC,
@@ -432,6 +435,7 @@ impl VideoSettings {
             bit_depth: None,
             width: None,
             height: None,
+            vertical: Vertical::default(),
             hdr: HdrMode::default(),
             passes: None,
             first_pass: FirstPass::default(),
@@ -482,10 +486,10 @@ impl VideoSettings {
     }
 
     fn asked_size(&self, timeline: (u32, u32)) -> (u32, u32) {
-        (
-            self.width.unwrap_or(timeline.0),
-            self.height.unwrap_or(timeline.1),
-        )
+        match (self.width, self.height) {
+            (Some(w), Some(h)) if self.vertical.turns(timeline) => (h, w),
+            (w, h) => (w.unwrap_or(timeline.0), h.unwrap_or(timeline.1)),
+        }
     }
 
     pub fn drawn_size(&self, timeline: (u32, u32)) -> (u32, u32) {
@@ -569,6 +573,36 @@ impl AlphaOut {
         match self {
             Self::Premultiplied => "Premultiplied",
             Self::Straight => "Straight",
+        }
+    }
+}
+
+/// Use Vertical Resolution (`video.vertical`): whether the `width` and the
+/// `height` of a custom size change places, for a picture that is higher
+/// than it is wide.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Vertical {
+    /// They keep their places.
+    #[default]
+    Off,
+    /// They change places.
+    On,
+    /// They change places when the timeline is higher than it is wide. The
+    /// presets for video sites use it.
+    Timeline,
+}
+
+impl Vertical {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn turns(self, timeline: (u32, u32)) -> bool {
+        match self {
+            Self::Off => false,
+            Self::On => true,
+            Self::Timeline => timeline.1 > timeline.0,
         }
     }
 }
@@ -715,6 +749,7 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         bit_depth: None,
         width: None,
         height: None,
+        vertical: Vertical::Off,
         hdr: HdrMode::Auto,
         passes: None,
         first_pass: FirstPass::Fast,
@@ -805,7 +840,31 @@ pub fn builtin_presets() -> Vec<Preset> {
             &format!("{family} {h}p"),
             &format!("MP4, H.264 {w}×{h}, AAC"),
             quick,
-            av(C::Mp4, sized(w, h, 18), audio(A::Aac, Some(320))),
+            av(
+                C::Mp4,
+                VideoSettings {
+                    vertical: Vertical::Timeline,
+                    ..sized(w, h, 18)
+                },
+                audio(A::Aac, Some(320)),
+            ),
+        )
+    };
+    let deck = |name: &str, title: &str, w: u32, h: u32, quick: bool| Preset {
+        family: Some("HyperDeck".into()),
+        ..preset(
+            name,
+            title,
+            &format!("QuickTime, H.264 Main {w}×{h}, AAC 320 kb/s: for a HyperDeck"),
+            quick,
+            av(
+                C::Mov,
+                VideoSettings {
+                    profile: Some("main".into()),
+                    ..sized(w, h, 16)
+                },
+                audio(A::Aac, Some(320)),
+            ),
         )
     };
     vec![
@@ -830,6 +889,9 @@ pub fn builtin_presets() -> Vec<Preset> {
             true,
             av(C::Mov, video(V::H264, Some(16)), audio(A::Aac, Some(320))),
         ),
+        deck("hyperdeck-1080p", "HyperDeck 1080p", 1920, 1080, true),
+        deck("hyperdeck-2160p", "HyperDeck 2160p", 3840, 2160, false),
+        deck("hyperdeck-dci-4k", "HyperDeck DCI 4K", 4096, 2160, false),
         preset(
             "h265-master",
             "H.265 Master",
@@ -865,20 +927,8 @@ pub fn builtin_presets() -> Vec<Preset> {
         site("Vimeo", 1280, 720, false),
         site("Vimeo", 1920, 1080, true),
         site("Vimeo", 3840, 2160, false),
-        preset(
-            "tiktok",
-            "TikTok",
-            "MP4, vertical H.264 1080×1920, AAC",
-            true,
-            av(
-                C::Mp4,
-                VideoSettings {
-                    hdr: HdrMode::Sdr,
-                    ..sized(1080, 1920, 20)
-                },
-                audio(A::Aac, Some(256)),
-            ),
-        ),
+        site("TikTok", 1280, 720, false),
+        site("TikTok", 1920, 1080, true),
         preset(
             "vp9-webm",
             "VP9 WebM",
@@ -1174,6 +1224,11 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         }
         if v.width.is_some() != v.height.is_some() {
             return Err(Error::usage("set both video.width and video.height"));
+        }
+        if v.width.is_none() && v.vertical != Vertical::Off {
+            return Err(Error::usage(
+                "video.vertical needs video.width and video.height",
+            ));
         }
         let (low, high) = crate::model::TIMELINE_SIDE;
         if [v.width, v.height]

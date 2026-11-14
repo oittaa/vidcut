@@ -353,6 +353,7 @@ mod tests {
             bit_depth: None,
             width: None,
             height: None,
+            vertical: Default::default(),
             hdr: HdrMode::Auto,
             passes: None,
             first_pass: Default::default(),
