@@ -1569,6 +1569,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - The Cut page makes no track of a thing in the picture. Its chapters name the Tracker palette only under Stabilization (pp. 738, 770).
+  - On the Fusion page, a Tracker node tracks patterns. Each pattern has its path, Offset Position (p. 1793).
+    - A value of another node connects to that path (pp. 1804–1805).
   - The Tracker palette of the Color page moves a window or an effect with a feature of the frame (pp. 3308, 3494).
   - Its tracking data is apart from the values of the window, and those values can have keyframes (p. 3309).
   - On a frame with no tracking data, the window stays where the first or the last tracked frame put it (p. 3310).
@@ -1576,13 +1578,17 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Magic Mask takes a stroke out of the tracking at the frame where its subject is fully off screen (p. 3305).
   - The scripting API of Resolve Studio 21.2 has no call that makes or reads a track.
 - **vidcut:**
-  - A clip of footage, a still or an image sequence has motion paths. A motion path tells where one thing is on each frame of the file: its box.
+  - The Effects page has the Tracker node of the Fusion page ([spec](spec.md#the-tracker)).
+  - The paths are not in the node. A clip of footage, a still or an image sequence holds them. A pattern of a Tracker names its path.
+  - A motion path tells where one thing is on each frame of the file: its box.
   - `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths. A script gives the samples.
   - A path that `motion.track` made holds its place outside its samples. Before its first sample and after its last, the box is where that sample puts it.
   - Another path lasts from its first sample to its last. Before and after them it has no box. Thus a path that `motion.find` made ends where its thing is gone.
-  - A pattern of a Tracker node on the Effects page has a path ([spec](spec.md#the-tracker)). `motion.find` makes a path for each face or each block of text ([X167](#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+  - `motion.find` makes a path for each thing that it finds ([X167](#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
 - **Why:**
-  - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
+  - A blur over a face or a number plate must follow it.
+  - A title has no nodes. A path of the clip lets a title follow a thing ([X169](#x169-a-title-follows-a-motion-path)).
+  - A script and `motion.find` make paths with no Tracker node.
   - The path is apart from the keyframes, as the tracking data of the Color page is. Thus a new path keeps the keyframes that the user set.
 
 ## X167. vidcut finds the faces and the text of a clip
