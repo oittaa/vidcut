@@ -427,7 +427,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Invert: b + (c − b) × (1 − α).
   - Measured in Resolve Studio 21.1.1: a ProRes 4444 with alpha and no tags is Straight.
   - vidcut reads the alpha channel of each file as Straight until `media.set` changes it.
-- **Upscale**, Super Scale in Resolve (pp. 288, 432–433; deviation [X91](deviations.md#x91-upscale-uses-the-upscaler-of-the-gpu)):
+- **Upscale** (pp. 288, 432–433; deviation [X91](deviations.md#x91-upscale-uses-the-upscaler-of-the-gpu)):
   - Upscale enlarges the pictures of a media item with a better upscaler before they are fitted.
   - It is a setting of the media item. Thus it applies to every clip of that item (p. 433).
   - Right-click the media in the pool, or use the Upscale section of the Inspector.
