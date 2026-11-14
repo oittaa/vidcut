@@ -1,8 +1,8 @@
-# AI upscaling for Super Scale
+# AI upscaling for Upscale
 
 **When:** next.
 
-Super Scale has two AI upscalers on shaders of vidcut's own: NanoVSR 5.4M (AI Fast) and FlashVSR+ Turbo (AI Slow) ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). This file holds their measurements, the decisions and the open work.
+Upscale has two AI upscalers on shaders of vidcut's own: NanoVSR 5.4M (AI Fast) and FlashVSR+ Turbo (AI Slow) ([X91](../deviations.md#x91-upscale-uses-the-upscaler-of-the-gpu)). This file holds their measurements, the decisions and the open work.
 
 ## The model in vidcut
 
@@ -60,7 +60,7 @@ AI Slow against the real frames, with and without its color fix, on the owner's 
 
 AI Slow speed and memory on the owner's RTX 4080 SUPER (16 GB), on 2026-10-24:
 
-- Each vidcut run is a CLI export: `project create --fps F --width W --height H`, `media add`, `edit append m1 --range 0f..Nf`, `media set m1 --super-scale true --upscaler ai_slow`, `export start out.mkv`.
+- Each vidcut run is a CLI export: `project create --fps F --width W --height H`, `media add`, `edit append m1 --range 0f..Nf`, `media set m1 --upscale true --upscaler ai_slow`, `export start out.mkv`.
 - The memory is the peak of the whole card, from `nvidia-smi` every 0.5 s, less the memory in use before.
 
 | Clip | vidcut | Official code, bf16, Triton |
@@ -106,7 +106,7 @@ AI Slow and AI Fast memory and time on the owner's RTX 4080 SUPER (16 GB), on 20
 - AI has no Noise Reduction. NanoVSR has no such control.
 - AI has no size limit. Its memory grows with the size of the source picture.
 - Users have different needs. Some wait a long time for the best pictures, and others want good pictures fast.
-  - Thus Super Scale can offer more than one AI model: a fast default, and slower models with better pictures.
+  - Thus Upscale can offer more than one AI model: a fast default, and slower models with better pictures.
   - Speed alone does not rule out a model. A slow model must give clearly better pictures.
   - FlashVSR+ Turbo ([repo](https://github.com/OpenImagingLab/FlashVSR_Plus)) is the slow model, AI Slow. NanoVSR 5.4M is the fast one, AI Fast.
   - AI Slow runs in the viewer too, as AI Fast does, however slow it is.

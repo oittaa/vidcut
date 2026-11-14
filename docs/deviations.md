@@ -713,7 +713,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The curve stays in line with the keyframes that it joins.
 
-## X91. Super Scale uses the upscaler of the GPU
+## X91. Upscale uses the upscaler of the GPU
 
 - **Resolve:**
   - Super Scale is in the Studio version only (p. 288).
@@ -722,7 +722,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The project setting also has Auto (p. 149).
   - It makes a clip of a higher resolution, which often stops playback in real time (p. 288). The usual sizing then fits that clip.
 - **vidcut:**
-  - Super Scale is Off or On. On enlarges a picture as much as it needs, up to 4 times its source. There is no Enhanced mode.
+  - Upscale is Off or On. On enlarges a picture as much as it needs, up to 4 times its source. There is no Enhanced mode.
   - Its Upscaler is Project Settings, the default, AI Slow, AI Fast or Classic.
   - Project Settings has the upscaler of the project: Auto, the default, AI Slow, AI Fast or Classic. Auto is AI on macOS, and AI Fast elsewhere.
   - The lists name the upscaler that Auto and Project Settings give on this computer, as in Auto (AI Fast).
@@ -738,14 +738,14 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - The viewer and an export use one rule and one message. The message names the file and the reason.
     - An export refuses before it starts. The viewer shows the same message over its picture.
     - An export also refuses an AI upscaler that it needs without its weights, or without a GPU that can run the network.
-  - The Inspector of the Cut page has a Super Scale section for the media of the selected clips.
-  - The viewer shows Super Scale only with View > Show Super Scale, which is off by default.
+  - The Inspector of the Cut page has an Upscale section for the media of the selected clips.
+  - The viewer shows Upscale only with View > Show Upscale, which is off by default.
   - With an AI upscaler, the viewer runs the upscaler of the export on each picture that the export enlarges. With AI Slow, a picture can take seconds.
 - **Why:**
   - A video model adds detail that a classic upscaler cannot. Some users wait a long time for the best pictures, and others want good pictures fast.
   - vidcut makes a picture only as large as the output shows it. A factor would only limit placed pictures. Thus On is sufficient.
   - The owner chose the scaler of macOS as the default on macOS. The owner also decided that AI Fast and AI Slow stay off there. Thus an export has different pixels on macOS and on other systems, and the owner accepts this.
-  - The owner approved the defaults of Super Scale as better than those of Resolve.
+  - The owner approved the defaults of Upscale as better than those of Resolve.
 
 ## X92. Deleting words on the timeline cuts at quiet points
 
@@ -869,7 +869,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:** the input goes into the timeline color space before Super Scale and before Speed Effects (§13, p. 3407).
 - **vidcut:**
   - In an HDR timeline, AI Slow takes SDR media as SDR. The draw then converts its result into the timeline color space.
-  - AI Slow refuses HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
+  - AI Slow refuses HDR media in an HDR timeline ([X91](#x91-upscale-uses-the-upscaler-of-the-gpu)).
 - **Why:**
   - In the test of `hdr_models` ([tools](tools.md)), AI Slow in PQ and HLG came far from the real frames, also with its color fix.
   - SDR goes into an HDR timeline with no clipping. Thus the conversion after the stage keeps all of the picture.
@@ -946,7 +946,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Smart finds the media that are slow to decode by the decoder and by the proxy rules, not by a list of formats:
     - with GPU decoding on, media of a codec with long groups of pictures that the GPU does not decode
     - media that the proxy rules pick (spec D41), while the original plays
-  - Smart also renders AI Super Scale, and each Retime Process other than Nearest.
+  - Smart also renders AI Upscale, and each Retime Process other than Nearest.
   - Smart also renders the parts where frames drop steadily during play ([D98](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - The writes of playback would take GPU time from the frames on the screen.

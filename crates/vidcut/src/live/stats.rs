@@ -3,8 +3,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use vidcut_av::color::Matrix;
 use vidcut_av::player::{self as engine, Layout, Made, PlaysOn, Upscaled};
-use vidcut_av::{interpolate, super_scale};
-use vidcut_core::model::{Hdr, RenderCache, Retime, SuperScale, Upscaler, hex};
+use vidcut_av::{interpolate, upscale};
+use vidcut_core::model::{Hdr, RenderCache, Retime, Upscale, Upscaler, hex};
 use vidcut_core::render::BLACK;
 use vidcut_core::render_cache::{Part, Reason};
 
@@ -18,7 +18,7 @@ pub struct PlayerStats {
     pub picture: Option<PictureStats>,
     pub made: Option<MadeStats>,
     pub render_cache: Option<String>,
-    pub super_scale: Option<SuperScaleStats>,
+    pub upscale: Option<UpscaleStats>,
     pub retime: Option<RetimeStats>,
     pub viewer: Option<ViewerStats>,
     pub playback: PlaybackStats,
@@ -66,14 +66,14 @@ pub struct LayerMade {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuperScaleStats {
+pub struct UpscaleStats {
     pub upscaler: Option<String>,
     pub runs_on: Option<String>,
     pub sizes: Option<String>,
     pub state: Option<String>,
     pub last: Option<String>,
     #[serde(skip)]
-    pub scale: Option<SuperScale>,
+    pub scale: Option<Upscale>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,15 +223,14 @@ impl PlayerStats {
             PlaysOn::Chosen(id) => id.clone(),
             PlaysOn::Missing(id) => format!("System default ({id} isn't connected)"),
         };
-        let super_scale =
-            SuperScaleStats::of(s.super_scales.first().copied(), &super_scale::report());
+        let upscale = UpscaleStats::of(s.upscales.first().copied(), &upscale::report());
         let retime = RetimeStats::of(s.retimes.first().copied(), &interpolate::report());
         Self {
             decoding,
             picture,
             made,
             render_cache: None,
-            super_scale,
+            upscale,
             retime,
             viewer,
             playback: PlaybackStats {
@@ -271,17 +270,17 @@ impl PlayerStats {
         let written = self.made.as_ref().and_then(|m| m.written);
         self.render_cache = cache_row(mode, line, frame, written);
         let part = line.iter().find(|p| p.holds(frame));
-        let shown = self.super_scale.as_ref().and_then(|s| s.scale);
+        let shown = self.upscale.as_ref().and_then(|s| s.scale);
         let made = part.and_then(|p| match shown {
-            None if p.has(frame) => p.super_scales.iter().find(|s| s.ai()),
+            None if p.has(frame) => p.upscales.iter().find(|s| s.ai()),
             None => None,
             Some(s) => p
-                .super_scales
+                .upscales
                 .first()
                 .filter(|b| b.ai() && s.upscaler == Upscaler::Classic),
         });
         if let Some(s) = made.filter(|_| !mode.is_off()) {
-            self.super_scale = Some(SuperScaleStats::cached(*s));
+            self.upscale = Some(UpscaleStats::cached(*s));
         }
         let retime = part.and_then(|p| p.retimes.first());
         if let Some(r) = retime.filter(|_| self.retime.is_none() && !mode.is_off()) {
@@ -305,8 +304,8 @@ impl PlayerStats {
         if !made.is_empty() {
             groups.push(("How It Was Made", made));
         }
-        if let Some(s) = &self.super_scale {
-            groups.push(("Super Scale", s.rows()));
+        if let Some(s) = &self.upscale {
+            groups.push(("Upscale", s.rows()));
         }
         if let Some(r) = &self.retime {
             groups.push(("Retime Process", r.rows()));
@@ -489,7 +488,7 @@ impl LayerMade {
             ),
         };
         let upscaler = upscaled.map(|u| {
-            let name = super_scale::name(u.upscaler);
+            let name = upscale::name(u.upscaler);
             match u.sizes {
                 Some([(w, h), (mw, mh)]) => format!("{name}, {w}×{h} → {mw}×{mh}"),
                 None => format!("{name}, not used: the frame needs no enlarging"),
@@ -566,16 +565,16 @@ pub fn reason_names(reasons: &[Reason]) -> Vec<String> {
             Reason::Retime(x) | Reason::AiRetime(x) => {
                 format!("Retime Process: {}", interpolate::name(*x))
             }
-            Reason::SuperScale(u) => format!("Super Scale: {}", super_scale::name(*u)),
+            Reason::Upscale(u) => format!("Upscale: {}", upscale::name(*u)),
             r => r.title().to_string(),
         })
         .collect()
 }
 
-impl SuperScaleStats {
-    fn cached(s: SuperScale) -> Self {
+impl UpscaleStats {
+    fn cached(s: Upscale) -> Self {
         Self {
-            upscaler: Some(format!("{}, from the render cache", super_scale::named(s))),
+            upscaler: Some(format!("{}, from the render cache", upscale::named(s))),
             runs_on: None,
             sizes: None,
             state: None,
@@ -584,12 +583,12 @@ impl SuperScaleStats {
         }
     }
 
-    fn of(s: Option<SuperScale>, report: &super_scale::Report) -> Option<Self> {
+    fn of(s: Option<Upscale>, report: &upscale::Report) -> Option<Self> {
         if s.is_none() && report.making.is_none() {
             return None;
         }
-        let upscaler = s.map(super_scale::named);
-        let mine = |w: &Option<super_scale::Work>| {
+        let upscaler = s.map(upscale::named);
+        let mine = |w: &Option<upscale::Work>| {
             w.clone()
                 .filter(|w| s.map(|s| s.upscaler) == Some(w.upscaler))
         };
@@ -624,7 +623,7 @@ impl SuperScaleStats {
                 )),
                 (None, Some(w)) => Some(format!(
                     "{} still making {} · {} so far",
-                    super_scale::name(w.upscaler),
+                    upscale::name(w.upscaler),
                     frames(w.frames).to_lowercase(),
                     secs(w.started.elapsed())
                 )),

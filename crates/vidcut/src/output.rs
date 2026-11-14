@@ -315,7 +315,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 let path = std::path::Path::new(u["path"].as_str().unwrap_or_default());
                 let name = path.file_name().unwrap_or(path.as_os_str());
                 println!(
-                    "  Super Scale: {}: {}",
+                    "  Upscale: {}: {}",
                     name.to_string_lossy(),
                     u["how"].as_str().unwrap_or_default()
                 );

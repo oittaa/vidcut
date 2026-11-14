@@ -2147,34 +2147,34 @@ impl Workspace {
                 }
             });
             let mut put = None;
-            ui.menu_button("Super Scale", |ui| {
-                use super::super_scale::{SHARPNESS, UPSCALERS};
+            ui.menu_button("Upscale", |ui| {
+                use super::upscale::{SHARPNESS, UPSCALERS};
                 use vidcut_core::model::Upscaler;
-                let now = m.super_scale;
+                let now = m.upscale;
                 let settings = self.project_shared().map(|p| p.settings.clone());
                 let project = settings
                     .as_ref()
                     .map_or_else(Default::default, |s| s.upscaler);
                 let shown = settings.as_ref().map_or_else(Default::default, |s| {
-                    vidcut_core::render::super_scale_of(now, s)
+                    vidcut_core::render::upscale_of(now, s)
                 });
                 for (on, label) in [(false, "Off"), (true, "On")] {
                     if ui.radio(now.on == on, label).clicked() {
-                        put = Some(json!({ "super_scale": on }));
+                        put = Some(json!({ "upscale": on }));
                     }
                 }
                 ui.separator();
                 ui.add_enabled_ui(!now.is_off(), |ui| {
                     ui.menu_button("Upscaler", |ui| {
                         for &(upscaler, label) in UPSCALERS {
-                            let text = super::super_scale::upscaler_text(upscaler, label, project);
+                            let text = super::upscale::upscaler_text(upscaler, label, project);
                             if ui.radio(now.upscaler == upscaler, text).clicked() {
                                 put = Some(json!({ "upscaler": upscaler }));
                             }
                         }
                     });
                     let timeline = self.timeline_colors();
-                    if let Some(text) = super::super_scale::unfit(shown, [m], timeline) {
+                    if let Some(text) = super::upscale::unfit(shown, [m], timeline) {
                         super::dialog::warn(ui, text);
                     }
                     ui.add_enabled_ui(shown.upscaler == Upscaler::Classic, |ui| {
@@ -2192,7 +2192,7 @@ impl Workspace {
                 }
             });
             if let Some(params) = put {
-                self.set_super_scale(&ids, params);
+                self.set_upscale(&ids, params);
             }
         }
         if let Some(p) = self.project_shared() {

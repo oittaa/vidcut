@@ -13,7 +13,7 @@ use crate::error::{Error, Result};
 use crate::ffmpeg::frame;
 use crate::models::{self, Fetch, Need};
 use crate::screen::held;
-use crate::super_scale::Picture;
+use crate::upscale::Picture;
 
 mod ema;
 mod macos;

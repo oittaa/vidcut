@@ -810,14 +810,12 @@ impl Words<'_> {
         });
         s.put("input_lut", "Input LUT", &text, |m| json!(m.input_lut));
         s.put("alpha_mode", "Alpha Mode", &word, |m| json!(m.alpha_mode));
-        s.put("super_scale", "Super Scale", &on_off, |m| {
-            json!(m.super_scale.on)
-        });
+        s.put("upscale", "Upscale", &on_off, |m| json!(m.upscale.on));
         s.put("sharpness", "Sharpness", &word, |m| {
-            json!(m.super_scale.sharpness)
+            json!(m.upscale.sharpness)
         });
         s.put("upscaler", "Upscaler", &upscaler, |m| {
-            json!(m.super_scale.upscaler)
+            json!(m.upscale.upscaler)
         });
         s.f.text()
     }

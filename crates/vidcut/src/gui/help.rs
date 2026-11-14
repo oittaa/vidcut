@@ -176,7 +176,7 @@ fn explained_by(s: &Shortcut, query: &str, bindings: &Bindings) -> bool {
 
 fn choices(query: &str) -> Vec<Choices> {
     [
-        ("Super Scale Upscaler", super::super_scale::choices()),
+        ("Upscaler", super::upscale::choices()),
         ("Retime Process", super::retime_process::choices()),
     ]
     .into_iter()

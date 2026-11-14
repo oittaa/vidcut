@@ -23,7 +23,7 @@ try() {
     "$vidcut" project create "$project" --fps 30 --width "${3%x*}" --height "${3#*x}" >/dev/null || exit 1
     "$vidcut" media add "$2" >/dev/null || exit 1
     "$vidcut" edit append m1 --range 0f..15f >/dev/null || exit 1
-    "$vidcut" media set m1 --super-scale true --upscaler macos >/dev/null || exit 1
+    "$vidcut" media set m1 --upscale true --upscaler macos >/dev/null || exit 1
     echo "== $1: $(basename "$2" | cut -d_ -f3) clip in a $3 timeline"
     echo "export: $(answer "$vidcut" export start "$dir/$1.mp4")"
     echo "viewer: $(answer "$vidcut" frame render --at 5f --out "$dir/$1.png" --viewer)"

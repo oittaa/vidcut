@@ -87,7 +87,7 @@ impl Frame {
     }
 
     fn draw(&self, screen: &mut Screen, width: u32, height: u32) {
-        let preview = crate::preferences::load().is_ok_and(|p| p.viewer.super_scale);
+        let preview = crate::preferences::load().is_ok_and(|p| p.viewer.upscale);
         let shown = &self.shown;
         let kernels: Vec<u32> = match preview {
             true => shown

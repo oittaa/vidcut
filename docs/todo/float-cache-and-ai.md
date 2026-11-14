@@ -9,7 +9,7 @@
   - Thus a cached frame of a float picture loses its values above 1 and below 0.
   - Exports do not read the cache. Thus the viewer can show other values than the export.
   - The difference shows where a later step uses these values, for example the output LUT.
-- Super Scale and Retime Process:
+- Upscale and Retime Process:
   - The AI upscalers take 16-bit integer RGB pictures (`RGB48`). The scaler of macOS takes P416.
   - The AI frames of Retime Process and Smooth Cut also take 16-bit integer RGB pictures.
   - Thus these steps cut a float picture to 0..1, in the viewer and in the export.

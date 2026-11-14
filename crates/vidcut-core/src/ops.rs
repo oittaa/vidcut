@@ -2404,13 +2404,13 @@ pub fn set_media_alpha_mode(p: &mut Project, ids: &[String], mode: AlphaMode) ->
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SuperScaleSet {
+pub struct UpscaleSet {
     pub on: Option<bool>,
     pub sharpness: Option<Sharpness>,
     pub upscaler: Option<MediaUpscaler>,
 }
 
-impl SuperScaleSet {
+impl UpscaleSet {
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
@@ -2447,13 +2447,13 @@ pub fn smooth_retimes(p: &Project) -> Vec<crate::model::Retime> {
     out
 }
 
-pub fn ai_upscalers(p: &Project, ids: &[String], set: &SuperScaleSet) -> Vec<Upscaler> {
+pub fn ai_upscalers(p: &Project, ids: &[String], set: &UpscaleSet) -> Vec<Upscaler> {
     let mut out = Vec::new();
     for m in ids.iter().filter_map(|id| p.media(id)) {
-        let mut s = m.super_scale;
+        let mut s = m.upscale;
         s.on = set.on.unwrap_or(s.on);
         s.upscaler = set.upscaler.unwrap_or(s.upscaler);
-        let s = crate::render::super_scale_of(s, &p.settings);
+        let s = crate::render::upscale_of(s, &p.settings);
         if s.ai() && !out.contains(&s.upscaler) {
             out.push(s.upscaler);
         }
@@ -2461,7 +2461,7 @@ pub fn ai_upscalers(p: &Project, ids: &[String], set: &SuperScaleSet) -> Vec<Ups
     out
 }
 
-pub fn set_media_super_scale(p: &mut Project, ids: &[String], set: SuperScaleSet) -> Result<()> {
+pub fn set_media_upscale(p: &mut Project, ids: &[String], set: UpscaleSet) -> Result<()> {
     for id in ids {
         let m = p
             .media
@@ -2471,7 +2471,7 @@ pub fn set_media_super_scale(p: &mut Project, ids: &[String], set: SuperScaleSet
         if m.info.video.is_none() {
             return Err(Error::invalid(format!("{id} has no pictures")));
         }
-        let s = &mut m.super_scale;
+        let s = &mut m.upscale;
         s.on = set.on.unwrap_or(s.on);
         s.sharpness = set.sharpness.unwrap_or(s.sharpness);
         s.upscaler = set.upscaler.unwrap_or(s.upscaler);

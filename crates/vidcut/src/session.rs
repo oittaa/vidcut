@@ -604,7 +604,7 @@ pub fn export_media(
         vidcut_av::isolate::get_ready(&crate::paths::models_dir(), params.download)
             .map_err(|e| export::av_error(&e, ErrorCode::Export, String::new()))?;
     }
-    vidcut_av::super_scale::check(
+    vidcut_av::upscale::check(
         p,
         prepared.outputs.iter().map(|o| &o.plan),
         &crate::paths::models_dir(),
@@ -811,7 +811,7 @@ pub fn doctor() -> Value {
         };
         doctor["macos_frame_processors"] = json!({
             "frame_rate_conversion": formats(vidcut_av::interpolate::macos_formats()),
-            "super_resolution": formats(vidcut_av::super_scale::macos::formats()),
+            "super_resolution": formats(vidcut_av::upscale::macos::formats()),
         });
     }
     doctor

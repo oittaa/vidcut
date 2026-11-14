@@ -35,7 +35,7 @@ impl Fill {
 
     fn of(piece: &VideoPiece) -> Self {
         match piece {
-            VideoPiece::Source { super_scale, .. } if super_scale.ai() => Self {
+            VideoPiece::Source { upscale, .. } if upscale.ai() => Self {
                 behind: false,
                 lead: false,
                 ..Self::ALL
@@ -226,12 +226,12 @@ impl Plan {
         self.plan.video.get(i).map(scales_of).unwrap_or_default()
     }
 
-    pub(crate) fn super_scales_at(&self, t: i64) -> Vec<vidcut_core::model::SuperScale> {
+    pub(crate) fn upscales_at(&self, t: i64) -> Vec<vidcut_core::model::Upscale> {
         let (i, _) = self.locate(t);
         self.plan
             .video
             .get(i)
-            .map(VideoPiece::super_scales)
+            .map(VideoPiece::upscales)
             .unwrap_or_default()
     }
 
@@ -322,7 +322,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             image,
             color_space,
             alpha_mode,
-            super_scale,
+            upscale,
             retime,
             placed,
             made: shape,
@@ -348,17 +348,17 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             let made = if !retime.is_nearest() {
                 let placed = pictures();
                 format!(
-                    "|{super_scale:?}|{}x{}|{:?}|{placed:?}|{retime:?}",
+                    "|{upscale:?}|{}x{}|{:?}|{placed:?}|{retime:?}",
                     plan.width, plan.height, plan.colors
                 )
             } else if shape.is_some() {
                 format!("|{:?}", pictures())
-            } else if super_scale.ai() {
+            } else if upscale.ai() {
                 let detail =
                     (!placed.is_empty()).then(|| vidcut_core::place::detail(placed).to_bits());
                 format!(
                     "|{:?}|{}x{}|{:?}|{detail:?}",
-                    super_scale.upscaler, plan.width, plan.height, plan.colors
+                    upscale.upscaler, plan.width, plan.height, plan.colors
                 )
             } else {
                 String::new()
@@ -458,9 +458,7 @@ pub(crate) fn scales_of(piece: &VideoPiece) -> Vec<Option<vidcut_core::model::Sh
         .layers()
         .into_iter()
         .map(|(l, _)| match l {
-            VideoPiece::Source { super_scale, .. } => {
-                (!super_scale.is_off()).then_some(super_scale.sharpness)
-            }
+            VideoPiece::Source { upscale, .. } => (!upscale.is_off()).then_some(upscale.sharpness),
             _ => None,
         })
         .collect()
@@ -468,7 +466,7 @@ pub(crate) fn scales_of(piece: &VideoPiece) -> Vec<Option<vidcut_core::model::Sh
 
 #[cfg(test)]
 mod tests {
-    use vidcut_core::model::{Picture, Retime, SuperScale, Upscaler};
+    use vidcut_core::model::{Picture, Retime, Upscale, Upscaler};
     use vidcut_core::render::{Placed, RenderPlan, VideoPiece};
     use vidcut_core::time::Rational;
 
@@ -492,7 +490,7 @@ mod tests {
         }
     }
 
-    fn piece(super_scale: SuperScale, retime: Retime, zoom: f64, start: i64) -> VideoPiece {
+    fn piece(upscale: Upscale, retime: Retime, zoom: f64, start: i64) -> VideoPiece {
         VideoPiece::Source {
             media: "m".into(),
             path: "clip.mp4".into(),
@@ -503,7 +501,7 @@ mod tests {
             pace: Default::default(),
             color_space: Default::default(),
             alpha_mode: Default::default(),
-            super_scale,
+            upscale,
             retime,
             placed: vec![Placed {
                 clip: "c".into(),
@@ -531,7 +529,7 @@ mod tests {
 
     #[test]
     fn a_made_frame_misses_after_a_zoom() {
-        let off = SuperScale::default();
+        let off = Upscale::default();
         let before = source_key(&piece(off, Retime::FrameBlend, 2.0, 0), &plan());
         let after = source_key(&piece(off, Retime::FrameBlend, 1.5, 0), &plan());
         assert_ne!(before, after);
@@ -539,10 +537,10 @@ mod tests {
 
     #[test]
     fn an_upscaled_frame_stays_kept_after_a_move() {
-        let ai = SuperScale {
+        let ai = Upscale {
             on: true,
             upscaler: Upscaler::AiFast,
-            ..SuperScale::default()
+            ..Upscale::default()
         };
         let before = source_key(&piece(ai, Retime::Nearest, 2.0, 0), &plan());
         let after = source_key(&piece(ai, Retime::Nearest, 2.0, 48), &plan());
