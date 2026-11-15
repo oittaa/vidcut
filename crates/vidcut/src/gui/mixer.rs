@@ -202,7 +202,7 @@ fn track_channels(p: &Project, t: &Track, at: i64, waveforms: &Waves) -> Vec<f32
             continue;
         };
         let origin = p.media(&c.media).map_or(0.0, |m| m.origin());
-        let s = c.source_at(at) as f64 / fps + origin;
+        let s = (c.source_at(at) as f64 + c.phase) / fps + origin;
         let gained = map_channels(&source_peaks(w, s, s + 1.0 / fps), n);
         let gain = c.gain_at(at as f64).unwrap_or(audio.gain_db);
         let g = linear(gain + t.volume_db) * share as f32;
@@ -335,8 +335,11 @@ impl Workspace {
         let Some(w) = self.snap.waveforms.get(media) else {
             return vec![0.0; n];
         };
-        let fps = p.settings.fps.as_f64();
-        let origin = p.media(media).map_or(0.0, |m| m.origin());
+        let m = p.media(media);
+        let fps = m
+            .map_or(p.settings.fps, |m| m.rate(p.settings.fps))
+            .as_f64();
+        let origin = m.map_or(0.0, |m| m.origin());
         let s = frame as f64 / fps + origin;
         map_channels(&source_peaks(w, s, s + 1.0 / fps), n)
     }

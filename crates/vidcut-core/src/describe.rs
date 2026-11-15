@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::model::{GeneratorKind, Project};
+use crate::model::{GeneratorKind, Media, Project};
 use crate::time::{DurationSpec, Keyword, RangeSpec, TimeSpec};
 
 mod set;
@@ -39,10 +39,14 @@ pub fn describe_at(
         "media.subclip" => format!("Create subclip {} of {}", d.text("name"), d.media("media")),
         "media.subclip_set" => format!("Change the limits of subclip {}", d.media("media")),
         "media.set" => d.media_set(),
-        "media.marks.set" => d.marks_set(
-            format!("Source marks of {}", d.media("media")),
-            set::source_marks(project, &d.list("media")),
-        ),
+        "media.marks.set" => {
+            let media = set::source_media(project, &d.list("media"));
+            d.marks_set(
+                format!("Source marks of {}", d.media("media")),
+                media.map(|m| &m.marks),
+                media,
+            )
+        }
         "speakers.set" => d.speaker_set(),
         "media.marks.clear" => format!("Clear the source marks of {}", d.media("media")),
         "tape.marks.set" => format!("Source Tape marks: {}", d.in_out()),
@@ -271,16 +275,20 @@ pub fn describe_at(
             d.clips("clips"),
             d.time("at")
         ),
-        "marks.set" => d.marks_set("Timeline marks".into(), project.map(|p| &p.marks)),
+        "marks.set" => d.marks_set("Timeline marks".into(), project.map(|p| &p.marks), None),
         "marks.clear" => "Clear the timeline marks".into(),
         "markers.add" if d.params["media"].is_string() => format!(
             "Marker on {} at {}{}",
             d.media("media"),
-            d.time("at"),
+            d.on_media(project.and_then(|p| p.media(&d.text("media"))), "at"),
             d.named()
         ),
         "markers.add" => format!("Marker at {}{}", d.time("at"), d.named()),
-        "markers.move" => format!("Move marker {} to {}", d.text("marker"), d.time("to")),
+        "markers.move" => format!(
+            "Move marker {} to {}",
+            d.text("marker"),
+            d.on_media(d.marker_media(&d.text("marker")), "to")
+        ),
         "markers.set" => d.marker_set(),
         "markers.remove" => format!("Remove marker {}", d.text("marker")),
         "subtitles.add" => format!("Subtitle {} at {}", quoted(&d.text("text")), d.time("at")),
@@ -728,8 +736,8 @@ impl Words<'_> {
             .ok()?;
         Some(format!(
             "{}\u{2013}{}",
-            p.settings.length_timecode(a),
-            p.settings.length_timecode(b)
+            p.clip_timecode(media, a),
+            p.clip_timecode(media, b)
         ))
     }
 
@@ -826,6 +834,31 @@ impl Words<'_> {
 
     fn track_or_v1(&self) -> String {
         format!(" on {}", self.params["track"].as_str().unwrap_or("V1"))
+    }
+
+    fn on_media(&self, media: Option<&Media>, key: &str) -> String {
+        let (Some(m), Some(p)) = (media, self.project) else {
+            return self.time(key);
+        };
+        match &self.params[key] {
+            Value::Number(n) => n
+                .as_i64()
+                .map_or_else(|| n.to_string(), |f| p.clip_timecode(m, f)),
+            Value::String(s) => match TimeSpec::parse(s) {
+                Ok(t) => crate::editor::media_context(p, m, None)
+                    .resolve(&t)
+                    .map_or_else(|_| self.unresolved(s), |f| p.clip_timecode(m, f)),
+                Err(_) => self.unresolved(s),
+            },
+            _ => self.time(key),
+        }
+    }
+
+    fn marker_media(&self, id: &str) -> Option<&Media> {
+        self.project?
+            .media
+            .iter()
+            .find(|m| m.markers.iter().any(|k| k.id == id))
     }
 
     fn unresolved(&self, s: &str) -> String {
@@ -952,7 +985,7 @@ impl Words<'_> {
         };
         let duration = match &self.params["duration"] {
             Value::Null => None,
-            _ => Some(format!("Duration {}", self.marked_duration())),
+            _ => Some(format!("Duration {}", self.marked_duration(None))),
         };
         let parts: Vec<String> = [part("in", "In"), part("out", "Out"), duration]
             .into_iter()
@@ -965,7 +998,7 @@ impl Words<'_> {
         }
     }
 
-    fn marked_duration(&self) -> String {
+    fn marked_duration(&self, media: Option<&Media>) -> String {
         let spec = match &self.params["duration"] {
             Value::Number(n) => n.as_i64().map(|n| DurationSpec(TimeSpec::Frames(n))),
             Value::String(s) => DurationSpec::parse(s).ok(),
@@ -974,10 +1007,17 @@ impl Words<'_> {
         let (Some(DurationSpec(spec)), Some(p)) = (spec, self.project) else {
             return self.text("duration");
         };
-        match p.time_context(None).duration(&spec) {
+        let context = match media {
+            Some(m) => crate::editor::media_context(p, m, None),
+            None => p.time_context(None),
+        };
+        match context.duration(&spec) {
             Ok(n) if spec.is_relative() && n > 0 => format!("+{}", frames(n)),
             Ok(n) if spec.is_relative() => frames(n),
-            Ok(n) => p.settings.length_timecode(n),
+            Ok(n) => match media {
+                Some(m) => p.clip_timecode(m, n),
+                None => p.settings.length_timecode(n),
+            },
             Err(_) => self.text("duration"),
         }
     }

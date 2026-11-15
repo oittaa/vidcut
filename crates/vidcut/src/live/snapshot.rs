@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use vidcut_core::model::{Clip, Generator, GeneratorKind, Marks};
 use vidcut_core::multicam::camera_order;
-use vidcut_core::render::TapeEntry;
+use vidcut_core::render::{FileClock, TapeEntry};
 use vidcut_core::request::{GeneratorSettings, TimecodeDisplay, ViewerFrame, ViewerMode};
 use vidcut_core::steps::{Span, Steps};
 use vidcut_core::time::{Rational, format_timecode, parse_counter, parse_frame_number};
@@ -327,10 +327,40 @@ impl Snapshot {
                 .as_deref()
                 .map(|m| (m, self.source.position)),
             ViewerMode::SourceTape | ViewerMode::MultiSource => {
-                source_entry(self.viewer, &self.tape, self.source.position)
-                    .map(|e| (e.media.as_str(), self.source.position - e.start))
+                let e = source_entry(self.viewer, &self.tape, self.source.position)?;
+                let k = self.source.position - e.start;
+                let frame = match self.project().and_then(|p| Some((p, p.media(&e.media)?))) {
+                    Some((p, m)) => p.clip_frame_at(m, k as f64),
+                    None => k,
+                };
+                Some((e.media.as_str(), frame))
             }
             ViewerMode::Timeline => None,
+        }
+    }
+
+    pub fn source_position(&self, frame: i64) -> i64 {
+        match self.viewer {
+            ViewerMode::SourceTape | ViewerMode::MultiSource => {
+                let Some(e) = source_entry(self.viewer, &self.tape, self.source.position) else {
+                    return frame;
+                };
+                let k = match self.project().and_then(|p| Some((p, p.media(&e.media)?))) {
+                    Some((p, m)) => p.tape_frame(m, frame),
+                    None => frame,
+                };
+                e.start + k
+            }
+            ViewerMode::SourceClip | ViewerMode::Timeline => frame,
+        }
+    }
+
+    pub fn viewer_fps(&self) -> Rational {
+        let p = self.project();
+        let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);
+        match (self.viewer, p, self.source_media.as_deref()) {
+            (ViewerMode::SourceClip, Some(p), Some(m)) => p.media(m).map_or(fps, |m| m.rate(fps)),
+            _ => fps,
         }
     }
 
@@ -399,9 +429,18 @@ pub fn source_frame_at(
     match viewer {
         ViewerMode::SourceClip => Some(playhead),
         ViewerMode::SourceTape | ViewerMode::MultiSource => {
-            source_entry(viewer, tape, playhead).map(|e| playhead - e.start)
+            let e = source_entry(viewer, tape, playhead)?;
+            let k = playhead - e.start;
+            Some(match project.and_then(|p| Some((p, p.media(&e.media)?))) {
+                Some((p, m)) => p.clip_frame_at(m, k as f64),
+                None => k,
+            })
         }
-        ViewerMode::Timeline => project?.shown_clip(playhead).map(|c| c.source_at(playhead)),
+        ViewerMode::Timeline => {
+            let p = project?;
+            let c = p.shown_clip(playhead)?;
+            Some(FileClock::of(p, c).frame(c.content_at(playhead)))
+        }
     }
 }
 
@@ -412,12 +451,16 @@ pub struct TimecodeView<'a> {
     pub fps: Rational,
     pub drop: bool,
     pub start_tc: i64,
+    pub source_fps: Rational,
+    pub source_drop: bool,
     pub source_tc: i64,
     pub timer_zero: i64,
     pub source_frame: Option<i64>,
     pub tape_start: i64,
     pub tape_frames: Option<i64>,
+    pub tape_per: Rational,
     pub clip: Option<&'a Clip>,
+    pub clock: Option<FileClock>,
 }
 
 pub fn timecode_view<'a>(
@@ -447,10 +490,14 @@ pub fn timecode_view<'a>(
         ViewerMode::SourceTape | ViewerMode::MultiSource => entry.map(|e| e.media.as_str()),
         ViewerMode::Timeline => clip.map(|c| c.media.as_str()),
     };
-    let source_tc = project
-        .zip(media)
-        .and_then(|(p, m)| p.media(m))
-        .map_or(0, |m| m.timecode_at(fps).round() as i64);
+    let shown = project.zip(media).and_then(|(p, m)| Some((p, p.media(m)?)));
+    let (source_fps, source_drop) = shown.map_or((fps, drop), |(p, m)| p.clip_rate(m));
+    let source_tc = shown.map_or(0, |(_, m)| m.timecode_at(source_fps).round() as i64);
+    let tape_per = shown.map_or(Rational::ONE, |(p, _)| p.settings.fps.over(source_fps));
+    let (fps, drop) = match viewer {
+        ViewerMode::SourceClip => (source_fps, source_drop),
+        ViewerMode::SourceTape | ViewerMode::MultiSource | ViewerMode::Timeline => (fps, drop),
+    };
     TimecodeView {
         display,
         viewer,
@@ -458,12 +505,16 @@ pub fn timecode_view<'a>(
         fps,
         drop,
         start_tc,
+        source_fps,
+        source_drop,
         source_tc,
         timer_zero,
         source_frame: source_frame_at(project, viewer, playhead, tape),
         tape_start: entry.map_or(0, |e| e.start),
         tape_frames: entry.map(|e| e.frames),
+        tape_per,
         clip,
+        clock: project.zip(clip).map(|(p, c)| FileClock::of(p, c)),
     }
 }
 
@@ -475,12 +526,14 @@ pub fn format_timecode_field(view: &TimecodeView<'_>) -> Option<String> {
     let n = view.source_frame.unwrap_or(0);
     Some(match view.display {
         TimecodeDisplay::Auto if view.viewer.is_source() => {
-            format_timecode(n, view.fps, view.source_tc, view.drop)
+            format_timecode(n, view.source_fps, view.source_tc, view.source_drop)
         }
         TimecodeDisplay::Auto | TimecodeDisplay::RecordTimecode => {
             format_timecode(view.playhead, view.fps, view.start_tc, view.drop)
         }
-        TimecodeDisplay::SourceTimecode => format_timecode(n, view.fps, view.source_tc, view.drop),
+        TimecodeDisplay::SourceTimecode => {
+            format_timecode(n, view.source_fps, view.source_tc, view.source_drop)
+        }
         TimecodeDisplay::SourceFrame => n.to_string(),
         TimecodeDisplay::RecordFrame => view.playhead.to_string(),
         TimecodeDisplay::Timer2 => format_timecode(view.playhead, view.fps, 0, view.drop),
@@ -525,16 +578,18 @@ fn read_count(text: &str, view: &TimecodeView<'_>) -> Result<i64, Error> {
     ) {
         return parse_frame_number(text).ok_or_else(unread);
     }
-    let start = match view.display {
-        TimecodeDisplay::RecordTimecode => view.start_tc,
-        TimecodeDisplay::Auto if !view.viewer.is_source() => view.start_tc,
-        TimecodeDisplay::Auto | TimecodeDisplay::SourceTimecode => view.source_tc,
+    let (start, fps, drop) = match view.display {
+        TimecodeDisplay::RecordTimecode => (view.start_tc, view.fps, view.drop),
+        TimecodeDisplay::Auto if !view.viewer.is_source() => (view.start_tc, view.fps, view.drop),
+        TimecodeDisplay::Auto | TimecodeDisplay::SourceTimecode => {
+            (view.source_tc, view.source_fps, view.source_drop)
+        }
         TimecodeDisplay::SourceFrame
         | TimecodeDisplay::RecordFrame
         | TimecodeDisplay::Timer1
-        | TimecodeDisplay::Timer2 => 0,
+        | TimecodeDisplay::Timer2 => (0, view.fps, view.drop),
     };
-    parse_counter(text, view.fps, view.drop, start).ok_or_else(unread)
+    parse_counter(text, fps, drop, start).ok_or_else(unread)
 }
 
 fn source_playhead(n: i64, view: &TimecodeView<'_>) -> Result<i64, Error> {
@@ -544,17 +599,27 @@ fn source_playhead(n: i64, view: &TimecodeView<'_>) -> Result<i64, Error> {
             let frames = view
                 .tape_frames
                 .ok_or_else(|| Error::usage("no source frame here"))?;
-            if !(0..frames).contains(&n) {
+            let per = view.tape_per;
+            let at = n * per.num();
+            let k = at.div_euclid(per.den()) + i64::from(at.rem_euclid(per.den()) != 0);
+            if !(0..frames).contains(&k) {
                 return Err(Error::usage("that frame is outside the clip"));
             }
-            Ok(view.tape_start + n)
+            Ok(view.tape_start + k)
         }
         ViewerMode::Timeline => {
             let clip = view
                 .clip
                 .ok_or_else(|| Error::usage("no source frame here"))?;
+            let clock = view.clock.clone().unwrap_or_else(|| FileClock::plain(clip));
+            let shown = |t: i64| clock.frame(clip.content_at(t));
+            let frames = (clip.start..clip.end()).map(shown);
+            let (lo, hi) = (frames.clone().min(), frames.max());
+            if lo.is_none_or(|lo| n < lo) || hi.is_none_or(|hi| n > hi) {
+                return Err(Error::usage("that frame is outside the clip"));
+            }
             (clip.start..clip.end())
-                .find(|&t| clip.source_at(t) == n)
+                .min_by_key(|&t| ((shown(t) - n).abs(), t))
                 .ok_or_else(|| Error::usage("that frame is outside the clip"))
         }
     }
@@ -577,11 +642,15 @@ mod tests {
             drop: false,
             start_tc: 0,
             source_tc: 0,
+            source_fps: rate(24, 1),
+            source_drop: false,
             timer_zero: 0,
             source_frame: None,
             tape_start: 0,
             tape_frames: None,
+            tape_per: Rational::ONE,
             clip: None,
+            clock: None,
         }
     }
 
@@ -592,6 +661,7 @@ mod tests {
             start,
             duration: 20,
             source_in,
+            phase: 0.0,
             video: true,
             audio: None,
             enabled: true,

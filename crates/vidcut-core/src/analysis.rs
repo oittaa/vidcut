@@ -344,7 +344,7 @@ impl Span {
                 start: a,
                 end: b,
                 source_in: c.source_at(a),
-                origin,
+                origin: origin + c.phase / fps.as_f64(),
                 fps,
                 pace: c.pace().after(a - c.start),
             })

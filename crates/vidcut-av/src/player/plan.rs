@@ -496,6 +496,8 @@ mod tests {
             path: "clip.mp4".into(),
             origin: 0.0,
             source_frame: 0,
+            phase: 0.0,
+            per_frame: Rational::ONE,
             frames: 10,
             image: None,
             pace: Default::default(),

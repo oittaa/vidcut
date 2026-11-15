@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use vidcut_av::export::encode::Availability;
 use vidcut_av::export::{self as engine, Progress, Report};
 use vidcut_av::light::{Lights, Span};
-use vidcut_core::editor::source_context;
+use vidcut_core::editor::{media_context, source_context};
 use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
 use vidcut_core::export::metadata::{Measured, PieceMeta};
 use vidcut_core::export::{
@@ -1534,15 +1534,11 @@ pub fn frame(
                 .video
                 .as_ref()
                 .ok_or_else(|| Error::invalid(format!("{id} has no video")))?;
-            let frames = p.media_frames(m);
+            let frames = p.clip_frames(m);
             let ctx = TimeContext {
-                fps,
-                start_tc: 0,
-                drop_frame: p.settings.counts_drop_frame(),
-                end: frames,
                 mark_in: None,
                 mark_out: None,
-                playhead: None,
+                ..media_context(p, m, None)
             };
             let t = ctx.resolve(at)?;
             if t < 0 || t >= frames {
@@ -1551,7 +1547,7 @@ pub fn frame(
                 )));
             }
             (
-                render::media_frame(p, m, t),
+                render::media_clip_frame(p, m, t),
                 v.display_size(),
                 t,
                 None,

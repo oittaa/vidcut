@@ -19,8 +19,30 @@ use crate::error::{Error, Result};
 use crate::ffmpeg::{self, format, frame};
 use crate::player::{AlphaUse, Cached, Fit, Made, Origin, Sampling, Upscaled};
 
-pub(crate) fn target(fps: Rational, origin: f64, pos: i64) -> f64 {
-    origin + fps.frames_to_secs(pos) - 0.5 * fps.frames_to_secs(1)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Clock {
+    pub(crate) origin: f64,
+    frame: f64,
+}
+
+impl Clock {
+    pub(crate) fn of(fps: Rational, origin: f64, per_frame: Rational) -> Self {
+        let frame = fps.frames_to_secs(1) * per_frame.den() as f64 / per_frame.num() as f64;
+        Self { origin, frame }
+    }
+
+    pub(crate) fn of_piece(piece: &VideoPiece, fps: Rational) -> Option<Self> {
+        match piece {
+            VideoPiece::Source {
+                origin, per_frame, ..
+            } => Some(Self::of(fps, *origin, *per_frame)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn target(self, pos: i64) -> f64 {
+        self.origin + (pos as f64 - 0.5) * self.frame
+    }
 }
 
 pub(crate) fn input_of(path: &Path, image: Option<&Image>) -> Input {
@@ -217,7 +239,7 @@ impl Look {
 struct Source {
     reader: VideoReader,
     tick: f64,
-    origin: f64,
+    clock: Clock,
     source_frame: i64,
     target: f64,
     current: Option<(frame::Video, f64)>,
@@ -324,7 +346,7 @@ impl Source {
     #[allow(clippy::too_many_arguments)]
     fn open(
         input: &Input,
-        origin: f64,
+        clock: Clock,
         source_frame: i64,
         target: f64,
         pictures: Pictures,
@@ -345,7 +367,7 @@ impl Source {
         let mut source = Source {
             reader,
             tick: f64::from(tb.numerator()) / f64::from(tb.denominator()),
-            origin,
+            clock,
             source_frame,
             target,
             current: None,
@@ -402,7 +424,7 @@ impl Source {
 
     fn bare(
         input: &Input,
-        origin: f64,
+        clock: Clock,
         pictures: Pictures,
         decoder: Option<&crate::hw::GpuDecoder>,
         reading: Reading,
@@ -418,7 +440,7 @@ impl Source {
         Ok(Source {
             reader,
             tick: f64::from(tb.numerator()) / f64::from(tb.denominator()),
-            origin,
+            clock,
             source_frame: 0,
             target: 0.0,
             current: None,
@@ -563,8 +585,8 @@ impl Source {
         Ok(changed)
     }
 
-    fn reposition(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
-        self.origin = origin;
+    fn reposition(&mut self, clock: Clock, source_frame: i64, target: f64) -> Result<()> {
+        self.clock = clock;
         self.source_frame = source_frame;
         if !self.reads_on(target) {
             self.seek(target)?;
@@ -822,9 +844,9 @@ impl Source {
         self.told = true;
     }
 
-    fn resume(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
+    fn resume(&mut self, clock: Clock, source_frame: i64, target: f64) -> Result<()> {
         self.back();
-        self.reposition(origin, source_frame, target)?;
+        self.reposition(clock, source_frame, target)?;
         if self.advance(target)? {
             self.normalized = None;
         }
@@ -2860,8 +2882,6 @@ impl VideoFrames {
     pub fn keyframe_time(&mut self, piece: &VideoPiece) -> Result<Option<f64>> {
         let VideoPiece::Source {
             path,
-            origin,
-            source_frame,
             image: None,
             color_space,
             ..
@@ -2869,14 +2889,17 @@ impl VideoFrames {
         else {
             return Ok(None);
         };
+        let Some(clock) = Clock::of_piece(piece, self.fps) else {
+            return Ok(None);
+        };
         let input = input_of(path, None);
-        let target = self.target(*origin, *source_frame);
+        let target = clock.target(piece.position(0));
         let s = match self.open.iter().position(|s| s.reader.input() == &input) {
             Some(s) => s,
             None => {
                 let bare = Source::bare(
                     &input,
-                    *origin,
+                    clock,
                     Pictures::Video,
                     self.decoder.as_ref(),
                     self.maker.reading(),
@@ -2929,10 +2952,6 @@ impl VideoFrames {
         Ok(self.black.as_ref().expect("just set"))
     }
 
-    fn target(&self, origin: f64, pos: i64) -> f64 {
-        target(self.fps, origin, pos)
-    }
-
     fn measures(&self, input: &Input) -> bool {
         self.dynamic.hdr10plus && !self.light.contains_key(input.path())
     }
@@ -2953,8 +2972,6 @@ impl VideoFrames {
         for (i, (layer, _)) in piece.layers().into_iter().enumerate() {
             let VideoPiece::Source {
                 path,
-                origin,
-                source_frame,
                 image,
                 pace,
                 color_space,
@@ -2968,15 +2985,19 @@ impl VideoFrames {
                 reading.push(None);
                 continue;
             };
+            let Some(clock) = Clock::of_piece(layer, self.fps) else {
+                reading.push(None);
+                continue;
+            };
             let lut = input_lut
                 .as_deref()
                 .map(|path| self.input_lut(path))
                 .transpose()?;
             let pictures = Pictures::of(image.as_ref());
             let still = pictures == Pictures::Still;
-            let from = if still { 0 } else { *source_frame };
+            let from = if still { 0 } else { layer.position(0) };
             let input = input_of(path, image.as_ref());
-            let target = self.target(*origin, from);
+            let target = clock.target(from);
             let free: Vec<usize> = (0..self.open.len())
                 .filter(|&s| {
                     !taken[s]
@@ -2991,7 +3012,7 @@ impl VideoFrames {
                 .find(|&s| self.open[s].reads_on(target));
             let s = match reads_on.or(free.first().copied()) {
                 Some(s) => {
-                    if let Err(e) = self.open[s].reposition(*origin, from, target) {
+                    if let Err(e) = self.open[s].reposition(clock, from, target) {
                         self.open[s].current = None;
                         self.open[s].normalized = None;
                         return Err(e);
@@ -3007,14 +3028,14 @@ impl VideoFrames {
                     let opened = match reclaimed {
                         Some(mut source) => {
                             source.back();
-                            source.reposition(*origin, from, target)?;
+                            source.reposition(clock, from, target)?;
                             source
                         }
                         None => match self.ahead.take(slot(self.piece, i)) {
                             Some(opened) => opened?,
                             None => Source::open(
                                 &input,
-                                *origin,
+                                clock,
                                 from,
                                 target,
                                 pictures,
@@ -3105,14 +3126,15 @@ impl VideoFrames {
         for (i, (layer, _)) in piece.layers().into_iter().enumerate() {
             let VideoPiece::Source {
                 path,
-                origin,
-                source_frame,
                 image,
                 color_space,
                 upscale,
                 ..
             } = layer
             else {
+                continue;
+            };
+            let Some(clock) = Clock::of_piece(layer, self.fps) else {
                 continue;
             };
             let (color_space, upscale) = (*color_space, *upscale);
@@ -3133,18 +3155,17 @@ impl VideoFrames {
             let from = if pictures == Pictures::Still {
                 0
             } else {
-                *source_frame
+                layer.position(0)
             };
-            let origin = *origin;
-            let target = self.target(origin, from);
+            let target = clock.target(from);
             let decoder = self.decoder.clone();
             let measure = self.measures(&input);
             let reading = self.maker.reading();
-            let key = (input.clone(), origin.to_bits(), from);
+            let key = (input.clone(), clock.origin.to_bits(), from);
             if let Some(s) = left {
                 let mut source = self.take_out(s);
                 self.ahead.start(slot(j, i), key, move || {
-                    source.resume(origin, from, target)?;
+                    source.resume(clock, from, target)?;
                     Ok(source)
                 });
                 return;
@@ -3152,7 +3173,7 @@ impl VideoFrames {
             self.ahead.start(slot(j, i), key, move || {
                 Source::open(
                     &input,
-                    origin,
+                    clock,
                     from,
                     target,
                     pictures,
@@ -3176,7 +3197,7 @@ impl VideoFrames {
     }
 
     fn pass_at(&mut self, s: usize, pos: i64) -> Result<()> {
-        let at = target(self.fps, self.open[s].origin, pos);
+        let at = self.open[s].clock.target(pos);
         self.pass_to(s, at)
     }
 
@@ -3189,9 +3210,7 @@ impl VideoFrames {
     }
 
     fn exact_at(&self, s: usize, layer: &VideoPiece, k: i64) -> f64 {
-        let src = &self.open[s];
-        let exact = src.source_frame as f64 + (layer.exact(k) - layer.position(0) as f64);
-        src.origin + exact * self.fps.frames_to_secs(1)
+        self.open[s].clock.origin + layer.exact(k) * self.fps.frames_to_secs(1)
     }
 
     fn source_frame(
@@ -3214,9 +3233,8 @@ impl VideoFrames {
         placed: &[Placed],
     ) -> Result<frame::Video> {
         let pos = self.open[s].source_frame + Self::step(layer, k);
-        let fps = self.fps;
         let src = &mut self.open[s];
-        src.advance(target(fps, src.origin, pos))?;
+        src.advance(src.clock.target(pos))?;
         self.colors_frame(i, s, layer, placed)
     }
 
@@ -3259,9 +3277,8 @@ impl VideoFrames {
                 for j in here {
                     let frame = match j {
                         Some(j) => {
-                            let fps = self.fps;
                             let src = &mut self.open[s];
-                            src.advance(target(fps, src.origin, p))?;
+                            src.advance(src.clock.target(p))?;
                             let placed = crate::player::placed_of(piece, j, &[]);
                             let placed = placed.get(i).map(Vec::as_slice).unwrap_or_default();
                             self.colors_frame(i, s, layer, placed)?
@@ -3323,9 +3340,8 @@ impl VideoFrames {
         pos: i64,
         layer: &VideoPiece,
     ) -> Result<frame::Video> {
-        let fps = self.fps;
         let src = &mut self.open[s];
-        let changed = src.advance(target(fps, src.origin, pos))?;
+        let changed = src.advance(src.clock.target(pos))?;
         self.shown(i, s, layer, changed)
     }
 

@@ -4345,7 +4345,7 @@ impl Live {
         }
         let made = match &want {
             SourceContent::Tape => render::tape(&p, &all),
-            SourceContent::Clip(m) => render::tape(&p, std::slice::from_ref(m)),
+            SourceContent::Clip(m) => render::clip_tape(&p, m),
             SourceContent::Multi(_) => self
                 .source_media
                 .as_deref()
@@ -4443,13 +4443,18 @@ impl Live {
         let Some(media) = self.source_media.clone() else {
             return Ok(());
         };
-        let want = self.source_grid.file_marks(&media, &self.multi_marks);
-        let have = self
-            .project
-            .as_ref()
-            .and_then(|o| o.project().media(&media))
-            .map(|m| m.marks.clone())
-            .unwrap_or_default();
+        let tape = self.source_grid.file_marks(&media, &self.multi_marks);
+        let Some(p) = self.project.as_ref().map(|o| o.project()) else {
+            return Ok(());
+        };
+        let Some(m) = p.media(&media) else {
+            return Ok(());
+        };
+        let want = Marks {
+            mark_in: tape.mark_in.map(|i| p.clip_span(m, (i, i)).0),
+            mark_out: tape.mark_out.map(|o| p.clip_span(m, (o - 1, o)).1),
+        };
+        let have = m.marks.clone();
         if want == have {
             return Ok(());
         }
@@ -4785,8 +4790,8 @@ impl Live {
                     snapshot::source_entry(self.viewer, &self.tape, position)
                         .and_then(|e| Some((e, p.media(&e.media)?)))
                         .map(|(e, m)| vidcut_core::model::Marks {
-                            mark_in: m.marks.mark_in.map(|i| e.start + i),
-                            mark_out: m.marks.mark_out.map(|o| e.start + o),
+                            mark_in: m.marks.mark_in.map(|i| e.start + p.tape_frame(m, i)),
+                            mark_out: m.marks.mark_out.map(|o| e.start + p.tape_frame(m, o)),
                         })
                         .unwrap_or_default()
                 } else {
@@ -4809,8 +4814,8 @@ impl Live {
                     .and_then(|e| Some((e, p.media(&e.media)?)))
                     .map(|(e, m)| {
                         (
-                            m.marks.mark_in.map(|i| e.start + i),
-                            m.marks.mark_out.map(|o| e.start + o),
+                            m.marks.mark_in.map(|i| e.start + p.tape_frame(m, i)),
+                            m.marks.mark_out.map(|o| e.start + p.tape_frame(m, o)),
                         )
                     })
                     .unwrap_or_default();
@@ -4855,9 +4860,11 @@ impl Live {
             (Some(SourceContent::Clip(m)), ViewerMode::SourceClip) if m == media => Some(position),
             (Some(SourceContent::Tape), ViewerMode::SourceTape)
             | (Some(SourceContent::Multi(_)), ViewerMode::MultiSource) => {
+                let p = self.project.as_ref()?.project();
+                let m = p.media(media)?;
                 snapshot::source_entry(self.viewer, &self.tape, position)
                     .filter(|e| e.media == media)
-                    .map(|e| position - e.start)
+                    .map(|e| p.clip_frame_at(m, (position - e.start) as f64))
             }
             _ => None,
         }
@@ -5037,14 +5044,13 @@ impl Live {
         .unwrap_or_else(|| "-".into());
         let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);
         let drop = p.is_some_and(|p| p.settings.counts_drop_frame());
-        let tc = |f: i64, stc: i64| format_timecode(f, fps, stc, drop);
-        let player = |id: PlayerId, stc: i64| {
+        let player = |id: PlayerId, (fps, drop, stc): (Rational, bool, i64)| {
             let snap = self.player.snap(id);
             json!({
                 "loaded": snap.loaded,
                 "frames": snap.frames,
                 "position": snap.position,
-                "position_tc": tc(snap.position, stc),
+                "position_tc": format_timecode(snap.position, fps, stc, drop),
                 "ready": snap.ready,
                 "playing": snap.playing,
                 "speed": snap.speed,
@@ -5052,19 +5058,33 @@ impl Live {
                 "error": snap.error,
             })
         };
-        let mut source = player(SOURCE, 0);
+        let clip = match (&self.source_content, p) {
+            (Some(SourceContent::Clip(m)), Some(p)) => p.media(m),
+            _ => None,
+        };
+        let source_rate = match (clip, p) {
+            (Some(m), Some(p)) => {
+                let (rate, drop) = p.clip_rate(m);
+                (rate, drop, 0)
+            }
+            _ => (fps, drop, 0),
+        };
+        let mut source = player(SOURCE, source_rate);
         let position = self.player.position(SOURCE);
+        let in_clip = |media: &str, k: i64| match p.and_then(|p| Some((p, p.media(media)?))) {
+            Some((p, m)) => p.clip_frame_at(m, k as f64),
+            None => k,
+        };
         let under = match &self.source_content {
             Some(SourceContent::Clip(m)) => Some((m.clone(), position)),
-            Some(SourceContent::Tape) => {
-                tape_at(&self.tape, position).map(|e| (e.media.clone(), position - e.start))
-            }
+            Some(SourceContent::Tape) => tape_at(&self.tape, position)
+                .map(|e| (e.media.clone(), in_clip(&e.media, position - e.start))),
             Some(SourceContent::Multi(bin)) => {
                 source["bin"] = json!(bin);
                 source["cameras"] = json!(self.source_grid.cameras);
                 source["marks"] = json!(self.multi_marks);
                 snapshot::source_entry(ViewerMode::MultiSource, &self.tape, position)
-                    .map(|e| (e.media.clone(), position - e.start))
+                    .map(|e| (e.media.clone(), in_clip(&e.media, position - e.start)))
             }
             Some(SourceContent::Generator) => {
                 if let Some(g) = &self.source_generator {
@@ -5094,7 +5114,7 @@ impl Live {
             "last_source": self.last_source,
             "source_media": self.source_media,
             "source": source,
-            "timeline": player(TIMELINE, p.map_or(0, |p| p.settings.start_tc)),
+            "timeline": player(TIMELINE, (fps, drop, p.map_or(0, |p| p.settings.start_tc))),
             "late": late,
             "skipped": skipped,
             "selection": self.selection,

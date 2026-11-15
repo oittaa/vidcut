@@ -48,6 +48,8 @@ fn main() {
         path: path.clone(),
         origin: v.first_frame_time.unwrap_or(0.0),
         source_frame: start,
+        phase: 0.0,
+        per_frame: Rational::ONE,
         frames,
         image: None,
         color_space: Default::default(),

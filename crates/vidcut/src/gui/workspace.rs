@@ -592,9 +592,9 @@ impl Workspace {
         }
     }
 
-    pub(super) fn media_frames(&self, media: &str) -> i64 {
+    pub(super) fn clip_frames(&self, media: &str) -> i64 {
         self.project()
-            .and_then(|p| p.media(media).map(|m| p.media_frames(m)))
+            .and_then(|p| p.media(media).map(|m| p.clip_frames(m)))
             .unwrap_or(0)
     }
 
@@ -648,7 +648,7 @@ impl Workspace {
         };
         let range = |media: &str| -> Option<Value> {
             let m = p.media(media)?;
-            let frames = p.media_frames(m);
+            let frames = p.clip_frames(m);
             let a = m.marks.mark_in.unwrap_or(0);
             let b = m.marks.mark_out.unwrap_or(frames);
             (b > a).then(|| json!({ "media": media, "range": format!("{a}f..{b}f") }))
@@ -657,7 +657,10 @@ impl Workspace {
             return self
                 .multi_part()
                 .map(|part| {
-                    let (a, b) = part.range;
+                    let (a, b) = match p.media(&part.media) {
+                        Some(m) => p.clip_span(m, part.range),
+                        None => part.range,
+                    };
                     json!({
                         "media": part.media,
                         "range": format!("{a}f..{b}f"),
@@ -1453,7 +1456,7 @@ impl Workspace {
         let viewer = self.snap.viewer;
         let id = PlayerId::of(viewer);
         let player = self.snap.player(id).clone();
-        let fps = self.fps().as_f64().round().max(1.0) as i64;
+        let fps = self.snap.viewer_fps().as_f64().round().max(1.0) as i64;
         self.timeline_keys(&fired);
         if fired.struck(Action::AddKeyframe) {
             self.key_cmd(super::keyframe_editor::KeyCmd::Add);
@@ -1904,7 +1907,7 @@ impl Workspace {
         let value = if is_in { frame } else { frame + 1 };
         match media {
             Some(m) => {
-                let frames = self.media_frames(&m);
+                let frames = self.clip_frames(&m);
                 self.send(
                     "media.marks.set",
                     json!({ "media": m, key: value.clamp(0, frames) }),
@@ -1951,7 +1954,12 @@ impl Workspace {
                 } else {
                     m.marks.mark_out.map(|o| o - 1)
                 };
-                if let Some(f) = mark {
+                let tape = matches!(
+                    self.snap.viewer,
+                    ViewerMode::SourceTape | ViewerMode::MultiSource
+                );
+                if let (Some(f), Some(p)) = (mark, self.project()) {
+                    let f = if tape { p.tape_frame(m, f) } else { f };
                     self.seek(PlayerId::Source, base + f, false);
                 }
             }

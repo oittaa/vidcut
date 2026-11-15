@@ -815,6 +815,7 @@ mod tests {
             start,
             duration,
             source_in: 0,
+            phase: 0.0,
             video: true,
             audio: audio.map(|(head, tail)| ClipAudio {
                 stream: 0,

@@ -2,7 +2,7 @@ use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::shortcuts::Action;
-use vidcut_core::time::{format_timecode, parse_counter};
+use vidcut_core::time::{Rational, format_timecode, parse_counter};
 
 use super::viewer::timecode_input;
 use super::workspace::Workspace;
@@ -35,6 +35,8 @@ impl NewSubclip {
 pub(super) struct EditSubclip {
     media: String,
     title: String,
+    fps: Rational,
+    drop: bool,
     origin: i64,
     current: (i64, i64),
     whole: i64,
@@ -65,7 +67,7 @@ impl Workspace {
             .unwrap_or_default();
         (
             marks.mark_in.unwrap_or(0),
-            marks.mark_out.unwrap_or(self.media_frames(media)),
+            marks.mark_out.unwrap_or(self.clip_frames(media)),
         )
     }
 
@@ -156,19 +158,17 @@ impl Workspace {
         let Some((m, current)) = p.media(media).and_then(|m| Some((m, p.subclip_span(m)?))) else {
             return;
         };
-        let origin = m
-            .info
-            .timecode
-            .map_or(0.0, |tc| tc.frames_at(p.settings.fps))
-            .round() as i64;
-        let label =
-            |f: i64| format_timecode(f, p.settings.fps, origin, p.settings.counts_drop_frame());
+        let (fps, drop) = p.clip_rate(m);
+        let origin = m.info.timecode.map_or(0.0, |tc| tc.frames_at(fps)).round() as i64;
+        let label = |f: i64| format_timecode(f, fps, origin, drop);
         let edit = EditSubclip {
             media: media.to_string(),
             title: format!("Edit {}", m.name),
+            fps,
+            drop,
             origin,
             current,
-            whole: p.file_frames(m),
+            whole: p.whole_clip_frames(m),
             start: label(current.0),
             end: label(current.1),
             full: false,
@@ -176,27 +176,26 @@ impl Workspace {
         self.edit_subclip = Some(edit);
     }
 
-    fn typed_frame(&self, text: &str, shown: &str, origin: i64) -> Option<i64> {
-        let p = self.project()?;
-        let drop = p.settings.counts_drop_frame();
-        let digits = p.settings.fps.frame_digits();
-        let spec = timecode_input(text, shown, self.dropped(), digits)?;
-        parse_counter(&spec, p.settings.fps, drop, origin)
+    fn typed_frame(&self, text: &str, shown: &str, d: &EditSubclip) -> Option<i64> {
+        let dropped = if d.drop {
+            d.fps.dropped_per_minute()
+        } else {
+            0
+        };
+        let spec = timecode_input(text, shown, dropped, d.fps.frame_digits())?;
+        parse_counter(&spec, d.fps, d.drop, d.origin)
     }
 
     fn edit_subclip_window(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.edit_subclip.take() else {
             return;
         };
-        let (fps, drop) = self.project().map_or((self.fps(), false), |p| {
-            (p.settings.fps, p.settings.counts_drop_frame())
-        });
-        let label = |f: i64| format_timecode(f, fps, d.origin, drop);
+        let label = |f: i64| format_timecode(f, d.fps, d.origin, d.drop);
         let (mut now_start, mut now_end) = (label(d.current.0), label(d.current.1));
         let (mut all_start, mut all_end) = (label(0), label(d.whole));
         let typed = match (
-            self.typed_frame(&d.start, &now_start, d.origin),
-            self.typed_frame(&d.end, &now_end, d.origin),
+            self.typed_frame(&d.start, &now_start, &d),
+            self.typed_frame(&d.end, &now_end, &d),
         ) {
             (Some(a), Some(b)) if a < b && a >= 0 && b <= d.whole => Some((a, b)),
             _ => None,

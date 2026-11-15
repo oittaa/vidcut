@@ -983,6 +983,8 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
         path: file.to_path_buf(),
         origin: 0.0,
         source_frame: i64::from(at),
+        phase: 0.0,
+        per_frame: crate::time::Rational::ONE,
         frames,
         image: None,
         pace: Default::default(),
@@ -1014,6 +1016,8 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         path,
         origin,
         source_frame,
+        phase,
+        per_frame,
         image,
         pace,
         color_space,
@@ -1030,6 +1034,8 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         *path = file.to_path_buf();
         *origin = 0.0;
         *source_frame = i64::from(at);
+        *phase = 0.0;
+        *per_frame = crate::time::Rational::ONE;
         *image = None;
         *pace = Default::default();
         *color_space = Default::default();

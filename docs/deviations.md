@@ -59,18 +59,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - vidcut does not upload, and it has no settings for a Blackmagic HyperDeck. The Export dialog has H.264 for other needs.
   - The two TikTok resolutions are not measured yet.
 
-## X8. The source viewer counts project frames
-
-- **Resolve:**
-  - Source Clip and Source Tape show a clip at its own frame rate, with its own source timecode (pp. 680, 688).
-- **vidcut:**
-  - Source viewers step through project frames. They count from the first frame of the clip.
-  - They sample frames as the export samples them ([design/export.md](design/export.md#which-source-frame)). For media at the project rate, these are the frames of the media.
-  - Source Timecode adds the start timecode of the file, as project frames ([spec D91](spec.md#12-decisions-on-gaps-and-contradictions)).
-- **Why:**
-  - All positions, also source positions, are in project frames ([design/model.md](design/model.md#time)).
-  - Thus what the user marks is exactly what goes into the timeline and the export.
-
 ## X9. OpenTimelineIO interchange
 
 - **Resolve:**

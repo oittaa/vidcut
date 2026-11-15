@@ -322,7 +322,7 @@ fn ducking_of(
                 sources.push(DuckSource {
                     media: c.media.clone(),
                     stream: au.stream,
-                    origin,
+                    origin: origin + c.phase / p.settings.fps.as_f64(),
                     frames: (a, b),
                     start: a,
                     source_in: c.source_at(a),

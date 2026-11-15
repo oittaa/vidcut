@@ -273,6 +273,17 @@ Folders:
 - Each timeline position and length is a whole frame at the rate of the project, `Settings::fps`.
 - The rate is an exact `Rational` (30000/1001, not 29.97).
 - The `source_in` of a clip also counts project frames, from the first frame of its media.
+- `Clip::phase` is the part of a project frame from `source_in` to the exact start of the clip.
+  - An edit of media at another frame rate starts on a frame of that media. This start can fall between two project frames.
+  - The sound of the clip starts at the same exact time.
+- A position on a pool item counts its source frames: the frames of its video, at the frame rate of the video (`Media::rate`).
+  - A still or a sound file counts project frames.
+  - The marks, the markers, the left-out spans and the subclip limits of an item count source frames.
+  - `media_context` resolves times on an item at its frame rate, with the drop-frame count of its file (`Project::clip_rate`).
+- Conversions between the two counts:
+  - `Project::on_timeline` gives the project frames and the `phase` of a marked range, for an edit.
+  - `Project::clip_frame_at` gives the source frame that a frame of the Source Tape shows. `Project::tape_frame` gives the first frame of the tape that shows a source frame.
+  - `Project::left_out_frames` gives the left-out spans in project frames, for the `phase` of an edit.
 
 Requests take times as strings that parse into a `TimeSpec`:
 

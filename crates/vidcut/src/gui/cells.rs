@@ -158,11 +158,15 @@ impl Drop for Cells {
 fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
     let s = &p.settings;
     let (mut plan, frame) = match piece {
-        VideoPiece::Source { media, .. } => (
+        VideoPiece::Source {
+            media,
+            source_frame,
+            ..
+        } => (
             vidcut_core::render::tape(p, std::slice::from_ref(media))
                 .ok()?
                 .0,
-            piece.position(0),
+            *source_frame,
         ),
         _ => (
             RenderPlan {

@@ -55,6 +55,8 @@ fn main() {
                 path: path.clone(),
                 origin,
                 source_frame: at,
+                phase: 0.0,
+                per_frame: vidcut_core::time::Rational::ONE,
                 frames: 1,
                 image: None,
                 color_space: Default::default(),
