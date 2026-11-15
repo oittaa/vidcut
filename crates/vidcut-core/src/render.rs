@@ -665,23 +665,22 @@ pub struct FileClock {
     /// The frame rate of the timeline and the frame rate of the file, when
     /// they are not the same.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rates: Option<[f64; 2]>,
+    pub rates: Option<[Rational; 2]>,
 }
 
 impl FileClock {
     pub fn of(p: &Project, c: &Clip) -> Self {
-        let fps = p.settings.fps.as_f64();
+        let fps = p.settings.fps;
         let file = p
             .media(&c.media)
-            .and_then(|m| m.info.video.as_ref())
-            .filter(|v| !v.still && v.fps.as_f64() > 0.0)
-            .map(|v| v.fps.as_f64());
+            .map(|m| m.rate(fps))
+            .filter(|f| f.num() > 0 && *f != fps);
         Self {
             pace: c.pace(),
             from: c.source_in,
             phase: c.phase,
             key: c.content_at(c.start),
-            rates: file.filter(|f| (f - fps).abs() > 1e-9).map(|f| [fps, f]),
+            rates: file.map(|f| [fps, f]),
         }
     }
 
@@ -703,7 +702,7 @@ impl FileClock {
     }
 
     pub fn rate(&self, fps: f64) -> f64 {
-        self.rates.map_or(fps, |[_, file]| file)
+        self.rates.map_or(fps, |[_, file]| file.as_f64())
     }
 
     pub fn source(&self, key: i64) -> i64 {
@@ -717,21 +716,21 @@ impl FileClock {
     fn shown(&self, source: f64) -> i64 {
         match self.rates {
             None => source_frame(source),
-            Some([fps, file]) => source_frame(source * file / fps),
+            Some([fps, file]) => shown_frame(file.over(fps), source),
         }
     }
 
     pub fn file_end(&self, end: i64) -> i64 {
         match self.rates {
             None => end,
-            Some([fps, file]) => (end as f64 / fps * file - 1e-6).ceil() as i64,
+            Some([fps, file]) => (end as f64 * file.over(fps).as_f64() - 1e-6).ceil() as i64,
         }
     }
 
     pub fn source_of(&self, file: f64) -> f64 {
         match self.rates {
             None => file,
-            Some([fps, rate]) => file * fps / rate,
+            Some([fps, rate]) => file * fps.over(rate).as_f64(),
         }
     }
 
