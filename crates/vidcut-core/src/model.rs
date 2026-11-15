@@ -6826,6 +6826,19 @@ impl Project {
         self.media(id).filter(|m| !m.removed)
     }
 
+    pub fn offline_in<'a>(&'a self, clips: impl IntoIterator<Item = &'a Clip>) -> Vec<&'a Media> {
+        let gone: Vec<&Media> = self.media.iter().filter(|m| m.removed).collect();
+        let mut out: Vec<&Media> = Vec::new();
+        for c in clips {
+            for m in gone.iter().filter(|m| c.uses(&m.id)) {
+                if !out.iter().any(|o| o.id == m.id) {
+                    out.push(m);
+                }
+            }
+        }
+        out
+    }
+
     pub fn is_used(&self, media: &str) -> bool {
         self.clips_using(media).next().is_some() || self.compounds.iter().any(|k| k.holds(media))
     }

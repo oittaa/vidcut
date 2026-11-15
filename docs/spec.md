@@ -275,9 +275,13 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - Remove from Pool on the right-click menu asks no question (measured in Resolve Studio 21.2).
   - Only the pool items go. The files on disk stay.
   - The clips and the compound clips that use an item stay, on the timeline and in the pool (measured in Resolve Studio 21.2).
-  - Those clips are offline. They are red on the timeline, and they play no picture and no sound. The viewer shows Media Offline.
-  - An export or a frame of the timeline that needs an offline clip fails, as with a missing file.
+  - Those clips are offline. They are red on the timeline, and they play no sound.
+  - Their picture is Media Offline, in a dark red 16:9 box with a warning sign. The box is in the middle of a black frame (measured in Resolve Studio 21.2).
+    - The box fits the frame of the timeline. The transform and the crop of the clip do not apply.
+    - The opacity and the composite mode of the clip apply. In a compound clip, the picture is the same.
+  - Before an export of a timeline with offline clips, vidcut asks for a confirmation (p. 4130). The export then shows them as Media Offline.
   - Import of the same file puts the item back in the pool. Its clips are then online again (measured in Resolve Studio 21.2).
+  - vidcut also puts back the removed subclips of that file. This is not measured: the scripts of Resolve cannot make a subclip.
 - **Views** (pp. 638, 661–665):
   - **Thumbnail:** a hover scrubs the clip, and I/O mark its source In/Out. A click on the lower-right corner of a thumbnail shows its metadata (deviation X60).
   - **Filmstrip:** each clip is a row of its pictures, as wide as the pool, under its name. Hover and I/O work as on a thumbnail.

@@ -75,8 +75,9 @@ pub enum Request {
     /// Add files to the project's media (probing them); returns their media ids.
     /// A subtitle file (SRT, WebVTT, TTML) becomes a subtitle item, with no
     /// pictures or sound, for `subtitles.import` with `media`. The file of a
-    /// removed item brings that item back, with its id, and its clips are
-    /// online again.
+    /// removed item brings that item and its removed subclips back, with
+    /// their ids, and their clips are online again. A file that changed so
+    /// that those clips no longer fit it comes in as a new item.
     #[serde(rename = "media.add")]
     MediaAdd {
         paths: Vec<PathBuf>,

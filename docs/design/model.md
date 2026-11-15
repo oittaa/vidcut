@@ -134,9 +134,13 @@ classDiagram
 - `media` also keeps the items that `media.remove` took out while clips or compound clips use them (`Media::removed`, with no `bin`).
   - `Project::pool_media` and `Project::pooled` give only the pool. The pool, the requests that name media, and the lists of the GUI use them.
   - `Project::media` finds each item. The code that plays, draws or writes clips uses it.
-  - The plans play the clips of removed media as gaps, with no sound. `render::flatten` makes them so in a copy of the project.
+  - The plans play the clips of removed media with no sound. Their picture is `Generated::Offline`, with only their opacity and composite mode.
+  - `render::flatten` makes them so in a copy of the project.
   - `drop_unused_removed` runs after each change (`Editor::apply`, `history.revert`). It deletes each removed item that no clip and no compound clip uses (`Project::is_used`).
-  - `add_media` and `join_pool` put a removed item of the same file back in the pool, with its id.
+  - `add_media` puts each removed item of the same file back in the pool, with its id, its subclips too (`bring_back`).
+    - It does so only when the project stays valid with the file as it is now. Else the file comes in as a new item, and the clips stay offline.
+    - Why: a file can change at the same path, and the clips can then need frames that it no longer has.
+  - `join_pool` puts a removed item of the same file back in the pool, with its id.
 - `tracks` are the video tracks, then the audio tracks. Audio tracks hold sound-only clips.
 - A clip on a video track carries its picture. Its `ClipAudio` carries its sound, with J/L offsets (`head`, `tail`).
 - `tape_marks` holds the In and Out of the source tape.

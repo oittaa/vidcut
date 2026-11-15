@@ -232,6 +232,7 @@ struct Starting {
     picking: Option<Picked>,
     ask: Option<Ask>,
     weights: bool,
+    offline: Vec<String>,
 }
 
 enum Otio {
@@ -844,6 +845,7 @@ impl Workspace {
                 picking: Some(picking),
                 ask: None,
                 weights: false,
+                offline: Vec::new(),
             });
         }
         if open {
@@ -866,6 +868,16 @@ impl Workspace {
                     s.params["output"] = json!(path);
                     self.send_start(ctx, &mut s);
                 }
+            }
+        }
+        if !s.offline.is_empty() {
+            match ask_offline(ctx, &s.offline) {
+                Some(true) => {
+                    s.offline.clear();
+                    self.send_checked(ctx, &mut s);
+                }
+                Some(false) => return,
+                None => {}
             }
         }
         if s.weights {
@@ -917,6 +929,16 @@ impl Workspace {
     }
 
     fn send_start(&self, ctx: &egui::Context, s: &mut Starting) {
+        s.offline = self.project().map_or_else(Vec::new, |p| {
+            let clips = p.tracks.iter().flat_map(|t| &t.clips);
+            p.offline_in(clips).iter().map(|m| m.name.clone()).collect()
+        });
+        if s.offline.is_empty() {
+            self.send_checked(ctx, s);
+        }
+    }
+
+    fn send_checked(&self, ctx: &egui::Context, s: &mut Starting) {
         let (retimes, upscalers) = self.ai_models();
         if !super::upscale::needed(&retimes, &upscalers).is_empty() {
             s.weights = true;
@@ -1178,6 +1200,7 @@ impl Workspace {
                 from: From::Dialog,
                 picking: None,
                 weights: false,
+                offline: Vec::new(),
             };
             self.send_start(ctx, &mut s);
             self.export.starting = Some(s);
@@ -1693,6 +1716,28 @@ impl Workspace {
             self.export.confirm_quit = false;
         }
     }
+}
+
+fn ask_offline(ctx: &egui::Context, names: &[String]) -> Option<bool> {
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::unique("export-offline")).show(ctx, |ui| {
+        ui.set_width(super::dialog::WIDTH);
+        ui.spacing_mut().item_spacing.y = 8.0;
+        ui.heading("Media Offline");
+        ui.add(egui::Label::new(names.join(", ")).wrap());
+        super::dialog::footer(ui, |ui| {
+            if super::dialog::main_button(ui, "Export Anyway", true) {
+                answer = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                answer = Some(false);
+            }
+        });
+    });
+    if escape_cancels(ctx, &modal) {
+        answer = Some(false);
+    }
+    answer
 }
 
 const SWEEP_LEG: f64 = 1.0;

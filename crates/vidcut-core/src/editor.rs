@@ -2661,9 +2661,11 @@ fn mutate(
                     false => env.probe(path)?,
                 };
                 let still = still_secs(p, env)?;
-                let id = add_media(p, &mut files, probed, still);
-                if !ids.contains(&id) {
-                    ids.push(id);
+                let (id, subclips) = add_media(p, &mut files, probed, still);
+                for id in std::iter::once(id).chain(subclips) {
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
                 }
             }
             if let Some(bin) = bin {
@@ -5275,7 +5277,8 @@ impl PoolFiles {
             .get(path)?
             .iter()
             .map(|&i| &p.media[i])
-            .find(|m| &m.sequence == sequence)
+            .filter(|m| &m.sequence == sequence)
+            .min_by_key(|m| m.removed)
     }
 
     fn note(&mut self, p: &Project, i: usize) {
@@ -5285,19 +5288,26 @@ impl PoolFiles {
     }
 }
 
-fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia, still: f64) -> String {
-    if let Some(existing) = files.find(p, &probed.path, &probed.sequence) {
-        let id = existing.id.clone();
-        if existing.removed {
-            let m = p.media.iter_mut().find(|m| m.id == id).expect("found");
-            m.removed = false;
-            m.size = probed.size;
-            m.mtime_ns = probed.mtime_ns;
-            m.info = probed.info;
-            m.fingerprint = probed.fingerprint;
-            m.subtitles = probed.subtitles;
+fn add_media(
+    p: &mut Project,
+    files: &mut PoolFiles,
+    probed: ProbedMedia,
+    still: f64,
+) -> (String, Vec<String>) {
+    let removed: Vec<(String, bool)> = (p.media.iter())
+        .filter(|m| m.removed && m.path == probed.path && m.sequence == probed.sequence)
+        .map(|m| (m.id.clone(), m.subclip.is_some()))
+        .collect();
+    let mut subclips = Vec::new();
+    for (id, subclip) in removed {
+        if bring_back(p, &id, &probed) && subclip {
+            subclips.push(id);
         }
-        return id;
+    }
+    if let Some(existing) = files.find(p, &probed.path, &probed.sequence)
+        && !existing.removed
+    {
+        return (existing.id.clone(), subclips);
     }
     first_video_sets_format(p, &probed.info);
     let still_secs = probed
@@ -5347,7 +5357,25 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia, still:
         removed: false,
     });
     files.note(p, p.media.len() - 1);
-    id
+    (id, subclips)
+}
+
+fn bring_back(p: &mut Project, id: &str, probed: &ProbedMedia) -> bool {
+    let mut back = p.clone();
+    let Some(m) = back.media.iter_mut().find(|m| m.id == id) else {
+        return false;
+    };
+    m.removed = false;
+    m.size = probed.size;
+    m.mtime_ns = probed.mtime_ns;
+    m.info = probed.info.clone();
+    m.fingerprint = probed.fingerprint.clone();
+    m.subtitles = probed.subtitles.clone();
+    if !validate::violations(&back).is_empty() {
+        return false;
+    }
+    *p = back;
+    true
 }
 
 fn still_secs(p: &Project, env: &dyn Env) -> Result<f64> {
@@ -5433,10 +5461,13 @@ fn add_folder(
             }
         };
         let still = still_secs(p, env)?;
-        let id = add_media(p, files, probed, still);
-        ops::move_media(p, std::slice::from_ref(&id), bin)?;
-        if !out.media.contains(&id) {
-            out.media.push(id);
+        let (id, subclips) = add_media(p, files, probed, still);
+        let added: Vec<String> = std::iter::once(id).chain(subclips).collect();
+        ops::move_media(p, &added, bin)?;
+        for id in added {
+            if !out.media.contains(&id) {
+                out.media.push(id);
+            }
         }
     }
     for sub in &folder.folders {
@@ -5740,7 +5771,7 @@ fn find_media<'a>(
         match probed {
             Some(probed) => {
                 let still = still_secs(p, env)?;
-                let id = add_media(p, &mut files, probed, still);
+                let (id, _) = add_media(p, &mut files, probed, still);
                 if found.insert(id.clone()) {
                     media.push(id.clone());
                 }

@@ -50,7 +50,8 @@ flowchart TD
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
   - A count with no default layout in FFmpeg uses the first channels of the 22.2 layout (`channel_layout`). Why: the mix needs a layout, and a stereo file then goes to the first two channels.
   - An encoder can take fewer channels. Then the export fails with the name of the encoder and the channel count.
-  - An export with a clip of removed media in its range fails with the name of the media (`refuse_removed`). `export::frame` does the same for a frame of the timeline. Why: the clips of removed media are offline, and the export of a missing file fails too.
+  - An export shows the clips of removed media as Media Offline. Its report then has the note `media_offline`, with the names of the media (`Project::offline_in`).
+  - Before an export, the GUI asks when a clip of the timeline uses removed media (`ask_offline`). Cancel stops the export.
 - **Models:** `session::export_media` first checks the models of Voice Isolation, Upscale, Retime Process and the Process of each Smooth Cut. A missing model needs `download`.
 
 GPU preferences:
@@ -182,6 +183,7 @@ Sources:
 - Each layer of a dissolve reads its own file.
 - A `VideoPiece::Generated` has no file. `VideoFrames::generated_frame` makes its frame at the size of the plan.
   - `Generated::at` gives the `generators::Pattern` of a frame. A gradient with keyframes gives a new pattern on each frame.
+  - `slate::draw` draws the box and the sign of `Pattern::Offline`. `burn::line_coverage` lays out its words with the fonts of the titles. `slate::put_text` puts them on the frame.
   - A Solid Color in an SDR timeline is RGB24.
   - Each other frame is RGBAF32LE, in 32-bit floats with an alpha of 1. It holds the code values from `generators::draw`, with the tag of the timeline colors (`screen::held::tag`).
   - Why: Resolve draws its generators in 32-bit floats ([spec §8.17](../spec.md#817-generators-p-766)).

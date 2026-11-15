@@ -3990,6 +3990,12 @@ fn filled_generator(pattern: Pattern, (w, h): (u32, u32), colors: Option<Hdr>) -
     let mut f = frame::Video::new(format::Pixel::RGBAF32LE, w, h);
     let stride = f.stride(0);
     vidcut_core::generators::draw(pattern, (w, h), colors, f.data_mut(0), stride);
+    if pattern == Pattern::Offline {
+        let (size, at) = vidcut_core::slate::text((w, h));
+        if let Some(text) = crate::burn::line_coverage(vidcut_core::slate::TEXT, size, at) {
+            vidcut_core::slate::put_text(&text, (w, h), colors, f.data_mut(0), stride);
+        }
+    }
     crate::screen::held::tag(&mut f, colors);
     f
 }

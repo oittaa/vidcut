@@ -15,7 +15,7 @@ use vidcut_core::export::{
 };
 use vidcut_core::fingerprint::short_digest;
 use vidcut_core::looks::checked_name;
-use vidcut_core::model::{Clip, Generator, TrackKind};
+use vidcut_core::model::{Clip, Generator};
 use vidcut_core::ops::titles::default_length;
 use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan};
@@ -624,6 +624,7 @@ pub struct Prepared {
     pub preset: Option<String>,
     pub outputs: Vec<Output>,
     pub encoder_changed: Option<String>,
+    pub offline: Vec<String>,
 }
 
 fn sanitize(name: &str) -> String {
@@ -738,6 +739,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     let ext = settings.container.extension();
     let drop_frame = p.settings.counts_drop_frame();
     let mut outputs = Vec::new();
+    let offline;
     if params.per_clip {
         let template = params.name.as_deref().unwrap_or("{index:03}-{name}");
         let clips: Vec<_> = proj
@@ -749,8 +751,8 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             .collect();
         let mut clips = clips;
         clips.sort();
+        offline = p.offline_in(clips.iter().filter_map(|(_, id, _)| p.clip(id)));
         for (i, (start, id, media)) in clips.iter().enumerate() {
-            refuse_removed(p, p.clip(id))?;
             let plan = render::flatten_clip(&proj, id)?;
             let name = file_name(template, i + 1, &plan.name, id, media);
             outputs.push(Output {
@@ -771,7 +773,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             let (x, y) = c.audio_range().unwrap_or((c.start, c.end()));
             c.start.min(x) < b && c.end().max(y) > a
         };
-        refuse_removed(p, p.tracks.iter().flat_map(|t| &t.clips).filter(heard))?;
+        offline = p.offline_in(p.tracks.iter().flat_map(|t| &t.clips).filter(heard));
         outputs.push(Output {
             plan: render::flatten(&proj, a, b)?,
             path: params.output.clone(),
@@ -804,18 +806,8 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         preset: preset_name,
         outputs,
         encoder_changed: None,
+        offline: offline.iter().map(|m| m.name.clone()).collect(),
     })
-}
-
-fn refuse_removed<'a>(p: &Project, clips: impl IntoIterator<Item = &'a Clip>) -> Result<()> {
-    let removed = |c: &Clip| p.media.iter().find(|m| m.removed && c.uses(&m.id));
-    match clips.into_iter().find_map(removed) {
-        Some(m) => Err(Error::media(format!(
-            "{} is offline: add its file to the pool again",
-            m.name
-        ))),
-        None => Ok(()),
-    }
 }
 
 fn picture_kind(p: &Project, piece: &render::VideoPiece) -> PictureKind {
@@ -1084,6 +1076,12 @@ pub fn notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
         .map(|why| json!({ "code": "encoder_changed", "message": why }))
         .collect();
     notes.extend(hdr_notes(prepared, available));
+    if !prepared.offline.is_empty() {
+        notes.push(json!({
+            "code": "media_offline",
+            "message": format!("Media Offline in the export: {}", prepared.offline.join(", ")),
+        }));
+    }
     notes
 }
 
@@ -1518,10 +1516,6 @@ pub fn frame(
                     p.end()
                 )));
             }
-            let shown = (p.tracks.iter())
-                .filter(|k| k.kind == TrackKind::Video)
-                .filter_map(|k| k.clip_covering(t).map(|i| &k.clips[i]));
-            refuse_removed(p, shown)?;
             let plan = render::flatten(p, t, t + 1)?;
             (
                 plan.video[0].clone(),

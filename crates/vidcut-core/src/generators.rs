@@ -29,7 +29,7 @@ const HLG_WHITE: f64 = 0.1;
 
 pub const CENTER: RangeInclusive<f64> = -1.0..=1.0;
 
-const RGBA_F32: usize = 16;
+pub(crate) const RGBA_F32: usize = 16;
 
 const BAR_COLORS: [Code; 7] = [
     [1.0, 1.0, 1.0],
@@ -297,6 +297,7 @@ pub enum Pattern {
         corners: [[u8; 3]; 4],
     },
     Chart(Chart),
+    Offline,
 }
 
 impl Pattern {
@@ -332,7 +333,7 @@ fn mixed(corners: [[f64; 3]; 4], u: f64, v: f64) -> [f64; 3] {
         .map(|c| (1.0 - v) * ((1.0 - u) * ul[c] + u * ur[c]) + v * ((1.0 - u) * ll[c] + u * lr[c]))
 }
 
-fn put_row(row: &mut [u8], codes: impl Iterator<Item = [f64; 3]>) {
+pub(crate) fn put_row(row: &mut [u8], codes: impl Iterator<Item = [f64; 3]>) {
     for (pixel, [r, g, b]) in row.as_chunks_mut::<RGBA_F32>().0.iter_mut().zip(codes) {
         for (bytes, v) in pixel.as_chunks_mut::<4>().0.iter_mut().zip([r, g, b, 1.0]) {
             *bytes = (v as f32).to_le_bytes();
@@ -349,7 +350,12 @@ fn same_rows(data: &mut [u8], stride: usize, width: usize, codes: &[[f64; 3]]) {
     }
 }
 
-fn each_row(data: &mut [u8], stride: usize, height: usize, work: impl Fn(usize, &mut [u8]) + Sync) {
+pub(crate) fn each_row(
+    data: &mut [u8],
+    stride: usize,
+    height: usize,
+    work: impl Fn(usize, &mut [u8]) + Sync,
+) {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let block = height.div_ceil(threads).max(1);
     let work = &work;
@@ -603,6 +609,7 @@ pub fn draw(
             });
         }
         Pattern::Chart(chart) => draw_bands(&bands(chart, w, h), data, stride, width),
+        Pattern::Offline => crate::slate::draw((w, h), colors, data, stride),
     }
 }
 

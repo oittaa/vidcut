@@ -38,6 +38,7 @@ pub mod retime;
 pub mod rich;
 pub mod sequence;
 pub mod shortcuts;
+pub mod slate;
 pub mod speakers;
 pub mod steps;
 pub mod store;

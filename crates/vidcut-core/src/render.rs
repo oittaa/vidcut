@@ -276,6 +276,9 @@ pub enum Generated {
     FourColorGradient { gradient: Gradient, frame: i64 },
     /// A picture that a rule draws from the size of the timeline.
     Chart { chart: Chart },
+    /// The picture of a clip whose media is out of the pool: Media Offline
+    /// on dark red, in a 16:9 box in the middle of a black frame.
+    Offline,
 }
 
 impl Generated {
@@ -332,6 +335,7 @@ impl Generated {
                 Pattern::of_gradient(gradient, (frame + k) as f64)
             }
             Self::Chart { chart } => Pattern::Chart(*chart),
+            Self::Offline => Pattern::Offline,
         }
     }
 }
@@ -2552,19 +2556,26 @@ fn offline(p: &Project) -> Option<Project> {
     }
     let mut out = p.clone();
     for t in &mut out.tracks {
-        unplayed(&mut t.clips, &gone);
+        slated(&mut t.clips, &gone);
     }
     Some(out)
 }
 
-fn unplayed(clips: &mut [Clip], gone: &HashSet<&str>) {
+fn slated(clips: &mut [Clip], gone: &HashSet<&str>) {
     for c in clips {
         if gone.contains(c.media.as_str()) {
-            c.video = false;
             c.audio = None;
+            c.picture = (c.picture.take())
+                .map(|p| Picture {
+                    composite_mode: p.composite_mode,
+                    opacity: p.opacity,
+                    opacity_keys: p.opacity_keys,
+                    ..Picture::default()
+                })
+                .filter(|p| !p.is_usual());
         }
         for t in c.compound.iter_mut().flat_map(|k| &mut k.tracks) {
-            unplayed(&mut t.clips, gone);
+            slated(&mut t.clips, gone);
         }
     }
 }
@@ -3483,6 +3494,14 @@ impl VideoPlan<'_> {
             });
         }
         let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
+        if m.removed {
+            return Ok(VideoPiece::Generated {
+                frames: y - x,
+                picture: Generated::Offline,
+                placed: placed_of(c, nest, true, crossed, x),
+                excluded: false,
+            });
+        }
         let (path, origin) = origin_of(m);
         let mut placed = placed_of(c, nest, fills, crossed, x);
         if let Some(own) = placed.first_mut().filter(|o| o.clip == c.id) {
