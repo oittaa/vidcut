@@ -487,7 +487,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 ### 4.1 Modes
 - **Source Clip** (p. 680):
   - The Viewer shows the selected pool clip.
-  - It steps through the frames of the clip, at the frame rate of the clip (p. 688). Measured in Resolve Studio 21.2 with 25 fps media in a 30 fps project.
+  - It steps through the frames of the clip, at the frame rate of the clip. Measured in Resolve Studio 21.2 with 25 fps media in a 30 fps project.
     - The source marks of the clip are on these frames (measured).
     - vidcut puts the markers of the clip on these frames too.
     - A still or a sound file has the frame rate of the project.
@@ -4921,6 +4921,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Record Frame on a tape is the frame along the tape.
   - On the timeline, the source frame is the frame of the media of the top shown clip.
   - `FileClock::frame` gives it, so a speed is included.
+  - Measured in the Edit page timeline viewer of Resolve Studio 21.2, with 24 fps media in a 30 fps timeline:
+    - Source Timecode counts at 24 fps. Source Frame counts frames of the media.
+    - Timeline frame 12 shows media frame 1449, and the viewer reads 00:01:00:09 and 1449.
   - A gap, a title, a generator, or a compound has no source frame.
   - The field then shows a dash.
   - Timer 2 is the playhead as a timecode from 0.
