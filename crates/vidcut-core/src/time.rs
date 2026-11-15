@@ -46,6 +46,25 @@ fn gcd(a: i64, b: i64) -> i64 {
 }
 
 impl Rational {
+    pub const ONE: Self = Self { num: 1, den: 1 };
+
+    pub fn one() -> Self {
+        Self::ONE
+    }
+
+    pub fn is_one(&self) -> bool {
+        *self == Self::ONE
+    }
+
+    pub fn over(self, other: Self) -> Self {
+        let (num, den) = (self.num * other.den, self.den * other.num);
+        let g = gcd(num, den);
+        Self {
+            num: num / g,
+            den: den / g,
+        }
+    }
+
     pub fn new(num: i64, den: i64) -> Result<Self, TimeError> {
         if num <= 0 || den <= 0 {
             return Err(TimeError::Rate(format!("{num}/{den}")));

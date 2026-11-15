@@ -487,6 +487,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 ### 4.1 Modes
 - **Source Clip** (p. 680):
   - The Viewer shows the selected pool clip.
+  - It steps through the frames of the clip, at the frame rate of the clip. Measured in Resolve Studio 21.2 with 25 fps media in a 30 fps project.
+    - The source marks of the clip are on these frames (measured).
+    - vidcut puts the markers of the clip on these frames too.
+    - A still or a sound file has the frame rate of the project.
   - A scroll area under the picture stands for the whole clip. It has the playhead, a zoomed-in waveform and In/Out handles that you can drag.
   - vidcut draws the waveform of the whole clip across the scroll area, from the bottom edge up.
     - With marks, the waveform is green between In and Out, and gray outside them.
@@ -499,6 +503,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - `media.marks.set` sets a clip mark. `tape.marks.set` sets a tape mark.
 - **Source Tape** (pp. 680–681, 704–706):
   - All pool clips play end to end as one tape, in the pool sort order.
+  - The tape steps through frames of the project. Measured in Resolve Studio 21.2 with 25 fps media in a 30 fps project.
+    - A clip at another frame rate shows the frame that each frame of the tape falls in, rounded down.
+    - The source timecode is that frame of the clip, at the frame rate of the clip.
   - The clip under the playhead becomes selected in the pool.
 - **Multi Source** (pp. 679, 682, measured in Resolve Studio 21.1.2):
   - The Viewer shows the video files and stills of the current bin and its subfolders in a grid. All of them follow one playhead.
@@ -4905,15 +4912,18 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Auto is the default. It follows the viewer.
   - Source modes show Source Timecode.
   - Timeline mode shows record timecode.
-  - Source Timecode is the media frame on screen plus the file start timecode (X8).
+  - Source Timecode is the media frame on screen plus the file start timecode, at the frame rate of the clip.
   - A file without a start timecode starts at 00:00:00:00.
   - Source Frame is that frame as a whole number, from 0.
   - Record Timecode is the playhead on screen plus the timeline start.
   - Record Frame is that playhead as a whole number, from 0.
-  - On a tape, Source Frame is the frame inside the clip.
+  - On a tape, Source Frame is the frame of the clip that the tape shows.
   - Record Frame on a tape is the frame along the tape.
-  - On the timeline, the source frame is the top shown clip.
-  - `Clip::source_at` gives it, so a speed is included.
+  - On the timeline, the source frame is the frame of the media of the top shown clip.
+  - `FileClock::frame` gives it, so a speed is included.
+  - Measured in the Edit page timeline viewer of Resolve Studio 21.2, with 24 fps media in a 30 fps timeline:
+    - Source Timecode counts at 24 fps. Source Frame counts frames of the media.
+    - Timeline frame 12 shows media frame 1449, and the viewer reads 00:01:00:09 and 1449.
   - A gap, a title, a generator, or a compound has no source frame.
   - The field then shows a dash.
   - Timer 2 is the playhead as a timecode from 0.

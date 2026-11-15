@@ -362,7 +362,7 @@ pub fn list(p: &Project, ids: Option<&[String]>, at: Option<i64>, samples: bool)
             };
             if wanted {
                 let clock = FileClock::of(p, c);
-                let frame = at.map(|t| clock.file(c.source_at(t)));
+                let frame = at.map(|t| clock.frame(c.content_at(t)));
                 let paths: Vec<Value> = c.motion.iter().map(|m| shown(m, frame, samples)).collect();
                 clips.push(json!({ "clip": c.id, "track": t.id, "paths": paths }));
             }

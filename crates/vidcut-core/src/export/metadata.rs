@@ -534,6 +534,8 @@ mod tests {
             path: PathBuf::from(format!("/{media}.mkv")),
             origin: 0.0,
             source_frame: 0,
+            phase: 0.0,
+            per_frame: crate::time::Rational::ONE,
             frames,
             image: None,
             color_space: Default::default(),

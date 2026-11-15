@@ -71,18 +71,18 @@ fn origin(p: &Project, m: &Media) -> i64 {
 }
 
 fn used(p: &Project, m: &Media, whole: bool) -> Range<i64> {
-    let frames = p.media_frames(m);
     if whole || m.is_still() {
-        return 0..frames;
+        return 0..p.media_frames(m);
     }
-    m.marks.mark_in.unwrap_or(0)..m.marks.mark_out.unwrap_or(frames)
+    let (a, b) = p.marked_frames(m);
+    a..b
 }
 
 fn record_start(p: &Project, m: &Media, sync: AngleSync, part: &Range<i64>) -> i64 {
     let mark = match sync {
         AngleSync::Timecode | AngleSync::Sound => return origin(p, m) + part.start,
-        AngleSync::In => m.marks.mark_in.unwrap_or(0),
-        AngleSync::Out => m.marks.mark_out.unwrap_or(p.media_frames(m)),
+        AngleSync::In => p.marked_frames(m).0,
+        AngleSync::Out => p.marked_frames(m).1,
     };
     part.start - mark
 }

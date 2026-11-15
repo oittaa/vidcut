@@ -192,7 +192,7 @@ pub fn source_overwrite(
         return Err(no_common_time());
     }
     let kept = match m {
-        Some(m) => uncovered(a, b, &m.left_out),
+        Some(m) => uncovered(a, b, &p.left_out_frames(m, src.phase)),
         None => vec![(a, b)],
     };
     let (Some(first), Some(last)) = (kept.first(), kept.last()) else {

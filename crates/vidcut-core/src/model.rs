@@ -391,7 +391,9 @@ pub struct Media {
     pub mtime_ns: i64,
     pub info: MediaInfo,
     /// Source In/Out (spec §4.4; decision D6: remembered per clip). Edits
-    /// without an explicit source range use them.
+    /// without an explicit source range use them. The source frames of a
+    /// pool item are the frames of its video at the video's frame rate. A
+    /// still or a sound file counts frames of the project.
     #[serde(default, skip_serializing_if = "Marks::is_empty")]
     pub marks: Marks,
     /// The bin it is in (a path from [`Project::bins`]); empty: the top level.
@@ -974,6 +976,13 @@ impl Media {
     pub fn timecode_at(&self, fps: Rational) -> f64 {
         let file = self.info.timecode.map_or(0.0, |tc| tc.frames_at(fps));
         file + self.skipped() * fps.as_f64()
+    }
+
+    pub fn rate(&self, fps: Rational) -> Rational {
+        match &self.info.video {
+            Some(v) if !v.still => v.fps,
+            Some(_) | None => fps,
+        }
     }
 
     pub fn sequence_file(&self, k: u64) -> Option<PathBuf> {
@@ -1815,6 +1824,11 @@ pub struct Clip {
     /// Source position of the clip's first frame, in project frames from the
     /// media's first video frame.
     pub source_in: i64,
+    /// The part of a project frame from `source_in` to the exact source
+    /// position of the clip's first frame, from 0 up to 1. A clip that starts
+    /// on a frame of media at another frame rate has one. Left out at 0.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub phase: f64,
     /// Whether the clip shows video (false for audio-only clips).
     pub video: bool,
     /// The clip's audio, if it carries any.
@@ -3517,6 +3531,29 @@ pub struct Composition {
 
 fn is_zero_i64(n: &i64) -> bool {
     *n == 0
+}
+
+fn is_zero_f64(n: &f64) -> bool {
+    *n == 0.0
+}
+
+fn frames_at(secs: f64, rate: Rational) -> i64 {
+    (secs * rate.as_f64() + 0.05).floor().max(0.0) as i64
+}
+
+fn clip_secs(media: &Media) -> f64 {
+    media
+        .subclip
+        .map_or_else(|| file_secs(media), |s| s.end - s.start)
+}
+
+fn file_secs(media: &Media) -> f64 {
+    match (&media.info.video, media.info.audio.first()) {
+        (Some(v), _) if v.still => media.still_secs.unwrap_or_default(),
+        (Some(v), _) => v.duration,
+        (None, Some(a)) => a.duration,
+        (None, None) => 0.0,
+    }
 }
 
 /// A node of a composition: the clip's picture coming in, a tool, a mask,
@@ -5903,7 +5940,7 @@ impl Clip {
     }
 
     pub fn sound_at(&self, t: f64) -> f64 {
-        self.source_in as f64 + self.pace().sound(t - self.start as f64)
+        self.source_in as f64 + self.phase + self.pace().sound(t - self.start as f64)
     }
 
     pub fn walk(&mut self, k: i64) {
@@ -6005,6 +6042,9 @@ impl Clip {
     }
 
     pub fn in_step(&self, other: &Clip) -> bool {
+        if self.phase != other.phase {
+            return false;
+        }
         match (&self.speed, &other.speed) {
             (None, None) => true,
             (Some(a), Some(b)) => {
@@ -6671,6 +6711,7 @@ impl Cue {
             start: self.start,
             duration: self.duration,
             source_in: 0,
+            phase: 0.0,
             video: true,
             audio: None,
             enabled: true,
@@ -6889,25 +6930,90 @@ impl Project {
     }
 
     pub fn media_frames(&self, media: &Media) -> i64 {
-        match media.subclip {
-            Some(s) => self.frames_in(s.end - s.start),
-            None => self.file_frames(media),
-        }
+        frames_at(clip_secs(media), self.settings.fps)
     }
 
     pub fn subclip_span(&self, media: &Media) -> Option<(i64, i64)> {
-        let first = self.frames_in(media.subclip?.start);
-        Some((first, first + self.media_frames(media)))
+        let first = frames_at(media.subclip?.start, media.rate(self.settings.fps));
+        Some((first, first + self.clip_frames(media)))
     }
 
     pub fn file_frames(&self, media: &Media) -> i64 {
-        let secs = match (&media.info.video, media.info.audio.first()) {
-            (Some(v), _) if v.still => media.still_secs.unwrap_or_default(),
-            (Some(v), _) => v.duration,
-            (None, Some(a)) => a.duration,
-            (None, None) => 0.0,
+        self.frames_in(file_secs(media))
+    }
+
+    pub fn clip_frames(&self, media: &Media) -> i64 {
+        self.frames_of(media, media.rate(self.settings.fps))
+    }
+
+    pub fn frames_of(&self, media: &Media, fps: Rational) -> i64 {
+        frames_at(clip_secs(media), fps)
+    }
+
+    pub fn whole_clip_frames(&self, media: &Media) -> i64 {
+        frames_at(file_secs(media), media.rate(self.settings.fps))
+    }
+
+    pub fn on_timeline(&self, media: &Media, (a, b): (i64, i64)) -> ((i64, i64), f64) {
+        let per = self.settings.fps.over(media.rate(self.settings.fps));
+        let (num, den) = (per.num(), per.den());
+        let start = a * num;
+        let first = start.div_euclid(den);
+        let frames = ((b - a) * num).div_euclid(den);
+        (
+            (first, first + frames),
+            start.rem_euclid(den) as f64 / den as f64,
+        )
+    }
+
+    pub fn clip_rate(&self, media: &Media) -> (Rational, bool) {
+        let rate = media.rate(self.settings.fps);
+        let drop = match media.info.timecode.as_ref().filter(|t| t.rate == rate) {
+            Some(t) => t.drop_frame,
+            None => self.settings.drop_frame,
         };
-        self.frames_in(secs)
+        (rate, drop && rate.has_drop_frame())
+    }
+
+    pub fn clip_timecode(&self, media: &Media, frames: i64) -> String {
+        let (rate, drop) = self.clip_rate(media);
+        format_timecode(frames, rate, 0, drop)
+    }
+
+    pub fn marked_frames(&self, media: &Media) -> (i64, i64) {
+        let frames = self.media_frames(media);
+        let i = media.marks.mark_in.unwrap_or(0);
+        let ((a, b), _) = self.on_timeline(media, (i, media.marks.mark_out.unwrap_or(i)));
+        match media.marks.mark_out {
+            Some(_) => (a, b.min(frames)),
+            None => (a, frames),
+        }
+    }
+
+    pub fn left_out_frames(&self, media: &Media, phase: f64) -> Vec<(i64, i64)> {
+        let per = self.settings.fps.over(media.rate(self.settings.fps));
+        let slack = crate::render::grid_slack(per);
+        let at = |x: i64| (x as f64 * per.as_f64() - phase - slack).ceil() as i64;
+        (media.left_out.iter())
+            .map(|&(x, y)| (at(x), at(y)))
+            .filter(|(a, b)| b > a)
+            .collect()
+    }
+
+    pub fn clip_span(&self, media: &Media, (a, b): (i64, i64)) -> (i64, i64) {
+        let at = |k: i64| self.clip_frame_at(media, k as f64);
+        (at(a), if b > a { at(b - 1) + 1 } else { at(a) })
+    }
+
+    pub fn tape_frame(&self, media: &Media, frame: i64) -> i64 {
+        let per = self.settings.fps.over(media.rate(self.settings.fps));
+        let n = frame * per.num();
+        n.div_euclid(per.den()) + i64::from(n.rem_euclid(per.den()) != 0)
+    }
+
+    pub fn clip_frame_at(&self, media: &Media, source: f64) -> i64 {
+        let per = media.rate(self.settings.fps).over(self.settings.fps);
+        crate::render::shown_frame(per, source)
     }
 
     pub fn marker(&self, id: &str) -> Option<&Marker> {
@@ -6922,6 +7028,14 @@ impl Project {
             self.frames_in(STILL_LIMIT_SECS)
         } else {
             self.media_frames(media)
+        }
+    }
+
+    pub fn clip_limit(&self, media: &Media) -> i64 {
+        if media.is_still() {
+            self.frames_in(STILL_LIMIT_SECS)
+        } else {
+            self.clip_frames(media)
         }
     }
 
@@ -6955,7 +7069,7 @@ impl Project {
     }
 
     fn frames_in(&self, secs: f64) -> i64 {
-        (secs * self.settings.fps.as_f64() + 0.05).floor().max(0.0) as i64
+        frames_at(secs, self.settings.fps)
     }
 
     pub fn time_context(&self, playhead: Option<i64>) -> TimeContext {

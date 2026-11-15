@@ -43,6 +43,7 @@ pub const MAIN: &str = "V1";
 pub struct Source {
     pub media: String,
     pub range: (i64, i64),
+    pub phase: f64,
     pub video_only: bool,
     pub audio_only: bool,
     pub track: Option<String>,
@@ -279,6 +280,7 @@ pub(crate) fn block_clip(
         start,
         duration,
         source_in: 0,
+        phase: 0.0,
         video: true,
         audio: None,
         enabled: true,
@@ -348,6 +350,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         start: 0,
         duration: b - a,
         source_in: a,
+        phase: src.phase,
         video,
         audio: audio.then_some(ClipAudio {
             stream: 0,
@@ -581,10 +584,11 @@ fn fit_to(p: &Project, srcs: &[Source], len: i64) -> Vec<Source> {
     };
     let left_out = p
         .media(&last.media)
-        .map_or(&[][..], |m| m.left_out.as_slice());
+        .map(|m| p.left_out_frames(m, last.phase))
+        .unwrap_or_default();
     let mut at = last.range.1;
     let mut more: Vec<(i64, i64)> = Vec::new();
-    for &(a, b) in left_out {
+    for &(a, b) in &left_out {
         if left <= 0 {
             break;
         }
@@ -2325,7 +2329,7 @@ pub fn leave_out(
     let m = p
         .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    let frames = p.media_frames(m);
+    let frames = p.clip_frames(m);
     for &(a, b) in spans {
         if a >= b || a < 0 || b > frames {
             return Err(Error::invalid(format!(
@@ -2589,7 +2593,7 @@ pub fn add_source_marker(p: &mut Project, media: &str, k: NewMarker) -> Result<S
     let m = p
         .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    let frames = p.media_limit(m);
+    let frames = p.clip_limit(m);
     if k.at >= frames {
         return Err(Error::invalid(format!(
             "marker at frame {} is past the end of {media} ({frames} frames)",
@@ -2682,7 +2686,7 @@ pub fn create_subclip(
     if m.subtitles.is_some() {
         return Err(Error::invalid(format!("{media} is a subtitle file")));
     }
-    let frames = p.media_limit(m);
+    let frames = p.clip_limit(m);
     if a < 0 || b > frames || b <= a {
         return Err(Error::invalid(format!(
             "subclip {a}..{b} is outside {media} ({frames} frames)"
@@ -2693,7 +2697,7 @@ pub fn create_subclip(
             "no bin {bin:?}; add it with bins.add"
         )));
     }
-    let fps = p.settings.fps;
+    let fps = m.rate(p.settings.fps);
     let start = m.skipped() + fps.frames_to_secs(a);
     let mut sub = Media {
         id: String::new(),
@@ -2737,16 +2741,17 @@ pub fn is_date(text: &str) -> bool {
     (1..=last).contains(&day)
 }
 
-fn clip_outside(tracks: &[Track], media: &str, part: std::ops::Range<i64>) -> Option<String> {
+fn clip_outside(tracks: &[Track], media: &str, part: (f64, f64)) -> Option<String> {
     for c in tracks.iter().flat_map(|t| &t.clips) {
         if let Some(k) = &c.compound
-            && let Some(id) = compound_outside(k, media, part.clone())
+            && let Some(id) = compound_outside(k, media, part)
         {
             return Some(id);
         }
         if c.media == media {
             let (lo, hi) = c.shown();
-            if lo < part.start || hi > part.end {
+            let (lo, hi) = (lo as f64 + c.phase, hi as f64 + c.phase);
+            if lo < part.0 || hi > part.1 {
                 return Some(c.id.clone());
             }
         }
@@ -2754,12 +2759,17 @@ fn clip_outside(tracks: &[Track], media: &str, part: std::ops::Range<i64>) -> Op
     None
 }
 
-fn compound_outside(k: &Compound, media: &str, part: std::ops::Range<i64>) -> Option<String> {
-    clip_outside(&k.tracks, media, part.clone()).or_else(|| clip_outside(&k.made_from, media, part))
+fn compound_outside(k: &Compound, media: &str, part: (f64, f64)) -> Option<String> {
+    clip_outside(&k.tracks, media, part).or_else(|| clip_outside(&k.made_from, media, part))
 }
 
-fn shift_source(c: &mut Clip, (by, file_by): (i64, i64)) {
-    c.source_in += by;
+fn shift_source(c: &mut Clip, (per, file_by): (crate::time::Rational, i64)) {
+    let den = per.den();
+    let at = c.source_in * den + (c.phase * den as f64).round() as i64 + file_by * per.num();
+    let first = at.div_euclid(den);
+    let by = first - c.source_in;
+    c.source_in = first;
+    c.phase = at.rem_euclid(den) as f64 / den as f64;
     motion::shift(c, file_by);
     if let Some(k) = c.picture.as_mut().and_then(|x| x.composition.as_mut()) {
         k.start += file_by;
@@ -2783,7 +2793,7 @@ fn shift_source(c: &mut Clip, (by, file_by): (i64, i64)) {
     }
 }
 
-fn shift_clips(tracks: &mut [Track], media: &str, by: (i64, i64)) {
+fn shift_clips(tracks: &mut [Track], media: &str, by: (crate::time::Rational, i64)) {
     for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
         if let Some(k) = c.compound.as_mut() {
             shift_compound(k, media, by);
@@ -2794,7 +2804,7 @@ fn shift_clips(tracks: &mut [Track], media: &str, by: (i64, i64)) {
     }
 }
 
-fn shift_compound(k: &mut Compound, media: &str, by: (i64, i64)) {
+fn shift_compound(k: &mut Compound, media: &str, by: (crate::time::Rational, i64)) {
     shift_clips(&mut k.tracks, media, by);
     shift_clips(&mut k.made_from, media, by);
 }
@@ -2806,26 +2816,23 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
     let Some((first, end)) = p.subclip_span(m) else {
         return Err(Error::invalid(format!("{media} is not a subclip")));
     };
-    let frames = p.file_frames(m);
+    let frames = p.whole_clip_frames(m);
     if a < 0 || b > frames || b <= a {
         return Err(Error::invalid(format!(
             "subclip {a}..{b} is outside the file of {media} ({frames} frames)"
         )));
     }
     let (by, len, more) = (first - a, b - a, b - end);
-    let fps = p.settings.fps.as_f64();
-    let video = m
-        .info
-        .video
-        .as_ref()
-        .filter(|v| !v.still && v.fps.as_f64() > 0.0);
-    let file_by = (by as f64 * video.map_or(fps, |v| v.fps.as_f64()) / fps).round() as i64;
-    let part = -by..len - by;
-    let outside = clip_outside(&p.tracks, media, part.clone()).or_else(|| {
+    let rate = m.rate(p.settings.fps);
+    let per = p.settings.fps.over(rate);
+    let slack = crate::render::grid_slack(per);
+    let exact = by as f64 * per.as_f64();
+    let part = (-exact - slack, (len - by) as f64 * per.as_f64() + slack);
+    let outside = clip_outside(&p.tracks, media, part).or_else(|| {
         p.compounds
             .iter()
             .flat_map(PooledCompound::blocks)
-            .find_map(|k| compound_outside(k, media, part.clone()))
+            .find_map(|k| compound_outside(k, media, part))
     });
     if !m.is_still()
         && let Some(c) = outside
@@ -2834,12 +2841,16 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             "{c} uses frames of {media} outside {a}..{b}"
         )));
     }
+    let (head, tail) = (
+        exact.round() as i64,
+        (more as f64 * per.as_f64()).round() as i64,
+    );
     for g in &mut p.groups {
         let id = g.id.clone();
         for c in g.rows.iter_mut().flat_map(|r| &mut r.clips) {
             if c.media == media {
-                c.head += by;
-                c.tail += more;
+                c.head += head;
+                c.tail += tail;
                 if c.head < 0 || c.tail < 0 {
                     return Err(Error::invalid(format!(
                         "sync group {id} uses frames of {media} outside {a}..{b}"
@@ -2848,11 +2859,10 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             }
         }
     }
-    shift_clips(&mut p.tracks, media, (by, file_by));
+    shift_clips(&mut p.tracks, media, (per, by));
     for k in p.compounds.iter_mut().flat_map(PooledCompound::blocks_mut) {
-        shift_compound(k, media, (by, file_by));
+        shift_compound(k, media, (per, by));
     }
-    let fps = p.settings.fps;
     let m = p
         .media
         .iter_mut()
@@ -2875,10 +2885,10 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
         *x += by;
         *y += by;
     }
-    let start = fps.frames_to_secs(a);
+    let start = rate.frames_to_secs(a);
     m.subclip = Some(Subclip {
         start,
-        end: start + fps.frames_to_secs(len),
+        end: start + rate.frames_to_secs(len),
     });
     Ok(())
 }
@@ -2887,7 +2897,7 @@ pub fn use_full_extents(p: &mut Project, media: &str) -> Result<()> {
     let m = p
         .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    let frames = p.file_frames(m);
+    let frames = p.whole_clip_frames(m);
     set_subclip_limits(p, media, (0, frames))
 }
 
@@ -2900,7 +2910,7 @@ pub fn set_media_marks(
     let m = p
         .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    let frames = p.media_limit(m);
+    let frames = p.clip_limit(m);
     let mut marks = m.marks.clone();
     if let Some(i) = mark_in {
         marks.mark_in = i;
@@ -2934,6 +2944,13 @@ fn mirrored_piece(
     (pieces.len() == 1).then(|| pieces.remove(0))
 }
 
+fn clip_span(p: &Project, piece: &crate::render::SpanPiece) -> (i64, i64) {
+    match p.media(&piece.media) {
+        Some(m) => p.clip_span(m, piece.range),
+        None => piece.range,
+    }
+}
+
 fn clear_owned_mirror(
     p: &mut Project,
     marks: &crate::model::TapeMarks,
@@ -2942,13 +2959,14 @@ fn clear_owned_mirror(
     let Some(piece) = mirrored_piece(entries, marks) else {
         return;
     };
+    let (a, b) = clip_span(p, &piece);
     let Some(m) = p.media.iter_mut().find(|m| m.id == piece.media) else {
         return;
     };
-    if marks.mark_in.is_some() && m.marks.mark_in == Some(piece.range.0) {
+    if marks.mark_in.is_some() && m.marks.mark_in == Some(a) {
         m.marks.mark_in = None;
     }
-    if marks.mark_out.is_some() && m.marks.mark_out == Some(piece.range.1) {
+    if marks.mark_out.is_some() && m.marks.mark_out == Some(b) {
         m.marks.mark_out = None;
     }
 }
@@ -2961,11 +2979,12 @@ fn write_mirror(
     let Some(piece) = mirrored_piece(entries, marks) else {
         return Ok(());
     };
+    let (a, b) = clip_span(p, &piece);
     set_media_marks(
         p,
         &piece.media,
-        marks.mark_in.map(|_| Some(piece.range.0)),
-        marks.mark_out.map(|_| Some(piece.range.1)),
+        marks.mark_in.map(|_| Some(a)),
+        marks.mark_out.map(|_| Some(b)),
     )
 }
 

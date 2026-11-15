@@ -850,7 +850,7 @@ impl Workspace {
             && let Some(answer) = ask.take()
         {
             let (bounds, gaps) = match &asked.shown {
-                Shown::Media(m) => (p.media(m).map(|m| (0, p.media_frames(m))), Vec::new()),
+                Shown::Media(m) => (p.media(m).map(|m| (0, p.clip_frames(m))), Vec::new()),
                 Shown::Timeline => (None, holes(&p)),
             };
             if let Ok(r) = &answer {
@@ -912,9 +912,13 @@ impl Workspace {
             Some(Shown::Media(_)) => self.snap.source.playing,
             None => false,
         };
-        let tc = |ws: &Workspace, f: i64| match shown {
+        let tc = |ws: &Workspace, f: i64| match &shown {
             Some(Shown::Timeline) => ws.tc(f),
-            _ => ws.src_tc(f),
+            Some(Shown::Media(id)) => match ws.project().and_then(|p| Some((p, p.media(id)?))) {
+                Some((p, m)) => p.clip_timecode(m, f),
+                None => ws.src_tc(f),
+            },
+            None => ws.src_tc(f),
         };
         let mut acts: Vec<Act> = Vec::new();
         if let Some(items) = &items {
@@ -1381,7 +1385,10 @@ impl Workspace {
                         "{words} word(s), {} – {} ({})",
                         tc(self, start),
                         tc(self, end - 1),
-                        self.src_tc(end - start)
+                        match &shown {
+                            Some(Shown::Media(_)) => tc(self, end - start),
+                            _ => self.src_tc(end - start),
+                        }
                     ));
                 }
                 _ => {
@@ -1676,11 +1683,8 @@ impl Workspace {
             }
             Act::Seek(frame) => match media {
                 Some(_) => {
-                    let offset = self
-                        .snap
-                        .source_at()
-                        .map_or(0, |(_, f)| self.snap.source.position - f);
-                    self.seek(PlayerId::Source, frame + offset, false);
+                    let at = self.snap.source_position(frame);
+                    self.seek(PlayerId::Source, at, false);
                 }
                 None => self.seek(PlayerId::Timeline, frame, false),
             },

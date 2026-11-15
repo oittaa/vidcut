@@ -915,7 +915,13 @@ fn media_preview(
     let Some(t) = ctx.v1() else {
         return Preview::default();
     };
-    let len = range.1 - range.0;
+    let len = match ctx.project.media(media) {
+        Some(m) => {
+            let ((a, b), _) = ctx.project.on_timeline(m, range);
+            b - a
+        }
+        None => range.1 - range.0,
+    };
     let has_video = !audio_only
         && ctx
             .project
@@ -1684,6 +1690,7 @@ mod tests {
             start,
             duration,
             source_in,
+            phase: 0.0,
             video: true,
             audio: Some(ClipAudio {
                 stream: 0,

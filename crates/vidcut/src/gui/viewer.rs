@@ -10,7 +10,7 @@ use vidcut_core::request::{
     TimecodeDisplay, ViewerFrame, ViewerFrameKey, ViewerMode, viewer_frame_after,
 };
 use vidcut_core::shortcuts::Action;
-use vidcut_core::time::parse_frame_number;
+use vidcut_core::time::{Rational, parse_frame_number};
 
 use super::pool::elide;
 use super::row::Row;
@@ -83,6 +83,7 @@ enum MarkHandles {
         media: String,
         base: i64,
         len: i64,
+        per: Rational,
         in_frame: i64,
         out_frame: i64,
         xa: f32,
@@ -978,7 +979,7 @@ impl Workspace {
         let (Some(w), Some(p)) = (self.snap.waveforms.get(&m.id), self.project()) else {
             return;
         };
-        let fps = p.settings.fps.as_f64();
+        let fps = m.rate(p.settings.fps).as_f64();
         let origin = m.origin();
         let per_px = frames as f64 / f64::from(rect.width().max(1.0));
         let mut x = rect.left().floor();
@@ -1068,9 +1069,11 @@ impl Workspace {
                 xb: x(b),
             });
         } else if let Some(media) = &shown
-            && let Some(m) = self.project().and_then(|p| p.media(media))
+            && let Some(p) = self.project_shared()
+            && let Some(m) = p.media(media)
         {
-            let base = if tape || self.snap.viewer == ViewerMode::MultiSource {
+            let on_tape = tape || self.snap.viewer == ViewerMode::MultiSource;
+            let base = if on_tape {
                 self.snap
                     .tape
                     .iter()
@@ -1079,7 +1082,12 @@ impl Workspace {
             } else {
                 0
             };
-            let len = self.media_frames(media);
+            let at = |f: i64| base + if on_tape { p.tape_frame(m, f) } else { f };
+            let per = match on_tape {
+                true => vidcut_core::render::per_frame(m, p.settings.fps),
+                false => Rational::ONE,
+            };
+            let len = p.clip_frames(m);
             let (mut a, mut b) = (
                 m.marks.mark_in.unwrap_or(0),
                 m.marks.mark_out.unwrap_or(len),
@@ -1101,8 +1109,8 @@ impl Workspace {
             if marked {
                 painter.rect_filled(
                     Rect::from_min_max(
-                        Pos2::new(x(base + a), rect.top()),
-                        Pos2::new(x(base + b), rect.bottom()),
+                        Pos2::new(x(at(a)), rect.top()),
+                        Pos2::new(x(at(b)), rect.bottom()),
                     ),
                     CornerRadius::ZERO,
                     theme::colors().marked,
@@ -1111,12 +1119,12 @@ impl Workspace {
             if self.snap.viewer == ViewerMode::SourceClip {
                 self.clip_waveform(&painter, rect, m, frames, marked.then_some((a, b)));
             }
-            self.mark_handles(&painter, rect, x(base + a), x(base + b));
+            self.mark_handles(&painter, rect, x(at(a)), x(at(b)));
             for k in &m.markers {
                 let color = marker_color(&k.color);
-                let at = x(base + k.at);
+                let end = x(at(k.at + k.duration));
+                let at = x(at(k.at));
                 if k.duration > 1 {
-                    let end = x(base + k.at + k.duration);
                     painter.rect_filled(
                         Rect::from_min_max(
                             Pos2::new(at, rect.top()),
@@ -1147,10 +1155,11 @@ impl Workspace {
                 media: media.clone(),
                 base,
                 len,
+                per,
                 in_frame: a,
                 out_frame: b,
-                xa: x(base + a),
-                xb: x(base + b),
+                xa: x(at(a)),
+                xb: x(at(b)),
             });
         }
         let px = x(self.snap.source.position);
@@ -1201,9 +1210,16 @@ impl Workspace {
                         self.seek(PlayerId::Source, f, true);
                     }
                 }
-                Some(Drag::SourceMark { frame, .. }) => {
-                    if let Some(MarkHandles::Clip { base, len, .. }) = &handles {
-                        *frame = (f - base).clamp(0, *len);
+                Some(Drag::SourceMark { frame, is_in, .. }) => {
+                    if let Some(MarkHandles::Clip { base, len, per, .. }) = &handles {
+                        let clip = |k: i64| (k * per.num()).div_euclid(per.den());
+                        let k = (f - base).max(0);
+                        *frame = match (*is_in, k) {
+                            (true, k) => clip(k),
+                            (false, 0) => 0,
+                            (false, k) => clip(k - 1) + 1,
+                        }
+                        .clamp(0, *len);
                     }
                 }
                 Some(Drag::TapeMark { frame, is_in, .. }) if resp.dragged() => {
@@ -1357,7 +1373,7 @@ impl Workspace {
         let Some(media) = self.snap.source_at().map(|(m, _)| m.to_string()) else {
             return;
         };
-        let len = self.media_frames(&media);
+        let len = self.clip_frames(&media);
         let marks = self
             .project()
             .and_then(|p| p.media(&media).map(|m| m.marks.clone()))
@@ -1781,8 +1797,15 @@ impl Workspace {
         if raw.is_empty() {
             return;
         }
+        let view = self.snap.timecode_view();
+        let dropped = if view.drop {
+            view.fps.dropped_per_minute()
+        } else {
+            0
+        };
+        let digits = view.fps.frame_digits();
         if let Some(sign) = entry.sign {
-            let Some(spec) = timecode_input(raw, "", self.dropped(), self.frame_digits()) else {
+            let Some(spec) = timecode_input(raw, "", dropped, digits) else {
                 return;
             };
             let at = if sign > 0 {
@@ -1793,11 +1816,9 @@ impl Workspace {
             self.send("player.seek", json!({ "at": at }));
             return;
         }
-        let view = self.snap.timecode_view();
         let shown = self.snap.timecode_text();
         if view.display == TimecodeDisplay::Auto && !view.viewer.is_source() {
-            let Some(spec) = timecode_input(raw, &shown, self.dropped(), self.frame_digits())
-            else {
+            let Some(spec) = timecode_input(raw, &shown, dropped, digits) else {
                 return;
             };
             self.send("player.seek", json!({ "at": spec }));
@@ -1813,8 +1834,14 @@ impl Workspace {
             }
             raw.to_string()
         } else {
-            let Some(spec) = timecode_input(raw, &shown, self.dropped(), self.frame_digits())
-            else {
+            let source = view.display == TimecodeDisplay::SourceTimecode
+                || (view.display == TimecodeDisplay::Auto && view.viewer.is_source());
+            let (fps, drop) = match source {
+                true => (view.source_fps, view.source_drop),
+                false => (view.fps, view.drop),
+            };
+            let dropped = if drop { fps.dropped_per_minute() } else { 0 };
+            let Some(spec) = timecode_input(raw, &shown, dropped, fps.frame_digits()) else {
                 return;
             };
             if !spec.contains([':', ';']) {
@@ -1837,12 +1864,16 @@ impl Workspace {
             (Some(marks), _) => (marks, self.snap.source.frames, None),
             (None, Some((media, _))) => (
                 p.media(media).map(|m| m.marks.clone()).unwrap_or_default(),
-                self.media_frames(media),
+                self.clip_frames(media),
                 Some(media.to_string()),
             ),
             (None, None) => (p.marks.clone(), p.end(), None),
         };
-        let current = self.src_tc(marks.mark_out.unwrap_or(end) - marks.mark_in.unwrap_or(0));
+        let length = marks.mark_out.unwrap_or(end) - marks.mark_in.unwrap_or(0);
+        let current = match media.as_deref().and_then(|m| p.media(m)) {
+            Some(m) => p.clip_timecode(m, length),
+            None => self.src_tc(length),
+        };
         if let Some(text) = &mut self.duration_text {
             let r = ui.add(
                 egui::TextEdit::singleline(text)

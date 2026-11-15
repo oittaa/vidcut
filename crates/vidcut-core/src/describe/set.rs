@@ -4,7 +4,9 @@ use serde_json::{Value, json};
 
 use super::{Words, db};
 use crate::duck::{AMOUNT_DB, HOLD_MS, LOOKAHEAD_MS, RECOVERY_MS, RISE_MS, THRESHOLD_DB};
-use crate::model::{Clip, DynamicZoom, Marks, Picture, Project, SubtitleStyle, Title, TitleKind};
+use crate::model::{
+    Clip, DynamicZoom, Marks, Media, Picture, Project, SubtitleStyle, Title, TitleKind,
+};
 use crate::time::{Rational, TimeSpec};
 
 type Show<'a> = &'a dyn Fn(&Value) -> String;
@@ -836,9 +838,14 @@ impl Words<'_> {
     pub(super) fn marker_set(&self) -> String {
         let id = self.text("marker");
         let found = self.project.and_then(|pr| pr.marker(&id).map(|m| (pr, m)));
+        let media = self.marker_media(&id);
+        let at = |pr: &Project, n: i64| match media {
+            Some(media) => pr.clip_timecode(media, n),
+            None => pr.settings.timecode(n),
+        };
         let thing = found.map_or_else(
             || format!("Marker {id}"),
-            |(pr, m)| format!("Marker at {}", pr.settings.timecode(m.at)),
+            |(pr, m)| format!("Marker at {}", at(pr, m.at)),
         );
         let markers = found.map(|(_, m)| m).into_iter().collect();
         let mut s = Set::new(Fields::new(thing, "Marker"), markers, self.params);
@@ -846,14 +853,20 @@ impl Words<'_> {
         s.put("color", "Color", &raw, |m| json!(m.color));
         s.put("note", "Note", &text, |m| json!(m.note));
         if !self.params["duration"].is_null() {
-            let length = |v: &Value| match (v.as_i64(), self.project) {
-                (Some(n), Some(pr)) => pr.settings.length_timecode(n),
+            let length = |v: &Value| match (v.as_i64(), self.project, media) {
+                (Some(n), Some(pr), Some(media)) => pr.clip_timecode(media, n),
+                (Some(n), Some(pr), None) => pr.settings.length_timecode(n),
                 _ => raw(v),
             };
             let new = match (&self.params["duration"], self.project) {
                 (Value::String(t), Some(pr)) => TimeSpec::parse(t)
                     .ok()
-                    .and_then(|t| pr.time_context(None).duration(&t).ok())
+                    .and_then(|t| match media {
+                        Some(media) => crate::editor::media_context(pr, media, None)
+                            .duration(&t)
+                            .ok(),
+                        None => pr.time_context(None).duration(&t).ok(),
+                    })
                     .map_or_else(|| json!(t), |n| json!(n)),
                 (v, _) => v.clone(),
             };
@@ -943,7 +956,12 @@ impl Words<'_> {
         s.f.text()
     }
 
-    pub(super) fn marks_set(&self, thing: String, marks: Option<&Marks>) -> String {
+    pub(super) fn marks_set(
+        &self,
+        thing: String,
+        marks: Option<&Marks>,
+        media: Option<&Media>,
+    ) -> String {
         let mut f = Fields::new(thing, "Marks");
         for (key, name) in [("in", "In"), ("out", "Out")] {
             if self.params[key].is_null() {
@@ -953,14 +971,24 @@ impl Words<'_> {
                 .zip(self.project)
                 .map(|(m, pr)| {
                     let at = if key == "in" { m.mark_in } else { m.mark_out };
-                    at.map_or_else(|| Shown::of("none"), |n| Shown::of(pr.settings.timecode(n)))
+                    at.map_or_else(
+                        || Shown::of("none"),
+                        |n| match media {
+                            Some(media) => Shown::of(pr.clip_timecode(media, n)),
+                            None => Shown::of(pr.settings.timecode(n)),
+                        },
+                    )
                 })
                 .into_iter()
                 .collect();
-            f.shown(name, old, Shown::of(self.time(key)));
+            f.shown(name, old, Shown::of(self.on_media(media, key)));
         }
         if !self.params["duration"].is_null() {
-            f.shown("Duration", Vec::new(), Shown::of(self.marked_duration()));
+            f.shown(
+                "Duration",
+                Vec::new(),
+                Shown::of(self.marked_duration(media)),
+            );
         }
         f.text()
     }
@@ -1011,12 +1039,12 @@ fn ducking(f: &mut Fields, before: &[Value], duck: &Value) {
     }
 }
 
-pub(super) fn source_marks<'a>(
+pub(super) fn source_media<'a>(
     project: Option<&'a Project>,
     media: &[String],
-) -> Option<&'a Marks> {
+) -> Option<&'a Media> {
     let [id] = media else {
         return None;
     };
-    project?.media(id).map(|m| &m.marks)
+    project?.media(id)
 }

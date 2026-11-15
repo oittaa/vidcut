@@ -424,14 +424,23 @@ fn subtitle_frames(p: &Project, m: &Media) -> i64 {
     ((m.info.duration - m.info.start_time).max(0.0) * p.settings.fps.as_f64()).round() as i64
 }
 
-fn marks(painter: &egui::Painter, rect: Rect, m: &Media, frames: i64, hovered: Option<i64>) {
+fn marks(
+    painter: &egui::Painter,
+    rect: Rect,
+    p: Option<&Project>,
+    m: &Media,
+    frames: i64,
+    hovered: Option<i64>,
+) {
     if frames <= 0 {
         return;
     }
     let x = |f: i64| rect.left() + rect.width() * (f as f32 / frames as f32);
-    if !m.marks.is_empty() {
-        let a = x(m.marks.mark_in.unwrap_or(0));
-        let b = x(m.marks.mark_out.unwrap_or(frames));
+    if let Some(p) = p
+        && !m.marks.is_empty()
+    {
+        let a = x(m.marks.mark_in.map_or(0, |i| p.tape_frame(m, i)));
+        let b = x(m.marks.mark_out.map_or(frames, |o| p.tape_frame(m, o)));
         painter.rect_filled(
             Rect::from_min_max(
                 Pos2::new(a, rect.bottom() - 4.0),
@@ -1220,7 +1229,7 @@ impl Workspace {
     ) {
         painter.rect_filled(picture, CornerRadius::same(3), theme::colors().track);
         if let Some(f) = hovered_frame {
-            self.hover = Some((m.id.clone(), f));
+            self.hover = Some((m.id.clone(), self.clip_frame(m, f)));
         }
         match super::tiles::media_aspect(m) {
             _ if m.subtitles.is_some() => subtitle_card(painter, picture, m),
@@ -1243,10 +1252,25 @@ impl Workspace {
             None if ui.is_rect_visible(picture) => self.sound(painter, picture, m),
             None => no_pictures(painter, picture, m),
         }
-        marks(painter, picture, m, frames, hovered_frame);
+        marks(painter, picture, self.project(), m, frames, hovered_frame);
         if let Some(color) = m.color.as_deref().and_then(theme::clip_color) {
             painter.circle_filled(picture.right_bottom() + vec2(-9.0, -11.0), 4.5, color);
         }
+    }
+
+    fn clip_frame(&self, m: &Media, f: i64) -> i64 {
+        self.project().map_or(f, |p| p.clip_frame_at(m, f as f64))
+    }
+
+    fn tile_time(&self, m: &Media, hovered: Option<i64>) -> String {
+        let Some(p) = self.project() else {
+            return self.src_tc(hovered.unwrap_or(0));
+        };
+        let f = match hovered {
+            Some(f) => p.clip_frame_at(m, f as f64),
+            None => p.clip_frames(m),
+        };
+        p.clip_timecode(m, f)
     }
 
     fn cues_text(&self, m: &Media) -> Option<String> {
@@ -1408,7 +1432,7 @@ impl Workspace {
         );
         let second = self
             .cues_text(m)
-            .unwrap_or_else(|| self.src_tc(hovered_frame.unwrap_or(frames)));
+            .unwrap_or_else(|| self.tile_time(m, hovered_frame));
         label(
             Pos2::new(picture.left(), picture.bottom() + 16.0),
             second,
@@ -1442,7 +1466,7 @@ impl Workspace {
         let frames = self.project().map_or(0, |p| p.media_frames(m));
         let hovered_frame = resp.hover_pos().map(|pos| frame_at(film, pos.x, frames));
         if let Some(f) = hovered_frame {
-            self.hover = Some((m.id.clone(), f));
+            self.hover = Some((m.id.clone(), self.clip_frame(m, f)));
         }
         if let Some(color) = m.color.as_deref().and_then(theme::clip_color) {
             painter.rect_filled(header, CornerRadius::same(2), color.gamma_multiply(0.6));
@@ -1450,7 +1474,7 @@ impl Workspace {
         let font = egui::FontId::proportional(12.0);
         let time = self
             .cues_text(m)
-            .unwrap_or_else(|| self.src_tc(hovered_frame.unwrap_or(frames)));
+            .unwrap_or_else(|| self.tile_time(m, hovered_frame));
         let time = painter.layout_no_wrap(time, font.clone(), theme::colors().text_dim);
         let room = ((width - time.size().x - 16.0) / 6.5).max(3.0) as usize;
         let name = painter.layout_no_wrap(elide(&m.name, room), font, theme::colors().text);
@@ -1499,7 +1523,7 @@ impl Workspace {
             }
             None => self.sound(&painter, film, m),
         }
-        marks(&painter, film, m, frames, hovered_frame);
+        marks(&painter, film, self.project(), m, frames, hovered_frame);
         self.outline(&painter, film, m);
         self.badges(&painter, film, m);
         self.media_interaction(&resp, m);
@@ -1826,11 +1850,12 @@ impl Workspace {
                 self.media_interaction(&resp, m);
             }
             1 => {
-                let frames = self.project().map_or(0, |p| match m.subtitles {
-                    Some(_) => subtitle_frames(p, m),
-                    None => p.media_frames(m),
-                });
-                ui.label(self.src_tc(frames));
+                let length = match (self.project(), &m.subtitles) {
+                    (Some(p), Some(_)) => self.src_tc(subtitle_frames(p, m)),
+                    (Some(p), None) => p.clip_timecode(m, p.clip_frames(m)),
+                    (None, _) => self.src_tc(0),
+                };
+                ui.label(length);
             }
             2 => {
                 ui.label(file_time(m).map_or_else(|| "-".to_string(), |d| d.minutes()));
@@ -1907,7 +1932,7 @@ impl Workspace {
         if resp.drag_started()
             && let Some(press) = resp.ctx.input(|i| i.pointer.press_origin())
         {
-            let frames = self.project().map_or(0, |p| p.media_frames(m));
+            let frames = self.project().map_or(0, |p| p.clip_frames(m));
             let range = (
                 m.marks.mark_in.unwrap_or(0),
                 m.marks.mark_out.unwrap_or(frames),
@@ -1994,7 +2019,7 @@ impl Workspace {
                 ui.close();
             }
             if ui.button("Append to Timeline").clicked() {
-                let frames = self.project().map_or(0, |p| p.media_frames(m));
+                let frames = self.project().map_or(0, |p| p.clip_frames(m));
                 let (a, b) = (
                     m.marks.mark_in.unwrap_or(0),
                     m.marks.mark_out.unwrap_or(frames),
@@ -2394,7 +2419,12 @@ fn range_text(app: &Workspace, source: &serde_json::Value) -> String {
         .split("..")
         .map(|x| x.trim_end_matches('f').parse::<i64>().unwrap_or(0));
     let (a, b) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0));
-    format!("{} long", app.src_tc(b - a))
+    let media = source["media"].as_str().unwrap_or_default();
+    let length = match app.project().and_then(|p| Some((p, p.media(media)?))) {
+        Some((p, m)) => p.clip_timecode(m, b - a),
+        None => app.src_tc(b - a),
+    };
+    format!("{length} long")
 }
 
 pub(super) fn elide(s: &str, n: usize) -> String {

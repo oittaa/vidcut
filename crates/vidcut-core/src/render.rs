@@ -176,6 +176,15 @@ pub enum VideoPiece {
         origin: f64,
         /// First source position, in project frames from `origin`.
         source_frame: i64,
+        /// The part of a project frame from `source_frame` to its exact first
+        /// position, from 0 up to 1.
+        #[serde(default, skip_serializing_if = "zero_f64")]
+        phase: f64,
+        /// Frames of its media in one project frame: the media's rate over
+        /// the project's. Frame `k` shows the media frame that plays at its
+        /// exact position.
+        #[serde(default = "Rational::one", skip_serializing_if = "Rational::is_one")]
+        per_frame: Rational,
         frames: i64,
         /// Pictures that aren't a video file's frames.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -648,27 +657,30 @@ pub struct FileClock {
     pub pace: Pace,
     /// The source frame of the clip's first frame.
     pub from: i64,
+    /// The clip's `phase`.
+    #[serde(default, skip_serializing_if = "zero_f64")]
+    pub phase: f64,
     /// The keyframe position of the clip's first frame.
     pub key: i64,
     /// The frame rate of the timeline and the frame rate of the file, when
     /// they are not the same.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rates: Option<[f64; 2]>,
+    pub rates: Option<[Rational; 2]>,
 }
 
 impl FileClock {
     pub fn of(p: &Project, c: &Clip) -> Self {
-        let fps = p.settings.fps.as_f64();
+        let fps = p.settings.fps;
         let file = p
             .media(&c.media)
-            .and_then(|m| m.info.video.as_ref())
-            .filter(|v| !v.still && v.fps.as_f64() > 0.0)
-            .map(|v| v.fps.as_f64());
+            .map(|m| m.rate(fps))
+            .filter(|f| f.num() > 0 && *f != fps);
         Self {
             pace: c.pace(),
             from: c.source_in,
+            phase: c.phase,
             key: c.content_at(c.start),
-            rates: file.filter(|f| (f - fps).abs() > 1e-9).map(|f| [fps, f]),
+            rates: file.map(|f| [fps, f]),
         }
     }
 
@@ -676,17 +688,21 @@ impl FileClock {
         Self {
             pace: c.pace(),
             from: c.source_in,
+            phase: c.phase,
             key: c.content_at(c.start),
             rates: None,
         }
     }
 
     pub fn is_plain(&self) -> bool {
-        self.rates.is_none() && self.pace == Pace::default() && self.from == self.key
+        self.rates.is_none()
+            && self.pace == Pace::default()
+            && self.from == self.key
+            && self.phase == 0.0
     }
 
     pub fn rate(&self, fps: f64) -> f64 {
-        self.rates.map_or(fps, |[_, file]| file)
+        self.rates.map_or(fps, |[_, file]| file.as_f64())
     }
 
     pub fn source(&self, key: i64) -> i64 {
@@ -694,31 +710,32 @@ impl FileClock {
     }
 
     pub fn file(&self, source: i64) -> i64 {
+        self.shown(source as f64)
+    }
+
+    fn shown(&self, source: f64) -> i64 {
         match self.rates {
-            None => source,
-            Some([fps, file]) => {
-                let shown = (((source as f64 - 0.5) / fps - 1e-6) * file).ceil() as i64;
-                if source >= 0 { shown.max(0) } else { shown }
-            }
+            None => source_frame(source),
+            Some([fps, file]) => shown_frame(file.over(fps), source),
         }
     }
 
     pub fn file_end(&self, end: i64) -> i64 {
         match self.rates {
             None => end,
-            Some([fps, file]) => (end as f64 / fps * file - 1e-6).ceil() as i64,
+            Some([fps, file]) => (end as f64 * file.over(fps).as_f64() - 1e-6).ceil() as i64,
         }
     }
 
     pub fn source_of(&self, file: f64) -> f64 {
         match self.rates {
             None => file,
-            Some([fps, rate]) => file * fps / rate,
+            Some([fps, rate]) => file * fps.over(rate).as_f64(),
         }
     }
 
     pub fn frame(&self, key: i64) -> i64 {
-        self.file(self.source(key))
+        self.shown(self.from as f64 + self.phase + self.pace.exact(key - self.key))
     }
 }
 
@@ -1533,6 +1550,9 @@ impl VideoPiece {
                 media,
                 path,
                 origin,
+                source_frame,
+                phase,
+                per_frame,
                 image,
                 pace,
                 color_space,
@@ -1551,7 +1571,9 @@ impl VideoPiece {
                     media: media.clone(),
                     path: path.clone(),
                     origin: *origin,
-                    source_frame: self.position(if still { 0 } else { k }),
+                    source_frame: source_frame + if still { 0 } else { pace.offset(k) },
+                    phase: *phase,
+                    per_frame: *per_frame,
                     frames,
                     image: image.clone(),
                     pace: if still { pace.clone() } else { pace.after(k) },
@@ -1635,6 +1657,8 @@ impl VideoPiece {
                 Self::Source {
                     media,
                     source_frame,
+                    phase,
+                    per_frame,
                     frames,
                     cache,
                     pace,
@@ -1647,6 +1671,8 @@ impl VideoPiece {
                 Self::Source {
                     media: m2,
                     source_frame: s2,
+                    phase: h2,
+                    per_frame: f2,
                     cache: c2,
                     pace: p2,
                     retime: r2,
@@ -1657,6 +1683,8 @@ impl VideoPiece {
                 },
             ) => {
                 media == m2
+                    && phase == h2
+                    && per_frame == f2
                     && excluded == e2
                     && retime == r2
                     && input_lut == i2
@@ -1812,10 +1840,22 @@ impl Default for Pace {
     }
 }
 
-const FRAME_SLACK: f64 = 0.002;
+pub const FRAME_SLACK: f64 = 0.002;
 
 pub fn source_frame(x: f64) -> i64 {
     (x + FRAME_SLACK).floor() as i64
+}
+
+pub fn shown_frame(per_frame: Rational, x: f64) -> i64 {
+    (x * per_frame.num() as f64 / per_frame.den() as f64 + grid_slack(per_frame)).floor() as i64
+}
+
+pub fn grid_slack(per: Rational) -> f64 {
+    FRAME_SLACK.min(0.5 / per.den() as f64)
+}
+
+pub fn per_frame(m: &Media, fps: Rational) -> Rational {
+    m.rate(fps).over(fps)
 }
 
 impl Pace {
@@ -2008,8 +2048,12 @@ impl VideoPiece {
     pub fn position(&self, k: i64) -> i64 {
         match self {
             VideoPiece::Source {
-                source_frame, pace, ..
-            } => source_frame + pace.offset(k),
+                source_frame,
+                phase,
+                per_frame,
+                pace,
+                ..
+            } => shown_frame(*per_frame, *source_frame as f64 + phase + pace.exact(k)),
             VideoPiece::Black { .. } | VideoPiece::Generated { .. } => 0,
             VideoPiece::Flat { pieces, skip, .. } => {
                 let last = pieces.iter().map(VideoPiece::frames).sum::<i64>() - 1;
@@ -2022,8 +2066,11 @@ impl VideoPiece {
     pub fn exact(&self, k: i64) -> f64 {
         match self {
             VideoPiece::Source {
-                source_frame, pace, ..
-            } => *source_frame as f64 + pace.exact(k),
+                source_frame,
+                phase,
+                pace,
+                ..
+            } => *source_frame as f64 + phase + pace.exact(k),
             VideoPiece::Black { .. } | VideoPiece::Generated { .. } => 0.0,
             VideoPiece::Flat { .. } => self.position(k) as f64,
             VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.exact(k),
@@ -3513,6 +3560,8 @@ impl VideoPlan<'_> {
             path,
             origin,
             source_frame: c.source_at(x),
+            phase: c.phase,
+            per_frame: per_frame(m, s.fps),
             frames: y - x,
             image: image_of(m),
             pace: c.pace().after(x - c.start),
@@ -4007,16 +4056,16 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
     let per_frame = f64::from(rate) / fps.as_f64();
     let since = fps.frame_to_sample(x, rate) - fps.frame_to_sample(c.start, rate);
     let source_sample = if c.speed.is_none() {
-        fps.frame_to_sample(c.source_at(x), rate)
+        fps.frame_to_sample(c.source_at(x), rate) + (c.phase * per_frame).round() as i64
     } else if speed == 0.0 {
         return AudioPiece::Silence { samples };
     } else if c.constant_speed().is_some() {
         fps.frame_to_sample(c.source_in, rate)
-            + (c.pace().sound(0.0) * per_frame + since as f64 * speed).round() as i64
+            + ((c.phase + c.pace().sound(0.0)) * per_frame + since as f64 * speed).round() as i64
     } else {
         let k = x - c.start;
-        fps.frame_to_sample(c.source_in, rate)
-            + (c.pace().sound_in(k, since as f64 / per_frame) * per_frame).round() as i64
+        let at = c.phase + c.pace().sound_in(k, since as f64 / per_frame);
+        fps.frame_to_sample(c.source_in, rate) + (at * per_frame).round() as i64
     };
     let keyed = audio.is_keyed().then(|| {
         Box::new(Keyed {
@@ -4243,6 +4292,8 @@ pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
             path: m.path.clone(),
             origin: m.origin(),
             source_frame: at,
+            phase: 0.0,
+            per_frame: per_frame(m, p.settings.fps),
             frames: 1,
             image: image_of(m),
             color_space: m.color_space,
@@ -4259,6 +4310,15 @@ pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
     }
 }
 
+pub fn media_clip_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
+    let ((first, _), shift) = p.on_timeline(m, (at, at));
+    let mut piece = media_frame(p, m, first);
+    if let VideoPiece::Source { phase, .. } = &mut piece {
+        *phase = shift;
+    }
+    piece
+}
+
 /// A media item's place on a source tape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TapeEntry {
@@ -4269,7 +4329,12 @@ pub struct TapeEntry {
 }
 
 pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>)> {
-    laid_out(p, media)
+    laid_out(p, media, p.settings.fps)
+}
+
+pub fn clip_tape(p: &Project, media: &str) -> Result<(RenderPlan, Vec<TapeEntry>)> {
+    let m = found(p.media(media), media)?;
+    laid_out(p, std::slice::from_ref(&m.id), m.rate(p.settings.fps))
 }
 
 pub fn camera_tape(
@@ -4319,6 +4384,8 @@ pub fn camera_tape(
                 path,
                 origin,
                 source_frame: from,
+                phase: 0.0,
+                per_frame: per_frame(m, s.fps),
                 frames: b - a,
                 image: image_of(m),
                 color_space: m.color_space,
@@ -4334,18 +4401,19 @@ pub fn camera_tape(
         );
         push_audio(&mut lane, sound_of(p, m, from, samples));
     }
-    Ok((tape_plan(p, end, video, lane), entries))
+    Ok((tape_plan(p, s.fps, end, video, lane), entries))
 }
 
 fn tape_plan(
     p: &Project,
+    fps: Rational,
     frames: i64,
     video: Vec<VideoPiece>,
     lane: Vec<AudioPiece>,
 ) -> RenderPlan {
     let s = &p.settings;
     RenderPlan {
-        fps: s.fps,
+        fps,
         width: s.width,
         height: s.height,
         sample_rate: s.sample_rate,
@@ -4440,15 +4508,15 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
     }
 }
 
-fn laid_out(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>)> {
+fn laid_out(p: &Project, media: &[String], fps: Rational) -> Result<(RenderPlan, Vec<TapeEntry>)> {
     let s = &p.settings;
-    let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
+    let sample = |t: i64| fps.frame_to_sample(t, s.sample_rate);
     let (mut video, mut lane, mut entries) = (Vec::new(), Vec::new(), Vec::new());
     let pool = p.pool();
     let mut t = 0;
     for id in media {
         let m = found(pool.get(id.as_str()).copied(), id)?;
-        let frames = p.media_frames(m);
+        let frames = p.frames_of(m, fps);
         if frames <= 0 {
             continue;
         }
@@ -4462,6 +4530,8 @@ fn laid_out(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     path,
                     origin,
                     source_frame: 0,
+                    phase: 0.0,
+                    per_frame: per_frame(m, fps),
                     frames,
                     image: image_of(m),
                     color_space: m.color_space,
@@ -4490,7 +4560,7 @@ fn laid_out(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
     if entries.is_empty() {
         return Err(Error::invalid("no media to show"));
     }
-    Ok((tape_plan(p, t, video, lane), entries))
+    Ok((tape_plan(p, fps, t, video, lane), entries))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -5196,6 +5266,8 @@ mod tests {
             plan.video[0],
             VideoPiece::Source {
                 source_frame: 10,
+                phase: 0.0,
+                per_frame: Rational::ONE,
                 frames: 50,
                 ..
             }

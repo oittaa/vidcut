@@ -3424,8 +3424,15 @@ impl Workspace {
             egui::Id::unique("media-drag"),
         ));
         let name = crate::gui::pool::elide(&name, 30);
+        let length = |n: i64| match &d.drag.gesture {
+            Gesture::Media { media, .. } => self
+                .project()
+                .and_then(|p| Some(p.clip_timecode(p.media(media)?, n)))
+                .unwrap_or_else(|| self.src_tc(n)),
+            _ => self.src_tc(n),
+        };
         let text = match range {
-            Some((a, b)) => format!("{name}  {}", self.src_tc(b - a)),
+            Some((a, b)) => format!("{name}  {}", length(b - a)),
             None => name,
         };
         let galley = painter.layout_no_wrap(text, FontId::proportional(12.0), Color32::WHITE);
@@ -4376,6 +4383,7 @@ mod tests {
             start,
             duration,
             source_in: 0,
+            phase: 0.0,
             video: true,
             audio: tail.map(|tail| ClipAudio {
                 stream: 0,

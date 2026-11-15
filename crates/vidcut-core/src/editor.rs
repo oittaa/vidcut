@@ -2380,7 +2380,12 @@ pub fn source_context(
 }
 
 pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeContext {
-    source_context(p, p.media_frames(media), &media.marks, playhead)
+    let (fps, drop_frame) = p.clip_rate(media);
+    TimeContext {
+        fps,
+        drop_frame,
+        ..source_context(p, p.clip_frames(media), &media.marks, playhead)
+    }
 }
 
 fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
@@ -2402,8 +2407,11 @@ fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
     let kept: Vec<Source> = sources
         .into_iter()
         .flat_map(|s| {
-            let left_out = p.media(&s.media).map_or(&[][..], |m| m.left_out.as_slice());
-            crate::model::uncovered(s.range.0, s.range.1, left_out)
+            let left_out = p
+                .media(&s.media)
+                .map(|m| p.left_out_frames(m, s.phase))
+                .unwrap_or_default();
+            crate::model::uncovered(s.range.0, s.range.1, &left_out)
                 .into_iter()
                 .map(move |range| Source { range, ..s.clone() })
         })
@@ -2439,6 +2447,7 @@ fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
         .map(|piece| Source {
             media: piece.media,
             range: piece.range,
+            phase: 0.0,
             video_only: params.video_only,
             audio_only: params.audio_only,
             track: params.track.clone(),
@@ -2522,6 +2531,7 @@ fn generator_source(p: &Project, params: &SourceParams, generator: Generator) ->
     Ok(Source {
         media: String::new(),
         range,
+        phase: 0.0,
         video_only: params.video_only,
         audio_only: params.audio_only,
         track: params.track.clone(),
@@ -2536,17 +2546,25 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
     let media = p
         .pooled(&params.media)
         .ok_or_else(|| Error::not_found(format!("no media {}", params.media)))?;
-    let frames = p.media_frames(media);
-    let range = match &params.range {
+    let frames = p.clip_frames(media);
+    let marked = match &params.range {
         None => (
             media.marks.mark_in.unwrap_or(0),
             media.marks.mark_out.unwrap_or(frames),
         ),
         Some(r) => media_context(p, media, None).range(r)?,
     };
+    let ((first, end), phase) = p.on_timeline(media, marked);
+    if marked.1 > marked.0 && end <= first {
+        return Err(Error::invalid(
+            "the marked range is shorter than one timeline frame",
+        ));
+    }
+    let range = (first, end.min(p.media_limit(media)));
     Ok(Source {
         media: params.media.clone(),
         range,
+        phase,
         video_only: params.video_only,
         audio_only: params.audio_only,
         track: params.track.clone(),
@@ -2924,7 +2942,7 @@ fn mutate(
                         .pooled(media)
                         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
                     let whole = TimeContext {
-                        end: p.file_frames(m),
+                        end: p.whole_clip_frames(m),
                         mark_in: None,
                         mark_out: None,
                         ..media_context(p, m, None)
@@ -3026,12 +3044,13 @@ fn mutate(
             if words.is_empty() {
                 return Err(Error::usage("name the words to leave out"));
             }
+            let m = p
+                .pooled(media)
+                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            let c = media_context(p, m, None);
             let mut spans = Vec::with_capacity(words.len());
             for w in words {
-                spans.push((
-                    resolve(p, &w.start, playhead)?,
-                    resolve(p, &w.end, playhead)?,
-                ));
+                spans.push((c.resolve(&w.start)?, c.resolve(&w.end)?));
             }
             let left_out = ops::leave_out(p, media, &spans, *back)?;
             json!({ "left_out": left_out })
@@ -3915,8 +3934,9 @@ fn mutate(
             let m = p
                 .pooled(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-            let at = media_context(p, m, None).resolve(at)?;
-            let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
+            let c = media_context(p, m, None);
+            let at = c.resolve(at)?;
+            let duration = duration.as_ref().map(|d| c.duration(d)).transpose()?;
             let k = ops::NewMarker {
                 kept: None,
                 at,
@@ -3966,7 +3986,15 @@ fn mutate(
             note,
             duration,
         } => {
-            let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
+            let on_source = p
+                .media
+                .iter()
+                .find(|m| m.markers.iter().any(|k| &k.id == marker));
+            let duration = match (duration, on_source) {
+                (Some(d), Some(m)) => Some(media_context(p, m, None).duration(d)?),
+                (Some(d), None) => Some(length(p, d)?),
+                (None, _) => None,
+            };
             ops::set_marker(
                 p,
                 marker,
@@ -5825,19 +5853,27 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         }
     };
     for c in &mut t.clips {
-        let tc = match (c.is_block(), c.timecoded) {
-            (false, true) => pool
-                .get(ids[&media_key(&c.media)].as_str())
-                .filter(|m| m.sequence.is_none())
-                .map_or(0, |m| m.timecode_at(from).round() as i64),
-            _ => 0,
+        let m = match c.is_block() {
+            true => None,
+            false => pool.get(ids[&media_key(&c.media)].as_str()).copied(),
+        };
+        let tc = match m.filter(|m| c.timecoded && m.sequence.is_none()) {
+            Some(m) => m.timecode_at(from),
+            None => 0.0,
         };
         c.timecoded = false;
         let (start, end) = (conv(c.start), conv(c.end()));
         if let Some((h, tl)) = c.audio {
             c.audio = Some((conv(c.start + h) - start, conv(c.end() + tl) - end));
         }
-        c.source_in = conv(c.source_in - tc);
+        let exact = (c.source_in as f64 + c.source_rest - tc) * ratio;
+        c.source_in = conv(c.source_in - tc.round() as i64);
+        c.source_rest = 0.0;
+        if let Some(per) = m.map(|m| to.over(m.rate(to))).filter(|per| per.den() != 1) {
+            let units = (exact * per.den() as f64).round() as i64;
+            c.source_in = units.div_euclid(per.den());
+            c.source_rest = units.rem_euclid(per.den()) as f64 / per.den() as f64;
+        }
         if let Some(k) = c.compound.as_mut() {
             k.frames = conv(k.frames).max(c.source_in + end - start);
         }
@@ -5998,6 +6034,7 @@ fn place_imported(
                 start,
                 duration: end - start,
                 source_in,
+                phase: 0.0,
                 video: c.video,
                 audio: None,
                 enabled: c.enabled,
@@ -6157,6 +6194,7 @@ fn place_imported(
             start,
             duration,
             source_in,
+            phase: c.source_rest,
             video: c.video,
             audio,
             enabled: c.enabled,
@@ -7552,7 +7590,7 @@ pub fn query(
                     v["source_frame"] = json!(c.source_at(at));
                     if ops::motion::takes(c) {
                         let clock = crate::render::FileClock::of(p, c);
-                        v["file_frame"] = json!(clock.file(c.source_at(at)));
+                        v["file_frame"] = json!(clock.frame(c.content_at(at)));
                     }
                     v
                 })
@@ -8073,7 +8111,7 @@ pub fn query(
                     .iter()
                     .map(|k| {
                         let mut v = serde_json::to_value(k).unwrap_or_default();
-                        v["at_tc"] = json!(p.settings.length_timecode(k.at));
+                        v["at_tc"] = json!(p.clip_timecode(m, k.at));
                         v
                     })
                     .collect::<Vec<_>>()
@@ -8370,10 +8408,10 @@ impl Target<'_> {
                 vec![Span {
                     pace: Default::default(),
                     start: 0,
-                    end: p.media_frames(m),
+                    end: p.clip_frames(m),
                     source_in: 0,
                     origin,
-                    fps,
+                    fps: m.rate(fps),
                 }]
             }
             Target::Clip(c) => {
@@ -8385,8 +8423,15 @@ impl Target<'_> {
 
     fn tc(&self, p: &Project, f: i64) -> String {
         match self {
-            Target::Media(_) => p.settings.length_timecode(f),
+            Target::Media(m) => p.clip_timecode(m, f),
             Target::Clip(_) => p.settings.timecode(f),
+        }
+    }
+
+    fn length_tc(&self, p: &Project, f: i64) -> String {
+        match self {
+            Target::Media(m) => p.clip_timecode(m, f),
+            Target::Clip(_) => p.settings.length_timecode(f),
         }
     }
 
@@ -8396,7 +8441,7 @@ impl Target<'_> {
             .map(|&(a, b)| {
                 json!({
                     "start": a, "end": b, "start_tc": self.tc(p, a), "end_tc": self.tc(p, b),
-                    "duration_tc": p.settings.length_timecode(b - a),
+                    "duration_tc": self.length_tc(p, b - a),
                 })
             })
             .collect()
@@ -8592,7 +8637,10 @@ fn silent_parts(
     let (stream, gain) = match target {
         Target::Media(_) => (0, crate::keyframes::Gain::flat(0.0)),
         Target::Clip(c) => match &c.audio {
-            Some(a) => (a.stream, crate::keyframes::Gain::of(a, 0.0, origin, fps)),
+            Some(a) => (
+                a.stream,
+                crate::keyframes::Gain::of(a, 0.0, origin + c.phase / fps, fps),
+            ),
             None => {
                 return Err(Error::invalid(format!(
                     "{} has no sound to find silence in",
@@ -9046,13 +9094,13 @@ fn scene_cuts(
 }
 
 fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
-    let frames = p.media_frames(m);
+    let frames = p.clip_frames(m);
     let mut v = json!({
         "id": m.id,
         "name": m.name,
         "path": m.path,
         "frames": frames,
-        "duration_tc": p.settings.length_timecode(frames),
+        "duration_tc": p.clip_timecode(m, frames),
         "video": m.info.video.as_ref().map(|v| {
             let (width, height) = v.display_size();
             json!({ "width": width, "height": height, "fps": v.fps.to_string(), "codec": v.codec,

@@ -53,6 +53,9 @@ vidcut timeline get --json
 
 - A number without a unit is an error.
   - The exception is a `duration` of `marks set` and `media marks set`. It is in frames, as in the Duration field of the viewer.
+- A time on a media item counts the frames of its video, at the frame rate of the video.
+  - This applies to its marks, markers, subclip limits, words and `--media` frames.
+  - A still or a sound file counts frames of the project.
 - Ids: media `m1`, clips `c1`, markers `k1`, subtitle cues `q1`.
 - Tracks: `V1`, `V2`, … from the bottom, `A1`, `A2`, … and subtitle tracks `S1`, `S2`, ….
   - When you remove a track, vidcut renumbers the tracks.

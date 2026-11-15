@@ -111,7 +111,6 @@ impl Span {
     pub fn of(piece: &VideoPiece, fps: Rational) -> Option<Self> {
         let VideoPiece::Source {
             path,
-            origin,
             frames,
             image,
             color_space,
@@ -129,35 +128,35 @@ impl Span {
                 color_space: *color_space,
             });
         }
-        let target = |pos| crate::export::video::target(fps, *origin, pos);
+        let clock = crate::export::video::Clock::of_piece(piece, fps)?;
         let (a, b) = (piece.position(0), piece.position(frames - 1));
         Some(Self {
             input,
-            from: target(a.min(b)),
-            to: target(a.max(b) + 1),
+            from: clock.target(a.min(b)),
+            to: clock.target(a.max(b) + 1),
             color_space: *color_space,
         })
     }
 }
 
 pub fn sampled(piece: &VideoPiece, fps: Rational) -> impl Iterator<Item = f64> + use<> {
-    let (origin, n) = match piece {
+    let clock = crate::export::video::Clock::of_piece(piece, fps);
+    let (still, n) = match piece {
         VideoPiece::Source {
             image: Some(Image::Still),
             ..
-        } => (f64::NEG_INFINITY, 1),
-        VideoPiece::Source { origin, frames, .. } => (*origin, *frames),
+        } => (true, 1),
+        VideoPiece::Source { frames, .. } => (false, *frames),
         VideoPiece::Black { .. }
         | VideoPiece::Generated { .. }
         | VideoPiece::Flat { .. }
         | VideoPiece::Mix { .. }
-        | VideoPiece::Titled { .. } => (0.0, 0),
+        | VideoPiece::Titled { .. } => (false, 0),
     };
-    let still = origin == f64::NEG_INFINITY;
     let piece = piece.clone();
-    (0..n).map(move |k| {
-        let pos = if still { 0 } else { piece.position(k) };
-        crate::export::video::target(fps, origin, pos)
+    (0..n).filter_map(move |k| match still {
+        true => Some(f64::NEG_INFINITY),
+        false => Some(clock?.target(piece.position(k))),
     })
 }
 
