@@ -32,7 +32,7 @@ pub(super) struct GridCell {
 }
 
 pub(super) fn grid_pictures(area: Rect, p: &Project, count: usize) -> Vec<Rect> {
-    let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
+    let aspect = p.width() as f32 / p.height().max(1) as f32;
     let cols = (1..=count).find(|c| c * c >= count).unwrap_or(1);
     let size = vec2(
         area.width() / cols as f32,
@@ -272,6 +272,9 @@ impl Workspace {
                     }
                     r
                 }
+                Header::Title if mode == ViewerMode::Timeline && !ws.sync_grid_on() => {
+                    ws.timeline_selection(ui)
+                }
                 Header::Title => {
                     ui.add(egui::Label::new(RichText::new(ws.viewer_title()).strong()).truncate())
                 }
@@ -319,9 +322,9 @@ impl Workspace {
             Pos2::new(avail.max.x, area.bottom()),
         );
         self.viewer_meter(ui, meter);
-        let aspect = self.project().map_or(16.0 / 9.0, |p| {
-            p.settings.width as f32 / p.settings.height.max(1) as f32
-        });
+        let aspect = self
+            .project()
+            .map_or(16.0 / 9.0, |p| p.width() as f32 / p.height().max(1) as f32);
         let ppp = ui.ctx().pixels_per_point();
         let one_picture =
             !dynamic && trim.is_none() && mode != ViewerMode::MultiSource && !sync_grid;
@@ -863,7 +866,7 @@ impl Workspace {
         mode: TwoUpMode,
         cells: &[(i64, &str)],
     ) {
-        let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
+        let aspect = p.width() as f32 / p.height().max(1) as f32;
         ui.allocate_rect(area, Sense::hover());
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
@@ -1084,7 +1087,7 @@ impl Workspace {
             };
             let at = |f: i64| base + if on_tape { p.tape_frame(m, f) } else { f };
             let per = match on_tape {
-                true => vidcut_core::render::per_frame(m, p.settings.fps),
+                true => vidcut_core::render::per_frame(m, p.settings.fps, p.fps()),
                 false => Rational::ONE,
             };
             let len = p.clip_frames(m);

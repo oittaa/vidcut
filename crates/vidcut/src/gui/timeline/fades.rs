@@ -212,7 +212,7 @@ impl Workspace {
         let Some((e, x)) = self.selected_transition() else {
             return;
         };
-        let Some(fps) = self.project().map(|p| p.settings.fps) else {
+        let Some(fps) = self.project().map(|p| p.fps()) else {
             return;
         };
         self.timeline.fade_dialog = Some(FadeDialog {
@@ -313,7 +313,7 @@ impl Workspace {
         };
         let Some((fps, width)) = self
             .project()
-            .map(|p| (p.settings.fps, f64::from(p.settings.width.max(1))))
+            .map(|p| (p.fps(), f64::from(p.width().max(1))))
         else {
             return false;
         };
@@ -433,7 +433,7 @@ impl Workspace {
         let Some(mut d) = self.timeline.fade_dialog.take() else {
             return;
         };
-        let Some(fps) = self.project().map(|p| p.settings.fps) else {
+        let Some(fps) = self.project().map(|p| p.fps()) else {
             return;
         };
         let mut in_frames = self.timeline.fade_in_frames;

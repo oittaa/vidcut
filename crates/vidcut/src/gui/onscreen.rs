@@ -217,7 +217,7 @@ impl Workspace {
             return Vec::new();
         };
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
-        let size = (p.settings.width, p.settings.height);
+        let size = (p.width(), p.height());
         let (w, h) = (f64::from(size.0), f64::from(size.1));
         let scale = vec2(picture.width() / w as f32, picture.height() / h as f32);
         let wanted = self.title_wanted();

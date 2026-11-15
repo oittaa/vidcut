@@ -1399,7 +1399,7 @@ impl Workspace {
                 let media = to_transcribe(p, s, heard, (a, b));
                 (duration(p, &media), files(media.len()))
             }
-            false => ((b - a) as f64 / p.settings.fps.as_f64(), "The mix".into()),
+            false => ((b - a) as f64 / p.fps().as_f64(), "The mix".into()),
         }
     }
 }

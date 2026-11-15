@@ -362,7 +362,7 @@ fn pixels_of(p: &Project, c: &Clip, frame: (f64, f64)) -> (f64, f64) {
 }
 
 fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Option<Shown> {
-    let (w, h) = (f64::from(p.settings.width), f64::from(p.settings.height));
+    let (w, h) = (f64::from(p.width()), f64::from(p.height()));
     let run = Run {
         at: at - c.start,
         of: c.duration,

@@ -171,7 +171,7 @@ pub fn ruler(
     compact: bool,
 ) {
     painter.rect_filled(rect, CornerRadius::ZERO, theme::colors().panel_dark);
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let f = fps.as_f64();
     let s = step(scale, f, if compact { 110.0 } else { 90.0 });
     let (a, b) = scale.visible(rect.left(), rect.right());
@@ -188,7 +188,7 @@ pub fn ruler(
             painter.text(
                 pos2(x + 3.0, rect.top() + 1.0),
                 Align2::LEFT_TOP,
-                p.settings.timecode(frame),
+                p.timecode(frame),
                 FontId::monospace(if compact { 9.0 } else { 10.0 }),
                 theme::colors().text_dim,
             );
@@ -276,7 +276,7 @@ pub fn track(
     };
     painter.rect_filled(rect, CornerRadius::ZERO, fill);
     let (a, b) = scale.visible(rect.left(), rect.right());
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let shown = &t.clips[clips_in(t, a - 1, b + 1)];
     let span = |c: &Clip| (c.start, c.end());
     let picked = |c: &Clip| selected.contains(c.id.as_str());
@@ -388,7 +388,7 @@ fn clip(
         }
         if let Some(tex) = assets.titles.get(c.id.as_str()) {
             let inner = video.shrink2(vec2(1.0, 1.0));
-            let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
+            let aspect = p.width() as f32 / p.height().max(1) as f32;
             let w = (inner.height() * aspect).min(inner.width());
             painter.with_clip_rect(inner).image(
                 *tex,

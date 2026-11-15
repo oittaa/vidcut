@@ -808,7 +808,7 @@ impl Workspace {
             return;
         };
         let (shown, clips, missing) = self.shown_source(&p);
-        let fps = p.settings.fps.as_f64();
+        let fps = p.fps().as_f64();
         let pause = (fps * PAUSE).round() as i64;
         let preferred = self.snap.fillers.clone();
         let want = shown.clone().map(|shown| Asked {

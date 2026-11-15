@@ -2147,7 +2147,7 @@ fn frames(p: &Project, text: &str, shown: &str, dropped: i64) -> Option<f64> {
         text,
         shown,
         dropped,
-        p.settings.fps.frame_digits(),
+        p.fps().frame_digits(),
     )?)
     .ok()?;
     let n = p.time_context(None).duration(&spec).ok()?;
@@ -2158,12 +2158,12 @@ fn rate(p: &Project, c: &Clip) -> f64 {
     p.media(&c.media)
         .and_then(|m| m.info.video.as_ref())
         .filter(|v| !v.still)
-        .map_or(p.settings.fps, |v| v.fps)
+        .map_or(p.fps(), |v| v.fps)
         .as_f64()
 }
 
 pub(super) fn shape(p: &Project, c: &Clip) -> Shape {
-    let (w, h) = (p.settings.width.max(1), p.settings.height.max(1));
+    let (w, h) = (p.width().max(1), p.height().max(1));
     let frame = [f64::from(w), f64::from(h)];
     let size = p
         .media(&c.media)
@@ -2758,9 +2758,9 @@ fn drag(
                 .custom_parser(typed)
                 .min_size(vec2(FIELD_WIDTH, ui.spacing().interact_size.y));
             if let Some((p, dropped)) = look.timecode {
-                let now = p.settings.length_timecode(before.round() as i64);
+                let now = p.length_timecode(before.round() as i64);
                 drag = drag
-                    .custom_formatter(|n, _| p.settings.length_timecode(n.round() as i64))
+                    .custom_formatter(|n, _| p.length_timecode(n.round() as i64))
                     .custom_parser(move |t| frames(p, t, &now, dropped));
             }
             ui.add(drag)

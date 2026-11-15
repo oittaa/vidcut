@@ -2339,7 +2339,7 @@ impl Workspace {
     }
 
     fn ruler(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip, plot: Plot) {
-        let now = p.settings.timecode(plot.play);
+        let now = p.timecode(plot.play);
         let (rect, resp) = row(ui, RULER_H, plot, |ui| {
             ui.label(RichText::new(now).small().color(theme::colors().text_dim));
         });
@@ -2348,7 +2348,7 @@ impl Workspace {
         let colors = theme::colors();
         painter.rect_filled(rect, 2.0, colors.panel_dark);
         painter.rect_filled(clip_band(map, clip, rect), 0.0, colors.track);
-        let step = tick_step(map.ppf(), p.settings.fps.as_f64()).max(1);
+        let step = tick_step(map.ppf(), p.fps().as_f64()).max(1);
         let font = TextStyle::Small.resolve(ui.style());
         let mut t = (map.lo / step as f64).ceil() as i64 * step;
         while (t as f64) <= map.hi {
@@ -2360,7 +2360,7 @@ impl Workspace {
             painter.text(
                 pos2(x + 2.0, rect.top() + 1.0),
                 Align2::LEFT_TOP,
-                p.settings.timecode(t),
+                p.timecode(t),
                 font.clone(),
                 colors.text_dim,
             );
@@ -3331,7 +3331,7 @@ impl Workspace {
         let key = lane.keys[i];
         let y = (lane.extra.len() == lane.keys.len()).then(|| lane.extra[i]);
         let paired = paired(mark.param) && y.is_some();
-        let at = p.settings.timecode(clip.key_time(key.frame).round() as i64);
+        let at = p.timecode(clip.key_time(key.frame).round() as i64);
         let mut gone = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new(lane_name(mark.param)).strong());

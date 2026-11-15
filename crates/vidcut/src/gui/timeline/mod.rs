@@ -770,7 +770,7 @@ impl Workspace {
         });
         let lower_resp = ui.allocate_rect(lower_rect, Sense::click_and_drag());
 
-        let fps = p.settings.fps.as_f64();
+        let fps = p.fps().as_f64();
         let end = shape.end();
         let span = ((end as f64 * 1.01).max(fps * 10.0)).ceil() as i64;
         let upper_scale = Scale::fit(upper_rect.left(), upper_rect.width(), span);
@@ -3264,7 +3264,7 @@ impl Workspace {
             .iter()
             .map(|c| c.start)
             .fold(f64::INFINITY, f64::min);
-        let fps = p.settings.fps.as_f64();
+        let fps = p.fps().as_f64();
         let frame = |t: f64| ((t - first) * fps).round() as i64;
         let cues: Vec<(i64, i64)> = read
             .cues
@@ -3493,7 +3493,7 @@ impl Workspace {
         if fired.pressed(Action::SelectNothing) {
             self.timeline.set_edit(None);
         }
-        let second = p.settings.fps.as_f64().round() as i64;
+        let second = p.fps().as_f64().round() as i64;
         let nudge = [
             (Action::TrimLeft, -1),
             (Action::TrimRight, 1),

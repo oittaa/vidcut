@@ -176,8 +176,8 @@ impl SyncClips {
         let gaps = self.gaps();
         let before = gaps.iter().rev().find(|(at, _)| *at <= frame);
         let hidden = before.map_or(0, |(_, hidden)| *hidden);
-        let drop = p.settings.counts_drop_frame();
-        format_timecode(self.ruler + frame + hidden, p.settings.fps, 0, drop)
+        let drop = p.counts_drop_frame();
+        format_timecode(self.ruler + frame + hidden, p.fps(), 0, drop)
     }
 
     fn hear(&mut self) {
@@ -564,7 +564,7 @@ impl Workspace {
         let top = rect.top() + 18.0;
         let left = Rect::from_min_max(pos2(rect.left(), top), pos2(middle, rect.bottom()));
         let right = Rect::from_min_max(pos2(middle, top), rect.max);
-        let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
+        let aspect = p.width() as f32 / p.height().max(1) as f32;
         let mut pictures = grid_pictures(left, p, cells.len());
         if s.viewed < s.rows.len() {
             let big = GridCell {
@@ -815,7 +815,7 @@ impl Workspace {
     }
 
     fn sync_clips_ruler(&self, painter: &egui::Painter, ruler: Rect, per_frame: f32, p: &Project) {
-        let fps = p.settings.fps.as_f64();
+        let fps = p.fps().as_f64();
         let s = &self.sync_clips;
         let last = ((ruler.width() / per_frame) as i64).max(s.frames(p));
         let every = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]

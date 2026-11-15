@@ -135,13 +135,11 @@ pub fn run_with(
             sample_rate,
             channels,
             drop_frame,
-            start_tc,
         } => {
             let format = Format {
                 fps: fps.clone(),
                 size: size(*width, *height)?,
                 drop_frame: *drop_frame,
-                start_tc: start_tc.clone(),
                 sample_rate: *sample_rate,
                 channels: *channels,
             };
@@ -434,7 +432,7 @@ pub fn render(
     }
     let mut r = match &envelope.request {
         Request::ExportPlan(params) if export::timeline_format(&params.output).is_some() => {
-            let name = export::timeline_name(path);
+            let name = export::timeline_name(project, path);
             answer(export::timeline(project, &name, params, None, None)?)
         }
         Request::ExportStart(params) if export::timeline_format(&params.output).is_some() => {
@@ -558,7 +556,7 @@ pub fn export_media(
     started: &mut dyn FnMut(Vec<(std::path::PathBuf, i64)>) -> Result<()>,
 ) -> Result<Response> {
     if export::timeline_format(&params.output).is_some() {
-        let name = export::timeline_name(path);
+        let name = export::timeline_name(p, path);
         let plan = export::timeline(p, &name, params, None, None)?;
         let frames = plan["outputs"][0]["frames"].as_i64().unwrap_or(0);
         started(vec![(params.output.clone(), frames)])?;

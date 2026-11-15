@@ -48,6 +48,7 @@ mod sync_clips;
 mod theme;
 mod tiles;
 mod timeline;
+mod timelines;
 mod title_browser;
 mod titles;
 mod transcription;

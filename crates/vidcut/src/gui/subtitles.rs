@@ -411,8 +411,8 @@ fn edge_field(
 }
 
 fn typed_frame(p: &Project, text: &str, base: i64, (playhead, dropped): (i64, i64)) -> Option<i64> {
-    let shown = p.settings.timecode(base);
-    let digits = p.settings.fps.frame_digits();
+    let shown = p.timecode(base);
+    let digits = p.fps().frame_digits();
     let spec = super::viewer::timecode_input(text, &shown, dropped, digits)?;
     let sign = match text.trim().chars().next() {
         Some(c @ ('+' | '-')) => c.to_string(),
@@ -1655,7 +1655,7 @@ impl Workspace {
                 .max(wide("Time In/Out".into())),
             cps: wide("000".into()).max(wide("CPS".into())),
         };
-        let fps = p.settings.fps;
+        let fps = p.fps();
         let mut picked = None;
         let room = dialog::scroll_room(ui);
         list_heading(ui, ui.available_width() - room, &cols, &font);

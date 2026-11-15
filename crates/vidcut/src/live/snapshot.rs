@@ -357,7 +357,7 @@ impl Snapshot {
 
     pub fn viewer_fps(&self) -> Rational {
         let p = self.project();
-        let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);
+        let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.fps());
         match (self.viewer, p, self.source_media.as_deref()) {
             (ViewerMode::SourceClip, Some(p), Some(m)) => p.media(m).map_or(fps, |m| m.rate(fps)),
             _ => fps,
@@ -474,11 +474,7 @@ pub fn timecode_view<'a>(
 ) -> TimecodeView<'a> {
     let entry = source_entry(viewer, tape, playhead);
     let (fps, drop, start_tc) = match project {
-        Some(p) => (
-            p.settings.fps,
-            p.settings.counts_drop_frame(),
-            p.settings.start_tc,
-        ),
+        Some(p) => (p.fps(), p.counts_drop_frame(), p.start_tc()),
         None => (Rational::new(30, 1).expect("valid"), false, 0),
     };
     let clip = match viewer {
@@ -493,7 +489,7 @@ pub fn timecode_view<'a>(
     let shown = project.zip(media).and_then(|(p, m)| Some((p, p.media(m)?)));
     let (source_fps, source_drop) = shown.map_or((fps, drop), |(p, m)| p.clip_rate(m));
     let source_tc = shown.map_or(0, |(_, m)| m.timecode_at(source_fps).round() as i64);
-    let tape_per = shown.map_or(Rational::ONE, |(p, _)| p.settings.fps.over(source_fps));
+    let tape_per = shown.map_or(Rational::ONE, |(p, _)| p.fps().over(source_fps));
     let (fps, drop) = match viewer {
         ViewerMode::SourceClip => (source_fps, source_drop),
         ViewerMode::SourceTape | ViewerMode::MultiSource | ViewerMode::Timeline => (fps, drop),

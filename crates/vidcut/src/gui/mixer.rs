@@ -188,7 +188,7 @@ fn source_peaks(w: &vidcut_av::waveform::Waveform, a: f64, b: f64) -> Vec<f32> {
 
 fn track_channels(p: &Project, t: &Track, at: i64, waveforms: &Waves) -> Vec<f32> {
     let n = project_channels(p);
-    let fps = p.settings.fps.as_f64();
+    let fps = p.fps().as_f64();
     let mut level = vec![0.0; n];
     let fades = vidcut_core::otio::transitions::cross_fades(p, t);
     for c in &t.clips {
@@ -336,9 +336,7 @@ impl Workspace {
             return vec![0.0; n];
         };
         let m = p.media(media);
-        let fps = m
-            .map_or(p.settings.fps, |m| m.rate(p.settings.fps))
-            .as_f64();
+        let fps = m.map_or(p.fps(), |m| m.rate(p.settings.fps)).as_f64();
         let origin = m.map_or(0.0, |m| m.origin());
         let s = frame as f64 / fps + origin;
         map_channels(&source_peaks(w, s, s + 1.0 / fps), n)
