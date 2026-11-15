@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 # The toolchain pinned in rust-toolchain.toml (installed by rustup). The
 # MSRV-aware resolver picks dependency versions that build with it.
-rust-version = "1.99"
+rust-version = "1.100"
 license = "MIT"
 
 [workspace.dependencies]
