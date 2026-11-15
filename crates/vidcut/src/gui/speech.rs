@@ -617,6 +617,7 @@ fn heard_files(
             if c.enabled
                 && !sound.muted
                 && !c.is_block()
+                && p.pooled(&c.media).is_some()
                 && to > a
                 && from < b
                 && !skip.contains(&c.media)

@@ -11,6 +11,7 @@ use vidcut_core::model::{
     TitleKind, TitlePart, TitleShadow, TitleStyle,
 };
 use vidcut_core::rich::Shift;
+use vidcut_core::slate::Coverage;
 use vidcut_core::subtitles::{Piece, Shown, rgb};
 
 const CHORD_LIMIT: f32 = 1.0 / 6.0;
@@ -118,6 +119,51 @@ fn fonts() -> &'static Mutex<Fonts> {
             system,
             cache: SwashCache::new(),
         })
+    })
+}
+
+pub fn line_coverage(text: &str, size: f32, [middle, baseline]: [f32; 2]) -> Option<Coverage> {
+    let mut held = fonts().lock().unwrap_or_else(|e| e.into_inner());
+    let f = &mut *held;
+    f.limit_glyphs();
+    let attrs = Attrs::new()
+        .family(Family::SansSerif)
+        .weight(Weight::SEMIBOLD);
+    let attrs = with_face_weight(&f.system, attrs);
+    let mut buffer = Buffer::new(&mut f.system, Metrics::new(size, size));
+    buffer.set_text(text, &attrs, Shaping::Advanced, None);
+    buffer.shape_until_scroll(&mut f.system, false);
+    let run = buffer.layout_runs().next()?;
+    let left = middle - run.line_w / 2.0;
+    let glyphs: Vec<(Vec<u8>, zeno::Placement, i32, i32)> = (run.glyphs.iter())
+        .filter_map(|g| letter(g, (left, baseline), f))
+        .map(|t| {
+            let (mask, at) = masked(&t, None);
+            (mask, at, t.x + at.left, t.y - at.top)
+        })
+        .filter(|(_, at, ..)| at.width > 0 && at.height > 0)
+        .collect();
+    let x0 = glyphs.iter().map(|g| g.2).min()?;
+    let y0 = glyphs.iter().map(|g| g.3).min()?;
+    let x1 = glyphs.iter().map(|g| g.2 + g.1.width as i32).max()?;
+    let y1 = glyphs.iter().map(|g| g.3 + g.1.height as i32).max()?;
+    let width = (x1 - x0) as usize;
+    let mut alpha = vec![0.0; width * (y1 - y0) as usize];
+    for (mask, at, gx, gy) in &glyphs {
+        let w = at.width as usize;
+        for (j, row) in mask.chunks(w).enumerate() {
+            let start = (gy - y0) as usize * width + (gx - x0) as usize + j * width;
+            for (d, &m) in alpha[start..start + w].iter_mut().zip(row) {
+                let a = f32::from(m) / 255.0;
+                *d = a + *d * (1.0 - a);
+            }
+        }
+    }
+    Some(Coverage {
+        left: x0,
+        top: y0,
+        width,
+        alpha,
     })
 }
 

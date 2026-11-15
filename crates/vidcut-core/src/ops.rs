@@ -2323,7 +2323,7 @@ pub fn leave_out(
     back: bool,
 ) -> Result<Vec<(i64, i64)>> {
     let m = p
-        .media(media)
+        .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
     let frames = p.media_frames(m);
     for &(a, b) in spans {
@@ -2587,7 +2587,7 @@ pub fn add_markers(p: &mut Project, markers: Vec<NewMarker>) -> Result<Vec<Strin
 
 pub fn add_source_marker(p: &mut Project, media: &str, k: NewMarker) -> Result<String> {
     let m = p
-        .media(media)
+        .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
     let frames = p.media_limit(m);
     if k.at >= frames {
@@ -2677,7 +2677,7 @@ pub fn create_subclip(
     bin: Option<&str>,
 ) -> Result<String> {
     let m = p
-        .media(media)
+        .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
     if m.subtitles.is_some() {
         return Err(Error::invalid(format!("{media} is a subtitle file")));
@@ -2801,7 +2801,7 @@ fn shift_compound(k: &mut Compound, media: &str, by: (i64, i64)) {
 
 pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> Result<()> {
     let m = p
-        .media(media)
+        .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
     let Some((first, end)) = p.subclip_span(m) else {
         return Err(Error::invalid(format!("{media} is not a subclip")));
@@ -2885,7 +2885,7 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
 
 pub fn use_full_extents(p: &mut Project, media: &str) -> Result<()> {
     let m = p
-        .media(media)
+        .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
     let frames = p.file_frames(m);
     set_subclip_limits(p, media, (0, frames))
@@ -2898,7 +2898,7 @@ pub fn set_media_marks(
     mark_out: Option<Option<i64>>,
 ) -> Result<()> {
     let m = p
-        .media(media)
+        .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
     let frames = p.media_limit(m);
     let mut marks = m.marks.clone();
@@ -3260,25 +3260,9 @@ pub fn remove_bin(p: &mut Project, path: &str) -> Result<()> {
         return Err(Error::not_found(format!("no bin {path:?}")));
     }
     p.bins.retain(|b| !within(b, path));
-    p.media.retain(|m| !within(&m.bin, path));
     p.groups.retain(|g| !within(&g.bin, path));
     p.compounds.retain(|k| !within(&k.bin, path));
     Ok(())
-}
-
-pub fn bin_users(p: &Project, path: &str) -> Vec<String> {
-    let inside = p.media.iter().filter(|m| within(&m.bin, path));
-    let media: Vec<&str> = inside.map(|m| m.id.as_str()).collect();
-    let clips = media.iter().flat_map(|m| p.clips_using(m)).map(|c| &c.id);
-    let outside = p.compounds.iter().filter(|k| !within(&k.bin, path));
-    let held = outside.filter(|k| media.iter().any(|m| k.holds(m)));
-    let mut users: Vec<String> = Vec::new();
-    for id in clips.chain(held.map(|k| &k.id)) {
-        if !users.contains(id) {
-            users.push(id.clone());
-        }
-    }
-    users
 }
 
 pub fn rename_bin(p: &mut Project, path: &str, to: &str) -> Result<()> {
@@ -3331,7 +3315,7 @@ pub fn move_media(p: &mut Project, ids: &[String], bin: &str) -> Result<()> {
         let m = p
             .media
             .iter_mut()
-            .find(|m| &m.id == id)
+            .find(|m| &m.id == id && !m.removed)
             .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
         m.bin = bin.to_string();
     }

@@ -485,6 +485,11 @@ pub struct Media {
     /// with `media`), in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<Marker>,
+    /// It is not in the pool: `media.remove` took it out while clips or
+    /// compound clips still use it. Those clips are offline. Adding its file
+    /// again puts it back. Left out while it is in the pool.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removed: bool,
 }
 
 /// The part of a file that a subclip is, in seconds from the file's first
@@ -6811,6 +6816,31 @@ impl Project {
 
     pub fn media(&self, id: &str) -> Option<&Media> {
         self.media.iter().find(|m| m.id == id)
+    }
+
+    pub fn pool_media(&self) -> impl Iterator<Item = &Media> {
+        self.media.iter().filter(|m| !m.removed)
+    }
+
+    pub fn pooled(&self, id: &str) -> Option<&Media> {
+        self.media(id).filter(|m| !m.removed)
+    }
+
+    pub fn offline_in<'a>(&'a self, clips: impl IntoIterator<Item = &'a Clip>) -> Vec<&'a Media> {
+        let gone: Vec<&Media> = self.media.iter().filter(|m| m.removed).collect();
+        let mut out: Vec<&Media> = Vec::new();
+        for c in clips {
+            for m in gone.iter().filter(|m| c.uses(&m.id)) {
+                if !out.iter().any(|o| o.id == m.id) {
+                    out.push(m);
+                }
+            }
+        }
+        out
+    }
+
+    pub fn is_used(&self, media: &str) -> bool {
+        self.clips_using(media).next().is_some() || self.compounds.iter().any(|k| k.holds(media))
     }
 
     pub fn pool(&self) -> HashMap<&str, &Media> {

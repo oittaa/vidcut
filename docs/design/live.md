@@ -221,11 +221,15 @@ The bar and the Jobs button:
 
 ## Missing media
 
-- `MissingWatch` runs `vidcut-missing-media`. It looks at the paths of the media and of their proxies after each project change, and at a fixed interval.
+- `MissingWatch` runs `vidcut-missing-media`. It looks at the paths of the pool media and of their proxies after each project change, and at a fixed interval.
   - Why a thread: a stalled network drive can hold a file check for long.
 - It sends `Msg::Missing` when either set changes. The end of a proxy job makes it look again at once.
 - Missing means absent, or a path from another system.
 - The UI marks missing media in the pool and the timeline. It offers Relink Media (`media.relink`), and the viewer shows Media Offline ([spec §3](../spec.md#3-media-pool-ch-34-pp-653675)).
+- The clips of removed media (`Media::removed`) are offline in the same way. Their files are not watched.
+  - The timeline paints them in the offline color.
+  - The plan plays them with no sound, and their picture is Media Offline (`render::flatten`).
+  - The timeline viewer shows that picture with no label on it. A source viewer shows their name (`offline_name`).
 - The pool marks a lost proxy LOST PROXY.
 - While proxies play, a proxy that is lost or back reloads the plans of the viewers. Thus they play the original or the proxy again.
 - `Live::make_proxies` makes a lost proxy again when the automatic rules pick its media ([spec D41](../spec.md#12-decisions-on-gaps-and-contradictions)).

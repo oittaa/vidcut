@@ -15,7 +15,7 @@ use vidcut_core::export::{
 };
 use vidcut_core::fingerprint::short_digest;
 use vidcut_core::looks::checked_name;
-use vidcut_core::model::Generator;
+use vidcut_core::model::{Clip, Generator};
 use vidcut_core::ops::titles::default_length;
 use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan};
@@ -624,6 +624,7 @@ pub struct Prepared {
     pub preset: Option<String>,
     pub outputs: Vec<Output>,
     pub encoder_changed: Option<String>,
+    pub offline: Vec<String>,
 }
 
 fn sanitize(name: &str) -> String {
@@ -738,6 +739,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     let ext = settings.container.extension();
     let drop_frame = p.settings.counts_drop_frame();
     let mut outputs = Vec::new();
+    let offline;
     if params.per_clip {
         let template = params.name.as_deref().unwrap_or("{index:03}-{name}");
         let clips: Vec<_> = proj
@@ -749,6 +751,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             .collect();
         let mut clips = clips;
         clips.sort();
+        offline = p.offline_in(clips.iter().filter_map(|(_, id, _)| p.clip(id)));
         for (i, (start, id, media)) in clips.iter().enumerate() {
             let plan = render::flatten_clip(&proj, id)?;
             let name = file_name(template, i + 1, &plan.name, id, media);
@@ -766,6 +769,11 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             return Err(Error::invalid("no clips in the export range"));
         }
     } else {
+        let heard = |c: &&Clip| {
+            let (x, y) = c.audio_range().unwrap_or((c.start, c.end()));
+            c.start.min(x) < b && c.end().max(y) > a
+        };
+        offline = p.offline_in(p.tracks.iter().flat_map(|t| &t.clips).filter(heard));
         outputs.push(Output {
             plan: render::flatten(&proj, a, b)?,
             path: params.output.clone(),
@@ -798,6 +806,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         preset: preset_name,
         outputs,
         encoder_changed: None,
+        offline: offline.iter().map(|m| m.name.clone()).collect(),
     })
 }
 
@@ -1067,6 +1076,12 @@ pub fn notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
         .map(|why| json!({ "code": "encoder_changed", "message": why }))
         .collect();
     notes.extend(hdr_notes(prepared, available));
+    if !prepared.offline.is_empty() {
+        notes.push(json!({
+            "code": "media_offline",
+            "message": format!("Media Offline in the export: {}", prepared.offline.join(", ")),
+        }));
+    }
     notes
 }
 
@@ -1512,7 +1527,7 @@ pub fn frame(
         }
         (Some(id), None) => {
             let m = p
-                .media(id)
+                .pooled(id)
                 .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
             let v = m
                 .info

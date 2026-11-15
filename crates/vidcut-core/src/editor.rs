@@ -848,6 +848,7 @@ impl Editor {
             warnings.push(otio::transitions::dropped(dropped));
         }
         warnings.extend(ops::motion::settle(&mut working));
+        drop_unused_removed(&mut working);
         let problems = validate::violations(&working);
         if !problems.is_empty() {
             return Err(Error::internal(format!(
@@ -1115,6 +1116,7 @@ impl Editor {
             warnings.push(otio::transitions::dropped(dropped));
         }
         warnings.extend(ops::motion::settle(&mut working));
+        drop_unused_removed(&mut working);
         let problems = validate::violations(&working);
         if !problems.is_empty() {
             return Err(Error::conflict(format!(
@@ -2168,14 +2170,14 @@ fn transcript_json(stream: u32, s: &Speech) -> Value {
 }
 
 fn pool_item<'a>(p: &'a Project, media: &str) -> Result<&'a Media> {
-    p.media(media)
+    p.pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))
 }
 
 fn pool_item_mut<'a>(p: &'a mut Project, media: &str) -> Result<&'a mut Media> {
     p.media
         .iter_mut()
-        .find(|m| m.id == media)
+        .find(|m| m.id == media && !m.removed)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))
 }
 
@@ -2453,13 +2455,11 @@ fn clip_ids(ids: &[String]) -> Value {
     v
 }
 
-fn remove_media(p: &mut Project, media: &str) -> Result<()> {
-    let users: Vec<String> = p.clips_using(media).map(|c| c.id.clone()).collect();
-    if !users.is_empty() {
-        ops::delete(p, &users, false)?;
+fn remove_media(p: &mut Project, media: &str) {
+    if let Some(m) = p.media.iter_mut().find(|m| m.id == media) {
+        m.removed = true;
+        m.bin.clear();
     }
-    p.compounds.retain(|k| !k.holds(media));
-    p.media.retain(|m| m.id != media);
     for g in &mut p.groups {
         g.dropped.retain(|m| m != media);
         for row in &mut g.rows {
@@ -2469,7 +2469,17 @@ fn remove_media(p: &mut Project, media: &str) -> Result<()> {
     }
     p.groups.retain(|g| !g.rows.is_empty());
     forget_tape_marks(p, media);
-    Ok(())
+}
+
+fn drop_unused_removed(p: &mut Project) {
+    if !p.media.iter().any(|m| m.removed) {
+        return;
+    }
+    let unused: HashSet<String> = (p.media.iter())
+        .filter(|m| m.removed && !p.is_used(&m.id))
+        .map(|m| m.id.clone())
+        .collect();
+    p.media.retain(|m| !unused.contains(&m.id));
 }
 
 fn forget_tape_marks(p: &mut Project, media: &str) {
@@ -2524,7 +2534,7 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
         return generator_source(p, params, generator);
     }
     let media = p
-        .media(&params.media)
+        .pooled(&params.media)
         .ok_or_else(|| Error::not_found(format!("no media {}", params.media)))?;
     let frames = p.media_frames(media);
     let range = match &params.range {
@@ -2651,9 +2661,11 @@ fn mutate(
                     false => env.probe(path)?,
                 };
                 let still = still_secs(p, env)?;
-                let id = add_media(p, &mut files, probed, still);
-                if !ids.contains(&id) {
-                    ids.push(id);
+                let (id, subclips) = add_media(p, &mut files, probed, still);
+                for id in std::iter::once(id).chain(subclips) {
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
                 }
             }
             if let Some(bin) = bin {
@@ -2710,21 +2722,14 @@ fn mutate(
             ops::add_bin(p, path)?;
             Value::Null
         }
-        Request::BinsRemove { path, force } => {
+        Request::BinsRemove { path } => {
             if path.is_empty() || !ops::has_bin(p, path) {
                 return Err(Error::not_found(format!("no bin {path:?}")));
             }
-            let users = ops::bin_users(p, path);
-            if !force && !users.is_empty() {
-                return Err(Error::invalid(format!(
-                    "bin {path:?} holds media used by {}; pass force to delete those clips too",
-                    users.join(", ")
-                )));
-            }
-            let inside = p.media.iter().filter(|m| ops::within(&m.bin, path));
+            let inside = p.pool_media().filter(|m| ops::within(&m.bin, path));
             let media: Vec<String> = inside.map(|m| m.id.clone()).collect();
             for m in &media {
-                remove_media(p, m)?;
+                remove_media(p, m);
             }
             ops::remove_bin(p, path)?;
             Value::Null
@@ -2785,19 +2790,10 @@ fn mutate(
             };
             json!(crate::multicam::pick(p, media, need(at, "at")?)?)
         }
-        Request::MediaRemove { media, force } => {
-            p.media(media)
+        Request::MediaRemove { media } => {
+            p.pooled(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-            let users: Vec<String> = p.clips_using(media).map(|c| c.id.clone()).collect();
-            let pooled = p.compounds.iter().filter(|k| k.holds(media));
-            let held: Vec<String> = pooled.map(|k| k.id.clone()).collect();
-            if !force && !(users.is_empty() && held.is_empty()) {
-                return Err(Error::invalid(format!(
-                    "{media} is used by {}; pass force to delete those clips too",
-                    [users, held].concat().join(", ")
-                )));
-            }
-            remove_media(p, media)?;
+            remove_media(p, media);
             Value::Null
         }
         Request::MediaRelink {
@@ -2816,7 +2812,7 @@ fn mutate(
             duration,
         } => {
             let m = p
-                .media(media)
+                .pooled(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             let c = media_context(p, m, None);
             let mut i = mark_in.as_ref().map(|t| c.resolve(t)).transpose()?;
@@ -2879,7 +2875,7 @@ fn mutate(
             let m = p
                 .media
                 .iter_mut()
-                .find(|m| &m.id == media)
+                .find(|m| &m.id == media && !m.removed)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             m.name = name.clone();
             Value::Null
@@ -2895,7 +2891,7 @@ fn mutate(
                 return Err(Error::usage("give range or full_extents, not both"));
             }
             let m = p
-                .media(media)
+                .pooled(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             let c = media_context(p, m, None);
             let span = match (range, *full_extents) {
@@ -2925,7 +2921,7 @@ fn mutate(
                 (None, true) => ops::use_full_extents(p, media)?,
                 (Some(r), false) => {
                     let m = p
-                        .media(media)
+                        .pooled(media)
                         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
                     let whole = TimeContext {
                         end: p.file_frames(m),
@@ -2962,6 +2958,9 @@ fn mutate(
                 sharpness: *sharpness,
                 upscaler: *upscaler,
             };
+            for id in media.to_vec() {
+                pool_item(p, &id)?;
+            }
             let notes = [camera, created, scene, shot, take, comment];
             if color.is_none()
                 && notes.iter().all(|note| note.is_none())
@@ -3914,7 +3913,7 @@ fn mutate(
             duration,
         } => {
             let m = p
-                .media(media)
+                .pooled(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             let at = media_context(p, m, None).resolve(at)?;
             let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
@@ -4709,7 +4708,7 @@ fn mutate(
                 (Some(path), None) => path.clone(),
                 (None, Some(id)) => {
                     let m = p
-                        .media(id)
+                        .pooled(id)
                         .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
                     if m.subtitles.is_none() {
                         return Err(Error::invalid(format!("{id} isn't a subtitle file")));
@@ -5201,7 +5200,7 @@ fn mutate(
             speaker,
             person,
         } => {
-            if p.media(media).is_none() {
+            if p.pooled(media).is_none() {
                 return Err(Error::not_found(format!("no media {media}")));
             }
             let voice = crate::speakers::voice(media, *stream, *speaker);
@@ -5219,7 +5218,7 @@ fn mutate(
             end,
             person,
         } => {
-            if p.media(media).is_none() {
+            if p.pooled(media).is_none() {
                 return Err(Error::not_found(format!("no media {media}")));
             }
             if !(start.is_finite() && end.is_finite() && end > start) {
@@ -5278,7 +5277,8 @@ impl PoolFiles {
             .get(path)?
             .iter()
             .map(|&i| &p.media[i])
-            .find(|m| &m.sequence == sequence)
+            .filter(|m| &m.sequence == sequence)
+            .min_by_key(|m| m.removed)
     }
 
     fn note(&mut self, p: &Project, i: usize) {
@@ -5288,9 +5288,26 @@ impl PoolFiles {
     }
 }
 
-fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia, still: f64) -> String {
-    if let Some(existing) = files.find(p, &probed.path, &probed.sequence) {
-        return existing.id.clone();
+fn add_media(
+    p: &mut Project,
+    files: &mut PoolFiles,
+    probed: ProbedMedia,
+    still: f64,
+) -> (String, Vec<String>) {
+    let removed: Vec<(String, bool)> = (p.media.iter())
+        .filter(|m| m.removed && m.path == probed.path && m.sequence == probed.sequence)
+        .map(|m| (m.id.clone(), m.subclip.is_some()))
+        .collect();
+    let mut subclips = Vec::new();
+    for (id, subclip) in removed {
+        if bring_back(p, &id, &probed) && subclip {
+            subclips.push(id);
+        }
+    }
+    if let Some(existing) = files.find(p, &probed.path, &probed.sequence)
+        && !existing.removed
+    {
+        return (existing.id.clone(), subclips);
     }
     first_video_sets_format(p, &probed.info);
     let still_secs = probed
@@ -5337,9 +5354,28 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia, still:
         subtitles: probed.subtitles,
         subclip: None,
         markers: Vec::new(),
+        removed: false,
     });
     files.note(p, p.media.len() - 1);
-    id
+    (id, subclips)
+}
+
+fn bring_back(p: &mut Project, id: &str, probed: &ProbedMedia) -> bool {
+    let mut back = p.clone();
+    let Some(m) = back.media.iter_mut().find(|m| m.id == id) else {
+        return false;
+    };
+    m.removed = false;
+    m.size = probed.size;
+    m.mtime_ns = probed.mtime_ns;
+    m.info = probed.info.clone();
+    m.fingerprint = probed.fingerprint.clone();
+    m.subtitles = probed.subtitles.clone();
+    if !validate::violations(&back).is_empty() {
+        return false;
+    }
+    *p = back;
+    true
 }
 
 fn still_secs(p: &Project, env: &dyn Env) -> Result<f64> {
@@ -5425,10 +5461,13 @@ fn add_folder(
             }
         };
         let still = still_secs(p, env)?;
-        let id = add_media(p, files, probed, still);
-        ops::move_media(p, std::slice::from_ref(&id), bin)?;
-        if !out.media.contains(&id) {
-            out.media.push(id);
+        let (id, subclips) = add_media(p, files, probed, still);
+        let added: Vec<String> = std::iter::once(id).chain(subclips).collect();
+        ops::move_media(p, &added, bin)?;
+        for id in added {
+            if !out.media.contains(&id) {
+                out.media.push(id);
+            }
         }
     }
     for sub in &folder.folders {
@@ -5475,8 +5514,7 @@ fn relink(
     let ids = match media {
         Some(m) => m.to_vec(),
         None => p
-            .media
-            .iter()
+            .pool_media()
             .filter(|m| !env.present(m))
             .map(|m| m.id.clone())
             .collect(),
@@ -5484,7 +5522,7 @@ fn relink(
     let targets: Vec<Media> = ids
         .iter()
         .map(|id| {
-            p.media(id)
+            p.pooled(id)
                 .cloned()
                 .ok_or_else(|| Error::not_found(format!("no media {id}")))
         })
@@ -5733,7 +5771,7 @@ fn find_media<'a>(
         match probed {
             Some(probed) => {
                 let still = still_secs(p, env)?;
-                let id = add_media(p, &mut files, probed, still);
+                let (id, _) = add_media(p, &mut files, probed, still);
                 if found.insert(id.clone()) {
                     media.push(id.clone());
                 }
@@ -6795,13 +6833,21 @@ fn join_pool(
                 .find(|x| x.path == m.path && x.subclip == m.subclip),
             None => files.find(p, &m.path, &m.sequence),
         };
+        let bin = match m.bin.as_str() {
+            "" => bin.to_string(),
+            own => format!("{bin}/{own}"),
+        };
         let id = match same {
+            Some(x) if x.removed => {
+                let id = x.id.clone();
+                ops::add_bin(p, &bin)?;
+                let x = p.media.iter_mut().find(|x| x.id == id).expect("found");
+                x.removed = false;
+                x.bin = bin;
+                id
+            }
             Some(x) => x.id.clone(),
             None => {
-                let bin = match m.bin.as_str() {
-                    "" => bin.to_string(),
-                    own => format!("{bin}/{own}"),
-                };
                 ops::add_bin(p, &bin)?;
                 first_video_sets_format(p, &m.info);
                 let id = p.alloc_media_id();
@@ -6816,6 +6862,7 @@ fn join_pool(
                     markers,
                     bin,
                     proxy: None,
+                    removed: false,
                     ..m.clone()
                 });
                 files.note(p, p.media.len() - 1);
@@ -7239,8 +7286,7 @@ fn proxy_longest(width: Option<u32>, default: u32) -> Result<u32> {
 fn proxy_targets(p: &Project, media: Option<&OneOrMany<String>>) -> Result<Vec<String>> {
     let mut ids = match media {
         None => p
-            .media
-            .iter()
+            .pool_media()
             .filter(|m| m.info.video.is_some() && !m.is_still())
             .map(|m| m.id.clone())
             .collect(),
@@ -7253,7 +7299,7 @@ fn proxy_targets(p: &Project, media: Option<&OneOrMany<String>>) -> Result<Vec<S
             }
             for id in &ids {
                 let m = p
-                    .media(id)
+                    .pooled(id)
                     .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
                 if m.info.video.is_none() {
                     return Err(Error::invalid(format!(
@@ -7373,7 +7419,7 @@ fn proxy_remove(
                 ));
             }
             for id in &ids {
-                p.media(id)
+                p.pooled(id)
                     .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
             }
             ids
@@ -7410,7 +7456,7 @@ pub fn query(
         Request::ProjectSummary {} => json!({
             "rev": p.rev,
             "settings": p.settings,
-            "media": p.media.len(),
+            "media": p.pool_media().count(),
             "clips": p.tracks.iter().map(|t| t.clips.len()).sum::<usize>(),
             "tracks": p.tracks.iter().map(|t| &t.id).collect::<Vec<_>>(),
             "duration": p.end(),
@@ -7426,15 +7472,14 @@ pub fn query(
         }),
         Request::MediaList {} => {
             json!(
-                p.media
-                    .iter()
+                p.pool_media()
                     .map(|m| media_json(p, m, env, &env.proxy_dir()))
                     .collect::<Vec<_>>()
             )
         }
         Request::MediaDetails { media } => {
             let m = p
-                .media(media)
+                .pooled(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             let mut v = serde_json::to_value(env.media_details(m)?).unwrap_or_default();
             v["media"] = json!(m.id);
@@ -7476,7 +7521,7 @@ pub fn query(
         }
         Request::MediaGet { media } => {
             let m = p
-                .media(media)
+                .pooled(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             let mut v = media_json(p, m, env, &env.proxy_dir());
             v["info"] = serde_json::to_value(&m.info).unwrap_or_default();
@@ -7728,7 +7773,7 @@ pub fn query(
             let mut notes: Vec<String> = Vec::new();
             for id in media.to_vec() {
                 let m = p
-                    .media(&id)
+                    .pooled(&id)
                     .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
                 match m.info.audio.len() {
                     0 => return Err(Error::invalid(format!("{id} has no sound"))),
@@ -8021,7 +8066,7 @@ pub fn query(
         ),
         Request::MarkersList { media: Some(media) } => {
             let m = p
-                .media(media)
+                .pooled(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             json!(
                 m.markers
@@ -8384,7 +8429,7 @@ fn targets<'a>(
         (Some(_), Some(_)) => Err(Error::usage("give `media` or `clips`, not both")),
         (Some(id), None) => {
             let m = p
-                .media(id)
+                .pooled(id)
                 .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
             Ok(vec![Target::Media(m)])
         }

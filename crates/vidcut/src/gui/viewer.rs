@@ -124,7 +124,7 @@ fn offline_name(
     mode: ViewerMode,
     position: i64,
     source: Option<&str>,
-) -> Option<String> {
+) -> Option<(String, bool)> {
     let media = match mode {
         ViewerMode::Timeline => {
             let c = p
@@ -138,15 +138,15 @@ fn offline_name(
                         .filter(|c| c.enabled && c.video)
                 })?;
             if c.is_offline() {
-                return Some(c.name.clone().unwrap_or_default());
+                return Some((c.name.clone().unwrap_or_default(), false));
             }
             c.media.as_str()
         }
         ViewerMode::SourceClip | ViewerMode::SourceTape | ViewerMode::MultiSource => source?,
     };
     p.media(media)
-        .filter(|_| missing.contains(media))
-        .map(|m| m.name.clone())
+        .filter(|m| m.removed || missing.contains(media))
+        .map(|m| (m.name.clone(), m.removed && mode == ViewerMode::Timeline))
 }
 
 impl Workspace {
@@ -455,7 +455,7 @@ impl Workspace {
         {
             self.title_controls(ui, &area_resp, picture);
         }
-        if let Some(name) = offline {
+        if let Some((name, false)) = offline {
             painter.rect_filled(picture, CornerRadius::ZERO, theme::colors().offline);
             let text = RichText::new(format!("Media Offline\n{name}"))
                 .size(18.0)

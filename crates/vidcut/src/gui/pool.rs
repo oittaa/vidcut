@@ -1080,7 +1080,7 @@ impl Workspace {
         let tab = Rect::from_min_size(body.min - vec2(0.0, 7.0), vec2(26.0, 9.0));
         painter.rect_filled(tab, CornerRadius::same(2), color);
         painter.rect_filled(body, CornerRadius::same(3), color);
-        let count = p.media.iter().filter(|m| within(&m.bin, path)).count();
+        let count = p.pool_media().filter(|m| within(&m.bin, path)).count();
         for (y, text, color) in [
             (2.0, elide(leaf(path), 28), theme::colors().text),
             (16.0, format!("{count} clip(s)"), theme::colors().text_dim),
@@ -1099,7 +1099,7 @@ impl Workspace {
     }
 
     fn folder_row(&mut self, ui: &mut egui::Ui, p: &Project, path: &str) {
-        let count = p.media.iter().filter(|m| within(&m.bin, path)).count();
+        let count = p.pool_media().filter(|m| within(&m.bin, path)).count();
         let r = ui
             .selectable_label(
                 false,
@@ -1135,16 +1135,8 @@ impl Workspace {
                 });
                 ui.close();
             }
-            let used = self
-                .project()
-                .is_some_and(|p| !vidcut_core::ops::bin_users(p, path).is_empty());
-            let label = if used {
-                "Delete Bin (and its clips)"
-            } else {
-                "Delete Bin"
-            };
-            if ui.button(label).clicked() {
-                self.send("bins.remove", json!({ "path": path, "force": used }));
+            if ui.button("Delete Bin").clicked() {
+                self.send("bins.remove", json!({ "path": path }));
                 ui.close();
             }
         });
@@ -1810,7 +1802,7 @@ impl Workspace {
                     self.bin_interaction(&r, b);
                 }
                 1 => {
-                    let count = p.media.iter().filter(|m| within(&m.bin, b)).count();
+                    let count = p.pool_media().filter(|m| within(&m.bin, b)).count();
                     ui.label(dim(format!("{count} clip(s)")));
                 }
                 _ => {
@@ -2222,16 +2214,8 @@ impl Workspace {
             }
             ui.separator();
         }
-        let used = self.project().is_some_and(|p| {
-            p.clips_using(&m.id).next().is_some() || p.compounds.iter().any(|k| k.holds(&m.id))
-        });
-        let label = if used {
-            "Remove from Pool (and its clips)"
-        } else {
-            "Remove from Pool"
-        };
-        if ui.button(label).clicked() {
-            self.send("media.remove", json!({ "media": m.id, "force": used }));
+        if ui.button("Remove from Pool").clicked() {
+            self.remove_media(std::slice::from_ref(&m.id));
             ui.close();
         }
     }
@@ -2271,45 +2255,16 @@ impl Workspace {
         let Some(ids) = self.removing.clone() else {
             return;
         };
-        let clips = self.project().map_or(0, |p| {
-            p.tracks
-                .iter()
-                .flat_map(|t| &t.clips)
-                .filter(|c| ids.iter().any(|m| c.uses(m)))
-                .count()
-        });
-        let pooled = self.project().map_or(0, |p| {
-            p.compounds
-                .iter()
-                .filter(|k| ids.iter().any(|m| k.holds(m)))
-                .count()
-        });
         let mut done = None;
         let modal = egui::Modal::new(egui::Id::unique("remove-media")).show(ctx, |ui| {
-            ui.set_max_width(420.0);
+            ui.set_max_width(super::dialog::WIDTH);
             let items = match ids.len() {
                 1 => "1 item".to_string(),
                 n => format!("{n} items"),
             };
             ui.label(RichText::new(format!("Remove {items} from Media?")).strong());
-            if clips > 0 {
-                let it = if ids.len() == 1 { "it" } else { "them" };
-                let clips = match clips {
-                    1 => format!("The 1 clip on the timeline that uses {it} goes too."),
-                    n => format!("The {n} clips on the timeline that use {it} go too."),
-                };
-                ui.label(clips);
-            }
-            if pooled > 0 {
-                ui.label(match pooled {
-                    1 => "1 compound clip in the pool goes too.".to_string(),
-                    n => format!("{n} compound clips in the pool go too."),
-                });
-            }
-            ui.label(dim("The files stay on disk."));
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                if ui.button("Remove").clicked() {
+            super::dialog::footer(ui, |ui| {
+                if super::dialog::main_button(ui, "Remove", true) {
                     done = Some(true);
                 }
                 if ui.button("Cancel").clicked() {
@@ -2320,24 +2275,29 @@ impl Workspace {
         if done.is_none() && super::workspace::escape_cancels(ctx, &modal) {
             done = Some(false);
         }
-        if done == Some(true) {
-            let remove = |id: &String| json!({ "media": id, "force": true });
-            match ids.as_slice() {
-                [id] => self.send("media.remove", remove(id)),
-                _ => self.send(
-                    "apply",
-                    json!({
-                        "label": format!("Remove {} items from Media", ids.len()),
-                        "commands": ids
-                            .iter()
-                            .map(|id| json!({ "method": "media.remove", "params": remove(id) }))
-                            .collect::<Vec<_>>(),
-                    }),
-                ),
-            }
+        if done.is_none() {
+            return;
         }
-        if done.is_some() {
-            self.removing = None;
+        self.removing = None;
+        if done == Some(true) {
+            self.remove_media(&ids);
+        }
+    }
+
+    pub(super) fn remove_media(&mut self, ids: &[String]) {
+        match ids {
+            [] => {}
+            [id] => self.send("media.remove", json!({ "media": id })),
+            _ => self.send(
+                "apply",
+                json!({
+                    "label": format!("Remove {} items from Media", ids.len()),
+                    "commands": ids
+                        .iter()
+                        .map(|id| json!({ "method": "media.remove", "params": { "media": id } }))
+                        .collect::<Vec<_>>(),
+                }),
+            ),
         }
     }
 

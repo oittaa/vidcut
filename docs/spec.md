@@ -271,8 +271,17 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - An image file, or a GIF or WebP of one frame, comes in as a still (D38).
   - Numbered image files come in as one clip (D39).
 - **Remove** (p. 654):
-  - Delete or Backspace removes the pool entry, after a confirmation.
-  - Only the pool entry goes. The files on disk stay.
+  - Delete or Backspace removes the selected items from the pool, after a confirmation.
+  - Remove from Pool on the right-click menu asks no question (measured in Resolve Studio 21.2).
+  - Only the pool items go. The files on disk stay.
+  - The clips and the compound clips that use an item stay, on the timeline and in the pool (measured in Resolve Studio 21.2).
+  - Those clips are offline. They are red on the timeline, and they play no sound.
+  - Their picture is Media Offline, in a dark red 16:9 box with a warning sign. The box is in the middle of a black frame (measured in Resolve Studio 21.2).
+    - The box fits the frame of the timeline. The transform and the crop of the clip do not apply.
+    - The opacity and the composite mode of the clip apply. In a compound clip, the picture is the same.
+  - Before an export of a timeline with offline clips, vidcut asks for a confirmation (p. 4130). The export then shows them as Media Offline.
+  - Import of the same file puts the item back in the pool. Its clips are then online again (measured in Resolve Studio 21.2).
+  - vidcut also puts back the removed subclips of that file. This is not measured: the scripts of Resolve cannot make a subclip.
 - **Views** (pp. 638, 661–665):
   - **Thumbnail:** a hover scrubs the clip, and I/O mark its source In/Out. A click on the lower-right corner of a thumbnail shows its metadata (deviation X60).
   - **Filmstrip:** each clip is a row of its pictures, as wide as the pool, under its name. Hover and I/O work as on a thumbnail.
@@ -325,7 +334,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - A path at the top (Master › Interviews › Day 1), the Bins menu and a double-click open any bin.
   - New Bin is on the File menu (Shift+Ctrl+N), on the Bins menu and on the right-click menu of the pool.
   - The menu of a bin has Rename Bin and Delete Bin.
-  - Delete Bin deletes the bin and the bins in it (p. 377). It also deletes the media in them. Media that clips use goes as in deviation X6.
+  - Delete Bin deletes the bin and the bins in it (p. 377). It also removes the media in them, as Remove does. The compound clips and the synced groups in them go too.
+  - Delete Bin asks no question, and the clips that use the media of the bin stay, offline (measured in Resolve Studio 21.2).
   - Clips and bins dragged onto a bin, or onto a level of the path, move into it.
   - The menu of a clip has Move to Bin and Create Bin With Selected Clips (p. 656).
   - Imports go into the open bin (p. 377).

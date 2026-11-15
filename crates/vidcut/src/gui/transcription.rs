@@ -774,7 +774,7 @@ impl Workspace {
             let mut clips: Vec<(i64, String)> = Vec::new();
             let mut missing: Vec<String> = Vec::new();
             for c in p.tracks.iter().flat_map(|t| &t.clips) {
-                if c.audio.is_none() || c.is_block() {
+                if c.audio.is_none() || c.is_block() || p.pooled(&c.media).is_none() {
                     continue;
                 }
                 if self.snap.transcribed.contains(&c.media) {

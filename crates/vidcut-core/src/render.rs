@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -276,6 +276,9 @@ pub enum Generated {
     FourColorGradient { gradient: Gradient, frame: i64 },
     /// A picture that a rule draws from the size of the timeline.
     Chart { chart: Chart },
+    /// The picture of a clip whose media is out of the pool: Media Offline
+    /// on dark red, in a 16:9 box in the middle of a black frame.
+    Offline,
 }
 
 impl Generated {
@@ -332,6 +335,7 @@ impl Generated {
                 Pattern::of_gradient(gradient, (frame + k) as f64)
             }
             Self::Chart { chart } => Pattern::Chart(*chart),
+            Self::Offline => Pattern::Offline,
         }
     }
 }
@@ -2542,6 +2546,40 @@ fn split_at_fades(runs: Vec<(i64, i64)>, fades: &[Fading]) -> Vec<(i64, i64)> {
     out
 }
 
+fn offline(p: &Project) -> Option<Project> {
+    let gone: HashSet<&str> = (p.media.iter())
+        .filter(|m| m.removed)
+        .map(|m| m.id.as_str())
+        .collect();
+    if gone.is_empty() {
+        return None;
+    }
+    let mut out = p.clone();
+    for t in &mut out.tracks {
+        slated(&mut t.clips, &gone);
+    }
+    Some(out)
+}
+
+fn slated(clips: &mut [Clip], gone: &HashSet<&str>) {
+    for c in clips {
+        if gone.contains(c.media.as_str()) {
+            c.audio = None;
+            c.picture = (c.picture.take())
+                .map(|p| Picture {
+                    composite_mode: p.composite_mode,
+                    opacity: p.opacity,
+                    opacity_keys: p.opacity_keys,
+                    ..Picture::default()
+                })
+                .filter(|p| !p.is_usual());
+        }
+        for t in c.compound.iter_mut().flat_map(|k| &mut k.tracks) {
+            slated(&mut t.clips, gone);
+        }
+    }
+}
+
 fn expanded(p: &Project) -> Option<(Project, Within)> {
     let holds = |p: &Project| p.tracks.iter().any(|t| t.clips.iter().any(plays_inside));
     if !holds(p) {
@@ -3270,6 +3308,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     if a < 0 || b <= a {
         return Err(Error::invalid(format!("nothing to render in {a}..{b}")));
     }
+    let offline = offline(p);
+    let p = offline.as_ref().unwrap_or(p);
     let expanded = expanded(p);
     let (p, within) = match &expanded {
         Some((q, w)) => (q, Some(w)),
@@ -3454,6 +3494,14 @@ impl VideoPlan<'_> {
             });
         }
         let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
+        if m.removed {
+            return Ok(VideoPiece::Generated {
+                frames: y - x,
+                picture: Generated::Offline,
+                placed: placed_of(c, nest, true, crossed, x),
+                excluded: false,
+            });
+        }
         let (path, origin) = origin_of(m);
         let mut placed = placed_of(c, nest, fills, crossed, x);
         if let Some(own) = placed.first_mut().filter(|o| o.clip == c.id) {

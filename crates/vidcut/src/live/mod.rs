@@ -2619,8 +2619,7 @@ impl Live {
         };
         let busy = self.proxies_encoding(p);
         let ids: Vec<&str> = p
-            .media
-            .iter()
+            .pool_media()
             .filter(|m| only.is_none_or(|a| a.contains(&m.id)))
             .filter(|m| {
                 let made = m.fresh_proxy().is_some() && !self.lost_proxies.contains_key(&m.id);
@@ -3835,12 +3834,10 @@ impl Live {
         let folder = AvEnv::for_project(open.store.path()).proxy_dir();
         let p = open.project();
         self.missing_watch.watch(
-            p.media
-                .iter()
+            p.pool_media()
                 .map(|m| (m.id.clone(), m.path.clone()))
                 .collect(),
-            p.media
-                .iter()
+            p.pool_media()
                 .filter_map(|m| Some((m.id.clone(), m.proxy.as_ref()?.path_in(&folder))))
                 .collect(),
         );
@@ -3867,7 +3864,7 @@ impl Live {
             history,
         });
         let p = &*project;
-        let media: HashSet<String> = p.media.iter().map(|m| m.id.clone()).collect();
+        let media: HashSet<String> = p.pool_media().map(|m| m.id.clone()).collect();
         self.selection.media.retain(|m| media.contains(m));
         self.selection.clips.retain(|c| p.clip(c).is_some());
         self.selection.cues.retain(|c| p.cue(c).is_some());
@@ -4681,7 +4678,7 @@ impl Live {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
         let m = p
-            .media(media)
+            .pooled(media)
             .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
         let position = match at {
             Some(t) => {
@@ -4914,7 +4911,7 @@ impl Live {
             .transpose()?;
         if let Some(m) = &media {
             for id in m.to_vec() {
-                p.media(&id)
+                p.pooled(&id)
                     .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
             }
         }

@@ -74,7 +74,10 @@ pub enum Request {
 
     /// Add files to the project's media (probing them); returns their media ids.
     /// A subtitle file (SRT, WebVTT, TTML) becomes a subtitle item, with no
-    /// pictures or sound, for `subtitles.import` with `media`.
+    /// pictures or sound, for `subtitles.import` with `media`. The file of a
+    /// removed item brings that item and its removed subclips back, with
+    /// their ids, and their clips are online again. A file that changed so
+    /// that those clips no longer fit it comes in as a new item.
     #[serde(rename = "media.add")]
     MediaAdd {
         paths: Vec<PathBuf>,
@@ -256,15 +259,11 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<TimeSpec>,
     },
-    /// Remove from the pool and from its synced groups. `force` also deletes
-    /// the clips and the compound clips that use it. A group with no file
-    /// left goes too.
+    /// Remove from the pool and from its synced groups. A group with no file
+    /// left goes too. The clips and the compound clips that use it stay, and
+    /// its clips are offline. Adding its file again brings them back.
     #[serde(rename = "media.remove")]
-    MediaRemove {
-        media: String,
-        #[serde(default)]
-        force: bool,
-    },
+    MediaRemove { media: String },
     /// Point pool items at their files again (re-probed): one at `path`, or
     /// each found by name in the `search` folders and their subfolders.
     /// A file found is relinked only if it is the item's file (the same
@@ -695,15 +694,10 @@ pub enum Request {
     #[serde(rename = "bins.add")]
     BinsAdd { path: String },
     /// Delete a bin, the bins inside it and all that they hold: media,
-    /// compound clips and synced groups. The files stay on disk. When the
-    /// timeline or a compound clip elsewhere uses that media, it needs
-    /// `force`, which also deletes those clips, as `media.remove` does.
+    /// compound clips and synced groups. The files stay on disk. Its media
+    /// goes as `media.remove` removes it: the clips that use it stay.
     #[serde(rename = "bins.remove")]
-    BinsRemove {
-        path: String,
-        #[serde(default)]
-        force: bool,
-    },
+    BinsRemove { path: String },
     /// Rename or move a bin, with everything inside it.
     #[serde(rename = "bins.rename")]
     BinsRename { path: String, to: String },

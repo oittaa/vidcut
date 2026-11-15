@@ -59,20 +59,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - vidcut does not upload, and it has no settings for a Blackmagic HyperDeck. The Export dialog has H.264 for other needs.
   - The two TikTok resolutions are not measured yet.
 
-## X6. Removing media deletes the clips that use it
-
-- **Resolve:**
-  - These are measurements in Resolve Studio 21.2:
-    - Remove Selected Clip on media that timeline clips use asks no question. The pool item goes.
-    - The clips of that media on the timeline stay, offline.
-    - A compound clip that holds a clip of that media stays in the pool and on the timeline.
-- **vidcut:**
-  - `media.remove` removes media. It needs `force` when clips or compound clips use the media.
-  - `force` also deletes those clips, and the compound clips that hold the media, on the timeline and in the pool.
-  - Delete Bin (`bins.remove`) removes the media of the bin in the same way.
-- **Why:**
-  - A clip on the timeline needs its media in the pool. vidcut has no clip without a pool item.
-
 ## X8. The source viewer counts project frames
 
 - **Resolve:**
@@ -1179,7 +1165,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **vidcut:**
   - `media.remove` also takes the file out of its groups. A group with no file left goes too.
 - **Why:**
-  - A group in vidcut holds only files that are in the project.
+  - A group in vidcut holds only files that are in the pool.
 
 ## X129. Generators have the correct picture where Resolve has a fault
 
