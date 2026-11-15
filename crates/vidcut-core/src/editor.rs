@@ -28,7 +28,7 @@ use crate::request::{
 };
 use crate::retime;
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
-use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode};
+use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode, rescale};
 use crate::transcript::{self, Speech};
 use crate::transcripts;
 use crate::validate;
@@ -1945,9 +1945,9 @@ fn clip_speech(
         let timed = transcript::spoken(said).map_err(Error::invalid)?;
         let (_, origin) = p.media_origin(&c.media)?;
         let spans = Span::of_clip(c, origin, fps);
-        let words = spans.iter().flat_map(|span| {
-            analysis::words_between(span, (from, to), &timed, m.skipped(p.settings.fps))
-        });
+        let words = spans
+            .iter()
+            .flat_map(|span| analysis::words_between(span, (from, to), &timed, m.skipped()));
         for (i, start, end) in words {
             let middle = (start + end) / 2;
             if (a..b).contains(&middle) {
@@ -2085,9 +2085,7 @@ fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(
                 known.extend(
                     spans
                         .iter()
-                        .flat_map(|span| {
-                            analysis::words_in(span, &timed, m.skipped(p.settings.fps))
-                        })
+                        .flat_map(|span| analysis::words_in(span, &timed, m.skipped()))
                         .map(|(_, a, b)| (a, b)),
                 );
             }
@@ -4588,16 +4586,10 @@ fn mutate(
             for (id, media, frames, rate) in looks {
                 let look = Look {
                     side: *size,
-                    ..subject_look(&media, media.origin(p.settings.fps), rate, frames)
+                    ..subject_look(&media, rate, frames)
                 };
                 let found = env.subjects(&media, *subject, look, *download)?;
-                let tracks = crate::motion::joined(
-                    &found,
-                    media.origin(p.settings.fps),
-                    rate,
-                    frames,
-                    &rules,
-                );
+                let tracks = crate::motion::joined(&found, media.origin(), rate, frames, &rules);
                 let to = (*subject, tracker.as_deref());
                 out.push(ops::motion::found(p, id, to, tracks)?);
             }
@@ -5283,9 +5275,7 @@ fn first_video_sets_format(p: &mut Project, info: &MediaInfo) {
     if p.settings.auto_format
         && let Some(v) = info.video.as_ref().filter(|v| !v.still)
     {
-        let rate = p.settings.fps;
         p.settings.set_fps(v.fps);
-        subclips_to_rate(p, rate);
         let drop = v.fps.has_drop_frame() && info.timecode.is_some_and(|t| t.drop_frame);
         p.settings
             .set_drop_frame(drop)
@@ -5746,15 +5736,6 @@ fn adopt_size(p: &mut Project, v: &VideoInfo) {
     p.settings.auto_format = false;
 }
 
-fn rescale(f: i64, from: Rational, to: Rational) -> i64 {
-    if from == to {
-        return f;
-    }
-    let n = i128::from(f) * i128::from(from.den()) * i128::from(to.num());
-    let d = i128::from(from.num()) * i128::from(to.den());
-    (2 * n + d).div_euclid(2 * d) as i64
-}
-
 struct Import<'a> {
     path: Option<&'a Path>,
     doc: Option<&'a Value>,
@@ -5846,20 +5827,6 @@ fn groups_to_rate(p: &mut Project, from: Rational) {
             c.hidden = rescale(c.hidden, from, to);
             c.head = rescale(c.head, from, to);
             c.tail = rescale(c.tail, from, to);
-        }
-    }
-}
-
-fn subclips_to_rate(p: &mut Project, from: Rational) {
-    let to = p.settings.fps;
-    let whole: Vec<i64> = p.media.iter().map(|m| p.whole_clip_frames(m)).collect();
-    for (m, whole) in p.media.iter_mut().zip(whole) {
-        if m.rate(from) == m.rate(to) {
-            continue;
-        }
-        if let Some(s) = m.subclip.as_mut() {
-            s.start = rescale(s.start, from, to).min(whole - 1).max(0);
-            s.end = rescale(s.end, from, to).min(whole).max(s.start + 1);
         }
     }
 }
@@ -6791,7 +6758,6 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             p.settings.set_fps(rate);
         }
         groups_to_rate(p, rate);
-        subclips_to_rate(p, rate);
         p.settings.auto_format = false;
     }
     if t.fps != p.settings.fps {
@@ -6890,10 +6856,10 @@ fn join_pool(
     let mut files = PoolFiles::of(p);
     for m in meta.media.iter().filter(|m| wanted.contains(&m.id)) {
         let same = match m.subclip {
-            Some(_) => p
+            Some(s) => p
                 .media
                 .iter()
-                .find(|x| x.path == m.path && x.subclip == m.subclip),
+                .find(|x| x.path == m.path && x.subclip.is_some_and(|own| own.same_part(s))),
             None => files.find(p, &m.path, &m.sequence),
         };
         let bin = match m.bin.as_str() {
@@ -7156,9 +7122,9 @@ pub fn models_after(
 
 pub type SubjectLook = (Media, Subject, Look, bool);
 
-fn subject_look(media: &Media, origin: f64, fps: f64, frames: (i64, i64)) -> Look {
+fn subject_look(media: &Media, fps: f64, frames: (i64, i64)) -> Look {
     let seen = if media.is_still() { (0, 1) } else { frames };
-    crate::motion::look(origin, fps, seen)
+    crate::motion::look(media.origin(), fps, seen)
 }
 
 fn track_start(
@@ -7235,7 +7201,7 @@ pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> V
             let (frames, rate) = ops::motion::file_frames(p, c);
             let look = Look {
                 side: *size,
-                ..subject_look(media, media.origin(p.settings.fps), rate, frames)
+                ..subject_look(media, rate, frames)
             };
             Some((media.clone(), *subject, look, *download))
         })
@@ -7278,7 +7244,6 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
         let rate = p.settings.fps;
         p.settings.set_fps(fps);
         groups_to_rate(p, rate);
-        subclips_to_rate(p, rate);
         p.settings.auto_format = false;
     }
     if set.width.is_some() || set.height.is_some() {
@@ -7958,9 +7923,7 @@ pub fn query(
                     let tongue = filler_language(language, speech);
                     let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
                     let placed: Vec<_> = (target.spans(p)?.iter())
-                        .flat_map(|span| {
-                            analysis::words_in(span, &timed, m.skipped(p.settings.fps))
-                        })
+                        .flat_map(|span| analysis::words_in(span, &timed, m.skipped()))
                         .collect();
                     let words: Vec<Value> = placed
                         .iter()

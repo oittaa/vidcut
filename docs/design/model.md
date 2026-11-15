@@ -236,8 +236,12 @@ Media fields:
 - `subclip` (`Subclip`) makes the item one part of its file (`media.subclip`, `ops::create_subclip`).
   - `info` still tells about the whole file. `Project::file_frames` gives its length, and `Project::media_frames` gives the length of the part.
   - The source frames of a subclip count from the start of the part. `Media::origin` adds `Media::skipped`, thus the render pieces and the measurements find the right part of the file.
-  - `Subclip` holds the first frame of the part and the frame after its last frame, in source frames of the file. Thus no reader rounds a time to find a frame.
-  - The part of a still or a sound file counts frames of the project. A change of the project rate converts it to the new rate, to the nearest frame (`subclips_to_rate`).
+  - `Subclip` holds the first frame of the part, the frame after its last frame, and the frame rate that they count.
+    - For video, this is the rate of the video. Thus the part is always whole source frames, and no reader rounds a time to find a frame.
+    - A still or a sound file counts frames of the project. Its part keeps the project's rate from when the part was set.
+    - Thus a change of the project rate and an OTIO import from a project at another rate keep the part at the same time.
+    - After such a change, `Project::subclip_span` gives the part at the new rate, to the nearest frame (`Subclip::at`).
+  - An OTIO import finds a subclip that is already in the pool by its file and its part (`Subclip::same_part`). The part counts as the same at any rate.
   - The measurements, transcripts, proxies and waveforms belong to the file. A subclip uses them as they are.
   - Word times are in seconds of the file. `analysis::words_in` takes the skipped seconds to place them.
   - `Media::timecode_at` gives the source timecode of its first frame.

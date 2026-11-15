@@ -2708,6 +2708,7 @@ pub fn create_subclip(
         subclip: Some(Subclip {
             start,
             end: start + b - a,
+            rate: m.rate(p.settings.fps),
         }),
         ..m.clone()
     };
@@ -2884,7 +2885,11 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
         *x += by;
         *y += by;
     }
-    m.subclip = Some(Subclip { start: a, end: b });
+    m.subclip = Some(Subclip {
+        start: a,
+        end: b,
+        rate,
+    });
     Ok(())
 }
 

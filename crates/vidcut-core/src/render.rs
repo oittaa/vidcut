@@ -2162,10 +2162,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
 
 impl Project {
     pub(crate) fn media_origin(&self, media: &str) -> Result<(PathBuf, f64)> {
-        Ok(origin_of(
-            found(self.media(media), media)?,
-            self.settings.fps,
-        ))
+        Ok(origin_of(found(self.media(media), media)?))
     }
 
     pub fn media_image(&self, media: &str) -> Option<Image> {
@@ -2177,8 +2174,8 @@ fn found<'a>(m: Option<&'a Media>, id: &str) -> Result<&'a Media> {
     m.ok_or_else(|| Error::not_found(format!("no media {id}")))
 }
 
-fn origin_of(m: &Media, fps: Rational) -> (PathBuf, f64) {
-    (m.path.clone(), m.origin(fps))
+fn origin_of(m: &Media) -> (PathBuf, f64) {
+    (m.path.clone(), m.origin())
 }
 
 pub fn retime_of(c: &Clip, t: i64, m: &Media, s: &Settings) -> Retime {
@@ -3552,7 +3549,7 @@ impl VideoPlan<'_> {
                 excluded: false,
             });
         }
-        let (path, origin) = origin_of(m, s.fps);
+        let (path, origin) = origin_of(m);
         let mut placed = placed_of(c, nest, fills, crossed, x);
         if let Some(own) = placed.first_mut().filter(|o| o.clip == c.id) {
             own.clock = FileClock::of(self.p, c);
@@ -4053,7 +4050,7 @@ fn planned_audio(
 
 fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> AudioPiece {
     let audio = c.audio.as_ref().expect("has audio");
-    let (path, origin) = origin_of(m, p.settings.fps);
+    let (path, origin) = origin_of(m);
     let (fps, rate) = (p.settings.fps, p.settings.sample_rate);
     let speed = c.speed_at(x);
     let per_frame = f64::from(rate) / fps.as_f64();
@@ -4293,7 +4290,7 @@ pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
             pace: Default::default(),
             media: m.id.clone(),
             path: m.path.clone(),
-            origin: m.origin(p.settings.fps),
+            origin: m.origin(),
             source_frame: at,
             phase: 0.0,
             per_frame: per_frame(m, p.settings.fps),
@@ -4378,7 +4375,7 @@ pub fn camera_tape(
         };
         let m = found(pool.get(e.media.as_str()).copied(), &e.media)?;
         let from = a - e.start;
-        let (path, origin) = origin_of(m, s.fps);
+        let (path, origin) = origin_of(m);
         push_video(
             &mut video,
             VideoPiece::Source {
@@ -4487,7 +4484,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
     if m.info.audio.is_empty() {
         return AudioPiece::Silence { samples };
     }
-    let (path, origin) = origin_of(m, p.settings.fps);
+    let (path, origin) = origin_of(m);
     AudioPiece::Source {
         speed: 1.0,
         joined: false,
@@ -4523,7 +4520,7 @@ fn laid_out(p: &Project, media: &[String], fps: Rational) -> Result<(RenderPlan,
         if frames <= 0 {
             continue;
         }
-        let (path, origin) = origin_of(m, s.fps);
+        let (path, origin) = origin_of(m);
         if m.info.video.is_some() {
             push_video(
                 &mut video,

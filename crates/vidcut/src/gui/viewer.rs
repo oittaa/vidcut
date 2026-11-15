@@ -980,7 +980,7 @@ impl Workspace {
             return;
         };
         let fps = m.rate(p.settings.fps).as_f64();
-        let origin = m.origin(p.settings.fps);
+        let origin = m.origin();
         let per_px = frames as f64 / f64::from(rect.width().max(1.0));
         let mut x = rect.left().floor();
         while x < rect.right() {
