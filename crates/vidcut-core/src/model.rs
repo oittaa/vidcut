@@ -6980,6 +6980,9 @@ impl Project {
     }
 
     pub fn frames_of(&self, media: &Media, fps: Rational) -> i64 {
+        if fps == media.rate(self.settings.fps) {
+            return self.clip_frames(media);
+        }
         frames_at(clip_secs(media), fps)
     }
 
