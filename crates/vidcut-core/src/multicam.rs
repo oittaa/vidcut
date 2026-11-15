@@ -66,8 +66,18 @@ pub enum SyncOpen<'a> {
     Files(Vec<&'a Media>),
 }
 
+pub fn same_rate(p: &Project) -> Result<()> {
+    match p.fps() == p.settings.fps {
+        true => Ok(()),
+        false => Err(Error::invalid(format!(
+            "synced groups count frames at the project's {} fps: open a timeline at that rate",
+            p.settings.fps.decimal()
+        ))),
+    }
+}
+
 fn origin(p: &Project, m: &Media) -> i64 {
-    m.timecode_at(p.settings.fps).floor() as i64
+    m.timecode_at(p.fps()).floor() as i64
 }
 
 fn used(p: &Project, m: &Media, whole: bool) -> Range<i64> {
@@ -88,7 +98,7 @@ fn record_start(p: &Project, m: &Media, sync: AngleSync, part: &Range<i64>) -> i
 }
 
 fn start_timecode(p: &Project, start: i64) -> String {
-    let (fps, drop) = (p.settings.fps, p.settings.counts_drop_frame());
+    let (fps, drop) = (p.fps(), p.counts_drop_frame());
     format_timecode(start, fps, 0, drop)
 }
 
@@ -276,7 +286,7 @@ pub fn layout(
 }
 
 fn one_hour(p: &Project) -> i64 {
-    let (fps, drop) = (p.settings.fps, p.settings.counts_drop_frame());
+    let (fps, drop) = (p.fps(), p.counts_drop_frame());
     timecode_frames(1, 0, 0, 0, fps, drop).unwrap_or(0)
 }
 
@@ -324,7 +334,7 @@ pub fn settle(p: &Project, rows: &mut [GroupRow]) {
         .flat_map(|r| &r.clips)
         .map(|c| (c.at + c.hidden, visible(p, c)))
         .collect();
-    let shown = close_far_gaps(p.settings.fps, &spans);
+    let shown = close_far_gaps(p.fps(), &spans);
     let clips = rows.iter_mut().flat_map(|r| &mut r.clips);
     for (clip, (at, hidden)) in clips.zip(shown) {
         clip.at = at;
@@ -414,7 +424,7 @@ fn by_sound(
             }
         }
     }
-    let fps = p.settings.fps.as_f64();
+    let fps = p.fps().as_f64();
     let mut base = 0;
     let mut unmatched = Vec::new();
     for k in 0..n {
@@ -789,7 +799,7 @@ pub fn pick(p: &mut Project, media: &str, at: i64) -> Result<Marks> {
     let (a, b) = if at > end {
         (end - start, at - start)
     } else {
-        let length = (PICK_SECONDS * p.settings.fps.as_f64()).round() as i64;
+        let length = (PICK_SECONDS * p.fps().as_f64()).round() as i64;
         (at - start, at - start + length)
     };
     let (a, b) = (a.max(0), b.min(frames));

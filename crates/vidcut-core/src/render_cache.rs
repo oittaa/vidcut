@@ -88,7 +88,7 @@ pub struct Look {
 
 impl Look {
     pub fn of(project: &Project, proxies: (u32, ProxyCodec), chosen: CacheCodec) -> Self {
-        let s = &project.settings;
+        let s = &project.flat_settings();
         let (width, height) = match s.use_proxies {
             true => crate::model::proxy_size(s.width, s.height, proxies.0),
             false => (s.width, s.height),

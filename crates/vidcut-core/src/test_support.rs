@@ -379,12 +379,15 @@ impl Fixture {
         }
         let settings = Settings {
             fps,
-            start_tc: 0,
             auto_format: false,
             ..Settings::default()
         };
+        let mut project = Project::new(settings);
+        let mut timeline = project.new_timeline("Timeline 1".into(), String::new());
+        timeline.start_tc = 0;
+        project.add_timeline(timeline);
         let mut f = Self {
-            editor: Editor::new(Project::new(settings), History::default()),
+            editor: Editor::new(project, History::default()),
             env,
         };
         if !paths.is_empty() {

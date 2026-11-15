@@ -154,7 +154,7 @@ fn start_tc(m: &Media, fps: Rational) -> f64 {
 }
 
 fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> Value {
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let frames = p.file_frames(m) as f64;
     let bundled = match locations {
         Locations::Bundle(names) => names.get(&m.id).cloned(),
@@ -276,7 +276,7 @@ pub fn exported(c: &Clip, a: i64, b: i64) -> bool {
 }
 
 fn shape_of(p: &Project, c: &Clip, m: Option<&Media>) -> picture::Shape {
-    let frame = (p.settings.width, p.settings.height);
+    let frame = (p.width(), p.height());
     match m.and_then(|m| m.info.video.as_ref()) {
         Some(v) if c.compound.is_none() => picture::Shape::of(v, frame),
         _ => picture::Shape::whole(frame),
@@ -636,7 +636,7 @@ fn media_in(p: &Project, c: &Clip, m: Option<&Media>, s: i64) -> Option<f64> {
     }
     let top = c.source_at(s) as f64 + c.pace().after(s - c.start).sound(0.0);
     let frames = p.media_limit(m?) as f64;
-    Some((frames - top) / -x / p.settings.fps.as_f64())
+    Some((frames - top) / -x / p.fps().as_f64())
 }
 
 fn own_pace(meta: &mut Value, c: &Clip, s: i64) {
@@ -691,13 +691,13 @@ pub fn export_drawn(
     locations: Locations,
     drawn: &dyn Fn(&Title) -> titles::Drawn,
 ) -> Result<Value> {
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let rate = fps.as_f64();
     let (a, b) = span.unwrap_or((0, p.end()));
     if b <= a {
         return Err(Error::invalid("nothing to export: the range is empty"));
     }
-    let g = p.settings.start_tc + a;
+    let g = p.start_tc() + a;
     let item = |label: &str,
                 c: &Clip,
                 m: Option<&Media>,
@@ -720,7 +720,7 @@ pub fn export_drawn(
                 source,
                 match (&c.title, &c.generator) {
                     (Some(t), _) => {
-                        titles::reference(t, p.settings.height, &drawn(t), source.round() as i64)
+                        titles::reference(t, p.height(), &drawn(t), source.round() as i64)
                     }
                     (None, Some(g)) => generators::reference(g, source.round() as i64),
                     (None, None) => Value::Null,
@@ -1147,7 +1147,7 @@ pub fn export_drawn(
             .filter(|o| *o > a && *o <= b)
             .map(|o| o - a),
     };
-    let mut ours = json!({ "fps": p.settings.fps, "marks": marks });
+    let mut ours = json!({ "fps": p.fps(), "marks": marks });
     if span.is_none() {
         ours["project"] = json!(ProjectMeta {
             settings: p.settings.clone(),
@@ -1157,6 +1157,8 @@ pub fn export_drawn(
             tape_marks: p.tape_marks.clone(),
             next_id: p.next_id.clone(),
             subtitles: p.subtitles.clone(),
+            timelines: p.timelines.clone(),
+            recent: p.recent.clone(),
         });
     }
     let tracks = with(
@@ -1237,7 +1239,7 @@ pub(crate) fn made_stack(inner: &Project, name: &str, frames: i64) -> Result<Val
     stack["name"] = json!(name);
     stack["metadata"] = json!({ EDITOR: {
         "Sequence Type": "Compound Clip",
-        "Sequence Fps": inner.settings.fps.as_f64(),
+        "Sequence Fps": inner.fps().as_f64(),
     }});
     if let Some(o) = stack.as_object_mut() {
         for key in ["source_range", "effects", "markers"] {
@@ -1654,6 +1656,10 @@ pub struct ProjectMeta {
     pub next_id: crate::model::NextIds,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subtitles: Vec<crate::model::SubtitleTrack>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timelines: Vec<crate::model::Timeline>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

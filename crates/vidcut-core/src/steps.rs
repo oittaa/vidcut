@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::model::{Clip, Cue, Project, SubtitleTrack, Track, Transition};
+use crate::model::{
+    Clip, Cue, Marks, Project, Sheet, SubtitleTrack, TimelineSettings, Track, Transition,
+};
 use crate::request::{Client, ClientKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -377,6 +379,9 @@ pub fn groups(line: &[Step]) -> Vec<Group> {
 }
 
 pub fn places(before: &Project, after: &Project) -> (Vec<String>, Vec<Span>) {
+    if before.open_id() != after.open_id() {
+        return (Vec::new(), Vec::new());
+    }
     let mut clips = Vec::new();
     let mut spans: Vec<Span> = Vec::new();
     let mut shifted = Vec::new();
@@ -468,7 +473,7 @@ pub fn places(before: &Project, after: &Project) -> (Vec<String>, Vec<Span>) {
             });
         }
     }
-    let (qa, qb) = (cues(before), cues(after));
+    let (qa, qb) = (cues(before.sheet()), cues(after.sheet()));
     let mut hits: Vec<(&str, &Cue)> = Vec::new();
     for (id, (track, c)) in &qa {
         match qb.get(id) {
@@ -498,7 +503,7 @@ pub fn places(before: &Project, after: &Project) -> (Vec<String>, Vec<Span>) {
     (clips, merged(spans))
 }
 
-fn cues(p: &Project) -> HashMap<&str, (&str, &Cue)> {
+fn cues<'a>(p: Sheet<'a>) -> HashMap<&'a str, (&'a str, &'a Cue)> {
     p.subtitles
         .iter()
         .flat_map(|t| t.cues.iter().map(|c| (c.id.as_str(), (t.id.as_str(), c))))
@@ -528,6 +533,7 @@ pub struct Since {
     pub media: Counts,
     pub tracks: Counts,
     pub bins: Counts,
+    pub timelines: Counts,
     pub marks: bool,
     pub settings: bool,
 }
@@ -660,6 +666,7 @@ impl Since {
         parts.extend(self.media.words("media file", "media files"));
         parts.extend(self.tracks.words("track", "tracks"));
         parts.extend(self.bins.words("bin", "bins"));
+        parts.extend(self.timelines.words("timeline", "timelines"));
         if self.marks {
             parts.push("In and Out marks changed".into());
         }
@@ -683,7 +690,71 @@ impl Since {
 }
 
 pub fn since(before: &Project, after: &Project) -> Since {
-    let clips = |p: &Project| -> HashMap<String, (String, Clip)> {
+    let (a, b) = (sheets_of(before), sheets_of(after));
+    let empty = Marks::default();
+    let none = Sheet {
+        tracks: &[],
+        marks: &empty,
+        markers: &[],
+        subtitles: &[],
+    };
+    let mut ids: Vec<&str> = a.iter().chain(&b).map(|(id, _)| id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut out = ids.into_iter().fold(Since::default(), |acc, id| {
+        acc.plus(sheet_since(
+            sheet_in(&a, id).unwrap_or(none),
+            sheet_in(&b, id).unwrap_or(none),
+        ))
+    });
+    out.media = Counts::of(
+        before.media.iter().map(|m| (m.id.as_str(), m)),
+        after.media.iter().map(|m| (m.id.as_str(), m)),
+    )
+    .plus(Counts::of(
+        before.groups.iter().map(|g| (g.id.as_str(), g)),
+        after.groups.iter().map(|g| (g.id.as_str(), g)),
+    ));
+    out.bins = Counts::of(
+        before.bins.iter().map(|b| (b.as_str(), b)),
+        after.bins.iter().map(|b| (b.as_str(), b)),
+    );
+    let (ha, hb) = (heads(before), heads(after));
+    out.timelines = Counts::of(
+        ha.iter().map(|(id, h)| (id.as_str(), h)),
+        hb.iter().map(|(id, h)| (id.as_str(), h)),
+    );
+    out.marks |= before.tape_marks != after.tape_marks;
+    out.settings = before.settings != after.settings;
+    out
+}
+
+type Head = (String, String, i64, Option<TimelineSettings>);
+
+fn heads(p: &Project) -> Vec<(String, Head)> {
+    (p.timelines.iter())
+        .map(|t| {
+            (
+                t.id.clone(),
+                (t.name.clone(), t.bin.clone(), t.start_tc, t.own),
+            )
+        })
+        .collect()
+}
+
+fn sheet_in<'a>(list: &[(String, Sheet<'a>)], id: &str) -> Option<Sheet<'a>> {
+    list.iter().find(|(t, _)| t == id).map(|(_, s)| *s)
+}
+
+fn sheets_of(p: &Project) -> Vec<(String, Sheet<'_>)> {
+    match p.timelines.is_empty() {
+        true => vec![(String::new(), p.sheet())],
+        false => p.sheets().map(|(t, s)| (t.id.clone(), s)).collect(),
+    }
+}
+
+fn sheet_since(before: Sheet<'_>, after: Sheet<'_>) -> Since {
+    let clips = |p: Sheet<'_>| -> HashMap<String, (String, Clip)> {
         p.tracks
             .iter()
             .flat_map(|t| {
@@ -740,14 +811,6 @@ pub fn since(before: &Project, after: &Project) -> Since {
             before.markers.iter().map(|k| (k.id.as_str(), k)),
             after.markers.iter().map(|k| (k.id.as_str(), k)),
         ),
-        media: Counts::of(
-            before.media.iter().map(|m| (m.id.as_str(), m)),
-            after.media.iter().map(|m| (m.id.as_str(), m)),
-        )
-        .plus(Counts::of(
-            before.groups.iter().map(|g| (g.id.as_str(), g)),
-            after.groups.iter().map(|g| (g.id.as_str(), g)),
-        )),
         tracks: Counts::of(
             bare(before).iter().map(|t| (t.id.as_str(), t)),
             bare(after).iter().map(|t| (t.id.as_str(), t)),
@@ -756,16 +819,27 @@ pub fn since(before: &Project, after: &Project) -> Since {
             bare_subtitles(before).iter().map(|t| (t.id.as_str(), t)),
             bare_subtitles(after).iter().map(|t| (t.id.as_str(), t)),
         )),
-        bins: Counts::of(
-            before.bins.iter().map(|b| (b.as_str(), b)),
-            after.bins.iter().map(|b| (b.as_str(), b)),
-        ),
-        marks: before.marks != after.marks || before.tape_marks != after.tape_marks,
-        settings: before.settings != after.settings,
+        marks: before.marks != after.marks,
+        ..Since::default()
     }
 }
 
-fn bare(p: &Project) -> Vec<Track> {
+impl Since {
+    fn plus(self, o: Since) -> Since {
+        Since {
+            clips: self.clips.plus(o.clips),
+            subtitles: self.subtitles.plus(o.subtitles),
+            dissolves: self.dissolves.plus(o.dissolves),
+            fades: self.fades.plus(o.fades),
+            markers: self.markers.plus(o.markers),
+            tracks: self.tracks.plus(o.tracks),
+            marks: self.marks || o.marks,
+            ..self
+        }
+    }
+}
+
+fn bare(p: Sheet<'_>) -> Vec<Track> {
     p.tracks
         .iter()
         .map(|t| Track {
@@ -776,7 +850,7 @@ fn bare(p: &Project) -> Vec<Track> {
         .collect()
 }
 
-fn bare_subtitles(p: &Project) -> Vec<SubtitleTrack> {
+fn bare_subtitles(p: Sheet<'_>) -> Vec<SubtitleTrack> {
     p.subtitles
         .iter()
         .map(|t| SubtitleTrack {
@@ -786,7 +860,7 @@ fn bare_subtitles(p: &Project) -> Vec<SubtitleTrack> {
         .collect()
 }
 
-fn transitions(p: &Project, sound: bool) -> impl Iterator<Item = (&str, &Transition)> {
+fn transitions(p: Sheet<'_>, sound: bool) -> impl Iterator<Item = (&'_ str, &'_ Transition)> {
     p.tracks
         .iter()
         .flat_map(|t| t.transitions.iter())
@@ -812,7 +886,7 @@ pub fn listing(steps: &Steps, from: Option<usize>, limit: Option<usize>, p: &Pro
                 for span in spans {
                     for key in ["from", "to"] {
                         if let Some(f) = span[key].as_i64() {
-                            span[format!("{key}_tc")] = json!(p.settings.timecode(f));
+                            span[format!("{key}_tc")] = json!(p.timecode(f));
                         }
                     }
                 }

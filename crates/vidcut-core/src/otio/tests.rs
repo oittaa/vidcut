@@ -58,6 +58,7 @@ fn files_without_audio_tracks_bring_media_audio() {
     f.env = FakeEnv::default()
         .with("/media/A001.mov", media_info(1000.0 / 24.0, fps, true))
         .with("/media/A002.mov", media_info(10.0, fps, false));
+    f.ok(req("timeline.delete", json!({ "timeline": "t1" })));
     f.ok(req("timeline.import", json!({ "otio": doc })));
     let p = f.editor.project();
     assert_eq!(p.clip("c1").unwrap().audio_range(), Some((0, 48)));
@@ -178,9 +179,12 @@ fn the_settings_come_back_from_an_otio_file() {
     let mut f = Fixture::new(&[(10.0, true)]);
     f.ok(req(
         "project.set",
-        json!({"fps": "30000/1001", "drop_frame": true, "width": 1280, "height": 720,
-               "sample_rate": 44100, "channels": 6, "ripple_on": false,
-               "start_tc": "01:00:00;00", "use_proxies": true}),
+        json!({"sample_rate": 44100, "channels": 6, "ripple_on": false, "use_proxies": true}),
+    ));
+    f.ok(req(
+        "timeline.set",
+        json!({"own": {"fps": "30000/1001", "drop_frame": true, "width": 1280, "height": 720},
+               "start_tc": "01:00:00;00"}),
     ));
     f.ok(req(
         "edit.append",
@@ -727,10 +731,14 @@ fn dissolve() -> Value {
 #[test]
 fn a_split_before_a_dissolve_changes_only_the_dissolve() {
     let mut f = Fixture::new(&[(4.0, true)]);
-    f.ok(req("timeline.import", json!({"otio": dissolve()})));
+    f.ok(req(
+        "timeline.import",
+        json!({"otio": dissolve(), "mode": "append"}),
+    ));
     f.ok(req("edit.split", json!({"at": "20f"})));
     let step = serde_json::to_value(&f.editor.held().undo.last().unwrap().change).unwrap();
-    let track = &step["fields"]["tracks"]["items"]["changed"]["V1"]["fields"];
+    let timeline = &step["fields"]["timelines"]["items"]["changed"]["t1"]["fields"];
+    let track = &timeline["tracks"]["items"]["changed"]["V1"]["fields"];
     assert_eq!(
         track["transitions"],
         json!({"items": {"changed": {"t1": {"fields": {"from": {"set": {"was": "c1", "is": "c3"}}}}}}})

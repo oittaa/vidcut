@@ -336,6 +336,68 @@ pub fn violations(p: &Project) -> Vec<String> {
     {
         v.push(format!("tape In {i} is not before Out {o}"));
     }
+    timelines(p, &mut v);
+    v
+}
+
+fn timelines(p: &Project, v: &mut Vec<String>) {
+    let mut ids = HashSet::new();
+    for t in &p.timelines {
+        if !ids.insert(t.id.as_str()) {
+            v.push(format!("duplicate timeline {}", t.id));
+        }
+        let n = t.id.strip_prefix('t').and_then(|n| n.parse::<u64>().ok());
+        if n.is_none_or(|n| n == 0 || n >= p.next_id.timeline) {
+            v.push(format!(
+                "timeline id {} is not t1 to t{}",
+                t.id,
+                p.next_id.timeline - 1
+            ));
+        }
+        if !t.bin.is_empty() && !p.bins.contains(&t.bin) {
+            v.push(format!("timeline {} is in unknown bin {:?}", t.id, t.bin));
+        }
+        if t.name.trim().is_empty() {
+            v.push(format!("timeline {} has no name", t.id));
+        }
+        if t.start_tc < 0 {
+            v.push(format!("timeline {} starts before 00:00:00:00", t.id));
+        }
+        if let Some(o) = t.own {
+            if o.drop_frame && !o.fps.has_drop_frame() {
+                v.push(format!("timeline {} counts drop-frame at {}", t.id, o.fps));
+            }
+            if crate::model::timeline_size(o.width, o.height) != (o.width, o.height) {
+                v.push(format!("timeline {} is {}x{}", t.id, o.width, o.height));
+            }
+        }
+    }
+    let mut recent: Vec<&str> = p.recent.iter().map(String::as_str).collect();
+    recent.sort_unstable();
+    let mut all: Vec<&str> = ids.into_iter().collect();
+    all.sort_unstable();
+    if recent != all {
+        v.push("the recent timelines are not the timelines".into());
+    }
+    if let Some(t) = p.timeline()
+        && !(t.tracks.is_empty()
+            && t.marks.is_empty()
+            && t.markers.is_empty()
+            && t.subtitles.is_empty())
+    {
+        v.push(format!("open timeline {} holds its own tracks", t.id));
+    }
+}
+
+pub fn everywhere(p: &Project) -> Vec<String> {
+    let mut v = violations(p);
+    let open = p.open_id();
+    for t in p.timelines.iter().filter(|t| Some(t.id.as_str()) != open) {
+        let mut q = p.clone();
+        if q.open_timeline(&t.id).is_ok() {
+            v.extend(violations(&q).into_iter().map(|e| format!("{}: {e}", t.id)));
+        }
+    }
     v
 }
 

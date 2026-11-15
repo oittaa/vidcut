@@ -154,7 +154,7 @@ fn number(t: &Track) -> usize {
 }
 
 fn stack_of(p: &mut Project, whole: &[Track], name: &str, frames: i64) -> Result<Kept> {
-    let mut inner = Project::new(p.settings.clone());
+    let mut inner = Project::new(p.flat_settings());
     for t in whole {
         let ti = ensure_track(&mut inner, &t.id)?;
         inner.tracks[ti].clips.clone_from(&t.clips);
@@ -244,10 +244,12 @@ fn keep_copy(p: &mut Project, nested: &Nested, bin: &str) {
         .find_map(|c| c.name.clone())
         .unwrap_or_default();
     let id = p.alloc_pooled_compound_id();
+    let fps = p.fps();
     p.compounds.push(PooledCompound {
         id,
         name,
         bin: bin.to_string(),
+        fps,
         picture,
         sound,
     });
@@ -347,12 +349,15 @@ pub fn place_pooled(
     track: Option<&str>,
     how: Place,
 ) -> Result<Nested> {
-    let item = p
+    let mut item = p
         .compounds
         .iter()
         .find(|x| x.id == id)
         .cloned()
         .ok_or_else(|| Error::not_found(format!("no compound clip {id}")))?;
+    if let Some(r) = super::conform::Rates::new(item.fps, p.fps()) {
+        super::conform::pooled(p, &mut item, r);
+    }
     if let Some(t) = track {
         ensure_track(p, t)?;
     }

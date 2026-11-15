@@ -1,5 +1,6 @@
 pub mod comp;
 pub mod compound;
+pub mod conform;
 pub mod effect;
 pub mod filmstrip;
 mod follow;
@@ -12,6 +13,7 @@ pub mod picture;
 mod source_overwrite;
 pub mod speed;
 pub mod subtitles;
+pub mod timelines;
 pub mod titles;
 mod tracks;
 mod transition;
@@ -2427,7 +2429,7 @@ pub fn ai_retimes(p: &Project, ids: &[String]) -> Vec<crate::model::Retime> {
             continue;
         };
         for (a, _) in c.runs(c.start, c.end()) {
-            let r = crate::render::retime_of(c, a, m, &p.settings);
+            let r = crate::render::retime_of(c, a, m, &p.flat_settings());
             if r.ai() && !out.contains(&r) {
                 out.push(r);
             }
@@ -2824,7 +2826,7 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
     }
     let (by, len, more) = (first - a, b - a, b - end);
     let rate = m.rate(p.settings.fps);
-    let per = p.settings.fps.over(rate);
+    let per = p.fps().over(rate);
     let slack = crate::render::grid_slack(per);
     let exact = by as f64 * per.as_f64();
     let part = (-exact - slack, (len - by) as f64 * per.as_f64() + slack);
@@ -3278,6 +3280,11 @@ pub fn remove_bin(p: &mut Project, path: &str) -> Result<()> {
     if !has_bin(p, path) || path.is_empty() {
         return Err(Error::not_found(format!("no bin {path:?}")));
     }
+    let timelines: Vec<String> = (p.timelines.iter())
+        .filter(|t| within(&t.bin, path))
+        .map(|t| t.id.clone())
+        .collect();
+    timelines::delete(p, &timelines)?;
     p.bins.retain(|b| !within(b, path));
     p.groups.retain(|g| !within(&g.bin, path));
     p.compounds.retain(|k| !within(&k.bin, path));
@@ -3318,6 +3325,11 @@ pub fn rename_bin(p: &mut Project, path: &str, to: &str) -> Result<()> {
             k.bin = rebase(&k.bin);
         }
     }
+    for t in &mut p.timelines {
+        if within(&t.bin, path) {
+            t.bin = rebase(&t.bin);
+        }
+    }
     add_bin(p, to)?;
     p.bins.sort();
     p.bins.dedup();
@@ -3331,12 +3343,13 @@ pub fn move_media(p: &mut Project, ids: &[String], bin: &str) -> Result<()> {
         )));
     }
     for id in ids {
-        let m = p
-            .media
-            .iter_mut()
-            .find(|m| &m.id == id && !m.removed)
-            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
-        m.bin = bin.to_string();
+        if let Some(m) = p.media.iter_mut().find(|m| &m.id == id && !m.removed) {
+            m.bin = bin.to_string();
+        } else if let Some(t) = p.timelines.iter_mut().find(|t| &t.id == id) {
+            t.bin = bin.to_string();
+        } else {
+            return Err(Error::not_found(format!("no media or timeline {id}")));
+        }
     }
     Ok(())
 }

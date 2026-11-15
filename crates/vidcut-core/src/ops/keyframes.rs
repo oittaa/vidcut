@@ -636,7 +636,7 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                         let mut v = json!({
                             "frame": k.frame,
                             "at": at,
-                            "at_tc": p.settings.timecode(at),
+                            "at_tc": p.timecode(at),
                             "value": value,
                             "ease": ease_of(held, i),
                         });
@@ -663,7 +663,7 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                         let mut v = json!({
                             "frame": s.at,
                             "at": at,
-                            "at_tc": p.settings.timecode(at),
+                            "at_tc": p.timecode(at),
                             "value": s.speed,
                         });
                         if s.ease.is_some() {
@@ -1331,7 +1331,7 @@ fn listed(p: &Project, c: &Clip, picture: &Picture, v: PictureValue) -> Vec<Valu
             let mut row = json!({
                 "frame": k.frame,
                 "at": at,
-                "at_tc": p.settings.timecode(at),
+                "at_tc": p.timecode(at),
                 "value": if v.pair() { json!(value) } else { json!(value[0]) },
                 "ease": ease_of(picture.keys_of(v), i),
             });

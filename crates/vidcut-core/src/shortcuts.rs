@@ -155,6 +155,7 @@ actions! {
     Redo "redo",
     Import "import",
     NewBin "new_bin",
+    NewTimeline "new_timeline",
     Preferences "preferences",
     Help "help",
 }
@@ -1422,6 +1423,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     same(Nodes, Action::SelectAll, "Select all nodes", None),
     same(Nodes, Action::SelectNothing, "Select no node", None),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),
+    own(App, Action::NewTimeline, &["Ctrl+N"], "New timeline", None),
     own(App, Action::Preferences, &["Ctrl+,"], "Preferences", None),
     own(App, Action::Help, &["F1"], "Help", None),
 ];

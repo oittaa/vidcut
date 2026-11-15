@@ -261,7 +261,7 @@ pub(crate) fn checked_shadow(s: &TitleShadow) -> Result<TitleShadow> {
 }
 
 pub fn default_length(p: &Project) -> i64 {
-    p.settings.fps.secs_to_frames(DEFAULT_SECS).max(1)
+    p.fps().secs_to_frames(DEFAULT_SECS).max(1)
 }
 
 pub fn add(

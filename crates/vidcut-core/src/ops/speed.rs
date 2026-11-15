@@ -25,7 +25,7 @@ fn under(p: &Project, id: &str, t: i64) -> Result<Clip> {
     if !(c.start..c.end()).contains(&t) {
         return Err(Error::invalid(format!(
             "{id} isn't under {}",
-            p.settings.timecode(t)
+            p.timecode(t)
         )));
     }
     Ok(c)
@@ -119,7 +119,7 @@ fn with(c: &Clip, mut map: Vec<Section>, skip: i64) -> Clip {
 
 fn takes_keyframe(p: &Project, id: &str, t: i64) -> Result<Clip> {
     let c = under(p, id, t)?;
-    let tc = p.settings.timecode(t);
+    let tc = p.timecode(t);
     if t == c.start {
         return Err(Error::invalid(format!(
             "{id} starts at {tc}: a speed keyframe goes after its first frame"
@@ -244,7 +244,7 @@ pub fn set(
             };
             return Err(Error::invalid(format!(
                 "the section of {id} under {} is {what}: only a forward section takes a speed",
-                p.settings.timecode(t)
+                p.timecode(t)
             )));
         }
         let last = &map[index(&map, end - 1)];
@@ -283,7 +283,7 @@ pub fn set(
 
 pub fn freeze(p: &mut Project, ids: &[String], t: i64, ripple: Option<bool>) -> Result<()> {
     let ripple_on = ripple.unwrap_or(p.settings.ripple_on);
-    let hold = (2.0 * p.settings.fps.as_f64()).round() as i64;
+    let hold = (2.0 * p.fps().as_f64()).round() as i64;
     for (id, lead) in latest_first(p, ids) {
         let c = under(p, &id, t)?;
         let (mut map, skip) = sections(&c);
@@ -329,7 +329,7 @@ pub fn reverse(p: &mut Project, ids: &[String], t: i64, backward: bool) -> Resul
         if v == 0.0 {
             return Err(Error::invalid(format!(
                 "the section of {id} under {} is a freeze frame: it has no direction",
-                p.settings.timecode(t)
+                p.timecode(t)
             )));
         }
         if (v < 0.0) == backward {
@@ -409,7 +409,7 @@ pub fn key_ease(c: &Clip, frame: i64) -> Option<Ease> {
 }
 
 fn eased(p: &Project, map: &mut [Section], i: usize, on: bool, [start, end]: [i64; 2]) {
-    let h = p.settings.fps.as_f64() / 6.0;
+    let h = p.fps().as_f64() / 6.0;
     let at = map[i].at;
     let a = if at > start {
         (-h).max((start - at) as f64)
@@ -442,7 +442,7 @@ pub fn ease(p: &mut Project, ids: &[String], t: i64, ease: Ease) -> Result<()> {
         keyed(&c)?;
         let (mut map, skip) = sections(&c);
         let i = index(&map, skip + t - c.start);
-        let tc = p.settings.timecode(t);
+        let tc = p.timecode(t);
         if first && i == 0 {
             return Err(Error::invalid(format!(
                 "the section of {id} under {tc} has no speed keyframe at its start"

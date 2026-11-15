@@ -16,8 +16,8 @@ use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marker, Marks,
-    Media, MediaInfo, Picture, Project, Proxy, Subject, Title, Track, TrackKind, Transition,
-    VideoInfo, WordsChange,
+    Media, MediaInfo, Picture, Project, Proxy, Subject, Timeline, Title, Track, TrackKind,
+    Transition, VideoInfo, WordsChange,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -827,6 +827,18 @@ impl Editor {
             )?,
             _ => mutate(&mut working, &request, env, playhead, dry_run)?,
         };
+        if working.timelines.is_empty() && !working.is_fresh_sheet() {
+            if !working.has_sheet() {
+                return Err(Error::invalid(
+                    "the project has no timeline: make one with timeline.new",
+                ));
+            }
+            let t = working.new_timeline(working.next_timeline_name(), String::new());
+            working.adopt_sheet(t);
+            if working.tracks_of(TrackKind::Audio).is_empty() {
+                ops::add_track(&mut working, TrackKind::Audio);
+            }
+        }
         let label = match (&request, parts.as_slice()) {
             (Request::Apply { label: None, .. }, [one]) => one.clone(),
             (Request::Apply { label: None, .. }, [first, rest @ ..]) => {
@@ -849,7 +861,10 @@ impl Editor {
         }
         warnings.extend(ops::motion::settle(&mut working));
         drop_unused_removed(&mut working);
-        let problems = validate::violations(&working);
+        let problems = match touches_timelines(&request) {
+            true => validate::everywhere(&working),
+            false => validate::violations(&working),
+        };
         if !problems.is_empty() {
             return Err(Error::internal(format!(
                 "{} would break project invariants (a vidcut bug): {}",
@@ -1117,7 +1132,7 @@ impl Editor {
         }
         warnings.extend(ops::motion::settle(&mut working));
         drop_unused_removed(&mut working);
-        let problems = validate::violations(&working);
+        let problems = validate::everywhere(&working);
         if !problems.is_empty() {
             return Err(Error::conflict(format!(
                 "can't revert step {step}: the project would be broken: {}",
@@ -1333,11 +1348,8 @@ fn changed(before: &mut Project, after: &mut Project) -> Option<Change> {
 
 fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
     use std::mem::take;
-    let (mut media, mut tracks, mut markers) = (
-        (take(&mut a.media), take(&mut b.media)),
-        (take(&mut a.tracks), take(&mut b.tracks)),
-        (take(&mut a.markers), take(&mut b.markers)),
-    );
+    let mut media = (take(&mut a.media), take(&mut b.media));
+    let mut timelines = (a.take_timelines(), b.take_timelines());
     let rest = Change::between(&to_json(a), &to_json(b));
     let lists = [
         (
@@ -1345,20 +1357,62 @@ fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
             Change::of_items(&mut media.0, &mut media.1, |m| &m.id, leaf),
         ),
         (
-            "tracks",
-            Change::of_items(&mut tracks.0, &mut tracks.1, |t| &t.id, track_change),
-        ),
-        (
-            "markers",
-            Change::of_items(
-                &mut markers.0,
-                &mut markers.1,
-                |k| &k.id,
-                |a, b| moved_only(a, b, |k| &mut k.at, "at"),
-            ),
+            "timelines",
+            listed(&mut timelines.0, &mut timelines.1, |a, b| {
+                Change::of_items(a, b, |t| &t.id, timeline_change)
+            }),
         ),
     ];
     (a.media, b.media) = media;
+    a.put_timelines(timelines.0);
+    b.put_timelines(timelines.1);
+    joined(rest, lists)
+}
+
+fn listed<T: serde::Serialize>(
+    a: &mut Vec<T>,
+    b: &mut Vec<T>,
+    items: impl FnOnce(&mut Vec<T>, &mut Vec<T>) -> Option<Change>,
+) -> Option<Change> {
+    match (a.is_empty(), b.is_empty()) {
+        (true, true) => None,
+        (false, true) => Some(Change::Set {
+            before: Some(to_value(&*a)),
+            after: None,
+        }),
+        (true, false) => Some(Change::Set {
+            before: None,
+            after: Some(to_value(&*b)),
+        }),
+        (false, false) => items(a, b),
+    }
+}
+
+fn timeline_change(a: &mut Timeline, b: &mut Timeline) -> Option<Change> {
+    use std::mem::take;
+    if a == b {
+        return None;
+    }
+    let (mut tracks, mut markers) = (
+        (take(&mut a.tracks), take(&mut b.tracks)),
+        (take(&mut a.markers), take(&mut b.markers)),
+    );
+    let rest = Change::between(&to_value(&*a), &to_value(&*b));
+    let markers_change = listed(&mut markers.0, &mut markers.1, |a, b| {
+        Change::of_items(
+            a,
+            b,
+            |k| &k.id,
+            |a, b| moved_only(a, b, |k| &mut k.at, "at"),
+        )
+    });
+    let lists = [
+        (
+            "tracks",
+            Change::of_items(&mut tracks.0, &mut tracks.1, |t| &t.id, track_change),
+        ),
+        ("markers", markers_change),
+    ];
     (a.tracks, b.tracks) = tracks;
     (a.markers, b.markers) = markers;
     joined(rest, lists)
@@ -1446,27 +1500,56 @@ fn undo_step(p: &mut Project, change: &Change, forward: bool) -> std::result::Re
     let Change::Fields(fields) = change else {
         return apply_json(p, change, forward);
     };
-    let (lists, rest) = split_fields(fields, &["media", "tracks", "markers"]);
+    let (lists, rest) = split_fields(fields, &["media", "timelines"]);
+    let mut timelines = p.take_timelines();
+    let mut stepped = Ok(());
+    if !rest.is_empty() {
+        let kept = std::mem::take(&mut p.media);
+        stepped = apply_json(p, &Change::Fields(rest), forward);
+        p.media = kept;
+    }
+    for (name, c) in lists {
+        if stepped.is_err() {
+            break;
+        }
+        stepped = match name {
+            "media" => c.apply_to_items(&mut p.media, forward, |m| &m.id, apply_json, shift_json),
+            _ => c.apply_to_items(
+                &mut timelines,
+                forward,
+                |t| &t.id,
+                timeline_step,
+                shift_json,
+            ),
+        };
+    }
+    p.put_timelines(timelines);
+    stepped
+}
+
+fn timeline_step(
+    t: &mut Timeline,
+    change: &Change,
+    forward: bool,
+) -> std::result::Result<(), String> {
+    use crate::change::{apply_json, shift_json};
+    let Change::Fields(fields) = change else {
+        return apply_json(t, change, forward);
+    };
+    let (lists, rest) = split_fields(fields, &["tracks", "markers"]);
     if !rest.is_empty() {
         use std::mem::take;
-        let kept = (
-            take(&mut p.media),
-            take(&mut p.tracks),
-            take(&mut p.markers),
-        );
-        apply_json(p, &Change::Fields(rest), forward)?;
-        (p.media, p.tracks, p.markers) = kept;
+        let kept = (take(&mut t.tracks), take(&mut t.markers));
+        apply_json(t, &Change::Fields(rest), forward)?;
+        (t.tracks, t.markers) = kept;
     }
     for (name, c) in lists {
         match name {
-            "media" => {
-                c.apply_to_items(&mut p.media, forward, |m| &m.id, apply_json, shift_json)?
-            }
             "tracks" => {
-                c.apply_to_items(&mut p.tracks, forward, |t| &t.id, track_step, shift_json)?
+                c.apply_to_items(&mut t.tracks, forward, |t| &t.id, track_step, shift_json)?
             }
             _ => c.apply_to_items(
-                &mut p.markers,
+                &mut t.markers,
                 forward,
                 |k| &k.id,
                 apply_json,
@@ -1608,14 +1691,29 @@ fn diff(before: &Project, after: &Project) -> Changes {
         Marker(&'a crate::model::Marker),
         Cue(&'a str, &'a crate::model::Cue),
         Group(&'a crate::model::SyncGroup),
+        Timeline(
+            &'a str,
+            &'a str,
+            i64,
+            Option<crate::model::TimelineSettings>,
+        ),
     }
-    fn index(p: &Project) -> HashMap<&str, Named<'_>> {
+    fn index(p: &Project, sheet: bool) -> HashMap<&str, Named<'_>> {
         let mut m = HashMap::new();
         for media in &p.media {
             m.insert(media.id.as_str(), Named::Media(media));
         }
         for g in &p.groups {
             m.insert(g.id.as_str(), Named::Group(g));
+        }
+        for t in &p.timelines {
+            m.insert(
+                t.id.as_str(),
+                Named::Timeline(&t.name, &t.bin, t.start_tc, t.own),
+            );
+        }
+        if !sheet {
+            return m;
         }
         for t in &p.tracks {
             for c in &t.clips {
@@ -1632,7 +1730,8 @@ fn diff(before: &Project, after: &Project) -> Changes {
         }
         m
     }
-    let (a, b) = (index(before), index(after));
+    let same = before.open_id() == after.open_id();
+    let (a, b) = (index(before, same), index(after, same));
     let mut c = Changes::default();
     for (id, v) in &b {
         match a.get(id) {
@@ -1800,7 +1899,7 @@ fn clip_speech(
     asked: &transcript::Asked,
     use_kept: Reuse,
 ) -> Result<(Speech, Vec<Value>, Vec<String>)> {
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let mut speech = Speech {
         model: asked.model_name(),
         device: String::new(),
@@ -2060,7 +2159,7 @@ fn media_sound_plan(p: &Project, m: &Media, stream: u32, channels: u16) -> Resul
 const QUIET_REACH: f64 = 0.12;
 
 fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(i64, i64)>> {
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let reach = ((fps.as_f64() * QUIET_REACH).round() as i64).max(1);
     let solo = p.any_solo();
     let mut sources = Vec::new();
@@ -2369,9 +2468,9 @@ pub fn source_context(
     playhead: Option<i64>,
 ) -> TimeContext {
     TimeContext {
-        fps: p.settings.fps,
+        fps: p.fps(),
         start_tc: 0,
-        drop_frame: p.settings.counts_drop_frame(),
+        drop_frame: p.counts_drop_frame(),
         end: frames,
         mark_in: marks.mark_in,
         mark_out: marks.mark_out,
@@ -2478,6 +2577,23 @@ fn remove_media(p: &mut Project, media: &str) {
     }
     p.groups.retain(|g| !g.rows.is_empty());
     forget_tape_marks(p, media);
+}
+
+fn touches_timelines(request: &Request) -> bool {
+    matches!(
+        request,
+        Request::TimelineNew(_)
+            | Request::TimelineOpen { .. }
+            | Request::TimelineRename { .. }
+            | Request::TimelineDuplicate { .. }
+            | Request::TimelineDelete { .. }
+            | Request::TimelineSet(_)
+            | Request::TimelineImport { .. }
+            | Request::BinsRemove { .. }
+            | Request::BinsRename { .. }
+            | Request::MediaMove { .. }
+            | Request::ProjectSet(_)
+    )
 }
 
 fn drop_unused_removed(p: &mut Project) {
@@ -2675,7 +2791,7 @@ fn mutate(
             let mut files = PoolFiles::of(p);
             for path in paths {
                 let probed = match sequence {
-                    true => env.probe_sequence(path, fps.unwrap_or(p.settings.fps))?,
+                    true => env.probe_sequence(path, fps.unwrap_or(p.fps()))?,
                     false => env.probe(path)?,
                 };
                 let still = still_secs(p, env)?;
@@ -2736,6 +2852,25 @@ fn mutate(
             ops::move_media(p, &media.to_vec(), bin)?;
             Value::Null
         }
+        Request::TimelineNew(new) => json!({ "id": ops::timelines::new(p, new)? }),
+        Request::TimelineOpen { timeline } => {
+            json!({ "id": ops::timelines::open(p, timeline)? })
+        }
+        Request::TimelineRename { timeline, name } => {
+            ops::timelines::rename(p, timeline, name)?;
+            Value::Null
+        }
+        Request::TimelineDuplicate { timeline } => {
+            json!({ "id": ops::timelines::duplicate(p, timeline.as_deref())? })
+        }
+        Request::TimelineDelete { timeline } => {
+            let gone = ops::timelines::delete(p, &timeline.to_vec())?;
+            json!({ "deleted": gone, "open": p.open_id() })
+        }
+        Request::TimelineSet(set) => {
+            ops::timelines::set(p, set)?;
+            Value::Null
+        }
         Request::BinsAdd { path } => {
             ops::add_bin(p, path)?;
             Value::Null
@@ -2771,6 +2906,7 @@ fn mutate(
                     .unwrap_or_else(|| format!("Media Sync {}", env.local_stamp())),
                 bin: bin.as_deref().unwrap_or_default(),
             };
+            crate::multicam::same_rate(p)?;
             let made = crate::multicam::create(p, env, &media.to_vec(), new)?;
             let g = p.group(&made.id).expect("just made");
             let mut v = crate::multicam::group_json(p, g);
@@ -2780,11 +2916,13 @@ fn mutate(
             v
         }
         Request::MulticamSet { group, rows } => {
+            crate::multicam::same_rate(p)?;
             crate::multicam::set_rows(p, group, rows)?;
             let g = p.group(group).expect("just set");
             crate::multicam::group_json(p, g)
         }
         Request::MulticamPlace { group, media, at } => {
+            crate::multicam::same_rate(p)?;
             crate::multicam::place(p, group, media, *at)?;
             let g = p.group(group).expect("just placed");
             crate::multicam::group_json(p, g)
@@ -2806,6 +2944,7 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
+            crate::multicam::same_rate(p)?;
             json!(crate::multicam::pick(p, media, need(at, "at")?)?)
         }
         Request::MediaRemove { media } => {
@@ -2872,9 +3011,9 @@ fn mutate(
                 (None, None)
             };
             let ctx = TimeContext {
-                fps: p.settings.fps,
+                fps: p.fps(),
                 start_tc: 0,
-                drop_frame: p.settings.counts_drop_frame(),
+                drop_frame: p.counts_drop_frame(),
                 end,
                 mark_in: cur_in,
                 mark_out: cur_out,
@@ -3501,8 +3640,8 @@ fn mutate(
                     parts
                 }
             };
-            let shown = p.settings.clone();
-            let tc = move |f: i64| shown.timecode(f);
+            let (fps, start, drop) = (p.fps(), p.start_tc(), p.counts_drop_frame());
+            let tc = move |f: i64| crate::time::format_timecode(f, fps, start, drop);
             let removed: Vec<Value> = parts
                 .iter()
                 .flat_map(|(id, spans)| spans.iter().map(move |&(a, b)| (id, a, b)))
@@ -3527,8 +3666,8 @@ fn mutate(
         }
         Request::EditDetectSceneCuts { clips, threshold } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let shown = p.settings.clone();
-            let tc = move |f: i64| shown.timecode(f);
+            let (fps, start, drop) = (p.fps(), p.start_tc(), p.counts_drop_frame());
+            let tc = move |f: i64| crate::time::format_timecode(f, fps, start, drop);
             let mut cuts = Vec::new();
             let mut created = Vec::new();
             for id in &ids {
@@ -3850,19 +3989,19 @@ fn mutate(
                 let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
                 let copied = ops::copy_clips(p, &ids)?;
                 ops::delete(p, &ids, false)?;
-                json!({ "clips": copied })
+                json!({ "clips": copied, "fps": p.fps() })
             }
             (None, Some(range), None) => {
                 let (a, b) = ctx(p, playhead).range(range)?;
                 let copied = ops::copy_range(p, a, b)?;
                 ops::delete_range(p, a, b, true)?;
-                json!({ "clips": copied })
+                json!({ "clips": copied, "fps": p.fps() })
             }
             (None, None, Some(cues)) => {
                 let ids = resolve_cues(p, &cues.to_vec(), playhead)?;
                 let copied = ops::subtitles::copy_cues(p, &ids)?;
                 ops::subtitles::remove_cues(p, &ids)?;
-                json!({ "cues": copied })
+                json!({ "cues": copied, "fps": p.fps() })
             }
             _ => return Err(Error::usage("give `clips`, `range` or `cues`")),
         },
@@ -3872,26 +4011,36 @@ fn mutate(
             at,
             insert,
             duration,
+            fps,
         } => {
             let at = match at {
                 Some(t) => resolve(p, t, playhead)?,
                 None => need(playhead, "at")?,
             };
+            let rates = fps.and_then(|f| ops::conform::Rates::new(f, p.fps()));
             if let Some(cues) = cues {
                 if clips.is_some() || *insert || duration.is_some() {
                     return Err(Error::usage(
                         "cues paste alone: without clips, insert or duration",
                     ));
                 }
-                let ids = ops::subtitles::paste_cues(p, cues, at)?;
+                let mut cues = cues.clone();
+                if let Some(r) = rates {
+                    ops::conform::cues(&mut cues, r);
+                }
+                let ids = ops::subtitles::paste_cues(p, &cues, at)?;
                 return Ok(json!({ "cues": ids }));
             }
             let clips = clips.as_ref().ok_or_else(|| {
                 Error::usage("edit.paste needs `clips` or `cues` (the GUI pastes its clipboard)")
             })?;
+            let mut clips = clips.clone();
+            if let Some(r) = rates {
+                ops::conform::clips(p, &mut clips, r);
+            }
             let clips = match duration {
-                Some(d) => ops::cut_to(clips, length(p, d)?),
-                None => clips.clone(),
+                Some(d) => ops::cut_to(&clips, length(p, d)?),
+                None => clips,
             };
             let ids = match *insert {
                 true => ops::paste_insert(p, &clips, at)?,
@@ -4761,7 +4910,7 @@ fn mutate(
                     placed.before_zero
                 ));
             }
-            let fps = p.settings.fps.as_f64();
+            let fps = p.fps().as_f64();
             json!({
                 "track": placed.track,
                 "cues": placed.cues,
@@ -4843,11 +4992,7 @@ fn mutate(
                     (Arc::new(s), json!(media), people)
                 }
                 HearFrom::Mix => {
-                    upload_check(
-                        &asked,
-                        &[((b - a) as f64 / p.settings.fps.as_f64(), 1)],
-                        "The mix",
-                    )?;
+                    upload_check(&asked, &[((b - a) as f64 / p.fps().as_f64(), 1)], "The mix")?;
                     let s = env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?;
                     let people = match &s.speakers {
                         Some(run) => (1..=transcript::speaker_count(&s.said))
@@ -4860,7 +5005,7 @@ fn mutate(
             };
             let made = transcript::cues(
                 &speech.said,
-                p.settings.fps,
+                p.fps(),
                 transcript::Layout {
                     chars: *chars as usize,
                     lines: *lines as usize,
@@ -5072,6 +5217,8 @@ fn mutate(
             path,
             otio,
             mode,
+            bin,
+            name,
             search,
             unpack,
             flatten,
@@ -5081,6 +5228,8 @@ fn mutate(
                 path: path.as_deref(),
                 doc: otio.as_ref(),
                 mode: *mode,
+                bin: bin.as_deref().unwrap_or_default(),
+                name: name.as_deref(),
                 search,
                 unpack: unpack.as_deref(),
                 write: !dry_run,
@@ -5471,7 +5620,7 @@ fn add_folder(
             continue;
         }
         let probed = match runs.contains_key(file) {
-            true => env.probe_sequence(file, out.fps.unwrap_or(p.settings.fps)),
+            true => env.probe_sequence(file, out.fps.unwrap_or(p.fps())),
             false => env.probe(file),
         };
         let probed = match probed {
@@ -5740,6 +5889,8 @@ struct Import<'a> {
     path: Option<&'a Path>,
     doc: Option<&'a Value>,
     mode: ImportMode,
+    bin: &'a str,
+    name: Option<&'a str>,
     search: &'a [PathBuf],
     unpack: Option<&'a Path>,
     write: bool,
@@ -5833,7 +5984,7 @@ fn groups_to_rate(p: &mut Project, from: Rational) {
 
 fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
     let pool: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
-    let (from, to) = (t.fps, p.settings.fps);
+    let (from, to) = (t.fps, p.fps());
     let conv = |f: i64| rescale(f, from, to);
     let ratio = to.as_f64() / from.as_f64();
     let retime = |list: &mut Vec<Value>| {
@@ -5972,8 +6123,8 @@ fn place_imported(
         .enumerate()
         .map(|(i, m)| (m.id.clone(), i))
         .collect();
-    debug_assert_eq!(t.fps, p.settings.fps, "converted first (at_project_rate)");
-    let frame = (p.settings.width, p.settings.height);
+    debug_assert_eq!(t.fps, p.fps(), "converted first (at_project_rate)");
+    let frame = (p.width(), p.height());
     let track_of = |id: &str| tracks.get(id).cloned().unwrap_or_else(|| id.to_string());
     let carry = |list: &[Value], first: i64| {
         (!list.is_empty()).then(|| Effects {
@@ -6013,7 +6164,7 @@ fn place_imported(
             let title = c
                 .title_from
                 .as_ref()
-                .and_then(|r| otio::titles::from_editor(r, p.settings.height))
+                .and_then(|r| otio::titles::from_editor(r, p.height()))
                 .zip(c.title.as_ref())
                 .map(|(t, read)| otio::titles::with_keys_of(t, read))
                 .or_else(|| c.title.clone());
@@ -6340,7 +6491,7 @@ fn compound_contents(
     let mut t = nested(k, video, at.base)?;
     let ids = nested_media(p, &t.clips, env, at)?;
     at_project_rate(p, &mut t, &ids);
-    let mut inner = Project::new(p.settings.clone());
+    let mut inner = Project::new(p.flat_settings());
     let mut needed: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
     needed.sort_by_key(|id| (!id.starts_with('V'), id[1..].parse::<usize>().unwrap_or(0)));
     needed.dedup();
@@ -6464,7 +6615,7 @@ fn decompose(
         return Ok(made);
     }
     let mut t = nested(&k, block.video, at.base)?;
-    let to = p.settings.fps;
+    let to = p.fps();
     let conv = |f: i64| rescale(f, t.fps, to);
     let (lo, hi) = block.shown();
     t.clips.retain(|c| conv(c.start) < hi && conv(c.end()) > lo);
@@ -6562,7 +6713,7 @@ fn finish_decompose(
 }
 
 fn give_picture(p: &mut Project, block: &Clip, picture: &Picture, made: &[String]) -> Vec<String> {
-    let frame = (p.settings.width, p.settings.height);
+    let frame = (p.width(), p.height());
     let mut dropped = Vec::new();
     for id in made {
         let Some((ti, ci)) = p.find_clip(id) else {
@@ -6598,12 +6749,19 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         path,
         doc,
         mode,
+        bin: timeline_bin,
+        name: new_name,
         search,
         unpack,
         write,
         flatten,
         adopt_rate,
     } = *import;
+    if mode == ImportMode::New && !ops::has_bin(p, timeline_bin) {
+        return Err(Error::not_found(format!(
+            "no bin {timeline_bin:?}; add it with bins.add"
+        )));
+    }
     if flatten && mode == ImportMode::Compound {
         return Err(Error::usage(
             "flatten decomposes compound clips: it can't import as one",
@@ -6633,6 +6791,15 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         ("", Some(stem)) => stem.clone(),
         (name, _) => name.to_string(),
     };
+    let new_name = match (new_name.map(str::trim), &stem, t.name.trim()) {
+        (Some(named), ..) => named.to_string(),
+        (None, Some(stem), _) => stem.clone(),
+        (None, None, "") => p.next_timeline_name(),
+        (None, None, own) => own.to_string(),
+    };
+    if mode == ImportMode::New {
+        ops::timelines::free_name(p, &new_name, None)?;
+    }
     let meta = t.project.take();
     let wanted = meta
         .as_ref()
@@ -6646,7 +6813,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     let pool = meta
         .as_ref()
         .is_some_and(|m| mode == ImportMode::Media && !m.media.is_empty());
-    let empties = mode == ImportMode::Replace && t.warnings.is_empty();
+    let empties = matches!(mode, ImportMode::Replace | ImportMode::New) && t.warnings.is_empty();
     if t.clips.is_empty() && !pool && !empties {
         return Err(Error::invalid(format!(
             "nothing to import: the timeline has no clips{}",
@@ -6717,7 +6884,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         compound_media(p, &t, env, at, &mut media)?;
         return Ok(json!({
             "name": name,
-            "fps": p.settings.fps,
+            "fps": p.fps(),
             "clips": [],
             "media": media,
             "markers": [],
@@ -6731,6 +6898,11 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         }
         p.markers.clear();
         p.marks = Default::default();
+    }
+    let made = mode == ImportMode::New;
+    if made {
+        let new = p.new_timeline(new_name, timeline_bin.to_string());
+        p.add_timeline(new);
     }
     let empty = p.tracks.iter().all(|t| t.clips.is_empty());
     if empty {
@@ -6748,22 +6920,30 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
                 .and_then(|m| m.info.timecode)
                 .is_some_and(|tc| tc.drop_frame)
         });
-        let rate = p.settings.fps;
-        p.settings.set_fps(t.fps);
-        if drop && t.fps.has_drop_frame() {
-            p.settings.drop_frame = true;
+        let alone = p.timelines.len() <= usize::from(made);
+        let drop = drop && t.fps.has_drop_frame();
+        match p.timeline_mut().and_then(|t| t.own.as_mut()) {
+            Some(own) if adopt_rate => {
+                own.fps = t.fps;
+                own.drop_frame |= drop;
+            }
+            Some(_) => {}
+            None if adopt_rate && alone => {
+                let rate = p.settings.fps;
+                p.settings.set_fps(t.fps);
+                p.settings.drop_frame |= drop;
+                groups_to_rate(p, rate);
+            }
+            None => {}
         }
-        p.settings.start_tc = t.start_tc;
-        if !adopt_rate || !p.compounds.is_empty() {
-            p.settings.set_fps(rate);
-        }
-        groups_to_rate(p, rate);
+        p.set_start_tc(crate::time::rescale(t.start_tc, t.fps, p.fps()));
         p.settings.auto_format = false;
     }
-    if t.fps != p.settings.fps {
+    if t.fps != p.fps() {
         warnings.push(format!(
             "converted from {} to the project's {} fps: cuts may move by up to half a frame",
-            t.fps, p.settings.fps
+            t.fps,
+            p.fps()
         ));
     }
     at_project_rate(p, &mut t, &ids);
@@ -6797,7 +6977,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     }
     let mut result = json!({
         "name": name,
-        "fps": p.settings.fps,
+        "fps": p.fps(),
         "clips": clips,
         "media": media,
         "markers": markers,
@@ -6971,8 +7151,20 @@ pub fn open_otio(
     p.bins = meta.bins;
     p.groups = meta.groups;
     p.tape_marks = meta.tape_marks;
+    p.timelines = meta.timelines;
+    p.recent = meta.recent;
+    if p.timeline().is_none() {
+        let name = match t.name.trim() {
+            "" => p.next_timeline_name(),
+            own => own.to_string(),
+        };
+        let timeline = p.new_timeline(name, String::new());
+        p.recent.insert(0, timeline.id.clone());
+        p.timelines.push(timeline);
+    }
+    p.check_out();
     p.subtitles = meta.subtitles;
-    p.settings.start_tc = t.start_tc;
+    p.set_start_tc(crate::time::rescale(t.start_tc, t.fps, p.fps()));
     let mut warnings = t.warnings.clone();
     let mut ids = MediaIds::new();
     for c in t.clips.iter().filter(|c| !c.is_block()) {
@@ -6984,10 +7176,11 @@ pub fn open_otio(
     let others = t.clips.iter().filter(|c| !ids.contains_key(&media_key(c)));
     let (found, _) = find_media(&mut p, others, env, &[], false)?;
     ids.extend(found);
-    if t.fps != p.settings.fps {
+    if t.fps != p.fps() {
         warnings.push(format!(
             "converted from {} to the project's {} fps: cuts may move by up to half a frame",
-            t.fps, p.settings.fps
+            t.fps,
+            p.fps()
         ));
     }
     at_project_rate(&p, &mut t, &ids);
@@ -7036,14 +7229,15 @@ pub fn project_from_otio(
     }
     let first = Format {
         drop_frame: None,
-        start_tc: None,
         ..format.clone()
     };
     let mut p = Project::new(first.settings()?);
     let import = Import {
         path: Some(path),
         doc: None,
-        mode: ImportMode::Replace,
+        mode: ImportMode::New,
+        bin: "",
+        name: None,
         search: &[],
         unpack: None,
         write,
@@ -7052,10 +7246,7 @@ pub fn project_from_otio(
     };
     let result = import_timeline(&mut p, &import, env)?;
     if let Some(d) = format.drop_frame {
-        p.settings.set_drop_frame(d)?;
-    }
-    if let Some(tc) = &format.start_tc {
-        p.settings.set_start_tc(tc)?;
+        set_drop_frame(&mut p, d)?;
     }
     let mut warnings: Vec<String> =
         serde_json::from_value(result["warnings"].clone()).unwrap_or_default();
@@ -7233,12 +7424,20 @@ fn checked_lut(env: &dyn Env, path: &Path) -> Result<Option<PathBuf>> {
     Ok(Some(path.to_path_buf()))
 }
 
+fn set_drop_frame(p: &mut Project, on: bool) -> Result<()> {
+    let was = p.settings.clone();
+    p.settings.set_drop_frame(on)?;
+    for t in p.timelines.iter_mut().filter(|t| t.own.is_none()) {
+        t.start_tc = p.settings.relabel(t.start_tc, &was);
+    }
+    Ok(())
+}
+
 fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
-    if let Some(fps) = set.fps {
-        let has_clips = p.tracks.iter().any(|t| !t.clips.is_empty());
-        if (has_clips || !p.compounds.is_empty()) && fps != p.settings.fps {
+    if let Some(fps) = set.fps.filter(|&f| f != p.settings.fps) {
+        if !p.timelines.is_empty() {
             return Err(Error::invalid(
-                "the frame rate can only change with no clips on the timeline or compound clips in the pool",
+                "the project frame rate can only change while the project has no timelines",
             ));
         }
         let rate = p.settings.fps;
@@ -7269,11 +7468,13 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     if let Some(r) = set.ripple_on {
         p.settings.ripple_on = r;
     }
-    if let Some(d) = set.drop_frame {
-        p.settings.set_drop_frame(d)?;
-    }
-    if let Some(tc) = &set.start_tc {
-        p.settings.set_start_tc(tc)?;
+    if let Some(d) = set.drop_frame.filter(|&d| d != p.settings.drop_frame) {
+        if !p.timelines.is_empty() {
+            return Err(Error::invalid(
+                "the project drop-frame can only change while the project has no timelines",
+            ));
+        }
+        set_drop_frame(p, d)?;
     }
     if let Some(on) = set.use_proxies {
         p.settings.use_proxies = on;
@@ -7474,7 +7675,7 @@ pub fn query(
     playhead: Option<i64>,
     dry_run: bool,
 ) -> Result<Value> {
-    let tc = |f: i64| p.settings.timecode(f);
+    let tc = |f: i64| p.timecode(f);
     Ok(match request {
         Request::ProjectGet {} => {
             serde_json::to_value(p).map_err(|e| Error::internal(e.to_string()))?
@@ -7518,6 +7719,7 @@ pub fn query(
             sync,
             full_extents,
         } => {
+            crate::multicam::same_rate(p)?;
             json!(crate::multicam::layout(
                 p,
                 env,
@@ -7539,6 +7741,7 @@ pub fn query(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
+            crate::multicam::same_rate(p)?;
             json!(crate::multicam::sync_rows(
                 p,
                 bin.as_deref().unwrap_or_default(),
@@ -7553,7 +7756,13 @@ pub fn query(
             v["info"] = serde_json::to_value(&m.info).unwrap_or_default();
             let pooled = p.compounds.iter().filter(|k| k.holds(media));
             let users = p.clips_using(media).map(|c| &c.id);
-            v["used_by"] = json!(users.chain(pooled.map(|k| &k.id)).collect::<Vec<_>>());
+            let timelines = p.timelines_using(media).map(|t| &t.id);
+            v["used_by"] = json!(
+                users
+                    .chain(pooled.map(|k| &k.id))
+                    .chain(timelines)
+                    .collect::<Vec<_>>()
+            );
             v
         }
         Request::Probe { path } => {
@@ -7640,6 +7849,7 @@ pub fn query(
                 .collect::<Vec<_>>()
         ),
         Request::BinsList {} => json!(p.bins),
+        Request::TimelineList {} => ops::timelines::list(p),
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;
             ops::picture::get(p, &id)?
@@ -7977,11 +8187,7 @@ pub fn query(
                 xai: xai.clone(),
                 google: google.clone(),
             };
-            upload_check(
-                &asked,
-                &[((b - a) as f64 / p.settings.fps.as_f64(), 1)],
-                "The mix",
-            )?;
+            upload_check(&asked, &[((b - a) as f64 / p.fps().as_f64(), 1)], "The mix")?;
             let speech = env.transcribe(&sound_plan(p, a, b, &heard)?, &asked)?;
             let timed = transcript::spoken(&speech).map_err(Error::invalid)?;
             let tongue = filler_language(&None, &speech);
@@ -7989,7 +8195,7 @@ pub fn query(
             let words: Vec<Value> = timed
                 .iter()
                 .flat_map(|w| {
-                    transcript::word_frames(std::slice::from_ref(w), p.settings.fps, a, b)
+                    transcript::word_frames(std::slice::from_ref(w), p.fps(), a, b)
                         .into_iter()
                         .map(|(_, start, end)| {
                             let mut v = word_json(w, start, end, &fillers);
@@ -8064,10 +8270,10 @@ pub fn query(
                 format,
                 &crate::subtitles::Writing {
                     language: t.language.as_deref(),
-                    frame_rate: Some(p.settings.fps.as_f64()),
+                    frame_rate: Some(p.fps().as_f64()),
                     positions: true,
                     style: &t.style,
-                    timeline_height: p.settings.height,
+                    timeline_height: p.height(),
                 },
             );
             if !dry_run {
@@ -8116,15 +8322,15 @@ pub fn query(
         Request::EditCopy { clips, range, cues } => match (clips, range, cues) {
             (Some(clips), None, None) => {
                 let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-                json!({ "clips": ops::copy_clips(p, &ids)? })
+                json!({ "clips": ops::copy_clips(p, &ids)?, "fps": p.fps() })
             }
             (None, Some(range), None) => {
                 let (a, b) = ctx(p, playhead).range(range)?;
-                json!({ "clips": ops::copy_range(p, a, b)? })
+                json!({ "clips": ops::copy_range(p, a, b)?, "fps": p.fps() })
             }
             (None, None, Some(cues)) => {
                 let ids = resolve_cues(p, &cues.to_vec(), playhead)?;
-                json!({ "cues": ops::subtitles::copy_cues(p, &ids)? })
+                json!({ "cues": ops::subtitles::copy_cues(p, &ids)?, "fps": p.fps() })
             }
             _ => return Err(Error::usage("give `clips`, `range` or `cues`")),
         },
@@ -8140,7 +8346,7 @@ pub fn query(
             let item = |c: &Clip| {
                 json!({
                     "clip": c.id, "start": c.start, "duration": c.duration,
-                    "start_tc": tc(c.start), "duration_tc": p.settings.length_timecode(c.duration),
+                    "start_tc": tc(c.start), "duration_tc": p.length_timecode(c.duration),
                 })
             };
             json!({
@@ -8389,7 +8595,7 @@ impl Target<'_> {
     }
 
     fn spans(&self, p: &Project) -> Result<Vec<Span>> {
-        let fps = p.settings.fps;
+        let fps = p.fps();
         Ok(match self {
             Target::Media(m) => {
                 let (_, origin) = p.media_origin(&m.id)?;
@@ -8399,7 +8605,7 @@ impl Target<'_> {
                     end: p.clip_frames(m),
                     source_in: 0,
                     origin,
-                    fps: m.rate(fps),
+                    fps: m.rate(p.settings.fps),
                 }]
             }
             Target::Clip(c) => {
@@ -8412,14 +8618,14 @@ impl Target<'_> {
     fn tc(&self, p: &Project, f: i64) -> String {
         match self {
             Target::Media(m) => p.clip_timecode(m, f),
-            Target::Clip(_) => p.settings.timecode(f),
+            Target::Clip(_) => p.timecode(f),
         }
     }
 
     fn length_tc(&self, p: &Project, f: i64) -> String {
         match self {
             Target::Media(m) => p.clip_timecode(m, f),
-            Target::Clip(_) => p.settings.length_timecode(f),
+            Target::Clip(_) => p.length_timecode(f),
         }
     }
 
@@ -8621,7 +8827,7 @@ fn silent_parts(
 ) -> Result<Vec<(i64, i64)>> {
     let m = target.media(p)?;
     let (_, origin) = p.media_origin(&m.id)?;
-    let fps = p.settings.fps.as_f64();
+    let fps = p.fps().as_f64();
     let (stream, gain) = match target {
         Target::Media(_) => (0, crate::keyframes::Gain::flat(0.0)),
         Target::Clip(c) => match &c.audio {
@@ -8669,7 +8875,7 @@ fn heard_speech(
     heard: &[String],
     download: bool,
 ) -> Result<Vec<(f64, f64)>> {
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let f = fps.as_f64();
     let frames = |secs: f64| (secs * f).round() as i64;
     let settings = SilenceSettings {
@@ -8788,7 +8994,7 @@ fn time_words(
     said: &[transcript::Said],
     a: i64,
 ) -> (usize, usize, Vec<String>) {
-    let fps = p.settings.fps.as_f64();
+    let fps = p.fps().as_f64();
     let texts: Vec<Vec<String>> = which
         .iter()
         .map(|&ci| crate::subtitles::words(&p.subtitles[ti].cues[ci].text))
@@ -8887,7 +9093,7 @@ fn retime_subtitles(p: &mut Project, env: &dyn Env, r: &Retime<'_>) -> Result<Va
         None => ops::subtitles::shown(p)?,
     };
     ops::subtitles::unlocked(p, ti)?;
-    let fps = p.settings.fps.as_f64();
+    let fps = p.fps().as_f64();
     let id = p.subtitles[ti].id.clone();
     let cues: Vec<(f64, f64)> = p.subtitles[ti]
         .cues
@@ -9167,7 +9373,7 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     if let Some(tc) = m.info.timecode {
         let fps = match &m.info.video {
             Some(v) if v.fps == tc.rate => v.fps,
-            _ => p.settings.fps,
+            _ => p.fps(),
         };
         let frames = m.timecode_at(fps).round() as i64;
         v["timecode"] = json!(format_timecode(frames, fps, 0, tc.drop_frame));
@@ -9209,11 +9415,11 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         "start": c.start,
         "end": c.end(),
         "duration": c.duration,
-        "start_tc": p.settings.timecode(c.start),
-        "end_tc": p.settings.timecode(c.end()),
+        "start_tc": p.timecode(c.start),
+        "end_tc": p.timecode(c.end()),
         "source_in": c.source_in,
         "source_out": c.source_at(c.end()),
-        "source_in_tc": p.settings.length_timecode(c.source_in),
+        "source_in_tc": p.length_timecode(c.source_in),
         "enabled": c.enabled,
     });
     if let Some(color) = c.shown_color(media) {
@@ -9267,7 +9473,7 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
 }
 
 fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let pool = p.pool();
     let tracks: Vec<Value> = p
         .tracks
@@ -9279,7 +9485,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
                 if c.start > at && c.start > a && at < b {
                     let (gs, ge) = (at.max(a), c.start.min(b));
                     items.push(json!({ "type": "gap", "start": gs, "end": ge, "duration": ge - gs,
-                        "start_tc": p.settings.timecode(gs), "end_tc": p.settings.timecode(ge) }));
+                        "start_tc": p.timecode(gs), "end_tc": p.timecode(ge) }));
                 }
                 if c.end() > a && c.start < b {
                     items.push(clip_json(p, c, pool.get(c.media.as_str()).copied(), &t.id));
@@ -9323,7 +9529,7 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
         "start": a,
         "end": b,
         "duration": p.end(),
-        "duration_tc": p.settings.timecode(p.end()),
+        "duration_tc": p.timecode(p.end()),
         "marks": p.marks,
         "markers": p.markers,
     });
