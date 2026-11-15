@@ -5857,11 +5857,14 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
             true => None,
             false => pool.get(ids[&media_key(&c.media)].as_str()).copied(),
         };
-        let tc = match m.filter(|m| c.timecoded && m.sequence.is_none()) {
-            Some(m) => m.timecode_at(from),
-            None => 0.0,
+        let tc = match (m, c.counted) {
+            (Some(m), otio::Counted::ByTimecode) if m.sequence.is_none() => m.timecode_at(from),
+            (Some(m), otio::Counted::ByTimecode | otio::Counted::InFile) => {
+                m.skipped() * from.as_f64()
+            }
+            _ => 0.0,
         };
-        c.timecoded = false;
+        c.counted = otio::Counted::InItem;
         let (start, end) = (conv(c.start), conv(c.end()));
         if let Some((h, tl)) = c.audio {
             c.audio = Some((conv(c.start + h) - start, conv(c.end() + tl) - end));

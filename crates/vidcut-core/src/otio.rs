@@ -614,13 +614,18 @@ fn written_start(c: &Clip, s: i64, len: i64) -> f64 {
     }
 }
 
-fn source_start(meta: &Value, at: f64, first: i64, speed: Option<&Speed>) -> (i64, f64) {
+fn source_start(
+    meta: &Value,
+    (at, counted): (f64, Counted),
+    first: i64,
+    speed: Option<&Speed>,
+) -> (i64, f64, Counted) {
     if let Some(x) = meta["source_in"].as_i64() {
-        return (x, meta["phase"].as_f64().unwrap_or(0.0));
+        return (x, meta["phase"].as_f64().unwrap_or(0.0), Counted::InItem);
     }
     match speed.map_or(Some(1.0), Speed::scalar) {
-        Some(x) if x >= 0.0 => (first, at - first as f64),
-        _ => (first, 0.0),
+        Some(x) if x >= 0.0 => (first, at - first as f64, counted),
+        _ => (first, 0.0, counted),
     }
 }
 
@@ -704,11 +709,11 @@ pub fn export_drawn(
         let (start, reference) = match m {
             Some(m) if m.is_still() => (0.0, media_reference(p, m, locations, rate)),
             Some(m) if m.sequence.is_some() => (
-                (m.skipped() * fps.as_f64()).round() + source,
+                m.skipped() * fps.as_f64() + source,
                 media_reference(p, m, locations, rate),
             ),
             Some(m) => (
-                m.timecode_at(fps).round() + source,
+                start_tc(m, fps) + m.skipped() * fps.as_f64() + source,
                 media_reference(p, m, locations, rate),
             ),
             None => (
@@ -1419,6 +1424,13 @@ pub struct MediaRef {
     pub sequence: Option<Rational>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Counted {
+    InItem,
+    InFile,
+    ByTimecode,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedClip {
     pub key: usize,
@@ -1431,7 +1443,7 @@ pub struct ImportedClip {
     pub duration: i64,
     pub source_in: i64,
     pub source_rest: f64,
-    pub timecoded: bool,
+    pub counted: Counted,
     pub video: bool,
     pub enabled: bool,
     pub audio: Option<(i64, i64)>,
@@ -1521,7 +1533,7 @@ impl ImportedClip {
             source_in: time(&item["source_range"]["start_time"])
                 .map_or(0, |(v, r)| frames(v, r, fps)),
             source_rest: 0.0,
-            timecoded: false,
+            counted: Counted::InItem,
             video: true,
             enabled: item["enabled"].as_bool().unwrap_or(true),
             audio: None,
@@ -1927,7 +1939,11 @@ fn sequence_ref(r: &Value, base: Option<&Path>, fps: Rational) -> Result<MediaRe
     Ok(m)
 }
 
-fn clip_source(item: &Value, fps: Rational, base: Option<&Path>) -> Result<(MediaRef, f64, bool)> {
+fn clip_source(
+    item: &Value,
+    fps: Rational,
+    base: Option<&Path>,
+) -> Result<(MediaRef, f64, Counted)> {
     let reference = media_reference_of(item);
     let name = item["name"].as_str().unwrap_or("");
     let s = schema(reference);
@@ -1956,9 +1972,9 @@ fn clip_source(item: &Value, fps: Rational, base: Option<&Path>) -> Result<(Medi
     let available = time(&reference["available_range"]["start_time"]);
     Ok(
         match (time(&item["source_range"]["start_time"]), available) {
-            (Some(start), Some(base)) => (media, exact_between(base, start, fps), false),
-            (Some((v, r)), None) => (media, exact_frames(v, r, fps), true),
-            (None, _) => (media, 0.0, false),
+            (Some(start), Some(base)) => (media, exact_between(base, start, fps), Counted::InFile),
+            (Some((v, r)), None) => (media, exact_frames(v, r, fps), Counted::ByTimecode),
+            (None, _) => (media, 0.0, Counted::InItem),
         },
     )
 }
@@ -2278,13 +2294,14 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 continue;
             }
             match clip_source(item, fps, base) {
-                Ok((media, at, timecoded)) => {
+                Ok((media, at, counted)) => {
                     let meta = &item["metadata"][VIDCUT];
                     let (first, skip) = first_shown(at.round() as i64, len, speed.as_ref());
                     if let Some(s) = speed.as_mut() {
                         s.skip = meta["skip"].as_i64().unwrap_or(skip);
                     }
-                    let (source_in, source_rest) = source_start(meta, at, first, speed.as_ref());
+                    let (source_in, source_rest, counted) =
+                        source_start(meta, (at, counted), first, speed.as_ref());
                     clip_markers(item, start, len, fps, &mut markers);
                     keys[i] = Some(clips.len());
                     clips.push(ImportedClip {
@@ -2298,7 +2315,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         duration: len,
                         source_in,
                         source_rest,
-                        timecoded: timecoded && meta["source_in"].is_null(),
+                        counted,
                         video: true,
                         enabled: item["enabled"].as_bool().unwrap_or(true),
                         audio: None,
@@ -2386,8 +2403,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 clips.push(c);
                 continue;
             }
-            let (media, (source_in, source_rest), timecoded) = match clip_source(item, fps, base) {
-                Ok((media, at, timecoded)) => {
+            let (media, (source_in, source_rest, counted)) = match clip_source(item, fps, base) {
+                Ok((media, at, counted)) => {
                     let meta = &item["metadata"][VIDCUT];
                     let (first, skip) = first_shown(at.round() as i64, len, speed.as_ref());
                     if let Some(s) = speed.as_mut() {
@@ -2395,8 +2412,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     }
                     (
                         media,
-                        source_start(meta, at, first, speed.as_ref()),
-                        timecoded,
+                        source_start(meta, (at, counted), first, speed.as_ref()),
                     )
                 }
                 Err(e) => {
@@ -2427,7 +2443,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 c.video
                     && c.audio.is_none()
                     && c.media.url == media.url
-                    && c.timecoded == timecoded
+                    && c.counted == counted
                     && match (&c.speed, &speed) {
                         (Some(a), Some(b)) if a.scalar().is_none() || b.scalar().is_none() => {
                             a.sections == b.sections && a.skip - c.start == b.skip - start
@@ -2519,7 +2535,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 duration: len,
                 source_in,
                 source_rest,
-                timecoded,
+                counted,
                 video: false,
                 enabled: true,
                 audio: Some((0, 0)),

@@ -242,7 +242,8 @@ Media fields:
   - `Media::timecode_at` gives the source timecode of its first frame.
   - `Tiles::job` keeps no blocks on disk for a subclip, because the blocks count the frames of the whole file.
   - `PoolFiles` and `otio::same_media` never take a subclip for its file.
-  - An OTIO file gives a clip of a subclip as a clip of the whole file, at the right time.
+  - An OTIO file gives a clip of a subclip as a clip of the whole file, at the right time. The start of the subclip is not rounded to a frame.
+  - An import takes the start of the subclip off a source start that counts in the whole file (`otio::Counted`, `at_project_rate`). The `vidcut` metadata of a clip counts in the subclip.
   - `Speakers::share` gives a new subclip the people of its parent.
   - `ops::set_subclip_limits` changes the part (`media.subclip_set`). `Project::subclip_span` gives the part in frames of the file.
     - The source frames count from the start of the part. Thus a new start moves each frame that counts from it by the same amount.
