@@ -26,16 +26,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The user can move the project folder, also to another computer, and keep its media.
   - A different file with the same name does not take the place of the media.
 
-## X2. One timeline per project file
-
-- **Resolve:**
-  - A project holds many timelines. The Media Pool stores them in bins (p. 678).
-  - The Master bin of the Cut page lists all of them (p. 655).
-- **vidcut:**
-  - A project file holds exactly one timeline.
-  - Several timelines are several project files that share media.
-- **Why:** several timelines in one project are not built yet ([todo](todo/timelines.md)).
-
 ## X3. Exports are jobs, and Quick Export has a shorter row
 
 - **Resolve:**
@@ -63,13 +53,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 
 - **Resolve:**
   - Timelines move between applications as EDL, AAF, XML or OTIO files. File > Import Timeline and File > Export do this, off the Cut page (pp. 527–530, 4159–4160).
-  - An import makes a new timeline.
 - **vidcut:**
   - vidcut uses only OpenTimelineIO, for import and for export, in the shapes that Resolve uses ([D40](spec.md#12-decisions-on-gaps-and-contradictions)).
   - File > Export Timeline is `export start cut.otio`. With Media, the export is a bundle ([design/model.md](design/model.md#opentimelineio)).
-  - A project holds one timeline (X2). Thus File > Import Timeline (`timeline import`) appends, replaces the timeline, adds one compound clip, or brings in only the media.
   - An OTIO file also opens as a new project.
-  - OTIO has no drop-frame flag. An imported timeline takes the frame rate and the drop-frame setting of the project.
+  - OTIO has no drop-frame flag. An imported timeline takes the drop-frame setting of the project.
+  - A project with no other timeline also turns drop-frame on when the timecode of the media is drop-frame.
   - An import into a project with no media turns drop-frame off.
   - Clip effects, transitions, generators that vidcut does not draw, compound clips and speed changes come in as data. vidcut writes them back while they fit.
   - Dissolves, cross fades ([D50](spec.md#12-decisions-on-gaps-and-contradictions)), wipes and speeds ([D48](spec.md#12-decisions-on-gaps-and-contradictions)) play.
@@ -1497,7 +1486,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - After a decompose beside a J or L cut, the cut stays. A sound that comes back starts after that cut.
     - A clip whose sound the cuts cover, alone or together, has no sound.
 - **Why:**
-  - A project has one timeline (X2). Thus a pool item has no timeline to open.
+  - Open in Timeline of a compound clip is not built yet (p. 1053, [gaps](todo/gaps.md)).
   - A clip holds its picture and sound as one. Half of a clip is not a thing that vidcut can select.
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
   - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
@@ -1603,3 +1592,14 @@ The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the contro
   - Resolve: the Equalizer is the effect `Fairlight Clip Equaliser`, with one more effect for each band.
   - vidcut: the Equalizer is in fields that only vidcut reads. The export report shows the note `equalizer_kept`.
   - Why: vidcut cannot write the Equalizer effects of Resolve yet ([todo](todo/effects-library.md)).
+
+## X172. An imported timeline keeps its times at another frame rate
+
+- **Resolve:** (measured in Resolve Studio 21.2)
+  - File > Import > Timeline makes a new timeline. A timeline in the project locks the frame rate. The new timeline then has the project's settings.
+  - The clips keep their frame counts. An OTIO file at 25 fps in a 29.97 fps project thus gives shorter clips.
+  - A clip of 4 seconds becomes 3.3 seconds. The script import does the same.
+- **vidcut:**
+  - The new timeline has the project's settings, as in Resolve.
+  - The clips keep their times: vidcut converts them to the frame rate of the timeline. A cut can move by up to half a frame, and the import gives a warning.
+- **Why:** the cuts of the file are at times. A change of their times is a fault in Resolve.

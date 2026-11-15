@@ -323,6 +323,31 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - vidcut also sorts by Duration.
   - This order is also the Source Tape order.
   - The search field filters live, through the open bin and the bins inside it.
+- **Timelines** (pp. 838–841, 1053; measured in Resolve Studio 21.2):
+  - A project holds many timelines. The pool shows each one in its bin, with its length. The open one is highlighted.
+  - A double-click on a timeline opens it. The edits then act on it.
+  - In/Out marks, markers, subtitle tracks and the playhead stay with each timeline.
+  - All timelines share one undo history. Opening a timeline is a step of it: "Set Timeline 2 as Current Timeline".
+  - The Timeline Selection menu, at the top of the Timeline viewer, shows the name of the open timeline. It lists the 10 timelines opened last, the last first.
+  - **New Timeline** (File > New Timeline, Ctrl+N, or Create New Timeline in the menu of the pool):
+    - Start Timecode, 01:00:00:00 by default.
+    - Timeline Name, "Timeline N" by default. N is the count of timelines plus 1, or the next number that no timeline has.
+    - Video Tracks and Audio Tracks, 1 each.
+    - Use Project Settings, on by default. Off, the timeline has its own frame rate, resolution, drop-frame and color space. It has no LUT of its own.
+    - The timeline goes into the open bin, and opens.
+  - The menu of a timeline in the pool has Open, Duplicate Timeline, Rename, Timeline Settings and Delete Timeline.
+    - Duplicate Timeline makes "X copy", then "X copy 1", in the same bin, and opens it. The copy has the markers, and no In/Out marks.
+    - Timeline Settings has the start timecode, Use Project Settings and the own format.
+    - Delete Timeline asks first. When the open timeline goes, the timeline made before it opens, else the one after it. A project can have no timeline.
+  - An edit into a project with no timeline makes "Timeline 1", with at least 1 video track and 1 audio track (p. 678).
+  - A timeline in the project locks the frame rate and drop-frame of the project. Media in the pool do not lock them.
+    - The manual says that media lock the frame rate (pp. 141, 364). Resolve Studio 21.2 does not.
+    - With no timeline, they change again.
+  - A timeline with its own settings changes its frame rate and drop-frame only while it has no clips. Its start timecode keeps its label.
+  - A compound clip made in a timeline at another rate is converted by time where it goes. Pasted clips are too.
+  - File > Import > Timeline makes a new timeline, named after the file, in the open bin, and opens it. A name that a timeline has is refused.
+    - The Import window has the timeline's name. vidcut also offers Append, Replace, As a Compound Clip and Media Only.
+    - A timeline at another frame rate keeps its times ([deviation X172](deviations.md#x172-an-imported-timeline-keeps-its-times-at-another-frame-rate)).
 - **Clip Info** (vidcut):
   - Clip Info shows all that vidcut knows of a file.
   - The info button of the metadata strip or of a thumbnail corner opens it. The menu of a pool item also opens it.
@@ -3438,7 +3463,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut's OTIO uses the shapes that Resolve writes and needs: source ranges in media timecode, plain paths, link groups, marker notes.
   - Thus a cut goes to Resolve and back with its media linked, and with its audio together with its video.
   - **A file with tracks and no clips.** Resolve Studio 21.1.2 imports it as an empty timeline, with V1, A1 and the start timecode of the file (measured).
-    - `project create --from` and `timeline.import` with `replace` make an empty timeline. It takes the rate and the start timecode of the file.
+    - `project create --from` and `timeline.import` with `new` or `replace` make an empty timeline. It takes the start timecode of the file.
     - `timeline.import` with `append`, `compound` or `media` refuses such a file. Resolve was not measured for these modes.
     - A file whose clips cannot be read also refuses, and the error names them.
   - Mapping: [deviation X9](deviations.md#x9-opentimelineio-interchange), [model](design/model.md#opentimelineio).

@@ -44,7 +44,7 @@ vidcut timeline get --json
 |---|---|
 | `450f`, or a JSON integer | frames |
 | `15s`, `250ms`, `1m30s`, `1h2m` | seconds, to the nearest frame |
-| `01:00:00:00`, `01:00:00;00` | timecode from the start timecode of the project; `;` is drop-frame |
+| `01:00:00:00`, `01:00:00;00` | timecode from the start timecode of the open timeline; `;` is drop-frame |
 | `00:01:02.500` | clock time |
 | `start`, `end`, `in`, `out`, `playhead` | the ends of the timeline, its marks, the playhead (GUI only) |
 | `+10f`, `-2s` | relative, where a command allows it (`player seek -2s`) |

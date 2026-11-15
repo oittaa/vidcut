@@ -171,6 +171,8 @@ Each wait has a deadline, except an untimed `jobs.wait`.
 - A mutation does this under `Store::lock`, and saves with `Store::save` before the reply. History compaction (`Store::compact`) runs on `vidcut-history`.
 - A `notify` watcher on the folder of the file sends `Msg::FileChanged`. Then `OpenProject::reload` reads the file under the lock.
 - The file is the source of truth. [requests](requests.md) tells about outside changes and undo.
+- Each timeline keeps its playhead. When another timeline opens, `Live::switch_playhead` keeps the playhead of the one before, and seeks to the playhead of the new one.
+  - `playheads` holds them by timeline id, for the open project only. It loses the ids of deleted timelines at each change.
 
 ## Jobs
 

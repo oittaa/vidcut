@@ -1,6 +1,6 @@
 # Project model
 
-- A project is one `Project` value in vidcut-core: settings, its media, tracks of clips, subtitle tracks of cues, marks, markers and bins.
+- A project is one `Project` value in vidcut-core: settings, its media, bins and timelines. A timeline holds tracks of clips, subtitle tracks of cues, marks and markers.
 - It is saved as one `.vidcut` JSON file. Only the editor changes it ([requests](requests.md)).
 - This page tells about the types, time, ids, the file, OpenTimelineIO and the preferences.
 
@@ -17,11 +17,16 @@ classDiagram
     fps: Rational
     width, height
     sample_rate, channels
-    start_tc, drop_frame
+    drop_frame
     ripple_on
     auto_format, use_proxies, render_cache
     fillers, timeline_colors
     retime, upscaler
+  }
+  class Timeline {
+    id, name, bin
+    start_tc
+    own: TimelineSettings
   }
   class Media {
     id
@@ -106,11 +111,12 @@ classDiagram
   }
   Project *-- Settings : settings
   Project *-- "*" Media : media
-  Project *-- "*" Track : tracks
-  Project *-- "*" Marker : markers
-  Project *-- "*" SubtitleTrack : subtitles
+  Project *-- "*" Timeline : timelines
+  Timeline *-- "*" Track : tracks
+  Timeline *-- "*" Marker : markers
+  Timeline *-- "*" SubtitleTrack : subtitles
   SubtitleTrack *-- "*" Cue : cues
-  Project *-- Marks : marks
+  Timeline *-- Marks : marks
   Media *-- Marks : source marks
   Media *-- "0..1" Proxy : proxy
   Track *-- "*" Clip : clips
@@ -145,7 +151,25 @@ classDiagram
 - A clip on a video track carries its picture. Its `ClipAudio` carries its sound, with J/L offsets (`head`, `tail`).
 - `tape_marks` holds the In and Out of the source tape.
 - `MediaInfo` keeps what the probe found: streams, duration, start timecode.
-- One project is one timeline ([deviation X2](../deviations.md#x2-one-timeline-per-project-file)).
+
+Timelines (spec §3):
+
+- `timelines` holds the timelines in the order they were made. Each `Timeline` has an `id` (`t<N>`, never reused), a `name`, a `bin` and a `start_tc`.
+- `recent` lists the ids, the last opened first. Its first id is the open timeline. The Timeline Selection menu shows `ops::timelines::RECENT_SHOWN` of them.
+- In memory, the open timeline is checked out: its `tracks`, `marks`, `markers` and `subtitles` are the fields of `Project` with these names. Its entry in `timelines` has empty lists.
+  - Why: the code that edits, plays and exports a timeline reads these fields. It does not change for many timelines.
+  - `Project::check_in` puts them back into the entry, and `Project::check_out` takes them out. `Project::open_timeline` does both.
+  - The file and the history hold each timeline with its contents (`Project::whole_timeline`, `Project::sheets`). Thus a diff names the timeline that changed.
+- `TimelineSettings` (`own`) gives a timeline its own frame rate, size, drop-frame and color space. Without it, the timeline uses the project's.
+  - `Project::fps`, `width`, `height`, `start_tc` and `counts_drop_frame` give the values of the open timeline. `Settings` holds the project's own values.
+  - `Project::flat_settings` gives `Settings` with the format of the open timeline. The export, the render cache and ducking use it.
+- A timeline in the project locks the project's frame rate and drop-frame (`project_set`). A timeline with its own settings changes them only while it has no clips (`ops::timelines::set`).
+- `ops::timelines` holds the requests: `new`, `open`, `rename`, `duplicate`, `delete` and `set`, and `list`.
+  - `delete` opens the timeline made before the deleted one, else the one after. A project can have no timeline.
+  - An edit into a project with no timeline makes one first (`Editor::apply`).
+- A pool item counts at the project's rate: a sound file and a still count `Settings::fps` (`Media::rate`). A compound clip keeps the rate of the timeline where it was made (`PooledCompound::fps`).
+- `ops::conform` converts clips by time from one frame rate to another. `place_pooled` and `edit.paste` use it, and `edit.copy` returns the rate of its clips.
+- Synced groups count frames at the project's rate. Their requests refuse a timeline at another rate (`multicam::same_rate`).
 
 Volume keyframes ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)):
 
@@ -280,14 +304,14 @@ Folders:
 
 ## Time
 
-- Each timeline position and length is a whole frame at the rate of the project, `Settings::fps`.
+- Each timeline position and length is a whole frame at the rate of its timeline (`Project::fps`). Below, "project frames" are these frames.
 - The rate is an exact `Rational` (30000/1001, not 29.97).
 - The `source_in` of a clip also counts project frames, from the first frame of its media.
 - `Clip::phase` is the part of a project frame from `source_in` to the exact start of the clip.
   - An edit of media at another frame rate starts on a frame of that media. This start can fall between two project frames.
   - The sound of the clip starts at the same exact time.
 - A position on a pool item counts its source frames: the frames of its video, at the frame rate of the video (`Media::rate`).
-  - A still or a sound file counts project frames.
+  - A still or a sound file counts frames at the project's own rate, `Settings::fps`.
   - The marks, the markers, the left-out spans and the subclip limits of an item count source frames.
   - `media_context` resolves times on an item at its frame rate, with the drop-frame count of its file (`Project::clip_rate`).
 - Conversions between the two counts:
@@ -308,7 +332,7 @@ Ranges and resolution:
 - A `RangeSpec` is half-open: "A..B" or "A..+D".
 - The editor resolves times with a `TimeContext` from the project:
   - "15s" is the nearest frame (`Rational::secs_to_frames`).
-  - Timecode counts from `start_tc` ([spec §4.3](../spec.md#43-timecode-pp-640-688-713714)).
+  - Timecode counts from the `start_tc` of the open timeline ([spec §4.3](../spec.md#43-timecode-pp-640-688-713714)).
   - The playhead keyword resolves only when the caller gives a frame. The live core gives the frame of the timeline. Thus a command that the GUI runs can use the playhead, and a headless command cannot.
 - A clip reference is an id, or "V1@15s": the clip under that frame on V1 (`resolve_clip`).
 
@@ -776,9 +800,12 @@ Import:
 
 Modes:
 
-- `ImportMode` is `append`, `replace`, `compound` (`otio::as_compound`) or `media`. `flatten` decomposes compound clips.
-- An empty timeline takes the rate, start timecode and track settings of the file.
-- `replace` and `project_from_otio` take a file with tracks and no clips, and make its tracks ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)). The other modes refuse it.
+- `ImportMode` is `new` (the default), `append`, `replace`, `compound` (`otio::as_compound`) or `media`. `flatten` decomposes compound clips.
+- `new` makes a timeline named after the file, in the bin of the request, and opens it. A name that a timeline has is refused (`ops::timelines::free_name`).
+- An empty timeline takes the start timecode and track settings of the file.
+  - It takes the file's rate when it has its own settings, or when the project has no other timeline.
+  - Else the clips are converted to its rate by time ([deviation X172](../deviations.md#x172-an-imported-timeline-keeps-its-times-at-another-frame-rate)).
+- `new`, `replace` and `project_from_otio` take a file with tracks and no clips, and make its tracks ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)). The other modes refuse it.
 - A file that vidcut wrote brings its pool items (`join_pool`) into a bin named after it, with new ids, without proxies.
 
 Kept data:
