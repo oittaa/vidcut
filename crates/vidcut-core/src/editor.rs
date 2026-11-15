@@ -5863,9 +5863,7 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         };
         let tc = match (m, c.counted) {
             (Some(m), otio::Counted::ByTimecode) if m.sequence.is_none() => m.timecode_at(from),
-            (Some(m), otio::Counted::ByTimecode | otio::Counted::InFile) => {
-                m.skipped() * from.as_f64()
-            }
+            (Some(m), otio::Counted::ByTimecode | otio::Counted::InFile) => m.skipped_at(from),
             _ => 0.0,
         };
         c.counted = otio::Counted::InItem;

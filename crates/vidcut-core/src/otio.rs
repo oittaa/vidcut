@@ -709,11 +709,11 @@ pub fn export_drawn(
         let (start, reference) = match m {
             Some(m) if m.is_still() => (0.0, media_reference(p, m, locations, rate)),
             Some(m) if m.sequence.is_some() => (
-                m.skipped() * fps.as_f64() + source,
+                m.skipped_at(fps) + source,
                 media_reference(p, m, locations, rate),
             ),
             Some(m) => (
-                start_tc(m, fps) + m.skipped() * fps.as_f64() + source,
+                start_tc(m, fps) + m.skipped_at(fps) + source,
                 media_reference(p, m, locations, rate),
             ),
             None => (
