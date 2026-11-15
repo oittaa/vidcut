@@ -267,7 +267,7 @@ pub fn violations(p: &Project) -> Vec<String> {
     }
     for m in &p.media {
         if let Some(s) = m.subclip
-            && (s.start < 0.0 || s.end <= s.start)
+            && (s.start < 0 || s.end <= s.start)
         {
             v.push(format!("{} is an empty subclip", m.id));
         }

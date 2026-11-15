@@ -213,6 +213,15 @@ impl schemars::JsonSchema for Rational {
     }
 }
 
+pub fn rescale(f: i64, from: Rational, to: Rational) -> i64 {
+    if from == to {
+        return f;
+    }
+    let n = i128::from(f) * i128::from(from.den()) * i128::from(to.num());
+    let d = i128::from(from.num()) * i128::from(to.den());
+    (2 * n + d).div_euclid(2 * d) as i64
+}
+
 pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64, drop: bool) -> String {
     let base = fps.timecode_base();
     let total = frames + start_tc;

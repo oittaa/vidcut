@@ -28,7 +28,7 @@ use crate::request::{
 };
 use crate::retime;
 use crate::steps::{Branch, Mark, Step, Steps, StepsCache, Tree};
-use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode};
+use crate::time::{DurationSpec, Rational, TimeContext, TimeSpec, format_timecode, rescale};
 use crate::transcript::{self, Speech};
 use crate::transcripts;
 use crate::validate;
@@ -5736,15 +5736,6 @@ fn adopt_size(p: &mut Project, v: &VideoInfo) {
     p.settings.auto_format = false;
 }
 
-fn rescale(f: i64, from: Rational, to: Rational) -> i64 {
-    if from == to {
-        return f;
-    }
-    let n = i128::from(f) * i128::from(from.den()) * i128::from(to.num());
-    let d = i128::from(from.num()) * i128::from(to.den());
-    (2 * n + d).div_euclid(2 * d) as i64
-}
-
 struct Import<'a> {
     path: Option<&'a Path>,
     doc: Option<&'a Value>,
@@ -6865,10 +6856,10 @@ fn join_pool(
     let mut files = PoolFiles::of(p);
     for m in meta.media.iter().filter(|m| wanted.contains(&m.id)) {
         let same = match m.subclip {
-            Some(_) => p
+            Some(s) => p
                 .media
                 .iter()
-                .find(|x| x.path == m.path && x.subclip == m.subclip),
+                .find(|x| x.path == m.path && x.subclip.is_some_and(|own| own.same_part(s))),
             None => files.find(p, &m.path, &m.sequence),
         };
         let bin = match m.bin.as_str() {

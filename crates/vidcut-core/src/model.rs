@@ -494,12 +494,35 @@ pub struct Media {
     pub removed: bool,
 }
 
-/// The part of a file that a subclip is, in seconds from the file's first
+/// The part of a file that a subclip is, in frames from the file's first
 /// frame.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Subclip {
-    pub start: f64,
-    pub end: f64,
+    /// The first frame of the part.
+    pub start: i64,
+    /// The frame after the last frame of the part.
+    pub end: i64,
+    /// The frame rate that `start` and `end` count: the rate of the video,
+    /// or for a still or a sound file the project's rate when the part was
+    /// set.
+    pub rate: Rational,
+}
+
+impl Subclip {
+    pub fn same_part(self, other: Self) -> bool {
+        let at = |f: i64, r: Rational, o: Rational| {
+            i128::from(f) * i128::from(r.den()) * i128::from(o.num())
+        };
+        at(self.start, self.rate, other.rate) == at(other.start, other.rate, self.rate)
+            && at(self.end, self.rate, other.rate) == at(other.end, other.rate, self.rate)
+    }
+
+    pub fn at(self, rate: Rational) -> (i64, i64) {
+        (
+            crate::time::rescale(self.start, self.rate, rate),
+            crate::time::rescale(self.end, self.rate, rate),
+        )
+    }
 }
 
 /// The words a project takes from the transcripts of one sound stream.
@@ -959,7 +982,7 @@ impl Media {
     }
 
     pub fn skipped(&self) -> f64 {
-        self.subclip.map_or(0.0, |s| s.start)
+        self.subclip.map_or(0.0, |s| s.rate.frames_to_secs(s.start))
     }
 
     pub fn origin(&self) -> f64 {
@@ -979,9 +1002,10 @@ impl Media {
     }
 
     pub fn skipped_at(&self, fps: Rational) -> f64 {
-        let rate = self.rate(fps);
-        let per = fps.over(rate);
-        (frames_at(self.skipped(), rate) * per.num()) as f64 / per.den() as f64
+        self.subclip.map_or(0.0, |s| {
+            let per = fps.over(s.rate);
+            (s.start * per.num()) as f64 / per.den() as f64
+        })
     }
 
     pub fn rate(&self, fps: Rational) -> Rational {
@@ -3548,9 +3572,10 @@ fn frames_at(secs: f64, rate: Rational) -> i64 {
 }
 
 fn clip_secs(media: &Media) -> f64 {
-    media
-        .subclip
-        .map_or_else(|| file_secs(media), |s| s.end - s.start)
+    media.subclip.map_or_else(
+        || file_secs(media),
+        |s| s.rate.frames_to_secs(s.end - s.start),
+    )
 }
 
 fn file_secs(media: &Media) -> f64 {
@@ -6936,12 +6961,11 @@ impl Project {
     }
 
     pub fn media_frames(&self, media: &Media) -> i64 {
-        frames_at(clip_secs(media), self.settings.fps)
+        self.frames_of(media, self.settings.fps)
     }
 
     pub fn subclip_span(&self, media: &Media) -> Option<(i64, i64)> {
-        let first = frames_at(media.subclip?.start, media.rate(self.settings.fps));
-        Some((first, first + self.clip_frames(media)))
+        Some(media.subclip?.at(media.rate(self.settings.fps)))
     }
 
     pub fn file_frames(&self, media: &Media) -> i64 {
@@ -6949,7 +6973,10 @@ impl Project {
     }
 
     pub fn clip_frames(&self, media: &Media) -> i64 {
-        self.frames_of(media, media.rate(self.settings.fps))
+        match self.subclip_span(media) {
+            Some((a, b)) => b - a,
+            None => self.whole_clip_frames(media),
+        }
     }
 
     pub fn frames_of(&self, media: &Media, fps: Rational) -> i64 {
