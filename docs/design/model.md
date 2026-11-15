@@ -241,6 +241,8 @@ Media fields:
     - A still or a sound file counts frames of the project. Its part keeps the project's rate from when the part was set.
     - Thus a change of the project rate and an OTIO import from a project at another rate keep the part at the same time.
     - After such a change, `Project::subclip_span` gives the part at the new rate, to the nearest frame (`Subclip::at`).
+    - A length at the rate of the item comes from these frames (`Project::frames_of`).
+    - For a still or a sound file, the item's rate is the project's rate. Thus `Project::media_frames` and `Project::clip_frames` agree, and an edit can reach the last frame.
   - An OTIO import finds a subclip that is already in the pool by its file and its part (`Subclip::same_part`). The part counts as the same at any rate.
   - The measurements, transcripts, proxies and waveforms belong to the file. A subclip uses them as they are.
   - Word times are in seconds of the file. `analysis::words_in` takes the skipped seconds to place them.
