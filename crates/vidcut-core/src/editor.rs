@@ -5756,10 +5756,14 @@ struct Import<'a> {
     adopt_rate: bool,
 }
 
-type MediaIds = HashMap<(String, bool), String>;
+type MediaIds = HashMap<(String, bool, Option<String>), String>;
 
-fn media_key(m: &otio::MediaRef) -> (String, bool) {
-    (m.url.clone(), m.sequence.is_some())
+fn media_key(c: &otio::ImportedClip) -> (String, bool, Option<String>) {
+    (
+        c.media.url.clone(),
+        c.media.sequence.is_some(),
+        c.media_id.clone(),
+    )
 }
 
 fn find_media<'a>(
@@ -5776,7 +5780,7 @@ fn find_media<'a>(
     let mut missing: Vec<&str> = Vec::new();
     for c in clips.into_iter().filter(|c| !c.is_block()) {
         let m = &c.media;
-        if ids.contains_key(&media_key(m)) || missing.contains(&m.shown.as_str()) {
+        if ids.contains_key(&media_key(c)) || missing.contains(&m.shown.as_str()) {
             continue;
         }
         let probe = |path: &Path| match m.sequence {
@@ -5803,7 +5807,7 @@ fn find_media<'a>(
                 if found.insert(id.clone()) {
                     media.push(id.clone());
                 }
-                ids.insert(media_key(m), id);
+                ids.insert(media_key(c), id);
             }
             None => missing.push(&m.shown),
         }
@@ -5855,13 +5859,14 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
     for c in &mut t.clips {
         let m = match c.is_block() {
             true => None,
-            false => pool.get(ids[&media_key(&c.media)].as_str()).copied(),
+            false => pool.get(ids[&media_key(c)].as_str()).copied(),
         };
-        let tc = match m.filter(|m| c.timecoded && m.sequence.is_none()) {
-            Some(m) => m.timecode_at(from),
-            None => 0.0,
+        let tc = match (m, c.counted) {
+            (Some(m), otio::Counted::ByTimecode) if m.sequence.is_none() => m.timecode_at(from),
+            (Some(m), otio::Counted::ByTimecode | otio::Counted::InFile) => m.skipped_at(from),
+            _ => 0.0,
         };
-        c.timecoded = false;
+        c.counted = otio::Counted::InItem;
         let (start, end) = (conv(c.start), conv(c.end()));
         if let Some((h, tl)) = c.audio {
             c.audio = Some((conv(c.start + h) - start, conv(c.end() + tl) - end));
@@ -6059,7 +6064,7 @@ fn place_imported(
             placed.insert(track_of(&c.track));
             continue;
         }
-        let m = p.media[pool[&ids[&media_key(&c.media)]]].clone();
+        let m = p.media[pool[&ids[&media_key(c)]]].clone();
         let frames = p.media_limit(&m);
         let label = if c.name.is_empty() { &m.name } else { &c.name };
         let mut start = offset + c.start;
@@ -6299,12 +6304,10 @@ fn nested_media(
         .filter(|c| !c.is_block())
         .filter_map(|c| {
             let m = otio::same_media(&c.media, &among)?;
-            Some((media_key(&c.media), m.id.clone()))
+            Some((media_key(c), m.id.clone()))
         })
         .collect();
-    let others = clips
-        .iter()
-        .filter(|c| !ids.contains_key(&media_key(&c.media)));
+    let others = clips.iter().filter(|c| !ids.contains_key(&media_key(c)));
     let (found, _) = find_media(p, others, env, at.dirs, false)?;
     ids.extend(found);
     Ok(ids)
@@ -6703,13 +6706,10 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             let mut ids = MediaIds::new();
             for c in t.clips.iter().filter(|c| !c.is_block()) {
                 if let Some(id) = c.media_id.as_ref().and_then(|id| kept.get(id)) {
-                    ids.insert(media_key(&c.media), id.clone());
+                    ids.insert(media_key(c), id.clone());
                 }
             }
-            let others = t
-                .clips
-                .iter()
-                .filter(|c| !ids.contains_key(&media_key(&c.media)));
+            let others = t.clips.iter().filter(|c| !ids.contains_key(&media_key(c)));
             let (found, mut media) = find_media(p, others, env, &dirs, search.is_empty())?;
             ids.extend(found);
             for id in kept.into_values() {
@@ -6748,12 +6748,12 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
                 .clips
                 .iter()
                 .filter(|c| !c.is_block())
-                .find_map(|c| p.media(&ids[&media_key(&c.media)])?.info.video.clone())
+                .find_map(|c| p.media(&ids[&media_key(c)])?.info.video.clone())
         {
             adopt_size(p, &v);
         }
         let drop = t.clips.iter().filter(|c| !c.is_block()).any(|c| {
-            p.media(&ids[&media_key(&c.media)])
+            p.media(&ids[&media_key(c)])
                 .and_then(|m| m.info.timecode)
                 .is_some_and(|tc| tc.drop_frame)
         });
@@ -6987,13 +6987,10 @@ pub fn open_otio(
     for c in t.clips.iter().filter(|c| !c.is_block()) {
         let named = c.media_id.as_deref().and_then(|id| p.media(id));
         if let Some(m) = named.filter(|m| same_file(&c.media, m)) {
-            ids.insert(media_key(&c.media), m.id.clone());
+            ids.insert(media_key(c), m.id.clone());
         }
     }
-    let others = t
-        .clips
-        .iter()
-        .filter(|c| !ids.contains_key(&media_key(&c.media)));
+    let others = t.clips.iter().filter(|c| !ids.contains_key(&media_key(c)));
     let (found, _) = find_media(&mut p, others, env, &[], false)?;
     ids.extend(found);
     if t.fps != p.settings.fps {

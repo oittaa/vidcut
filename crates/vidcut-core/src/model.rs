@@ -975,7 +975,13 @@ impl Media {
 
     pub fn timecode_at(&self, fps: Rational) -> f64 {
         let file = self.info.timecode.map_or(0.0, |tc| tc.frames_at(fps));
-        file + self.skipped() * fps.as_f64()
+        file + self.skipped_at(fps)
+    }
+
+    pub fn skipped_at(&self, fps: Rational) -> f64 {
+        let rate = self.rate(fps);
+        let per = fps.over(rate);
+        (frames_at(self.skipped(), rate) * per.num()) as f64 / per.den() as f64
     }
 
     pub fn rate(&self, fps: Rational) -> Rational {
