@@ -121,7 +121,7 @@ impl PoolView {
             p.pool_media().filter(|m| inside(&m.bin)).collect();
         use vidcut_core::request::{PoolMode, PoolSort};
         let start = |m: &vidcut_core::model::Media| {
-            m.info.timecode.map_or(0.0, |t| t.label_seconds()) + m.skipped()
+            m.info.timecode.map_or(0.0, |t| t.label_seconds()) + m.skipped(p.settings.fps)
         };
         let by_start = |a: &vidcut_core::model::Media, b: &vidcut_core::model::Media| {
             start(a).total_cmp(&start(b))

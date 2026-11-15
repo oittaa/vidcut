@@ -2697,8 +2697,7 @@ pub fn create_subclip(
             "no bin {bin:?}; add it with bins.add"
         )));
     }
-    let fps = m.rate(p.settings.fps);
-    let start = m.skipped() + fps.frames_to_secs(a);
+    let start = p.subclip_span(m).map_or(0, |s| s.0) + a;
     let mut sub = Media {
         id: String::new(),
         name: name.to_string(),
@@ -2708,7 +2707,7 @@ pub fn create_subclip(
         markers: Vec::new(),
         subclip: Some(Subclip {
             start,
-            end: start + fps.frames_to_secs(b - a),
+            end: start + b - a,
         }),
         ..m.clone()
     };
@@ -2885,11 +2884,7 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
         *x += by;
         *y += by;
     }
-    let start = rate.frames_to_secs(a);
-    m.subclip = Some(Subclip {
-        start,
-        end: start + rate.frames_to_secs(len),
-    });
+    m.subclip = Some(Subclip { start: a, end: b });
     Ok(())
 }
 

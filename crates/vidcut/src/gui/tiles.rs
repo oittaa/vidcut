@@ -338,7 +338,7 @@ impl Tiles {
             thumbs: Some(ThumbsFile {
                 path: thumbcache::thumbs_file(m, &origin),
                 origin,
-                skipped: m.skipped(),
+                skipped: m.skipped(p.settings.fps),
                 frames: p.media_frames(m),
             }),
         });

@@ -789,7 +789,7 @@ fn waveform(
         return;
     }
     let source = |at: f64| c.sound_at(at);
-    let origin = p.media(&c.media).map_or(0.0, |m| m.origin());
+    let origin = p.media(&c.media).map_or(0.0, |m| m.origin(p.settings.fps));
     let f = fps.as_f64();
     wave_columns(painter, rect, |x| {
         let (a, b) = (source(scale.frame(x)), source(scale.frame(x + 1.0)));

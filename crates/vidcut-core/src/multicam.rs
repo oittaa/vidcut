@@ -405,7 +405,8 @@ fn by_sound(
         if keep == join {
             continue;
         }
-        let shift = s.shift + placed[*j].0.skipped() - placed[*i].0.skipped();
+        let fps = p.settings.fps;
+        let shift = s.shift + placed[*j].0.skipped(fps) - placed[*i].0.skipped(fps);
         let by = secs[*i] + shift - secs[*j];
         for k in 0..n {
             if party[k] == join {

@@ -236,7 +236,8 @@ Media fields:
 - `subclip` (`Subclip`) makes the item one part of its file (`media.subclip`, `ops::create_subclip`).
   - `info` still tells about the whole file. `Project::file_frames` gives its length, and `Project::media_frames` gives the length of the part.
   - The source frames of a subclip count from the start of the part. `Media::origin` adds `Media::skipped`, thus the render pieces and the measurements find the right part of the file.
-  - The start is in seconds. Thus a change of the project rate does not change it.
+  - `Subclip` holds the first frame of the part and the frame after its last frame, in source frames of the file. Thus no reader rounds a time to find a frame.
+  - The part of a still or a sound file counts frames of the project. A change of the project rate converts it to the new rate, to the nearest frame (`subclips_to_rate`).
   - The measurements, transcripts, proxies and waveforms belong to the file. A subclip uses them as they are.
   - Word times are in seconds of the file. `analysis::words_in` takes the skipped seconds to place them.
   - `Media::timecode_at` gives the source timecode of its first frame.
