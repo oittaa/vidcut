@@ -2555,6 +2555,11 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
         Some(r) => media_context(p, media, None).range(r)?,
     };
     let ((first, end), phase) = p.on_timeline(media, marked);
+    if marked.1 > marked.0 && end <= first {
+        return Err(Error::invalid(
+            "the marked range is shorter than one timeline frame",
+        ));
+    }
     let range = (first, end.min(p.media_limit(media)));
     Ok(Source {
         media: params.media.clone(),
@@ -5848,19 +5853,27 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         }
     };
     for c in &mut t.clips {
-        let tc = match (c.is_block(), c.timecoded) {
-            (false, true) => pool
-                .get(ids[&media_key(&c.media)].as_str())
-                .filter(|m| m.sequence.is_none())
-                .map_or(0, |m| m.timecode_at(from).round() as i64),
-            _ => 0,
+        let m = match c.is_block() {
+            true => None,
+            false => pool.get(ids[&media_key(&c.media)].as_str()).copied(),
+        };
+        let tc = match m.filter(|m| c.timecoded && m.sequence.is_none()) {
+            Some(m) => m.timecode_at(from),
+            None => 0.0,
         };
         c.timecoded = false;
         let (start, end) = (conv(c.start), conv(c.end()));
         if let Some((h, tl)) = c.audio {
             c.audio = Some((conv(c.start + h) - start, conv(c.end() + tl) - end));
         }
-        c.source_in = conv(c.source_in - tc);
+        let exact = (c.source_in as f64 + c.source_rest - tc) * ratio;
+        c.source_in = conv(c.source_in - tc.round() as i64);
+        c.source_rest = 0.0;
+        if let Some(per) = m.map(|m| to.over(m.rate(to))).filter(|per| per.den() != 1) {
+            let units = (exact * per.den() as f64).round() as i64;
+            c.source_in = units.div_euclid(per.den());
+            c.source_rest = units.rem_euclid(per.den()) as f64 / per.den() as f64;
+        }
         if let Some(k) = c.compound.as_mut() {
             k.frames = conv(k.frames).max(c.source_in + end - start);
         }
@@ -6181,7 +6194,7 @@ fn place_imported(
             start,
             duration,
             source_in,
-            phase: 0.0,
+            phase: c.source_rest,
             video: c.video,
             audio,
             enabled: c.enabled,

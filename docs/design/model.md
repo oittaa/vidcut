@@ -246,7 +246,8 @@ Media fields:
   - `Speakers::share` gives a new subclip the people of its parent.
   - `ops::set_subclip_limits` changes the part (`media.subclip_set`). `Project::subclip_span` gives the part in frames of the file.
     - The source frames count from the start of the part. Thus a new start moves each frame that counts from it by the same amount.
-    - `ops::shift_source` moves `source_in`, the keyframes and the `from` of the effects of each clip. A clip with a `Speed` keeps its keyframes, because they count on the retimed source.
+    - `ops::shift_source` moves `source_in`, the `phase`, the keyframes and the `from` of the effects of each clip. A clip with a `Speed` keeps its keyframes, because they count on the retimed source.
+    - `ops::shift_source` counts the `phase` in whole steps between the two rates. Thus the parts of one split clip keep the same `phase`.
     - The `head` and `tail` of a `GroupClip` take the change, so that its visible part stays.
     - `validate` refuses a clip outside its media, so `ops::set_subclip_limits` refuses the change first and names the clip.
     - A `Marker` can be outside the part for this reason. Nothing shows it there, and a later change can bring it back.
@@ -698,7 +699,7 @@ flowchart LR
 |---|---|
 | video track | a `Video` track, disabled with its video off, and an `Audio` track of its clips' sound, J/L cuts as audio edits |
 | audio track | an `Audio` track, disabled when muted |
-| clip | `Clip.2`, its source range from the media's start timecode |
+| clip | `Clip.2`, its source range from the media's start timecode; the start has the clip's `phase` as a fraction of a frame |
 | media | `ExternalReference` by plain path, relative in a bundle; a still one frame long, its clips from source 0; an image sequence an `ImageSequenceReference` at its rate |
 | Clip Color | the item's `color` |
 | title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../spec.md#12-decisions-on-gaps-and-contradictions)) |
@@ -711,7 +712,7 @@ The metadata:
 | Metadata | Holds |
 |---|---|
 | `vidcut` on clips, for the sound | `stream`, `gain_db`, `muted`, `pan`, `equalizer`, `dialogue_leveler`, `compressor`, `noise_reduction`; `gain_keys` from the item's first source frame |
-| `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects; the `motion` paths of a clip |
+| `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `phase`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects; the `motion` paths of a clip |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`, a clip volume effect with the volume keyframes in its `Key Frames`, a clip pan effect (`effects::sound`), and `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling, and Dynamic Zoom (`otio::picture`), fitted, in place of carried ones |
@@ -728,6 +729,9 @@ Import:
 
 - `otio::import` also takes `Clip.1`, and float rates, snapped (`rational`).
 - It takes media named by a `file` URL; a plain, Windows or relative path; or the `Media Url` of an offline `MissingReference`. `locate` gives no path for other schemes.
+- A clip of media at another frame rate keeps the fraction of its source start as its `phase` (`at_project_rate`).
+  - The `phase` is a whole number of steps between the two rates, as in an edit from marks.
+  - A clip in reverse or with speed keyframes gets the `phase` only from the `vidcut` metadata.
 - Video tracks become V1, V2, …. An audio clip that lines up with a video clip of the same media (and link group) becomes its sound. Other audio clips go on A1, A2, ….
 - Names other than the defaults (`default_track_name`) name tracks. Markers on clips, tracks and the stack become timeline markers.
 - Nested tracks, unknown items, clips with no reference and clips that overlap are left out, with a warning.

@@ -1848,7 +1848,11 @@ pub fn source_frame(x: f64) -> i64 {
 }
 
 pub fn shown_frame(per_frame: Rational, x: f64) -> i64 {
-    source_frame(x * per_frame.num() as f64 / per_frame.den() as f64)
+    (x * per_frame.num() as f64 / per_frame.den() as f64 + grid_slack(per_frame)).floor() as i64
+}
+
+pub fn grid_slack(per: Rational) -> f64 {
+    FRAME_SLACK.min(0.5 / per.den() as f64)
 }
 
 pub fn per_frame(m: &Media, fps: Rational) -> Rational {

@@ -6991,8 +6991,9 @@ impl Project {
     }
 
     pub fn left_out_frames(&self, media: &Media, phase: f64) -> Vec<(i64, i64)> {
-        let per = self.settings.fps.as_f64() / media.rate(self.settings.fps).as_f64();
-        let at = |x: i64| (x as f64 * per - phase - crate::render::FRAME_SLACK).ceil() as i64;
+        let per = self.settings.fps.over(media.rate(self.settings.fps));
+        let slack = crate::render::grid_slack(per);
+        let at = |x: i64| (x as f64 * per.as_f64() - phase - slack).ceil() as i64;
         (media.left_out.iter())
             .map(|&(x, y)| (at(x), at(y)))
             .filter(|(a, b)| b > a)

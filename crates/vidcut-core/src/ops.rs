@@ -19,8 +19,6 @@ mod transition;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
-use crate::render::FRAME_SLACK;
-
 use serde_json::json;
 pub use source_overwrite::{Placed, SourceLining, file_start_at, source_overwrite};
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
@@ -2753,7 +2751,7 @@ fn clip_outside(tracks: &[Track], media: &str, part: (f64, f64)) -> Option<Strin
         if c.media == media {
             let (lo, hi) = c.shown();
             let (lo, hi) = (lo as f64 + c.phase, hi as f64 + c.phase);
-            if lo < part.0 - FRAME_SLACK || hi > part.1 + FRAME_SLACK {
+            if lo < part.0 || hi > part.1 {
                 return Some(c.id.clone());
             }
         }
@@ -2765,15 +2763,13 @@ fn compound_outside(k: &Compound, media: &str, part: (f64, f64)) -> Option<Strin
     clip_outside(&k.tracks, media, part).or_else(|| clip_outside(&k.made_from, media, part))
 }
 
-fn shift_source(c: &mut Clip, (exact, file_by): (f64, i64)) {
-    let at = c.source_in as f64 + c.phase + exact;
-    let first = crate::render::source_frame(at);
+fn shift_source(c: &mut Clip, (per, file_by): (crate::time::Rational, i64)) {
+    let den = per.den();
+    let at = c.source_in * den + (c.phase * den as f64).round() as i64 + file_by * per.num();
+    let first = at.div_euclid(den);
     let by = first - c.source_in;
     c.source_in = first;
-    c.phase = (at - first as f64).max(0.0);
-    if c.phase < FRAME_SLACK {
-        c.phase = 0.0;
-    }
+    c.phase = at.rem_euclid(den) as f64 / den as f64;
     motion::shift(c, file_by);
     if let Some(k) = c.picture.as_mut().and_then(|x| x.composition.as_mut()) {
         k.start += file_by;
@@ -2797,7 +2793,7 @@ fn shift_source(c: &mut Clip, (exact, file_by): (f64, i64)) {
     }
 }
 
-fn shift_clips(tracks: &mut [Track], media: &str, by: (f64, i64)) {
+fn shift_clips(tracks: &mut [Track], media: &str, by: (crate::time::Rational, i64)) {
     for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
         if let Some(k) = c.compound.as_mut() {
             shift_compound(k, media, by);
@@ -2808,7 +2804,7 @@ fn shift_clips(tracks: &mut [Track], media: &str, by: (f64, i64)) {
     }
 }
 
-fn shift_compound(k: &mut Compound, media: &str, by: (f64, i64)) {
+fn shift_compound(k: &mut Compound, media: &str, by: (crate::time::Rational, i64)) {
     shift_clips(&mut k.tracks, media, by);
     shift_clips(&mut k.made_from, media, by);
 }
@@ -2828,9 +2824,10 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
     }
     let (by, len, more) = (first - a, b - a, b - end);
     let rate = m.rate(p.settings.fps);
-    let per = p.settings.fps.as_f64() / rate.as_f64();
-    let exact = by as f64 * per;
-    let part = (-exact, (len - by) as f64 * per);
+    let per = p.settings.fps.over(rate);
+    let slack = crate::render::grid_slack(per);
+    let exact = by as f64 * per.as_f64();
+    let part = (-exact - slack, (len - by) as f64 * per.as_f64() + slack);
     let outside = clip_outside(&p.tracks, media, part).or_else(|| {
         p.compounds
             .iter()
@@ -2844,7 +2841,10 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             "{c} uses frames of {media} outside {a}..{b}"
         )));
     }
-    let (head, tail) = (exact.round() as i64, (more as f64 * per).round() as i64);
+    let (head, tail) = (
+        exact.round() as i64,
+        (more as f64 * per.as_f64()).round() as i64,
+    );
     for g in &mut p.groups {
         let id = g.id.clone();
         for c in g.rows.iter_mut().flat_map(|r| &mut r.clips) {
@@ -2859,9 +2859,9 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             }
         }
     }
-    shift_clips(&mut p.tracks, media, (exact, by));
+    shift_clips(&mut p.tracks, media, (per, by));
     for k in p.compounds.iter_mut().flat_map(PooledCompound::blocks_mut) {
-        shift_compound(k, media, (exact, by));
+        shift_compound(k, media, (per, by));
     }
     let m = p
         .media

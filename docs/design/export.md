@@ -206,7 +206,9 @@ Notes:
 
 - Output frame k of a piece shows one frame of its media (`VideoPiece::position`).
   - The exact source position is the position of the piece, plus its `phase`, plus k frames at the pace of the piece.
-  - `render::shown_frame` turns this position into a frame at the rate of the media, rounded down. `FRAME_SLACK` keeps a position on a frame boundary on that frame.
+  - `render::shown_frame` turns this position into a frame at the rate of the media, rounded down.
+  - A slack keeps a position on a frame boundary on that frame (`render::grid_slack`). The slack is less than half of the smallest step between two positions at the two rates.
+  - Thus a frame of 29.97 fps media on a 30 fps timeline does not move one frame early.
   - Thus media at 25 fps on a 30 fps timeline shows each frame one or two times. Media at 60 fps shows each second frame.
 - `Clock::target` gives the time of that frame for the decoder: the start of the frame, less half a frame of the media.
 - The decoder shows the first decoded frame at or after this time.
