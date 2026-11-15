@@ -557,7 +557,7 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.3",
  "shlex",
- "syn 2.0.119",
+ "syn 3.0.7",
 ]
 
 [[package]]
@@ -1563,7 +1563,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3372,7 +3372,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4076,7 +4076,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4326,33 +4326,33 @@ dependencies = [
 
 [[package]]
 name = "shadcn-egui-core"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b41f98290c7acde226195be273ac83cc1cb15ba47d83ccab82c129eea1ac324"
+checksum = "dfa482ede5f4576ec2ed1130c1518379c5a58592ed32fc6fa003e2bbe1e38f16"
 
 [[package]]
 name = "shadcn-egui-font-geist"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51223ab73e5e8d56e74851f8027893e0360b2b76e3af4e5febe73d48352ebfa8"
+checksum = "c0d48f6c3402968743672e9437ac7ae45debb10112b0464947d8d1ab65c2c2bb"
 dependencies = [
  "shadcn-egui-core",
 ]
 
 [[package]]
 name = "shadcn-egui-font-geist-mono"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1e422e46ddbb175d185d4dacfb4184d1529bf8f02e313999fc24d039bfc15ab"
+checksum = "dc08c5562be4bf276116085894da8c7605f5dbb4778531de47700e2cbffab0bf"
 dependencies = [
  "shadcn-egui-core",
 ]
 
 [[package]]
 name = "shadcn-egui-font-space-grotesk"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90395ec07ef0971dc0b0129dcd1958915bc2b31eeaa7869a3b1de35d5858a32f"
+checksum = "ea3cfa0b15a1c9091902aec0cbaaf1e3ed9ae29fa13de48d67def727ab0447fb"
 dependencies = [
  "shadcn-egui-core",
 ]
@@ -4659,10 +4659,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5779,7 +5779,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
