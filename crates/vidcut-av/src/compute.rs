@@ -3,6 +3,7 @@ use std::sync::{Mutex, PoisonError};
 use crate::error::{Error, Result};
 
 mod gpu;
+pub(crate) mod ops;
 
 pub(crate) use gpu::{Gpu, floats};
 

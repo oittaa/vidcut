@@ -16,6 +16,13 @@ pub(crate) struct Param {
 
 type Key = (wgpu::ComputePipeline, wgpu::Buffer, Vec<wgpu::Buffer>);
 
+struct Clock {
+    set: wgpu::QuerySet,
+    count: u32,
+    names: Vec<String>,
+    now: String,
+}
+
 struct Ring {
     buffer: wgpu::Buffer,
     mirror: Vec<u8>,
@@ -35,6 +42,7 @@ pub(crate) struct Gpu {
     ring: Mutex<Ring>,
     groups: Mutex<HashMap<Key, wgpu::BindGroup>>,
     scratch: Mutex<Option<(wgpu::Buffer, wgpu::Buffer)>>,
+    clock: Mutex<Option<Clock>>,
 }
 
 pub(crate) fn storage() -> wgpu::BufferUsages {
@@ -153,6 +161,7 @@ impl Gpu {
             }),
             groups: Mutex::new(HashMap::new()),
             scratch: Mutex::new(None),
+            clock: Mutex::new(None),
         })
     }
 
@@ -313,6 +322,89 @@ impl Gpu {
         self.set(pass, pipe, param, buffers);
         let x = groups.min(MOST);
         pass.dispatch_workgroups(x, groups.div_ceil(x), 1);
+        self.tick(pass);
+    }
+
+    pub(crate) fn can_time(&self) -> bool {
+        let wanted =
+            wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
+        self.device.features().contains(wanted)
+    }
+
+    pub(crate) fn time_from(&self, count: u32) {
+        let set = self.device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: Some("vidcut-compute-clock"),
+            ty: wgpu::QueryType::Timestamp,
+            count,
+        });
+        *self.clock.lock().unwrap_or_else(PoisonError::into_inner) = Some(Clock {
+            set,
+            count,
+            names: Vec::new(),
+            now: String::new(),
+        });
+    }
+
+    pub(crate) fn mark(&self, name: impl FnOnce() -> String) {
+        if let Some(c) = self
+            .clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+        {
+            c.now = name();
+        }
+    }
+
+    pub(crate) fn tick(&self, pass: &mut wgpu::ComputePass) {
+        let mut clock = self.clock.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(c) = clock.as_mut()
+            && (c.names.len() as u32) < c.count
+        {
+            pass.write_timestamp(&c.set, c.names.len() as u32);
+            c.names.push(c.now.clone());
+        }
+    }
+
+    pub(crate) fn times(&self) -> Result<Vec<(String, f64)>> {
+        let taken = self
+            .clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        let Some(c) = taken.filter(|c| c.names.len() > 1) else {
+            return Ok(Vec::new());
+        };
+        let n = c.names.len() as u32;
+        let size = u64::from(n) * 8;
+        let resolved = compute::buffer(
+            &self.device,
+            "vidcut-compute-clock",
+            size as usize,
+            wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+        );
+        let staging = self.staging(size);
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        enc.resolve_query_set(&c.set, 0..n, &resolved, 0);
+        enc.copy_buffer_to_buffer(&resolved, 0, &staging, 0, size);
+        self.queue.submit([enc.finish()]);
+        let raw = self.fetch(&staging, size, None)?;
+        let ticks: Vec<u64> = raw
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|b| u64::from_le_bytes(*b))
+            .collect();
+        let ms = f64::from(self.queue.get_timestamp_period()) / 1e6;
+        let mut out: Vec<(String, f64)> = Vec::new();
+        for (name, w) in c.names.into_iter().skip(1).zip(ticks.windows(2)) {
+            let took = w[1].saturating_sub(w[0]) as f64 * ms;
+            match out.last_mut() {
+                Some((last, sum)) if *last == name => *sum += took,
+                _ => out.push((name, took)),
+            }
+        }
+        Ok(out)
     }
 
     #[cfg(target_os = "macos")]

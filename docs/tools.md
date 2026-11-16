@@ -75,6 +75,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - By default, PID is the newest `vidcut`.
 - The `[decoding]` lines of `VIDCUT_DEBUG` give the thread count of each reader when it opens. They also give how many readers are open when one opens or closes.
 - The `[subjects]` line of `VIDCUT_DEBUG` is for `motion.find`. It gives the pictures that the model saw, the frames decoded, the time, and the time in the model.
+  - With the slow face model, the `[subjects] gpu` lines give the GPU time of one pass, and of each layer in that pass. Each find measures one pass.
+  - These lines need a GPU that writes timestamps inside a compute pass. Under `VIDCUT_DEBUG`, vidcut asks the device for this feature.
 
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` makes a test encode with each GPU encoder (NVENC, VAAPI, AMF, QSV) on each GPU. It does not use the cache.
 
@@ -199,6 +201,11 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `NNNN-a.npy` and `NNNN-b.npy`: the two source frames, at the size of the made frame.
   - `NNNN-out-T-PROCESS.npy`: the made frame, with the weight `T` of the later frame and the process, such as `AIFast`.
   - A check against a PyTorch version of a model reads them.
+- `VIDCUT_SUBJECTS_DUMP=DIR` makes `motion.find` write what the model gets and what it finds as `.npy` files into `DIR`.
+  - `NNNNN.npy`: each picture at the size of the model, as blue, green and red planes of 8 bits, `[3, H, W]`.
+  - `boxes.npy`: one row for each found box, `[K, 6]`: the picture, the center, the size and the score. The center and the size are fractions of the picture content.
+  - `content.npy`: the width and the height of the picture content, in pixels of the model input.
+  - A check against an ONNX runtime reads them.
 - `vidcut models list` prints the catalog of models and speech services. `--json` gives all of it.
 - `vidcut models check MODEL` checks the SHA-256 of each file of a model, then loads it.
   - For a transcribe.cpp model, it compares what the model reports with the catalog.

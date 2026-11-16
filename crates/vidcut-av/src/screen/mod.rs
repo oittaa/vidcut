@@ -120,6 +120,11 @@ pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
         | wgpu::Features::VULKAN_EXTERNAL_MEMORY_WIN32
         | wgpu::Features::TEXTURE_FORMAT_NV12
         | wgpu::Features::TEXTURE_FORMAT_P010;
+    let wanted = if crate::debug() {
+        wanted | wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES
+    } else {
+        wanted
+    };
     (adapter.features() & wanted) | MIXING_NEEDS
 }
 

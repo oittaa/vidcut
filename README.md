@@ -98,6 +98,7 @@ Read [AGENTS.md](AGENTS.md) first. [docs/design/](docs/design/README.md) tells h
   - Sortformer ([nvidia/diar_streaming_sortformer_4spk-v2.1](https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1)): NVIDIA Open Model License.
 - The models that find things in a picture:
   - YuNet ([opencv/opencv_zoo](https://huggingface.co/opencv/opencv_zoo/tree/main/models/face_detection_yunet)): MIT.
+  - RetinaFace ResNet-34 ([yakhyo/retinaface-pytorch](https://github.com/yakhyo/retinaface-pytorch)): MIT.
   - PP-OCRv5 mobile detection ([PaddlePaddle/PP-OCRv5_mobile_det_onnx](https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx)): Apache-2.0.
   - YOLOX-S ([opencv/object_detection_yolox](https://huggingface.co/opencv/object_detection_yolox)): Apache-2.0.
 - ureq, rustls and keyring are MIT or Apache-2.0.

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::ops::{self, Act, Carve, Conv, Deconv, Grid, Ops, Res, Shape, View, tensor};
+use crate::compute::ops::{self, Act, Carve, Conv, Deconv, Grid, Ops, Res, Shape, View, tensor};
 use crate::compute::{Gpu, bytes};
 use crate::error::Result;
 use crate::weights::Torch;
