@@ -1606,11 +1606,17 @@ fn encode(
                 return Err(Error::Invalid(CANCELLED.into()));
             }
             if let (Some(v), Some(c)) = (video.as_mut(), copying.as_mut())
-                && let Some(mut run) = c.run_at(j)?
+                && let Some(mut run) = c.run_at(j, cancel)?
             {
-                writing.send(Out::Cut)?;
                 let mut until = j;
+                let mut cut = false;
                 while let Some(batch) = c.next(&mut run)? {
+                    if cancel.load(Ordering::Relaxed) {
+                        return Err(Error::Invalid(CANCELLED.into()));
+                    }
+                    if !std::mem::replace(&mut cut, true) {
+                        writing.send(Out::Cut)?;
+                    }
                     for (at, packet) in batch.packets {
                         let clock = Instant::now();
                         writing.send(Out::Packet { j: at, packet })?;

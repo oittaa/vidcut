@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 use vidcut_core::export::AlphaOut;
@@ -778,7 +779,7 @@ impl Copying {
         ffmpeg::Rational(self.fps.den() as i32, self.fps.num() as i32)
     }
 
-    pub(crate) fn run_at(&mut self, j: i64) -> Result<Option<Run>> {
+    pub(crate) fn run_at(&mut self, j: i64, cancel: &AtomicBool) -> Result<Option<Run>> {
         while self.spans.get(self.at).is_some_and(|s| s.to <= j) {
             self.at += 1;
             self.start = None;
@@ -791,7 +792,7 @@ impl Copying {
         }
         let from = j.max(self.after);
         if self.start.is_none_or(|(i, s)| i != self.at || s < from) {
-            let s = self.find_start(&span, from)?;
+            let s = self.find_start(&span, from, cancel)?;
             self.start = Some((self.at, s));
         }
         let Some((_, s)) = self.start else {
@@ -836,12 +837,15 @@ impl Copying {
         Ok(())
     }
 
-    fn find_start(&mut self, span: &Span, from: i64) -> Result<i64> {
+    fn find_start(&mut self, span: &Span, from: i64, cancel: &AtomicBool) -> Result<i64> {
         let end_t = span.target(span.to) - EPS;
         self.reader_for(span, span.target(from))?;
         let f = &self.files[span.file];
         let r = self.reader.as_mut().expect("opened");
         loop {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Invalid(super::CANCELLED.into()));
+            }
             if r.queue.is_empty() && !r.read(f)? {
                 return Ok(i64::MAX);
             }
