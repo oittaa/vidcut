@@ -3090,7 +3090,9 @@ pub enum Request {
         /// A tracker node of the composition of the clip, with one clip in
         /// `clips`. The tracker then gets a pattern for each path of the
         /// subject, named as the path, in place of its patterns of earlier
-        /// paths of the subject. Its other patterns stay.
+        /// paths of the subject. Its other patterns stay. A tracker that is
+        /// as `comp.add` made it, with no mask that follows it, loses its
+        /// own pattern when the find gives it others.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tracker: Option<String>,
     },

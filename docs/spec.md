@@ -2739,6 +2739,7 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - vidcut: Follow Size makes the mask also grow and shrink with the box of the pattern.
 - vidcut: Find in the Inspector of a Tracker finds the things of a subject in the clip ([X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
   - The Tracker gets a pattern for each thing.
+  - A Tracker that is as it was added, with no mask that follows it, then loses its own pattern. Why: that pattern follows nothing, and Blur would blur its box on each frame.
   - Blur there adds a Mosaic Blur before Media Out. For each pattern, it adds a mask on the blur that follows that pattern with Follow Size.
 
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.

@@ -629,11 +629,20 @@ fn patterned(c: &mut Clip, tracker: &str, subject: Subject) {
         .filter(|m| m.subject == Some(subject))
         .map(|m| (m.id.clone(), m.name.clone().unwrap_or_else(|| m.id.clone())))
         .collect();
-    let comp = c.picture.as_mut().and_then(|x| x.composition.as_mut());
-    let node = comp.and_then(|x| x.nodes.iter_mut().find(|n| n.name == tracker));
+    let Some(comp) = c.picture.as_mut().and_then(|x| x.composition.as_mut()) else {
+        return;
+    };
+    let led = comp.nodes.iter().any(|n| {
+        let connect = n.tool.mask().and_then(|m| m.connect.as_ref());
+        connect.is_some_and(|k| k.tracker == tracker)
+    });
+    let node = comp.nodes.iter_mut().find(|n| n.name == tracker);
     let Some(Tool::Tracker(t)) = node.map(|n| &mut n.tool) else {
         return;
     };
+    if !paths.is_empty() && !led && *t == crate::model::Tracker::made() {
+        t.patterns.clear();
+    }
     for (path, name) in paths {
         let has = t.patterns.iter().any(|p| p.path.as_ref() == Some(&path));
         if !has && t.patterns.len() < crate::model::Tracker::PATTERNS_KEPT {
