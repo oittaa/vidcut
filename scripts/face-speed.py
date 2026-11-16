@@ -3,8 +3,9 @@
 `motion find --model slow` on 8 s of Tears of Steel at each size (640 and
 1280) and prints the time in the model for each picture. It splits that time
 into the steps of each model call: upload, send, clock (the GPU timing of one
-pass, only in the first call), wait and boxes. It also prints the GPU time for
-each picture, of each stage and of the slowest layers.
+pass, only in the first call), wait and boxes. It also prints the faces found
+for each picture, and the GPU time for each picture, of each stage and of the
+slowest layers. VIDCUT_GPU_CONV=plain or direct turns off GPU kernels.
 
     python3 scripts/face-speed.py [SIZE...]
 
@@ -65,12 +66,14 @@ def per_picture(calls):
 
 
 def steps(err):
-    calls = []
-    for n, rest in re.findall(r"\[subjects\] model call of (\d+) pictures in \d+ passes: (.*)", err):
+    calls, faces = [], 0
+    for n, found, rest in re.findall(r"\[subjects\] model call of (\d+) pictures in \d+ passes, (\d+) faces: (.*)", err):
         calls.append((int(n), {k: float(ms) for k, ms in re.findall(r"(\w+) ([\d.]+) ms", rest)}))
+        faces += int(found)
     if not calls:
         print("  no model call lines")
         return
+    print(f"  faces found: {faces / sum(c[0] for c in calls):.2f} per picture")
     print(f"  first call, ms per picture ({calls[0][0]} pictures): {per_picture(calls[:1])}")
     rest = calls[1:]
     if not rest:
@@ -123,6 +126,7 @@ def main():
     print(f"vidcut: {VIDCUT}")
     print(f"computer: {platform.platform()}, {platform.machine()}")
     print(f"clip: {CLIP} {RANGE}")
+    print(f"convolutions: {os.environ.get('VIDCUT_GPU_CONV') or 'all'}")
     with tempfile.TemporaryDirectory() as folder:
         work = Path(folder)
         copy = work / "cache" / "vidcut" / MODEL

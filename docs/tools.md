@@ -41,7 +41,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 - It runs `motion.find` with the slow face model on 8 s of the clip `tos-720p-mov`, at each SIZE given (640 1280).
 - It prints the time in the model for each picture.
-- From the `[subjects] model call` lines, it prints the time of each step for each picture. It gives the first call apart, because only the first call has the clock step.
+- From the `[subjects] model call` lines, it prints the faces found for each picture. A wrong model output can give many faces in each picture.
+- From the same lines, it prints the time of each step for each picture. It gives the first call apart, because only the first call has the clock step.
 - It compares the wait in the early calls with the wait in the last calls. A longer wait at the end can show a GPU that slows when it gets hot.
 - From the `[subjects] gpu` lines, it prints the GPU time for each picture, each stage and the slowest layers.
 - The finds and their cache go to a temporary folder. Thus each run measures again.
@@ -86,7 +87,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - By default, PID is the newest `vidcut`.
 - The `[decoding]` lines of `VIDCUT_DEBUG` give the thread count of each reader when it opens. They also give how many readers are open when one opens or closes.
 - The `[subjects]` line of `VIDCUT_DEBUG` is for `motion.find`. It gives the pictures that the model saw, the frames decoded, the time, and the time in the model.
-  - With the slow face model, one `[subjects] model call` line comes for each call of the model. It gives the time of each step of the call:
+  - With the slow face model, one `[subjects] model call` line comes for each call of the model. It gives the faces found and the time of each step of the call:
     - upload: the pictures go to the GPU.
     - send: vidcut records the passes and sends them to the GPU.
     - clock: the GPU timing of one pass.
@@ -226,6 +227,9 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `boxes.npy`: one row for each found box, `[K, 6]`: the picture, the center, the size and the score. The center and the size are fractions of the picture content.
   - `content.npy`: the width and the height of the picture content, in pixels of the model input.
   - A check against an ONNX runtime reads them.
+- `VIDCUT_GPU_CONV` turns off the fast convolution kernels of the GPU layers (`compute::ops`). A different result then shows a fault in a kernel that is off.
+  - `direct`: no Winograd convolutions (`WINO_GEMM`).
+  - `plain`: no Winograd convolutions and no `CONV4`. Each convolution uses `CONV`.
 - `vidcut models list` prints the catalog of models and speech services. `--json` gives all of it.
 - `vidcut models check MODEL` checks the SHA-256 of each file of a model, then loads it.
   - For a transcribe.cpp model, it compares what the model reports with the catalog.

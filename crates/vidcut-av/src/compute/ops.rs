@@ -354,8 +354,24 @@ pub(crate) enum Layer {
     Wino(Wino),
 }
 
+#[derive(PartialEq)]
+enum Allowed {
+    Plain,
+    Direct,
+    All,
+}
+
+fn allowed() -> Allowed {
+    match std::env::var("VIDCUT_GPU_CONV").as_deref() {
+        Ok("plain") => Allowed::Plain,
+        Ok("direct") => Allowed::Direct,
+        _ => Allowed::All,
+    }
+}
+
 pub(crate) fn layer(gpu: &Gpu, s: Shape, weights: &[f32], bias: &[f32], act: Act) -> Layer {
-    if s.k == (3, 3)
+    if allowed() == Allowed::All
+        && s.k == (3, 3)
         && s.stride == 1
         && s.pad == (1, 1)
         && s.dil == 1
@@ -436,6 +452,7 @@ pub(crate) struct Kernels {
     cor: wgpu::ComputePipeline,
     attend: wgpu::ComputePipeline,
     pub(crate) dummy: wgpu::Buffer,
+    four: bool,
 }
 
 const HEADER: &str = r#"
@@ -1896,6 +1913,7 @@ impl Kernels {
             cor: make("ops-cor", COR),
             attend: make("ops-attend", ATTEND),
             dummy: gpu.upload(&[0u8; 16]),
+            four: allowed() != Allowed::Plain,
         }
     }
 }
@@ -2053,7 +2071,8 @@ impl Ops<'_, '_> {
         p[12] = c.cout;
         let param = self.gpu.uniform(&p);
         let four = |v: &View| [v.base, v.stride, v.at].iter().all(|x| x.is_multiple_of(4));
-        let fast = shuffle == 1
+        let fast = self.k.four
+            && shuffle == 1
             && c.cin.is_multiple_of(16)
             && c.cout.is_multiple_of(4)
             && four(src)

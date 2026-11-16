@@ -262,8 +262,10 @@ impl Laps {
         }
     }
 
-    fn report(&self, pictures: usize, passes: usize) {
+    fn report(&self, found: &[Vec<Found>], passes: usize) {
         if self.on {
+            let pictures = found.len();
+            let faces: usize = found.iter().map(Vec::len).sum();
             let steps: Vec<String> = STEPS
                 .iter()
                 .zip(self.took)
@@ -271,7 +273,7 @@ impl Laps {
                 .collect();
             crate::debug!(
                 "subjects",
-                "model call of {pictures} pictures in {passes} passes: {}",
+                "model call of {pictures} pictures in {passes} passes, {faces} faces: {}",
                 steps.join(", ")
             );
         }
@@ -509,7 +511,7 @@ impl Model {
             out.extend((0..run.len()).map(|b| self.found(v, b as u32)));
         }
         laps.lap(4);
-        laps.report(pictures.len(), passes);
+        laps.report(&out, passes);
         Ok(out)
     }
 
