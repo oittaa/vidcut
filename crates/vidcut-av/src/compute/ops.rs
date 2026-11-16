@@ -604,13 +604,6 @@ fn put(m: u32, n0: u32, v4: vec4<f32>) {
     }
 }
 
-fn at4(at: u32, v: vec4<f32>) {
-    sa[(at) / 4u][(at) % 4u] = v.x;
-    sa[(at + 8u) / 4u][(at + 8u) % 4u] = v.y;
-    sa[(at + 16u) / 4u][(at + 16u) % 4u] = v.z;
-    sa[(at + 24u) / 4u][(at + 24u) % 4u] = v.w;
-}
-
 fn b_at(k0: u32, i: u32, tn: u32) -> vec4<f32> {
     let kk = u(36u); let cols = u(37u);
     let k = k0 + i / 16u;
@@ -633,11 +626,12 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
     let tn = g / tiles_m;
     let kq = li % 16u;
     let mg = li / 16u;
-    let base = tm * 128u + mg;
-    let r0 = rows_of(vec4<u32>(base, base + 8u, base + 16u, base + 24u));
-    let r1 = rows_of(vec4<u32>(base + 32u, base + 40u, base + 48u, base + 56u));
-    let r2 = rows_of(vec4<u32>(base + 64u, base + 72u, base + 80u, base + 88u));
-    let r3 = rows_of(vec4<u32>(base + 96u, base + 104u, base + 112u, base + 120u));
+    let base = tm * 128u + mg * 4u;
+    let four = vec4<u32>(0u, 1u, 2u, 3u);
+    let r0 = rows_of(base + four);
+    let r1 = rows_of(base + 32u + four);
+    let r2 = rows_of(base + 64u + four);
+    let r3 = rows_of(base + 96u + four);
     let tx = li % 8u;
     let ty = li / 8u;
     var c00 = vec4<f32>(0.0); var c01 = vec4<f32>(0.0); var c10 = vec4<f32>(0.0); var c11 = vec4<f32>(0.0);
@@ -652,11 +646,11 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
     var w0 = b_at(0u, li, tn);
     var w1 = b_at(0u, li + 128u, tn);
     for (var k0 = 0u; k0 < kk; k0 += 16u) {
-        let at = kq * 132u + mg;
-        at4(at, a0);
-        at4(at + 32u, a1);
-        at4(at + 64u, a2);
-        at4(at + 96u, a3);
+        let at = kq * 33u + mg;
+        sa[at] = a0;
+        sa[at + 8u] = a1;
+        sa[at + 16u] = a2;
+        sa[at + 24u] = a3;
         sb[li] = w0;
         sb[li + 128u] = w1;
         workgroupBarrier();
@@ -751,7 +745,7 @@ const CONV4: &str = r#"
 @group(0) @binding(5) var<storage, read_write> dst: array<vec4<f32>>;
 @group(0) @binding(6) var<storage, read> res: array<vec4<f32>>;
 
-var<workgroup> sa: array<vec4<f32>, 528>;
+var<workgroup> sa: array<vec4<f32>, 512>;
 var<workgroup> sb: array<vec4<f32>, 256>;
 
 var<private> c00: vec4<f32>;
@@ -800,37 +794,42 @@ fn fetch(y: i32, x: i32, b: u32, ok: bool, at: u32) -> vec4<f32> {
     return vec4<f32>(0.0);
 }
 
-fn put_a(r: u32, q: u32, v: vec4<f32>) {
-    let i = r / 4u;
-    let c = r % 4u;
-    let k = q * 4u;
-    sa[k * 33u + i][c] = v.x;
-    sa[(k + 1u) * 33u + i][c] = v.y;
-    sa[(k + 2u) * 33u + i][c] = v.z;
-    sa[(k + 3u) * 33u + i][c] = v.w;
-}
-
-fn mac(k: u32) {
-    let a0 = sa[k * 33u + ty];
-    let a1 = sa[k * 33u + 16u + ty];
+fn add8(k: u32, r0: f32, r1: f32, r2: f32, r3: f32, r4: f32, r5: f32, r6: f32, r7: f32) {
     let b0 = sb[k * 16u + tx];
     let b1 = sb[k * 16u + 8u + tx];
-    c00 += a0.x * b0;
-    c01 += a0.x * b1;
-    c10 += a0.y * b0;
-    c11 += a0.y * b1;
-    c20 += a0.z * b0;
-    c21 += a0.z * b1;
-    c30 += a0.w * b0;
-    c31 += a0.w * b1;
-    c40 += a1.x * b0;
-    c41 += a1.x * b1;
-    c50 += a1.y * b0;
-    c51 += a1.y * b1;
-    c60 += a1.z * b0;
-    c61 += a1.z * b1;
-    c70 += a1.w * b0;
-    c71 += a1.w * b1;
+    c00 += r0 * b0;
+    c01 += r0 * b1;
+    c10 += r1 * b0;
+    c11 += r1 * b1;
+    c20 += r2 * b0;
+    c21 += r2 * b1;
+    c30 += r3 * b0;
+    c31 += r3 * b1;
+    c40 += r4 * b0;
+    c41 += r4 * b1;
+    c50 += r5 * b0;
+    c51 += r5 * b1;
+    c60 += r6 * b0;
+    c61 += r6 * b1;
+    c70 += r7 * b0;
+    c71 += r7 * b1;
+}
+
+fn block(g: u32) {
+    let at = ty * 16u + g;
+    let a0 = sa[at];
+    let a1 = sa[at + 4u];
+    let a2 = sa[at + 8u];
+    let a3 = sa[at + 12u];
+    let a4 = sa[at + 256u];
+    let a5 = sa[at + 260u];
+    let a6 = sa[at + 264u];
+    let a7 = sa[at + 268u];
+    let k = g * 4u;
+    add8(k, a0.x, a1.x, a2.x, a3.x, a4.x, a5.x, a6.x, a7.x);
+    add8(k + 1u, a0.y, a1.y, a2.y, a3.y, a4.y, a5.y, a6.y, a7.y);
+    add8(k + 2u, a0.z, a1.z, a2.z, a3.z, a4.z, a5.z, a6.z, a7.z);
+    add8(k + 3u, a0.w, a1.w, a2.w, a3.w, a4.w, a5.w, a6.w, a7.w);
 }
 
 fn act4(v: vec4<f32>, pa: vec4<f32>) -> vec4<f32> {
@@ -885,10 +884,10 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
     var pb0 = wts[bi];
     var pb1 = wts[bi + 8u * c4];
     for (var ks = 0u; ks < nk; ks++) {
-        put_a(ar, aq, p0);
-        put_a(ar + 32u, aq, p1);
-        put_a(ar + 64u, aq, p2);
-        put_a(ar + 96u, aq, p3);
+        sa[ar * 4u + aq] = p0;
+        sa[(ar + 32u) * 4u + aq] = p1;
+        sa[(ar + 64u) * 4u + aq] = p2;
+        sa[(ar + 96u) * 4u + aq] = p3;
         sb[bk * 16u + bq] = pb0;
         sb[(bk + 8u) * 16u + bq] = pb1;
         workgroupBarrier();
@@ -906,12 +905,10 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
             pb0 = wts[bi + ob];
             pb1 = wts[bi + ob + 8u * c4];
         }
-        for (var q = 0u; q < 16u; q += 4u) {
-            mac(q);
-            mac(q + 1u);
-            mac(q + 2u);
-            mac(q + 3u);
-        }
+        block(0u);
+        block(1u);
+        block(2u);
+        block(3u);
         workgroupBarrier();
     }
     let m = m0 + ty * 4u;
@@ -1016,7 +1013,7 @@ const WINO_GEMM: &str = r#"
 @group(0) @binding(2) var<storage, read> ub: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read_write> mc: array<vec4<f32>>;
 
-var<workgroup> sa: array<vec4<f32>, 528>;
+var<workgroup> sa: array<vec4<f32>, 512>;
 var<workgroup> sb: array<vec4<f32>, 512>;
 
 var<private> c00: vec4<f32>;
@@ -1045,37 +1042,42 @@ fn la(ok: bool, i: u32) -> vec4<f32> {
     return vec4<f32>(0.0);
 }
 
-fn put_a(r: u32, q: u32, v: vec4<f32>) {
-    let i = r / 4u;
-    let c = r % 4u;
-    let k = q * 4u;
-    sa[k * 33u + i][c] = v.x;
-    sa[(k + 1u) * 33u + i][c] = v.y;
-    sa[(k + 2u) * 33u + i][c] = v.z;
-    sa[(k + 3u) * 33u + i][c] = v.w;
-}
-
-fn mac(k: u32) {
-    let a0 = sa[k * 33u + ty];
-    let a1 = sa[k * 33u + 16u + ty];
+fn add8(k: u32, r0: f32, r1: f32, r2: f32, r3: f32, r4: f32, r5: f32, r6: f32, r7: f32) {
     let b0 = sb[k * 32u + tx];
     let b1 = sb[k * 32u + 16u + tx];
-    c00 += a0.x * b0;
-    c01 += a0.x * b1;
-    c10 += a0.y * b0;
-    c11 += a0.y * b1;
-    c20 += a0.z * b0;
-    c21 += a0.z * b1;
-    c30 += a0.w * b0;
-    c31 += a0.w * b1;
-    c40 += a1.x * b0;
-    c41 += a1.x * b1;
-    c50 += a1.y * b0;
-    c51 += a1.y * b1;
-    c60 += a1.z * b0;
-    c61 += a1.z * b1;
-    c70 += a1.w * b0;
-    c71 += a1.w * b1;
+    c00 += r0 * b0;
+    c01 += r0 * b1;
+    c10 += r1 * b0;
+    c11 += r1 * b1;
+    c20 += r2 * b0;
+    c21 += r2 * b1;
+    c30 += r3 * b0;
+    c31 += r3 * b1;
+    c40 += r4 * b0;
+    c41 += r4 * b1;
+    c50 += r5 * b0;
+    c51 += r5 * b1;
+    c60 += r6 * b0;
+    c61 += r6 * b1;
+    c70 += r7 * b0;
+    c71 += r7 * b1;
+}
+
+fn block(g: u32) {
+    let at = ty * 16u + g;
+    let a0 = sa[at];
+    let a1 = sa[at + 4u];
+    let a2 = sa[at + 8u];
+    let a3 = sa[at + 12u];
+    let a4 = sa[at + 256u];
+    let a5 = sa[at + 260u];
+    let a6 = sa[at + 264u];
+    let a7 = sa[at + 268u];
+    let k = g * 4u;
+    add8(k, a0.x, a1.x, a2.x, a3.x, a4.x, a5.x, a6.x, a7.x);
+    add8(k + 1u, a0.y, a1.y, a2.y, a3.y, a4.y, a5.y, a6.y, a7.y);
+    add8(k + 2u, a0.z, a1.z, a2.z, a3.z, a4.z, a5.z, a6.z, a7.z);
+    add8(k + 3u, a0.w, a1.w, a2.w, a3.w, a4.w, a5.w, a6.w, a7.w);
 }
 
 fn out2(at: u32, m: u32, n4: u32, v0: vec4<f32>, v1: vec4<f32>) {
@@ -1124,8 +1126,8 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
     var pb0 = ub[bi0];
     var pb1 = ub[bi1];
     for (var ks = 0u; ks < nk; ks++) {
-        put_a(ar0, aq, pa0);
-        put_a(ar1, aq, pa1);
+        sa[ar0 * 4u + aq] = pa0;
+        sa[ar1 * 4u + aq] = pa1;
         sb[bk * 32u + bq] = pb0;
         sb[(bk + 8u) * 32u + bq] = pb1;
         workgroupBarrier();
@@ -1137,12 +1139,10 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
             pb0 = ub[bi0 + ob];
             pb1 = ub[bi1 + ob];
         }
-        for (var kk = 0u; kk < 16u; kk += 4u) {
-            mac(kk);
-            mac(kk + 1u);
-            mac(kk + 2u);
-            mac(kk + 3u);
-        }
+        block(0u);
+        block(1u);
+        block(2u);
+        block(3u);
         workgroupBarrier();
     }
     let at = u(5u) + grp * t * (cout / 4u);
