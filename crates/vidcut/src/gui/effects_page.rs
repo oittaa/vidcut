@@ -1216,7 +1216,10 @@ impl Workspace {
                     .filter(|b| b.clip == clip.id && b.node == *name && b.pattern == k);
                 let area = match held {
                     Some(b) => b.area,
-                    None => (pattern.area_at(&clip.motion, frame)).unwrap_or_else(|| pattern.own()),
+                    None => match pattern.area_at(&clip.motion, frame) {
+                        Some(a) => a,
+                        None => continue,
+                    },
                 };
                 let half = [area.size[0] / 2.0, area.size[1] / 2.0];
                 let r = Rect::from_min_max(
