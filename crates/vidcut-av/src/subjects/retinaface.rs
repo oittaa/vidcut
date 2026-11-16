@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use tract_onnx::pb;
 use tract_onnx::prelude::Framework;
@@ -17,6 +18,7 @@ pub const SIDE: u32 = 640;
 pub const LEAST: f32 = 0.3;
 pub const SAME: f32 = 0.4;
 const WHAT: &str = "face detection";
+const STEPS: [&str; 5] = ["upload", "send", "clock", "wait", "boxes"];
 const RELU: Act = Act::Leaky(0.0);
 const MEAN: [f32; 3] = [104.0, 117.0, 123.0];
 const STRIDES: [u32; 3] = [8, 16, 32];
@@ -237,6 +239,45 @@ fn within(v: &View, base: u32, n: u32, (h, w, c): (u32, u32, u32)) -> View {
     }
 }
 
+struct Laps {
+    on: bool,
+    at: Instant,
+    took: [f64; STEPS.len()],
+}
+
+impl Laps {
+    fn new() -> Self {
+        Self {
+            on: crate::debug(),
+            at: Instant::now(),
+            took: [0.0; STEPS.len()],
+        }
+    }
+
+    fn lap(&mut self, step: usize) {
+        if self.on {
+            let now = Instant::now();
+            self.took[step] += (now - self.at).as_secs_f64() * 1000.0;
+            self.at = now;
+        }
+    }
+
+    fn report(&self, pictures: usize, passes: usize) {
+        if self.on {
+            let steps: Vec<String> = STEPS
+                .iter()
+                .zip(self.took)
+                .map(|(name, ms)| format!("{name} {ms:.2} ms"))
+                .collect();
+            crate::debug!(
+                "subjects",
+                "model call of {pictures} pictures in {passes} passes: {}",
+                steps.join(", ")
+            );
+        }
+    }
+}
+
 fn plan(c: &mut Carve, (w, h): (u32, u32), n: u32) -> Work {
     let cells: u32 = STRIDES.iter().map(|s| (h / s) * (w / s)).sum();
     let tiles =
@@ -423,6 +464,7 @@ impl Model {
         let plane = self.size.0 * self.size.1;
         let clocked = crate::debug() && !self.timed.swap(true, Ordering::Relaxed);
         let timed = clocked.then(|| runs.len().min(2) - 1);
+        let mut laps = Laps::new();
         compute::checked(&gpu.device, WHAT, || {
             for (i, run) in runs.clone().enumerate() {
                 if timed == Some(i) {
@@ -436,6 +478,7 @@ impl Model {
                             .write_buffer(wide, at as u64, &compute::bytes(values));
                     }
                 }
+                laps.lap(0);
                 let mut enc = gpu.device.create_command_encoder(&Default::default());
                 {
                     let mut pass = enc.begin_compute_pass(&Default::default());
@@ -449,18 +492,24 @@ impl Model {
                 enc.copy_buffer_to_buffer(&heads.buf, 0, &staging, i as u64 * each, each);
                 gpu.flush();
                 gpu.queue.submit([enc.finish()]);
+                laps.lap(1);
                 if timed == Some(i) {
                     self.report(run.len())?;
                 }
+                laps.lap(2);
             }
             Ok(())
         })?;
         let raw = gpu.fetch(&staging, all, None)?;
+        laps.lap(3);
         let values = compute::floats(&raw);
         let mut out = Vec::new();
+        let passes = runs.len();
         for (run, v) in runs.zip(values.chunks((each / 4) as usize)) {
             out.extend((0..run.len()).map(|b| self.found(v, b as u32)));
         }
+        laps.lap(4);
+        laps.report(pictures.len(), passes);
         Ok(out)
     }
 
@@ -473,9 +522,10 @@ impl Model {
         let times = self.gpu.times()?;
         let all: f64 = times.iter().map(|(_, ms)| ms).sum();
         let (w, h) = self.size;
+        let name = &self.gpu.name;
         crate::debug!(
             "subjects",
-            "gpu pass of {n} pictures of {w}x{h}: {all:.3} ms ({how})"
+            "gpu pass of {n} pictures of {w}x{h} on {name}: {all:.3} ms ({how})"
         );
         for (name, ms) in &times {
             crate::debug!("subjects", "gpu {name}: {ms:.3} ms");

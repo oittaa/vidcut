@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """How fast the slow face model finds faces on this computer. It runs
 `motion find --model slow` on 8 s of Tears of Steel at each size (640 and
-1280) and prints the time in the model for each picture. It also prints the
-GPU time for each picture, of each stage and of the slowest layers.
+1280) and prints the time in the model for each picture. It splits that time
+into the steps of each model call: upload, send, clock (the GPU timing of one
+pass, only in the first call), wait and boxes. It also prints the GPU time for
+each picture, of each stage and of the slowest layers.
 
     python3 scripts/face-speed.py [SIZE...]
 
@@ -54,6 +56,31 @@ def run(args, env=None):
     return r
 
 
+def step(calls, name):
+    return sum(c[1][name] for c in calls) / sum(c[0] for c in calls)
+
+
+def per_picture(calls):
+    return ", ".join(f"{k} {step(calls, k):.2f}" for k in calls[0][1])
+
+
+def steps(err):
+    calls = []
+    for n, rest in re.findall(r"\[subjects\] model call of (\d+) pictures in \d+ passes: (.*)", err):
+        calls.append((int(n), {k: float(ms) for k, ms in re.findall(r"(\w+) ([\d.]+) ms", rest)}))
+    if not calls:
+        print("  no model call lines")
+        return
+    print(f"  first call, ms per picture ({calls[0][0]} pictures): {per_picture(calls[:1])}")
+    rest = calls[1:]
+    if not rest:
+        return
+    print(f"  other {len(rest)} calls, ms per picture: {per_picture(rest)}")
+    if len(rest) >= 6:
+        early, late = step(rest[:3], "wait"), step(rest[-3:], "wait")
+        print(f"  wait, ms per picture: {early:.2f} in calls 2 to 4, {late:.2f} in the last 3 calls")
+
+
 def measure(work, size):
     project = str(work / f"p{size}.vidcut")
     run(["--headless", "project", "create", project])
@@ -66,13 +93,14 @@ def measure(work, size):
     if not seen:
         sys.exit(f"no [subjects] line in the output of motion find:\n{err[-2000:]}")
     pictures, model_s = int(seen[1]), float(seen[4])
-    line = f"size {size}: {pictures} pictures, {model_s * 1000 / pictures:.2f} ms per picture in the model"
-    gpu = re.search(r"\[subjects\] gpu pass of (\d+) pictures of (\d+)x(\d+): ([\d.]+) ms \(([^)]*)\)", err)
+    print(f"size {size}: {pictures} pictures, {model_s * 1000 / pictures:.2f} ms per picture in the model")
+    steps(err)
+    gpu = re.search(r"\[subjects\] gpu pass of (\d+) pictures of (\d+)x(\d+) on (.+?): ([\d.]+) ms \(([^)]*)\)", err)
     if not gpu:
-        print(line + ", no GPU time", flush=True)
+        print("  no GPU time", flush=True)
         return
     n = int(gpu[1])
-    print(f"{line}, GPU {float(gpu[4]) / n:.2f} ms per picture (input {gpu[2]}x{gpu[3]}, {n} in a pass, {gpu[5]})")
+    print(f"  GPU {gpu[4]}: {float(gpu[5]) / n:.2f} ms per picture (input {gpu[2]}x{gpu[3]}, {n} in a pass, {gpu[6]})")
     layers = [(name, float(ms)) for name, ms in re.findall(r"\[subjects\] gpu (?!pass of )(.+): ([\d.]+) ms", err)]
     stages = {}
     for name, ms in layers:

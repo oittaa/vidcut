@@ -40,7 +40,10 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 **Face speed:** `python3 scripts/face-speed.py [SIZE…]` (release build).
 
 - It runs `motion.find` with the slow face model on 8 s of the clip `tos-720p-mov`, at each SIZE given (640 1280).
-- It prints the time in the model for each picture. From the `[subjects] gpu` lines, it prints the GPU time for each picture, each stage and the slowest layers.
+- It prints the time in the model for each picture.
+- From the `[subjects] model call` lines, it prints the time of each step for each picture. It gives the first call apart, because only the first call has the clock step.
+- It compares the wait in the early calls with the wait in the last calls. A longer wait at the end can show a GPU that slows when it gets hot.
+- From the `[subjects] gpu` lines, it prints the GPU time for each picture, each stage and the slowest layers.
 - The finds and their cache go to a temporary folder. Thus each run measures again.
 - `CLIP=FILE` and `RANGE=A..B` time another clip.
 - It needs the model file. `vidcut models check retinaface-r34 --download` gets it.
@@ -83,7 +86,14 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - By default, PID is the newest `vidcut`.
 - The `[decoding]` lines of `VIDCUT_DEBUG` give the thread count of each reader when it opens. They also give how many readers are open when one opens or closes.
 - The `[subjects]` line of `VIDCUT_DEBUG` is for `motion.find`. It gives the pictures that the model saw, the frames decoded, the time, and the time in the model.
-  - With the slow face model, the `[subjects] gpu` lines give the GPU time of one pass, and of each layer in that pass. Each find measures one pass.
+  - With the slow face model, one `[subjects] model call` line comes for each call of the model. It gives the time of each step of the call:
+    - upload: the pictures go to the GPU.
+    - send: vidcut records the passes and sends them to the GPU.
+    - clock: the GPU timing of one pass.
+    - wait: vidcut waits for the GPU and reads the results back.
+    - boxes: vidcut makes the boxes from the results.
+  - The GPU works while vidcut uploads the pictures of the next pass. Thus the wait can be shorter than the GPU time.
+  - The `[subjects] gpu` lines give the GPU name and the GPU time of one pass, and of each layer in that pass. Each find measures one pass.
   - On a GPU that writes timestamps inside a compute pass, the times come from these timestamps. Under `VIDCUT_DEBUG`, vidcut asks the device for this feature.
   - On another GPU, vidcut runs each dispatch of that pass again on its own and waits for it. The time is the wait on the CPU, with the time to send the dispatch.
   - The time in the model then also holds this second run. The line of the pass names the method.
