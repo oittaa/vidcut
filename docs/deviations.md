@@ -1486,7 +1486,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - After a decompose beside a J or L cut, the cut stays. A sound that comes back starts after that cut.
     - A clip whose sound the cuts cover, alone or together, has no sound.
 - **Why:**
-  - Open in Timeline of a compound clip is not built yet (p. 1053, [gaps](todo/gaps.md)).
+  - Open in Timeline of a compound clip is not built yet (p. 1054, [gaps](todo/gaps.md)).
   - A clip holds its picture and sound as one. Half of a clip is not a thing that vidcut can select.
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
   - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
