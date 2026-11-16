@@ -84,14 +84,45 @@ def steps(err):
         print(f"  wait, ms per picture: {early:.2f} in calls 2 to 4, {late:.2f} in the last 3 calls")
 
 
+def project(work, name, span):
+    path = str(work / f"{name}.vidcut")
+    run(["--headless", "project", "create", path])
+    run(["--headless", "-p", path, "media", "add", CLIP])
+    run(["--headless", "-p", path, "edit", "append", "m1", "--range", span])
+    return path
+
+
+def find(work, path, size, **env):
+    env = dict(os.environ, VIDCUT_DEBUG="1", XDG_CACHE_HOME=str(work / "cache"), **env)
+    args = ["--headless", "-p", path, "motion", "find", "c1", "--subject", "face", "--model", "slow", "--size", size]
+    return run(args, env).stderr
+
+
+def ready():
+    if not VIDCUT.exists():
+        sys.exit(f"{VIDCUT} is missing: cargo build --release -p vidcut")
+    if not Path(CLIP).exists():
+        sys.exit(f"{CLIP} is missing: scripts/fetch-test-media.sh tos-720p-mov")
+    model = cache() / MODEL
+    if not model.exists():
+        sys.exit(f"{model} is missing: {VIDCUT} models check retinaface-r34 --download")
+    print(f"vidcut: {VIDCUT}")
+    print(f"computer: {platform.platform()}, {platform.machine()}")
+    print(f"convolutions: {os.environ.get('VIDCUT_GPU_CONV') or 'all'}")
+    return model
+
+
+def cached(work, model):
+    copy = work / "cache" / "vidcut" / MODEL
+    copy.parent.mkdir(parents=True)
+    try:
+        copy.symlink_to(model)
+    except OSError:
+        shutil.copyfile(model, copy)
+
+
 def measure(work, size):
-    project = str(work / f"p{size}.vidcut")
-    run(["--headless", "project", "create", project])
-    run(["--headless", "-p", project, "media", "add", CLIP])
-    run(["--headless", "-p", project, "edit", "append", "m1", "--range", RANGE])
-    env = dict(os.environ, VIDCUT_DEBUG="1", XDG_CACHE_HOME=str(work / "cache"))
-    find = ["--headless", "-p", project, "motion", "find", "c1", "--subject", "face", "--model", "slow", "--size", size]
-    err = run(find, env).stderr
+    err = find(work, project(work, f"p{size}", RANGE), size)
     seen = re.search(r"\[subjects\] .*: (\d+) pictures of (\d+) frames in ([\d.]+) s, ([\d.]+) s of it in the model", err)
     if not seen:
         sys.exit(f"no [subjects] line in the output of motion find:\n{err[-2000:]}")
@@ -116,25 +147,11 @@ def measure(work, size):
 
 def main():
     sizes = sys.argv[1:] or ["640", "1280"]
-    if not VIDCUT.exists():
-        sys.exit(f"{VIDCUT} is missing: cargo build --release -p vidcut")
-    if not Path(CLIP).exists():
-        sys.exit(f"{CLIP} is missing: scripts/fetch-test-media.sh tos-720p-mov")
-    model = cache() / MODEL
-    if not model.exists():
-        sys.exit(f"{model} is missing: {VIDCUT} models check retinaface-r34 --download")
-    print(f"vidcut: {VIDCUT}")
-    print(f"computer: {platform.platform()}, {platform.machine()}")
+    model = ready()
     print(f"clip: {CLIP} {RANGE}")
-    print(f"convolutions: {os.environ.get('VIDCUT_GPU_CONV') or 'all'}")
     with tempfile.TemporaryDirectory() as folder:
         work = Path(folder)
-        copy = work / "cache" / "vidcut" / MODEL
-        copy.parent.mkdir(parents=True)
-        try:
-            copy.symlink_to(model)
-        except OSError:
-            shutil.copyfile(model, copy)
+        cached(work, model)
         for size in sizes:
             measure(work, size)
 

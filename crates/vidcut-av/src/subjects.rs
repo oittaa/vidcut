@@ -148,6 +148,13 @@ impl Net {
         }
     }
 
+    fn probe(&self, dir: &Path, pictures: &[Vec<f32>]) -> Result<()> {
+        match self {
+            Self::Faces(m) => m.probe(dir, pictures),
+            _ => Ok(()),
+        }
+    }
+
     fn found(&self, pictures: &[Vec<f32>], content: (usize, usize)) -> Result<Vec<Vec<Found>>> {
         match self {
             Self::Face(m) => each(pictures, &|p| m.find(p)),
@@ -467,6 +474,11 @@ pub fn find(
             && (waiting.len() >= batch || ended)
             && !waiting.is_empty()
         {
+            if let Some(dir) = &dump
+                && out.found.is_empty()
+            {
+                seeing.model.probe(dir, &waiting)?;
+            }
             let asked = Instant::now();
             out.found.extend(seeing.found(&waiting)?);
             in_model += asked.elapsed();

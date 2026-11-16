@@ -239,6 +239,22 @@ fn within(v: &View, base: u32, n: u32, (h, w, c): (u32, u32, u32)) -> View {
     }
 }
 
+struct Seen {
+    name: String,
+    view: View,
+    after: u32,
+}
+
+fn saw(seen: &mut Option<&mut Vec<Seen>>, gpu: &Gpu, name: impl FnOnce() -> String, view: &View) {
+    if let Some(list) = seen {
+        list.push(Seen {
+            name: name(),
+            view: view.clone(),
+            after: gpu.dispatches(),
+        });
+    }
+}
+
 struct Laps {
     on: bool,
     at: Instant,
@@ -358,7 +374,7 @@ impl Model {
         })
     }
 
-    fn forward(&self, o: &mut Ops, n: u32) {
+    fn forward(&self, o: &mut Ops, n: u32, mut seen: Option<&mut Vec<Seen>>) {
         let (net, k) = (&self.net, &self.work);
         let (w, h) = (self.size.0 as u32, self.size.1 as u32);
         let input = k.input.shaped(n, h, w, 3);
@@ -370,13 +386,17 @@ impl Model {
             let plane = within(&k.wide, ch as u32 * self.batch * h * w, n, (h, w, 1));
             o.copy(&plane, &input.part(ch as u32, 1), 1.0, -mean, Act::None);
         }
+        saw(&mut seen, o.gpu, || "input".into(), &input);
         let stem = k.wide.shaped(n, h / 2, w / 2, WIDTHS[0]);
         o.gpu
             .mark(|| format!("stem {}x{}x{}", h / 2, w / 2, WIDTHS[0]));
         o.conv(&net.stem, &input, &stem, Res::None);
+        saw(&mut seen, o.gpu, || "stem".into(), &stem);
         let mut dims = (h / 4, w / 4, WIDTHS[0]);
         o.gpu.mark(|| "pool".into());
-        o.pool(&stem, &within(&k.spare[0], 0, n, dims), 3, 2, 1);
+        let pooled = within(&k.spare[0], 0, n, dims);
+        o.pool(&stem, &pooled, 3, 2, 1);
+        saw(&mut seen, o.gpu, || "pool".into(), &pooled);
         let (mut x, mut y) = (0, 1);
         let lateral = k.lateral.each_ref().map(|v| v.shaped(n, v.h, v.w, v.c));
         for (i, layer) in net.layers.iter().enumerate() {
@@ -394,6 +414,12 @@ impl Model {
                 };
                 o.gpu.mark(|| name("conv1"));
                 o.layer(&block.a, &from, &middle, Res::None, scratch);
+                saw(
+                    &mut seen,
+                    o.gpu,
+                    || format!("layer{}.{j}.conv1", i + 1),
+                    &middle,
+                );
                 match &block.down {
                     Some(down) => {
                         let skip = within(&k.spare[2], 0, n, dims);
@@ -407,12 +433,14 @@ impl Model {
                         o.layer(&block.b, &middle, &out, Res::Before(&from), scratch);
                     }
                 }
+                saw(&mut seen, o.gpu, || format!("layer{}.{j}", i + 1), &out);
                 (x, y) = (y, x);
             }
             if i > 0 {
                 let out = within(&k.spare[x], 0, n, dims);
                 o.gpu.mark(|| format!("lateral{i}"));
                 o.conv(&net.lateral[i - 1], &out, &lateral[i - 1], Res::None);
+                saw(&mut seen, o.gpu, || format!("lateral{i}"), &lateral[i - 1]);
             }
         }
         let merged = k.merged.each_ref().map(|v| v.shaped(n, v.h, v.w, v.c));
@@ -420,14 +448,18 @@ impl Model {
         o.gpu.mark(|| "up16".into());
         o.nearest(&lateral[2], &up);
         o.add(&up, &lateral[1]);
+        saw(&mut seen, o.gpu, || "add16".into(), &lateral[1]);
         o.gpu.mark(|| "merge16".into());
         o.layer(&net.merge[1], &lateral[1], &merged[1], Res::None, scratch);
+        saw(&mut seen, o.gpu, || "merge16".into(), &merged[1]);
         let up = k.up.shaped(n, h / 8, w / 8, FEATURES);
         o.gpu.mark(|| "up8".into());
         o.nearest(&merged[1], &up);
         o.add(&up, &lateral[0]);
+        saw(&mut seen, o.gpu, || "add8".into(), &lateral[0]);
         o.gpu.mark(|| "merge8".into());
         o.layer(&net.merge[0], &lateral[0], &merged[0], Res::None, scratch);
+        saw(&mut seen, o.gpu, || "merge8".into(), &merged[0]);
         let inputs = [&merged[0], &merged[1], &lateral[2]];
         let (half, quarter) = (FEATURES / 2, FEATURES / 4);
         for (i, (base, lh, lw)) in self.levels().into_iter().enumerate() {
@@ -450,9 +482,11 @@ impl Model {
                 Res::None,
                 scratch,
             );
+            saw(&mut seen, o.gpu, || format!("context{stride}"), &out);
             let head = within(&k.heads, base, n, (lh, lw, HEAD));
             o.gpu.mark(|| format!("head{stride}"));
             o.conv(&net.heads[i], &out, &head, Res::None);
+            saw(&mut seen, o.gpu, || format!("head{stride}"), &head);
         }
     }
 
@@ -463,7 +497,6 @@ impl Model {
         let runs = pictures.chunks(self.batch as usize);
         let all = each * runs.len() as u64;
         let staging = gpu.staging(all);
-        let plane = self.size.0 * self.size.1;
         let clocked = crate::debug() && !self.timed.swap(true, Ordering::Relaxed);
         let timed = clocked.then(|| runs.len().min(2) - 1);
         let mut laps = Laps::new();
@@ -472,25 +505,9 @@ impl Model {
                 if timed == Some(i) {
                     gpu.time_from(CLOCK);
                 }
-                for (b, picture) in run.iter().enumerate() {
-                    for (ch, values) in picture.chunks(plane).take(3).enumerate() {
-                        let at = (ch * self.batch as usize + b) * plane * 4;
-                        let wide = &self.work.wide.buf;
-                        gpu.queue
-                            .write_buffer(wide, at as u64, &compute::bytes(values));
-                    }
-                }
+                self.upload(run);
                 laps.lap(0);
-                let mut enc = gpu.device.create_command_encoder(&Default::default());
-                {
-                    let mut pass = enc.begin_compute_pass(&Default::default());
-                    let mut o = Ops {
-                        gpu,
-                        k: &self.kernels,
-                        pass: &mut pass,
-                    };
-                    self.forward(&mut o, run.len() as u32);
-                }
+                let mut enc = self.encode(run.len() as u32, None);
                 enc.copy_buffer_to_buffer(&heads.buf, 0, &staging, i as u64 * each, each);
                 gpu.flush();
                 gpu.queue.submit([enc.finish()]);
@@ -513,6 +530,67 @@ impl Model {
         laps.lap(4);
         laps.report(&out, passes);
         Ok(out)
+    }
+
+    fn upload(&self, run: &[Vec<f32>]) {
+        let plane = self.size.0 * self.size.1;
+        for (b, picture) in run.iter().enumerate() {
+            for (ch, values) in picture.chunks(plane).take(3).enumerate() {
+                let at = (ch * self.batch as usize + b) * plane * 4;
+                let wide = &self.work.wide.buf;
+                self.gpu
+                    .queue
+                    .write_buffer(wide, at as u64, &compute::bytes(values));
+            }
+        }
+    }
+
+    fn encode(&self, n: u32, seen: Option<&mut Vec<Seen>>) -> wgpu::CommandEncoder {
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = enc.begin_compute_pass(&Default::default());
+            let mut o = Ops {
+                gpu: &self.gpu,
+                k: &self.kernels,
+                pass: &mut pass,
+            };
+            self.forward(&mut o, n, seen);
+        }
+        enc
+    }
+
+    pub(crate) fn probe(&self, dir: &Path, pictures: &[Vec<f32>]) -> Result<()> {
+        let gpu = &self.gpu;
+        let run = &pictures[..pictures.len().min(2).min(self.batch as usize)];
+        let n = run.len() as u32;
+        let mut seen = Vec::new();
+        let done = compute::checked(&gpu.device, WHAT, || {
+            gpu.stop_after(Some(u32::MAX));
+            drop(self.encode(n, Some(&mut seen)));
+            for (i, s) in seen.iter().enumerate() {
+                gpu.stop_after(Some(s.after));
+                self.upload(run);
+                let mut enc = self.encode(n, None);
+                let v = &s.view;
+                let size = u64::from((v.n * v.h * v.w - 1) * v.stride + v.at + v.c) * 4;
+                let staging = gpu.staging(size);
+                enc.copy_buffer_to_buffer(&v.buf, u64::from(v.base) * 4, &staging, 0, size);
+                gpu.flush();
+                gpu.queue.submit([enc.finish()]);
+                let values = compute::floats(&gpu.fetch(&staging, size, None)?);
+                let mut out = Vec::new();
+                for p in 0..(v.n * v.h * v.w) as usize {
+                    let at = p * v.stride as usize + v.at as usize;
+                    out.extend_from_slice(&values[at..at + v.c as usize]);
+                }
+                let shape = [v.n, v.h, v.w, v.c].map(|x| x as usize);
+                let file = dir.join(format!("stage-{i:02}-{}.npy", s.name));
+                crate::npy::write(&file, &shape, &out)?;
+            }
+            Ok(())
+        });
+        gpu.stop_after(None);
+        done
     }
 
     fn report(&self, n: usize) -> Result<()> {

@@ -49,6 +49,15 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `CLIP=FILE` and `RANGE=A..B` time another clip.
 - It needs the model file. `vidcut models check retinaface-r34 --download` gets it.
 
+**Face check:** `uv run scripts/face-check.py [SIZE]` (release build).
+
+- It finds the first step of the slow face model where the GPU result is wrong.
+- It runs `motion.find` with `VIDCUT_SUBJECTS_DUMP` on 1 s of the clip `tos-720p-mov`, at SIZE (640 when not given).
+- It gives the same pictures to onnxruntime on the CPU, and reads the output of each step from the ONNX graph.
+- For each step, it prints the largest difference as a share of the largest value. A share of more than 0.01 is far off.
+- It needs what the face speed script needs, and numpy, onnx and onnxruntime. `uv run` gets these packages.
+- `RANGE=A..B` checks another part of the clip. `VIDCUT_GPU_CONV` selects the convolution kernels.
+
 **Slow and dropped frames:** `scripts/playback-check.py [--log DIR] [CODEC…]` (`make playback`, release builds).
 
 - It opens a window on 4K60 `busy` AV1, 10-bit HEVC and VP9 clips with keyframes 2 s apart.
@@ -226,6 +235,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `NNNNN.npy`: each picture at the size of the model, as blue, green and red planes of 8 bits, `[3, H, W]`.
   - `boxes.npy`: one row for each found box, `[K, 6]`: the picture, the center, the size and the score. The center and the size are fractions of the picture content.
   - `content.npy`: the width and the height of the picture content, in pixels of the model input.
+  - With the slow face model, `stage-NN-STEP.npy`: the output of each step of the network for the first two pictures, `[N, H, W, C]`.
+  - vidcut runs the pass again for each step and stops it after that step (`Gpu::stop_after`). Thus later steps cannot write over the output.
   - A check against an ONNX runtime reads them.
 - `VIDCUT_GPU_CONV` turns off the fast convolution kernels of the GPU layers (`compute::ops`). A different result then shows a fault in a kernel that is off.
   - `direct`: no Winograd convolutions (`WINO_GEMM`).

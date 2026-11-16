@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Instant;
 
@@ -60,6 +60,9 @@ pub(crate) struct Gpu {
     scratch: Mutex<Option<(wgpu::Buffer, wgpu::Buffer)>>,
     clock: Mutex<Option<Clock>>,
     timing: AtomicBool,
+    counting: AtomicBool,
+    limit: AtomicU32,
+    done: AtomicU32,
 }
 
 pub(crate) fn storage() -> wgpu::BufferUsages {
@@ -180,6 +183,9 @@ impl Gpu {
             scratch: Mutex::new(None),
             clock: Mutex::new(None),
             timing: AtomicBool::new(false),
+            counting: AtomicBool::new(false),
+            limit: AtomicU32::new(u32::MAX),
+            done: AtomicU32::new(0),
         })
     }
 
@@ -335,7 +341,7 @@ impl Gpu {
         buffers: &[&wgpu::Buffer],
         groups: u32,
     ) {
-        if groups == 0 {
+        if groups == 0 || self.skipped() {
             return;
         }
         let (bind, at) = self.set(pass, pipe, param, buffers);
@@ -345,6 +351,22 @@ impl Gpu {
         if self.timing.load(Ordering::Relaxed) {
             self.tick(pass, Some((pipe, bind, at, (x, y))));
         }
+    }
+
+    pub(crate) fn stop_after(&self, limit: Option<u32>) {
+        self.done.store(0, Ordering::Relaxed);
+        self.limit
+            .store(limit.unwrap_or(u32::MAX), Ordering::Relaxed);
+        self.counting.store(limit.is_some(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn dispatches(&self) -> u32 {
+        self.done.load(Ordering::Relaxed)
+    }
+
+    fn skipped(&self) -> bool {
+        self.counting.load(Ordering::Relaxed)
+            && self.done.fetch_add(1, Ordering::Relaxed) >= self.limit.load(Ordering::Relaxed)
     }
 
     pub(crate) fn stamps(&self) -> bool {
