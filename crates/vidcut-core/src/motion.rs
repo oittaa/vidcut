@@ -267,10 +267,80 @@ impl Join {
 }
 
 struct Open {
+    first: Found,
     last: Found,
     seen: i64,
     total: f64,
     samples: Vec<PathSample>,
+    picks: Vec<usize>,
+}
+
+fn paired(
+    heads: Vec<(usize, Found)>,
+    boxes: &[Found],
+    taken: &[bool],
+    least: f64,
+) -> Vec<(usize, usize)> {
+    let mut pairs: Vec<(f64, usize, usize)> = Vec::new();
+    for (t, head) in &heads {
+        for (b, f) in boxes.iter().enumerate() {
+            let near = overlap(head, f);
+            if !taken[b] && near >= least {
+                pairs.push((near, *t, b));
+            }
+        }
+    }
+    pairs.sort_by(|x, y| y.0.total_cmp(&x.0));
+    let (mut joined, mut moved) = (taken.to_vec(), HashSet::new());
+    let mut out = Vec::new();
+    for (_, t, b) in pairs {
+        if !joined[b] && moved.insert(t) {
+            joined[b] = true;
+            out.push((t, b));
+        }
+    }
+    out
+}
+
+fn grown_back(
+    done: &mut [Open],
+    frames: &[Vec<bool>],
+    boxes_at: impl Fn(i64) -> Vec<Found>,
+    (first, shots): (i64, &[i64]),
+    wait: i64,
+    least: f64,
+) {
+    let shot = |f: i64| shots[shots.partition_point(|&s| s <= f).saturating_sub(1)];
+    let mut heads: Vec<(Found, i64, i64)> = (done.iter())
+        .map(|o| (o.first, o.samples[0].frame, shot(o.samples[0].frame)))
+        .collect();
+    let mut order: Vec<usize> = (0..done.len()).collect();
+    order.sort_by_key(|&t| std::cmp::Reverse(heads[t].1));
+    let (mut next, mut active) = (0, Vec::new());
+    let mut earlier: Vec<Vec<PathSample>> = vec![Vec::new(); done.len()];
+    for (i, taken) in frames.iter().enumerate().rev() {
+        let frame = first + i as i64;
+        while next < order.len() && heads[order[next]].1 > frame {
+            active.push(order[next]);
+            next += 1;
+        }
+        active.retain(|&t: &usize| heads[t].1 - frame <= wait && frame >= heads[t].2);
+        if active.is_empty() || taken.iter().all(|&t| t) {
+            continue;
+        }
+        let boxes = boxes_at(frame);
+        let near = active.iter().map(|&t| (t, heads[t].0)).collect();
+        for (t, b) in paired(near, &boxes, taken, least) {
+            (heads[t].0, heads[t].1) = (boxes[b], frame);
+            done[t].total += f64::from(boxes[b].score);
+            earlier[t].push(sample(frame, &boxes[b]));
+        }
+    }
+    for (o, mut before) in done.iter_mut().zip(earlier) {
+        before.reverse();
+        before.append(&mut o.samples);
+        o.samples = before;
+    }
 }
 
 fn overlap(a: &Found, b: &Found) -> f64 {
@@ -326,52 +396,47 @@ pub fn joined(
     let mut open: Vec<Open> = Vec::new();
     let mut done: Vec<Open> = Vec::new();
     let mut shots = vec![first];
+    let mut counts: Vec<usize> = Vec::new();
+    let shown = |f: i64| shown_time(origin, fps, f);
+    let boxes_at = |frame: i64| -> Vec<Found> {
+        let boxes = found.shown(shown(frame));
+        let kept = boxes.iter().copied().filter(|f| f.score >= rules.keep);
+        kept.collect()
+    };
     for frame in first..end {
-        let shown = |f: i64| shown_time(origin, fps, f);
         if frame > first && found.cut(shown(frame - 1), shown(frame)) {
             done.append(&mut open);
             shots.push(frame);
         }
-        let boxes = found.shown(shown(frame));
-        let kept = boxes.iter().copied().filter(|f| f.score >= rules.keep);
-        let boxes: Vec<Found> = kept.collect();
+        let boxes = boxes_at(frame);
         let (live, gone): (Vec<Open>, Vec<Open>) =
             open.into_iter().partition(|o| frame - o.seen <= wait);
         open = live;
         done.extend(gone);
-        let mut pairs: Vec<(f64, usize, usize)> = Vec::new();
-        for (t, o) in open.iter().enumerate() {
-            for (b, f) in boxes.iter().enumerate() {
-                let near = overlap(&o.last, f);
-                if near >= rules.overlap {
-                    pairs.push((near, t, b));
-                }
+        let mut taken = vec![false; boxes.len()];
+        let heads = open.iter().map(|o| o.last).enumerate().collect();
+        for (t, b) in paired(heads, &boxes, &taken, rules.overlap) {
+            taken[b] = true;
+            let o = &mut open[t];
+            (o.last, o.seen) = (boxes[b], frame);
+            o.total += f64::from(boxes[b].score);
+            o.samples.push(sample(frame, &boxes[b]));
+            o.picks.push(b);
+        }
+        for (b, f) in boxes.iter().enumerate() {
+            if !taken[b] && f.score >= rules.start {
+                taken[b] = true;
+                open.push(Open {
+                    first: *f,
+                    last: *f,
+                    seen: frame,
+                    total: f64::from(f.score),
+                    samples: vec![sample(frame, f)],
+                    picks: vec![b],
+                });
             }
         }
-        pairs.sort_by(|x, y| y.0.total_cmp(&x.0));
-        let mut joined = vec![false; boxes.len()];
-        let mut moved = vec![false; open.len()];
-        for (_, t, b) in pairs {
-            if !moved[t] && !joined[b] {
-                (moved[t], joined[b]) = (true, true);
-                let o = &mut open[t];
-                (o.last, o.seen) = (boxes[b], frame);
-                o.total += f64::from(boxes[b].score);
-                o.samples.push(sample(frame, &boxes[b]));
-            }
-        }
-        let fresh = boxes
-            .iter()
-            .zip(&joined)
-            .filter(|(f, j)| !**j && f.score >= rules.start);
-        for (f, _) in fresh {
-            open.push(Open {
-                last: *f,
-                seen: frame,
-                total: f64::from(f.score),
-                samples: vec![sample(frame, f)],
-            });
-        }
+        counts.push(boxes.len());
     }
     done.extend(open);
     let lasts = |o: &Open| (o.seen - o.samples[0].frame + 1) as usize;
@@ -382,6 +447,20 @@ pub fn joined(
         (shots.get(next).copied().unwrap_or(end) - from) as usize
     };
     done.retain(|o| lasts(o) >= shortest.min(left(o)) && steady(o));
+    let mut taken: Vec<Vec<bool>> = counts.iter().map(|&n| vec![false; n]).collect();
+    for o in &done {
+        for (s, &b) in o.samples.iter().zip(&o.picks) {
+            taken[(s.frame - first) as usize][b] = true;
+        }
+    }
+    grown_back(
+        &mut done,
+        &taken,
+        boxes_at,
+        (first, &shots),
+        wait,
+        rules.overlap,
+    );
     done.sort_by(|a, b| {
         let (a, b) = (&a.samples[0], &b.samples[0]);
         (a.frame, a.center[0])

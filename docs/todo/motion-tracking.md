@@ -81,8 +81,13 @@ In this file, a path is never a track of the timeline.
 - **Mask keyframes, what is left:**
   - The points of a polygon take no keyframes. Resolve animates a polygon window (manual p. 3273).
   - `comp.set` refuses a connection of a Center with keyframes. Measure on the Fusion page what a connection does to a Center with keyframes.
-- **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
+- **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no box and no blur.
+  - A path grows backward over the boxes with a low score (`grown_back`). The frames with no box stay open.
+  - On the crowd clip, a face shows for about 6 frames after the end of its path.
   - Try how many frames a found path must start early and end late.
+- **The join of found boxes:** `motion::joined` links a box to a path by the overlap with the last box only.
+  - On the crowd clip, a face path goes back onto a STOP sign for 21 frames. The model gives the sign a low face score.
+  - Try a box that the motion of the path predicts, in place of the last box.
 - **Faces, what is left:**
   - Check `motion.find` on a file with a rotation in its metadata. `subjects::find` turns the picture upright before the model sees it.
   - Measure YuNet on the GPU against the CPU, and build it there if it is clearly faster ([analysis](../design/analysis.md#subjects)).

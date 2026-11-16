@@ -121,6 +121,14 @@ flowchart TD
       - Why: each path ends at a shot change. A thing that shows late in a shot, or in a short shot, must get its path too.
   - A path stays only with a box on a share of `steady` of its frames.
     - Why: a pattern that comes and goes from frame to frame is no thing. Two short sights that are far apart are no path.
+  - Then each path that stays grows backward in time, on boxes with a score of `keep` or more (`grown_back`).
+    - Why: a face that comes into the picture scores lower on its first frames. Its path must not start late.
+    - The backward growth uses `overlap` and `wait_secs` as the forward one does. It stops at the start of the shot.
+    - The boxes of the paths that go are free for it.
+    - Only a path takes such a box. A box that no path takes opens no path.
+      - Why: the model can give one face a second box with a low score. That box must not open a second path.
+    - The growth does not change which paths stay.
+      - Why: a short path of a thing that is not a face can have more low boxes before it. They must not make it long enough to stay.
   - `motion.find` takes each of these values: `start`, `keep`, `overlap`, `wait`, `shortest` and `steady`. `Join::of` gives the usual values of a subject, and `Join::problem` checks the given values.
     - The boxes of a find stay in the disk cache. Thus a find with other values takes the boxes from there, and the model does not run again.
   - `motion::simplified` keeps the first sample, the last sample, and each sample that the line between its kept neighbors misses.

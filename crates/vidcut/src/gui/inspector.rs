@@ -56,9 +56,9 @@ const FIND_VALUES: [(&str, &str, &str, &str); 7] = [
     ),
     (
         "keep",
-        "Min Score To Continue (0-1)",
-        "How sure the model must be on later frames to keep following.",
-        "Lower keeps a thing through blur and turns.",
+        "Min Score To Follow (0-1)",
+        "How sure the model must be on the other frames.",
+        "Lower follows a thing through blur, turns and its first frames.",
     ),
     (
         "overlap",

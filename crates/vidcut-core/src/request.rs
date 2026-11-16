@@ -3064,9 +3064,9 @@ pub enum Request {
         /// for `face` and `text`, 0.5 for `person` and `vehicle`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start: Option<f32>,
-        /// The score, from 0 to `start`, at which a box continues a path.
-        /// Usual: 0.4 for `face`, 0.6 for `text`, 0.35 for `person` and
-        /// `vehicle`.
+        /// The score, from 0 to `start`, at which a box continues a path,
+        /// forward and backward in time. Usual: 0.4 for `face`, 0.6 for
+        /// `text`, 0.35 for `person` and `vehicle`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keep: Option<f32>,
         /// How much a box must overlap the last box of a path to join that
