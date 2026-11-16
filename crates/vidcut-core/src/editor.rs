@@ -833,7 +833,7 @@ impl Editor {
                     "the project has no timeline: make one with timeline.new",
                 ));
             }
-            ops::timelines::keep_sheet(&mut working);
+            working.keep_sheet();
         }
         let label = match (&request, parts.as_slice()) {
             (Request::Apply { label: None, .. }, [one]) => one.clone(),
@@ -6896,9 +6896,9 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         }));
     }
 
-    let kept = p.timelines.is_empty() && (mode != ImportMode::New || p.has_sheet());
+    let kept = p.timelines.is_empty() && mode != ImportMode::New;
     if kept {
-        ops::timelines::keep_sheet(p);
+        p.keep_sheet();
     }
     if mode == ImportMode::Replace {
         for track in &mut p.tracks {

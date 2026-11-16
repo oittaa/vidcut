@@ -58,7 +58,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - File > Export Timeline is `export start cut.otio`. With Media, the export is a bundle ([design/model.md](design/model.md#opentimelineio)).
   - An OTIO file also opens as a new project.
   - OTIO has no drop-frame flag. An imported timeline takes the drop-frame setting of the project.
-  - A project with no other timeline also turns drop-frame on when the timecode of the media is drop-frame.
+  - A project that had no timeline before the import also turns drop-frame on when the timecode of the media is drop-frame.
   - An import into a project with no media turns drop-frame off.
   - Clip effects, transitions, generators that vidcut does not draw, compound clips and speed changes come in as data. vidcut writes them back while they fit.
   - Dissolves, cross fades ([D50](spec.md#12-decisions-on-gaps-and-contradictions)), wipes and speeds ([D48](spec.md#12-decisions-on-gaps-and-contradictions)) play.

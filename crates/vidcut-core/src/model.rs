@@ -7119,8 +7119,20 @@ impl Project {
             && self.subtitles.is_empty()
     }
 
+    pub fn keep_sheet(&mut self) {
+        let t = self.new_timeline(self.next_timeline_name(), String::new());
+        self.adopt_sheet(t);
+        if self.tracks_of(TrackKind::Audio).is_empty() {
+            self.tracks
+                .push(Track::new("A1".to_string(), TrackKind::Audio));
+        }
+    }
+
     pub fn check_in(&mut self) {
         use std::mem::{replace, take};
+        if self.timelines.is_empty() && self.has_sheet() {
+            self.keep_sheet();
+        }
         let tracks = replace(&mut self.tracks, Self::fresh_tracks());
         let (marks, markers, subtitles) = (
             take(&mut self.marks),

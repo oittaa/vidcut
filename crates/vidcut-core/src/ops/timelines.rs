@@ -99,17 +99,9 @@ fn settings_with(p: &Project, f: TimelineSettings) -> Settings {
     }
 }
 
-pub fn keep_sheet(p: &mut Project) {
-    let t = p.new_timeline(p.next_timeline_name(), String::new());
-    p.adopt_sheet(t);
-    if p.tracks_of(TrackKind::Audio).is_empty() {
-        super::add_track(p, TrackKind::Audio);
-    }
-}
-
 pub fn new(p: &mut Project, n: &TimelineNew) -> Result<String> {
     if p.timelines.is_empty() && p.has_sheet() {
-        keep_sheet(p);
+        p.keep_sheet();
     }
     let name = n.name.clone().unwrap_or_else(|| p.next_timeline_name());
     free_name(p, &name, None)?;

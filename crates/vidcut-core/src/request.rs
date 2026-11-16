@@ -901,8 +901,9 @@ pub enum Request {
     /// (its media are unpacked first) or an `.otiod` bundle folder, as other
     /// editors write them. Its media join the pool, and its tracks go on V1,
     /// V2, … and A1, A2, … as `mode` says. An empty timeline takes the file's
-    /// start timecode. A project with no other timeline takes the file's
-    /// frame rate, and so does an empty timeline with its own settings.
+    /// start timecode. A project that had no timeline before the import
+    /// takes the file's frame rate, and so does an empty timeline with its
+    /// own settings.
     /// Else the clips are converted to the timeline's rate by time. The
     /// media of a project vidcut wrote come as it has them, in a bin named
     /// after the file. What can't be imported is listed in `warnings`.

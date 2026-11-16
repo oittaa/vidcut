@@ -167,7 +167,8 @@ Timelines (spec §3):
 - `ops::timelines` holds the requests: `new`, `open`, `rename`, `duplicate`, `delete` and `set`, and `list`.
   - `delete` opens the timeline made before the deleted one, else the one after. A project can have no timeline.
   - An edit into a project with no timeline makes one first (`Editor::apply`).
-    - `ops::timelines::keep_sheet` makes "Timeline 1" from the open tracks. `Editor::apply`, `timeline.new` and `timeline.import` use it, so that no edit gets lost.
+    - `Project::keep_sheet` makes "Timeline 1" from the open tracks. `Project::check_in` calls it when no timeline is open, so that no edit gets lost.
+    - `timeline.new` calls it first, so that the new timeline gets the next name.
 - A pool item counts at the project's rate: a sound file and a still count `Settings::fps` (`Media::rate`). A compound clip keeps the rate of the timeline where it was made (`PooledCompound::fps`).
 - `ops::conform` converts clips by time from one frame rate to another. `place_pooled` and `edit.paste` use it, and `edit.copy` returns the rate of its clips.
 - Synced groups and the Sync Clips window count frames at the project's rate. The Sync Bin, `multicam.pick` and Source Overwrite work in frames of the open timeline. `multicam::timeline_frames` converts a frame of a group to the open timeline's rate by time.
@@ -809,7 +810,8 @@ Modes:
 - `ImportMode` is `new` (the default), `append`, `replace`, `compound` (`otio::as_compound`) or `media`. `flatten` decomposes compound clips.
 - `new` makes a timeline named after the file, in the bin of the request, and opens it. A name that a timeline has is refused (`ops::timelines::free_name`).
 - An empty timeline takes the start timecode and track settings of the file.
-  - It takes the file's rate when it has its own settings, or when the project has no other timeline.
+  - It takes the file's rate when it has its own settings, or when the project had no timeline before the import.
+  - A timeline that the import makes from the open tracks (`Project::keep_sheet`) counts as no timeline.
   - Else the clips are converted to its rate by time ([deviation X172](../deviations.md#x172-an-imported-timeline-keeps-its-times-at-another-frame-rate)).
 - `new`, `replace` and `project_from_otio` take a file with tracks and no clips, and make its tracks ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)). The other modes refuse it.
 - A file that vidcut wrote brings its pool items (`join_pool`) into a bin named after it, with new ids, without proxies.
