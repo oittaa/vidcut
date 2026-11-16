@@ -122,6 +122,13 @@ fn passes(v: &VideoSettings, name: &str) -> Result<Passes> {
     }
     let fast_first = v.first_pass == FirstPass::Fast;
     match name {
+        "libx264" | "libx265" | "libvpx-vp9" if v.bypass_reencode => match v.passes {
+            None => Ok(Passes::One),
+            Some(_) => Err(Error::Invalid(format!(
+                "{name} makes its two passes over the whole range; with bypass_reencode, set \
+                 passes to 1"
+            ))),
+        },
         "libx264" | "libx265" | "libvpx-vp9" => Ok(Passes::TwoRuns { fast_first }),
         n if n.ends_with("_nvenc") => Ok(Passes::TwoInside),
         _ if v.passes.is_none() => Ok(Passes::One),
@@ -1094,12 +1101,17 @@ pub(crate) fn open_video(
     ctx.set_flags(flags);
     let vaapi = match &enc.device {
         _ if gpu_frames.is_some() => {
-            ctx.set_format(format::Pixel::CUDA);
             let frames = unsafe { ffi::av_buffer_ref(gpu_frames.expect("checked")) };
             if frames.is_null() {
                 return Err(Error::Invalid("no memory for the GPU frames".into()));
             }
-            unsafe { (*ctx.as_mut_ptr()).hw_frames_ctx = frames };
+            // SAFETY: the data of a frames reference is its AVHWFramesContext.
+            let held = unsafe { &*((*frames).data as *const ffi::AVHWFramesContext) };
+            ctx.set_format(format::Pixel::from(held.format));
+            unsafe {
+                (*ctx.as_mut_ptr()).sw_pix_fmt = held.sw_format;
+                (*ctx.as_mut_ptr()).hw_frames_ctx = frames;
+            }
             None
         }
         Some(node) if enc.kind == EncoderChoice::Vaapi => {

@@ -364,7 +364,8 @@ pub struct VideoSettings {
     /// and VP9 encode the range twice, the first time to measure; NVENC
     /// looks at each frame twice in one encode (`multipass`). They need
     /// `bitrate`. Unset: 2 with a bitrate, 1 with constant quality
-    /// (decision D45).
+    /// (decision D45). x264, x265 and VP9 make 1 pass with
+    /// `bypass_reencode`, and refuse 2: their two runs need the whole range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passes: Option<u8>,
     /// The first of two passes (x264, x265, VP9): `fast` (the default)
@@ -418,6 +419,16 @@ pub struct VideoSettings {
     /// A higher level gives a smaller file with more loss. Unset: 45.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compression_level: Option<u32>,
+    /// Bypass Re-encode When Possible: the file gets the packets of the
+    /// source for the frames that the timeline does not change. The source
+    /// must have the codec, profile, size, pixel layout and colors of the
+    /// output, and play at normal speed. A copy starts at a frame that a
+    /// decoder can start at (an IDR for H.264). The export encodes the frames
+    /// before it, transitions, titles and effects. The copied frames keep the
+    /// quality of the source: `quality` and `bitrate` apply only to the
+    /// encoded frames.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bypass_reencode: bool,
 }
 
 impl VideoSettings {
@@ -445,6 +456,7 @@ impl VideoSettings {
             filename_digits: None,
             first_frame: None,
             compression_level: None,
+            bypass_reencode: false,
         }
     }
 
@@ -728,6 +740,7 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         filename_digits: None,
         first_frame: None,
         compression_level: None,
+        bypass_reencode: false,
     }
 }
 
@@ -1072,6 +1085,12 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         if v.alpha && !v.alpha_modes().contains(&v.alpha_mode) {
             return Err(Error::usage(
                 "OpenEXR holds only premultiplied colors: set video.alpha_mode to premultiplied",
+            ));
+        }
+        if v.bypass_reencode && s.container.image_sequence() {
+            return Err(Error::usage(
+                "video.bypass_reencode needs a video file: TIFF and OpenEXR frames are always \
+                 encoded",
             ));
         }
         let fixed = match (v.codec, v.profile.as_deref()) {

@@ -2785,6 +2785,7 @@ fn settings_form(
                                 filename_digits: None,
                                 first_frame: None,
                                 compression_level: None,
+                                bypass_reencode: false,
                             }),
                         );
                         fit_codecs(&mut d.settings);

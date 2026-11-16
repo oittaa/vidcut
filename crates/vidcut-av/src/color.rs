@@ -360,25 +360,59 @@ fn mobius_peak() -> f64 {
 
 impl Source {
     pub(crate) fn of(f: &frame::Video) -> Self {
+        let raw = unsafe { &*f.as_ptr() };
+        Self::tagged(
+            (raw.colorspace, raw.color_trc, raw.color_range),
+            f.format(),
+            (f.width(), f.height()),
+        )
+    }
+
+    pub(crate) fn of_stream(p: &ffi::AVCodecParameters) -> Self {
+        let pixel =
+            crate::buffers::pixel_format(p.format).map_or(format::Pixel::None, format::Pixel::from);
+        Self::tagged(
+            (p.color_space, p.color_trc, p.color_range),
+            pixel,
+            (p.width.max(0) as u32, p.height.max(0) as u32),
+        )
+    }
+
+    fn tagged(
+        (space, transfer, range): (
+            ffi::AVColorSpace,
+            ffi::AVColorTransferCharacteristic,
+            ffi::AVColorRange,
+        ),
+        pixel: format::Pixel,
+        (width, height): (u32, u32),
+    ) -> Self {
         use ffi::AVColorSpace as S;
         use format::Pixel as P;
-        let raw = unsafe { &*f.as_ptr() };
-        let hdr = hdr_of(f);
-        let matrix = match raw.colorspace {
+        let hdr = hdr_of_transfer(transfer);
+        let matrix = match space {
             S::AVCOL_SPC_BT709 => Matrix::Bt709,
             S::AVCOL_SPC_BT470BG | S::AVCOL_SPC_SMPTE170M | S::AVCOL_SPC_FCC => Matrix::Bt601,
             S::AVCOL_SPC_BT2020_NCL | S::AVCOL_SPC_BT2020_CL => Matrix::Bt2020,
             _ if hdr.is_some() => Matrix::Bt2020,
-            _ if is_deep_rgb(f.format()) => Matrix::Bt709,
-            _ => untagged_matrix(f.width(), f.height()),
+            _ if is_deep_rgb(pixel) => Matrix::Bt709,
+            _ => untagged_matrix(width, height),
         };
         Self {
             hdr,
             matrix,
-            full_range: raw.color_range == ffi::AVColorRange::AVCOL_RANGE_JPEG
-                || matches!(f.format(), P::YUVJ420P | P::YUVJ422P | P::YUVJ444P),
-            rgb: is_rgb(f.format()),
+            full_range: range == ffi::AVColorRange::AVCOL_RANGE_JPEG
+                || matches!(pixel, P::YUVJ420P | P::YUVJ422P | P::YUVJ444P),
+            rgb: is_rgb(pixel),
         }
+    }
+
+    pub(crate) fn is_output(self, hdr: Option<Hdr>) -> bool {
+        let matrix = match hdr {
+            None => Matrix::Bt709,
+            Some(_) => Matrix::Bt2020,
+        };
+        !self.rgb && !self.full_range && self.hdr == hdr && self.matrix == matrix
     }
 
     fn primaries(self) -> &'static str {
