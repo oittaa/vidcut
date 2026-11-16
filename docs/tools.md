@@ -37,6 +37,14 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - It does this with `player.video_memory_mb` at each MB given (1024 8192).
 - `CLIP=FILE` times another clip.
 
+**Face speed:** `python3 scripts/face-speed.py [SIZE…]` (release build).
+
+- It runs `motion.find` with the slow face model on 8 s of the clip `tos-720p-mov`, at each SIZE given (640 1280).
+- It prints the time in the model for each picture. Where the GPU writes timestamps inside a compute pass, it also prints the GPU time for each picture.
+- The finds and their cache go to a temporary folder. Thus each run measures again.
+- `CLIP=FILE` and `RANGE=A..B` time another clip.
+- It needs the model file. `vidcut models check retinaface-r34 --download` gets it.
+
 **Slow and dropped frames:** `scripts/playback-check.py [--log DIR] [CODEC…]` (`make playback`, release builds).
 
 - It opens a window on 4K60 `busy` AV1, 10-bit HEVC and VP9 clips with keyframes 2 s apart.
