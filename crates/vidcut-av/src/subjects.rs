@@ -1,10 +1,10 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use vidcut_core::analysis::{Detections, Found, Look};
 use vidcut_core::catalog;
-use vidcut_core::model::Subject;
+use vidcut_core::model::{FindModel, Subject};
 
 use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Context, Error, Result};
@@ -13,6 +13,7 @@ use crate::ffmpeg::{format, frame, software::scaling};
 use crate::models::{self, Fetch, Need};
 
 pub mod ppocr;
+pub mod retinaface;
 pub mod yolox;
 pub mod yunet;
 
@@ -48,32 +49,40 @@ fn apart(mut found: Vec<Found>, same: f32) -> Vec<Found> {
     kept
 }
 
-fn model(subject: Subject) -> &'static catalog::Model {
+fn slow(subject: Subject, model: FindModel) -> bool {
+    subject == Subject::Face && model == FindModel::Slow
+}
+
+fn listed(subject: Subject, model: FindModel) -> &'static catalog::Model {
     match subject {
+        Subject::Face if slow(subject, model) => &catalog::RETINAFACE,
         Subject::Face => &catalog::YUNET,
         Subject::Text => &catalog::PPOCR_DET,
         Subject::Person | Subject::Vehicle => &catalog::YOLOX,
     }
 }
 
-fn file(subject: Subject) -> catalog::File {
+fn file(subject: Subject, model: FindModel) -> catalog::File {
     match subject {
+        Subject::Face if slow(subject, model) => retinaface::FILE,
         Subject::Face => yunet::FILE,
         Subject::Text => ppocr::FILE,
         Subject::Person | Subject::Vehicle => yolox::FILE,
     }
 }
 
-pub fn side(subject: Subject) -> u32 {
+pub fn side(subject: Subject, model: FindModel) -> u32 {
     match subject {
+        Subject::Face if slow(subject, model) => retinaface::SIDE,
         Subject::Face => yunet::SIDE,
         Subject::Text => ppocr::SIDE,
         Subject::Person | Subject::Vehicle => yolox::SIDE,
     }
 }
 
-fn rules(subject: Subject) -> String {
+fn rules(subject: Subject, model: FindModel) -> String {
     match subject {
+        Subject::Face if slow(subject, model) => retinaface::name(),
         Subject::Face => yunet::name(),
         Subject::Text => ppocr::name(),
         Subject::Person => yolox::name(yolox::PEOPLE),
@@ -81,15 +90,48 @@ fn rules(subject: Subject) -> String {
     }
 }
 
+fn takes(subject: Subject, model: FindModel) -> Result<()> {
+    if model.finds(subject) {
+        return Ok(());
+    }
+    Err(Error::Invalid(format!(
+        "the {} model finds only faces, not {}",
+        model.name(),
+        subject.name()
+    )))
+}
+
 enum Net {
     Face(yunet::Model),
+    Faces(Box<retinaface::Model>),
     Text(ppocr::Model),
     Things(yolox::Model),
 }
 
+fn each(
+    pictures: &[Vec<f32>],
+    find: &(dyn Fn(&[f32]) -> Result<Vec<Found>> + Sync),
+) -> Result<Vec<Vec<Found>>> {
+    let slots: Vec<Mutex<Option<Result<Vec<Found>>>>> =
+        pictures.iter().map(|_| Mutex::new(None)).collect();
+    crate::pool::run(pictures.len(), &|i| {
+        *crate::pool::lock(&slots[i]) = Some(find(&pictures[i]));
+    });
+    slots
+        .into_iter()
+        .map(|slot| {
+            let found = slot.into_inner().unwrap_or_else(|e| e.into_inner());
+            found.unwrap_or_else(|| Ok(Vec::new()))
+        })
+        .collect()
+}
+
 impl Net {
-    fn load(subject: Subject, path: &Path, size: (u32, u32)) -> Result<Self> {
+    fn load(subject: Subject, model: FindModel, path: &Path, size: (u32, u32)) -> Result<Self> {
         Ok(match subject {
+            Subject::Face if slow(subject, model) => {
+                Self::Faces(Box::new(retinaface::Model::load(path, size)?))
+            }
             Subject::Face => Self::Face(yunet::Model::load(path, size)?),
             Subject::Text => Self::Text(ppocr::Model::load(path, size)?),
             Subject::Person => Self::Things(yolox::Model::load(path, yolox::PEOPLE, size)?),
@@ -100,31 +142,45 @@ impl Net {
     fn size(&self) -> (usize, usize) {
         match self {
             Self::Face(m) => m.size(),
+            Self::Faces(m) => m.size(),
             Self::Text(m) => m.size(),
             Self::Things(m) => m.size(),
         }
     }
 
-    fn find(&self, picture: &[f32], content: (usize, usize)) -> Result<Vec<Found>> {
+    fn probe(&self, dir: &Path, pictures: &[Vec<f32>]) -> Result<()> {
         match self {
-            Self::Face(m) => m.find(picture),
-            Self::Text(m) => m.find(picture, content),
-            Self::Things(m) => m.find(picture, content),
+            Self::Faces(m) => m.probe(dir, pictures),
+            _ => Ok(()),
+        }
+    }
+
+    fn found(&self, pictures: &[Vec<f32>], content: (usize, usize)) -> Result<Vec<Vec<Found>>> {
+        match self {
+            Self::Face(m) => each(pictures, &|p| m.find(p)),
+            Self::Faces(m) => m.find(pictures),
+            Self::Text(m) => each(pictures, &|p| m.find(p, content)),
+            Self::Things(m) => each(pictures, &|p| m.find(p, content)),
         }
     }
 }
 
-pub fn of(id: &str) -> Option<Subject> {
-    Subject::ALL.into_iter().find(|s| model(*s).id == id)
+pub fn of(id: &str) -> Option<(Subject, FindModel)> {
+    let pairs = Subject::ALL
+        .into_iter()
+        .flat_map(|s| FindModel::ALL.map(|m| (s, m)));
+    pairs
+        .filter(|&(s, m)| m.finds(s))
+        .find(|&(s, m)| listed(s, m).id == id)
 }
 
-pub fn name(subject: Subject) -> String {
-    let weights: String = file(subject).sha256.chars().take(8).collect();
-    format!("{}-{weights}-{}", subject.name(), rules(subject))
+pub fn name(subject: Subject, model: FindModel) -> String {
+    let weights: String = file(subject, model).sha256.chars().take(8).collect();
+    format!("{}-{weights}-{}", subject.name(), rules(subject, model))
 }
 
-pub fn needed(dir: &Path, subject: Subject) -> Vec<Need> {
-    let file = file(subject);
+pub fn needed(dir: &Path, subject: Subject, model: FindModel) -> Vec<Need> {
+    let file = file(subject, model);
     if models::present(dir, &file) {
         return Vec::new();
     }
@@ -135,8 +191,9 @@ pub fn needed(dir: &Path, subject: Subject) -> Vec<Need> {
     }]
 }
 
-pub fn get_ready(dir: &Path, subject: Subject, download: bool) -> Result<()> {
-    let file = file(subject);
+pub fn get_ready(dir: &Path, subject: Subject, model: FindModel, download: bool) -> Result<()> {
+    takes(subject, model)?;
+    let file = file(subject, model);
     if models::present(dir, &file) {
         return Ok(());
     }
@@ -154,11 +211,12 @@ pub fn get_ready(dir: &Path, subject: Subject, download: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn inspect(dir: &Path, subject: Subject, download: bool) -> Result<()> {
-    get_ready(dir, subject, download)?;
-    models::verify(dir, &[file(subject)])?;
-    let side = (side(subject), side(subject));
-    Net::load(subject, &dir.join(file(subject).name), side).map(drop)
+pub fn inspect(dir: &Path, subject: Subject, model: FindModel, download: bool) -> Result<()> {
+    get_ready(dir, subject, model, download)?;
+    let file = file(subject, model);
+    models::verify(dir, &[file])?;
+    let side = side(subject, model);
+    Net::load(subject, model, &dir.join(file.name), (side, side)).map(drop)
 }
 
 pub(crate) fn fitted(decoded: &frame::Video, turn: u16, most: u32) -> (u32, u32) {
@@ -256,16 +314,16 @@ struct Looking {
 
 impl Looking {
     fn start(
-        subject: Subject,
+        (subject, model): (Subject, FindModel),
         path: &Path,
         (first, turn): (&frame::Video, u16),
         wanted: Option<u32>,
     ) -> Result<Self> {
         let source = first.width().max(first.height());
-        let most = wanted.map_or(side(subject), |s| s.min(source));
+        let most = wanted.map_or(side(subject, model), |s| s.min(source));
         let content = fitted(first, turn, most);
         Ok(Self {
-            model: Net::load(subject, path, content)?,
+            model: Net::load(subject, model, path, content)?,
             content,
             turn,
             scaler: None,
@@ -297,29 +355,54 @@ impl Looking {
     }
 
     fn found(&self, pictures: &[Vec<f32>]) -> Result<Vec<Vec<Found>>> {
-        let slots: Vec<Mutex<Option<Result<Vec<Found>>>>> =
-            pictures.iter().map(|_| Mutex::new(None)).collect();
-        let model = &self.model;
         let content = (self.content.0 as usize, self.content.1 as usize);
-        crate::pool::run(pictures.len(), &|i| {
-            let found = model.find(&pictures[i], content);
-            *crate::pool::lock(&slots[i]) = Some(found);
-        });
         let (cw, ch) = (self.content.0 as f32, self.content.1 as f32);
         let share = |f: Found| Found {
             center: [f.center[0] / cw, f.center[1] / ch],
             size: [f.size[0] / cw, f.size[1] / ch],
             ..f
         };
-        slots
+        let found = self.model.found(pictures, content)?;
+        Ok(found
             .into_iter()
-            .map(|slot| {
-                let found = slot.into_inner().unwrap_or_else(|e| e.into_inner());
-                let found = found.unwrap_or_else(|| Ok(Vec::new()))?;
-                Ok(found.into_iter().map(share).collect())
-            })
-            .collect()
+            .map(|f| f.into_iter().map(share).collect())
+            .collect())
     }
+}
+
+fn dumped() -> Result<Option<PathBuf>> {
+    let Some(dir) = std::env::var_os("VIDCUT_SUBJECTS_DUMP") else {
+        return Ok(None);
+    };
+    let dir = PathBuf::from(dir);
+    std::fs::create_dir_all(&dir)?;
+    Ok(Some(dir))
+}
+
+fn dump_picture(dir: &Path, at: usize, planes: &[f32], (w, h): (usize, usize)) -> Result<()> {
+    let bytes: Vec<u8> = planes.iter().map(|&v| v as u8).collect();
+    crate::npy::write_bytes(&dir.join(format!("{at:05}.npy")), &[3, h, w], &bytes)
+}
+
+fn dump_boxes(dir: &Path, found: &[Vec<Found>], (w, h): (u32, u32)) -> Result<()> {
+    let rows: Vec<f32> = found
+        .iter()
+        .enumerate()
+        .flat_map(|(i, boxes)| {
+            boxes.iter().flat_map(move |b| {
+                [
+                    i as f32,
+                    b.center[0],
+                    b.center[1],
+                    b.size[0],
+                    b.size[1],
+                    b.score,
+                ]
+            })
+        })
+        .collect();
+    crate::npy::write(&dir.join("boxes.npy"), &[rows.len() / 6, 6], &rows)?;
+    crate::npy::write(&dir.join("content.npy"), &[2], &[w as f32, h as f32])
 }
 
 pub fn find(
@@ -330,8 +413,8 @@ pub fn find(
     dir: &Path,
 ) -> Result<Detections> {
     crate::cancel::stop()?;
-    get_ready(dir, subject, false)?;
-    let weights = dir.join(file(subject).name);
+    get_ready(dir, subject, look.model, false)?;
+    let weights = dir.join(file(subject, look.model).name);
     let _turn = crate::turns::cpu_analysis()?;
     let mut reader = VideoReader::open_as(source, gpu, Reading::Stream)?;
     let tick = f64::from(reader.time_base());
@@ -342,6 +425,7 @@ pub fn find(
     let seed = crate::analysis::SEED;
     reader.seek(((look.from - seed as f64 * every) / tick).floor() as i64)?;
     let turn = reader.rotation();
+    let dump = dumped()?;
     let started = Instant::now();
     let batch = crate::pool::threads().max(1);
     let mut out = Detections::default();
@@ -363,14 +447,21 @@ pub fn find(
                     let seeing = match &mut looking {
                         Some(seeing) => seeing,
                         None => {
-                            let seeing =
-                                Looking::start(subject, &weights, (&decoded, turn), look.side)?;
+                            let seeing = Looking::start(
+                                (subject, look.model),
+                                &weights,
+                                (&decoded, turn),
+                                look.side,
+                            )?;
                             looking.insert(seeing)
                         }
                     };
                     let (picture, scene) = seeing.picture(&decoded)?;
                     wanted = wanted.max(((pts - look.from) / every).floor() as i64) + 1;
                     if wanted > 0 {
+                        if let Some(dir) = &dump {
+                            dump_picture(dir, out.pts.len(), &picture, seeing.model.size())?;
+                        }
                         waiting.push(picture);
                         out.pts.push(pts);
                         out.scene.push(scene);
@@ -383,6 +474,11 @@ pub fn find(
             && (waiting.len() >= batch || ended)
             && !waiting.is_empty()
         {
+            if let Some(dir) = &dump
+                && out.found.is_empty()
+            {
+                seeing.model.probe(dir, &waiting)?;
+            }
             let asked = Instant::now();
             out.found.extend(seeing.found(&waiting)?);
             in_model += asked.elapsed();
@@ -392,6 +488,9 @@ pub fn find(
             let seen = Progress::measuring(share, started.elapsed());
             crate::progress::report(source.path(), seen);
         }
+    }
+    if let (Some(dir), Some(seeing)) = (&dump, &looking) {
+        dump_boxes(dir, &out.found, seeing.content)?;
     }
     crate::debug!(
         "subjects",

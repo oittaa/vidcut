@@ -37,6 +37,27 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - It does this with `player.video_memory_mb` at each MB given (1024 8192).
 - `CLIP=FILE` times another clip.
 
+**Face speed:** `python3 scripts/face-speed.py [SIZE…]` (release build).
+
+- It runs `motion.find` with the slow face model on 8 s of the clip `tos-720p-mov`, at each SIZE given (640 1280).
+- It prints the time in the model for each picture.
+- From the `[subjects] model call` lines, it prints the faces found for each picture. A wrong model output can give many faces in each picture.
+- From the same lines, it prints the time of each step for each picture. It gives the first call apart, because only the first call has the clock step.
+- It compares the wait in the early calls with the wait in the last calls. A longer wait at the end can show a GPU that slows when it gets hot.
+- From the `[subjects] gpu` lines, it prints the GPU time for each picture, each stage and the slowest layers.
+- The finds and their cache go to a temporary folder. Thus each run measures again.
+- `CLIP=FILE` and `RANGE=A..B` time another clip.
+- It needs the model file. `vidcut models check retinaface-r34 --download` gets it.
+
+**Face check:** `uv run scripts/face-check.py [SIZE]` (release build).
+
+- It finds the first step of the slow face model where the GPU result is wrong.
+- It runs `motion.find` with `VIDCUT_SUBJECTS_DUMP` on 1 s of the clip `tos-720p-mov`, at SIZE (640 when not given).
+- It gives the same pictures to onnxruntime on the CPU, and reads the output of each step from the ONNX graph.
+- For each step, it prints the largest difference as a share of the largest value. A share of more than 0.01 is far off.
+- It needs what the face speed script needs, and numpy, onnx and onnxruntime. `uv run` gets these packages, and a Python version that onnxruntime supports.
+- `RANGE=A..B` checks another part of the clip. `VIDCUT_GPU_CONV` selects the convolution kernels.
+
 **Slow and dropped frames:** `scripts/playback-check.py [--log DIR] [CODEC…]` (`make playback`, release builds).
 
 - It opens a window on 4K60 `busy` AV1, 10-bit HEVC and VP9 clips with keyframes 2 s apart.
@@ -75,6 +96,17 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - By default, PID is the newest `vidcut`.
 - The `[decoding]` lines of `VIDCUT_DEBUG` give the thread count of each reader when it opens. They also give how many readers are open when one opens or closes.
 - The `[subjects]` line of `VIDCUT_DEBUG` is for `motion.find`. It gives the pictures that the model saw, the frames decoded, the time, and the time in the model.
+  - With the slow face model, one `[subjects] model call` line comes for each call of the model. It gives the faces found and the time of each step of the call:
+    - upload: the pictures go to the GPU.
+    - send: vidcut records the passes and sends them to the GPU.
+    - clock: the GPU timing of one pass.
+    - wait: vidcut waits for the GPU and reads the results back.
+    - boxes: vidcut makes the boxes from the results.
+  - The GPU works while vidcut uploads the pictures of the next pass. Thus the wait can be shorter than the GPU time.
+  - The `[subjects] gpu` lines give the GPU name and the GPU time of one pass, and of each layer in that pass. Each find measures one pass.
+  - On a GPU that writes timestamps inside a compute pass, the times come from these timestamps. Under `VIDCUT_DEBUG`, vidcut asks the device for this feature.
+  - On another GPU, vidcut runs each dispatch of that pass again on its own and waits for it. The time is the wait on the CPU, with the time to send the dispatch.
+  - The time in the model then also holds this second run. The line of the pass names the method.
 
 **GPU encoders:** `cargo run -p vidcut-av --example encoders` makes a test encode with each GPU encoder (NVENC, VAAPI, AMF, QSV) on each GPU. It does not use the cache.
 
@@ -199,6 +231,16 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `NNNN-a.npy` and `NNNN-b.npy`: the two source frames, at the size of the made frame.
   - `NNNN-out-T-PROCESS.npy`: the made frame, with the weight `T` of the later frame and the process, such as `AIFast`.
   - A check against a PyTorch version of a model reads them.
+- `VIDCUT_SUBJECTS_DUMP=DIR` makes `motion.find` write what the model gets and what it finds as `.npy` files into `DIR`.
+  - `NNNNN.npy`: each picture at the size of the model, as blue, green and red planes of 8 bits, `[3, H, W]`.
+  - `boxes.npy`: one row for each found box, `[K, 6]`: the picture, the center, the size and the score. The center and the size are fractions of the picture content.
+  - `content.npy`: the width and the height of the picture content, in pixels of the model input.
+  - With the slow face model, `stage-NN-STEP.npy`: the output of each step of the network for the first two pictures, `[N, H, W, C]`.
+  - vidcut runs the pass again for each step and stops it after that step (`Gpu::stop_after`). Thus later steps cannot write over the output.
+  - A check against an ONNX runtime reads them.
+- `VIDCUT_GPU_CONV` turns off the fast convolution kernels of the GPU layers (`compute::ops`). A different result then shows a fault in a kernel that is off.
+  - `direct`: no Winograd convolutions (`WINO_GEMM`).
+  - `plain`: no Winograd convolutions and no `CONV4`. Each convolution uses `CONV`.
 - `vidcut models list` prints the catalog of models and speech services. `--json` gives all of it.
 - `vidcut models check MODEL` checks the SHA-256 of each file of a model, then loads it.
   - For a transcribe.cpp model, it compares what the model reports with the catalog.

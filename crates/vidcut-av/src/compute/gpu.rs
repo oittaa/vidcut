@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError, mpsc};
+use std::time::Instant;
 
 use crate::compute;
 use crate::error::Result;
@@ -15,6 +16,28 @@ pub(crate) struct Param {
 }
 
 type Key = (wgpu::ComputePipeline, wgpu::Buffer, Vec<wgpu::Buffer>);
+
+struct Clock {
+    now: String,
+    kind: Kind,
+}
+
+enum Kind {
+    Stamps {
+        set: wgpu::QuerySet,
+        count: u32,
+        names: Vec<String>,
+    },
+    Waits(Vec<Call>),
+}
+
+struct Call {
+    name: String,
+    pipe: wgpu::ComputePipeline,
+    bind: wgpu::BindGroup,
+    at: u32,
+    groups: (u32, u32),
+}
 
 struct Ring {
     buffer: wgpu::Buffer,
@@ -35,6 +58,11 @@ pub(crate) struct Gpu {
     ring: Mutex<Ring>,
     groups: Mutex<HashMap<Key, wgpu::BindGroup>>,
     scratch: Mutex<Option<(wgpu::Buffer, wgpu::Buffer)>>,
+    clock: Mutex<Option<Clock>>,
+    timing: AtomicBool,
+    counting: AtomicBool,
+    limit: AtomicU32,
+    done: AtomicU32,
 }
 
 pub(crate) fn storage() -> wgpu::BufferUsages {
@@ -153,6 +181,11 @@ impl Gpu {
             }),
             groups: Mutex::new(HashMap::new()),
             scratch: Mutex::new(None),
+            clock: Mutex::new(None),
+            timing: AtomicBool::new(false),
+            counting: AtomicBool::new(false),
+            limit: AtomicU32::new(u32::MAX),
+            done: AtomicU32::new(0),
         })
     }
 
@@ -252,7 +285,7 @@ impl Gpu {
         pipe: &wgpu::ComputePipeline,
         param: Param,
         buffers: &[&wgpu::Buffer],
-    ) {
+    ) -> (wgpu::BindGroup, u32) {
         let key = (
             pipe.clone(),
             param.buffer.clone(),
@@ -270,6 +303,7 @@ impl Gpu {
             .clone();
         pass.set_pipeline(pipe);
         pass.set_bind_group(0, &bind, &[param.at as u32]);
+        (bind, param.at as u32)
     }
 
     fn group<'a>(
@@ -307,12 +341,166 @@ impl Gpu {
         buffers: &[&wgpu::Buffer],
         groups: u32,
     ) {
-        if groups == 0 {
+        if groups == 0 || self.skipped() {
             return;
         }
-        self.set(pass, pipe, param, buffers);
+        let (bind, at) = self.set(pass, pipe, param, buffers);
         let x = groups.min(MOST);
-        pass.dispatch_workgroups(x, groups.div_ceil(x), 1);
+        let y = groups.div_ceil(x);
+        pass.dispatch_workgroups(x, y, 1);
+        if self.timing.load(Ordering::Relaxed) {
+            self.tick(pass, Some((pipe, bind, at, (x, y))));
+        }
+    }
+
+    pub(crate) fn stop_after(&self, limit: Option<u32>) {
+        self.done.store(0, Ordering::Relaxed);
+        self.limit
+            .store(limit.unwrap_or(u32::MAX), Ordering::Relaxed);
+        self.counting.store(limit.is_some(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn dispatches(&self) -> u32 {
+        self.done.load(Ordering::Relaxed)
+    }
+
+    fn skipped(&self) -> bool {
+        self.counting.load(Ordering::Relaxed)
+            && self.done.fetch_add(1, Ordering::Relaxed) >= self.limit.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn stamps(&self) -> bool {
+        let wanted =
+            wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
+        self.device.features().contains(wanted)
+    }
+
+    pub(crate) fn time_from(&self, count: u32) {
+        let kind = if self.stamps() {
+            Kind::Stamps {
+                set: self.device.create_query_set(&wgpu::QuerySetDescriptor {
+                    label: Some("vidcut-compute-clock"),
+                    ty: wgpu::QueryType::Timestamp,
+                    count,
+                }),
+                count,
+                names: Vec::new(),
+            }
+        } else {
+            Kind::Waits(Vec::new())
+        };
+        *self.clock.lock().unwrap_or_else(PoisonError::into_inner) = Some(Clock {
+            now: String::new(),
+            kind,
+        });
+        self.timing.store(true, Ordering::Relaxed);
+    }
+
+    pub(crate) fn mark(&self, name: impl FnOnce() -> String) {
+        if !self.timing.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Some(c) = self
+            .clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+        {
+            c.now = name();
+        }
+    }
+
+    pub(crate) fn begin(&self, pass: &mut wgpu::ComputePass) {
+        if self.timing.load(Ordering::Relaxed) {
+            self.tick(pass, None);
+        }
+    }
+
+    fn tick(
+        &self,
+        pass: &mut wgpu::ComputePass,
+        call: Option<(&wgpu::ComputePipeline, wgpu::BindGroup, u32, (u32, u32))>,
+    ) {
+        let mut clock = self.clock.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(c) = clock.as_mut() else {
+            return;
+        };
+        match (&mut c.kind, call) {
+            (Kind::Stamps { set, count, names }, _) if (names.len() as u32) < *count => {
+                pass.write_timestamp(set, names.len() as u32);
+                names.push(c.now.clone());
+            }
+            (Kind::Waits(calls), Some((pipe, bind, at, groups))) => calls.push(Call {
+                name: c.now.clone(),
+                pipe: pipe.clone(),
+                bind,
+                at,
+                groups,
+            }),
+            _ => {}
+        }
+    }
+
+    pub(crate) fn times(&self) -> Result<Vec<(String, f64)>> {
+        self.timing.store(false, Ordering::Relaxed);
+        let taken = self
+            .clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        match taken.map(|c| c.kind) {
+            Some(Kind::Stamps { set, names, .. }) if names.len() > 1 => self.stamped(&set, names),
+            Some(Kind::Waits(calls)) => self.waited(calls),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    fn waited(&self, calls: Vec<Call>) -> Result<Vec<(String, f64)>> {
+        self.wait()?;
+        let mut out = Vec::new();
+        for c in calls {
+            let started = Instant::now();
+            let mut enc = self.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = enc.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&c.pipe);
+                pass.set_bind_group(0, &c.bind, &[c.at]);
+                pass.dispatch_workgroups(c.groups.0, c.groups.1, 1);
+            }
+            self.queue.submit([enc.finish()]);
+            self.wait()?;
+            add(&mut out, c.name, started.elapsed().as_secs_f64() * 1000.0);
+        }
+        Ok(out)
+    }
+
+    fn stamped(&self, set: &wgpu::QuerySet, names: Vec<String>) -> Result<Vec<(String, f64)>> {
+        let n = names.len() as u32;
+        let size = u64::from(n) * 8;
+        let resolved = compute::buffer(
+            &self.device,
+            "vidcut-compute-clock",
+            size as usize,
+            wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+        );
+        let staging = self.staging(size);
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        enc.resolve_query_set(set, 0..n, &resolved, 0);
+        enc.copy_buffer_to_buffer(&resolved, 0, &staging, 0, size);
+        self.queue.submit([enc.finish()]);
+        let raw = self.fetch(&staging, size, None)?;
+        let ticks: Vec<u64> = raw
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|b| u64::from_le_bytes(*b))
+            .collect();
+        let ms = f64::from(self.queue.get_timestamp_period()) / 1e6;
+        let mut out: Vec<(String, f64)> = Vec::new();
+        for (name, w) in names.into_iter().skip(1).zip(ticks.windows(2)) {
+            add(&mut out, name, w[1].saturating_sub(w[0]) as f64 * ms);
+        }
+        Ok(out)
     }
 
     #[cfg(target_os = "macos")]
@@ -395,6 +583,13 @@ impl Gpu {
             .poll(wgpu::PollType::wait_indefinitely())
             .map_err(|e| self.error(e))?;
         Ok(())
+    }
+}
+
+fn add(out: &mut Vec<(String, f64)>, name: String, took: f64) {
+    match out.last_mut() {
+        Some((last, sum)) if *last == name => *sum += took,
+        _ => out.push((name, took)),
     }
 }
 

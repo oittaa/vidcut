@@ -473,6 +473,7 @@ The bar and the Jobs button:
   - The pattern list has a check box, the name and Delete for each pattern, and Add Pattern. A click on a name picks the pattern.
   - Name, X Offset and Y Offset are of the picked pattern.
   - For a clip that takes motion paths (`ops::motion::takes`), a row has a menu of the subjects (`Subject::ALL`), Find, Blur and Advanced.
+    - For Faces, Model is Fast or Slow (`FindModel::ALL`). For the other subjects, Find always uses Fast (`FindModel::for_subject`).
     - Quality is Faster or Better, as the Quality of Magic Mask in Resolve (p. 3286). Better gives `motion.find` the size `BETTER_SIDE`, unless the size field has a number.
     - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
     - Each field tells on hover what it sets, and what a lower or a higher number does.

@@ -9,6 +9,7 @@ use vidcut_core::model::{Project, Retime};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::compute::Gpu;
+use crate::compute::ops::{Kernels, Ops, SHARED, View, tensor};
 use crate::error::{Error, Result};
 use crate::ffmpeg::frame;
 use crate::models::{self, Fetch, Need};
@@ -17,13 +18,9 @@ use crate::upscale::Picture;
 
 mod ema;
 mod macos;
-mod ops;
 mod rife;
 
-use ops::{Kernels, Ops, View, tensor};
-
 const WHAT: &str = "frame interpolation";
-const SHARED: u32 = 16 * 1024;
 const UHD: (u32, u32) = (3840, 2160);
 
 fn model(r: Retime) -> Option<&'static catalog::Model> {
