@@ -1,5 +1,6 @@
 pub mod comp;
 pub mod compound;
+pub mod conform;
 pub mod effect;
 pub mod filmstrip;
 mod follow;
@@ -12,6 +13,7 @@ pub mod picture;
 mod source_overwrite;
 pub mod speed;
 pub mod subtitles;
+pub mod timelines;
 pub mod titles;
 mod tracks;
 mod transition;
@@ -20,7 +22,9 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 use serde_json::json;
-pub use source_overwrite::{Placed, SourceLining, file_start_at, source_overwrite};
+pub use source_overwrite::{
+    Placed, SourceLining, Synced, file_start_at, source_overwrite, synced_at,
+};
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
 pub use transition::{
     Align, Made, Shape, cross_fade_joins, default_length as default_transition_length, dissolve,
@@ -31,8 +35,7 @@ pub use transition::{
 use crate::error::{Error, Result};
 use crate::model::{
     AlphaMode, Clip, ClipAudio, ColorSpace, Compound, Generator, Marker, Media, MediaUpscaler,
-    PooledCompound, Project, Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind,
-    Upscaler,
+    Project, Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -2427,7 +2430,7 @@ pub fn ai_retimes(p: &Project, ids: &[String]) -> Vec<crate::model::Retime> {
             continue;
         };
         for (a, _) in c.runs(c.start, c.end()) {
-            let r = crate::render::retime_of(c, a, m, &p.settings);
+            let r = crate::render::retime_of(c, a, m, &p.flat_settings());
             if r.ai() && !out.contains(&r) {
                 out.push(r);
             }
@@ -2824,16 +2827,24 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
     }
     let (by, len, more) = (first - a, b - a, b - end);
     let rate = m.rate(p.settings.fps);
-    let per = p.settings.fps.over(rate);
-    let slack = crate::render::grid_slack(per);
-    let exact = by as f64 * per.as_f64();
-    let part = (-exact - slack, (len - by) as f64 * per.as_f64() + slack);
-    let outside = clip_outside(&p.tracks, media, part).or_else(|| {
-        p.compounds
-            .iter()
-            .flat_map(PooledCompound::blocks)
-            .find_map(|k| compound_outside(k, media, part))
-    });
+    let project = p.settings.fps;
+    let fps_of = |t: &crate::model::Timeline| t.own.map_or(project, |o| o.fps);
+    let part = |fps: crate::time::Rational| {
+        let per = fps.over(rate);
+        let slack = crate::render::grid_slack(per);
+        let exact = by as f64 * per.as_f64();
+        (-exact - slack, (len - by) as f64 * per.as_f64() + slack)
+    };
+    let outside = clip_outside(&p.tracks, media, part(p.fps()))
+        .or_else(|| {
+            (p.timelines.iter()).find_map(|t| clip_outside(&t.tracks, media, part(fps_of(t))))
+        })
+        .or_else(|| {
+            p.compounds.iter().find_map(|k| {
+                k.blocks()
+                    .find_map(|block| compound_outside(block, media, part(k.fps)))
+            })
+        });
     if !m.is_still()
         && let Some(c) = outside
     {
@@ -2841,8 +2852,9 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             "{c} uses frames of {media} outside {a}..{b}"
         )));
     }
+    let per = project.over(rate);
     let (head, tail) = (
-        exact.round() as i64,
+        (by as f64 * per.as_f64()).round() as i64,
         (more as f64 * per.as_f64()).round() as i64,
     );
     for g in &mut p.groups {
@@ -2859,9 +2871,17 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             }
         }
     }
-    shift_clips(&mut p.tracks, media, (per, by));
-    for k in p.compounds.iter_mut().flat_map(PooledCompound::blocks_mut) {
-        shift_compound(k, media, (per, by));
+    let open = p.fps().over(rate);
+    shift_clips(&mut p.tracks, media, (open, by));
+    for t in &mut p.timelines {
+        let per = t.own.map_or(project, |o| o.fps).over(rate);
+        shift_clips(&mut t.tracks, media, (per, by));
+    }
+    for k in &mut p.compounds {
+        let per = k.fps.over(rate);
+        for block in k.blocks_mut() {
+            shift_compound(block, media, (per, by));
+        }
     }
     let m = p
         .media
@@ -3278,6 +3298,11 @@ pub fn remove_bin(p: &mut Project, path: &str) -> Result<()> {
     if !has_bin(p, path) || path.is_empty() {
         return Err(Error::not_found(format!("no bin {path:?}")));
     }
+    let timelines: Vec<String> = (p.timelines.iter())
+        .filter(|t| within(&t.bin, path))
+        .map(|t| t.id.clone())
+        .collect();
+    timelines::delete(p, &timelines)?;
     p.bins.retain(|b| !within(b, path));
     p.groups.retain(|g| !within(&g.bin, path));
     p.compounds.retain(|k| !within(&k.bin, path));
@@ -3318,6 +3343,11 @@ pub fn rename_bin(p: &mut Project, path: &str, to: &str) -> Result<()> {
             k.bin = rebase(&k.bin);
         }
     }
+    for t in &mut p.timelines {
+        if within(&t.bin, path) {
+            t.bin = rebase(&t.bin);
+        }
+    }
     add_bin(p, to)?;
     p.bins.sort();
     p.bins.dedup();
@@ -3331,12 +3361,13 @@ pub fn move_media(p: &mut Project, ids: &[String], bin: &str) -> Result<()> {
         )));
     }
     for id in ids {
-        let m = p
-            .media
-            .iter_mut()
-            .find(|m| &m.id == id && !m.removed)
-            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
-        m.bin = bin.to_string();
+        if let Some(m) = p.media.iter_mut().find(|m| &m.id == id && !m.removed) {
+            m.bin = bin.to_string();
+        } else if let Some(t) = p.timelines.iter_mut().find(|t| &t.id == id) {
+            t.bin = bin.to_string();
+        } else {
+            return Err(Error::not_found(format!("no media or timeline {id}")));
+        }
     }
     Ok(())
 }

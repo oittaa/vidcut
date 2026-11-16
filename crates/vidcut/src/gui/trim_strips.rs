@@ -113,7 +113,7 @@ impl Workspace {
             .map_or((0, 0), |a| a.moved(out, inc));
         let row = (band.height() - GAP) / 2.0;
         let h = (row - BAR).max(8.0);
-        let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
+        let aspect = p.width() as f32 / p.height().max(1) as f32;
         let w = (h * aspect).max(8.0);
         let cut = band.center().x.round();
         let fade = self.trim_transition(p, e);

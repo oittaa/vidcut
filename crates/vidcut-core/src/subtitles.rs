@@ -8,7 +8,7 @@ mod vtt;
 use std::path::Path;
 
 use crate::error::{Error, Result};
-use crate::model::{Place, Settings, SubtitleStyle};
+use crate::model::{Place, SubtitleStyle};
 use crate::request::SubtitleFormat;
 
 pub use languages::three_letter;
@@ -237,8 +237,8 @@ pub fn fill_times(known: &[Option<f64>], weights: &[f64], start: f64, end: f64) 
     out
 }
 
-pub fn origin(settings: &Settings) -> f64 {
-    settings.start_tc as f64 / settings.fps.as_f64()
+pub fn origin(p: &crate::model::Project) -> f64 {
+    p.start_tc() as f64 / p.fps().as_f64()
 }
 
 pub struct Beside {
@@ -299,10 +299,10 @@ pub fn beside(
             format,
             &Writing {
                 language: t.language.as_deref(),
-                frame_rate: Some(p.settings.fps.as_f64()),
+                frame_rate: Some(p.fps().as_f64()),
                 positions: !timeline,
                 style: &t.style,
-                timeline_height: p.settings.height,
+                timeline_height: p.height(),
             },
         );
         out.push(Beside {

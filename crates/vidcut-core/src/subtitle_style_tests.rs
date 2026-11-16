@@ -433,7 +433,7 @@ fn a_bold_cue_stores_a_word_that_is_not_bold() {
         &word_styles,
         &style,
         0,
-        p.settings.fps.as_f64(),
+        p.fps().as_f64(),
         None,
     );
     let drawn = shown
@@ -484,7 +484,7 @@ fn a_bold_track_stores_a_cue_that_is_not_bold() {
         &word_styles,
         &style,
         0,
-        p.settings.fps.as_f64(),
+        p.fps().as_f64(),
         None,
     );
     let drawn = shown

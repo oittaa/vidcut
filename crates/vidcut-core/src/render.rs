@@ -47,7 +47,7 @@ pub struct RenderPlan {
 }
 
 pub fn timeline_colors(p: &Project) -> Option<Hdr> {
-    match p.settings.timeline_colors {
+    match p.timeline_colors() {
         TimelineColors::Sdr => None,
         TimelineColors::Pq => Some(Hdr::Pq),
         TimelineColors::Hlg => Some(Hdr::Hlg),
@@ -394,7 +394,7 @@ impl Lead {
     pub fn of(p: &Project, c: &Clip, follow: &crate::model::Follow) -> Option<Self> {
         let a = p.clip(&follow.clip)?;
         let path = a.motion.iter().find(|m| m.id == follow.path)?;
-        let size = (p.settings.width, p.settings.height);
+        let size = (p.width(), p.height());
         let frame = (f64::from(size.0), f64::from(size.1));
         let video = p.media(&a.media).and_then(|m| m.info.video.as_ref());
         let (fitted, pixels) = match video.filter(|v| v.width > 0 && v.height > 0) {
@@ -670,10 +670,10 @@ pub struct FileClock {
 
 impl FileClock {
     pub fn of(p: &Project, c: &Clip) -> Self {
-        let fps = p.settings.fps;
+        let fps = p.fps();
         let file = p
             .media(&c.media)
-            .map(|m| m.rate(fps))
+            .map(|m| m.rate(p.settings.fps))
             .filter(|f| f.num() > 0 && *f != fps);
         Self {
             pace: c.pace(),
@@ -1854,8 +1854,8 @@ pub fn grid_slack(per: Rational) -> f64 {
     FRAME_SLACK.min(0.5 / per.den() as f64)
 }
 
-pub fn per_frame(m: &Media, fps: Rational) -> Rational {
-    m.rate(fps).over(fps)
+pub fn per_frame(m: &Media, project: Rational, fps: Rational) -> Rational {
+    m.rate(project).over(fps)
 }
 
 impl Pace {
@@ -3344,7 +3344,7 @@ pub struct LaneTrack {
 
 pub fn flatten_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>)> {
     let (mut plan, lanes) = plan_lanes(p, a, b)?;
-    plan.colors = match p.settings.timeline_colors {
+    plan.colors = match p.timeline_colors() {
         TimelineColors::Auto if (a, b) == (0, p.end()) => colors_in(p, &plan),
         _ => timeline_colors(p),
     };
@@ -3362,7 +3362,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         Some((q, w)) => (q, Some(w)),
         None => (p, None),
     };
-    let s = &p.settings;
+    let s = &p.flat_settings();
     let video = planned_video(p, within, (a, b))?;
     let (audio, lanes) = planned_audio(p, within, (a, b))?;
     let ducking = crate::duck::planned(p, &lanes, a, b);
@@ -3520,7 +3520,7 @@ struct VideoPlan<'a> {
 
 impl VideoPlan<'_> {
     fn fills(&self, c: &Clip) -> bool {
-        let (pool, s) = (&self.pool, &self.p.settings);
+        let (pool, s) = (&self.pool, &self.p.flat_settings());
         c.picture.as_ref().is_none_or(Picture::is_usual)
             && (c.draws()
                 || pool
@@ -3529,7 +3529,7 @@ impl VideoPlan<'_> {
     }
 
     fn picture(&self, c: &Clip, (nest, crossed): Nesting, x: i64, y: i64) -> Result<VideoPiece> {
-        let (pool, s) = (&self.pool, &self.p.settings);
+        let (pool, s) = (&self.pool, &self.p.flat_settings());
         let fills = self.fills(c);
         let drawn = c.generator.as_ref();
         if let Some(picture) = drawn.and_then(|g| Generated::of(g, c.content_at(x))) {
@@ -3561,7 +3561,7 @@ impl VideoPlan<'_> {
             origin,
             source_frame: c.source_at(x),
             phase: c.phase,
-            per_frame: per_frame(m, s.fps),
+            per_frame: per_frame(m, self.p.settings.fps, s.fps),
             frames: y - x,
             image: image_of(m),
             pace: c.pace().after(x - c.start),
@@ -3918,7 +3918,7 @@ fn planned_audio(
     (a, b): (i64, i64),
 ) -> Result<(Vec<Vec<AudioPiece>>, Vec<LaneTrack>)> {
     let pool = p.pool();
-    let s = &p.settings;
+    let s = &p.flat_settings();
     let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
 
     let any_solo = p.any_solo();
@@ -4051,7 +4051,7 @@ fn planned_audio(
 fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> AudioPiece {
     let audio = c.audio.as_ref().expect("has audio");
     let (path, origin) = origin_of(m);
-    let (fps, rate) = (p.settings.fps, p.settings.sample_rate);
+    let (fps, rate) = (p.fps(), p.settings.sample_rate);
     let speed = c.speed_at(x);
     let per_frame = f64::from(rate) / fps.as_f64();
     let since = fps.frame_to_sample(x, rate) - fps.frame_to_sample(c.start, rate);
@@ -4140,6 +4140,9 @@ fn alone(p: &Project, clip: &str, cut: Option<&str>) -> Result<RenderPlan> {
     let frames = crate::composition::Frames::of(p, &c);
     let clock = &frames.clock;
     let mut alone = p.clone();
+    alone.settings = p.flat_settings();
+    alone.timelines.clear();
+    alone.recent.clear();
     let own = p.media(&c.media).and_then(|m| m.info.video.as_ref());
     if let Some((w, h)) = own.map(crate::model::VideoInfo::display_size) {
         alone.settings.width = w;
@@ -4293,7 +4296,7 @@ pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
             origin: m.origin(),
             source_frame: at,
             phase: 0.0,
-            per_frame: per_frame(m, p.settings.fps),
+            per_frame: per_frame(m, p.settings.fps, p.fps()),
             frames: 1,
             image: image_of(m),
             color_space: m.color_space,
@@ -4308,6 +4311,15 @@ pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
         },
         None => VideoPiece::black(1),
     }
+}
+
+pub fn media_frame_at(p: &Project, m: &Media, at: f64) -> VideoPiece {
+    let first = at.floor();
+    let mut piece = media_frame(p, m, first as i64);
+    if let VideoPiece::Source { phase, .. } = &mut piece {
+        *phase = at - first;
+    }
+    piece
 }
 
 pub fn media_clip_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
@@ -4329,7 +4341,7 @@ pub struct TapeEntry {
 }
 
 pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>)> {
-    laid_out(p, media, p.settings.fps)
+    laid_out(p, media, p.fps())
 }
 
 pub fn clip_tape(p: &Project, media: &str) -> Result<(RenderPlan, Vec<TapeEntry>)> {
@@ -4342,8 +4354,8 @@ pub fn camera_tape(
     camera: &crate::multicam::GridCamera,
     end: i64,
 ) -> Result<(RenderPlan, Vec<TapeEntry>)> {
-    let s = &p.settings;
-    let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
+    let (fps, rate) = (p.fps(), p.settings.sample_rate);
+    let sample = |t: i64| fps.frame_to_sample(t, rate);
     let entries: Vec<TapeEntry> = camera
         .files
         .iter()
@@ -4385,7 +4397,7 @@ pub fn camera_tape(
                 origin,
                 source_frame: from,
                 phase: 0.0,
-                per_frame: per_frame(m, s.fps),
+                per_frame: per_frame(m, p.settings.fps, fps),
                 frames: b - a,
                 image: image_of(m),
                 color_space: m.color_space,
@@ -4399,9 +4411,9 @@ pub fn camera_tape(
                 input_lut: None,
             },
         );
-        push_audio(&mut lane, sound_of(p, m, from, samples));
+        push_audio(&mut lane, sound_of(p, m, from, fps, samples));
     }
-    Ok((tape_plan(p, s.fps, end, video, lane), entries))
+    Ok((tape_plan(p, fps, end, video, lane), entries))
 }
 
 fn tape_plan(
@@ -4453,7 +4465,7 @@ pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<Rend
             let next = row.clips.get(i + 1).map_or(i64::MAX, |n| n.at);
             t = (c.at + crate::multicam::visible(p, c)).min(next);
             let samples = sample(t) - sample(c.at);
-            push_audio(&mut lane, sound_of(p, m, c.head, samples));
+            push_audio(&mut lane, sound_of(p, m, c.head, s.fps, samples));
         }
         push_audio(
             &mut lane,
@@ -4480,7 +4492,7 @@ pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<Rend
     })
 }
 
-fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
+fn sound_of(p: &Project, m: &Media, head: i64, fps: Rational, samples: i64) -> AudioPiece {
     if m.info.audio.is_empty() {
         return AudioPiece::Silence { samples };
     }
@@ -4492,7 +4504,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
         path,
         stream: 0,
         origin,
-        source_sample: p.settings.fps.frame_to_sample(head, p.settings.sample_rate),
+        source_sample: fps.frame_to_sample(head, p.settings.sample_rate),
         samples,
         gain_db: 0.0,
         silent: false,
@@ -4531,7 +4543,7 @@ fn laid_out(p: &Project, media: &[String], fps: Rational) -> Result<(RenderPlan,
                     origin,
                     source_frame: 0,
                     phase: 0.0,
-                    per_frame: per_frame(m, fps),
+                    per_frame: per_frame(m, p.settings.fps, fps),
                     frames,
                     image: image_of(m),
                     color_space: m.color_space,
@@ -4549,7 +4561,7 @@ fn laid_out(p: &Project, media: &[String], fps: Rational) -> Result<(RenderPlan,
             push_video(&mut video, VideoPiece::black(frames));
         }
         let samples = sample(t + frames) - sample(t);
-        push_audio(&mut lane, sound_of(p, m, 0, samples));
+        push_audio(&mut lane, sound_of(p, m, 0, fps, samples));
         entries.push(TapeEntry {
             media: id.to_string(),
             start: t,
@@ -4971,7 +4983,7 @@ mod tests {
         let p = f.editor.project();
         let mut m = p.media("m1").unwrap().clone();
         m.info.video.as_mut().unwrap().hdr = Some(crate::model::Hdr::Pq);
-        retime_at(ClipRetime::Project, 0.5, &m, &p.settings)
+        retime_at(ClipRetime::Project, 0.5, &m, &p.flat_settings())
     }
 
     #[cfg(not(target_os = "macos"))]

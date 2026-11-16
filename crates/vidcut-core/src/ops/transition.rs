@@ -40,7 +40,7 @@ pub fn default_length(p: &Project, kind: &PictureTransition) -> i64 {
         PictureTransition::SmoothCut { .. } => SMOOTH_CUT_SECONDS,
         _ => 1.0,
     };
-    (p.settings.fps.as_f64() * seconds).round().max(1.0) as i64
+    (p.fps().as_f64() * seconds).round().max(1.0) as i64
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

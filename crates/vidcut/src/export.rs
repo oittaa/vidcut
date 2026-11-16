@@ -185,11 +185,14 @@ pub fn is_otio(output: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("otio"))
 }
 
-pub fn timeline_name(project_path: &Path) -> String {
-    project_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default()
+pub fn timeline_name(p: &Project, project_path: &Path) -> String {
+    match p.timeline() {
+        Some(t) => t.name.clone(),
+        None => project_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    }
 }
 
 pub struct Writing<'a> {
@@ -319,7 +322,7 @@ pub fn timeline(
     let family = vidcut_av::burn::usual_family();
     let drawn = |t: &vidcut_core::model::Title| otio::titles::Drawn {
         family: family.clone(),
-        backing: vidcut_av::burn::backing_box(t, p.settings.width, p.settings.height),
+        backing: vidcut_av::burn::backing_box(t, p.width(), p.height()),
     };
     let doc = otio::export_drawn(p, name, span, locations, &drawn)?;
     let text =
@@ -737,7 +740,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         proj.settings.channels = enc.channels;
     }
     let ext = settings.container.extension();
-    let drop_frame = p.settings.counts_drop_frame();
+    let drop_frame = p.counts_drop_frame();
     let mut outputs = Vec::new();
     let offline;
     if params.per_clip {
@@ -757,7 +760,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             let name = file_name(template, i + 1, &plan.name, id, media);
             outputs.push(Output {
                 path: params.output.join(format!("{name}.{ext}")),
-                numbering: settings.numbering(p.settings.start_tc + start, drop_frame),
+                numbering: settings.numbering(p.start_tc() + start, drop_frame),
                 plan,
                 settings: settings.clone(),
                 color: None,
@@ -777,7 +780,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         outputs.push(Output {
             plan: render::flatten(&proj, a, b)?,
             path: params.output.clone(),
-            numbering: settings.numbering(p.settings.start_tc + a, drop_frame),
+            numbering: settings.numbering(p.start_tc() + a, drop_frame),
             settings: settings.clone(),
             color: None,
             metadata: None,
@@ -1486,7 +1489,7 @@ pub fn frame(
     width: Option<u32>,
     playhead: Option<i64>,
 ) -> Result<Value> {
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let (piece, (w, h), frame, colors, lut) = match (media, generator) {
         (Some(_), Some(_)) => {
             return Err(Error::usage("give media or generator, not both"));
@@ -1502,7 +1505,7 @@ pub fn frame(
             let plan = render::generator_tape(p, generator, t, t + 1)?;
             (
                 plan.video[0].clone(),
-                (p.settings.width, p.settings.height),
+                (p.width(), p.height()),
                 t,
                 plan.colors,
                 plan.output_lut,
@@ -1519,7 +1522,7 @@ pub fn frame(
             let plan = render::flatten(p, t, t + 1)?;
             (
                 plan.video[0].clone(),
-                (p.settings.width, p.settings.height),
+                (p.width(), p.height()),
                 t,
                 plan.colors,
                 plan.output_lut,

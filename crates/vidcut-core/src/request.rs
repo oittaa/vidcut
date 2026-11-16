@@ -28,8 +28,8 @@ pub enum Request {
     /// Settings, counts, duration and marks.
     #[serde(rename = "project.summary")]
     ProjectSummary {},
-    /// Change settings. `fps` can only change with no clips on the timeline
-    /// or compound clips in the pool.
+    /// Change settings. `fps` changes only while the project has no
+    /// timelines.
     #[serde(rename = "project.set")]
     ProjectSet(ProjectSet),
     /// Create a project file. Without `fps` and a size, the first video
@@ -43,7 +43,8 @@ pub enum Request {
         /// bundle folder. A file vidcut wrote of its whole timeline gives the
         /// project it holds, and takes no format. Another editor's timeline
         /// is imported. Without a format, the project then takes the file's
-        /// frame rate and start timecode, and its first video's size.
+        /// frame rate and its first video's size. The new timeline takes
+        /// the file's start timecode.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<PathBuf>,
         /// Frame rate, like `25`, `29.97` or `30000/1001`.
@@ -66,10 +67,6 @@ pub enum Request {
         /// Count record timecode drop-frame (29.97, 59.94 and 119.88; decision D47).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         drop_frame: Option<bool>,
-        /// Record timecode of the first frame: `01:00:00:00` (the default),
-        /// `00:00:00:00`, `10:00:00:00` or any other.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        start_tc: Option<TimeSpec>,
     },
 
     /// Add files to the project's media (probing them); returns their media ids.
@@ -617,7 +614,7 @@ pub enum Request {
         #[serde(default)]
         media: Option<String>,
     },
-    /// Put media into a bin (`""`: the top level).
+    /// Put media or timelines (`t2`) into a bin (`""`: the top level).
     #[serde(rename = "media.move")]
     MediaMove {
         media: OneOrMany<String>,
@@ -694,8 +691,9 @@ pub enum Request {
     #[serde(rename = "bins.add")]
     BinsAdd { path: String },
     /// Delete a bin, the bins inside it and all that they hold: media,
-    /// compound clips and synced groups. The files stay on disk. Its media
-    /// goes as `media.remove` removes it: the clips that use it stay.
+    /// timelines, compound clips and synced groups. The files stay on disk.
+    /// Its media goes as `media.remove` removes it: the clips that use it
+    /// stay. Its timelines go as `timeline.delete` deletes them.
     #[serde(rename = "bins.remove")]
     BinsRemove { path: String },
     /// Rename or move a bin, with everything inside it.
@@ -903,9 +901,15 @@ pub enum Request {
     /// (its media are unpacked first) or an `.otiod` bundle folder, as other
     /// editors write them. Its media join the pool, and its tracks go on V1,
     /// V2, … and A1, A2, … as `mode` says. An empty timeline takes the file's
-    /// frame rate and start timecode. The media of a project vidcut wrote
-    /// come as it has them, in a bin named after the file. What can't be
-    /// imported is listed in `warnings`.
+    /// start timecode. A project that had no timeline before the import
+    /// takes the file's frame rate, and so does an empty timeline with its
+    /// own settings.
+    /// Else the timeline keeps the file's frame numbers: each clip has the
+    /// same first frame and length in frames, and plays faster or slower
+    /// by the ratio of the two rates, so each frame shows the same
+    /// picture. A warning tells the speed. The
+    /// media of a project vidcut wrote come as it has them, in a bin named
+    /// after the file. What can't be imported is listed in `warnings`.
     #[serde(rename = "timeline.import")]
     TimelineImport {
         /// The `.otio`, `.otioz` or `.otiod` file, read by the process that
@@ -917,6 +921,13 @@ pub enum Request {
         otio: Option<serde_json::Value>,
         #[serde(default)]
         mode: ImportMode,
+        /// With `new`, the bin of the new timeline. Default: the top level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bin: Option<String>,
+        /// With `new`, the name of the new timeline. Default: the file's
+        /// name. A name that another timeline has is refused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
         /// Directories to look in, by file name, for media missing at its path.
         #[serde(default)]
         search: Vec<PathBuf>,
@@ -929,6 +940,38 @@ pub enum Request {
         #[serde(default)]
         flatten: bool,
     },
+    /// The timelines of the project, in the order they were made: each
+    /// one's `id`, `name`, `bin`, `start` timecode, frame rate, size and
+    /// length, and `own` when it has its own settings. `open` is the id of
+    /// the open one, and `recent` lists the ids, the last opened first.
+    #[serde(rename = "timeline.list")]
+    TimelineList {},
+    /// Make an empty timeline and open it. Returns its `id`.
+    #[serde(rename = "timeline.new")]
+    TimelineNew(TimelineNew),
+    /// Open a timeline (an id like `t2`, or a name). The requests on the
+    /// timeline then act on it.
+    #[serde(rename = "timeline.open")]
+    TimelineOpen { timeline: String },
+    /// Rename a timeline. A name that another timeline has is refused.
+    #[serde(rename = "timeline.rename")]
+    TimelineRename { timeline: String, name: String },
+    /// Copy a timeline into its bin as `<name> copy`, and open the copy. The
+    /// copy keeps the markers, and has no In and Out marks. Default: the
+    /// open timeline. Returns the copy's `id`.
+    #[serde(rename = "timeline.duplicate")]
+    TimelineDuplicate {
+        #[serde(default)]
+        timeline: Option<String>,
+    },
+    /// Delete timelines. When the open one goes, the timeline made before
+    /// it opens, else the one after it. After the last one, no timeline is
+    /// open, and the frame rate of the project can change again.
+    #[serde(rename = "timeline.delete")]
+    TimelineDelete { timeline: OneOrMany<String> },
+    /// Change a timeline's settings. Default: the open timeline.
+    #[serde(rename = "timeline.set")]
+    TimelineSet(TimelineSet),
 
     /// Append after the last clip (Shift+F12).
     #[serde(rename = "edit.append")]
@@ -1488,8 +1531,9 @@ pub enum Request {
         at: Option<TimeSpec>,
         ease: Ease,
     },
-    /// Copy clips (Ctrl+C): returns them with their tracks as `clips`,
-    /// ready for `edit.paste`. The GUI also keeps them on its clipboard.
+    /// Copy clips (Ctrl+C): returns them with their tracks as `clips`, and
+    /// the timeline's frame rate as `fps`, ready for `edit.paste`. The GUI
+    /// also keeps them on its clipboard.
     /// With `range` instead of `clips`: the parts of the clips on the
     /// unlocked tracks in that range (Copy in the Transcription window).
     /// With `cues` instead (`q3`, or `S1@15s`): those cues with their
@@ -1540,6 +1584,11 @@ pub enum Request {
         /// selected words in the Transcription window).
         #[serde(default)]
         duration: Option<TimeSpec>,
+        /// The frame rate of the timeline they were copied from, as
+        /// `edit.copy` gives it. At another rate than this timeline's, their
+        /// frames are counted again by time. Default: this timeline's rate.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fps: Option<Rational>,
     },
 
     /// The tracks, with their header and mixer settings and how many clips
@@ -3464,10 +3513,6 @@ pub enum Request {
         /// drop-frame (29.97, 59.94 and 119.88; decision D47).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         drop_frame: Option<bool>,
-        /// With `create` or an OpenTimelineIO file, the record timecode of
-        /// the first frame (deviation X7).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        start_tc: Option<TimeSpec>,
     },
     /// What the viewer shows, and how its timecode field counts.
     /// `mode` is `source_clip`, `source_tape`, `multi_source`, or `timeline`.
@@ -4539,8 +4584,11 @@ pub enum NormalizeMode {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportMode {
-    /// Its tracks after the last clip.
+    /// A new timeline, named after the file, which opens. A name that
+    /// another timeline has is refused.
     #[default]
+    New,
+    /// Its tracks after the last clip of the open timeline.
     Append,
     /// Its tracks instead of the timeline's clips, markers and marks. A file
     /// with tracks and no clips leaves an empty timeline.
@@ -4985,6 +5033,76 @@ pub struct SourceParams {
     pub lead: Option<i64>,
 }
 
+/// A new timeline (File > New Timeline).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TimelineNew {
+    /// Default: `Timeline N`, with N one more than the count of timelines,
+    /// or the first larger number that no timeline has in its name. A name
+    /// that another timeline has is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The bin to put it in. Default: the top level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bin: Option<String>,
+    /// Record timecode of its first frame. Default: `01:00:00:00`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_tc: Option<TimeSpec>,
+    /// Video tracks, from 1 to 99. Default: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_tracks: Option<u32>,
+    /// Audio tracks, from 0 to 999. Default: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_tracks: Option<u32>,
+    /// Its own settings in the place of the project's: each value given
+    /// replaces the project's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own: Option<TimelineFormat>,
+}
+
+/// A change to a timeline's settings.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TimelineSet {
+    /// An id like `t2`, or a name. Default: the open timeline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline: Option<String>,
+    /// Record timecode of its first frame, e.g. `01:00:00:00`
+    /// (`01:00:00;00` drop-frame).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_tc: Option<TimeSpec>,
+    /// `true`: it uses the project's settings again. `false`: it keeps a
+    /// copy of the project's settings as its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_project: Option<bool>,
+    /// Its own settings: each value given replaces its own, and a timeline
+    /// that uses the project's settings gets its own first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own: Option<TimelineFormat>,
+}
+
+/// Settings of a timeline. The frame rate and drop-frame change only while
+/// the timeline has no clips. The size and the color space change at any
+/// time.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TimelineFormat {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fps: Option<Rational>,
+    /// Frame width, from 256 to 32768. A side under 256 sets both sides to
+    /// 256. Else a side over 32768 sets both to 32768.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    /// Frame height, from 256 to 32768. A side under 256 sets both sides to
+    /// 256. Else a side over 32768 sets both to 32768.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    /// Count record timecode drop-frame: at 29.97, 59.94 and 119.88
+    /// (decision D47).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drop_frame: Option<bool>,
+    /// The timeline color space (decision D50).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline_colors: Option<crate::model::TimelineColors>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ProjectSet {
     #[serde(default)]
@@ -5004,12 +5122,9 @@ pub struct ProjectSet {
     #[serde(default)]
     pub ripple_on: Option<bool>,
     /// Count record timecode drop-frame: at 29.97, 59.94 and 119.88 (decision D47).
+    /// It changes only while the project has no timelines.
     #[serde(default)]
     pub drop_frame: Option<bool>,
-    /// Record timecode of the first frame, e.g. `01:00:00:00` (`01:00:00;00`
-    /// drop-frame).
-    #[serde(default)]
-    pub start_tc: Option<TimeSpec>,
     /// Play fresh proxies in the preview. Export still reads the originals.
     #[serde(default)]
     pub use_proxies: Option<bool>,
@@ -6076,6 +6191,7 @@ impl Request {
                     | Self::MulticamRows { .. }
                     | Self::Probe { .. }
                     | Self::TimelineGet { .. }
+                    | Self::TimelineList {}
                     | Self::TimelineAt { .. }
                     | Self::TimelineEditPoints {}
                     | Self::TimelineBoring { .. }

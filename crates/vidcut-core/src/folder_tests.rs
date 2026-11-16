@@ -130,7 +130,7 @@ fn the_first_video_by_name_sets_the_format_whatever_its_case() {
         .with("/shoot/B.mp4", media_info(4.0, fps(24), true))
         .with("/shoot/a.mp4", media_info(4.0, fps(50), true));
     f.ok(req("media.add_folder", json!({"path": "/shoot"})));
-    assert_eq!(f.editor.project().settings.fps, fps(50));
+    assert_eq!(f.editor.project().fps(), fps(50));
 }
 
 #[test]

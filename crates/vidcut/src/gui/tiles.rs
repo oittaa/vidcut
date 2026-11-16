@@ -332,7 +332,7 @@ impl Tiles {
             },
             epoch: self.epochs.get(&m.id).copied().unwrap_or(0),
             width: 0,
-            fps: p.settings.fps,
+            fps: p.fps(),
             pieces: Vec::new(),
             disk: None,
             thumbs: Some(ThumbsFile {
@@ -377,7 +377,7 @@ impl Tiles {
             key: key.clone(),
             epoch: self.epochs.get(&key.media).copied().unwrap_or(0),
             width,
-            fps: p.settings.fps,
+            fps: p.fps(),
             pieces,
             disk: (self.disk && m.subclip.is_none()).then(|| {
                 let block = key.frame.div_euclid(TILE_BLOCK);

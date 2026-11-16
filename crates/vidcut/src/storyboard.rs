@@ -90,8 +90,7 @@ pub fn render(
     }
     let columns = (columns.max(1) as usize).min(cells.len());
     let w = (width.clamp(32, 1920) & !1) as usize;
-    let h = ((w as f64 * f64::from(p.settings.height) / f64::from(p.settings.width).max(1.0))
-        .round() as usize
+    let h = ((w as f64 * f64::from(p.height()) / f64::from(p.width()).max(1.0)).round() as usize
         & !1)
         .max(2);
     let rows = cells.len().div_ceil(columns);
@@ -111,7 +110,7 @@ pub fn render(
             let dst = ((y + row) * cw + x) * 4;
             canvas[dst..dst + w * 4].copy_from_slice(&rgba[row * w * 4..(row + 1) * w * 4]);
         }
-        let tc = p.settings.timecode(cell.frame);
+        let tc = p.timecode(cell.frame);
         let clip = shown_clip(p, cell.frame);
         let label = match &clip {
             Some((id, track)) if track != "V1" => format!("{tc} {id} {track}"),
@@ -141,7 +140,7 @@ fn pictures(
     (w, h): (usize, usize),
     colors: vidcut_av::export::renderer::Finish<'_>,
 ) -> Result<Vec<Vec<u8>>> {
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let decoding = crate::preferences::gpu_decoding();
     let threads = std::thread::available_parallelism().map_or(2, |n| n.get().min(6));
     let chunk = cells.len().div_ceil(threads);

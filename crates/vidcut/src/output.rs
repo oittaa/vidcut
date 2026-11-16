@@ -231,6 +231,42 @@ pub fn print(method: &str, r: &Response, json: bool) {
             let tc = |k: &str| r.result[k]["tc"].as_str().unwrap_or("-").to_string();
             println!("in {}  out {}", tc("in"), tc("out"));
         }
+        "timeline.new" | "timeline.duplicate" => {
+            let id = r.result["id"].as_str().unwrap_or_default();
+            println!("ok {method}: {id}, open (rev {})", r.rev);
+        }
+        "timeline.open" | "timeline.rename" | "timeline.set" => {
+            println!("ok {method} (rev {})", r.rev);
+        }
+        "timeline.delete" => {
+            let deleted: Vec<&str> = (r.result["deleted"].as_array().into_iter().flatten())
+                .filter_map(Value::as_str)
+                .collect();
+            let open = r.result["open"].as_str().unwrap_or("none");
+            println!(
+                "deleted {}; open: {open} (rev {})",
+                deleted.join(", "),
+                r.rev
+            );
+        }
+        "timeline.list" => {
+            let open = r.result["open"].as_str();
+            for t in r.result["timelines"].as_array().into_iter().flatten() {
+                let id = t["id"].as_str().unwrap_or_default();
+                let bin = t["bin"].as_str().filter(|b| !b.is_empty());
+                println!(
+                    "{} {id} {:?}  {} fps  {}x{}  start {}  {} frame(s){}",
+                    if Some(id) == open { "*" } else { " " },
+                    t["name"].as_str().unwrap_or_default(),
+                    rate(&t["fps"]),
+                    t["width"],
+                    t["height"],
+                    t["start"].as_str().unwrap_or_default(),
+                    t["frames"],
+                    bin.map(|b| format!("  in {b}")).unwrap_or_default()
+                );
+            }
+        }
         "timeline.import" => {
             let n = |k: &str| r.result[k].as_array().map_or(0, Vec::len);
             let verb = if r.dry_run {

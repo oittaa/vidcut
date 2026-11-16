@@ -462,7 +462,7 @@ fn style(f: &mut Fields, before: &[Value], after: &Value, size: f64, frame: Opti
 impl Words<'_> {
     fn tc(&self) -> impl Fn(&Value) -> String + '_ {
         move |v| match (v.as_i64(), self.project) {
-            (Some(n), Some(p)) => p.settings.timecode(n),
+            (Some(n), Some(p)) => p.timecode(n),
             _ => raw(v),
         }
     }
@@ -568,7 +568,7 @@ impl Words<'_> {
             .map(|c| c.picture.clone().unwrap_or_default())
             .collect();
         let (w, h) = self.project.map_or((1920.0, 1080.0), |pr| {
-            (f64::from(pr.settings.width), f64::from(pr.settings.height))
+            (f64::from(pr.width()), f64::from(pr.height()))
         });
         let mut s = Set::new(
             Fields::new(self.clips("clips"), "Clip"),
@@ -732,7 +732,7 @@ impl Words<'_> {
             let size = SubtitleStyle::default().text_fraction();
             let before = s.olds(|t| t["style"].clone());
             let frame = self.project.map_or([1920.0, 1080.0], |pr| {
-                [f64::from(pr.settings.width), f64::from(pr.settings.height)]
+                [f64::from(pr.width()), f64::from(pr.height())]
             });
             style(&mut s.f, &before, &p["style"], size, Some(frame));
         }
@@ -841,7 +841,7 @@ impl Words<'_> {
         let media = self.marker_media(&id);
         let at = |pr: &Project, n: i64| match media {
             Some(media) => pr.clip_timecode(media, n),
-            None => pr.settings.timecode(n),
+            None => pr.timecode(n),
         };
         let thing = found.map_or_else(
             || format!("Marker {id}"),
@@ -855,7 +855,7 @@ impl Words<'_> {
         if !self.params["duration"].is_null() {
             let length = |v: &Value| match (v.as_i64(), self.project, media) {
                 (Some(n), Some(pr), Some(media)) => pr.clip_timecode(media, n),
-                (Some(n), Some(pr), None) => pr.settings.length_timecode(n),
+                (Some(n), Some(pr), None) => pr.length_timecode(n),
                 _ => raw(v),
             };
             let new = match (&self.params["duration"], self.project) {
@@ -922,17 +922,6 @@ impl Words<'_> {
             json!(x.render_cache)
         });
         s.put("output_lut", "Output LUT", &text, |x| json!(x.output_lut));
-        let spec = |key: &str| serde_json::from_value::<TimeSpec>(p[key].clone()).ok();
-        if !p["start_tc"].is_null() {
-            let new = first.zip(spec("start_tc")).and_then(|(x, t)| {
-                let mut x = x.clone();
-                x.set_start_tc(&t).ok().map(|_| json!(x.timecode(0)))
-            });
-            let new = new.unwrap_or_else(|| p["start_tc"].clone());
-            s.add("Start Timecode", &new, &raw, Value::Null, |x| {
-                json!(x.timecode(0))
-            });
-        }
         let list = |v: &Value| match v.as_array().map(Vec::len) {
             Some(n) => Shown {
                 text: if n == 1 {
@@ -975,7 +964,7 @@ impl Words<'_> {
                         || Shown::of("none"),
                         |n| match media {
                             Some(media) => Shown::of(pr.clip_timecode(media, n)),
-                            None => Shown::of(pr.settings.timecode(n)),
+                            None => Shown::of(pr.timecode(n)),
                         },
                     )
                 })

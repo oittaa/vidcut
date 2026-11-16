@@ -51,6 +51,11 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("timeline.get", &["range"]),
     ("timeline.at", &["at"]),
     ("timeline.import", &["path"]),
+    ("timeline.new", &["name"]),
+    ("timeline.open", &["timeline"]),
+    ("timeline.rename", &["timeline", "name"]),
+    ("timeline.duplicate", &["timeline"]),
+    ("timeline.delete", &["timeline"]),
     ("track.add", &["kind"]),
     ("track.remove", &["track"]),
     ("track.set", &["track"]),
@@ -554,7 +559,18 @@ const EXAMPLES: &[(&str, &str)] = &[
         "timeline.import",
         "vidcut -p cut.vidcut timeline import their-cut.otio\n  \
          vidcut -p cut.vidcut timeline import cut.otio --mode replace --search /mnt/footage\n  \
-         vidcut -p cut.vidcut timeline import cut.otioz --unpack /mnt/fast/cut-media",
+         vidcut -p cut.vidcut timeline import cut.otioz --unpack /mnt/fast/cut-media\n  \
+         vidcut -p cut.vidcut timeline import their-cut.otio --mode append",
+    ),
+    (
+        "timeline.new",
+        "vidcut timeline new \"Rough Cut\"\n  \
+         vidcut timeline new Vertical --own '{\"width\": 1080, \"height\": 1920}'",
+    ),
+    (
+        "timeline.set",
+        "vidcut timeline set --start-tc 00:00:00:00\n  \
+         vidcut timeline set --timeline t2 --own '{\"fps\": \"25\"}'",
     ),
     (
         "storyboard.render",

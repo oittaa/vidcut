@@ -312,9 +312,7 @@ impl Workspace {
     }
 
     fn ask_graph(&mut self, ctx: &egui::Context, a: &Advanced, playhead: i64) {
-        let Some((rev, end, fps)) = self
-            .project()
-            .map(|p| (p.rev, p.end(), p.settings.fps.as_f64()))
+        let Some((rev, end, fps)) = self.project().map(|p| (p.rev, p.end(), p.fps().as_f64()))
         else {
             return;
         };
@@ -389,7 +387,7 @@ impl Workspace {
             self.ask_graph(ctx, &a, playhead);
         }
         let at = self.glided_playhead(playhead);
-        let fps = self.project().map_or(1.0, |p| p.settings.fps.as_f64());
+        let fps = self.project().map_or(1.0, |p| p.fps().as_f64());
         let graph = &self.ducking.graph;
         dialog::window(ctx, "Ducking", &mut open, |ui| {
             let threshold = (a.detect == DuckDetect::Level).then_some(a.threshold_db);

@@ -117,6 +117,7 @@ pub struct Workspace {
     pub(super) help: super::help::HelpUi,
     pub(super) history: super::history::HistoryUi,
     pub(super) project_ui: super::project::ProjectUi,
+    pub(super) timelines_ui: super::timelines::TimelinesUi,
     pub(super) import: super::import::ImportUi,
     pub(super) relink: super::relink::RelinkUi,
     pub(super) dialogs: Arc<dyn super::export::Dialogs>,
@@ -219,6 +220,7 @@ impl Workspace {
             help: Default::default(),
             history: super::history::HistoryUi::default(),
             project_ui: Default::default(),
+            timelines_ui: Default::default(),
             import: Default::default(),
             relink: Default::default(),
             dialogs: Arc::new(super::export::RfdDialogs),
@@ -564,12 +566,12 @@ impl Workspace {
 
     pub(super) fn fps(&self) -> Rational {
         self.project()
-            .map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps)
+            .map_or(Rational::new(30, 1).expect("valid"), |p| p.fps())
     }
 
     pub(super) fn dropped(&self) -> i64 {
         match self.project() {
-            Some(p) if p.settings.counts_drop_frame() => p.settings.fps.dropped_per_minute(),
+            Some(p) if p.counts_drop_frame() => p.fps().dropped_per_minute(),
             _ => 0,
         }
     }
@@ -580,14 +582,14 @@ impl Workspace {
 
     pub(super) fn tc(&self, frame: i64) -> String {
         match self.project() {
-            Some(p) => p.settings.timecode(frame),
+            Some(p) => p.timecode(frame),
             None => format_timecode(frame, self.fps(), 0, false),
         }
     }
 
     pub(super) fn src_tc(&self, frame: i64) -> String {
         match self.project() {
-            Some(p) => p.settings.length_timecode(frame),
+            Some(p) => p.length_timecode(frame),
             None => format_timecode(frame, self.fps(), 0, false),
         }
     }
@@ -946,6 +948,12 @@ impl Workspace {
                 if ui.add_enabled(open, egui::Button::new("New Bin")).clicked() {
                     self.new_bin();
                 }
+                let shortcut = self.snap.bindings.first(Action::NewTimeline);
+                let new_timeline =
+                    egui::Button::new("New Timeline…").shortcut_text(shortcut.unwrap_or_default());
+                if ui.add_enabled(open, new_timeline).clicked() {
+                    self.open_new_timeline();
+                }
                 if ui
                     .add_enabled(open, egui::Button::new("Import Timeline (OTIO)…"))
                     .clicked()
@@ -1235,9 +1243,9 @@ impl Workspace {
                     let p = ws.project().expect("open");
                     ui.label(dim(format!(
                         "{}×{}, {} fps",
-                        p.settings.width,
-                        p.settings.height,
-                        p.settings.fps.decimal()
+                        p.width(),
+                        p.height(),
+                        p.fps().decimal()
                     )))
                 }
                 S::Edited => {
@@ -1690,6 +1698,9 @@ impl Workspace {
         if fired.pressed(Action::NewBin) {
             self.new_bin();
         }
+        if fired.pressed(Action::NewTimeline) {
+            self.open_new_timeline();
+        }
         let delete_marker = fired.pressed(Action::DeleteMarker);
         if (delete_marker || fired.pressed(Action::AddMarker))
             && let Some((markers, at, media)) = self.viewer_markers()
@@ -2077,6 +2088,7 @@ impl Workspace {
         self.help_window(&ctx);
         self.history_frame(&ctx);
         self.project_windows(&ctx);
+        self.timeline_windows(&ctx);
         self.import_window(&ctx);
         self.relink_window(&ctx);
         self.remove_media_window(&ctx);

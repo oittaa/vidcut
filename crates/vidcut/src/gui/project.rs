@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::Project;
-use vidcut_core::model::{Hdr, ProjectRetime, ProjectUpscaler, Settings, TimelineColors};
+use vidcut_core::model::{Hdr, ProjectRetime, ProjectUpscaler, TimelineColors, TimelineSettings};
 use vidcut_core::time::{Rational, STANDARD_RATES, TimeSpec};
 
 use super::export::{Ask, Picked, near_center};
@@ -73,18 +73,75 @@ fn colors_name(hdr: Option<Hdr>) -> &'static str {
 
 impl Format {
     fn of(p: &Project) -> Self {
+        let s = &p.settings;
         Self {
-            width: p.settings.width,
-            height: p.settings.height,
-            rate: rate_text(p.settings.fps),
-            drop_frame: p.settings.drop_frame,
-            start: p.settings.timecode(0),
-            colors: p.settings.timeline_colors,
+            width: s.width,
+            height: s.height,
+            rate: rate_text(s.fps),
+            drop_frame: s.drop_frame,
+            start: p.timecode(0),
+            colors: s.timeline_colors,
             auto: vidcut_core::render::auto_colors(p),
             retime: p.settings.retime,
             upscaler: p.settings.upscaler,
             output_lut: p.settings.output_lut.clone(),
         }
+    }
+
+    pub(super) fn of_timeline(p: &Project, own: TimelineSettings, start_tc: Option<i64>) -> Self {
+        let drop = own.counts_drop_frame();
+        let tc = match start_tc {
+            Some(tc) => vidcut_core::time::format_timecode(0, own.fps, tc, drop),
+            None => {
+                let (sep, digits) = (if drop { ';' } else { ':' }, own.fps.frame_digits());
+                format!("01:00:00{sep}{:0digits$}", 0)
+            }
+        };
+        Self {
+            width: own.width,
+            height: own.height,
+            rate: rate_text(own.fps),
+            drop_frame: own.drop_frame,
+            start: tc,
+            colors: own.timeline_colors,
+            ..Self::of(p)
+        }
+    }
+
+    pub(super) fn with_start_of(self, other: &Self) -> Self {
+        Self {
+            start: other.start.clone(),
+            ..self
+        }
+    }
+
+    pub(super) fn own(&self) -> Option<Value> {
+        let fps = self.fps()?;
+        Some(json!({
+            "fps": rate_text(fps),
+            "width": self.width,
+            "height": self.height,
+            "drop_frame": self.drop_frame(),
+            "timeline_colors": self.colors,
+        }))
+    }
+
+    pub(super) fn own_changes(&self, was: &Self) -> Value {
+        let mut set = serde_json::Map::new();
+        if (self.width, self.height) != (was.width, was.height) {
+            set.insert("width".into(), json!(self.width));
+            set.insert("height".into(), json!(self.height));
+        }
+        if let Some(f) = self.fps().filter(|&f| Some(f) != was.fps()) {
+            set.insert("fps".into(), json!(rate_text(f)));
+        }
+        if self.drop_frame() != was.drop_frame() {
+            set.insert("drop_frame".into(), json!(self.drop_frame()));
+        }
+        if self.colors != was.colors {
+            set.insert("timeline_colors".into(), json!(self.colors));
+        }
+        Value::Object(set)
     }
 
     fn edit_ai(&mut self, ui: &mut egui::Ui) {
@@ -132,7 +189,7 @@ impl Format {
         }
     }
 
-    fn edit_colors(&mut self, ui: &mut egui::Ui, choose: &mut bool) {
+    pub(super) fn edit_colors(&mut self, ui: &mut egui::Ui, choose: Option<&mut bool>) {
         egui::Grid::new(ui.scope_id().with("colors"))
             .num_columns(2)
             .spacing([12.0, 8.0])
@@ -154,6 +211,9 @@ impl Format {
                     .response
                     .labelled_by(label.id);
                 ui.end_row();
+                let Some(choose) = choose else {
+                    return;
+                };
                 let label = ui.label("Output LUT");
                 ui.horizontal(|ui| {
                     *choose = ui.button("Choose…").labelled_by(label.id).clicked();
@@ -170,7 +230,7 @@ impl Format {
             });
     }
 
-    fn fps(&self) -> Option<Rational> {
+    pub(super) fn fps(&self) -> Option<Rational> {
         self.rate.trim().parse().ok()
     }
 
@@ -178,21 +238,21 @@ impl Format {
         self.drop_frame && self.fps().is_some_and(Rational::has_drop_frame)
     }
 
-    fn start(&self) -> Option<&str> {
+    pub(super) fn start(&self) -> Option<&str> {
         let t = self.start.trim();
         matches!(TimeSpec::parse(t), Ok(TimeSpec::Timecode(..))).then_some(t)
     }
 
-    fn starts_at_default(&self) -> bool {
-        self.start().and_then(timecode_fields) == Some((1, 0, 0, 0))
+    pub(super) fn same_start(&self, was: &Self) -> bool {
+        self.start().and_then(timecode_fields) == was.start().and_then(timecode_fields)
     }
 
-    fn edit_start(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn edit_start(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new(ui.scope_id().with("start"))
             .num_columns(2)
             .spacing([12.0, 8.0])
             .show(ui, |ui| {
-                let label = ui.label("Start timecode");
+                let label = ui.label("Start Timecode");
                 ui.horizontal(|ui| {
                     let sep = if self.drop_frame() { ';' } else { ':' };
                     let digits = self.fps().map_or(2, Rational::frame_digits);
@@ -240,7 +300,8 @@ impl Format {
             });
     }
 
-    fn edit(&mut self, ui: &mut egui::Ui, rate_enabled: bool) {
+    pub(super) fn edit(&mut self, ui: &mut egui::Ui, rate_locked: Option<&str>) {
+        let rate_enabled = rate_locked.is_none();
         egui::Grid::new(ui.scope_id().with("format"))
             .num_columns(2)
             .spacing([12.0, 8.0])
@@ -280,7 +341,7 @@ impl Format {
                     }
                 });
                 ui.end_row();
-                let label = ui.label("Frame rate");
+                let label = ui.label("Frame Rate");
                 ui.horizontal(|ui| {
                     ui.add_enabled_ui(rate_enabled, |ui| {
                         let current = self.fps();
@@ -317,14 +378,15 @@ impl Format {
                             );
                         }
                     });
-                    if !rate_enabled {
-                        super::dialog::why(ui, "only while the timeline is empty");
+                    if let Some(why) = rate_locked {
+                        super::dialog::why(ui, why);
                     }
                 });
                 ui.end_row();
                 if self.fps().is_some_and(Rational::has_drop_frame) {
                     ui.label("Timecode");
-                    ui.checkbox(&mut self.drop_frame, "Drop-frame");
+                    let drop = egui::Checkbox::new(&mut self.drop_frame, "Drop-frame");
+                    ui.add_enabled(rate_enabled, drop);
                     ui.end_row();
                 }
             });
@@ -379,17 +441,11 @@ impl OtioFile {
         let doc: Value = serde_json::from_str(&file.text)
             .map_err(|e| format!("{} isn't an OTIO file: {e}", file_name(&otio)))?;
         let t = vidcut_core::otio::import(&doc, None).map_err(|e| e.message)?;
-        let settings = Settings {
-            fps: t.fps,
-            start_tc: t.start_tc,
-            ..Settings::default()
-        };
         Ok(Self {
             target: otio.with_extension("vidcut"),
             ours: vidcut_core::otio::holds_project(&doc),
             format: Format {
                 rate: rate_text(t.fps),
-                start: settings.timecode(0),
                 ..Format::default()
             },
             otio,
@@ -583,27 +639,23 @@ impl Workspace {
                 ui.radio_value(&mut new.choose, false, auto);
                 ui.radio_value(&mut new.choose, true, "Choose it now:");
                 ui.add_enabled_ui(new.choose, |ui| {
-                    ui.indent("format", |ui| new.format.edit(ui, true));
+                    ui.indent("format", |ui| new.format.edit(ui, None));
                 });
-                if new.from.is_none() || new.choose {
-                    new.format.edit_start(ui);
-                }
                 ui.label(
-                    RichText::new("The frame rate can change only while the timeline is empty.")
+                    RichText::new("The frame rate can change until a timeline exists.")
                         .small()
                         .color(theme::colors().text_dim),
                 );
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let ok =
-                        (!new.choose || new.format.fps().is_some()) && new.format.start().is_some();
+                    let ok = !new.choose || new.format.fps().is_some();
                     let button = if new.from.is_some() {
                         "Create"
                     } else {
                         "Create…"
                     };
                     if ui.add_enabled(ok, egui::Button::new(button)).clicked() {
-                        let mut format = if new.choose {
+                        let format = if new.choose {
                             let fps = new.format.fps().expect("checked");
                             let mut format = json!({
                                 "fps": rate_text(fps),
@@ -617,13 +669,6 @@ impl Workspace {
                         } else {
                             json!({})
                         };
-                        let start = match new.from {
-                            Some(_) => new.choose,
-                            None => !new.format.starts_at_default(),
-                        };
-                        if start {
-                            format["start_tc"] = json!(new.format.start());
-                        }
                         create = Some(format);
                     }
                     if ui.button("Cancel").clicked() {
@@ -655,7 +700,7 @@ impl Workspace {
         let Some(p) = self.project() else {
             return;
         };
-        let empty = p.tracks.iter().all(|t| t.clips.is_empty());
+        let empty = p.timelines.is_empty();
         let mut open = true;
         let mut cancel = false;
         let mut apply = None;
@@ -666,24 +711,13 @@ impl Workspace {
             .default_pos(near_center(ctx, 420.0, 160.0))
             .open(&mut open)
             .show(ctx, |ui| {
-                format.edit(ui, empty);
-                format.edit_start(ui);
-                format.edit_colors(ui, &mut choose);
+                format.edit(ui, (!empty).then_some("only with no timelines"));
+                format.edit_colors(ui, Some(&mut choose));
                 format.edit_ai(ui);
-                if !empty {
-                    ui.label(
-                        RichText::new(
-                            "The frame rate can change only while the timeline is empty.",
-                        )
-                        .small()
-                        .color(theme::colors().text_dim),
-                    );
-                }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let changes = changes(&format, &was);
                     let ok = format.fps().is_some()
-                        && format.start().is_some()
                         && changes.as_object().is_some_and(|c| !c.is_empty());
                     if ui.add_enabled(ok, egui::Button::new("Apply")).clicked() {
                         apply = Some(changes);
@@ -721,9 +755,6 @@ fn changes(now: &Format, was: &Format) -> Value {
     }
     if now.drop_frame() != was.drop_frame() {
         set.insert("drop_frame".into(), json!(now.drop_frame()));
-    }
-    if let Some(start) = now.start().filter(|&s| Some(s) != was.start()) {
-        set.insert("start_tc".into(), json!(start));
     }
     if now.colors != was.colors {
         set.insert("timeline_colors".into(), json!(now.colors));

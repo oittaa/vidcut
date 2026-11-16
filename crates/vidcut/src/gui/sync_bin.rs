@@ -6,6 +6,7 @@ use serde_json::json;
 use vidcut_core::model::Project;
 use vidcut_core::multicam::{SyncRow, sync_rows};
 use vidcut_core::request::ViewerMode;
+use vidcut_core::time::{Rational, rescale};
 
 use super::export::Ask;
 use super::pool::FULL;
@@ -37,6 +38,7 @@ pub(super) struct Film<'a> {
     pub media: &'a str,
     pub frames: i64,
     pub head: i64,
+    pub fps: Rational,
     pub x: f32,
     pub per_frame: f32,
 }
@@ -192,7 +194,7 @@ impl Workspace {
                         number: Some(row.number),
                         label: Some(format!("Camera {}", row.camera)),
                         media: row.media.clone(),
-                        frame: row.frame,
+                        frame: row.source,
                         active: row.active,
                         outlined: self.sync_bin.outlined.as_deref() == Some(row.media.as_str()),
                     })
@@ -265,7 +267,7 @@ impl Workspace {
         rows: &[SyncRow],
         at: i64,
     ) {
-        let per_frame = PX_PER_SECOND / p.settings.fps.as_f64().max(1.0) as f32;
+        let per_frame = PX_PER_SECOND / p.fps().as_f64().max(1.0) as f32;
         let band = Rect::from_min_max(pos2(rect.left() + NUMBER, rect.top()), rect.max);
         let mid = band.center().x;
         let x = |t: i64| mid + (t - at) as f32 * per_frame;
@@ -314,6 +316,7 @@ impl Workspace {
                     media: &clip.media,
                     frames: clip.frames,
                     head: clip.head,
+                    fps: p.fps(),
                     x: x(start),
                     per_frame,
                 };
@@ -375,8 +378,8 @@ impl Workspace {
         at: i64,
         per_frame: f32,
     ) {
-        let second = p.settings.fps.as_f64().round().max(1.0) as i64;
-        let start_tc = p.settings.start_tc;
+        let second = p.fps().as_f64().round().max(1.0) as i64;
+        let start_tc = p.start_tc();
         let left = at + ((ruler.left() - ruler.center().x) / per_frame) as i64;
         let right = at + ((ruler.right() - ruler.center().x) / per_frame) as i64;
         let first = (start_tc + left.max(0)).div_euclid(second) + 1;
@@ -400,7 +403,7 @@ impl Workspace {
                 painter.text(
                     pos2(x(t), ruler.top()),
                     Align2::CENTER_TOP,
-                    p.settings.timecode(t),
+                    p.timecode(t),
                     FontId::proportional(10.0),
                     theme::colors().text_dim,
                 );
@@ -427,7 +430,7 @@ impl Workspace {
             clipped.rect_filled(span, CornerRadius::ZERO, theme::colors().audio);
             if let Some(w) = self.snap.waveforms.get(&m.id) {
                 let origin = m.info.audio.first().map_or(0.0, |a| a.first_pts);
-                let secs = p.settings.fps.frames_to_secs(1);
+                let secs = film.fps.frames_to_secs(1);
                 let whole = Rect::from_min_max(pos2(film.x, strip.top()), span.max);
                 wave_columns(&clipped, whole, |x| {
                     let frames = f64::from((x - film.x) / film.per_frame);
@@ -438,7 +441,7 @@ impl Workspace {
             return;
         }
         clipped.rect_filled(span, CornerRadius::ZERO, theme::colors().panel_dark);
-        let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
+        let aspect = p.width() as f32 / p.height().max(1) as f32;
         let wide = strip.height() * aspect;
         let step = ((wide / film.per_frame).ceil() as i64).max(1);
         let hidden = ((span.left() - film.x) / film.per_frame) as i64;
@@ -449,7 +452,7 @@ impl Workspace {
                 break;
             }
             let tile = Rect::from_min_size(pos2(left, strip.top()), vec2(wide, strip.height()));
-            let source = film.head + frame;
+            let source = rescale(film.head + frame, film.fps, p.fps());
             if let Some(shown) = self.pool_picture(ui.ctx(), m, source, tile.height(), step) {
                 clipped.image(shown, tile, FULL, Color32::WHITE);
             }

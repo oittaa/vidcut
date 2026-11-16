@@ -606,7 +606,7 @@ fn silence_reads(p: &Project, clips: &[String]) -> Value {
         let media = p.media(&c.media).map(|m| (&m.path, &m.info));
         json!([c.start, c.duration, c.source_in, c.speed, c.audio, media])
     });
-    json!([p.settings.fps, read.collect::<Vec<_>>()])
+    json!([p.fps(), read.collect::<Vec<_>>()])
 }
 
 impl Workspace {
@@ -1038,7 +1038,7 @@ impl Workspace {
         if !o.boring {
             return;
         }
-        let boring = (o.boring_secs * p.settings.fps.as_f64()).round() as i64;
+        let boring = (o.boring_secs * p.fps().as_f64()).round() as i64;
         let (long, short) = vidcut_core::analysis::boring(p, boring, o.jump_frames);
         for (clips, color) in [
             (long, Color32::from_rgba_unmultiplied(220, 220, 225, 90)),

@@ -323,6 +323,44 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - vidcut also sorts by Duration.
   - This order is also the Source Tape order.
   - The search field filters live, through the open bin and the bins inside it.
+- **Timelines** (pp. 678, 838–841; measured in Resolve Studio 21.2):
+  - A project holds many timelines. The pool shows each one in its bin, with its length. The open one is highlighted.
+  - A double-click on a timeline opens it. The edits then act on it.
+  - In/Out marks, markers, subtitle tracks and the playhead stay with each timeline.
+  - All timelines share one undo history. Opening a timeline is a step of it: "Set Timeline 2 as Current Timeline".
+  - The Timeline Selection menu, at the top of the Timeline viewer, shows the name of the open timeline. It lists the 10 timelines opened last, the last first.
+  - **New Timeline** (File > New Timeline, Ctrl+N, or Create New Timeline in the menu of the pool):
+    - Start Timecode, 01:00:00:00 by default.
+    - Timeline Name, "Timeline N" by default. N is the count of timelines plus 1, or the next number that no timeline has.
+    - Video Tracks and Audio Tracks, 1 each.
+    - Use Project Settings, on by default. Off, the timeline has its own frame rate, resolution, drop-frame and color space. It has no LUT of its own.
+    - The timeline goes into the open bin, and opens.
+  - The menu of a timeline in the pool has Open, Duplicate Timeline, Rename, Timeline Settings and Delete Timeline.
+    - Duplicate Timeline makes "X copy", then "X copy 1", in the same bin, and opens it. The copy has the markers, and no In/Out marks.
+    - Timeline Settings has the start timecode, Use Project Settings and the own format.
+    - Delete Timeline asks first. When the open timeline goes, the timeline made before it opens, else the one after it. A project can have no timeline.
+  - An edit into a project with no timeline makes a timeline (p. 678). vidcut gives it the New Timeline defaults: the next free name, and 1 video track and 1 audio track.
+    - Each command of a batch (`apply`) follows this rule as it does alone.
+  - A timeline in the project locks the frame rate and drop-frame of the project. Media in the pool do not lock them.
+    - Thus the first video of a project with a timeline sets only the picture size (D37).
+    - The manual says that media lock the frame rate (pp. 141, 364). Resolve Studio 21.2 does not.
+    - With no timeline, they change again.
+  - A timeline with its own settings changes its frame rate and drop-frame only while it has no clips. Its start timecode keeps its label.
+    - Its markers, subtitles and In/Out marks keep their time.
+  - A compound clip made in a timeline at another rate is converted by time where it goes. Pasted clips are too.
+  - File > Import > Timeline makes a new timeline, named after the file, in the open bin, and opens it. A name that a timeline has is refused.
+    - The Import window has the timeline's name. vidcut also offers Append, Replace, As a Compound Clip and Media Only.
+    - Append or Replace into a project with no timeline first makes "Timeline 1", as an edit does. It takes the file's start timecode.
+    - A file at another frame rate than its timeline keeps its frame numbers (measured in Resolve Studio 21.2, with a script import).
+      - The timeline has the project's settings. Each clip has the same first frame and the same length in frames as in the file.
+      - Each clip starts at the source time that the file gives. Each timeline frame then moves the source by one frame of the file's rate.
+      - Thus a 25 fps file plays at 120% speed in a 30 fps timeline.
+      - The pictures are the ones that the numbers of the file give.
+        - At frames 74, 75, 100, 300 and 499, they are a 71, b 18, b 42, a 288 and a 479.
+      - The timeline that Resolve wrote the file from shows b 43 at frame 100. Its export put the start of b at frame 18.24, not at 19.
+      - The start is the same count of frames. Thus 01:00:00:00 at 25 fps is 00:50:00:00 at 30 fps.
+      - The import gives a warning with the two rates and the speed.
+      - The sound, the Import window and the files of other editors are not measured.
 - **Clip Info** (vidcut):
   - Clip Info shows all that vidcut knows of a file.
   - The info button of the metadata strip or of a thumbnail corner opens it. The menu of a pool item also opens it.
@@ -822,7 +860,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - With no clip in the range, the track is V1, even into a gap.
     - It makes the track if necessary. It never fills a free lower track.
     - A source with no picture is an audio-only edit. An audio-only edit always makes a new top audio track.
-  - **Another frame rate:** timecode lines up in real time, for a file and for a reference clip.
+  - **Another frame rate:** the files line up on the frame grid of the project ([§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
+    - When the playhead shows the source In, the clip starts at the playhead (p. 709). It starts with the frame In.
+    - Else the clip starts at the first timeline frame that shows the source In or a later frame.
+    - With timeline marks, the clip starts with the frame that the Sync Bin shows at its first timeline frame.
+    - From its first frame, the clip plays at its own speed.
   - **A still** has timecode 00:00:00:00, so it goes in only with a clip at that timecode.
   - **After the edit,** the timeline marks clear, and the source marks stay.
     - The playhead goes to the clip's end.
@@ -888,11 +930,21 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - In is the file's frame at the timeline's end. Out is its frame at the playhead (p. 710).
   - The edit fills the timeline from its end to the playhead, and the playhead stays.
   - The reference is then the first clip that overlaps the whole file, as the marked range overlaps no clip.
+- **Another frame rate:** the Sync Bin counts on the frame grid of the project (measured in Resolve Studio 21.2, with 27 picks).
+  - This applies when a file or the timeline has another frame rate than the project. It applies by timecode and with a saved group.
+  - The playhead goes to the first project frame that is not before it. Its time is the exact source timecode of the reference clip.
+  - The start of a file goes down to a whole project frame.
+  - The row shows the frame of the file at that count of project frames from its start, rounded down.
+  - A click sets In to this frame, and Out five seconds of the file later.
+  - Example: 60 fps files in a 24 fps timeline of a 30 fps project. The second file starts 2 seconds and 13 frames later.
+    - At the timeline frames 61 to 65, the row shows the frames 22, 24, 26, 28 and 32.
+  - Source Overwrite puts the clip at the playhead. The clip starts with the frame In.
+  - A saved group counts its frames at the project's rate.
+  - Not measured: a reference clip whose start timecode is not on a project frame.
 - These cases are not measured, and vidcut lets them through:
   - **A still:** it has no row, as in the Sync Clips window.
   - **A file with no picture:** it has its own row and cell, as in the Sync Clips window.
   - **Two groups in the bin, and the clip at the playhead in neither:** the newest group counts.
-  - **A camera at another frame rate:** a click chooses it like any other camera.
 
 ### 7.5 Sync Clips window (pp. 706–708; measured in Resolve Studio 21.1.2)
 - **Opening:** the Sync Clips icon in the Media Pool acts on the files of the current bin. `gui.show sync_clips` does the same.
@@ -3401,7 +3453,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
   - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate ([X149](deviations.md#x149-a-project-takes-any-frame-rate)).
-  - A new timeline starts at record timecode 01:00:00:00 (p. 678). New Project and Project Settings also offer 00 and 10 hours, or any typed timecode.
+  - A new timeline starts at record timecode 01:00:00:00 (p. 678). New Timeline and Timeline Settings also offer 00 and 10 hours, or any typed timecode.
   - Its Frame rate menu offers the rates that Resolve Studio 21.2 takes for a project (`timelineFrameRate` in a script):
     - 16, 18, 23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60, 72, 90, 95.904, 96, 100, 119.88 and 120 fps.
     - Resolve refuses other rates, for example 15, 20, 144 and 240.
@@ -3438,7 +3490,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut's OTIO uses the shapes that Resolve writes and needs: source ranges in media timecode, plain paths, link groups, marker notes.
   - Thus a cut goes to Resolve and back with its media linked, and with its audio together with its video.
   - **A file with tracks and no clips.** Resolve Studio 21.1.2 imports it as an empty timeline, with V1, A1 and the start timecode of the file (measured).
-    - `project create --from` and `timeline.import` with `replace` make an empty timeline. It takes the rate and the start timecode of the file.
+    - `project create --from` and `timeline.import` with `new` or `replace` make an empty timeline. It takes the start timecode of the file.
     - `timeline.import` with `append`, `compound` or `media` refuses such a file. Resolve was not measured for these modes.
     - A file whose clips cannot be read also refuses, and the error names them.
   - Mapping: [deviation X9](deviations.md#x9-opentimelineio-interchange), [model](design/model.md#opentimelineio).

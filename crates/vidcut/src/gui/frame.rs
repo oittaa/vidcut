@@ -185,7 +185,7 @@ pub fn scope(
     let gpu = &frame.offscreen.gpu;
     let mut screen = Screen::new();
     screen.scoping(true);
-    frame.draw(&mut screen, p.settings.width, p.settings.height);
+    frame.draw(&mut screen, p.width(), p.height());
     let scale = crate::preferences::load()?.viewer.scopes.scale;
     screen.scopes(gpu, &[(scope, size)], scale);
     let image = screen

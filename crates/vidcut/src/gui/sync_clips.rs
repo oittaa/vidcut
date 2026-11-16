@@ -94,7 +94,7 @@ fn cell_of(p: &Project, rows: &[GroupRow], i: usize, at: i64) -> GridCell {
         number: Some(i + 1),
         label: Some(format!("Camera {}", row_camera(rows, i))),
         media: shown.map(|c| c.media.clone()).unwrap_or_default(),
-        frame: under.map(|(_, frame)| frame),
+        frame: under.map(|(_, frame)| frame as f64 * p.fps().over(p.settings.fps).as_f64()),
         active: false,
         outlined: false,
     }
@@ -564,7 +564,7 @@ impl Workspace {
         let top = rect.top() + 18.0;
         let left = Rect::from_min_max(pos2(rect.left(), top), pos2(middle, rect.bottom()));
         let right = Rect::from_min_max(pos2(middle, top), rect.max);
-        let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
+        let aspect = p.width() as f32 / p.height().max(1) as f32;
         let mut pictures = grid_pictures(left, p, cells.len());
         if s.viewed < s.rows.len() {
             let big = GridCell {
@@ -753,6 +753,7 @@ impl Workspace {
             media: &clip.media,
             frames,
             head: clip.head,
+            fps: p.settings.fps,
             x: lane.left + clip.at as f32 * lane.per_frame,
             per_frame: lane.per_frame,
         };

@@ -180,6 +180,7 @@ pub struct ExportUi {
     jobs_failed_unseen: bool,
     otio: Option<Otio>,
     flatten: bool,
+    import_name: String,
     warnings: Option<(String, Vec<String>)>,
     confirm_quit: bool,
     pub quit_confirmed: bool,
@@ -210,7 +211,7 @@ impl ExportUi {
     }
 
     pub(super) fn asking(&self, jobs: &[JobInfo]) -> bool {
-        matches!(self.otio, Some(Otio::Choose(_) | Otio::Missing { .. }))
+        matches!(self.otio, Some(Otio::Choose(..) | Otio::Missing { .. }))
             || (self.confirm_quit && jobs.iter().any(JobInfo::unfinished))
     }
 }
@@ -237,7 +238,7 @@ struct Starting {
 
 enum Otio {
     PickImport(Picked),
-    Choose(PathBuf),
+    Choose(PathBuf, String),
     Importing {
         ask: Ask,
         path: PathBuf,
@@ -955,7 +956,7 @@ impl Workspace {
         let project = self.snap.project.as_ref().map(|p| p.path.clone());
         let (width, height) = self
             .project()
-            .map_or((1920, 1080), |p| (p.settings.width, p.settings.height));
+            .map_or((1920, 1080), |p| (p.width(), p.height()));
         let (rate, channels) = self.project().map_or((48_000, 2), |p| {
             (p.settings.sample_rate, p.settings.channels)
         });
@@ -1392,7 +1393,7 @@ impl Workspace {
         }
         self.export.jobs_failed_unseen = false;
         let jobs = self.snap.jobs.clone();
-        let rate = self.project().map(|p| p.settings.fps.as_f64());
+        let rate = self.project().map(|p| p.fps().as_f64());
         let project = self.snap.project.as_ref().map(|p| p.path.clone());
         let mut open = true;
         let owner = self.main_window;
@@ -1449,7 +1450,11 @@ impl Workspace {
     pub(super) fn export_timeline(&mut self, ctx: &egui::Context, bundle: bool) {
         let (dialogs, folder) = (self.dialogs.clone(), self.export_folder());
         let ext = if bundle { "otioz" } else { "otio" };
-        let file = format!("{}.{ext}", self.project_stem());
+        let stem = match self.project().and_then(|p| p.timeline()) {
+            Some(t) => t.name.replace(['/', '\\'], "-"),
+            None => self.project_stem(),
+        };
+        let file = format!("{stem}.{ext}");
         let title = if bundle {
             "Export Timeline with Media"
         } else {
@@ -1502,6 +1507,10 @@ impl Workspace {
             if ws.export.flatten {
                 params["flatten"] = json!(true);
             }
+            if mode == ImportMode::New {
+                params["name"] = json!(ws.export.import_name.trim());
+                params["bin"] = json!(ws.snap.pool.bin);
+            }
             Otio::Importing {
                 ask: Ask::send(&ws.live, ctx, "timeline.import", params),
                 path,
@@ -1512,9 +1521,12 @@ impl Workspace {
             Otio::PickImport(p) => match p.take() {
                 None => Some(Otio::PickImport(p)),
                 Some(None) => None,
-                Some(Some(path)) => Some(Otio::Choose(path)),
+                Some(Some(path)) => {
+                    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+                    Some(Otio::Choose(path, stem.unwrap_or_default()))
+                }
             },
-            Otio::Choose(path) => {
+            Otio::Choose(path, mut name) => {
                 let empty = self
                     .project()
                     .is_none_or(|p| p.tracks.iter().all(|t| t.clips.is_empty()));
@@ -1528,6 +1540,17 @@ impl Workspace {
                                 .map_or(String::new(), |n| n.to_string_lossy().into_owned())
                         ));
                         ui.horizontal(|ui| {
+                            ui.label("Timeline Name");
+                            ui.text_edit_singleline(&mut name);
+                        });
+                        ui.horizontal(|ui| {
+                            let named = !name.trim().is_empty();
+                            if ui
+                                .add_enabled(named, egui::Button::new("New Timeline"))
+                                .clicked()
+                            {
+                                choice = Some(Some(ImportMode::New));
+                            }
                             if ui.button("Append to the Timeline").clicked() {
                                 choice = Some(Some(ImportMode::Append));
                             }
@@ -1549,9 +1572,12 @@ impl Workspace {
                     choice = Some(None);
                 }
                 match choice {
-                    None => Some(Otio::Choose(path)),
+                    None => Some(Otio::Choose(path, name)),
                     Some(None) => None,
-                    Some(Some(mode)) => Some(import(self, path, mode, None)),
+                    Some(Some(mode)) => {
+                        self.export.import_name = name;
+                        Some(import(self, path, mode, None))
+                    }
                 }
             }
             Otio::Missing {

@@ -17,8 +17,8 @@ fn no_common_time() -> Error {
     Error::invalid("No timecode in common with the timeline")
 }
 
-fn origin(p: &Project, m: &Media) -> i64 {
-    m.timecode_at(p.settings.fps).round() as i64
+fn origin(p: &Project, m: &Media) -> f64 {
+    m.timecode_at(p.fps())
 }
 
 #[derive(Clone, Copy)]
@@ -28,9 +28,11 @@ struct Lining<'a> {
 }
 
 impl Lining<'_> {
-    fn origin(&self, m: &Media) -> Option<i64> {
+    fn origin(&self, m: &Media) -> Option<f64> {
         match self.group {
-            Some(g) => g.at_of(&m.id),
+            Some(g) => g
+                .at_of(&m.id)
+                .map(|at| at as f64 * self.p.fps().over(self.p.settings.fps).as_f64()),
             None => Some(origin(self.p, m)),
         }
     }
@@ -39,16 +41,102 @@ impl Lining<'_> {
 fn shown(l: Lining<'_>, c: &Clip) -> Option<Range<i64>> {
     let m = l.p.media(&c.media).filter(|m| !m.is_still())?;
     let (a, b) = (c.source_at(c.start), c.source_at(c.end() - 1));
-    let o = l.origin(m)?;
+    let o = l.origin(m)?.floor() as i64;
     Some(o + a.min(b)..o + a.max(b) + 1)
+}
+
+fn exact_start(l: Lining<'_>, c: &Clip) -> Option<f64> {
+    let m = l.p.media(&c.media).filter(|m| !m.is_still())?;
+    let a = c.source_at(c.start).min(c.source_at(c.end() - 1));
+    Some(l.origin(m)? + a as f64 + c.phase)
 }
 
 fn meets(l: Lining<'_>, c: &Clip, file: &Range<i64>) -> bool {
     shown(l, c).is_some_and(|s| s.start < file.end && file.start < s.end)
 }
 
-fn lag(l: Lining<'_>, c: &Clip) -> i64 {
-    c.start - shown(l, c).map_or(0, |s| s.start)
+fn lag(l: Lining<'_>, c: &Clip) -> f64 {
+    c.start as f64 - exact_start(l, c).unwrap_or(0.0)
+}
+
+const SLACK: f64 = 1e-6;
+
+fn place(l: Lining<'_>, m: &Media) -> Option<f64> {
+    match l.group {
+        Some(g) => g.at_of(&m.id).map(|at| at as f64),
+        None => Some(m.timecode_at(l.p.settings.fps)),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Grid {
+    zero: f64,
+    step: f64,
+}
+
+impl Grid {
+    fn of(l: Lining<'_>, reference: &Clip) -> Self {
+        let step = l.p.settings.fps.over(l.p.fps()).as_f64();
+        let media = l.p.media(&reference.media).filter(|m| !m.is_still());
+        let first = (reference.source_at(reference.start))
+            .min(reference.source_at(reference.end() - 1)) as f64
+            + reference.phase;
+        let start = (media.and_then(|m| place(l, m))).map_or(0.0, |x| x + first * step);
+        Self {
+            zero: start - reference.start as f64 * step,
+            step,
+        }
+    }
+
+    fn place(self, at: i64) -> i64 {
+        (self.zero + at as f64 * self.step - SLACK).ceil() as i64
+    }
+
+    fn first(self, place: i64) -> i64 {
+        (((place - 1) as f64 - self.zero) / self.step + SLACK).floor() as i64 + 1
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Spot {
+    place: i64,
+    rate: f64,
+}
+
+impl Spot {
+    fn of(l: Lining<'_>, m: &Media) -> Option<Self> {
+        let project = l.p.settings.fps;
+        Some(Self {
+            place: (place(l, m)? + SLACK).floor() as i64,
+            rate: m.rate(project).over(project).as_f64(),
+        })
+    }
+
+    fn frame(self, place: i64) -> i64 {
+        ((place - self.place) as f64 * self.rate + SLACK).floor() as i64
+    }
+
+    fn shows(self, frame: i64) -> i64 {
+        self.place + (frame as f64 / self.rate - SLACK).ceil() as i64
+    }
+}
+
+pub struct Synced {
+    pub frame: i64,
+    pub offset: i64,
+}
+
+pub fn synced_at(p: &Project, m: &Media, at: i64, group: Option<&SyncGroup>) -> Option<Synced> {
+    let l = Lining { p, group };
+    let base = l.origin(m).unwrap_or_default().floor() as i64;
+    let whole = base..base + p.media_frames(m);
+    let grid = Grid::of(l, at_playhead(l, &whole, at)?);
+    let spot = Spot::of(l, m)?;
+    let place = grid.place(at);
+    Some(Synced {
+        frame: spot.frame(place),
+        offset: place - spot.place,
+    })
 }
 
 fn first_where<'a>(
@@ -94,10 +182,11 @@ fn by_playhead<'a>(l: Lining<'a>, file: &Range<i64>, at: i64) -> Option<&'a Clip
         .or_else(|| first_where(l, file, |_| true))
 }
 
-pub fn file_start_at(p: &Project, m: &Media, at: i64, group: Option<&SyncGroup>) -> Option<i64> {
+pub fn file_start_at(p: &Project, m: &Media, at: i64, group: Option<&SyncGroup>) -> Option<f64> {
     let l = Lining { p, group };
     let o = l.origin(m).unwrap_or_default();
-    let whole = o..o + p.media_frames(m);
+    let base = o.floor() as i64;
+    let whole = base..base + p.media_frames(m);
     at_playhead(l, &whole, at).map(|reference| lag(l, reference) + o)
 }
 
@@ -130,6 +219,7 @@ pub enum SourceLining {
 pub fn source_overwrite(
     p: &mut Project,
     src: &Source,
+    own: Option<(i64, i64)>,
     lining: SourceLining,
     playhead: Option<i64>,
     by_group: bool,
@@ -155,10 +245,11 @@ pub fn source_overwrite(
     let l = Lining { p, group };
     let (o, frames) = match m {
         Some(m) => (l.origin(m).unwrap_or_default(), p.media_frames(m)),
-        None => (0, default_length(p).max(src.range.1)),
+        None => (0.0, default_length(p).max(src.range.1)),
     };
-    let whole = o..o + frames;
-    let part = o + src.range.0..o + src.range.1;
+    let base = o.floor() as i64;
+    let whole = base..base + frames;
+    let part = base + src.range.0..base + src.range.1;
     let marks = (p.marks.mark_in, p.marks.mark_out);
     let reference = match marks {
         (None, None) => match lining {
@@ -178,22 +269,53 @@ pub fn source_overwrite(
         (a, b) => by_marks(l, &whole, a, b),
     }
     .ok_or_else(no_common_time)?;
-    let file_start = lag(l, reference) + o;
-    let (a, b) = match marks {
-        (None, None) => src.range,
-        (a, b) => (
-            a.map_or(0, |a| a - file_start),
-            b.map_or(frames, |b| b - file_start),
-        ),
+    let grid = Grid::of(l, reference);
+    let spot = m.and_then(|m| Spot::of(l, m));
+    let plain = (lag(l, reference) + o).round() as i64;
+    let first = |frame: i64| match spot {
+        Some(s) => grid.first(s.shows(frame)),
+        None => plain + frame,
     };
-    let a = a.max(0).max(-file_start);
-    let b = if m.is_some() { b.min(frames) } else { b };
+    let shown = |at: i64| match spot {
+        Some(s) => s.frame(grid.place(at)),
+        None => at - plain,
+    };
+    let (own, count) = match m {
+        Some(m) => (
+            own.unwrap_or_else(|| p.clip_span(m, src.range)),
+            p.clip_frames(m),
+        ),
+        None => (src.range, frames),
+    };
+    let file = (first(0), first(count));
+    let (from, to) = match marks {
+        (None, None) => {
+            let start = match playhead {
+                Some(at) if shown(at) == own.0 => at,
+                _ => first(own.0),
+            };
+            (start, start + src.range.1 - src.range.0)
+        }
+        (a, b) => (a.unwrap_or(file.0), b.unwrap_or(file.1)),
+    };
+    let a = from.max(0).max(file.0);
+    let b = if m.is_some() { to.min(file.1) } else { to };
     if a >= b {
         return Err(no_common_time());
     }
+    let marked = marks == (None, None) && a == from;
+    let (first_source, phase) = match (marked, m) {
+        (true, _) => (src.range.0, src.phase),
+        (false, Some(m)) => {
+            let ((start, _), phase) = p.on_timeline(m, (shown(a).max(0), count));
+            (start, phase)
+        }
+        (false, None) => (shown(a).max(0), 0.0),
+    };
+    let source = (first_source, first_source + b - a);
     let kept = match m {
-        Some(m) => uncovered(a, b, &p.left_out_frames(m, src.phase)),
-        None => vec![(a, b)],
+        Some(m) => uncovered(source.0, source.1, &p.left_out_frames(m, phase)),
+        None => vec![source],
     };
     let (Some(first), Some(last)) = (kept.first(), kept.last()) else {
         return Err(Error::invalid(
@@ -201,13 +323,15 @@ pub fn source_overwrite(
         ));
     };
     let reference = reference.id.clone();
-    let (start, end) = (file_start + first.0, file_start + last.1);
+    let place = |range: (i64, i64)| a + range.0 - source.0;
+    let (start, end) = (place(*first), place(*last) + last.1 - last.0);
     let mut clips = Vec::with_capacity(kept.len());
     for &range in &kept {
         clips.push(make_clip(
             p,
             &Source {
                 range,
+                phase,
                 ..src.clone()
             },
         )?);
@@ -223,7 +347,7 @@ pub fn source_overwrite(
     let stops_at_end = clips[0].video && p.tracks.len() > tracks_before;
     let mut ids = Vec::with_capacity(kept.len());
     for (clip, range) in clips.into_iter().zip(&kept) {
-        ids.extend(place_block(p, ti, vec![clip], file_start + range.0));
+        ids.extend(place_block(p, ti, vec![clip], place(*range)));
     }
     fix_audio(p, ti);
     Ok(Placed {

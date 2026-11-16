@@ -566,7 +566,7 @@ impl Workspace {
         let found = self.stored_title(id);
         self.looks.reread();
         let size = self.project().map_or([1.0, 1.0], |p| {
-            [f64::from(p.settings.width), f64::from(p.settings.height)]
+            [f64::from(p.width()), f64::from(p.height())]
         });
         let mut d = TitleDialog::new(id, found.as_ref(), size);
         d.focus = focus;

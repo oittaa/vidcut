@@ -8,7 +8,7 @@ use crate::editor::Env;
 use crate::error::{Error, Result};
 use crate::model::{AngleSync, GroupClip, GroupRow, Marks, Media, Project, SyncGroup};
 use crate::ops::{self, has_bin};
-use crate::time::{Rational, format_timecode, timecode_frames};
+use crate::time::{Rational, format_timecode, rescale, timecode_frames};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SoundPair {
@@ -56,6 +56,8 @@ pub struct SyncRow {
     pub clips: Vec<SyncClip>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<i64>,
+    #[serde(skip)]
+    pub source: Option<f64>,
     pub active: bool,
 }
 
@@ -66,23 +68,32 @@ pub enum SyncOpen<'a> {
     Files(Vec<&'a Media>),
 }
 
+pub fn timeline_frames(p: &Project, frames: i64) -> i64 {
+    rescale(frames, p.settings.fps, p.fps())
+}
+
+fn file_frames(p: &Project, m: &Media) -> i64 {
+    p.frames_of(m, p.settings.fps)
+}
+
 fn origin(p: &Project, m: &Media) -> i64 {
     m.timecode_at(p.settings.fps).floor() as i64
 }
 
 fn used(p: &Project, m: &Media, whole: bool) -> Range<i64> {
     if whole || m.is_still() {
-        return 0..p.media_frames(m);
+        return 0..file_frames(p, m);
     }
-    let (a, b) = p.marked_frames(m);
+    let (a, b) = p.marks_at(m, p.settings.fps);
     a..b
 }
 
 fn record_start(p: &Project, m: &Media, sync: AngleSync, part: &Range<i64>) -> i64 {
+    let marks = p.marks_at(m, p.settings.fps);
     let mark = match sync {
         AngleSync::Timecode | AngleSync::Sound => return origin(p, m) + part.start,
-        AngleSync::In => p.marked_frames(m).0,
-        AngleSync::Out => p.marked_frames(m).1,
+        AngleSync::In => marks.0,
+        AngleSync::Out => marks.1,
     };
     part.start - mark
 }
@@ -93,7 +104,7 @@ fn start_timecode(p: &Project, start: i64) -> String {
 }
 
 pub fn visible(p: &Project, c: &GroupClip) -> i64 {
-    p.media(&c.media).map_or(0, |m| p.media_frames(m)) - c.head - c.tail
+    p.media(&c.media).map_or(0, |m| file_frames(p, m)) - c.head - c.tail
 }
 
 pub fn row_file_at<'a>(p: &Project, row: &'a GroupRow, at: i64) -> Option<(&'a GroupClip, i64)> {
@@ -120,7 +131,7 @@ fn kept_clip(p: &Project, (m, _, part): &Placed<'_>, place: i64, start: i64) -> 
         at: start,
         hidden: 0,
         head: part.start + start - place,
-        tail: p.media_frames(m) - part.end,
+        tail: file_frames(p, m) - part.end,
     }
 }
 
@@ -224,7 +235,7 @@ fn ruled_rows(p: &Project, placed: &[Placed<'_>], sync: AngleSync) -> (Vec<Group
 fn whole_files<'a>(p: &Project, files: &[&'a Media]) -> Vec<Placed<'a>> {
     files
         .iter()
-        .map(|m| (*m, origin(p, m), 0..p.media_frames(m)))
+        .map(|m| (*m, origin(p, m), 0..file_frames(p, m)))
         .collect()
 }
 
@@ -698,25 +709,27 @@ fn sync_row(
             continue;
         };
         let start = ops::file_start_at(p, m, at, group);
-        let frames = visible(p, c);
+        let head = timeline_frames(p, c.head);
+        let frames = timeline_frames(p, c.head + visible(p, c)) - head;
+        let shown = c.head..c.head + visible(p, c);
         if under.is_none()
-            && let Some(frame) = start
-                .map(|s| at - s)
-                .filter(|f| (c.head..c.head + frames).contains(f))
+            && let Some(s) = ops::synced_at(p, m, at, group).filter(|s| shown.contains(&s.offset))
         {
-            under = Some((c.media.clone(), frame));
+            let per = m.rate(p.settings.fps).over(p.fps()).as_f64();
+            under = Some((c.media.clone(), s.frame, s.frame as f64 / per));
         }
         clips.push(SyncClip {
             media: c.media.clone(),
             frames,
-            head: c.head,
-            start: start.map(|s| s + c.head),
+            head,
+            start: start.map(|s| s.floor() as i64 + head),
         });
     }
-    let (media, frame) = match under {
-        Some((media, frame)) => (media, Some(frame)),
+    let (media, frame, source) = match under {
+        Some((media, frame, x)) => (media, Some(frame), Some(x)),
         None => (
             clips.first().map(|c| c.media.clone()).unwrap_or_default(),
+            None,
             None,
         ),
     };
@@ -727,6 +740,7 @@ fn sync_row(
         active: clips.iter().any(|c| shown == Some(c.media.as_str())),
         clips,
         frame,
+        source,
     }
 }
 
@@ -778,19 +792,21 @@ pub fn pick(p: &mut Project, media: &str, at: i64) -> Result<Marks> {
     let m = p
         .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    let frames = p.media_frames(m);
+    let frames = p.clip_frames(m);
     let group = group_at_playhead(p, at)
         .filter(|g| g.at_of(media).is_some())
         .or_else(|| p.group_of(media));
-    let start = ops::file_start_at(p, m, at, group)
-        .filter(|s| (0..frames).contains(&(at - s)))
+    let own = |t: i64| ops::synced_at(p, m, t, group).map(|s| s.frame);
+    let here = own(at)
+        .filter(|f| (0..frames).contains(f))
         .ok_or_else(|| Error::invalid(format!("{} has no frame at the playhead", m.name)))?;
     let end = p.end();
     let (a, b) = if at > end {
-        (end - start, at - start)
+        let a = own(end).unwrap_or(here);
+        (a, own(at - 1).map_or(here, |f| f + 1))
     } else {
-        let length = (PICK_SECONDS * p.settings.fps.as_f64()).round() as i64;
-        (at - start, at - start + length)
+        let length = (PICK_SECONDS * m.rate(p.settings.fps).as_f64()).round() as i64;
+        (here, here + length)
     };
     let (a, b) = (a.max(0), b.min(frames));
     if a >= b {
@@ -907,7 +923,7 @@ pub fn source_grid(p: &Project, media: &[String]) -> SourceGrid {
         .iter()
         .filter_map(|id| p.media(id))
         .filter(|m| m.info.video.is_some())
-        .map(|m| (m, origin(p, m), p.media_frames(m)))
+        .map(|m| (m, m.timecode_at(p.fps()).floor() as i64, p.media_frames(m)))
         .filter(|(.., frames)| *frames > 0)
         .collect();
     let mut spans: Vec<(i64, i64)> = files.iter().map(|(_, s, n)| (*s, s + n)).collect();

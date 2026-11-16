@@ -336,7 +336,7 @@ pub fn cue_at(t: &SubtitleTrack, frame: i64) -> Option<usize> {
 }
 
 pub fn default_length(p: &Project) -> i64 {
-    p.settings.fps.secs_to_frames(DEFAULT_SECS).max(1)
+    p.fps().secs_to_frames(DEFAULT_SECS).max(1)
 }
 
 pub fn checked_words(text: &str, duration: i64, words: &[i64]) -> Result<()> {
@@ -841,7 +841,7 @@ pub struct Imported {
 const GRID_SLACK: f64 = 0.0015;
 
 fn label_frames(p: &Project, t: f64) -> i64 {
-    let fps = p.settings.fps;
+    let fps = p.fps();
     let base = fps.timecode_base();
     let mut whole = t.max(0.0).floor() as i64;
     let mut f = ((t.max(0.0) - whole as f64) * base as f64).round() as i64;
@@ -850,7 +850,7 @@ fn label_frames(p: &Project, t: f64) -> i64 {
         f -= base;
     }
     let minutes = whole / 60;
-    let dropped = if p.settings.counts_drop_frame() {
+    let dropped = if p.counts_drop_frame() {
         fps.dropped_per_minute()
     } else {
         0
@@ -861,15 +861,15 @@ fn label_frames(p: &Project, t: f64) -> i64 {
 fn frames_of(p: &Project, t: f64, base: SubtitleTimeBase) -> i64 {
     match base {
         SubtitleTimeBase::Label => label_frames(p, t),
-        _ => (t * p.settings.fps.as_f64()).round() as i64,
+        _ => (t * p.fps().as_f64()).round() as i64,
     }
 }
 
 const REAL_MISS: f64 = 0.005;
 
 fn guess_base(p: &Project, cues: &[Timed]) -> (SubtitleTimeBase, Option<String>) {
-    let fps = p.settings.fps.as_f64();
-    let nominal = p.settings.fps.timecode_base() as f64;
+    let fps = p.fps().as_f64();
+    let nominal = p.fps().timecode_base() as f64;
     let (mut fractions, mut labels, mut reals) = (0usize, 0usize, 0usize);
     for t in cues.iter().flat_map(|c| [c.start, c.end]) {
         let ms = (t * 1000.0).round() as i64;
@@ -898,13 +898,12 @@ fn guess_base(p: &Project, cues: &[Timed]) -> (SubtitleTimeBase, Option<String>)
 }
 
 fn timecode_offset(p: &Project, first: i64, forced: bool) -> i64 {
-    let start = p.settings.start_tc;
+    let start = p.start_tc();
     if start > 0 {
         return if forced || first >= start { start } else { 0 };
     }
-    let hour =
-        crate::time::timecode_frames(1, 0, 0, 0, p.settings.fps, p.settings.counts_drop_frame())
-            .unwrap_or_else(|| (3600.0 * p.settings.fps.as_f64()).round() as i64);
+    let hour = crate::time::timecode_frames(1, 0, 0, 0, p.fps(), p.counts_drop_frame())
+        .unwrap_or_else(|| (3600.0 * p.fps().as_f64()).round() as i64);
     if first >= hour && (forced || p.end() <= hour) {
         hour
     } else {
@@ -1030,10 +1029,10 @@ pub fn import(
 }
 
 pub fn collect(p: &Project, ti: usize, range: (i64, i64), timecode: bool) -> Vec<Timed> {
-    let fps = p.settings.fps.as_f64();
+    let fps = p.fps().as_f64();
     let (a, b) = range;
     let (zero, base) = if timecode {
-        (0, subtitles::origin(&p.settings))
+        (0, subtitles::origin(p))
     } else {
         (a, 0.0)
     };

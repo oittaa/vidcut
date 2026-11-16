@@ -82,7 +82,27 @@ pub fn describe_at(
         "bins.add" => format!("New bin {}", d.text("path")),
         "bins.remove" => format!("Delete bin {}", d.text("path")),
         "bins.rename" => format!("Rename bin {} to {}", d.text("path"), d.text("to")),
+        "timeline.new" => match d.text("name").as_str() {
+            "" => "New timeline".to_string(),
+            name => format!("New timeline {name}"),
+        },
+        "timeline.open" => format!("Set {} as Current Timeline", d.timeline("timeline")),
+        "timeline.rename" => format!(
+            "Rename timeline {} to {}",
+            d.timeline("timeline"),
+            d.text("name")
+        ),
+        "timeline.duplicate" => match d.text("timeline").as_str() {
+            "" => "Duplicate the timeline".to_string(),
+            _ => format!("Duplicate timeline {}", d.timeline("timeline")),
+        },
+        "timeline.delete" => format!("Delete timeline {}", d.timeline("timeline")),
+        "timeline.set" => match d.text("timeline").as_str() {
+            "" => "Change the timeline settings".to_string(),
+            _ => format!("Change the settings of timeline {}", d.timeline("timeline")),
+        },
         "timeline.import" => match d.text("mode").as_str() {
+            "append" => format!("Import timeline {} after the last clip", d.file("path")),
             "replace" => format!("Import timeline {}, replacing the timeline", d.file("path")),
             "compound" => format!("Import timeline {} as a compound clip", d.file("path")),
             "media" => format!("Import the media of {}", d.file("path")),
@@ -670,7 +690,7 @@ impl Words<'_> {
     fn time(&self, key: &str) -> String {
         let one = |v: &Value| match v {
             Value::Number(n) => match (n.as_i64(), self.project) {
-                (Some(f), Some(p)) => p.settings.timecode(f),
+                (Some(f), Some(p)) => p.timecode(f),
                 (Some(f), None) => format!("{f}f"),
                 _ => n.to_string(),
             },
@@ -678,11 +698,11 @@ impl Words<'_> {
                 (Ok(t), Some(p)) => p
                     .time_context(self.playhead)
                     .resolve(&t)
-                    .map_or_else(|_| self.unresolved(s), |f| p.settings.timecode(f)),
+                    .map_or_else(|_| self.unresolved(s), |f| p.timecode(f)),
                 _ => self.unresolved(s),
             },
             _ => match (self.playhead, self.project) {
-                (Some(f), Some(p)) => p.settings.timecode(f),
+                (Some(f), Some(p)) => p.timecode(f),
                 _ => "the playhead".into(),
             },
         };
@@ -701,7 +721,7 @@ impl Words<'_> {
             _ => None,
         };
         match (frames, self.project) {
-            (Some(f), Some(p)) => p.settings.length_timecode(f),
+            (Some(f), Some(p)) => p.length_timecode(f),
             _ => self.text(key),
         }
     }
@@ -713,13 +733,7 @@ impl Words<'_> {
                 .and_then(|r| p.time_context(None).range(&r).ok())
                 .map_or_else(
                     || s.clone(),
-                    |(a, b)| {
-                        format!(
-                            "{}\u{2013}{}",
-                            p.settings.timecode(a),
-                            p.settings.timecode(b)
-                        )
-                    },
+                    |(a, b)| format!("{}\u{2013}{}", p.timecode(a), p.timecode(b)),
                 ),
             (Value::String(s), None) => s.clone(),
             (Value::Null, _) => "the timeline marks".into(),
@@ -747,11 +761,30 @@ impl Words<'_> {
             return "?".into();
         }
         let name = |id: &String| {
-            self.project
-                .and_then(|p| p.media(id))
-                .map_or_else(|| id.clone(), |m| m.name.clone())
+            let p = self.project;
+            (p.and_then(|p| p.media(id)).map(|m| m.name.clone()))
+                .or_else(|| p.and_then(|p| p.find_timeline(id)).map(|t| t.name.clone()))
+                .unwrap_or_else(|| id.clone())
         };
         match ids.len() {
+            1..=3 => ids.iter().map(name).collect::<Vec<_>>().join(", "),
+            n => format!("{} and {} more", name(&ids[0]), n - 1),
+        }
+    }
+
+    fn timeline(&self, key: &str) -> String {
+        let ids = self.list(key);
+        let name = |id: &String| {
+            (self.project)
+                .and_then(|p| {
+                    crate::ops::timelines::find(p, id)
+                        .ok()
+                        .and_then(|t| p.find_timeline(&t).map(|t| t.name.clone()))
+                })
+                .unwrap_or_else(|| id.clone())
+        };
+        match ids.len() {
+            0 => "?".into(),
             1..=3 => ids.iter().map(name).collect::<Vec<_>>().join(", "),
             n => format!("{} and {} more", name(&ids[0]), n - 1),
         }
@@ -822,7 +855,7 @@ impl Words<'_> {
             Some("tail") => clip.end(),
             _ => clip.start,
         };
-        format!(" at {} on {}", p.settings.timecode(at), p.tracks[t].id)
+        format!(" at {} on {}", p.timecode(at), p.tracks[t].id)
     }
 
     fn track_of(&self, key: &str) -> Option<String> {
@@ -1016,7 +1049,7 @@ impl Words<'_> {
             Ok(n) if spec.is_relative() => frames(n),
             Ok(n) => match media {
                 Some(m) => p.clip_timecode(m, n),
-                None => p.settings.length_timecode(n),
+                None => p.length_timecode(n),
             },
             Err(_) => self.text("duration"),
         }

@@ -412,7 +412,7 @@ pub fn findable(p: &mut Project, id: &str, subject: Subject, replace: bool) -> R
 pub fn file_frames(p: &Project, c: &Clip) -> ((i64, i64), f64) {
     let clock = FileClock::of(p, c);
     let (lo, hi) = c.shown();
-    let rate = clock.rate(p.settings.fps.as_f64());
+    let rate = clock.rate(p.fps().as_f64());
     ((clock.file(lo), clock.file(hi)), rate)
 }
 

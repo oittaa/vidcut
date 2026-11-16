@@ -646,6 +646,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         clipboard: Vec::new(),
         key_clipboard: Vec::new(),
         cue_clipboard: Vec::new(),
+        clipboard_fps: None,
         log: VecDeque::new(),
         log_seq: 0,
         notices: Arc::new(VecDeque::new()),
@@ -711,6 +712,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         duck_measuring: HashSet::new(),
         duck_failed: HashSet::new(),
         duck_kept: HashMap::new(),
+        playheads: HashMap::new(),
+        open_timeline: None,
     };
     live.watch_omarchy();
     let project = config.project;
@@ -925,6 +928,7 @@ struct Live {
     clipboard: Vec<vidcut_core::model::TrackClip>,
     key_clipboard: Vec<vidcut_core::request::CopiedKey>,
     cue_clipboard: Vec<vidcut_core::model::TrackCue>,
+    clipboard_fps: Option<vidcut_core::time::Rational>,
     log: VecDeque<LogEntry>,
     log_seq: u64,
     notices: Arc<VecDeque<Notice>>,
@@ -981,6 +985,8 @@ struct Live {
     duck_measuring: HashSet<Unmeasured>,
     duck_failed: HashSet<Unmeasured>,
     duck_kept: HashMap<crate::env::MeasureKey, vidcut_core::duck::Measured>,
+    playheads: HashMap<String, i64>,
+    open_timeline: Option<(PathBuf, String)>,
     render: render_cache::Background,
     drops: drops::Drops,
 }
@@ -1955,7 +1961,7 @@ impl Live {
                         ))
                     })
                     .collect();
-                let near = p.settings.fps.as_f64().round() as i64;
+                let near = p.fps().as_f64().round() as i64;
                 let solo = p.any_solo();
                 let clips = p
                     .tracks
@@ -2559,7 +2565,7 @@ impl Live {
                     && self
                         .project
                         .as_ref()
-                        .is_some_and(|p| p.project().settings.start_tc > 0) =>
+                        .is_some_and(|p| p.project().start_tc() > 0) =>
             {
                 format!(
                     "{} subtitle(s) on {}, from the timeline's start: the file isn't timed in                      the timeline's timecode",
@@ -2574,7 +2580,7 @@ impl Live {
                         / self
                             .project
                             .as_ref()
-                            .map_or(1.0, |p| p.project().settings.fps.as_f64());
+                            .map_or(1.0, |p| p.project().fps().as_f64());
                     format!("Ripple Delete Silence: cut {n} silence(s), {secs:.1} s")
                 }
             },
@@ -2755,13 +2761,11 @@ impl Live {
                 width,
                 height,
                 drop_frame,
-                start_tc,
             } => {
                 let format = crate::session::size(width, height).map(|size| Format {
                     fps,
                     size,
                     drop_frame,
-                    start_tc,
                     ..Format::default()
                 });
                 if vidcut_core::editor::is_timeline_file(&path) {
@@ -3631,7 +3635,10 @@ impl Live {
         handed: Handed,
     ) -> Result<Response> {
         match &mut envelope.request {
-            Request::EditPaste { clips, cues, .. } if clips.is_none() && cues.is_none() => {
+            Request::EditPaste {
+                clips, cues, fps, ..
+            } if clips.is_none() && cues.is_none() => {
+                *fps = fps.or(self.clipboard_fps);
                 if !self.clipboard.is_empty() {
                     *clips = Some(self.clipboard.clone());
                 } else if !self.cue_clipboard.is_empty() {
@@ -3733,6 +3740,7 @@ impl Live {
         if let Ok(r) = &result {
             match &request {
                 Request::EditCopy { .. } | Request::EditCut { .. } => {
+                    self.clipboard_fps = serde_json::from_value(r.result["fps"].clone()).ok();
                     if let Ok(clips) = serde_json::from_value(r.result["clips"].clone()) {
                         self.clipboard = clips;
                         self.key_clipboard.clear();
@@ -3829,6 +3837,8 @@ impl Live {
         let Some(open) = &self.project else {
             self.project_snap = None;
             self.missing_watch.watch(Vec::new(), Vec::new());
+            self.playheads.clear();
+            self.open_timeline = None;
             return;
         };
         let folder = AvEnv::for_project(open.store.path()).proxy_dir();
@@ -3879,8 +3889,38 @@ impl Live {
         let _ = response;
         self.check_media();
         self.schedule_timeline();
+        self.switch_playhead();
         self.refresh_source();
         self.dirty = true;
+    }
+
+    fn switch_playhead(&mut self) {
+        let Some(open) = &self.project else { return };
+        let p = open.project();
+        let path = open.store.path().to_path_buf();
+        let now = p.open_id().map(|id| (path.clone(), id.to_string()));
+        if self
+            .open_timeline
+            .as_ref()
+            .is_some_and(|(at, _)| *at != path)
+        {
+            self.playheads.clear();
+        }
+        self.playheads
+            .retain(|id, _| p.timelines.iter().any(|t| t.id == *id));
+        if now == self.open_timeline {
+            return;
+        }
+        let was = std::mem::replace(&mut self.open_timeline, now.clone());
+        let same_project = was.as_ref().is_some_and(|(at, _)| *at == path);
+        if let Some((_, old)) = was.filter(|_| same_project) {
+            self.playheads.insert(old, self.player.position(TIMELINE));
+        }
+        let Some((_, id)) = now else { return };
+        if same_project {
+            let at = self.playheads.get(&id).copied().unwrap_or(0);
+            self.seek(TIMELINE, at, false);
+        }
     }
 
     fn refresh_transcribed(&mut self, job_ended: bool) {
@@ -4008,7 +4048,7 @@ impl Live {
     fn project_fps(&self) -> f64 {
         self.project
             .as_ref()
-            .map_or(30.0, |o| o.project().settings.fps.as_f64())
+            .map_or(30.0, |o| o.project().fps().as_f64())
     }
 
     fn reviewed_frames(&self) -> i64 {
@@ -4798,9 +4838,9 @@ impl Live {
                     self.multi_marks.clone()
                 };
                 TimeContext {
-                    fps: p.settings.fps,
+                    fps: p.fps(),
                     start_tc: self.source_grid.start,
-                    drop_frame: p.settings.counts_drop_frame(),
+                    drop_frame: p.counts_drop_frame(),
                     end: self.source_grid.frames,
                     mark_in: marks.mark_in,
                     mark_out: marks.mark_out,
@@ -4820,9 +4860,9 @@ impl Live {
                     })
                     .unwrap_or_default();
                 TimeContext {
-                    fps: p.settings.fps,
+                    fps: p.fps(),
                     start_tc: 0,
-                    drop_frame: p.settings.counts_drop_frame(),
+                    drop_frame: p.counts_drop_frame(),
                     end: self.tape.last().map_or(0, |e| e.start + e.frames),
                     mark_in: marks.0,
                     mark_out: marks.1,
@@ -5042,8 +5082,8 @@ impl Live {
             self.source_media.as_deref(),
         ))
         .unwrap_or_else(|| "-".into());
-        let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps);
-        let drop = p.is_some_and(|p| p.settings.counts_drop_frame());
+        let fps = p.map_or(Rational::new(30, 1).expect("valid"), |p| p.fps());
+        let drop = p.is_some_and(|p| p.counts_drop_frame());
         let player = |id: PlayerId, (fps, drop, stc): (Rational, bool, i64)| {
             let snap = self.player.snap(id);
             json!({
@@ -5114,7 +5154,7 @@ impl Live {
             "last_source": self.last_source,
             "source_media": self.source_media,
             "source": source,
-            "timeline": player(TIMELINE, (fps, drop, p.map_or(0, |p| p.settings.start_tc))),
+            "timeline": player(TIMELINE, (fps, drop, p.map_or(0, |p| p.start_tc()))),
             "late": late,
             "skipped": skipped,
             "selection": self.selection,

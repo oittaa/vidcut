@@ -283,7 +283,7 @@ fn ducking_of(
     lanes: Vec<usize>,
     (a, b): (i64, i64),
 ) -> Ducking {
-    let s = &p.settings;
+    let s = &p.flat_settings();
     let fps = s.fps.as_f64();
     let rate = f64::from(s.sample_rate);
     let samples = |ms: f64| ms * rate / 1000.0;
@@ -322,7 +322,7 @@ fn ducking_of(
                 sources.push(DuckSource {
                     media: c.media.clone(),
                     stream: au.stream,
-                    origin: origin + c.phase / p.settings.fps.as_f64(),
+                    origin: origin + c.phase / p.fps().as_f64(),
                     frames: (a, b),
                     start: a,
                     source_in: c.source_at(a),
@@ -498,7 +498,7 @@ pub fn graph(
     (a, b): (i64, i64),
     env: &dyn Env,
 ) -> Result<Graph> {
-    let s = &p.settings;
+    let s = &p.flat_settings();
     let (fps, f, rate) = (s.fps, s.fps.as_f64(), f64::from(s.sample_rate));
     let mut ducking = ducking_of(p, target, d, Vec::new(), (a, b));
     ducking

@@ -258,10 +258,10 @@ impl Thumbs {
     pub fn prepare(&mut self, ctx: &egui::Context, p: &Project) -> &HashMap<String, TextureId> {
         self.shown.clear();
         let h = THUMB_HEIGHT;
-        let w = ((f64::from(h) * f64::from(p.settings.width) / f64::from(p.settings.height.max(1)))
-            .round() as u32)
+        let w = ((f64::from(h) * f64::from(p.width()) / f64::from(p.height().max(1))).round()
+            as u32)
             .max(1);
-        let drawn_for = (w, p.settings.height);
+        let drawn_for = (w, p.height());
         if self.drawn_for != drawn_for {
             self.drawn_for = drawn_for;
             self.kept.clear();
@@ -273,7 +273,7 @@ impl Thumbs {
             let id = match self.kept.get(t) {
                 Some(texture) => texture.id(),
                 None => {
-                    let sprite = vidcut_av::burn::title(t, w, h, p.settings.height)
+                    let sprite = vidcut_av::burn::title(t, w, h, p.height())
                         .into_iter()
                         .next();
                     let dy = if t.moves() {
@@ -344,7 +344,7 @@ impl Workspace {
             "Drag a title onto a timeline, or double-click to add it.",
         ));
         ui.add_space(6.0);
-        let (w, h) = (p.settings.width.max(1), p.settings.height.max(1));
+        let (w, h) = (p.width().max(1), p.height().max(1));
         let size = (
             RENDER_WIDTH,
             ((f64::from(RENDER_WIDTH) * f64::from(h) / f64::from(w)).round() as u32).max(1),

@@ -421,7 +421,7 @@ fn subtitle_card(painter: &egui::Painter, rect: Rect, m: &Media) {
 }
 
 fn subtitle_frames(p: &Project, m: &Media) -> i64 {
-    ((m.info.duration - m.info.start_time).max(0.0) * p.settings.fps.as_f64()).round() as i64
+    ((m.info.duration - m.info.start_time).max(0.0) * p.fps().as_f64()).round() as i64
 }
 
 fn marks(
@@ -660,6 +660,10 @@ impl Workspace {
                             self.send("bins.add", json!({ "path": new_bin(p, &view.bin) }));
                             ui.close();
                         }
+                        if ui.button("Create New Timeline…").clicked() {
+                            self.open_new_timeline();
+                            ui.close();
+                        }
                         if ui.button("Import Media…").clicked() {
                             self.import_media();
                             ui.close();
@@ -670,11 +674,12 @@ impl Workspace {
                         }
                     });
                 }
-                let mut compounds = false;
+                let mut items = false;
                 if let Some(p) = project {
-                    compounds = self.pooled_compounds(ui, p, &view.bin);
+                    items = self.pooled_timelines(ui, p, &view.bin);
+                    items |= self.pooled_compounds(ui, p, &view.bin);
                 }
-                if folders.is_empty() && media.is_empty() && !compounds {
+                if folders.is_empty() && media.is_empty() && !items {
                     ui.add_space(20.0);
                     ui.vertical_centered(|ui| {
                         if searching {
@@ -733,7 +738,7 @@ impl Workspace {
         }
         ui.horizontal_wrapped(|ui| {
             for k in shown {
-                let length = p.settings.length_timecode(k.frames());
+                let length = p.length_timecode(k.frames());
                 let r = ui
                     .button(format!("{}  {length}", k.name))
                     .interact(Sense::drag());
@@ -1593,7 +1598,7 @@ impl Workspace {
         let (Some(w), Some(p)) = (self.snap.waveforms.get(&m.id), self.project()) else {
             return no_pictures(painter, rect, m);
         };
-        let secs = p.settings.fps.frames_to_secs(p.media_frames(m));
+        let secs = p.fps().frames_to_secs(p.media_frames(m));
         let origin = m.origin();
         let per_px = secs / f64::from(rect.width().max(1.0));
         painter.rect_filled(rect, CornerRadius::same(3), theme::colors().audio);

@@ -14,49 +14,267 @@ use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, label_frames
 
 pub const STILL_LIMIT_SECS: f64 = 63_600.0;
 
-/// A whole project: one timeline (deviation X2) plus its media.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(from = "ProjectFile")]
 pub struct Project {
+    pub rev: u64,
+    pub edited: Option<u64>,
+    pub settings: Settings,
+    pub media: Vec<Media>,
+    pub tracks: Vec<Track>,
+    pub compounds: Vec<PooledCompound>,
+    pub marks: Marks,
+    pub tape_marks: TapeMarks,
+    pub markers: Vec<Marker>,
+    pub subtitles: Vec<SubtitleTrack>,
+    pub timelines: Vec<Timeline>,
+    pub recent: Vec<String>,
+    pub next_id: NextIds,
+    pub bins: Vec<String>,
+    pub groups: Vec<SyncGroup>,
+    pub speakers: Speakers,
+}
+
+/// A whole project: its media and its timelines.
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectFile {
     /// Increases with every change, including undo/redo. Mutations may pass
     /// `if_rev` to fail instead of clobbering a concurrent edit.
     pub rev: u64,
     /// When the project last changed (an edit, undo or redo), in
     /// milliseconds since 1970 UTC; `None` before its first change. For
     /// showing people when it was edited: scripts compare `rev`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub edited: Option<u64>,
     pub settings: Settings,
     /// The media, in pool order.
     pub media: Vec<Media>,
-    /// Video tracks `V1…` first, then audio tracks `A1…`.
-    pub tracks: Vec<Track>,
+    /// The timelines, in the order they were made. Left out when there are
+    /// none.
+    #[serde(default)]
+    pub timelines: Vec<Timeline>,
+    /// The ids of the timelines, the open one first, then the others from
+    /// the one open most recently. Left out when there are no timelines.
+    #[serde(default)]
+    pub recent: Vec<String>,
     /// The compound clips in the Media tab. Left out when there are none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub compounds: Vec<PooledCompound>,
-    /// Timeline In/Out marks.
-    pub marks: Marks,
     /// Source Tape In/Out (decision D17). Empty until the tape is marked.
     /// Frames are tape frames of `order`; a span on one clip is also that
     /// clip's source marks.
-    #[serde(default, skip_serializing_if = "TapeMarks::is_empty")]
+    #[serde(default)]
     pub tape_marks: TapeMarks,
-    pub markers: Vec<Marker>,
-    /// Subtitle tracks `S1…`, from the one nearest the video up.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub subtitles: Vec<SubtitleTrack>,
     pub next_id: NextIds,
     /// Bins of the Media tab, as `/`-separated paths below the top level
     /// (`Interviews`, `Interviews/Day 1`), sorted.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub bins: Vec<String>,
     /// Synced groups: pool items that line up whole files (`multicam.create`).
     /// Left out while there are none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub groups: Vec<SyncGroup>,
     /// Who speaks: names, the files' speakers joined as one person, and
     /// words given to another (`speakers.*`).
-    #[serde(default, skip_serializing_if = "Speakers::is_empty")]
+    #[serde(default)]
     pub speakers: Speakers,
+}
+
+#[derive(Serialize)]
+struct ProjectOut<'a> {
+    rev: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    edited: Option<u64>,
+    settings: &'a Settings,
+    media: &'a [Media],
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    timelines: Vec<TimelineOut<'a>>,
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    recent: &'a [String],
+    #[serde(skip_serializing_if = "<[PooledCompound]>::is_empty")]
+    compounds: &'a [PooledCompound],
+    #[serde(skip_serializing_if = "TapeMarks::is_empty")]
+    tape_marks: &'a TapeMarks,
+    next_id: &'a NextIds,
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    bins: &'a [String],
+    #[serde(skip_serializing_if = "<[SyncGroup]>::is_empty")]
+    groups: &'a [SyncGroup],
+    #[serde(skip_serializing_if = "Speakers::is_empty")]
+    speakers: &'a Speakers,
+}
+
+impl Serialize for Project {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let open = self.recent.first();
+        ProjectOut {
+            rev: self.rev,
+            edited: self.edited,
+            settings: &self.settings,
+            media: &self.media,
+            timelines: (self.timelines.iter())
+                .map(|t| match Some(&t.id) == open {
+                    true => TimelineOut::of(t, self.sheet()),
+                    false => TimelineOut::of(t, t.sheet()),
+                })
+                .collect(),
+            recent: &self.recent,
+            compounds: &self.compounds,
+            tape_marks: &self.tape_marks,
+            next_id: &self.next_id,
+            bins: &self.bins,
+            groups: &self.groups,
+            speakers: &self.speakers,
+        }
+        .serialize(s)
+    }
+}
+
+impl From<ProjectFile> for Project {
+    fn from(f: ProjectFile) -> Self {
+        let mut p = Self {
+            rev: f.rev,
+            edited: f.edited,
+            settings: f.settings,
+            media: f.media,
+            tracks: Vec::new(),
+            compounds: f.compounds,
+            marks: Marks::default(),
+            tape_marks: f.tape_marks,
+            markers: Vec::new(),
+            subtitles: Vec::new(),
+            timelines: f.timelines,
+            recent: f.recent,
+            next_id: f.next_id,
+            bins: f.bins,
+            groups: f.groups,
+            speakers: f.speakers,
+        };
+        p.check_out();
+        p
+    }
+}
+
+/// A timeline of the project: a pool item that the Media tab shows, and
+/// that opens on the timeline.
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+pub struct Timeline {
+    /// `t<N>`, never reused.
+    pub id: String,
+    pub name: String,
+    /// The bin it is in (a path from `bins`); empty: the top level.
+    #[serde(default)]
+    pub bin: String,
+    /// Record timecode of its frame 0, in frames: 01:00:00:00 by default.
+    pub start_tc: i64,
+    /// Its own settings in the place of the project's. Left out, it uses
+    /// the project's.
+    #[serde(default)]
+    pub own: Option<TimelineSettings>,
+    /// Video tracks `V1…` first, then audio tracks `A1…`.
+    pub tracks: Vec<Track>,
+    /// Timeline In/Out marks.
+    #[serde(default)]
+    pub marks: Marks,
+    #[serde(default)]
+    pub markers: Vec<Marker>,
+    /// Subtitle tracks `S1…`, from the one nearest the video up.
+    #[serde(default)]
+    pub subtitles: Vec<SubtitleTrack>,
+}
+
+/// The settings that a timeline has in the place of the project's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TimelineSettings {
+    pub fps: Rational,
+    pub width: u32,
+    pub height: u32,
+    /// Record timecode counts drop-frame (decision D47): at 29.97, 59.94 and
+    /// 119.88, and nothing at other rates.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drop_frame: bool,
+    /// The timeline color space (decision D50); left out when `auto`.
+    #[serde(default, skip_serializing_if = "TimelineColors::is_auto")]
+    pub timeline_colors: TimelineColors,
+}
+
+impl TimelineSettings {
+    pub fn of(s: &Settings) -> Self {
+        Self {
+            fps: s.fps,
+            width: s.width,
+            height: s.height,
+            drop_frame: s.drop_frame,
+            timeline_colors: s.timeline_colors,
+        }
+    }
+
+    pub fn counts_drop_frame(&self) -> bool {
+        self.drop_frame && self.fps.has_drop_frame()
+    }
+}
+
+#[derive(Serialize)]
+struct TimelineOut<'a> {
+    id: &'a str,
+    name: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    bin: &'a str,
+    start_tc: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    own: Option<TimelineSettings>,
+    tracks: &'a [Track],
+    #[serde(skip_serializing_if = "Marks::is_empty")]
+    marks: &'a Marks,
+    #[serde(skip_serializing_if = "<[Marker]>::is_empty")]
+    markers: &'a [Marker],
+    #[serde(skip_serializing_if = "<[SubtitleTrack]>::is_empty")]
+    subtitles: &'a [SubtitleTrack],
+}
+
+impl<'a> TimelineOut<'a> {
+    fn of(t: &'a Timeline, s: Sheet<'a>) -> Self {
+        Self {
+            id: &t.id,
+            name: &t.name,
+            bin: &t.bin,
+            start_tc: t.start_tc,
+            own: t.own,
+            tracks: s.tracks,
+            marks: s.marks,
+            markers: s.markers,
+            subtitles: s.subtitles,
+        }
+    }
+}
+
+impl Serialize for Timeline {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        TimelineOut::of(self, self.sheet()).serialize(s)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Sheet<'a> {
+    pub tracks: &'a [Track],
+    pub marks: &'a Marks,
+    pub markers: &'a [Marker],
+    pub subtitles: &'a [SubtitleTrack],
+}
+
+impl Timeline {
+    pub fn sheet(&self) -> Sheet<'_> {
+        Sheet {
+            tracks: &self.tracks,
+            marks: &self.marks,
+            markers: &self.markers,
+            subtitles: &self.subtitles,
+        }
+    }
+
+    pub fn has_clips(&self) -> bool {
+        self.tracks.iter().any(|t| !t.clips.is_empty())
+    }
 }
 
 /// Who speaks in the transcripts the project uses. A transcript numbers
@@ -102,8 +320,6 @@ pub struct Settings {
     pub channels: u16,
     /// Track 1 ripples on insert, delete, move and trim (Ripple On).
     pub ripple_on: bool,
-    /// Record timecode of timeline frame 0, in frames: 01:00:00:00 by default.
-    pub start_tc: i64,
     /// Record timecode counts drop-frame (decision D47): at 29.97, 59.94 and
     /// 119.88, and nothing at other rates.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -147,7 +363,6 @@ impl Default for Settings {
             sample_rate: 48_000,
             channels: 2,
             ripple_on: true,
-            start_tc: 30 * 3600,
             drop_frame: false,
             auto_format: true,
             use_proxies: false,
@@ -166,7 +381,6 @@ pub struct Format {
     pub fps: Option<String>,
     pub size: Option<(u32, u32)>,
     pub drop_frame: Option<bool>,
-    pub start_tc: Option<TimeSpec>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u16>,
 }
@@ -180,9 +394,6 @@ impl Format {
         let mut s = Settings::with_format(self.fps.as_deref(), self.size)?;
         if let Some(d) = self.drop_frame {
             s.set_drop_frame(d)?;
-        }
-        if let Some(tc) = &self.start_tc {
-            s.set_start_tc(tc)?;
         }
         if let Some(r) = self.sample_rate {
             s.sample_rate = r;
@@ -221,27 +432,16 @@ impl Settings {
                 self.fps.decimal()
             )));
         }
-        self.relabel(|s| s.drop_frame = on);
+        self.drop_frame = on;
         Ok(())
     }
 
     pub fn set_fps(&mut self, fps: Rational) {
-        self.relabel(|s| {
-            s.fps = fps;
-            s.drop_frame &= fps.has_drop_frame();
-        });
+        self.fps = fps;
+        self.drop_frame &= fps.has_drop_frame();
     }
 
-    fn relabel(&mut self, change: impl FnOnce(&mut Self)) {
-        let (label, secs) = (self.timecode(0), self.fps.frames_to_secs(self.start_tc));
-        change(self);
-        self.start_tc = TimeSpec::parse(&label.replace(';', ":"))
-            .ok()
-            .and_then(|t| self.start_context().resolve(&t).ok())
-            .unwrap_or_else(|| self.fps.secs_to_frames(secs));
-    }
-
-    fn start_context(&self) -> TimeContext {
+    pub fn start_context(&self) -> TimeContext {
         TimeContext {
             fps: self.fps,
             start_tc: 0,
@@ -253,23 +453,31 @@ impl Settings {
         }
     }
 
-    pub fn set_start_tc(&mut self, tc: &TimeSpec) -> crate::error::Result<()> {
+    pub fn start_frames(&self, tc: &TimeSpec) -> crate::error::Result<i64> {
         let frames = self.start_context().resolve(tc)?;
         if frames < 0 {
             return Err(crate::error::Error::invalid(
                 "a start timecode is 00:00:00:00 or later",
             ));
         }
-        self.start_tc = frames;
-        Ok(())
+        Ok(frames)
+    }
+
+    pub fn first_hour(&self) -> i64 {
+        self.start_frames(&TimeSpec::parse("01:00:00:00").expect("a timecode"))
+            .expect("one hour")
+    }
+
+    pub fn relabel(&self, start_tc: i64, was: &Settings) -> i64 {
+        let label = format_timecode(0, was.fps, start_tc, was.counts_drop_frame());
+        TimeSpec::parse(&label.replace(';', ":"))
+            .ok()
+            .and_then(|t| self.start_context().resolve(&t).ok())
+            .unwrap_or_else(|| self.fps.secs_to_frames(was.fps.frames_to_secs(start_tc)))
     }
 
     pub fn counts_drop_frame(&self) -> bool {
         self.drop_frame && self.fps.has_drop_frame()
-    }
-
-    pub fn timecode(&self, frame: i64) -> String {
-        format_timecode(frame, self.fps, self.start_tc, self.counts_drop_frame())
     }
 
     pub fn length_timecode(&self, frames: i64) -> String {
@@ -5625,6 +5833,10 @@ pub struct PooledCompound {
     /// The bin it is in (a path from [`Project::bins`]); empty: the top level.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub bin: String,
+    /// The frame rate that its frames count at: the rate of the timeline
+    /// it was made in. In a timeline at another rate, it plays at the same
+    /// speed, and its frames are counted again by time.
+    pub fps: Rational,
     /// The picture block. Left out when it holds only sound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture: Option<Compound>,
@@ -6803,6 +7015,7 @@ pub struct NextIds {
     #[serde(default = "first_id")]
     pub cue: u64,
     pub group: u64,
+    pub timeline: u64,
 }
 
 fn first_id() -> u64 {
@@ -6816,12 +7029,14 @@ impl Project {
             edited: None,
             settings,
             media: Vec::new(),
-            tracks: vec![Track::new("V1", TrackKind::Video)],
+            tracks: Self::fresh_tracks(),
             compounds: Vec::new(),
             marks: Marks::default(),
             tape_marks: TapeMarks::default(),
             markers: Vec::new(),
             subtitles: Vec::new(),
+            timelines: Vec::new(),
+            recent: Vec::new(),
             next_id: NextIds {
                 media: 1,
                 clip: 1,
@@ -6829,11 +7044,247 @@ impl Project {
                 transition: 1,
                 cue: 1,
                 group: 1,
+                timeline: 1,
             },
             bins: Vec::new(),
             groups: Vec::new(),
             speakers: Default::default(),
         }
+    }
+
+    pub fn fresh_tracks() -> Vec<Track> {
+        vec![Track::new("V1", TrackKind::Video)]
+    }
+
+    pub fn sheet(&self) -> Sheet<'_> {
+        Sheet {
+            tracks: &self.tracks,
+            marks: &self.marks,
+            markers: &self.markers,
+            subtitles: &self.subtitles,
+        }
+    }
+
+    pub fn sheets(&self) -> impl Iterator<Item = (&Timeline, Sheet<'_>)> {
+        let open = self.open_id();
+        self.timelines
+            .iter()
+            .map(move |t| match Some(t.id.as_str()) == open {
+                true => (t, self.sheet()),
+                false => (t, t.sheet()),
+            })
+    }
+
+    pub fn open_id(&self) -> Option<&str> {
+        self.recent.first().map(String::as_str)
+    }
+
+    pub fn timeline(&self) -> Option<&Timeline> {
+        let id = self.open_id()?;
+        self.timelines.iter().find(|t| t.id == id)
+    }
+
+    pub fn timeline_mut(&mut self) -> Option<&mut Timeline> {
+        let id = self.recent.first()?;
+        self.timelines.iter_mut().find(|t| t.id == *id)
+    }
+
+    pub fn find_timeline(&self, id: &str) -> Option<&Timeline> {
+        self.timelines.iter().find(|t| t.id == id)
+    }
+
+    pub fn whole_timeline(&self, id: &str) -> Option<Timeline> {
+        let t = self.find_timeline(id)?;
+        Some(match self.open_id() == Some(id) {
+            true => Timeline {
+                tracks: self.tracks.clone(),
+                marks: self.marks.clone(),
+                markers: self.markers.clone(),
+                subtitles: self.subtitles.clone(),
+                ..t.clone()
+            },
+            false => t.clone(),
+        })
+    }
+
+    pub fn has_sheet(&self) -> bool {
+        self.tracks.iter().any(|t| !t.clips.is_empty())
+            || self.subtitles.iter().any(|t| !t.cues.is_empty())
+    }
+
+    pub fn is_fresh_sheet(&self) -> bool {
+        self.tracks == Self::fresh_tracks()
+            && self.marks.is_empty()
+            && self.markers.is_empty()
+            && self.subtitles.is_empty()
+    }
+
+    pub fn keep_sheet(&mut self) {
+        let t = self.new_timeline(self.next_timeline_name(), String::new());
+        self.adopt_sheet(t);
+        if self.tracks_of(TrackKind::Audio).is_empty() {
+            self.tracks
+                .push(Track::new("A1".to_string(), TrackKind::Audio));
+        }
+    }
+
+    pub fn check_in(&mut self) {
+        use std::mem::{replace, take};
+        let tracks = replace(&mut self.tracks, Self::fresh_tracks());
+        let (marks, markers, subtitles) = (
+            take(&mut self.marks),
+            take(&mut self.markers),
+            take(&mut self.subtitles),
+        );
+        if let Some(t) = self.timeline_mut() {
+            (t.tracks, t.marks, t.markers, t.subtitles) = (tracks, marks, markers, subtitles);
+        }
+    }
+
+    pub fn check_out(&mut self) {
+        use std::mem::take;
+        let body = self.timeline_mut().map(|t| {
+            (
+                take(&mut t.tracks),
+                take(&mut t.marks),
+                take(&mut t.markers),
+                take(&mut t.subtitles),
+            )
+        });
+        (self.tracks, self.marks, self.markers, self.subtitles) = body.unwrap_or_else(|| {
+            (
+                Self::fresh_tracks(),
+                Marks::default(),
+                Vec::new(),
+                Vec::new(),
+            )
+        });
+    }
+
+    pub fn adopt_sheet(&mut self, t: Timeline) {
+        debug_assert!(self.timelines.is_empty());
+        self.recent.insert(0, t.id.clone());
+        self.timelines.push(Timeline {
+            tracks: Vec::new(),
+            ..t
+        });
+    }
+
+    pub fn flat_settings(&self) -> Settings {
+        let f = self.format();
+        Settings {
+            fps: f.fps,
+            width: f.width,
+            height: f.height,
+            drop_frame: f.drop_frame,
+            timeline_colors: f.timeline_colors,
+            ..self.settings.clone()
+        }
+    }
+
+    pub fn take_timelines(&mut self) -> Vec<Timeline> {
+        self.check_in();
+        std::mem::take(&mut self.timelines)
+    }
+
+    pub fn put_timelines(&mut self, timelines: Vec<Timeline>) {
+        self.timelines = timelines;
+        self.check_out();
+    }
+
+    pub fn open_timeline(&mut self, id: &str) -> crate::error::Result<()> {
+        if self.find_timeline(id).is_none() {
+            return Err(crate::error::Error::not_found(format!("no timeline {id}")));
+        }
+        if self.open_id() == Some(id) {
+            return Ok(());
+        }
+        self.check_in();
+        self.recent.retain(|r| r != id);
+        self.recent.insert(0, id.to_string());
+        self.check_out();
+        Ok(())
+    }
+
+    pub fn add_timeline(&mut self, t: Timeline) {
+        self.check_in();
+        self.recent.insert(0, t.id.clone());
+        self.timelines.push(t);
+        self.check_out();
+    }
+
+    pub fn new_timeline(&mut self, name: String, bin: String) -> Timeline {
+        let id = format!("t{}", self.next_id.timeline);
+        self.next_id.timeline += 1;
+        Timeline {
+            id,
+            name,
+            bin,
+            start_tc: self.settings.first_hour(),
+            own: None,
+            tracks: Self::fresh_tracks(),
+            marks: Marks::default(),
+            markers: Vec::new(),
+            subtitles: Vec::new(),
+        }
+    }
+
+    pub fn next_timeline_name(&self) -> String {
+        let used = |n: usize| {
+            let name = format!("Timeline {n}");
+            self.timelines.iter().any(|t| t.name == name)
+        };
+        let n = (self.timelines.len() + 1..)
+            .find(|&n| !used(n))
+            .expect("a free number");
+        format!("Timeline {n}")
+    }
+
+    pub fn format(&self) -> TimelineSettings {
+        self.timeline()
+            .and_then(|t| t.own)
+            .unwrap_or_else(|| TimelineSettings::of(&self.settings))
+    }
+
+    pub fn fps(&self) -> Rational {
+        self.format().fps
+    }
+
+    pub fn width(&self) -> u32 {
+        self.format().width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.format().height
+    }
+
+    pub fn counts_drop_frame(&self) -> bool {
+        self.format().counts_drop_frame()
+    }
+
+    pub fn timeline_colors(&self) -> TimelineColors {
+        self.format().timeline_colors
+    }
+
+    pub fn start_tc(&self) -> i64 {
+        self.timeline()
+            .map_or_else(|| self.settings.first_hour(), |t| t.start_tc)
+    }
+
+    pub fn set_start_tc(&mut self, frames: i64) {
+        if let Some(t) = self.timeline_mut() {
+            t.start_tc = frames;
+        }
+    }
+
+    pub fn timecode(&self, frame: i64) -> String {
+        let f = self.format();
+        format_timecode(frame, f.fps, self.start_tc(), f.counts_drop_frame())
+    }
+
+    pub fn length_timecode(&self, frames: i64) -> String {
+        let f = self.format();
+        format_timecode(frames, f.fps, 0, f.counts_drop_frame())
     }
 
     pub fn group(&self, id: &str) -> Option<&SyncGroup> {
@@ -6912,7 +7363,16 @@ impl Project {
     }
 
     pub fn is_used(&self, media: &str) -> bool {
-        self.clips_using(media).next().is_some() || self.compounds.iter().any(|k| k.holds(media))
+        self.clips_using(media).next().is_some()
+            || self.compounds.iter().any(|k| k.holds(media))
+            || self.timelines_using(media).next().is_some()
+    }
+
+    pub fn timelines_using<'a>(&'a self, media: &'a str) -> impl Iterator<Item = &'a Timeline> {
+        let open = self.open_id();
+        (self.timelines.iter())
+            .filter(move |t| Some(t.id.as_str()) != open)
+            .filter(move |t| (t.tracks.iter().flat_map(|t| &t.clips)).any(|c| c.uses(media)))
     }
 
     pub fn pool(&self) -> HashMap<&str, &Media> {
@@ -6961,7 +7421,7 @@ impl Project {
     }
 
     pub fn media_frames(&self, media: &Media) -> i64 {
-        self.frames_of(media, self.settings.fps)
+        self.frames_of(media, self.fps())
     }
 
     pub fn subclip_span(&self, media: &Media) -> Option<(i64, i64)> {
@@ -6990,8 +7450,12 @@ impl Project {
         frames_at(file_secs(media), media.rate(self.settings.fps))
     }
 
-    pub fn on_timeline(&self, media: &Media, (a, b): (i64, i64)) -> ((i64, i64), f64) {
-        let per = self.settings.fps.over(media.rate(self.settings.fps));
+    pub fn on_timeline(&self, media: &Media, range: (i64, i64)) -> ((i64, i64), f64) {
+        self.on_rate(media, range, self.fps())
+    }
+
+    pub fn on_rate(&self, media: &Media, (a, b): (i64, i64), fps: Rational) -> ((i64, i64), f64) {
+        let per = fps.over(media.rate(self.settings.fps));
         let (num, den) = (per.num(), per.den());
         let start = a * num;
         let first = start.div_euclid(den);
@@ -7017,9 +7481,13 @@ impl Project {
     }
 
     pub fn marked_frames(&self, media: &Media) -> (i64, i64) {
-        let frames = self.media_frames(media);
+        self.marks_at(media, self.fps())
+    }
+
+    pub fn marks_at(&self, media: &Media, fps: Rational) -> (i64, i64) {
+        let frames = self.frames_of(media, fps);
         let i = media.marks.mark_in.unwrap_or(0);
-        let ((a, b), _) = self.on_timeline(media, (i, media.marks.mark_out.unwrap_or(i)));
+        let ((a, b), _) = self.on_rate(media, (i, media.marks.mark_out.unwrap_or(i)), fps);
         match media.marks.mark_out {
             Some(_) => (a, b.min(frames)),
             None => (a, frames),
@@ -7027,7 +7495,7 @@ impl Project {
     }
 
     pub fn left_out_frames(&self, media: &Media, phase: f64) -> Vec<(i64, i64)> {
-        let per = self.settings.fps.over(media.rate(self.settings.fps));
+        let per = self.fps().over(media.rate(self.settings.fps));
         let slack = crate::render::grid_slack(per);
         let at = |x: i64| (x as f64 * per.as_f64() - phase - slack).ceil() as i64;
         (media.left_out.iter())
@@ -7042,13 +7510,13 @@ impl Project {
     }
 
     pub fn tape_frame(&self, media: &Media, frame: i64) -> i64 {
-        let per = self.settings.fps.over(media.rate(self.settings.fps));
+        let per = self.fps().over(media.rate(self.settings.fps));
         let n = frame * per.num();
         n.div_euclid(per.den()) + i64::from(n.rem_euclid(per.den()) != 0)
     }
 
     pub fn clip_frame_at(&self, media: &Media, source: f64) -> i64 {
-        let per = media.rate(self.settings.fps).over(self.settings.fps);
+        let per = media.rate(self.settings.fps).over(self.fps());
         crate::render::shown_frame(per, source)
     }
 
@@ -7105,14 +7573,14 @@ impl Project {
     }
 
     fn frames_in(&self, secs: f64) -> i64 {
-        frames_at(secs, self.settings.fps)
+        frames_at(secs, self.fps())
     }
 
     pub fn time_context(&self, playhead: Option<i64>) -> TimeContext {
         TimeContext {
-            fps: self.settings.fps,
-            start_tc: self.settings.start_tc,
-            drop_frame: self.settings.counts_drop_frame(),
+            fps: self.fps(),
+            start_tc: self.start_tc(),
+            drop_frame: self.counts_drop_frame(),
             end: self.end(),
             mark_in: self.marks.mark_in,
             mark_out: self.marks.mark_out,
@@ -7473,12 +7941,14 @@ mod tests {
 
     #[test]
     fn turning_drop_frame_off_keeps_the_start_label() {
-        let mut s = Settings::with_format(Some("29.97"), None).unwrap();
-        s.set_drop_frame(true).unwrap();
-        s.set_start_tc(&TimeSpec::parse("01:00:00;00").unwrap())
+        let mut was = Settings::with_format(Some("29.97"), None).unwrap();
+        was.set_drop_frame(true).unwrap();
+        let start = was
+            .start_frames(&TimeSpec::parse("01:00:00;00").unwrap())
             .unwrap();
-        assert_eq!(s.start_tc, 107_892);
-        s.set_drop_frame(false).unwrap();
-        assert_eq!(s.start_tc, 108_000);
+        assert_eq!(start, 107_892);
+        let mut now = was.clone();
+        now.set_drop_frame(false).unwrap();
+        assert_eq!(now.relabel(start, &was), 108_000);
     }
 }
