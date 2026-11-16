@@ -479,9 +479,10 @@ The bar and the Jobs button:
     - Find sends the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
   - Find sends `motion.find` with the `tracker` (`find_request`), and with `replace` when the clip has paths of that subject.
   - Blur sends one `apply` (`page_blur`): `comp.add` of a Mosaic Blur before Media Out, and a chain of masks on its effect mask.
-    - Each pattern gets one mask, with `comp.set` of `connect`, Follow Size and the size `BLUR_SIZE`.
+    - Each pattern with a path in the clip gets one mask, with `comp.set` of `connect`, Follow Size and the size `BLUR_SIZE`.
+    - A pattern without a path gets no mask. Such a pattern does not move. A mask on it blurs the same box on each frame.
     - The mask is a rectangle for text, a person or a vehicle, and an ellipse for a face (`boxed`).
-    - With no pattern, the button is off.
+    - With no pattern that has a path, the button is off.
   - The live core runs an `apply` with `motion.find` as a long edit (`runs_long`): it measures on a job thread first.
   - A `motion.find` and a `motion.track` of their own run as jobs (`start_encode`, kinds `find` and `track`). The Jobs window shows each with its progress, and Cancel stops it.
   - `Workspace::ask` asks before a download when a model is not there (`model_needs`, `Finding`). `Workspace::motion_prompt` shows the question that the other local models use (`ask_download`), and `with_model` then sets `download`.
