@@ -344,7 +344,8 @@ Ranges and resolution:
 
 - `origin` turns `MediaInfo.timecode` into frames of the open timeline with `StartTimecode::frames_at`. A file with no tag counts as 0.
   - `origin` and `lag` are exact, with no rounding. Why: a rounded start puts the clip up to half a frame out of sync.
-  - `Project::first_showing` gives the place of the first timeline frame that shows a frame of the file. The clip starts and ends at such places.
+  - `Project::first_showing` gives the place of the first timeline frame that shows a frame of the file. The clip ends at such a place.
+  - The clip starts at the playhead when the playhead shows the source In. Else it starts at the first frame that shows the source In.
 - A generator as the source has `origin` 0 and the length of `ops::titles::default_length`.
 - `shown` gives the timecode range that a clip shows, from `Clip::source_at`.
   - A clip with no media or with a still has no such range. Thus generators, titles and compound clips do not count.

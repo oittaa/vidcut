@@ -849,7 +849,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A source with no picture is an audio-only edit. An audio-only edit always makes a new top audio track.
   - **Another frame rate:** timecode lines up in real time, for a file and for a reference clip.
     - The clip is in sync with the exact time of the file (p. 701). At each timeline frame, it shows the frame of the file at that time.
-    - The clip starts at the first timeline frame that shows the source In. A file frame can fill more than one timeline frame. Then this start can be before the playhead.
+    - When the playhead shows the source In, the clip starts at the playhead (p. 709).
+    - Else the clip starts at the first timeline frame that shows the source In (p. 701).
   - **A still** has timecode 00:00:00:00, so it goes in only with a clip at that timecode.
   - **After the edit,** the timeline marks clear, and the source marks stay.
     - The playhead goes to the clip's end.

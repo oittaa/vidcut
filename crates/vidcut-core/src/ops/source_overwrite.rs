@@ -206,7 +206,14 @@ pub fn source_overwrite(
     };
     let file = (showing(0), showing(count));
     let (a, b) = match marks {
-        (None, None) => (showing(own.0), showing(own.1)),
+        (None, None) => {
+            let first = showing(own.0);
+            let start = match playhead {
+                Some(at) if first <= at && at < showing(own.0 + 1) => at,
+                _ => first,
+            };
+            (start, showing(own.1))
+        }
         (a, b) => (a.unwrap_or(file.0), b.unwrap_or(file.1)),
     };
     let a = a.max(0).max(file.0);
