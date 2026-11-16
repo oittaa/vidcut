@@ -2569,6 +2569,18 @@ impl VideoFrames {
         Ok(skipped)
     }
 
+    pub(crate) fn skip(&mut self, frames: i64) -> Result<()> {
+        for _ in 0..frames {
+            if self.next(Take::Skip)?.is_none() {
+                return Err(Error::Invalid(
+                    "plan has fewer video frames than expected".into(),
+                ));
+            }
+            self.drawn += 1;
+        }
+        Ok(())
+    }
+
     fn next(&mut self, take: Take) -> Result<Option<Option<Vec<Layer>>>> {
         loop {
             let Some(piece) = self.pieces.get(self.piece) else {

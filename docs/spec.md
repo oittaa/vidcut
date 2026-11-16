@@ -3066,6 +3066,42 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
     - With it off, the export composites over black, and the file has no alpha channel.
     - With it on, what shows nothing is transparent: a gap, a bar beside a picture, and a dip to black.
     - With it on, a composite mode mixes with the layers below as far as they show. Over nothing, the color stays as it is.
+- **Bypass Re-encode When Possible** (Deliver page):
+  - With it on, Resolve copies the video of timeline clips from the source file into the output. It does this when the Format, the Codec and the Type of the output match the source (p. 4120).
+  - The copy keeps alpha in a format that has alpha (p. 4120).
+  - A grade, an effect, a composite, a resize or a stabilization makes Resolve encode the whole clip. A change of the output sizing does the same (p. 4120).
+  - A transition is encoded only for its own length (p. 4120).
+  - Measured in Resolve Studio 21.2, with renders from the scripting API:
+    - The box is the render preset key `passthrough`. The preset H.264 Master has it off.
+    - ProRes 422 HQ into ProRes 422 HQ copies each frame. A dissolve of 2 frames encodes only those 2 frames.
+    - ProRes 422 HQ into ProRes 422 copies no frame.
+    - H.264 copies no frame, also with cuts on key frames.
+  - **In vidcut:**
+    - `video.bypass_reencode` is the box. It is off by default. The Export dialog shows it under Advanced.
+    - The export copies a frame when one clip shows a frame of its file with no change:
+      - The clip fills the frame. It has no Transform, Cropping, composite mode, opacity or effect.
+      - The clip plays at normal speed, with the Nearest retime.
+      - The file has no Input Color Space, Input LUT or Super Scale of its own.
+    - The file must have the codec, the profile, the size, the pixel layout and the colors of the output. Its pixels are square, its frames are progressive and it has no rotation.
+    - The export copies nothing in these cases. The report tells which one:
+      - The timeline colors are not those of the output.
+      - The output size is not the timeline size.
+      - The timeline has an output LUT.
+      - The output gets HDR10+ or Dolby Vision metadata.
+    - With `video.alpha`, the Alpha Mode of the clip must be the `video.alpha_mode` of the file. A clip with alpha copies only over a gap.
+    - H.264, HEVC, AV1 and VP9 also copy.
+    - A copy starts at a frame that a decoder can start at. The export encodes the frames before it.
+      - H.264: an IDR.
+      - HEVC: an IDR, a CRA or a BLA.
+      - AV1 and VP9: a key frame.
+      - ProRes and DNxHR: each frame.
+    - A copy stops before a frame that needs a packet after the clip.
+    - A copy also stops before a frame of the file that the timeline does not show. Thus a file at a higher rate than the timeline, or of variable rate, copies little.
+    - A transition, a title and a burned-in subtitle make their frames encoded.
+    - The encoded frames use the settings of the export. Each run of encoded frames starts with a new encoder.
+    - x264, x265 and libvpx-vp9 make one pass. An export refuses `video.passes` 2 with the box on.
+    - An image sequence refuses the box.
+    - `export.plan` gives the frames that the export can copy. The report of the export gives the frames that it copied. Both tell why a file does not match.
 - **TIFF and OpenEXR** (Deliver page):
   - Both are image sequence formats (pp. 4115-4116).
   - OpenEXR has RGB Half and RGB Float settings, and RGB Half with DWAA or DWAB and a Compression level (p. 4115).

@@ -368,6 +368,7 @@ mod tests {
             filename_digits: None,
             first_frame: None,
             compression_level: None,
+            bypass_reencode: false,
         }
     }
 

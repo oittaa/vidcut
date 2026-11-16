@@ -202,6 +202,56 @@ Notes:
   - The error does not say that the size is the cause. Why: the error code does not tell the cause, and the FFmpeg codec data holds no size limits.
 - [live](live.md#jobs) tells how a job collects the notes.
 
+## Bypass re-encode
+
+[Spec §10](../spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109) gives the rule. `VideoSettings::bypass_reencode` turns it on.
+
+**What the export can copy:**
+
+- `plan_copies` checks the whole output first. When the export can copy nothing, it gives the reason in the `BypassNote`.
+- `Copying::new` walks the pieces of the plan. `copyable` takes a piece that shows one file with no change:
+  - a `VideoPiece::Source` that fills the frame
+  - with `video.alpha`, a `VideoPiece::Mix` of one such source over black
+- `File::open` checks each file once against the `Output`: codec, size, pixel layout, profile, colors, field order, pixel shape and rotation.
+  - A file that does not match goes into the `Refused` list with its reason.
+- Each piece that copies gives a `Span` of timeline frames. A burned-in subtitle cue cuts its frames out of the span.
+
+**Which packets:**
+
+- `Span::target` gives the target time of a timeline frame, as `VideoFrames` finds the source frame ([which source frame](#which-source-frame)).
+- `Span::at` gives the last timeline frame that shows a source time.
+- `Copying::run_at` starts a run at the first start frame of the span at or after the timeline frame (`Bits::starts`).
+- `Copying::next` reads the packets in decode order and holds them in groups.
+  - A group is complete when the next packets of the file all come after it in time.
+  - It looks at as many packets as the decoder delay of the file, plus a margin.
+- A source frame shows on the timeline frames from the one after the `Span::at` of the frame before it, to its own `Span::at`.
+  - A frame with no such timeline frame ends the run. Thus a gap in a file of variable rate holds a frame, and a skipped frame ends the copy.
+- A packet at or after the end of the span ends the run. Thus a frame that needs such a packet is encoded.
+- Leading pictures before the start frame are dropped.
+- `Copying::end` gives the timeline frame after the last copied frame. The export encodes from there.
+
+**The bitstream:**
+
+- `Bits` holds what the first packet of a run needs:
+  - H.264 and HEVC: the parameter sets of the file. The packets change from NAL units with lengths to Annex B.
+  - The first packet gets the parameter sets after its access unit delimiter, if it has no SPS.
+  - In HEVC, a CRA in the first packet becomes a BLA. Why: then a decoder drops the RASL pictures, which use frames before the cut.
+  - AV1: the sequence header of the file, after the temporal delimiter.
+  - VP9, ProRes and DNxHR: nothing.
+- In MP4 and MOV, the sample entry is `avc3` or `hev1`. Why: each run of frames carries its own parameter sets.
+- A copied packet gets a PTS on the frame grid of the timeline. Its DTS keeps the distance from PTS to DTS of the source.
+- `Copying::time_base` gives a stream time base that holds each frame of the timeline and each time of the files exactly. Matroska uses 1/1000.
+
+**The encoder:**
+
+- The export thread sends `Out::Cut` before a run, and `Out::Packet` for each copied packet. It sends the sound of each frame as before.
+- `VideoFrames::skip` moves the decoders past the copied frames.
+- At `Out::Cut`, the writer drains the encoder and drops it. An encoder that got no frame is dropped without a drain.
+- The next picture opens a new encoder (`Reopen`) with the same settings and GPU frames. Thus each encoded run starts with an IDR ([gotchas](../gotchas.md#ffmpeg-encoding-and-muxing)).
+- The first packet of each encoded run gets the parameter sets of the encoder (`headers_of`).
+- `rising` keeps the DTS of the stream rising where two runs meet.
+- `Report::bypass` gives the frames copied, the reason when nothing can copy, and the refused files.
+
 ## Which source frame
 
 - Output frame k of a piece shows one frame of its media (`VideoPiece::position`).
