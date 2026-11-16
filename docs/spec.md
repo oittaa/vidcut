@@ -350,7 +350,6 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - File > Import > Timeline makes a new timeline, named after the file, in the open bin, and opens it. A name that a timeline has is refused.
     - The Import window has the timeline's name. vidcut also offers Append, Replace, As a Compound Clip and Media Only.
     - Append or Replace into a project with no timeline first makes "Timeline 1", as an edit does. It takes the file's start timecode.
-    - A timeline at another frame rate keeps its times ([deviation X172](deviations.md#x172-an-imported-timeline-keeps-its-times-at-another-frame-rate)).
 - **Clip Info** (vidcut):
   - Clip Info shows all that vidcut knows of a file.
   - The info button of the metadata strip or of a thumbnail corner opens it. The menu of a pool item also opens it.
