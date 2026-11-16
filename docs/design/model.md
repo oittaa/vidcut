@@ -164,7 +164,9 @@ Timelines (spec §3):
   - `Project::fps`, `width`, `height`, `start_tc` and `counts_drop_frame` give the values of the open timeline. `Settings` holds the project's own values.
   - `Project::flat_settings` gives `Settings` with the format of the open timeline. The export, the render cache and ducking use it.
 - A timeline in the project locks the project's frame rate and drop-frame (`project_set`). A timeline with its own settings changes them only while it has no clips (`ops::timelines::set`).
+  - Its markers, cues and In/Out marks then keep their time (`ops::conform`).
 - `ops::timelines` holds the requests: `new`, `open`, `rename`, `duplicate`, `delete` and `set`, and `list`.
+  - `duplicate` gives the copy new ids for its clips, transitions, markers and cues. A title that follows a clip of the source follows the copy of that clip.
   - `delete` opens the timeline made before the deleted one, else the one after. A project can have no timeline.
   - An edit into a project with no timeline makes one first (`Editor::apply`).
     - `Project::keep_sheet` makes "Timeline 1" from the open tracks.
@@ -814,6 +816,7 @@ Modes:
   - A timeline that the import makes from the open tracks (`Project::keep_sheet`) counts as no timeline.
   - Else the clips are converted to its rate by time.
 - `new`, `replace` and `project_from_otio` take a file with tracks and no clips, and make its tracks ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)). The other modes refuse it.
+- An audio track that the `vidcut` metadata names stays, also with no clips. Thus an empty A1 stays in a round trip. An audio track of another editor with no clips goes: its sound is on the video clips.
 - A file that vidcut wrote brings its pool items (`join_pool`) into a bin named after it, with new ids, without proxies.
 
 Kept data:

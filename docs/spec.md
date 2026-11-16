@@ -323,7 +323,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - vidcut also sorts by Duration.
   - This order is also the Source Tape order.
   - The search field filters live, through the open bin and the bins inside it.
-- **Timelines** (pp. 838–841, 1053; measured in Resolve Studio 21.2):
+- **Timelines** (pp. 678, 838–841; measured in Resolve Studio 21.2):
   - A project holds many timelines. The pool shows each one in its bin, with its length. The open one is highlighted.
   - A double-click on a timeline opens it. The edits then act on it.
   - In/Out marks, markers, subtitle tracks and the playhead stay with each timeline.
@@ -339,13 +339,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Duplicate Timeline makes "X copy", then "X copy 1", in the same bin, and opens it. The copy has the markers, and no In/Out marks.
     - Timeline Settings has the start timecode, Use Project Settings and the own format.
     - Delete Timeline asks first. When the open timeline goes, the timeline made before it opens, else the one after it. A project can have no timeline.
-  - An edit into a project with no timeline makes a timeline (p. 678). In Resolve Studio 21.2, it is "Timeline 1", with at least 1 video track and 1 audio track.
+  - An edit into a project with no timeline makes a timeline (p. 678). vidcut gives it the New Timeline defaults: the next free name, and 1 video track and 1 audio track.
     - Each command of a batch (`apply`) follows this rule as it does alone.
   - A timeline in the project locks the frame rate and drop-frame of the project. Media in the pool do not lock them.
     - Thus the first video of a project with a timeline sets only the picture size (D37).
     - The manual says that media lock the frame rate (pp. 141, 364). Resolve Studio 21.2 does not.
     - With no timeline, they change again.
   - A timeline with its own settings changes its frame rate and drop-frame only while it has no clips. Its start timecode keeps its label.
+    - Its markers, subtitles and In/Out marks keep their time.
   - A compound clip made in a timeline at another rate is converted by time where it goes. Pasted clips are too.
   - File > Import > Timeline makes a new timeline, named after the file, in the open bin, and opens it. A name that a timeline has is refused.
     - The Import window has the timeline's name. vidcut also offers Append, Replace, As a Compound Clip and Media Only.

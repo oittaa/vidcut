@@ -2238,6 +2238,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     let mut clips: Vec<ImportedClip> = Vec::new();
     let mut found = Vec::new();
     let mut settings: Vec<ImportedTrack> = Vec::new();
+    let mut named: Vec<String> = Vec::new();
     for (k, v) in video_tracks.iter().enumerate() {
         let id = format!("V{}", k + 1);
         settings.push(ImportedTrack::of(v, &id, false));
@@ -2571,7 +2572,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         }
         transitions_of(between, &keys, true, fps, &mut found);
         match (&hint, own) {
-            (Some(h), _) if h.starts_with('A') => settings.push(ImportedTrack::of(a, h, true)),
+            (Some(h), _) if h.starts_with('A') => {
+                named.push(h.clone());
+                settings.push(ImportedTrack::of(a, h, true));
+            }
             (None, Some(id)) => settings.push(ImportedTrack::of(a, &id, true)),
             _ => {}
         }
@@ -2638,7 +2642,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         ));
     }
     settings.retain(|t| {
-        clips.is_empty() || t.id.starts_with('V') || clips.iter().any(|c| c.track == t.id)
+        clips.is_empty()
+            || t.id.starts_with('V')
+            || named.contains(&t.id)
+            || clips.iter().any(|c| c.track == t.id)
     });
     let mut kept: Vec<String> = Vec::new();
     for c in &clips {

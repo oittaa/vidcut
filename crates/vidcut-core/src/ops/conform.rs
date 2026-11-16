@@ -1,6 +1,6 @@
 use crate::model::{
-    Clip, Compound, Effects, Generator, Marker, PooledCompound, Project, Track, TrackClip,
-    TrackCue, Transition,
+    Clip, Compound, Cue, Effects, Generator, Marker, Marks, PooledCompound, Project, Track,
+    TrackClip, TrackCue, Transition,
 };
 use crate::time::{Rational, rescale};
 
@@ -47,15 +47,24 @@ pub fn track(p: &Project, t: &mut Track, r: Rates) {
 
 pub fn cues(list: &mut [TrackCue], r: Rates) {
     for c in list.iter_mut().map(|c| &mut c.cue) {
-        let (start, end) = (r.frame(c.start), r.frame(c.start + c.duration));
-        (c.start, c.duration) = (start, (end - start).max(1));
-        for w in &mut c.words {
-            w.at = w.at.map(|a| r.frame(a));
-        }
-        if let Some(picture) = c.picture.as_mut() {
-            picture.scale_times(&|f| r.frame(f), &|_| r.ratio());
-        }
+        cue(c, r);
     }
+}
+
+pub fn cue(c: &mut Cue, r: Rates) {
+    let (start, end) = (r.frame(c.start), r.frame(c.start + c.duration));
+    (c.start, c.duration) = (start, (end - start).max(1));
+    for w in &mut c.words {
+        w.at = w.at.map(|a| r.frame(a));
+    }
+    if let Some(picture) = c.picture.as_mut() {
+        picture.scale_times(&|f| r.frame(f), &|_| r.ratio());
+    }
+}
+
+pub fn marks(m: &mut Marks, r: Rates) {
+    m.mark_in = m.mark_in.map(|f| r.frame(f));
+    m.mark_out = m.mark_out.map(|f| r.frame(f));
 }
 
 pub fn marker(k: &mut Marker, r: Rates) {

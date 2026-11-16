@@ -175,13 +175,45 @@ pub fn duplicate(p: &mut Project, timeline: Option<&str>) -> Result<String> {
     let source = p.whole_timeline(&id).expect("found");
     let fresh = p.new_timeline(copy_name(p, &source.name), source.bin.clone());
     let new_id = fresh.id.clone();
-    p.add_timeline(crate::model::Timeline {
+    let mut copy = crate::model::Timeline {
         id: fresh.id,
         name: fresh.name,
         marks: Default::default(),
         ..source
-    });
+    };
+    fresh_ids(p, &mut copy);
+    p.add_timeline(copy);
     Ok(new_id)
+}
+
+fn fresh_ids(p: &mut Project, t: &mut crate::model::Timeline) {
+    let mut clips = std::collections::HashMap::new();
+    for c in t.tracks.iter_mut().flat_map(|t| &mut t.clips) {
+        let id = p.alloc_clip_id();
+        clips.insert(std::mem::replace(&mut c.id, id.clone()), id);
+    }
+    let renamed = |id: &mut String| {
+        if let Some(new) = clips.get(id) {
+            id.clone_from(new);
+        }
+    };
+    for track in &mut t.tracks {
+        for x in &mut track.transitions {
+            x.id = p.alloc_transition_id();
+            x.from.iter_mut().chain(x.to.iter_mut()).for_each(renamed);
+        }
+        for c in &mut track.clips {
+            if let Some(f) = c.title.as_mut().and_then(|t| t.follows.as_mut()) {
+                renamed(&mut f.clip);
+            }
+        }
+    }
+    for m in &mut t.markers {
+        m.id = p.alloc_marker_id();
+    }
+    for q in t.subtitles.iter_mut().flat_map(|s| &mut s.cues) {
+        q.id = p.alloc_cue_id();
+    }
 }
 
 pub fn delete(p: &mut Project, timelines: &[String]) -> Result<Vec<String>> {
@@ -235,7 +267,17 @@ pub fn set(p: &mut Project, s: &TimelineSet) -> Result<()> {
         }
         None => t.start_tc,
     };
-    let t = p.timelines.iter_mut().find(|t| t.id == id).expect("found");
+    let mut all = p.take_timelines();
+    let t = all.iter_mut().find(|t| t.id == id).expect("found");
     (t.own, t.start_tc) = (own, start);
+    if let Some(r) = super::conform::Rates::new(before.fps, after.fps) {
+        t.markers
+            .iter_mut()
+            .for_each(|k| super::conform::marker(k, r));
+        let cues = t.subtitles.iter_mut().flat_map(|s| &mut s.cues);
+        cues.for_each(|c| super::conform::cue(c, r));
+        super::conform::marks(&mut t.marks, r);
+    }
+    p.put_timelines(all);
     Ok(())
 }
