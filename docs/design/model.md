@@ -824,7 +824,7 @@ Modes:
   - A timeline that the import makes from the open tracks (`Project::keep_sheet`) counts as no timeline.
   - Else the timeline keeps the frame numbers of the file (`frames_kept`, [spec §3](../spec.md#3-media-pool-ch-34-pp-653675)).
     - The start timecode, the clips, the transitions, the markers and the keyframes keep their frames.
-    - A clip of a video or sound file, and a compound clip, starts at the same time of its source. Its speed changes by the ratio of the two rates, so each frame shows the same picture.
+    - A clip of a video or sound file, and a compound clip, starts at the same time of its source. Its speed changes by the ratio of the two rates, so each frame shows the picture that the file gives for that frame.
     - A title, a generator and a still get no speed.
   - `at_project_rate` converts by time. The contents of a compound clip use it.
 - `new`, `replace` and `project_from_otio` take a file with tracks and no clips, and make its tracks ([spec D40](../spec.md#12-decisions-on-gaps-and-contradictions)). The other modes refuse it.

@@ -353,7 +353,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Append or Replace into a project with no timeline first makes "Timeline 1", as an edit does. It takes the file's start timecode.
     - A file at another frame rate than its timeline keeps its frame numbers (measured in Resolve Studio 21.2, with a script import).
       - The timeline has the project's settings. Each clip has the same first frame and the same length in frames as in the file.
-      - Each frame shows the picture that the same frame of the file shows. Thus a 25 fps file plays at 120% speed in a 30 fps timeline.
+      - Each clip starts at the source time that the file gives. Each timeline frame then moves the source by one frame of the file's rate.
+      - Thus a 25 fps file plays at 120% speed in a 30 fps timeline.
+      - The pictures are the ones that the numbers of the file give.
+        - At frames 74, 75, 100, 300 and 499, they are a 71, b 18, b 42, a 288 and a 479.
+      - The timeline that Resolve wrote the file from shows b 43 at frame 100. Its export put the start of b at frame 18.24, not at 19.
       - The start is the same count of frames. Thus 01:00:00:00 at 25 fps is 00:50:00:00 at 30 fps.
       - The import gives a warning with the two rates and the speed.
       - The sound, the Import window and the files of other editors are not measured.
