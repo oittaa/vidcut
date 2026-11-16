@@ -321,7 +321,7 @@ impl Model {
         let input = k.input.shaped(n, h, w, 3);
         let scratch = (&k.scratch[0], &k.scratch[1]);
         o.gpu.mark(|| "start".into());
-        o.gpu.tick(o.pass);
+        o.gpu.begin(o.pass);
         o.gpu.mark(|| "planes".into());
         for (ch, mean) in MEAN.iter().enumerate() {
             let plane = within(&k.wide, ch as u32 * self.batch * h * w, n, (h, w, 1));
@@ -421,7 +421,7 @@ impl Model {
         let all = each * runs.len() as u64;
         let staging = gpu.staging(all);
         let plane = self.size.0 * self.size.1;
-        let clocked = crate::debug() && gpu.can_time() && !self.timed.swap(true, Ordering::Relaxed);
+        let clocked = crate::debug() && !self.timed.swap(true, Ordering::Relaxed);
         let timed = clocked.then(|| runs.len().min(2) - 1);
         compute::checked(&gpu.device, WHAT, || {
             for (i, run) in runs.clone().enumerate() {
@@ -465,12 +465,17 @@ impl Model {
     }
 
     fn report(&self, n: usize) -> Result<()> {
+        let how = if self.gpu.stamps() {
+            "timestamps"
+        } else {
+            "a wait for each dispatch"
+        };
         let times = self.gpu.times()?;
         let all: f64 = times.iter().map(|(_, ms)| ms).sum();
         let (w, h) = self.size;
         crate::debug!(
             "subjects",
-            "gpu pass of {n} pictures of {w}x{h}: {all:.3} ms"
+            "gpu pass of {n} pictures of {w}x{h}: {all:.3} ms ({how})"
         );
         for (name, ms) in &times {
             crate::debug!("subjects", "gpu {name}: {ms:.3} ms");

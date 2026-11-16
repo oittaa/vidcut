@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """How fast the slow face model finds faces on this computer. It runs
 `motion find --model slow` on 8 s of Tears of Steel at each size (640 and
-1280) and prints the time in the model for each picture. Where the GPU
-gives timestamps in a pass, it also prints the GPU time for each picture.
+1280) and prints the time in the model for each picture. It also prints the
+GPU time for each picture, of each stage and of the slowest layers.
 
     python3 scripts/face-speed.py [SIZE...]
 
@@ -67,12 +67,20 @@ def measure(work, size):
         sys.exit(f"no [subjects] line in the output of motion find:\n{err[-2000:]}")
     pictures, model_s = int(seen[1]), float(seen[4])
     line = f"size {size}: {pictures} pictures, {model_s * 1000 / pictures:.2f} ms per picture in the model"
-    gpu = re.search(r"\[subjects\] gpu pass of (\d+) pictures of (\d+)x(\d+): ([\d.]+) ms", err)
-    if gpu:
-        line += f", GPU {float(gpu[4]) / int(gpu[1]):.2f} ms per picture (input {gpu[2]}x{gpu[3]}, {gpu[1]} in a pass)"
-    else:
-        line += ", no GPU time (no timestamps in a pass)"
-    print(line, flush=True)
+    gpu = re.search(r"\[subjects\] gpu pass of (\d+) pictures of (\d+)x(\d+): ([\d.]+) ms \(([^)]*)\)", err)
+    if not gpu:
+        print(line + ", no GPU time", flush=True)
+        return
+    n = int(gpu[1])
+    print(f"{line}, GPU {float(gpu[4]) / n:.2f} ms per picture (input {gpu[2]}x{gpu[3]}, {n} in a pass, {gpu[5]})")
+    layers = [(name, float(ms)) for name, ms in re.findall(r"\[subjects\] gpu (?!pass of )(.+): ([\d.]+) ms", err)]
+    stages = {}
+    for name, ms in layers:
+        stage = re.split(r"[ .]", name)[0]
+        stages[stage] = stages.get(stage, 0.0) + ms
+    print("  stages, ms per pass: " + ", ".join(f"{k} {v:.2f}" for k, v in stages.items()))
+    slowest = sorted(layers, key=lambda x: -x[1])[:8]
+    print("  slowest layers, ms per pass: " + ", ".join(f"{k} {v:.2f}" for k, v in slowest), flush=True)
 
 
 def main():
