@@ -1871,7 +1871,7 @@ impl Workspace {
                 }
                 if ui.button("Find").clicked() {
                     tried = true;
-                    let pick = (subject, model);
+                    let pick = (subject, model.for_subject(subject));
                     asked = Some(find_request(clip, &node.name, pick, &given));
                 }
                 let blur = page_blur(clip, comp, node);
@@ -1919,7 +1919,7 @@ impl Workspace {
             let usual = vidcut_core::motion::Join::of(subject);
             let side = match better {
                 true => BETTER_SIDE,
-                false => vidcut_av::subjects::side(subject, model),
+                false => vidcut_av::subjects::side(subject, model.for_subject(subject)),
             };
             let hints = [
                 side.to_string(),
@@ -1974,7 +1974,7 @@ impl Workspace {
             }
         }
         if let Some(found) = asked.filter(|_| extra.is_some()) {
-            self.ask(vec![found], Some((subject, model)));
+            self.ask(vec![found], Some((subject, model.for_subject(subject))));
         }
     }
 

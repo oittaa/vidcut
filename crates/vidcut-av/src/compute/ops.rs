@@ -861,6 +861,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
     let cin = u(6u); let kw = u(20u); let kk = u(36u); let cols = u(37u);
     let tiles_m = (u(38u) + 127u) / 128u;
     let g = gid(wg, nw);
+    if (g >= tiles_m * ((u(12u) + 63u) / 64u)) {
+        return;
+    }
     let m0 = (g % tiles_m) * 128u;
     let n0 = (g / tiles_m) * 64u;
     tx = li % 8u;
@@ -1100,6 +1103,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
     let tiles = tiles_m * u(7u);
     let g = gid(wg, nw);
     let grp = g / tiles;
+    if (grp >= 36u) {
+        return;
+    }
     let r = g % tiles;
     let m0 = (r % tiles_m) * 128u;
     let n0 = (r / tiles_m) * 128u;

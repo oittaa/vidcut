@@ -2259,6 +2259,14 @@ impl FindModel {
     pub fn finds(self, subject: Subject) -> bool {
         self == Self::Fast || subject == Subject::Face
     }
+
+    pub fn for_subject(self, subject: Subject) -> Self {
+        if self.finds(subject) {
+            self
+        } else {
+            Self::Fast
+        }
+    }
 }
 
 /// The area of a motion path on one frame of the clip's file.
