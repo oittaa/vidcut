@@ -5992,12 +5992,73 @@ fn groups_to_rate(p: &mut Project, from: Rational) {
 }
 
 fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
+    to_rate(p, t, ids, false);
+}
+
+fn frames_kept(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
+    to_rate(p, t, ids, true);
+}
+
+fn kept_frames_note(from: Rational, to: Rational) -> String {
+    let speed = crate::model::Speed::percent(to.as_f64() / from.as_f64());
+    format!(
+        "the {from} fps file keeps its frame numbers in the {to} fps timeline: it plays at {speed}% speed"
+    )
+}
+
+fn faster(speed: Option<&crate::model::Speed>, ratio: f64) -> (crate::model::Speed, i64, i64) {
+    use crate::model::{Section, Speed};
+    use crate::render::Pace;
+    let old = speed.cloned().unwrap_or_else(|| Speed::constant(1.0));
+    let sections: Vec<Section> = (old.sections.iter())
+        .map(|s| Section {
+            from: s.from * ratio,
+            speed: s.speed * ratio,
+            ..*s
+        })
+        .collect();
+    let new = Speed {
+        sections: sections.into(),
+        skip: old.skip,
+        effect: None,
+    };
+    let was = match speed {
+        Some(_) => Pace::mapped(old.sections.clone(), old.skip).shown(),
+        None => 0,
+    };
+    let now = Pace::mapped(new.sections.clone(), new.skip).shown();
+    (new, was, now)
+}
+
+fn on_grid(exact: f64, den: i64) -> (i64, f64) {
+    let units = (exact * den as f64).round() as i64;
+    (
+        units.div_euclid(den),
+        units.rem_euclid(den) as f64 / den as f64,
+    )
+}
+
+fn exact_parts(exact: f64, den: i64) -> (i64, f64) {
+    const FINE: i64 = 1_000_000;
+    let (whole, rest) = on_grid(exact, den);
+    match (whole as f64 + rest - exact).abs() * (FINE as f64) < 1.0 {
+        true => (whole, rest),
+        false => on_grid(exact, FINE),
+    }
+}
+
+fn to_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds, keep: bool) {
     let pool: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
     let (from, to) = (t.fps, p.fps());
-    let conv = |f: i64| rescale(f, from, to);
+    let keep = keep && from != to;
+    let conv = |f: i64| match keep {
+        true => f,
+        false => rescale(f, from, to),
+    };
     let ratio = to.as_f64() / from.as_f64();
+    let scaled = from != to && !keep;
     let retime = |list: &mut Vec<Value>| {
-        if from != to && !list.is_empty() {
+        if scaled && !list.is_empty() {
             let mut e = Effects {
                 from: 0,
                 list: std::mem::take(list).into_iter().map(Kept::from).collect(),
@@ -6022,20 +6083,33 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         if let Some((h, tl)) = c.audio {
             c.audio = Some((conv(c.start + h) - start, conv(c.end() + tl) - end));
         }
-        let exact = (c.source_in as f64 + c.source_rest - tc) * ratio;
-        c.source_in = conv(c.source_in - tc.round() as i64);
-        c.source_rest = 0.0;
-        if let Some(per) = m.map(|m| to.over(m.rate(to))).filter(|per| per.den() != 1) {
-            let units = (exact * per.den() as f64).round() as i64;
-            c.source_in = units.div_euclid(per.den());
-            c.source_rest = units.rem_euclid(per.den()) as f64 / per.den() as f64;
-        }
+        let plays = c.compound.is_some() || m.is_some_and(|m| !m.is_still());
+        let paced = (keep && plays).then(|| faster(c.speed.as_ref(), ratio));
+        let (was, now) = paced.as_ref().map_or((0, 0), |(_, was, now)| (*was, *now));
+        let exact = ((c.source_in - was) as f64 + c.source_rest - tc) * ratio;
+        let den = m.map_or(1, |m| to.over(m.rate(to)).den());
+        (c.source_in, c.source_rest) = match (keep, paced.is_some(), den) {
+            (true, false, _) => (c.source_in - tc.round() as i64, 0.0),
+            (true, true, den) => {
+                let (whole, rest) = exact_parts(exact, den);
+                (whole + now, rest)
+            }
+            (false, _, 1) => (conv(c.source_in - tc.round() as i64), 0.0),
+            (false, _, den) => on_grid(exact, den),
+        };
         if let Some(k) = c.compound.as_mut() {
-            k.frames = conv(k.frames).max(c.source_in + end - start);
+            let shown = match keep {
+                true => ((end - start) as f64 * ratio).ceil() as i64,
+                false => end - start,
+            };
+            k.frames = rescale(k.frames, from, to).max(c.source_in + shown);
+        }
+        if let Some((speed, ..)) = paced {
+            c.speed = (speed.scalar() != Some(1.0)).then_some(speed);
         }
         retime(&mut c.effects);
         retime(&mut c.audio_effects);
-        if from != to {
+        if scaled {
             c.gain_keys = crate::keyframes::scaled(&c.gain_keys, conv, ratio);
             if let Some(picture) = c.picture.as_mut() {
                 picture.scale_times(&conv, &|_| ratio);
@@ -6056,7 +6130,7 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
     }
     for x in &mut t.transitions {
         (x.before, x.after) = (conv(x.before), conv(x.after));
-        if from != to {
+        if scaled {
             otio::transitions::scale_curve(&mut x.otio, conv, ratio);
         }
     }
@@ -6949,17 +7023,13 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             }
             None => {}
         }
-        p.set_start_tc(crate::time::rescale(t.start_tc, t.fps, p.fps()));
+        p.set_start_tc(t.start_tc);
         p.settings.auto_format = false;
     }
     if t.fps != p.fps() {
-        warnings.push(format!(
-            "converted from {} to the project's {} fps: cuts may move by up to half a frame",
-            t.fps,
-            p.fps()
-        ));
+        warnings.push(kept_frames_note(t.fps, p.fps()));
     }
-    at_project_rate(p, &mut t, &ids);
+    frames_kept(p, &mut t, &ids);
     let offset = if empty { 0 } else { p.end() };
     add_tracks(p, &t, empty)?;
     let (mut clips, markers) =
@@ -7177,7 +7247,7 @@ pub fn open_otio(
     }
     p.check_out();
     p.subtitles = meta.subtitles;
-    p.set_start_tc(crate::time::rescale(t.start_tc, t.fps, p.fps()));
+    p.set_start_tc(t.start_tc);
     let mut warnings = t.warnings.clone();
     let mut ids = MediaIds::new();
     for c in t.clips.iter().filter(|c| !c.is_block()) {
@@ -7190,13 +7260,9 @@ pub fn open_otio(
     let (found, _) = find_media(&mut p, others, env, &[], false)?;
     ids.extend(found);
     if t.fps != p.fps() {
-        warnings.push(format!(
-            "converted from {} to the project's {} fps: cuts may move by up to half a frame",
-            t.fps,
-            p.fps()
-        ));
+        warnings.push(kept_frames_note(t.fps, p.fps()));
     }
-    at_project_rate(&p, &mut t, &ids);
+    frames_kept(&p, &mut t, &ids);
     add_tracks(&mut p, &t, true)?;
     let (clips, _) = place_imported(&mut p, &t, &ids, 0, &HashMap::new(), &mut warnings, true)?;
     fill_contents(

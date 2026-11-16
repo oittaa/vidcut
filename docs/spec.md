@@ -351,6 +351,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - File > Import > Timeline makes a new timeline, named after the file, in the open bin, and opens it. A name that a timeline has is refused.
     - The Import window has the timeline's name. vidcut also offers Append, Replace, As a Compound Clip and Media Only.
     - Append or Replace into a project with no timeline first makes "Timeline 1", as an edit does. It takes the file's start timecode.
+    - A file at another frame rate than its timeline keeps its frame numbers (measured in Resolve Studio 21.2, with a script import).
+      - The timeline has the project's settings. Each clip has the same first frame and the same length in frames as in the file.
+      - Each frame shows the picture that the same frame of the file shows. Thus a 25 fps file plays at 120% speed in a 30 fps timeline.
+      - The start is the same count of frames. Thus 01:00:00:00 at 25 fps is 00:50:00:00 at 30 fps.
+      - The import gives a warning with the two rates and the speed.
+      - The sound, the Import window and the files of other editors are not measured.
 - **Clip Info** (vidcut):
   - Clip Info shows all that vidcut knows of a file.
   - The info button of the metadata strip or of a thumbnail corner opens it. The menu of a pool item also opens it.

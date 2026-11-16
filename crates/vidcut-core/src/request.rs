@@ -904,7 +904,10 @@ pub enum Request {
     /// start timecode. A project that had no timeline before the import
     /// takes the file's frame rate, and so does an empty timeline with its
     /// own settings.
-    /// Else the clips are converted to the timeline's rate by time. The
+    /// Else the timeline keeps the file's frame numbers: each clip has the
+    /// same first frame and length in frames, and plays faster or slower
+    /// by the ratio of the two rates, so each frame shows the same
+    /// picture. A warning tells the speed. The
     /// media of a project vidcut wrote come as it has them, in a bin named
     /// after the file. What can't be imported is listed in `warnings`.
     #[serde(rename = "timeline.import")]
