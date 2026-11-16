@@ -3089,7 +3089,7 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
       - The timeline has an output LUT.
       - The output gets HDR10+ or Dolby Vision metadata.
     - With `video.alpha`, the Alpha Mode of the clip must be the `video.alpha_mode` of the file. A clip with alpha copies only over a gap.
-    - H.264, HEVC, AV1 and VP9 also copy ([X171](deviations.md#x171-bypass-re-encode-copies-h264-hevc-av1-and-vp9)).
+    - H.264, HEVC, AV1 and VP9 also copy.
     - A copy starts at a frame that a decoder can start at. The export encodes the frames before it.
       - H.264: an IDR.
       - HEVC: an IDR, a CRA or a BLA.

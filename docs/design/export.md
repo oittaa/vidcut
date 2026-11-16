@@ -238,7 +238,7 @@ Notes:
   - In HEVC, a CRA in the first packet becomes a BLA. Why: then a decoder drops the RASL pictures, which use frames before the cut.
   - AV1: the sequence header of the file, after the temporal delimiter.
   - VP9, ProRes and DNxHR: nothing.
-- In MP4 and MOV, the sample entry is `avc3` or `hev1` ([X171](../deviations.md#x171-bypass-re-encode-copies-h264-hevc-av1-and-vp9)).
+- In MP4 and MOV, the sample entry is `avc3` or `hev1`. Why: each run of frames carries its own parameter sets.
 - A copied packet gets a PTS on the frame grid of the timeline. Its DTS keeps the distance from PTS to DTS of the source.
 - `Copying::time_base` gives a stream time base that holds each frame of the timeline and each time of the files exactly. Matroska uses 1/1000.
 
