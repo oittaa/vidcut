@@ -34,7 +34,6 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - Vulkan on an NVIDIA GPU gave correct results with the same shaders.
   - Thus `CONV`, `CONV4` and `WINO_GEMM` write whole vectors into workgroup memory. Then they match onnxruntime on the M4.
   - `scripts/face-check.py` finds the first wrong step of the slow face model ([tools](tools.md)).
-  - The upscalers still write single components ([todo](todo/macos.md#workgroup-memory-on-metal)).
 - **Windows stops the computer after more than five GPU resets in one minute** (bug check 0x116, `TdrLimitCount` and `TdrLimitTime`).
   - Thus vidcut makes a new device after a loss only on an action of the user, and only a few times in a minute (`screen::retry_lost`).
 - **egui-wgpu shows an `Rgba8Unorm` native texture's values as they are**, with no sRGB conversion.
