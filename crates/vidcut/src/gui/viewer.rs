@@ -26,7 +26,7 @@ pub(super) struct GridCell {
     pub number: Option<usize>,
     pub label: Option<String>,
     pub media: String,
-    pub frame: Option<i64>,
+    pub frame: Option<f64>,
     pub active: bool,
     pub outlined: bool,
 }
@@ -535,7 +535,7 @@ impl Workspace {
                 number: Some(i + 1),
                 label: Some(camera.label.clone()),
                 media: file.media.clone(),
-                frame: Some(position - file.at),
+                frame: Some((position - file.at) as f64),
                 active: active.is_some_and(|a| std::ptr::eq(a, camera)),
                 outlined: false,
             })
@@ -629,7 +629,7 @@ impl Workspace {
                 None
             } else {
                 match shown.frame {
-                    Some(frame) => Some(vidcut_core::render::media_frame(p, m, frame)),
+                    Some(frame) => Some(vidcut_core::render::media_frame_at(p, m, frame)),
                     None => Some(vidcut_core::render::VideoPiece::black(1)),
                 }
             };

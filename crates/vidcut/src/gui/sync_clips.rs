@@ -8,7 +8,7 @@ use vidcut_av::player::{Config, PacedOutput, Player};
 use vidcut_core::model::{AngleSync, GroupClip, GroupRow, Project};
 use vidcut_core::multicam::{
     SyncOpen, drop_clip, lock_lined_up, row_camera, row_file_at, ruler_start, settle, shift_clip,
-    sync_clips_files, timeline_frames, visible,
+    sync_clips_files, visible,
 };
 use vidcut_core::render::{RenderPlan, places_sound};
 use vidcut_core::shortcuts::{Action, Bindings, Panel};
@@ -94,7 +94,7 @@ fn cell_of(p: &Project, rows: &[GroupRow], i: usize, at: i64) -> GridCell {
         number: Some(i + 1),
         label: Some(format!("Camera {}", row_camera(rows, i))),
         media: shown.map(|c| c.media.clone()).unwrap_or_default(),
-        frame: under.map(|(_, frame)| timeline_frames(p, frame)),
+        frame: under.map(|(_, frame)| frame as f64 * p.fps().over(p.settings.fps).as_f64()),
         active: false,
         outlined: false,
     }

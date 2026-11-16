@@ -7511,6 +7511,11 @@ impl Project {
         crate::render::shown_frame(per, source)
     }
 
+    pub fn first_showing(&self, media: &Media, frame: i64) -> f64 {
+        let per = media.rate(self.settings.fps).over(self.fps());
+        (frame as f64 - crate::render::grid_slack(per)) / per.as_f64()
+    }
+
     pub fn marker(&self, id: &str) -> Option<&Marker> {
         self.markers
             .iter()

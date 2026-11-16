@@ -194,7 +194,7 @@ impl Workspace {
                         number: Some(row.number),
                         label: Some(format!("Camera {}", row.camera)),
                         media: row.media.clone(),
-                        frame: row.frame,
+                        frame: row.source,
                         active: row.active,
                         outlined: self.sync_bin.outlined.as_deref() == Some(row.media.as_str()),
                     })

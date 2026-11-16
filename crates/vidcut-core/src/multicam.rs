@@ -56,6 +56,8 @@ pub struct SyncRow {
     pub clips: Vec<SyncClip>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<i64>,
+    #[serde(skip)]
+    pub source: Option<f64>,
     pub active: bool,
 }
 
@@ -709,24 +711,25 @@ fn sync_row(
         let start = ops::file_start_at(p, m, at, group);
         let head = timeline_frames(p, c.head);
         let frames = timeline_frames(p, c.head + visible(p, c)) - head;
+        let per = p.fps().over(p.settings.fps).as_f64();
+        let shown = c.head as f64 * per..(c.head + visible(p, c)) as f64 * per;
         if under.is_none()
-            && let Some(frame) = start
-                .map(|s| at - s)
-                .filter(|f| (head..head + frames).contains(f))
+            && let Some(x) = start.map(|s| at as f64 - s).filter(|x| shown.contains(x))
         {
-            under = Some((c.media.clone(), frame));
+            under = Some((c.media.clone(), p.clip_frame_at(m, x), x));
         }
         clips.push(SyncClip {
             media: c.media.clone(),
             frames,
             head,
-            start: start.map(|s| s + head),
+            start: start.map(|s| s.floor() as i64 + head),
         });
     }
-    let (media, frame) = match under {
-        Some((media, frame)) => (media, Some(frame)),
+    let (media, frame, source) = match under {
+        Some((media, frame, x)) => (media, Some(frame), Some(x)),
         None => (
             clips.first().map(|c| c.media.clone()).unwrap_or_default(),
+            None,
             None,
         ),
     };
@@ -737,6 +740,7 @@ fn sync_row(
         active: clips.iter().any(|c| shown == Some(c.media.as_str())),
         clips,
         frame,
+        source,
     }
 }
 
@@ -788,19 +792,22 @@ pub fn pick(p: &mut Project, media: &str, at: i64) -> Result<Marks> {
     let m = p
         .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    let frames = p.media_frames(m);
+    let frames = p.clip_frames(m);
     let group = group_at_playhead(p, at)
         .filter(|g| g.at_of(media).is_some())
         .or_else(|| p.group_of(media));
-    let start = ops::file_start_at(p, m, at, group)
-        .filter(|s| (0..frames).contains(&(at - s)))
+    let start = ops::file_start_at(p, m, at, group);
+    let own = |t: i64| start.map(|s| p.clip_frame_at(m, t as f64 - s));
+    let here = own(at)
+        .filter(|f| (0..frames).contains(f))
         .ok_or_else(|| Error::invalid(format!("{} has no frame at the playhead", m.name)))?;
     let end = p.end();
     let (a, b) = if at > end {
-        (end - start, at - start)
+        let a = own(end).unwrap_or(here);
+        (a, own(at - 1).map_or(here, |f| f + 1))
     } else {
-        let length = (PICK_SECONDS * p.fps().as_f64()).round() as i64;
-        (at - start, at - start + length)
+        let length = (PICK_SECONDS * m.rate(p.settings.fps).as_f64()).round() as i64;
+        (here, here + length)
     };
     let (a, b) = (a.max(0), b.min(frames));
     if a >= b {
@@ -809,7 +816,6 @@ pub fn pick(p: &mut Project, media: &str, at: i64) -> Result<Marks> {
             m.name
         )));
     }
-    let (a, b) = p.clip_span(m, (a, b));
     ops::set_media_marks(p, media, Some(Some(a)), Some(Some(b)))?;
     Ok(Marks {
         mark_in: Some(a),

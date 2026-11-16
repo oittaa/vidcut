@@ -4313,6 +4313,15 @@ pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
     }
 }
 
+pub fn media_frame_at(p: &Project, m: &Media, at: f64) -> VideoPiece {
+    let first = at.floor();
+    let mut piece = media_frame(p, m, first as i64);
+    if let VideoPiece::Source { phase, .. } = &mut piece {
+        *phase = at - first;
+    }
+    piece
+}
+
 pub fn media_clip_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
     let ((first, _), shift) = p.on_timeline(m, (at, at));
     let mut piece = media_frame(p, m, first);

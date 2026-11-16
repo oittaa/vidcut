@@ -664,9 +664,9 @@ The bar and the Jobs button:
 **The Sync Bin** ([spec §7.4](../spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
 
 - `LeftTab::SyncBin` is only a state of the GUI. Live has no Sync Bin mode. Thus the grid runs on `ViewerMode::Timeline`, and the transport and the sound stay the timeline's.
-- `multicam::sync_rows` works out the rows at a time, from the stored rows of a group or by `ruled_rows` on the timecodes. A `SyncRow` holds its files, and `media` and `frame` name the file at that time.
+- `multicam::sync_rows` works out the rows at a time, from the stored rows of a group or by `ruled_rows` on the timecodes. A `SyncRow` holds its files, and `media` and `frame` name the file at that time. `frame` counts the frames of the file.
 - `multicam::group_of_bin` chooses the group. With two groups or more, it takes the group of the clip at the playhead.
-- `ops::file_start_at` gives the place of a file by the clip at the playhead, because the rows follow that clip's source timecode. It takes the group of the rows, because a file of those rows can have a newer group.
+- `ops::file_start_at` gives the exact place of a file by the clip at the playhead, because the rows follow that clip's source timecode. It takes the group of the rows, because a file of those rows can have a newer group.
 - `multicam::pick` sets the source marks. The GUI then sends `viewer.load`, so the chosen camera is an ordinary source clip: its marks, scroll area and edits need nothing more.
 - The player stops at the end of its plan. Thus `SyncBin` holds a playhead past the timeline's end for the GUI, and the requests take it as `at`.
 - `Workspace::sync_overwrite` waits for the answer of the edit with `Ask`, because only a done edit returns to the grid.

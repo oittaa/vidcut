@@ -2655,6 +2655,16 @@ fn generator_source(p: &Project, params: &SourceParams, generator: Generator) ->
     })
 }
 
+fn marked(p: &Project, media: &Media, params: &SourceParams) -> Result<(i64, i64)> {
+    match &params.range {
+        None => Ok((
+            media.marks.mark_in.unwrap_or(0),
+            media.marks.mark_out.unwrap_or(p.clip_frames(media)),
+        )),
+        Some(r) => Ok(media_context(p, media, None).range(r)?),
+    }
+}
+
 fn source(p: &Project, params: &SourceParams) -> Result<Source> {
     if let Some(generator) = ops::generators::source_of(params.generator, &params.settings)? {
         return generator_source(p, params, generator);
@@ -2662,14 +2672,7 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
     let media = p
         .pooled(&params.media)
         .ok_or_else(|| Error::not_found(format!("no media {}", params.media)))?;
-    let frames = p.clip_frames(media);
-    let marked = match &params.range {
-        None => (
-            media.marks.mark_in.unwrap_or(0),
-            media.marks.mark_out.unwrap_or(frames),
-        ),
-        Some(r) => media_context(p, media, None).range(r)?,
-    };
+    let marked = marked(p, media, params)?;
     let ((first, end), phase) = p.on_timeline(media, marked);
     if marked.1 > marked.0 && end <= first {
         return Err(Error::invalid(
@@ -3355,13 +3358,20 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let sources = if src.tape {
+            let sources: Vec<(Source, Option<(i64, i64)>)> = if src.tape {
                 tape_sources(p, src)?
+                    .into_iter()
+                    .map(|s| (s, None))
+                    .collect()
             } else {
-                vec![source(p, src)?]
+                let own = match p.pooled(&src.media) {
+                    Some(m) if src.generator.is_none() => Some(marked(p, m, src)?),
+                    _ => None,
+                };
+                vec![(source(p, src)?, own)]
             };
             let mut landed = Vec::with_capacity(sources.len());
-            for s in &sources {
+            for (s, own) in &sources {
                 let marks = p.media(&s.media).map(|m| &m.marks);
                 let marked =
                     src.tape || src.range.is_some() || marks.is_some_and(|m| !m.is_empty());
@@ -3370,7 +3380,7 @@ fn mutate(
                     (false, true) => ops::SourceLining::Marked,
                     (false, false) => ops::SourceLining::Playhead,
                 };
-                landed.push(ops::source_overwrite(p, s, lining, at, *group)?);
+                landed.push(ops::source_overwrite(p, s, *own, lining, at, *group)?);
             }
             if !keep_marks {
                 p.marks = Default::default();
