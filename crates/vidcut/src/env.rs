@@ -449,11 +449,11 @@ impl Env for AvEnv {
         download: bool,
     ) -> Result<Arc<Detections>> {
         let dir = paths::models_dir();
-        vidcut_av::subjects::get_ready(&dir, subject, download).map_err(av_error)?;
+        vidcut_av::subjects::get_ready(&dir, subject, look.model, download).map_err(av_error)?;
         let us = |secs: f64| (secs * 1e6).round() as i64;
         let key = format!(
             "{}-{}-{}-{}",
-            vidcut_av::subjects::name(subject),
+            vidcut_av::subjects::name(subject, look.model),
             us(look.from),
             us(look.to),
             us(look.every)

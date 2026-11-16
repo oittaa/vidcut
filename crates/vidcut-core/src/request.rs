@@ -9,10 +9,10 @@ use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom,
-    Ease, EbuLevel, EffectType, EffectValue, FillMethod, GeneratorKind, GlowAlpha, GlowFraming,
-    GlowOutput, GrainComposite, GrainPreset, Handle, LowerThirdLine, Node, PathSample, PictureTool,
-    PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
-    TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape, ZoomBox,
+    Ease, EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha,
+    GlowFraming, GlowOutput, GrainComposite, GrainPreset, Handle, LowerThirdLine, Node, PathSample,
+    PictureTool, PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor,
+    TitleKind, TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -3041,6 +3041,10 @@ pub enum Request {
         /// Usual: `face`.
         #[serde(default)]
         subject: Subject,
+        /// The neural network that finds the things: `fast`, or `slow` for
+        /// `face`. Usual: `fast`.
+        #[serde(default)]
+        model: FindModel,
         /// Take the paths that an earlier `motion.find` of this subject made
         /// off the clip first. Without it, a clip that has such paths is an
         /// error. A path of a pattern of a tracker, or of a title, stays.
@@ -3049,8 +3053,9 @@ pub enum Request {
         #[serde(default)]
         replace: bool,
         /// Download the model of the subject when it is not on this
-        /// computer, checked against its SHA-256: 233 kB for `face`, 4.8 MB
-        /// for `text`, and one file of 35.9 MB for `person` and `vehicle`.
+        /// computer, checked against its SHA-256: 233 kB for `face`, 88.5 MB
+        /// for the `slow` model of `face`, 4.8 MB for `text`, and one file of
+        /// 35.9 MB for `person` and `vehicle`.
         /// Without it, a missing model is an error that tells its size.
         #[serde(default)]
         download: bool,

@@ -180,6 +180,7 @@ pub struct Look {
     pub to: f64,
     pub every: f64,
     pub side: Option<u32>,
+    pub model: crate::model::FindModel,
 }
 
 pub const SIDES: (u32, u32) = (320, 3840);

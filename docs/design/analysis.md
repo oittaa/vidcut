@@ -57,28 +57,46 @@ flowchart TD
   - `Subject::Face` is a face. `Subject::Text` is a line or a block of text. `Subject::Person` is a person. `Subject::Vehicle` is a vehicle.
   - `Subject::ALL` lists the subjects.
   - The subjects differ in two places only: `subjects::Net` holds the model of each, and `Join::of` holds the rules of its paths.
+  - A `FindModel` picks the model of the subject. `FindModel::Fast` is the small model of each subject, on the CPU.
+    - `FindModel::Slow` is a second model of `Subject::Face`, on the GPU (`retinaface`). The other subjects have no second model, and `FindModel::finds` refuses them.
+    - Why: a larger network finds more faces in a hard picture. It needs a GPU to be fast.
   - `Subject::Person` and `Subject::Vehicle` have one model and one model file. Each keeps its own classes of that model (`yolox::PEOPLE`, `yolox::VEHICLES`).
 - `subjects::find` in vidcut-av measures. It reads only the range that the clip shows:
   - A `Look` has the first time, the last time and the time between two frames of the project (`every`).
   - `VideoReader` seeks to the first time. It decodes on the GPU or the CPU, as the preferences tell.
   - `subjects::find` looks only at the first decoded frame at or after each time of the `Look`.
     - Why: a file of 60 fps in a project of 24 fps shows two frames of each five.
-  - It scales each picture to the longer side that the model takes (`yunet::SIDE`, `ppocr::SIDE`, `yolox::SIDE`), upright, with square pixels.
+  - It scales each picture to the longer side that the model takes (`yunet::SIDE`, `retinaface::SIDE`, `ppocr::SIDE`, `yolox::SIDE`), upright, with square pixels.
     - `motion.find` can give another longer side with `size` (`Look::side`), within `analysis::SIDES`. A larger picture shows the model smaller things, and takes more time.
     - With a given size, the picture is never larger than its source.
     - `AvEnv` puts a given size in the name of the cached find.
-  - The model runs with tract on the CPU, one picture on each thread of the pool (`pool::run`).
+  - A model on the CPU runs with tract, one picture on each thread of the pool (`subjects::each`).
+  - The model on the GPU takes several pictures in one pass, and one readback gives the outputs of all passes (`retinaface::Model::find`).
   - `Detections` holds the time of each picture and its `Found` boxes: the center, the size, the rotation and the score. The center and the size are fractions of the picture.
   - `Detections` also holds the scene score of each picture against the picture before it (`scene`).
     - `Looking::picture` measures it on the small picture, with `small_luma`, `mafd` and `scene_score` of `analyze.scenes`. Thus the file is not decoded a second time.
     - `subjects::find` also measures `SEED` pictures before the first time, where the file has them. `Detections` does not hold them.
       - Why: the scene score of a picture uses the two pictures before it. Without them, a fast move at the start of a clip scores as a shot change.
-  - It keeps each box with a score of `yunet::LEAST`, `ppocr::LEAST` or `yolox::LEAST` or more. Why: the core can then decide again with other scores, and nothing is measured again.
+  - It keeps each box with a score of `yunet::LEAST`, `retinaface::LEAST`, `ppocr::LEAST` or `yolox::LEAST` or more. Why: the core can then decide again with other scores, and nothing is measured again.
 - `yunet` prepares the picture and decodes the outputs of the model:
   - The picture goes in as blue, green and red values from 0 to 255. Its right side and its bottom are padded to a multiple of 32.
   - Each of the strides 8, 16 and 32 gives a class score, an object score and a box for each cell.
   - The score of a box is the root of the product of the two scores.
   - Of the boxes that overlap more than `yunet::SAME`, the box with the highest score stays (`subjects::apart`).
+- `retinaface` finds faces with RetinaFace and a ResNet-34, in the shaders of vidcut on the shared off-screen device ([GPU](gpu.md#gpu-layers)):
+  - The weights come from the ONNX file of the maker. `Onnx` reads the weights of each convolution by the name of its node, with the proto parser of tract.
+    - The file has each batch norm in the weights of its convolution.
+    - The file runs the first convolution of a context module twice on the same input. `retinaface` runs it once.
+  - The picture goes in as blue, green and red values from 0 to 255, each less its mean (`MEAN`). Its right side and its bottom are padded to a multiple of 32.
+    - The CPU sends the planes of the picture. Three copies on the GPU take off the mean and interleave the colors.
+  - Each of the strides 8, 16 and 32 has two anchor sizes (`ANCHORS`). Each anchor gives two class values and a box.
+    - One convolution gives the class values and the box of a stride together (`HEAD`).
+    - The score of a box is the softmax of the two class values. The box decodes from its anchor with `VARIANCE`.
+  - Of the boxes that overlap more than `retinaface::SAME`, the box with the highest score stays (`subjects::apart`).
+  - A pass takes up to `MOST` pictures, with up to `PIXELS` pixels in all.
+    - Why: the deep layers have few pixels. With one picture, most of the GPU waits.
+  - The work buffers have one size for each find (`plan`). The picture planes, the first feature map and the middle of each residual block share one buffer (`Work::wide`).
+    - Why: no two of them are in use at the same time. A buffer that a layer reads is never the buffer that it writes.
 - `yolox` finds people and vehicles with the YOLOX-S model, by the code of its maker (the files yolox.py and demo.py of OpenCV Zoo):
   - The model takes a square picture with a side of `yolox::SIDE`. The picture is at its top left, and the rest has the value of `PAD`.
     - Thus the model also runs on the part without a picture. Why: the code of the maker gives the model this square.
@@ -139,12 +157,12 @@ flowchart TD
 - A still has one picture. `subject_look` asks for it once, and each frame of the clip takes its boxes.
 - `AvEnv` keeps the `Detections` in the disk cache. The name of the file holds the subject, the model file, the rules of its model and the `Look` (`subjects::name`).
   - The model file is the first 8 digits of its SHA-256 in the catalog. Thus a new model file gives another file.
-  - Each model names its own rules (`yunet::name`, `ppocr::name`, `yolox::name`), with the values that prepare the picture. Thus a change of a rule gives another file.
+  - Each model names its own rules (`yunet::name`, `retinaface::name`, `ppocr::name`, `yolox::name`), with the values that prepare the picture. Thus a change of a rule gives another file.
   - `yolox::name` also holds the classes of the subject.
 - With `VIDCUT_DEBUG`, a line of the area `subjects` gives the pictures, the frames, the time and the time in the model.
 - In a GUI, `Live::measuring` measures on `vidcut-measure` first (`editor::subject_looks`). Headless, `work_first` measures on `vidcut-subjects`.
-- The model files are `catalog::YUNET_ONNX`, `catalog::PPOCR_DET_ONNX` and `catalog::YOLOX_ONNX`. `subjects::get_ready` fetches the file of the subject when the request has `download`.
-- `models.check` finds the subject of a model id with `subjects::of`. For the model of two subjects, that is the first of them.
+- The model files are `catalog::YUNET_ONNX`, `catalog::RETINAFACE_ONNX`, `catalog::PPOCR_DET_ONNX` and `catalog::YOLOX_ONNX`. `subjects::get_ready` fetches the file of the subject and its model when the request has `download`.
+- `models.check` finds the subject and the model of a model id with `subjects::of`. For the model of two subjects, that is the first of them.
 
 ## Tracks
 
@@ -535,7 +553,7 @@ A file with a `part` piece in its name is still being written, and does not coun
 - `crates/vidcut-core/src/fingerprint.rs`, `crates/vidcut-core/src/dirs.rs`, `crates/vidcut-core/src/disk_cache.rs`
 - `crates/vidcut-core/src/transcript.rs`, `crates/vidcut-core/src/transcripts.rs`, `crates/vidcut-core/src/speakers.rs`, `crates/vidcut-core/src/retime.rs`
 - `crates/vidcut-av/src/analysis.rs`, `crates/vidcut-av/src/transcribe.rs`, `crates/vidcut-av/src/speech_api.rs`, `crates/vidcut-av/src/models.rs`
-- `crates/vidcut-av/src/subjects.rs`, `crates/vidcut-av/src/subjects/yunet.rs`, `crates/vidcut-av/src/subjects/yolox.rs`, `crates/vidcut-core/src/motion.rs`
+- `crates/vidcut-av/src/subjects.rs`, `crates/vidcut-av/src/subjects/yunet.rs`, `crates/vidcut-av/src/subjects/retinaface.rs`, `crates/vidcut-av/src/subjects/yolox.rs`, `crates/vidcut-core/src/motion.rs`
 - `crates/vidcut-av/src/light.rs`, `crates/vidcut-av/src/waveform.rs`, `crates/vidcut-av/src/thumbs.rs`
 - `crates/vidcut/src/env.rs`, `crates/vidcut/src/paths.rs`, `crates/vidcut/src/preferences.rs`, `crates/vidcut/src/services.rs`
 - `crates/vidcut/src/thumbcache.rs`, `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/storyboard.rs`

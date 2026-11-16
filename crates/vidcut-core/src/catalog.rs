@@ -678,6 +678,25 @@ pub static YUNET: Model = Model {
     price: None,
 };
 
+pub const RETINAFACE_ONNX: File = File {
+    name: "retinaface/retinaface_r34.onnx",
+    title: "RetinaFace R34 face detection",
+    url: "https://github.com/yakhyo/retinaface-pytorch/releases/download/v0.0.1/retinaface_r34.onnx",
+    bytes: 88_502_283,
+    sha256: "bd0263dc2a465d32859555cb1741f2d98991eb0053696e8ee33fec583d30e630",
+};
+
+pub static RETINAFACE: Model = Model {
+    id: "retinaface-r34",
+    times: None,
+    title: "RetinaFace R34 face detection",
+    files: &[RETINAFACE_ONNX],
+    service: None,
+    languages: &[],
+    limits: &[],
+    price: None,
+};
+
 pub const PPOCR_DET_ONNX: File = File {
     name: "ppocr/PP-OCRv5_mobile_det.onnx",
     title: "PP-OCRv5 text detection",
@@ -861,7 +880,7 @@ pub static EMA_VFI: Model = Model {
     price: None,
 };
 
-pub static ALL: [&Model; 17] = [
+pub static ALL: [&Model; 18] = [
     &PARAKEET_ULTRA,
     &QWEN3_ASR,
     &WHISPER_LARGE_V3,
@@ -872,6 +891,7 @@ pub static ALL: [&Model; 17] = [
     &GOOGLE,
     &DPDFNET,
     &YUNET,
+    &RETINAFACE,
     &PPOCR_DET,
     &YOLOX,
     &VITTRACK,

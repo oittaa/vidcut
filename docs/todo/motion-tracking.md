@@ -62,6 +62,7 @@ In this file, a path is never a track of the timeline.
 | Subject | Model | File | License |
 |---|---|---|---|
 | A face | YuNet, from OpenCV Zoo | 233 kB | MIT |
+| A face, the `slow` model | RetinaFace with a ResNet-34, from yakhyo/retinaface-pytorch | 88.5 MB | MIT |
 | A number plate | LPD-YuNet, from OpenCV Zoo | 4.15 MB | Apache 2.0 |
 | A person and a vehicle. The model also has an animal and the other COCO classes. | YOLOX-S, from OpenCV Zoo | 35.9 MB | Apache 2.0 |
 | A drawn box | VitTrack, from OpenCV Zoo | 715 kB | Apache 2.0 |
@@ -84,6 +85,11 @@ In this file, a path is never a track of the timeline.
 - **The edges of a found path:** the model finds a face only when most of it shows. Thus a face that comes into the picture can show for a few frames with no blur.
   - Try how many frames a found path must start early and end late.
 - **Faces, what is left:**
+  - The `slow` model: try the Model switch of a Tracker in the app.
+  - The `slow` model takes from 6 to 7 ms for each picture of 640 pixels, and 25 ms at 1248, on an RTX 4080 SUPER. With onnxruntime on DirectML, the same file takes 3.8 ms at 640 and 8.6 ms at 1280.
+    - Try 16-bit floats and Winograd convolutions in `compute::ops`.
+    - The CPU decodes and scales the next pictures while the GPU waits. Try to do both at the same time.
+  - The `start` and the `keep` of a face come from the scores of YuNet. Check them on the scores of the `slow` model, on many clips.
   - Measure YuNet on the GPU against the CPU, and build it there if it is clearly faster ([analysis](../design/analysis.md#subjects)).
     - Measured on 2026-11-10, on 16 threads, with the file decoded on the GPU:
     - A 720p file at 24 fps gives 253 pictures in a second. The model takes 61 % of that time.

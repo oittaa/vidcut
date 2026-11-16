@@ -15,10 +15,10 @@ use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, ClipRetime, CompositeMode,
     Composition, Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue,
-    FillMethod, FilmGrain, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming, GlowOutput,
-    Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, Node, Pattern, Picture,
-    PictureTool, Project, Retime, Sharpen, Speed, Subject, Tool, ToolType, TrackKind, Upscaler,
-    Vignette, VignetteMode, VignetteShape, ZoomBox,
+    FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
+    GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, Node, Pattern,
+    Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject, Tool, ToolType, TrackKind,
+    Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -1718,6 +1718,7 @@ impl Workspace {
         let mut values = std::mem::take(&mut self.inspector.find_values);
         let mut open = self.inspector.find_open;
         let mut better = self.inspector.find_better;
+        let mut model = self.inspector.find_model;
         let wrong = self.inspector.find_error;
         let extra = find_extra(&values);
         let mut tried = false;
@@ -1870,7 +1871,8 @@ impl Workspace {
                 }
                 if ui.button("Find").clicked() {
                     tried = true;
-                    asked = Some(find_request(clip, &node.name, subject, &given));
+                    let pick = (subject, model);
+                    asked = Some(find_request(clip, &node.name, pick, &given));
                 }
                 let blur = page_blur(clip, comp, node);
                 let button = egui::Button::new("Blur");
@@ -1882,6 +1884,15 @@ impl Workspace {
                 }
             });
             ui.end_row();
+            if subject == Subject::Face {
+                label(ui, "Model", false);
+                dialog::switch(ui, |ui| {
+                    for m in FindModel::ALL {
+                        ui.selectable_value(&mut model, m, m.title());
+                    }
+                });
+                ui.end_row();
+            }
             label(ui, "Quality", false);
             dialog::switch(ui, |ui| {
                 let quick = ui.selectable_label(!better, "Faster");
@@ -1908,7 +1919,7 @@ impl Workspace {
             let usual = vidcut_core::motion::Join::of(subject);
             let side = match better {
                 true => BETTER_SIDE,
-                false => vidcut_av::subjects::side(subject),
+                false => vidcut_av::subjects::side(subject, model),
             };
             let hints = [
                 side.to_string(),
@@ -1946,6 +1957,7 @@ impl Workspace {
         self.inspector.find_values = values;
         self.inspector.find_open = open;
         self.inspector.find_better = better;
+        self.inspector.find_model = model;
         if tried || extra.is_some() {
             self.inspector.find_error = extra.is_none();
         }
@@ -1962,7 +1974,7 @@ impl Workspace {
             }
         }
         if let Some(found) = asked.filter(|_| extra.is_some()) {
-            self.ask(vec![found], Some(subject));
+            self.ask(vec![found], Some((subject, model)));
         }
     }
 
@@ -2229,7 +2241,7 @@ struct Chosen {
 #[derive(Debug, Clone)]
 struct Finding {
     asks: Vec<(&'static str, Value)>,
-    subject: Option<Subject>,
+    subject: Option<(Subject, FindModel)>,
 }
 
 #[derive(Debug, Clone)]
@@ -2315,6 +2327,7 @@ pub struct Inspector {
     find_values: [String; 7],
     find_open: bool,
     find_better: bool,
+    find_model: FindModel,
     find_error: bool,
     finding: Option<Finding>,
     pub(super) stopping: Option<bool>,
@@ -3725,10 +3738,15 @@ fn with_model(method: &str, params: &mut Value) {
 fn find_request(
     clip: &Clip,
     tracker: &str,
-    subject: Subject,
+    (subject, model): (Subject, FindModel),
     extra: &Value,
 ) -> (&'static str, Value) {
-    let mut params = json!({ "clips": [clip.id], "subject": subject, "tracker": tracker });
+    let mut params = json!({
+        "clips": [clip.id],
+        "subject": subject,
+        "model": model,
+        "tracker": tracker,
+    });
     if clip.motion.iter().any(|m| m.subject == Some(subject)) {
         params["replace"] = json!(true);
     }
@@ -3783,10 +3801,10 @@ fn page_blur(clip: &Clip, comp: &Composition, tracker: &Node) -> Option<(&'stati
     Some(("apply", json!({ "commands": commands, "label": label })))
 }
 
-fn model_needs(subject: Option<Subject>) -> Vec<vidcut_av::models::Need> {
+fn model_needs(subject: Option<(Subject, FindModel)>) -> Vec<vidcut_av::models::Need> {
     let dir = crate::paths::models_dir();
     match subject {
-        Some(subject) => vidcut_av::subjects::needed(&dir, subject),
+        Some((subject, model)) => vidcut_av::subjects::needed(&dir, subject, model),
         None => vidcut_av::tracking::needed(&dir),
     }
 }
@@ -4964,7 +4982,7 @@ impl Workspace {
         }
     }
 
-    fn ask(&mut self, asks: Vec<(&'static str, Value)>, subject: Option<Subject>) {
+    fn ask(&mut self, asks: Vec<(&'static str, Value)>, subject: Option<(Subject, FindModel)>) {
         if model_needs(subject).is_empty() {
             for (method, params) in asks {
                 self.send(method, params);

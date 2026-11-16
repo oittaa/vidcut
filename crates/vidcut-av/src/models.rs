@@ -95,11 +95,15 @@ pub fn inspect(
     download: bool,
 ) -> Result<Inspected> {
     let found = vidcut_core::catalog::Found::default();
-    if let Some(subject) = crate::subjects::of(model.id) {
-        crate::subjects::inspect(dir, subject, download)?;
+    if let Some((subject, finder)) = crate::subjects::of(model.id) {
+        crate::subjects::inspect(dir, subject, finder, download)?;
+        let loaded = match finder {
+            vidcut_core::model::FindModel::Fast => "tract",
+            vidcut_core::model::FindModel::Slow => "vidcut",
+        };
         return Ok(Inspected {
             found,
-            loaded: Some("tract"),
+            loaded: Some(loaded),
         });
     }
     if model.id == vidcut_core::catalog::VITTRACK.id {

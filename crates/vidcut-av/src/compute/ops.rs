@@ -1,20 +1,22 @@
 use crate::compute::{Gpu, bytes};
 use crate::error::{Error, Result};
 
+pub(crate) const SHARED: u32 = 16 * 1024;
+
 #[derive(Clone)]
-pub(super) struct View {
-    pub(super) buf: wgpu::Buffer,
-    pub(super) base: u32,
-    pub(super) n: u32,
-    pub(super) h: u32,
-    pub(super) w: u32,
-    pub(super) c: u32,
-    pub(super) stride: u32,
-    pub(super) at: u32,
+pub(crate) struct View {
+    pub(crate) buf: wgpu::Buffer,
+    pub(crate) base: u32,
+    pub(crate) n: u32,
+    pub(crate) h: u32,
+    pub(crate) w: u32,
+    pub(crate) c: u32,
+    pub(crate) stride: u32,
+    pub(crate) at: u32,
 }
 
 impl View {
-    pub(super) fn part(&self, at: u32, c: u32) -> View {
+    pub(crate) fn part(&self, at: u32, c: u32) -> View {
         View {
             at: self.at + at,
             c,
@@ -22,7 +24,7 @@ impl View {
         }
     }
 
-    pub(super) fn frame(&self, b: u32) -> View {
+    pub(crate) fn frame(&self, b: u32) -> View {
         View {
             base: self.base + b * self.h * self.w * self.stride,
             n: 1,
@@ -30,7 +32,7 @@ impl View {
         }
     }
 
-    pub(super) fn rows(&self, y: u32, h: u32) -> View {
+    pub(crate) fn rows(&self, y: u32, h: u32) -> View {
         debug_assert_eq!(self.n, 1);
         View {
             base: self.base + y * self.w * self.stride,
@@ -39,7 +41,7 @@ impl View {
         }
     }
 
-    pub(super) fn shaped(&self, n: u32, h: u32, w: u32, c: u32) -> View {
+    pub(crate) fn shaped(&self, n: u32, h: u32, w: u32, c: u32) -> View {
         View {
             n,
             h,
@@ -56,7 +58,7 @@ impl View {
     }
 }
 
-pub(super) struct Carve<'a> {
+pub(crate) struct Carve<'a> {
     bufs: &'a [wgpu::Buffer],
     dummy: &'a wgpu::Buffer,
     plan: &'a [usize],
@@ -68,7 +70,7 @@ pub(super) struct Carve<'a> {
 }
 
 impl Carve<'_> {
-    pub(super) fn view(&mut self, n: u32, h: u32, w: u32, c: u32) -> View {
+    pub(crate) fn view(&mut self, n: u32, h: u32, w: u32, c: u32) -> View {
         let size = u64::from(n) * u64::from(h) * u64::from(w) * u64::from(c);
         self.over |= size > self.cap;
         let i = self.asked.len();
@@ -92,11 +94,11 @@ impl Carve<'_> {
         }
     }
 
-    pub(super) fn mark(&self) -> usize {
+    pub(crate) fn mark(&self) -> usize {
         self.live.len()
     }
 
-    pub(super) fn reset(&mut self, mark: usize) {
+    pub(crate) fn reset(&mut self, mark: usize) {
         for i in self.live.drain(mark..) {
             self.asked[i].2 = self.time;
         }
@@ -132,7 +134,7 @@ fn slots(asked: &[(u64, u64, u64)]) -> (Vec<u64>, Vec<usize>) {
     (sizes, plan)
 }
 
-pub(super) fn arena<T>(
+pub(crate) fn arena<T>(
     gpu: &Gpu,
     plan: impl Fn(&mut Carve) -> T,
 ) -> Result<(Vec<wgpu::Buffer>, T)> {
@@ -156,9 +158,10 @@ pub(super) fn arena<T>(
     let mut c = carve(&[], &[]);
     plan(&mut c);
     if c.over {
-        return Err(Error::Invalid(
-            "frame interpolation on the GPU: the frame is larger than the GPU's buffers".into(),
-        ));
+        return Err(Error::Invalid(format!(
+            "{} on the GPU: the frame is larger than the GPU's buffers",
+            gpu.what
+        )));
     }
     let (sizes, slots) = slots(&c.asked);
     let bufs: Vec<wgpu::Buffer> = sizes.iter().map(|&f| gpu.buffer(f as usize * 4)).collect();
@@ -167,7 +170,7 @@ pub(super) fn arena<T>(
     Ok((bufs, t))
 }
 
-pub(super) fn tensor(gpu: &Gpu, n: u32, h: u32, w: u32, c: u32) -> View {
+pub(crate) fn tensor(gpu: &Gpu, n: u32, h: u32, w: u32, c: u32) -> View {
     let size = n as usize * h as usize * w as usize * c as usize * 4;
     View {
         buf: gpu.buffer(size),
@@ -182,7 +185,7 @@ pub(super) fn tensor(gpu: &Gpu, n: u32, h: u32, w: u32, c: u32) -> View {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum Act {
+pub(crate) enum Act {
     None,
     Leaky(f32),
     Prelu,
@@ -202,32 +205,32 @@ impl Act {
     }
 }
 
-pub(super) struct Conv {
-    pub(super) cin: u32,
-    pub(super) cout: u32,
-    pub(super) kh: u32,
-    pub(super) kw: u32,
-    pub(super) stride: (u32, u32),
-    pub(super) pad: (i32, i32),
-    pub(super) dil: (u32, u32),
-    pub(super) cols: u32,
-    pub(super) weights: wgpu::Buffer,
-    pub(super) bias: wgpu::Buffer,
-    pub(super) alpha: wgpu::Buffer,
-    pub(super) act: Act,
+pub(crate) struct Conv {
+    pub(crate) cin: u32,
+    pub(crate) cout: u32,
+    pub(crate) kh: u32,
+    pub(crate) kw: u32,
+    pub(crate) stride: (u32, u32),
+    pub(crate) pad: (i32, i32),
+    pub(crate) dil: (u32, u32),
+    pub(crate) cols: u32,
+    pub(crate) weights: wgpu::Buffer,
+    pub(crate) bias: wgpu::Buffer,
+    pub(crate) alpha: wgpu::Buffer,
+    pub(crate) act: Act,
 }
 
-pub(super) struct Shape {
-    pub(super) cin: u32,
-    pub(super) cout: u32,
-    pub(super) k: (u32, u32),
-    pub(super) stride: u32,
-    pub(super) pad: (i32, i32),
-    pub(super) dil: u32,
+pub(crate) struct Shape {
+    pub(crate) cin: u32,
+    pub(crate) cout: u32,
+    pub(crate) k: (u32, u32),
+    pub(crate) stride: u32,
+    pub(crate) pad: (i32, i32),
+    pub(crate) dil: u32,
 }
 
 impl Shape {
-    pub(super) fn square(cin: u32, cout: u32, k: u32, stride: u32, pad: i32) -> Self {
+    pub(crate) fn square(cin: u32, cout: u32, k: u32, stride: u32, pad: i32) -> Self {
         Self {
             cin,
             cout,
@@ -239,7 +242,7 @@ impl Shape {
     }
 }
 
-pub(super) fn conv(
+pub(crate) fn conv(
     gpu: &Gpu,
     s: Shape,
     weights: &[f32],
@@ -286,11 +289,11 @@ pub(super) fn conv(
     }
 }
 
-pub(super) struct Deconv {
-    pub(super) parts: Vec<Conv>,
+pub(crate) struct Deconv {
+    pub(crate) parts: Vec<Conv>,
 }
 
-pub(super) fn deconv(
+pub(crate) fn deconv(
     gpu: &Gpu,
     cin: u32,
     cout: u32,
@@ -330,10 +333,11 @@ pub(super) fn deconv(
     Deconv { parts }
 }
 
-pub(super) struct Kernels {
+pub(crate) struct Kernels {
     conv: wgpu::ComputePipeline,
     dwconv: wgpu::ComputePipeline,
     resize: wgpu::ComputePipeline,
+    pool: wgpu::ComputePipeline,
     warp: wgpu::ComputePipeline,
     shuffle: wgpu::ComputePipeline,
     copy: wgpu::ComputePipeline,
@@ -348,7 +352,7 @@ pub(super) struct Kernels {
     window: wgpu::ComputePipeline,
     cor: wgpu::ComputePipeline,
     attend: wgpu::ComputePipeline,
-    pub(super) dummy: wgpu::Buffer,
+    pub(crate) dummy: wgpu::Buffer,
 }
 
 const HEADER: &str = r#"
@@ -565,23 +569,67 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
     let x = px % ow;
     let y = (px / ow) % oh;
     let b = px / (ow * oh);
-    let fy = max((f32(y) + 0.5) * scy - 0.5, 0.0);
-    let fx = max((f32(x) + 0.5) * scx - 0.5, 0.0);
-    let y0 = min(u32(floor(fy)), ih - 1u);
-    let x0 = min(u32(floor(fx)), iw - 1u);
-    let y1 = min(y0 + 1u, ih - 1u);
-    let x1 = min(x0 + 1u, iw - 1u);
-    let ly = fy - f32(y0);
-    let lx = fx - f32(x0);
-    let row0 = (b * ih + y0) * iw;
-    let row1 = (b * ih + y1) * iw;
-    let a = src[ib + (row0 + x0) * istr + iat + ch];
-    let bb = src[ib + (row0 + x1) * istr + iat + ch];
-    let cc = src[ib + (row1 + x0) * istr + iat + ch];
-    let d = src[ib + (row1 + x1) * istr + iat + ch];
-    var v = (1.0 - ly) * ((1.0 - lx) * a + lx * bb) + ly * ((1.0 - lx) * cc + lx * d);
+    var v = 0.0;
+    if (u(17u) == 1u) {
+        let ny = min(u32(f32(y) * scy), ih - 1u);
+        let nx = min(u32(f32(x) * scx), iw - 1u);
+        v = src[ib + ((b * ih + ny) * iw + nx) * istr + iat + ch];
+    } else {
+        let fy = max((f32(y) + 0.5) * scy - 0.5, 0.0);
+        let fx = max((f32(x) + 0.5) * scx - 0.5, 0.0);
+        let y0 = min(u32(floor(fy)), ih - 1u);
+        let x0 = min(u32(floor(fx)), iw - 1u);
+        let y1 = min(y0 + 1u, ih - 1u);
+        let x1 = min(x0 + 1u, iw - 1u);
+        let ly = fy - f32(y0);
+        let lx = fx - f32(x0);
+        let row0 = (b * ih + y0) * iw;
+        let row1 = (b * ih + y1) * iw;
+        let a = src[ib + (row0 + x0) * istr + iat + ch];
+        let bb = src[ib + (row0 + x1) * istr + iat + ch];
+        let cc = src[ib + (row1 + x0) * istr + iat + ch];
+        let d = src[ib + (row1 + x1) * istr + iat + ch];
+        v = (1.0 - ly) * ((1.0 - lx) * a + lx * bb) + ly * ((1.0 - lx) * cc + lx * d);
+    }
     if (ch < mulc) {
         v *= mul;
+    }
+    dst[ob + ((b * oh + y) * ow + x) * ostr + oat + ch] = v;
+}
+"#;
+
+const POOL: &str = r#"
+@group(0) @binding(1) var<storage, read> src: array<f32>;
+@group(0) @binding(2) var<storage, read_write> dst: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let n = u(0u);
+    let ib = u(1u); let ih = u(2u); let iw = u(3u); let istr = u(4u); let iat = u(5u); let c = u(6u);
+    let ob = u(7u); let oh = u(8u); let ow = u(9u); let ostr = u(10u); let oat = u(11u);
+    let k = u(13u); let st = u(14u); let pad = s(15u);
+    let i = gid(wg, nw) * 256u + li;
+    if (i >= n * oh * ow * c) {
+        return;
+    }
+    let ch = i % c;
+    let px = i / c;
+    let x = px % ow;
+    let y = (px / ow) % oh;
+    let b = px / (ow * oh);
+    var v = -3.4028235e38;
+    for (var ky = 0u; ky < k; ky++) {
+        let yy = i32(y * st + ky) - pad;
+        if (yy < 0 || yy >= i32(ih)) {
+            continue;
+        }
+        for (var kx = 0u; kx < k; kx++) {
+            let xx = i32(x * st + kx) - pad;
+            if (xx < 0 || xx >= i32(iw)) {
+                continue;
+            }
+            v = max(v, src[ib + ((b * ih + u32(yy)) * iw + u32(xx)) * istr + iat + ch]);
+        }
     }
     dst[ob + ((b * oh + y) * ow + x) * ostr + oat + ch] = v;
 }
@@ -1120,38 +1168,39 @@ fn groups(items: u64) -> u32 {
 }
 
 impl Kernels {
-    pub(super) fn new(gpu: &Gpu) -> Self {
+    pub(crate) fn new(gpu: &Gpu) -> Self {
         let make = |key: &str, body: &str| gpu.pipe(key, || format!("{HEADER}{body}"));
         Self {
-            conv: make("interp-conv", CONV),
-            dwconv: make("interp-dwconv", DWCONV),
-            resize: make("interp-resize", RESIZE),
-            warp: make("interp-warp", WARP),
-            shuffle: make("interp-shuffle", SHUFFLE),
-            copy: make("interp-copy", COPY),
-            add: make("interp-add", ADD),
-            norm: make("interp-norm", NORM),
-            fill: make("interp-fill", FILL),
-            finish: make("interp-finish", FINISH),
-            load: make("interp-load", LOAD),
-            store: make("interp-store", STORE),
-            predict: make("interp-predict", PREDICT),
-            combine: make("interp-combine", COMBINE),
-            window: make("interp-window", WINDOW),
-            cor: make("interp-cor", COR),
-            attend: make("interp-attend", ATTEND),
+            conv: make("ops-conv", CONV),
+            dwconv: make("ops-dwconv", DWCONV),
+            resize: make("ops-resize", RESIZE),
+            pool: make("ops-pool", POOL),
+            warp: make("ops-warp", WARP),
+            shuffle: make("ops-shuffle", SHUFFLE),
+            copy: make("ops-copy", COPY),
+            add: make("ops-add", ADD),
+            norm: make("ops-norm", NORM),
+            fill: make("ops-fill", FILL),
+            finish: make("ops-finish", FINISH),
+            load: make("ops-load", LOAD),
+            store: make("ops-store", STORE),
+            predict: make("ops-predict", PREDICT),
+            combine: make("ops-combine", COMBINE),
+            window: make("ops-window", WINDOW),
+            cor: make("ops-cor", COR),
+            attend: make("ops-attend", ATTEND),
             dummy: gpu.upload(&[0u8; 16]),
         }
     }
 }
 
-pub(super) struct Ops<'a, 'p> {
-    pub(super) gpu: &'a Gpu,
-    pub(super) k: &'a Kernels,
-    pub(super) pass: &'a mut wgpu::ComputePass<'p>,
+pub(crate) struct Ops<'a, 'p> {
+    pub(crate) gpu: &'a Gpu,
+    pub(crate) k: &'a Kernels,
+    pub(crate) pass: &'a mut wgpu::ComputePass<'p>,
 }
 
-pub(super) enum Res<'v> {
+pub(crate) enum Res<'v> {
     None,
     Before(&'v View),
 }
@@ -1161,7 +1210,7 @@ fn words(parts: &[&[u32]]) -> Vec<u32> {
 }
 
 impl Ops<'_, '_> {
-    pub(super) fn conv(&mut self, c: &Conv, src: &View, dst: &View, res: Res) {
+    pub(crate) fn conv(&mut self, c: &Conv, src: &View, dst: &View, res: Res) {
         let qh = (src.h as i32 + 2 * c.pad.0 - (c.dil.0 * (c.kh - 1)) as i32 - 1)
             / c.stride.0 as i32
             + 1;
@@ -1171,7 +1220,7 @@ impl Ops<'_, '_> {
         self.conv_mapped(c, src, dst, res, (qh as u32, qw as u32), (1, 0, 1, 0), 1);
     }
 
-    pub(super) fn deconv(&mut self, d: &Deconv, src: &View, dst: &View, shuffle: u32) {
+    pub(crate) fn deconv(&mut self, d: &Deconv, src: &View, dst: &View, shuffle: u32) {
         for (i, c) in d.parts.iter().enumerate() {
             let (py, px) = ((i / 2) as u32, (i % 2) as u32);
             self.conv_mapped(
@@ -1236,7 +1285,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn dwconv(
+    pub(crate) fn dwconv(
         &mut self,
         w: &wgpu::Buffer,
         b: &wgpu::Buffer,
@@ -1258,7 +1307,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn resize(
+    pub(crate) fn resize(
         &mut self,
         src: &View,
         dst: &View,
@@ -1266,11 +1315,33 @@ impl Ops<'_, '_> {
         mul: f32,
         mulc: u32,
     ) {
+        self.sample(src, dst, scale, (mul, mulc), 0);
+    }
+
+    pub(crate) fn nearest(&mut self, src: &View, dst: &View) {
+        let scale = (src.h as f32 / dst.h as f32, src.w as f32 / dst.w as f32);
+        self.sample(src, dst, scale, (1.0, 0), 1);
+    }
+
+    fn sample(
+        &mut self,
+        src: &View,
+        dst: &View,
+        scale: (f32, f32),
+        (mul, mulc): (f32, u32),
+        nearest: u32,
+    ) {
         let p = words(&[
             &[src.n],
             &src.words(),
             &dst.words(),
-            &[scale.0.to_bits(), scale.1.to_bits(), mul.to_bits(), mulc],
+            &[
+                scale.0.to_bits(),
+                scale.1.to_bits(),
+                mul.to_bits(),
+                mulc,
+                nearest,
+            ],
         ]);
         let param = self.gpu.uniform(&p);
         let items = src.n as u64 * dst.h as u64 * dst.w as u64 * src.c as u64;
@@ -1283,15 +1354,33 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn scaled(&mut self, src: &View, dst: &View, factor: f32, mul: f32, mulc: u32) {
+    pub(crate) fn pool(&mut self, src: &View, dst: &View, k: u32, stride: u32, pad: i32) {
+        let p = words(&[
+            &[src.n],
+            &src.words(),
+            &dst.words(),
+            &[k, stride, pad as u32],
+        ]);
+        let param = self.gpu.uniform(&p);
+        let items = src.n as u64 * dst.h as u64 * dst.w as u64 * src.c as u64;
+        self.gpu.dispatch(
+            self.pass,
+            &self.k.pool,
+            param,
+            &[&src.buf, &dst.buf],
+            groups(items),
+        );
+    }
+
+    pub(crate) fn scaled(&mut self, src: &View, dst: &View, factor: f32, mul: f32, mulc: u32) {
         self.resize(src, dst, (1.0 / factor, 1.0 / factor), mul, mulc);
     }
 
-    pub(super) fn warp(&mut self, src: &View, flow: &View, dst: &View) {
+    pub(crate) fn warp(&mut self, src: &View, flow: &View, dst: &View) {
         self.warp_at(src, flow, dst, 0);
     }
 
-    pub(super) fn warp_at(&mut self, src: &View, flow: &View, dst: &View, oy: u32) {
+    pub(crate) fn warp_at(&mut self, src: &View, flow: &View, dst: &View, oy: u32) {
         let p = words(&[&[dst.n], &src.words(), &dst.words(), &flow.words(), &[oy]]);
         let param = self.gpu.uniform(&p);
         let items = dst.n as u64 * dst.h as u64 * dst.w as u64 * src.c as u64;
@@ -1304,7 +1393,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn shuffle(&mut self, src: &View, dst: &View, r: u32) {
+    pub(crate) fn shuffle(&mut self, src: &View, dst: &View, r: u32) {
         let p = words(&[&[src.n], &src.words(), &dst.words(), &[r]]);
         let param = self.gpu.uniform(&p);
         let items = src.n as u64 * dst.h as u64 * dst.w as u64 * dst.c as u64;
@@ -1317,7 +1406,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn copy(&mut self, src: &View, dst: &View, mul: f32, add: f32, act: Act) {
+    pub(crate) fn copy(&mut self, src: &View, dst: &View, mul: f32, add: f32, act: Act) {
         let (code, _) = act.code();
         let p = words(&[
             &[src.n],
@@ -1336,7 +1425,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn add(&mut self, src: &View, dst: &View) {
+    pub(crate) fn add(&mut self, src: &View, dst: &View) {
         let p = words(&[&[src.n], &src.words(), &dst.words()]);
         let param = self.gpu.uniform(&p);
         let items = src.n as u64 * src.h as u64 * src.w as u64 * src.c as u64;
@@ -1349,7 +1438,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn combine(&mut self, a: &View, b: &View, dst: &View, wa: f32, wb: f32) {
+    pub(crate) fn combine(&mut self, a: &View, b: &View, dst: &View, wa: f32, wb: f32) {
         let p = words(&[
             &[a.n],
             &a.words(),
@@ -1368,7 +1457,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn norm(
+    pub(crate) fn norm(
         &mut self,
         gamma: &wgpu::Buffer,
         beta: &wgpu::Buffer,
@@ -1388,7 +1477,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn fill(&mut self, dst: &View, v: f32) {
+    pub(crate) fn fill(&mut self, dst: &View, v: f32) {
         let p = words(&[&[dst.n], &dst.words(), &[v.to_bits()]]);
         let param = self.gpu.uniform(&p);
         let items = dst.n as u64 * dst.h as u64 * dst.w as u64 * dst.c as u64;
@@ -1396,7 +1485,7 @@ impl Ops<'_, '_> {
             .dispatch(self.pass, &self.k.fill, param, &[&dst.buf], groups(items));
     }
 
-    pub(super) fn load(
+    pub(crate) fn load(
         &mut self,
         rgb: &wgpu::Buffer,
         (sw, sh): (u32, u32),
@@ -1408,7 +1497,7 @@ impl Ops<'_, '_> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn load_turned(
+    pub(crate) fn load_turned(
         &mut self,
         rgb: &wgpu::Buffer,
         (sw, sh): (u32, u32),
@@ -1433,7 +1522,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn store(
+    pub(crate) fn store(
         &mut self,
         src: &View,
         (top, left): (u32, u32),
@@ -1443,7 +1532,7 @@ impl Ops<'_, '_> {
         self.store_both(src, None, (top, left), (ow, oh), out);
     }
 
-    pub(super) fn store_both(
+    pub(crate) fn store_both(
         &mut self,
         src: &View,
         turned: Option<&View>,
@@ -1468,7 +1557,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn predict(&mut self, w0: &View, w1: &View, mask: &View, res: &View, dst: &View) {
+    pub(crate) fn predict(&mut self, w0: &View, w1: &View, mask: &View, res: &View, dst: &View) {
         let p = words(&[
             &[1],
             &w0.words(),
@@ -1489,7 +1578,7 @@ impl Ops<'_, '_> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn finish(
+    pub(crate) fn finish(
         &mut self,
         w0: &View,
         w1: &View,
@@ -1520,18 +1609,18 @@ impl Ops<'_, '_> {
     }
 }
 
-pub(super) struct Grid {
-    pub(super) hp: u32,
-    pub(super) wp: u32,
-    pub(super) top: u32,
-    pub(super) left: u32,
-    pub(super) shift: u32,
-    pub(super) pad: bool,
-    pub(super) ids: wgpu::Buffer,
+pub(crate) struct Grid {
+    pub(crate) hp: u32,
+    pub(crate) wp: u32,
+    pub(crate) top: u32,
+    pub(crate) left: u32,
+    pub(crate) shift: u32,
+    pub(crate) pad: bool,
+    pub(crate) ids: wgpu::Buffer,
 }
 
 impl Grid {
-    pub(super) fn new(gpu: &Gpu, h: u32, w: u32, shift: u32) -> Self {
+    pub(crate) fn new(gpu: &Gpu, h: u32, w: u32, shift: u32) -> Self {
         let hp = h.div_ceil(7) * 7;
         let wp = w.div_ceil(7) * 7;
         let (ph, pw) = (hp - h, wp - w);
@@ -1560,13 +1649,13 @@ impl Grid {
         }
     }
 
-    pub(super) fn tokens(&self) -> u32 {
+    pub(crate) fn tokens(&self) -> u32 {
         self.hp * self.wp
     }
 }
 
 impl Ops<'_, '_> {
-    pub(super) fn windows(&mut self, g: &Grid, src: &View, dst: &View) {
+    pub(crate) fn windows(&mut self, g: &Grid, src: &View, dst: &View) {
         let p = words(&[
             &[src.n],
             &src.words(),
@@ -1584,7 +1673,7 @@ impl Ops<'_, '_> {
         );
     }
 
-    pub(super) fn unwindows(&mut self, g: &Grid, src: &View, dst: &View) {
+    pub(crate) fn unwindows(&mut self, g: &Grid, src: &View, dst: &View) {
         let p = words(&[
             &[dst.n],
             &src.words(),
@@ -1607,7 +1696,7 @@ impl Ops<'_, '_> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn cor(
+    pub(crate) fn cor(
         &mut self,
         g: &Grid,
         (h, w): (u32, u32),
@@ -1633,7 +1722,7 @@ impl Ops<'_, '_> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn attend(
+    pub(crate) fn attend(
         &mut self,
         g: &Grid,
         heads: u32,

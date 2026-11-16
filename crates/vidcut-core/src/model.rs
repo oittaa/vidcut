@@ -2175,7 +2175,8 @@ impl TrackWay {
 #[serde(rename_all = "snake_case")]
 pub enum Subject {
     /// The faces of people. A small neural network (YuNet) on the CPU finds
-    /// them. Its file (233 kB) downloads at its first use.
+    /// them. Its file (233 kB) downloads at its first use. The `slow` model
+    /// is a larger network on the GPU.
     #[default]
     Face,
     /// Lines of text: signs, captions, documents and screens. A small
@@ -2223,6 +2224,40 @@ impl Subject {
 
     pub fn named(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|s| s.name() == name)
+    }
+}
+
+/// The neural network that `motion.find` uses.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FindModel {
+    /// The small network of the subject, on the CPU.
+    #[default]
+    Fast,
+    /// For `face` only: a larger network (RetinaFace with a ResNet-34) on
+    /// the GPU. Its file (88.5 MB) downloads at its first use.
+    Slow,
+}
+
+impl FindModel {
+    pub const ALL: [Self; 2] = [Self::Fast, Self::Slow];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::Slow => "slow",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Fast => "Fast",
+            Self::Slow => "Slow",
+        }
+    }
+
+    pub fn finds(self, subject: Subject) -> bool {
+        self == Self::Fast || subject == Subject::Face
     }
 }
 

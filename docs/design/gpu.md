@@ -278,7 +278,7 @@ The scaler of macOS (`macos`):
 
 - `interpolate::between` takes two RGB pictures on the GPU and a weight. It gives an RGB picture on the GPU.
 - The pictures are 16-bit RGB in the timeline color space (`Form`). The kernels read and write 16-bit values (`Ops`).
-- It runs on the shared off-screen device (`compute::Gpu`), with kernels of its own (`interpolate::ops`).
+- It runs on the shared off-screen device (`compute::Gpu`), with the GPU layers of vidcut ([GPU layers](#gpu-layers)).
   - Its kernels and memory go when the last `interpolate::User` goes.
 - The last pair stays on the GPU with its features. Why: the frames between one pair share them.
 - AI Fast is RIFE 4.25 (`rife`). AI Slow is EMA-VFI (`ema`). Frame Blend mixes on the same device (`Ops::combine`).
@@ -300,6 +300,17 @@ On macOS (`interpolate::macos`):
 `interpolate::report` tells the last frame that a process made. The stats panel shows it (`RetimeStats`).
 
 Each kept picture tells its own process, source frames and position (`Origin`, [playback](playback.md#the-engine)).
+
+## GPU layers
+
+`compute::ops` holds the layers of the neural networks that run in the shaders of vidcut: the frame interpolation and the slow face model ([analysis](analysis.md#subjects)).
+
+- A `View` is a part of a buffer of 32-bit floats. The channels of a pixel are next to each other.
+- `Ops::conv` is a convolution as a matrix multiply. The bias, a residual and the activation are in the same pass.
+- `Ops::pool` keeps the largest value of each window. `Ops::nearest` enlarges with the nearest pixel. `Ops::resize` uses a bilinear filter.
+- `ops::arena` plans the work buffers of a network. It refuses a buffer that is larger than the GPU takes.
+- `Kernels` compiles the shaders once for each `compute::Gpu`. The device must have the workgroup memory of `ops::SHARED`.
+- A layer never reads and writes one buffer in one pass. Why: wgpu refuses a buffer that is bound as read-only and as writable in one dispatch.
 
 ## Deinterlacing and HDR
 

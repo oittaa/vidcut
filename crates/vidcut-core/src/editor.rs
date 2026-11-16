@@ -4689,6 +4689,7 @@ fn mutate(
         Request::MotionFind {
             clips,
             subject,
+            model,
             replace,
             download,
             size,
@@ -4711,6 +4712,12 @@ fn mutate(
             };
             if let Some(why) = rules.problem() {
                 return Err(Error::usage(why));
+            }
+            if !model.finds(*subject) {
+                return Err(Error::usage(format!(
+                    "the {} model (--model) finds only faces",
+                    model.name()
+                )));
             }
             let sides = crate::analysis::SIDES;
             if size.is_some_and(|s| !(sides.0..=sides.1).contains(&s)) {
@@ -4742,6 +4749,7 @@ fn mutate(
             for (id, media, frames, rate) in looks {
                 let look = Look {
                     side: *size,
+                    model: *model,
                     ..subject_look(&media, rate, frames)
                 };
                 let found = env.subjects(&media, *subject, look, *download)?;
@@ -7455,6 +7463,7 @@ pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> V
     let Request::MotionFind {
         clips,
         subject,
+        model,
         download,
         size,
         ..
@@ -7471,6 +7480,7 @@ pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> V
             let (frames, rate) = ops::motion::file_frames(p, c);
             let look = Look {
                 side: *size,
+                model: *model,
                 ..subject_look(media, rate, frames)
             };
             Some((media.clone(), *subject, look, *download))
