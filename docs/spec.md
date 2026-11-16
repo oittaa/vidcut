@@ -848,6 +848,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - It makes the track if necessary. It never fills a free lower track.
     - A source with no picture is an audio-only edit. An audio-only edit always makes a new top audio track.
   - **Another frame rate:** timecode lines up in real time, for a file and for a reference clip.
+    - A source In starts the clip at the first timeline frame that shows that frame of the file. Thus each frame of the clip is in sync ([gotchas](gotchas.md#resolves-sync-bin)).
   - **A still** has timecode 00:00:00:00, so it goes in only with a clip at that timecode.
   - **After the edit,** the timeline marks clear, and the source marks stay.
     - The playhead goes to the clip's end.

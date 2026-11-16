@@ -582,6 +582,19 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - Speed Warp on gave one sharp bar for the 30-pixel jump. It smeared the 150-pixel jump.
   - Measured with renders of 24-frame Smooth Cuts between pictures with a bar at known places.
 
+## Resolve's Sync Bin
+
+These facts come from measurements in Resolve Studio 21.2.
+
+- **Source Overwrite of a synced group can put the clip one frame out of sync.**
+  - This occurs when the place of a file in the group falls between two of its frames.
+  - Example: 24 fps files a and b in a 30 fps project, with b 2.2 seconds after a in a saved group.
+  - At 3 seconds the Sync Bin shows frame 19 of b. Source Overwrite puts b at 3 seconds, but its first frame is frame 18.
+  - The result is the same in a 30 fps timeline and in a 25 fps timeline.
+  - The manual says that the clip goes in in sync (pp. 701, 710). vidcut does what the manual says, so this is not a deviation.
+  - `editor::synced_source` starts the clip at the first timeline frame that shows the source In, with no `phase`.
+  - Thus the clip shows the frame of the Sync Bin at each frame. In the example, it starts at 3 seconds with frame 19.
+
 ## transcribe.cpp and its models
 
 - **Qwen3-ASR gives no times** (transcribe.cpp 0.4.1).

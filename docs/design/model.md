@@ -311,6 +311,8 @@ Folders:
 - `Clip::phase` is the part of a project frame from `source_in` to the exact start of the clip.
   - An edit of media at another frame rate starts on a frame of that media. This start can fall between two project frames.
   - The sound of the clip starts at the same exact time.
+  - Source Overwrite is the exception. Its clip has no `phase`, and it starts at the first project frame that shows the source In (`editor::synced_source`).
+  - Why: a `phase` moves the clip off its place in sync. Then the clip and the Sync Bin show different frames.
 - A position on a pool item counts its source frames: the frames of its video, at the frame rate of the video (`Media::rate`).
   - A still or a sound file counts frames at the project's own rate, `Settings::fps`.
   - The marks, the markers, the left-out spans and the subclip limits of an item count source frames.
@@ -341,7 +343,7 @@ Ranges and resolution:
 
 `ops::source_overwrite` holds `edit.source_overwrite`. The behavior is in [spec §7.2](../spec.md#72-edit-functions).
 
-- `origin` turns `MediaInfo.timecode` into project frames with `StartTimecode::frames_at`. A file with no tag counts as 0.
+- `origin` turns `MediaInfo.timecode` into frames of the open timeline with `StartTimecode::frames_at`. A file with no tag counts as 0.
 - A generator as the source has `origin` 0 and the length of `ops::titles::default_length`.
 - `shown` gives the timecode range that a clip shows, from `Clip::source_at`.
   - A clip with no media or with a still has no such range. Thus generators, titles and compound clips do not count.
