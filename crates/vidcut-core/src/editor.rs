@@ -833,11 +833,7 @@ impl Editor {
                     "the project has no timeline: make one with timeline.new",
                 ));
             }
-            let t = working.new_timeline(working.next_timeline_name(), String::new());
-            working.adopt_sheet(t);
-            if working.tracks_of(TrackKind::Audio).is_empty() {
-                ops::add_track(&mut working, TrackKind::Audio);
-            }
+            ops::timelines::keep_sheet(&mut working);
         }
         let label = match (&request, parts.as_slice()) {
             (Request::Apply { label: None, .. }, [one]) => one.clone(),
@@ -5430,11 +5426,13 @@ fn first_video_sets_format(p: &mut Project, info: &MediaInfo) {
     if p.settings.auto_format
         && let Some(v) = info.video.as_ref().filter(|v| !v.still)
     {
-        p.settings.set_fps(v.fps);
-        let drop = v.fps.has_drop_frame() && info.timecode.is_some_and(|t| t.drop_frame);
-        p.settings
-            .set_drop_frame(drop)
-            .expect("the rate has drop-frame");
+        if p.timelines.is_empty() {
+            p.settings.set_fps(v.fps);
+            let drop = v.fps.has_drop_frame() && info.timecode.is_some_and(|t| t.drop_frame);
+            p.settings
+                .set_drop_frame(drop)
+                .expect("the rate has drop-frame");
+        }
         adopt_size(p, v);
     }
 }
@@ -6898,6 +6896,10 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         }));
     }
 
+    let kept = p.timelines.is_empty() && (mode != ImportMode::New || p.has_sheet());
+    if kept {
+        ops::timelines::keep_sheet(p);
+    }
     if mode == ImportMode::Replace {
         for track in &mut p.tracks {
             track.clips.clear();
@@ -6926,7 +6928,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
                 .and_then(|m| m.info.timecode)
                 .is_some_and(|tc| tc.drop_frame)
         });
-        let alone = p.timelines.len() <= usize::from(made);
+        let alone = p.timelines.len() <= usize::from(made) + usize::from(kept);
         let drop = drop && t.fps.has_drop_frame();
         match p.timeline_mut().and_then(|t| t.own.as_mut()) {
             Some(own) if adopt_rate => {

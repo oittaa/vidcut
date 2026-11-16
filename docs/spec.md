@@ -340,13 +340,16 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Timeline Settings has the start timecode, Use Project Settings and the own format.
     - Delete Timeline asks first. When the open timeline goes, the timeline made before it opens, else the one after it. A project can have no timeline.
   - An edit into a project with no timeline makes a timeline (p. 678). In Resolve Studio 21.2, it is "Timeline 1", with at least 1 video track and 1 audio track.
+    - `timeline.new` after such an edit in one batch keeps the edit in "Timeline 1".
   - A timeline in the project locks the frame rate and drop-frame of the project. Media in the pool do not lock them.
+    - Thus the first video of a project with a timeline sets only the picture size (D37).
     - The manual says that media lock the frame rate (pp. 141, 364). Resolve Studio 21.2 does not.
     - With no timeline, they change again.
   - A timeline with its own settings changes its frame rate and drop-frame only while it has no clips. Its start timecode keeps its label.
   - A compound clip made in a timeline at another rate is converted by time where it goes. Pasted clips are too.
   - File > Import > Timeline makes a new timeline, named after the file, in the open bin, and opens it. A name that a timeline has is refused.
     - The Import window has the timeline's name. vidcut also offers Append, Replace, As a Compound Clip and Media Only.
+    - Append or Replace into a project with no timeline first makes "Timeline 1", as an edit does. It takes the file's start timecode.
     - A timeline at another frame rate keeps its times ([deviation X172](deviations.md#x172-an-imported-timeline-keeps-its-times-at-another-frame-rate)).
 - **Clip Info** (vidcut):
   - Clip Info shows all that vidcut knows of a file.
@@ -3432,7 +3435,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
   - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate ([X149](deviations.md#x149-a-project-takes-any-frame-rate)).
-  - A new timeline starts at record timecode 01:00:00:00 (p. 678). New Project and Project Settings also offer 00 and 10 hours, or any typed timecode.
+  - A new timeline starts at record timecode 01:00:00:00 (p. 678). New Timeline and Timeline Settings also offer 00 and 10 hours, or any typed timecode.
   - Its Frame rate menu offers the rates that Resolve Studio 21.2 takes for a project (`timelineFrameRate` in a script):
     - 16, 18, 23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60, 72, 90, 95.904, 96, 100, 119.88 and 120 fps.
     - Resolve refuses other rates, for example 15, 20, 144 and 240.
