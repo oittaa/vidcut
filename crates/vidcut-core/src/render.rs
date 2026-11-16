@@ -4345,8 +4345,8 @@ pub fn camera_tape(
     camera: &crate::multicam::GridCamera,
     end: i64,
 ) -> Result<(RenderPlan, Vec<TapeEntry>)> {
-    let s = &p.settings;
-    let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
+    let (fps, rate) = (p.fps(), p.settings.sample_rate);
+    let sample = |t: i64| fps.frame_to_sample(t, rate);
     let entries: Vec<TapeEntry> = camera
         .files
         .iter()
@@ -4388,7 +4388,7 @@ pub fn camera_tape(
                 origin,
                 source_frame: from,
                 phase: 0.0,
-                per_frame: per_frame(m, p.settings.fps, s.fps),
+                per_frame: per_frame(m, p.settings.fps, fps),
                 frames: b - a,
                 image: image_of(m),
                 color_space: m.color_space,
@@ -4402,9 +4402,9 @@ pub fn camera_tape(
                 input_lut: None,
             },
         );
-        push_audio(&mut lane, sound_of(p, m, from, samples));
+        push_audio(&mut lane, sound_of(p, m, from, fps, samples));
     }
-    Ok((tape_plan(p, s.fps, end, video, lane), entries))
+    Ok((tape_plan(p, fps, end, video, lane), entries))
 }
 
 fn tape_plan(
@@ -4456,7 +4456,7 @@ pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<Rend
             let next = row.clips.get(i + 1).map_or(i64::MAX, |n| n.at);
             t = (c.at + crate::multicam::visible(p, c)).min(next);
             let samples = sample(t) - sample(c.at);
-            push_audio(&mut lane, sound_of(p, m, c.head, samples));
+            push_audio(&mut lane, sound_of(p, m, c.head, s.fps, samples));
         }
         push_audio(
             &mut lane,
@@ -4483,7 +4483,7 @@ pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<Rend
     })
 }
 
-fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
+fn sound_of(p: &Project, m: &Media, head: i64, fps: Rational, samples: i64) -> AudioPiece {
     if m.info.audio.is_empty() {
         return AudioPiece::Silence { samples };
     }
@@ -4495,7 +4495,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
         path,
         stream: 0,
         origin,
-        source_sample: p.fps().frame_to_sample(head, p.settings.sample_rate),
+        source_sample: fps.frame_to_sample(head, p.settings.sample_rate),
         samples,
         gain_db: 0.0,
         silent: false,
@@ -4552,7 +4552,7 @@ fn laid_out(p: &Project, media: &[String], fps: Rational) -> Result<(RenderPlan,
             push_video(&mut video, VideoPiece::black(frames));
         }
         let samples = sample(t + frames) - sample(t);
-        push_audio(&mut lane, sound_of(p, m, 0, samples));
+        push_audio(&mut lane, sound_of(p, m, 0, fps, samples));
         entries.push(TapeEntry {
             media: id.to_string(),
             start: t,

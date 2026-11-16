@@ -7441,8 +7441,12 @@ impl Project {
         frames_at(file_secs(media), media.rate(self.settings.fps))
     }
 
-    pub fn on_timeline(&self, media: &Media, (a, b): (i64, i64)) -> ((i64, i64), f64) {
-        let per = self.fps().over(media.rate(self.settings.fps));
+    pub fn on_timeline(&self, media: &Media, range: (i64, i64)) -> ((i64, i64), f64) {
+        self.on_rate(media, range, self.fps())
+    }
+
+    pub fn on_rate(&self, media: &Media, (a, b): (i64, i64), fps: Rational) -> ((i64, i64), f64) {
+        let per = fps.over(media.rate(self.settings.fps));
         let (num, den) = (per.num(), per.den());
         let start = a * num;
         let first = start.div_euclid(den);
@@ -7468,9 +7472,13 @@ impl Project {
     }
 
     pub fn marked_frames(&self, media: &Media) -> (i64, i64) {
-        let frames = self.media_frames(media);
+        self.marks_at(media, self.fps())
+    }
+
+    pub fn marks_at(&self, media: &Media, fps: Rational) -> (i64, i64) {
+        let frames = self.frames_of(media, fps);
         let i = media.marks.mark_in.unwrap_or(0);
-        let ((a, b), _) = self.on_timeline(media, (i, media.marks.mark_out.unwrap_or(i)));
+        let ((a, b), _) = self.on_rate(media, (i, media.marks.mark_out.unwrap_or(i)), fps);
         match media.marks.mark_out {
             Some(_) => (a, b.min(frames)),
             None => (a, frames),

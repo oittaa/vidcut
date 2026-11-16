@@ -913,11 +913,15 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - In is the file's frame at the timeline's end. Out is its frame at the playhead (p. 710).
   - The edit fills the timeline from its end to the playhead, and the playhead stays.
   - The reference is then the first clip that overlaps the whole file, as the marked range overlaps no clip.
+- **A timeline at another frame rate** (measured in Resolve Studio 21.2): the rows and Source Overwrite line up the files by time. This applies by timecode and with a saved group.
+  - Example: 24 fps files a and b, with b 2 seconds after a. In a 25 fps timeline at 3 seconds, the rows show frame 72 of a and frame 24 of b.
+  - Source Overwrite of b then puts 125 frames at 3 seconds, from frame 24 of b.
+  - A saved group counts its frames at the project's rate. Example: in a 30 fps project, the Sync Clips window moves b 6 frames later.
+  - The rows at 3 seconds then show frame 19 of b, in a 30 fps timeline and in a 25 fps timeline.
 - These cases are not measured, and vidcut lets them through:
   - **A still:** it has no row, as in the Sync Clips window.
   - **A file with no picture:** it has its own row and cell, as in the Sync Clips window.
   - **Two groups in the bin, and the clip at the playhead in neither:** the newest group counts.
-  - **A camera at another frame rate:** a click chooses it like any other camera.
 
 ### 7.5 Sync Clips window (pp. 706–708; measured in Resolve Studio 21.1.2)
 - **Opening:** the Sync Clips icon in the Media Pool acts on the files of the current bin. `gui.show sync_clips` does the same.

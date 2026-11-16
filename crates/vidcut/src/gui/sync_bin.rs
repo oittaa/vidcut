@@ -6,6 +6,7 @@ use serde_json::json;
 use vidcut_core::model::Project;
 use vidcut_core::multicam::{SyncRow, sync_rows};
 use vidcut_core::request::ViewerMode;
+use vidcut_core::time::{Rational, rescale};
 
 use super::export::Ask;
 use super::pool::FULL;
@@ -37,6 +38,7 @@ pub(super) struct Film<'a> {
     pub media: &'a str,
     pub frames: i64,
     pub head: i64,
+    pub fps: Rational,
     pub x: f32,
     pub per_frame: f32,
 }
@@ -314,6 +316,7 @@ impl Workspace {
                     media: &clip.media,
                     frames: clip.frames,
                     head: clip.head,
+                    fps: p.fps(),
                     x: x(start),
                     per_frame,
                 };
@@ -427,7 +430,7 @@ impl Workspace {
             clipped.rect_filled(span, CornerRadius::ZERO, theme::colors().audio);
             if let Some(w) = self.snap.waveforms.get(&m.id) {
                 let origin = m.info.audio.first().map_or(0.0, |a| a.first_pts);
-                let secs = p.fps().frames_to_secs(1);
+                let secs = film.fps.frames_to_secs(1);
                 let whole = Rect::from_min_max(pos2(film.x, strip.top()), span.max);
                 wave_columns(&clipped, whole, |x| {
                     let frames = f64::from((x - film.x) / film.per_frame);
@@ -449,7 +452,7 @@ impl Workspace {
                 break;
             }
             let tile = Rect::from_min_size(pos2(left, strip.top()), vec2(wide, strip.height()));
-            let source = film.head + frame;
+            let source = rescale(film.head + frame, film.fps, p.fps());
             if let Some(shown) = self.pool_picture(ui.ctx(), m, source, tile.height(), step) {
                 clipped.image(shown, tile, FULL, Color32::WHITE);
             }

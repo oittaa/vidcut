@@ -169,7 +169,8 @@ Timelines (spec §3):
   - An edit into a project with no timeline makes one first (`Editor::apply`).
 - A pool item counts at the project's rate: a sound file and a still count `Settings::fps` (`Media::rate`). A compound clip keeps the rate of the timeline where it was made (`PooledCompound::fps`).
 - `ops::conform` converts clips by time from one frame rate to another. `place_pooled` and `edit.paste` use it, and `edit.copy` returns the rate of its clips.
-- Synced groups count frames at the project's rate. Their requests refuse a timeline at another rate (`multicam::same_rate`).
+- Synced groups and the Sync Clips window count frames at the project's rate. The Sync Bin, `multicam.pick` and Source Overwrite work in frames of the open timeline. `multicam::timeline_frames` converts a frame of a group to the open timeline's rate by time.
+- Source Tape (`render::tape`) and Multi Source (`multicam::source_grid`, `render::camera_tape`) count frames at the open timeline's rate. The source viewer of one clip (`render::clip_tape`) counts frames at the clip's own rate.
 
 Volume keyframes ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)):
 

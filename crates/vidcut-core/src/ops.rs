@@ -33,8 +33,7 @@ pub use transition::{
 use crate::error::{Error, Result};
 use crate::model::{
     AlphaMode, Clip, ClipAudio, ColorSpace, Compound, Generator, Marker, Media, MediaUpscaler,
-    PooledCompound, Project, Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind,
-    Upscaler,
+    Project, Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -2826,16 +2825,24 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
     }
     let (by, len, more) = (first - a, b - a, b - end);
     let rate = m.rate(p.settings.fps);
-    let per = p.fps().over(rate);
-    let slack = crate::render::grid_slack(per);
-    let exact = by as f64 * per.as_f64();
-    let part = (-exact - slack, (len - by) as f64 * per.as_f64() + slack);
-    let outside = clip_outside(&p.tracks, media, part).or_else(|| {
-        p.compounds
-            .iter()
-            .flat_map(PooledCompound::blocks)
-            .find_map(|k| compound_outside(k, media, part))
-    });
+    let project = p.settings.fps;
+    let fps_of = |t: &crate::model::Timeline| t.own.map_or(project, |o| o.fps);
+    let part = |fps: crate::time::Rational| {
+        let per = fps.over(rate);
+        let slack = crate::render::grid_slack(per);
+        let exact = by as f64 * per.as_f64();
+        (-exact - slack, (len - by) as f64 * per.as_f64() + slack)
+    };
+    let outside = clip_outside(&p.tracks, media, part(p.fps()))
+        .or_else(|| {
+            (p.timelines.iter()).find_map(|t| clip_outside(&t.tracks, media, part(fps_of(t))))
+        })
+        .or_else(|| {
+            p.compounds.iter().find_map(|k| {
+                k.blocks()
+                    .find_map(|block| compound_outside(block, media, part(k.fps)))
+            })
+        });
     if !m.is_still()
         && let Some(c) = outside
     {
@@ -2843,8 +2850,9 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             "{c} uses frames of {media} outside {a}..{b}"
         )));
     }
+    let per = project.over(rate);
     let (head, tail) = (
-        exact.round() as i64,
+        (by as f64 * per.as_f64()).round() as i64,
         (more as f64 * per.as_f64()).round() as i64,
     );
     for g in &mut p.groups {
@@ -2861,9 +2869,17 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             }
         }
     }
-    shift_clips(&mut p.tracks, media, (per, by));
-    for k in p.compounds.iter_mut().flat_map(PooledCompound::blocks_mut) {
-        shift_compound(k, media, (per, by));
+    let open = p.fps().over(rate);
+    shift_clips(&mut p.tracks, media, (open, by));
+    for t in &mut p.timelines {
+        let per = t.own.map_or(project, |o| o.fps).over(rate);
+        shift_clips(&mut t.tracks, media, (per, by));
+    }
+    for k in &mut p.compounds {
+        let per = k.fps.over(rate);
+        for block in k.blocks_mut() {
+            shift_compound(block, media, (per, by));
+        }
     }
     let m = p
         .media

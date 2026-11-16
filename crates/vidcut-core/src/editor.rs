@@ -2906,7 +2906,6 @@ fn mutate(
                     .unwrap_or_else(|| format!("Media Sync {}", env.local_stamp())),
                 bin: bin.as_deref().unwrap_or_default(),
             };
-            crate::multicam::same_rate(p)?;
             let made = crate::multicam::create(p, env, &media.to_vec(), new)?;
             let g = p.group(&made.id).expect("just made");
             let mut v = crate::multicam::group_json(p, g);
@@ -2916,13 +2915,11 @@ fn mutate(
             v
         }
         Request::MulticamSet { group, rows } => {
-            crate::multicam::same_rate(p)?;
             crate::multicam::set_rows(p, group, rows)?;
             let g = p.group(group).expect("just set");
             crate::multicam::group_json(p, g)
         }
         Request::MulticamPlace { group, media, at } => {
-            crate::multicam::same_rate(p)?;
             crate::multicam::place(p, group, media, *at)?;
             let g = p.group(group).expect("just placed");
             crate::multicam::group_json(p, g)
@@ -2944,7 +2941,6 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            crate::multicam::same_rate(p)?;
             json!(crate::multicam::pick(p, media, need(at, "at")?)?)
         }
         Request::MediaRemove { media } => {
@@ -7719,7 +7715,6 @@ pub fn query(
             sync,
             full_extents,
         } => {
-            crate::multicam::same_rate(p)?;
             json!(crate::multicam::layout(
                 p,
                 env,
@@ -7741,7 +7736,6 @@ pub fn query(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            crate::multicam::same_rate(p)?;
             json!(crate::multicam::sync_rows(
                 p,
                 bin.as_deref().unwrap_or_default(),

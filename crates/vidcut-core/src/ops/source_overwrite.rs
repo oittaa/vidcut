@@ -30,7 +30,9 @@ struct Lining<'a> {
 impl Lining<'_> {
     fn origin(&self, m: &Media) -> Option<i64> {
         match self.group {
-            Some(g) => g.at_of(&m.id),
+            Some(g) => g
+                .at_of(&m.id)
+                .map(|at| crate::multicam::timeline_frames(self.p, at)),
             None => Some(origin(self.p, m)),
         }
     }
@@ -146,13 +148,10 @@ pub fn source_overwrite(
     }
     let group = match (by_group, m) {
         (false, _) => None,
-        (true, Some(m)) => {
-            crate::multicam::same_rate(p)?;
-            Some(
-                p.group_of(&m.id)
-                    .ok_or_else(|| Error::invalid(format!("{} is in no synced group", m.name)))?,
-            )
-        }
+        (true, Some(m)) => Some(
+            p.group_of(&m.id)
+                .ok_or_else(|| Error::invalid(format!("{} is in no synced group", m.name)))?,
+        ),
         (true, None) => return Err(Error::invalid("A generator is in no synced group")),
     };
     let l = Lining { p, group };
