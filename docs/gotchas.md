@@ -29,6 +29,12 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - `create_buffer_init` panics on a lost device too, because it unwraps the mapped range.
   - Thus the off-screen device watches for its loss (`Offscreen::watch`). After the loss, its error handler logs the errors and does not panic.
   - `compute::buffer_with` fills a new buffer without that unwrap.
+- **On Metal, threads that write different components of one vector in workgroup memory can give wrong results.**
+  - On an Apple M4 (macOS 27.2), four threads wrote the four components of one `vec4` in workgroup memory. The convolutions then gave wrong results.
+  - Vulkan on an NVIDIA GPU gave correct results with the same shaders.
+  - Thus `CONV`, `CONV4` and `WINO_GEMM` write whole vectors into workgroup memory. Then they match onnxruntime on the M4.
+  - `scripts/face-check.py` finds the first wrong step of the slow face model ([tools](tools.md)).
+  - The upscalers still write single components ([todo](todo/macos.md#workgroup-memory-on-metal)).
 - **Windows stops the computer after more than five GPU resets in one minute** (bug check 0x116, `TdrLimitCount` and `TdrLimitTime`).
   - Thus vidcut makes a new device after a loss only on an action of the user, and only a few times in a minute (`screen::retry_lost`).
 - **egui-wgpu shows an `Rgba8Unorm` native texture's values as they are**, with no sRGB conversion.
