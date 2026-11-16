@@ -89,8 +89,10 @@ In this file, a path is never a track of the timeline.
     - A 720p file at 24 fps gives 253 pictures in a second. The model takes 61 % of that time.
     - A 2160p file at 59.94 fps in a project of 24 fps gives 57 pictures in a second. The model takes 21 % of that time.
   - The maker of YuNet gives face sizes from about 10 to 300 pixels. The model sees a picture with a longer side of 640 pixels.
-    - A close shot: in the film clip, the model finds a face of 328 pixels. At 320 pixels, the find gives no face that 640 misses for its size.
-    - Check a wide shot with faces under 10 pixels.
+    - Large faces: in the film clip, the model finds a face that is 328 of those pixels wide.
+      - At 320 pixels, each face is half as large to the model. It then finds no face that it misses at 640.
+    - Small faces: a wide shot, for example a crowd far away, can have faces under 10 of those pixels. The model can miss them.
+      - No test clip has such faces. Find one. Compare a find at 640 with a find at 1920, which Quality Better uses.
     - Decide whether the model also sees the picture at another size.
 - **More subjects:** number plates, animals and screens. The things that people blur most must be one choice each.
   - The Subject menu of a Tracker lists each subject (`Subject::ALL`).
