@@ -856,10 +856,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - With no clip in the range, the track is V1, even into a gap.
     - It makes the track if necessary. It never fills a free lower track.
     - A source with no picture is an audio-only edit. An audio-only edit always makes a new top audio track.
-  - **Another frame rate:** timecode lines up in real time, for a file and for a reference clip.
-    - The clip is in sync with the exact time of the file (p. 701). At each timeline frame, it shows the frame of the file at that time.
-    - When the playhead shows the source In, the clip starts at the playhead (p. 709).
-    - Else the clip starts at the first timeline frame that shows the source In (p. 701).
+  - **Another frame rate:** the files line up on the frame grid of the project ([§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
+    - When the playhead shows the source In, the clip starts at the playhead (p. 709). It starts with the frame In.
+    - Else the clip starts at the first timeline frame that shows the source In or a later frame.
+    - With timeline marks, the clip starts with the frame that the Sync Bin shows at its first timeline frame.
+    - From its first frame, the clip plays at its own speed.
   - **A still** has timecode 00:00:00:00, so it goes in only with a clip at that timecode.
   - **After the edit,** the timeline marks clear, and the source marks stay.
     - The playhead goes to the clip's end.
@@ -925,10 +926,17 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - In is the file's frame at the timeline's end. Out is its frame at the playhead (p. 710).
   - The edit fills the timeline from its end to the playhead, and the playhead stays.
   - The reference is then the first clip that overlaps the whole file, as the marked range overlaps no clip.
-- **A timeline at another frame rate:** the rows and Source Overwrite line up the files by their exact time (p. 710). This applies by timecode and with a saved group.
-  - The row shows the frame of the file at the playhead. A click sets In to this frame, and Out five seconds of the file later.
-  - The clip of Source Overwrite shows the same frame as the row at each timeline frame.
+- **Another frame rate:** the Sync Bin counts on the frame grid of the project (measured in Resolve Studio 21.2, with 27 picks).
+  - This applies when a file or the timeline has another frame rate than the project. It applies by timecode and with a saved group.
+  - The playhead goes to the first project frame that is not before it. Its time is the exact source timecode of the reference clip.
+  - The start of a file goes down to a whole project frame.
+  - The row shows the frame of the file at that count of project frames from its start, rounded down.
+  - A click sets In to this frame, and Out five seconds of the file later.
+  - Example: 60 fps files in a 24 fps timeline of a 30 fps project. The second file starts 2 seconds and 13 frames later.
+    - At the timeline frames 61 to 65, the row shows the frames 22, 24, 26, 28 and 32.
+  - Source Overwrite puts the clip at the playhead. The clip starts with the frame In.
   - A saved group counts its frames at the project's rate.
+  - Not measured: a reference clip whose start timecode is not on a project frame.
 - These cases are not measured, and vidcut lets them through:
   - **A still:** it has no row, as in the Sync Clips window.
   - **A file with no picture:** it has its own row and cell, as in the Sync Clips window.

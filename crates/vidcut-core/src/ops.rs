@@ -22,7 +22,9 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 use serde_json::json;
-pub use source_overwrite::{Placed, SourceLining, file_start_at, source_overwrite};
+pub use source_overwrite::{
+    Placed, SourceLining, Synced, file_start_at, source_overwrite, synced_at,
+};
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
 pub use transition::{
     Align, Made, Shape, cross_fade_joins, default_length as default_transition_length, dissolve,

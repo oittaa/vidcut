@@ -59,6 +59,86 @@ fn lag(l: Lining<'_>, c: &Clip) -> f64 {
     c.start as f64 - exact_start(l, c).unwrap_or(0.0)
 }
 
+const SLACK: f64 = 1e-6;
+
+fn place(l: Lining<'_>, m: &Media) -> Option<f64> {
+    match l.group {
+        Some(g) => g.at_of(&m.id).map(|at| at as f64),
+        None => Some(m.timecode_at(l.p.settings.fps)),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Grid {
+    zero: f64,
+    step: f64,
+}
+
+impl Grid {
+    fn of(l: Lining<'_>, reference: &Clip) -> Self {
+        let step = l.p.settings.fps.over(l.p.fps()).as_f64();
+        let media = l.p.media(&reference.media).filter(|m| !m.is_still());
+        let first = (reference.source_at(reference.start))
+            .min(reference.source_at(reference.end() - 1)) as f64
+            + reference.phase;
+        let start = (media.and_then(|m| place(l, m))).map_or(0.0, |x| x + first * step);
+        Self {
+            zero: start - reference.start as f64 * step,
+            step,
+        }
+    }
+
+    fn place(self, at: i64) -> i64 {
+        (self.zero + at as f64 * self.step - SLACK).ceil() as i64
+    }
+
+    fn first(self, place: i64) -> i64 {
+        (((place - 1) as f64 - self.zero) / self.step + SLACK).floor() as i64 + 1
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Spot {
+    place: i64,
+    rate: f64,
+}
+
+impl Spot {
+    fn of(l: Lining<'_>, m: &Media) -> Option<Self> {
+        let project = l.p.settings.fps;
+        Some(Self {
+            place: (place(l, m)? + SLACK).floor() as i64,
+            rate: m.rate(project).over(project).as_f64(),
+        })
+    }
+
+    fn frame(self, place: i64) -> i64 {
+        ((place - self.place) as f64 * self.rate + SLACK).floor() as i64
+    }
+
+    fn shows(self, frame: i64) -> i64 {
+        self.place + (frame as f64 / self.rate - SLACK).ceil() as i64
+    }
+}
+
+pub struct Synced {
+    pub frame: i64,
+    pub offset: i64,
+}
+
+pub fn synced_at(p: &Project, m: &Media, at: i64, group: Option<&SyncGroup>) -> Option<Synced> {
+    let l = Lining { p, group };
+    let base = l.origin(m).unwrap_or_default().floor() as i64;
+    let whole = base..base + p.media_frames(m);
+    let grid = Grid::of(l, at_playhead(l, &whole, at)?);
+    let spot = Spot::of(l, m)?;
+    let place = grid.place(at);
+    Some(Synced {
+        frame: spot.frame(place),
+        offset: place - spot.place,
+    })
+}
+
 fn first_where<'a>(
     l: Lining<'a>,
     file: &Range<i64>,
@@ -189,13 +269,16 @@ pub fn source_overwrite(
         (a, b) => by_marks(l, &whole, a, b),
     }
     .ok_or_else(no_common_time)?;
-    let file_start = lag(l, reference) + o;
-    let showing = |frame: i64| -> i64 {
-        let x = match m {
-            Some(m) => p.first_showing(m, frame),
-            None => frame as f64 - crate::render::grid_slack(crate::time::Rational::ONE),
-        };
-        (file_start + x).ceil() as i64
+    let grid = Grid::of(l, reference);
+    let spot = m.and_then(|m| Spot::of(l, m));
+    let plain = (lag(l, reference) + o).round() as i64;
+    let first = |frame: i64| match spot {
+        Some(s) => grid.first(s.shows(frame)),
+        None => plain + frame,
+    };
+    let shown = |at: i64| match spot {
+        Some(s) => s.frame(grid.place(at)),
+        None => at - plain,
     };
     let (own, count) = match m {
         Some(m) => (
@@ -204,26 +287,31 @@ pub fn source_overwrite(
         ),
         None => (src.range, frames),
     };
-    let file = (showing(0), showing(count));
-    let (a, b) = match marks {
+    let file = (first(0), first(count));
+    let (from, to) = match marks {
         (None, None) => {
-            let first = showing(own.0);
             let start = match playhead {
-                Some(at) if first <= at && at < showing(own.0 + 1) => at,
-                _ => first,
+                Some(at) if shown(at) == own.0 => at,
+                _ => first(own.0),
             };
-            (start, showing(own.1))
+            (start, start + src.range.1 - src.range.0)
         }
         (a, b) => (a.unwrap_or(file.0), b.unwrap_or(file.1)),
     };
-    let a = a.max(0).max(file.0);
-    let b = if m.is_some() { b.min(file.1) } else { b };
+    let a = from.max(0).max(file.0);
+    let b = if m.is_some() { to.min(file.1) } else { to };
     if a >= b {
         return Err(no_common_time());
     }
-    let from = (a as f64 - file_start).max(0.0);
-    let first_source = from.floor() as i64;
-    let phase = from - first_source as f64;
+    let marked = marks == (None, None) && a == from;
+    let (first_source, phase) = match (marked, m) {
+        (true, _) => (src.range.0, src.phase),
+        (false, Some(m)) => {
+            let ((start, _), phase) = p.on_timeline(m, (shown(a).max(0), count));
+            (start, phase)
+        }
+        (false, None) => (shown(a).max(0), 0.0),
+    };
     let source = (first_source, first_source + b - a);
     let kept = match m {
         Some(m) => uncovered(source.0, source.1, &p.left_out_frames(m, phase)),

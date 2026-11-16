@@ -711,12 +711,12 @@ fn sync_row(
         let start = ops::file_start_at(p, m, at, group);
         let head = timeline_frames(p, c.head);
         let frames = timeline_frames(p, c.head + visible(p, c)) - head;
-        let per = p.fps().over(p.settings.fps).as_f64();
-        let shown = c.head as f64 * per..(c.head + visible(p, c)) as f64 * per;
+        let shown = c.head..c.head + visible(p, c);
         if under.is_none()
-            && let Some(x) = start.map(|s| at as f64 - s).filter(|x| shown.contains(x))
+            && let Some(s) = ops::synced_at(p, m, at, group).filter(|s| shown.contains(&s.offset))
         {
-            under = Some((c.media.clone(), p.clip_frame_at(m, x), x));
+            let per = m.rate(p.settings.fps).over(p.fps()).as_f64();
+            under = Some((c.media.clone(), s.frame, s.frame as f64 / per));
         }
         clips.push(SyncClip {
             media: c.media.clone(),
@@ -796,8 +796,7 @@ pub fn pick(p: &mut Project, media: &str, at: i64) -> Result<Marks> {
     let group = group_at_playhead(p, at)
         .filter(|g| g.at_of(media).is_some())
         .or_else(|| p.group_of(media));
-    let start = ops::file_start_at(p, m, at, group);
-    let own = |t: i64| start.map(|s| p.clip_frame_at(m, t as f64 - s));
+    let own = |t: i64| ops::synced_at(p, m, t, group).map(|s| s.frame);
     let here = own(at)
         .filter(|f| (0..frames).contains(f))
         .ok_or_else(|| Error::invalid(format!("{} has no frame at the playhead", m.name)))?;
