@@ -3736,7 +3736,16 @@ fn find_request(
 }
 
 fn page_blur(clip: &Clip, comp: &Composition, tracker: &Node) -> Option<(&'static str, Value)> {
-    let t = tracker.tool.tracker().filter(|t| !t.patterns.is_empty())?;
+    let t = tracker.tool.tracker()?;
+    let followed: Vec<_> = (t.patterns.iter().enumerate())
+        .filter_map(|(k, p)| {
+            let id = p.path.as_ref()?;
+            Some((k, clip.motion.iter().find(|m| m.id == *id)?))
+        })
+        .collect();
+    if followed.is_empty() {
+        return None;
+    }
     let mut taken: Vec<String> = Vec::new();
     let mut free = |tool: ToolType| {
         let base = tool.made().base();
@@ -3752,10 +3761,8 @@ fn page_blur(clip: &Clip, comp: &Composition, tracker: &Node) -> Option<(&'stati
     let add = json!({ "clip": clip.id, "tool": ToolType::MosaicBlur, "after": after });
     let mut commands = vec![json!({ "method": "comp.add", "params": add })];
     let [width, height] = BLUR_SIZE;
-    for (k, p) in t.patterns.iter().enumerate() {
-        let path = p.path.as_ref();
-        let found = path.and_then(|id| clip.motion.iter().find(|m| m.id == *id));
-        let shape = match found.and_then(|m| m.subject).is_some_and(boxed) {
+    for (k, path) in followed {
+        let shape = match path.subject.is_some_and(boxed) {
             true => ToolType::Rectangle,
             false => ToolType::Ellipse,
         };
