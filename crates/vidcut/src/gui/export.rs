@@ -2347,6 +2347,36 @@ fn mib(bytes: u64) -> String {
     format!("{:.0} MiB", bytes as f64 / (1024.0 * 1024.0))
 }
 
+fn bypass_line(outputs: &[Value]) -> Option<String> {
+    let notes: Vec<&Value> = outputs
+        .iter()
+        .map(|o| &o["bypass"])
+        .filter(|b| !b.is_null())
+        .collect();
+    if notes.is_empty() {
+        return None;
+    }
+    let up_to: i64 = notes.iter().filter_map(|b| b["up_to"].as_i64()).sum();
+    if up_to > 0 {
+        return Some(format!("copies up to {up_to} frames"));
+    }
+    let refused = |b: &&Value| {
+        let r = &b["refused"][0];
+        let name = Path::new(r["path"].as_str()?)
+            .file_name()?
+            .to_string_lossy();
+        Some(format!("{name}: {}", r["why"].as_str()?))
+    };
+    let why = notes
+        .iter()
+        .find_map(|b| b["why_not"].as_str().map(String::from))
+        .or_else(|| notes.iter().find_map(refused));
+    Some(match why {
+        Some(why) => format!("copies nothing: {why}"),
+        None => "copies nothing".into(),
+    })
+}
+
 fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
     let mut action = None;
     ui.label(dim("Plan"));
@@ -2396,6 +2426,9 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
             }
             let frames: i64 = outputs.iter().filter_map(|o| o["frames"].as_i64()).sum();
             ui.label(format!("{} file(s), {frames} frames", outputs.len()));
+            if let Some(line) = bypass_line(&outputs) {
+                ui.label(dim(line));
+            }
             for o in outputs.iter().take(4) {
                 ui.label(dim(format!(
                     "{}  ({} frames)",
@@ -2982,6 +3015,14 @@ fn settings_form(
                     ui.end_row();
                 } else {
                     v.alpha = false;
+                }
+
+                if v.image_bits().is_none() {
+                    ui.label("");
+                    ui.checkbox(&mut v.bypass_reencode, "Bypass Re-encode When Possible");
+                    ui.end_row();
+                } else {
+                    v.bypass_reencode = false;
                 }
 
                 if v.image_bits().is_some() {

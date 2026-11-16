@@ -1227,6 +1227,15 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
             if let Some(r) = o.settings.video.as_ref().and_then(|v| v.rounded((o.plan.width, o.plan.height))) {
                 out["rounded"] = json!(r);
             }
+            if let Some(n) = engine::bypass_plan(&o.plan, &o.settings, available, &o.subtitles) {
+                out["bypass"] = json!({ "up_to": n.frames });
+                if let Some(why) = n.why_not {
+                    out["bypass"]["why_not"] = json!(why);
+                }
+                if !n.refused.is_empty() {
+                    out["bypass"]["refused"] = json!(n.refused);
+                }
+            }
             out
         }).collect::<Vec<_>>(),
     })
