@@ -55,7 +55,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - It runs `motion.find` with `VIDCUT_SUBJECTS_DUMP` on 1 s of the clip `tos-720p-mov`, at SIZE (640 when not given).
 - It gives the same pictures to onnxruntime on the CPU, and reads the output of each step from the ONNX graph.
 - For each step, it prints the largest difference as a share of the largest value. A share of more than 0.01 is far off.
-- It needs what the face speed script needs, and numpy, onnx and onnxruntime. `uv run` gets these packages.
+- It needs what the face speed script needs, and numpy, onnx and onnxruntime. `uv run` gets these packages, and a Python version that onnxruntime supports.
 - `RANGE=A..B` checks another part of the clip. `VIDCUT_GPU_CONV` selects the convolution kernels.
 
 **Slow and dropped frames:** `scripts/playback-check.py [--log DIR] [CODEC…]` (`make playback`, release builds).

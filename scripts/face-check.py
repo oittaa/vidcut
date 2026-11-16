@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # /// script
+# requires-python = ">=3.11,<3.15"
 # dependencies = ["numpy", "onnx", "onnxruntime"]
 # ///
 """Where the slow face model goes wrong on this computer. It runs `motion find
