@@ -2656,20 +2656,6 @@ fn generator_source(p: &Project, params: &SourceParams, generator: Generator) ->
 }
 
 fn source(p: &Project, params: &SourceParams) -> Result<Source> {
-    source_by(p, params, Project::on_timeline)
-}
-
-fn synced_source(p: &Project, params: &SourceParams) -> Result<Source> {
-    source_by(p, params, |p, m, (a, b)| {
-        ((p.tape_frame(m, a), p.tape_frame(m, b)), 0.0)
-    })
-}
-
-fn source_by(
-    p: &Project,
-    params: &SourceParams,
-    to_timeline: impl Fn(&Project, &Media, (i64, i64)) -> ((i64, i64), f64),
-) -> Result<Source> {
     if let Some(generator) = ops::generators::source_of(params.generator, &params.settings)? {
         return generator_source(p, params, generator);
     }
@@ -2684,7 +2670,7 @@ fn source_by(
         ),
         Some(r) => media_context(p, media, None).range(r)?,
     };
-    let ((first, end), phase) = to_timeline(p, media, marked);
+    let ((first, end), phase) = p.on_timeline(media, marked);
     if marked.1 > marked.0 && end <= first {
         return Err(Error::invalid(
             "the marked range is shorter than one timeline frame",
@@ -3372,7 +3358,7 @@ fn mutate(
             let sources = if src.tape {
                 tape_sources(p, src)?
             } else {
-                vec![synced_source(p, src)?]
+                vec![source(p, src)?]
             };
             let mut landed = Vec::with_capacity(sources.len());
             for s in &sources {

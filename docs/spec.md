@@ -848,7 +848,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - It makes the track if necessary. It never fills a free lower track.
     - A source with no picture is an audio-only edit. An audio-only edit always makes a new top audio track.
   - **Another frame rate:** timecode lines up in real time, for a file and for a reference clip.
-    - A source In starts the clip at the first timeline frame that shows that frame of the file. Thus each frame of the clip is in sync ([gotchas](gotchas.md#resolves-sync-bin)).
   - **A still** has timecode 00:00:00:00, so it goes in only with a clip at that timecode.
   - **After the edit,** the timeline marks clear, and the source marks stay.
     - The playhead goes to the clip's end.
@@ -915,10 +914,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The edit fills the timeline from its end to the playhead, and the playhead stays.
   - The reference is then the first clip that overlaps the whole file, as the marked range overlaps no clip.
 - **A timeline at another frame rate** (measured in Resolve Studio 21.2): the rows and Source Overwrite line up the files by time. This applies by timecode and with a saved group.
-  - Example: 24 fps files a and b, with b 2 seconds after a. In a 25 fps timeline at 3 seconds, the rows show frame 72 of a and frame 24 of b.
-  - Source Overwrite of b then puts 125 frames at 3 seconds, from frame 24 of b.
-  - A saved group counts its frames at the project's rate. Example: in a 30 fps project, the Sync Clips window moves b 6 frames later.
-  - The rows at 3 seconds then show frame 19 of b, in a 30 fps timeline and in a 25 fps timeline.
+  - A saved group counts its frames at the project's rate.
 - These cases are not measured, and vidcut lets them through:
   - **A still:** it has no row, as in the Sync Clips window.
   - **A file with no picture:** it has its own row and cell, as in the Sync Clips window.
