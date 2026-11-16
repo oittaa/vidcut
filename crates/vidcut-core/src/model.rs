@@ -7130,9 +7130,6 @@ impl Project {
 
     pub fn check_in(&mut self) {
         use std::mem::{replace, take};
-        if self.timelines.is_empty() && self.has_sheet() {
-            self.keep_sheet();
-        }
         let tracks = replace(&mut self.tracks, Self::fresh_tracks());
         let (marks, markers, subtitles) = (
             take(&mut self.marks),

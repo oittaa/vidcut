@@ -827,14 +827,7 @@ impl Editor {
             )?,
             _ => mutate(&mut working, &request, env, playhead, dry_run)?,
         };
-        if working.timelines.is_empty() && !working.is_fresh_sheet() {
-            if !working.has_sheet() {
-                return Err(Error::invalid(
-                    "the project has no timeline: make one with timeline.new",
-                ));
-            }
-            working.keep_sheet();
-        }
+        need_timeline(&mut working)?;
         let label = match (&request, parts.as_slice()) {
             (Request::Apply { label: None, .. }, [one]) => one.clone(),
             (Request::Apply { label: None, .. }, [first, rest @ ..]) => {
@@ -2705,6 +2698,18 @@ fn need(at: Option<i64>, what: &str) -> Result<i64> {
     at.ok_or_else(|| Error::usage(format!("{what} is required (no live playhead)")))
 }
 
+fn need_timeline(p: &mut Project) -> Result<()> {
+    if p.timelines.is_empty() && !p.is_fresh_sheet() {
+        if !p.has_sheet() {
+            return Err(Error::invalid(
+                "the project has no timeline: make one with timeline.new",
+            ));
+        }
+        p.keep_sheet();
+    }
+    Ok(())
+}
+
 fn batch(
     p: &mut Project,
     commands: &[Request],
@@ -2736,7 +2741,7 @@ fn batch(
             if let Some(labels) = labels.as_deref_mut() {
                 labels.push(label_of(cmd, p, playhead));
             }
-            mutate(p, cmd, env, playhead, dry_run)
+            mutate(p, cmd, env, playhead, dry_run).and_then(|v| need_timeline(p).map(|()| v))
         } else {
             query(p, &Labels::default(), cmd, env, playhead, dry_run)
         };

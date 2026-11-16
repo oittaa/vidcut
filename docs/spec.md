@@ -340,7 +340,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
     - Timeline Settings has the start timecode, Use Project Settings and the own format.
     - Delete Timeline asks first. When the open timeline goes, the timeline made before it opens, else the one after it. A project can have no timeline.
   - An edit into a project with no timeline makes a timeline (p. 678). In Resolve Studio 21.2, it is "Timeline 1", with at least 1 video track and 1 audio track.
-    - `timeline.new` after such an edit in one batch keeps the edit in "Timeline 1".
+    - Each command of a batch (`apply`) follows this rule as it does alone.
   - A timeline in the project locks the frame rate and drop-frame of the project. Media in the pool do not lock them.
     - Thus the first video of a project with a timeline sets only the picture size (D37).
     - The manual says that media lock the frame rate (pp. 141, 364). Resolve Studio 21.2 does not.

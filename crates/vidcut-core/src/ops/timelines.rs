@@ -100,9 +100,6 @@ fn settings_with(p: &Project, f: TimelineSettings) -> Settings {
 }
 
 pub fn new(p: &mut Project, n: &TimelineNew) -> Result<String> {
-    if p.timelines.is_empty() && p.has_sheet() {
-        p.keep_sheet();
-    }
     let name = n.name.clone().unwrap_or_else(|| p.next_timeline_name());
     free_name(p, &name, None)?;
     let bin = n.bin.clone().unwrap_or_default();

@@ -167,8 +167,8 @@ Timelines (spec §3):
 - `ops::timelines` holds the requests: `new`, `open`, `rename`, `duplicate`, `delete` and `set`, and `list`.
   - `delete` opens the timeline made before the deleted one, else the one after. A project can have no timeline.
   - An edit into a project with no timeline makes one first (`Editor::apply`).
-    - `Project::keep_sheet` makes "Timeline 1" from the open tracks. `Project::check_in` calls it when no timeline is open, so that no edit gets lost.
-    - `timeline.new` calls it first, so that the new timeline gets the next name.
+    - `Project::keep_sheet` makes "Timeline 1" from the open tracks.
+    - `need_timeline` applies the rule after the request, and after each command of a batch. Thus a batch gives the same result as its commands one by one.
 - A pool item counts at the project's rate: a sound file and a still count `Settings::fps` (`Media::rate`). A compound clip keeps the rate of the timeline where it was made (`PooledCompound::fps`).
 - `ops::conform` converts clips by time from one frame rate to another. `place_pooled` and `edit.paste` use it, and `edit.copy` returns the rate of its clips.
 - Synced groups and the Sync Clips window count frames at the project's rate. The Sync Bin, `multicam.pick` and Source Overwrite work in frames of the open timeline. `multicam::timeline_frames` converts a frame of a group to the open timeline's rate by time.
