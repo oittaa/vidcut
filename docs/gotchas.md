@@ -184,6 +184,24 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - 2.3.0 (Ubuntu's, with FFmpeg 8.0) does this from preset 9 up.
   - 4.2.0 does this from preset 10 up (11 with `rtc=1`).
   - Proxies use preset 8 (`ProxyEncoder::options`).
+- **An encoder takes no frame after it is drained:**
+  - After the end of the stream, `avcodec_send_frame` gives `AVERROR_EOF`.
+  - Thus each run of encoded frames between two copied runs gets a new encoder (`Reopen`).
+- **With the global header flag, x264 and NVENC put the SPS and PPS only into the extradata:**
+  - A packet in the middle of the stream then has no parameter sets. A decoder cannot start a run of frames there.
+  - The first packet of each run, copied or encoded, gets the parameter sets of its extradata (`bypass::Bits`).
+- **The MP4, MOV and Matroska muxers rewrite Annex B packets:**
+  - When the extradata of an H.264 or HEVC stream is Annex B, they write each NAL unit with its length before it.
+  - Copied packets become Annex B, as the packets of the encoder are. Thus one stream holds both.
+- **An H.264 key packet is not always an IDR:**
+  - A MOV file can mark an I-frame with a recovery point as a key frame. The frames after it can use frames before it (an open GOP).
+  - A copy of H.264 starts only at a packet with an IDR slice (`bypass::Bits`).
+- **SVT-AV1 marks only its first frame as a key packet:**
+  - SVT-AV1 4.2.0 makes forward key frames. The `libsvtav1` encoder of FFmpeg 9.0 gives them no key flag.
+  - Thus a copy of such a file starts only at its first frame.
+- **FFmpeg decodes ProRes 4444 and 4444 XQ at 12 bits:**
+  - The `prores` decoder of FFmpeg 9.0 gives `yuv444p12le` or `yuva444p12le` for these profiles. `prores_ks` takes 10 bits.
+  - The ProRes frame header has no bit depth. Thus a ProRes file matches by its profile, chroma and alpha, not by its bits.
 
 ## GPU drivers
 

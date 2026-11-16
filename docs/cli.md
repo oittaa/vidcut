@@ -157,12 +157,19 @@ The schema describes the parameters, not the results. This list gives the result
     - `sources`: each file, and how it was decoded.
       - `went`: how the decoded frames of the file went to the draw: `frames stayed there` or `frames came down whole`.
       - `went` is not there when the frames of the file come to the draw in memory.
+    - `bypass`, with `video.bypass_reencode`:
+      - `frames`: the frames copied from the source files.
+      - `why_not`: why the export can copy nothing, when it cannot.
+      - `refused`: each file that does not match the output (`path`), and `why`.
   - `upscaled[]`: each file that Upscale enlarged (`path`), and `how`: the upscaler, with its model or its Sharpness. Examples: `AI Fast (NanoVSR 5.4M)`, `Classic, sharpness high`.
   - `notes[]`: `code`, `message`.
 - `export plan`:
   - `settings`, `video_encoder` and `notes`.
   - `outputs[]`, with `color`, `metadata` and `rounded`.
     - `rounded` tells the rule of the codec. A plan does not know what an encoder does by itself.
+    - `bypass` has `why_not` and `refused`, as in the report of the export.
+      - Its `up_to` is the frames that the timeline shows unchanged from a matching file.
+      - The export copies fewer frames: a copy starts only at a frame that a decoder can start at.
   - `auto`: what each automatic setting picks when only that setting is on auto.
     - It has a list for each of `encoder`, `passes`, `bit_depth`, `hdr` and `metadata`.
     - Each list has one entry for each different pick across the outputs.
