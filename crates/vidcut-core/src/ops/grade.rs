@@ -1,79 +1,12 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{Error, Result};
 use crate::model::{Grade, Project};
 use crate::preferences::ColorPrefs;
+use crate::request::{GradeChange, PrinterColor};
 
 use super::locate;
 use super::picture::takes;
-
-/// The values of a primary correction to change. Each value given replaces
-/// its own.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct GradeChange {
-    /// Lift of red, green, blue and the master.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lift: Option<[f64; 4]>,
-    /// Gamma of red, green, blue and the master.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gamma: Option<[f64; 4]>,
-    /// Gain of red, green, blue and the master.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gain: Option<[f64; 4]>,
-    /// Offset of red, green and blue. 25 for none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub offset: Option<[f64; 3]>,
-    /// Contrast about the pivot, from 0 to 2. 1 for none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub contrast: Option<f64>,
-    /// The pivot of the contrast, from 0 to 1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pivot: Option<f64>,
-    /// Saturation, from 0 to 100. 50 for none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub saturation: Option<f64>,
-    /// Hue, from 0 to 100. 50 for none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hue: Option<f64>,
-    /// How much the luma stays, from 0 to 100.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lum_mix: Option<f64>,
-    /// Temp, from -4000 to 4000. 0 for none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub temp: Option<f64>,
-    /// Tint, from -100 to 100. 0 for none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tint: Option<f64>,
-    /// Color Boost, from -100 to 100. 0 for none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color_boost: Option<f64>,
-    /// Shadows, from -100 to 100. 0 for none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub shadows: Option<f64>,
-    /// Highlights, from -100 to 100. 0 for none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub highlights: Option<f64>,
-    /// Midtone Detail, from -100 to 100. 0 for none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub midtone_detail: Option<f64>,
-    /// The Log Shadow wheel, red, green and blue.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub log_shadow: Option<[f64; 3]>,
-    /// The Log Midtone wheel, red, green and blue.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub log_midtone: Option<[f64; 3]>,
-    /// The Log Highlight wheel, red, green and blue.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub log_highlight: Option<[f64; 3]>,
-    /// Where the Log Shadow range ends, above 0 and below the high range.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub low_range: Option<f64>,
-    /// Where the Log Highlight range starts, below 1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub high_range: Option<f64>,
-}
 
 impl GradeChange {
     pub fn is_empty(&self) -> bool {
@@ -169,26 +102,6 @@ pub fn checked(g: &Grade) -> Result<Option<Grade>> {
 }
 
 const NEEDS: &str = "grade.set needs a value to change";
-
-/// The channels of a printer point.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum PrinterColor {
-    /// Red.
-    Red,
-    /// Green.
-    Green,
-    /// Blue.
-    Blue,
-    /// Green and blue.
-    Cyan,
-    /// Red and blue.
-    Magenta,
-    /// Red and green.
-    Yellow,
-    /// Red, green and blue.
-    Master,
-}
 
 impl PrinterColor {
     pub fn channels(self) -> [f64; 3] {

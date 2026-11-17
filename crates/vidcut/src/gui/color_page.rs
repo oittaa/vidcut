@@ -4,8 +4,8 @@ use egui::{Color32, CursorIcon, DragValue, Label, Rect, Response, Sense, Stroke,
 use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
 use vidcut_core::model::{Grade, Picture};
-use vidcut_core::ops::grade::{PrinterColor, checked, printed};
-use vidcut_core::request::Page;
+use vidcut_core::ops::grade::{checked, printed};
+use vidcut_core::request::{Page, PrinterColor};
 
 use super::workspace::Workspace;
 
