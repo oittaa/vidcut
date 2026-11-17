@@ -16,6 +16,7 @@ pub mod export;
 pub mod fingerprint;
 pub mod folder;
 pub mod generators;
+pub mod grade;
 mod history;
 pub mod keyframes;
 pub mod leveler;
@@ -45,6 +46,8 @@ pub mod store;
 pub mod subtitles;
 pub mod temp;
 pub mod time;
+#[allow(clippy::approx_constant)]
+mod tone_tables;
 pub mod transcript;
 pub mod transcripts;
 pub mod validate;

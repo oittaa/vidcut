@@ -30,6 +30,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 | "track"
                 | "bins"
                 | "picture"
+                | "grade"
                 | "effects"
                 | "speed"
                 | "generators"
@@ -54,6 +55,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
             | "marks.get"
             | "markers.list"
             | "picture.get"
+            | "grade.get"
             | "motion.list"
     );
     if mutation {

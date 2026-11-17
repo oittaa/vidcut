@@ -82,6 +82,7 @@ pub(super) struct EffectsPage {
     alone: Option<Alone>,
     cells: Option<super::cells::Cells>,
     held: Option<Held>,
+    pub(super) graded: Option<super::color_page::Graded>,
     boxed: Option<Boxed>,
     pan: Vec2,
     zoom: f32,
@@ -108,6 +109,7 @@ impl Default for EffectsPage {
             alone: None,
             cells: None,
             held: None,
+            graded: None,
             boxed: None,
             pan: Vec2::ZERO,
             zoom: 1.0,
@@ -660,9 +662,10 @@ impl Workspace {
             return;
         }
         self.leave_inspector();
-        if page == Page::Cut {
+        if page != Page::Effects {
             self.effects_page.leave();
         }
+        self.effects_page.graded = None;
         self.effects_page.page = page;
         self.sync_bounds();
     }

@@ -737,6 +737,52 @@ The draw:
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
   - A layer in the normal mode draws its premultiplied colors as they are (`placed`). Why: `mosaic_alpha` can give more color than alpha, or color with no alpha. That color adds to the layers below.
 
+## The grade
+
+The primary correction of a clip (`model::Grade`, the `grade.set` request, the Color page):
+
+- `Placing::new` adds the grade after the effects of the clip, as the last `place::Working` (`Work::Grade`).
+  - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
+  - A grade at its defaults is left out (`Grade::is_usual`).
+- `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
+- `Grading::of` changes the values of the controls into the numbers that `fs_grade` uses:
+  - Temp and Tint give one 3×3 matrix. It adapts the white of 6500 K to the new white, with the Bradford cone matrix.
+  - The new white is on the Planck curve at 6500 K minus Temp. Tint moves it across the curve.
+  - `PLANCK_U` and `PLANCK_V` give the Planck curve in CIE 1960 uv. From 2000 K to 12000 K, the error is less than 2e-6.
+  - Saturation and Hue give one 3×3 matrix.
+  - Contrast is a curve about the pivot (`ContrastCurve`). Its knots give exact Hermite segments, with no table.
+  - Each Log color is a curve (`LogCurve`). Between Low Range and High Range it is a Bezier curve, solved to 1e-12.
+  - Shadows, Highlights and Midtone Detail give the tone stage (`Tone`). The changes of Shadows and Highlights add into one curve of the luma.
+  - `tone_tables` holds the measured change of each control at 18 amounts. Each change is a table of 1024 values from 0 to 2.
+  - Between the amounts, a cubic through the four nearest amounts gives the change.
+  - Below 0, the curve is a line through 0, with the mean slope from 0 to 0.25. Above 2, it continues with its slope from 1.75 to 2.
+- The tone stage needs a filtered luma. A fast guided filter makes it on a smaller copy of the luma (`grade_into`):
+  - `tone_filter` gives the size of the copy and the radius of the box. The scale is the width divided by 320, from 1 to 4.
+  - The radius is the longer side divided by 100, rounded up, then divided by the scale. Thus the filter reaches the same part of the picture at each size.
+  - `fs_grade_stats` makes the copy. Each copy pixel is one bilinear read of the luma, at the center of its block. It keeps the luma and its square.
+  - Box blurs (`fs_boxes`) give their means. The border pixels repeat.
+  - `fs_grade_coef` gives the coefficients of a guided filter. A box blur gives their means.
+  - `fs_grade` reads the coefficients back to the full size with a bilinear read. They apply to the full-size luma.
+  - The copy and the boxes use two spare textures of the copy size (`GRADE_SLOTS`).
+  - Why a guided filter: it keeps edges and ramps. Thus a ramp keeps its shape, and only the detail near an edge changes.
+  - Parts of the canvas with no picture count as black in the filter. The grade keeps them empty.
+- The tone stage:
+  - The colors are multiplied by the ratio of the curve to the filtered luma, from 1 to 4. The stage then adds the rest of the curve.
+  - Where the filtered luma is 0 or less, the ratio is 1.
+  - Thus a positive Shadows or Highlights keeps the ratios of the colors. A negative one keeps their differences.
+  - Midtone Detail adds the luma minus the filtered luma. A parabola of the new luma weights it, so that black and the top of the range stay.
+- `fs_grade` applies the parts in this order:
+  1. Shadows, Highlights and Midtone Detail.
+  2. Color Boost.
+  3. Temp and Tint.
+  4. Lift, Gamma, Gain and Offset of each color.
+  5. The master values of Lift, Gamma and Gain, on the luma.
+  6. Contrast. Lum Mix sets how much of the luma comes from the master values.
+  7. The Log wheels.
+  8. Saturation and Hue.
+- The grade works on the colors without their alpha, as an effect with Use Alpha off does.
+- Below 0 and above 1, the Contrast curve and the Log curves continue on straight lines.
+
 A made frame of a speed change ([which source frame](#which-source-frame)):
 
 - The effects of the clip work on each source picture before the frame between them is made, as in the spec (§13).

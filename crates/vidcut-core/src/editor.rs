@@ -255,6 +255,10 @@ pub trait Env {
         crate::preferences::Editing::default().still_duration
     }
 
+    fn printer_lights(&self) -> crate::preferences::ColorPrefs {
+        crate::preferences::ColorPrefs::default()
+    }
+
     fn fillers(&self, language: &str) -> Option<Vec<String>> {
         let _ = language;
         None
@@ -4515,6 +4519,25 @@ fn mutate(
             ops::picture::clear(p, &ids, *tool)?;
             Value::Null
         }
+        Request::GradeSet { clips, change } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::grade::set(p, &ids, change)?;
+            Value::Null
+        }
+        Request::GradeClear { clips } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::grade::clear(p, &ids)?;
+            Value::Null
+        }
+        Request::GradePrinter {
+            clips,
+            color,
+            points,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::grade::printer(p, &ids, (*color, *points), &env.printer_lights())?;
+            Value::Null
+        }
         Request::EffectsAdd { clips, kind } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             ops::effect::add(p, &ids, *kind)?
@@ -7937,6 +7960,10 @@ pub fn query(
         ),
         Request::BinsList {} => json!(p.bins),
         Request::TimelineList {} => ops::timelines::list(p),
+        Request::GradeGet { clip } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::grade::get(p, &id)?
+        }
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;
             ops::picture::get(p, &id)?

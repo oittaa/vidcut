@@ -551,6 +551,9 @@ impl Workspace {
             let at = c.content_at(frame);
             (id.to_string(), stored.preview(baseline, picture, at))
         };
+        if let Some(graded) = self.graded_wanted() {
+            return vec![graded];
+        }
         match self.grab_wanted() {
             Some((id, picture, baseline)) => vec![preview(&id, &baseline, &picture)],
             None => self

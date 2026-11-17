@@ -127,7 +127,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - It also carries Dolby Vision and HDR10+ from the grade (pp. 151, 259–260).
   - Resolve Studio measures MaxCLL and MaxFALL (p. 282).
 - **vidcut:**
-  - There is no grade. Thus an export carries what its sources tell, or measures it from their frames ([D46](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - An export carries what its sources tell, or measures it from their frames ([D46](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - Phone, camera and graded HDR footage looks on TVs as its sources do.
   - This needs no setup by a colorist.

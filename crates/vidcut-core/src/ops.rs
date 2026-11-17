@@ -5,6 +5,7 @@ pub mod effect;
 pub mod filmstrip;
 mod follow;
 pub mod generators;
+pub mod grade;
 pub mod keyframes;
 pub mod linked;
 pub mod motion;

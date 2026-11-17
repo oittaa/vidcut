@@ -495,8 +495,9 @@ The names of frames:
     - The `upscale` holds the Sharpness. Why: the job draws the Sharpness into the file (`VideoFrames::colors_frame`).
     - With a Retime Process, it also holds the Retime Process and the exact source position (`VideoPiece::exact`).
     - Thus a change of the Transform or of an effect renders a placed clip again.
-    - `alone` keeps only the effects of the clip itself (`render_cache::own_effects`). Why: the effects of a compound clip can work on its mix, at the draw.
+    - `alone` keeps only the effects of the clip itself (`render_cache::own_effects`). Why: the effects and the grade of a compound clip can work on its mix, at the draw.
     - Without a Retime Process, `alone` keeps the effects up to the last checked effect (`render_cache::baked`). Thus a change of a later effect keeps the names.
+    - A file with a checked effect holds no grade of the clip. The draw applies the grade after the later effects.
     - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.
 - `PieceKeys` keeps the frame names of each piece in memory. vidcut does not hash a piece again when the piece only moves, for example after a ripple edit.
   - When it holds more than `KEYS_BYTES` of frame names, it removes the least recently used pieces (`ByBytes`).

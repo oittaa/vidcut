@@ -419,6 +419,18 @@ The bar and the Jobs button:
 - The dragged picture goes to the core with `Handle::preview_pictures`. After it, the sent picture goes there until the project has it (`tools::landing`).
 - The boxes of a Dynamic Zoom are the picture placed with the start box and with the end box (`Shown::ends`). Thus they stay in place while the clip plays.
 
+**The Color page** (`Workspace::primaries_panel`).
+
+- The palette shows the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
+- The dragged grade goes to the core with `Handle::preview_pictures`, through `Workspace::graded_wanted`. Thus the viewer follows each frame of the drag.
+- When the pointer is up, the palette sends one `grade.set` with the changed values. Thus a drag is one undo step.
+- After that, the palette shows the sent grade until the project has it. If the request fails, the palette shows the project again after a short time.
+- A drag in a wheel moves the puck by the move of the pointer (manual p. 3144):
+  - With Shift, the puck jumps to the pointer.
+  - With Ctrl (Cmd on macOS), the drag moves the master values, as the dial does.
+- The dial under a wheel adds the same amount to each value of the wheel (p. 3145).
+- A double-click on a name resets its value. A drag on a name changes its value (pp. 3146, 3148).
+
 **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`).
 
 - It is a tab of the left panel (`LeftTab`). It draws the open Title, Subtitle and Subtitle Track sections (`Workspace::title_form`, `Workspace::cue_form`, `Workspace::track_form`).

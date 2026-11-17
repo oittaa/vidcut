@@ -2760,6 +2760,35 @@ pub enum Request {
         #[serde(default)]
         tool: Option<PictureTool>,
     },
+    /// The primary correction of a clip (`c3`, or `V2@15s`): every value of
+    /// the Primaries palette, usual ones too.
+    #[serde(rename = "grade.get")]
+    GradeGet { clip: ClipRef },
+    /// Change the primary correction of clips: footage, stills, image
+    /// sequences, compound clips and generators. It works after their
+    /// effects and before their composite mode and opacity. Each value given
+    /// replaces its own.
+    #[serde(rename = "grade.set")]
+    GradeSet {
+        clips: OneOrMany<ClipRef>,
+        #[serde(flatten)]
+        change: Box<crate::ops::grade::GradeChange>,
+    },
+    /// Put the primary correction of clips back at its usual values.
+    #[serde(rename = "grade.clear")]
+    GradeClear { clips: OneOrMany<ClipRef> },
+    /// Move the Offset of clips by printer points. One point moves each
+    /// channel by its Step Size times its Density Increment (the `color`
+    /// preferences).
+    #[serde(rename = "grade.printer")]
+    GradePrinter {
+        clips: OneOrMany<ClipRef>,
+        /// The channels that move.
+        color: crate::ops::grade::PrinterColor,
+        /// The points: 1 or -1 for a full point, 0.5 for a half point, 0.25
+        /// for a quarter point.
+        points: f64,
+    },
     /// Add an effect at its usual values after the effects of clips:
     /// footage, stills, image sequences and compound clips. A generator takes
     /// no effects. The effects work in their order, on the picture as its
@@ -3853,9 +3882,9 @@ pub enum Request {
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
     #[serde(rename = "gui.close")]
     GuiClose { panel: GuiPanel },
-    /// Show a page of the window: `cut`, or `effects`, the node editor of
-    /// the composition of the topmost clip at the playhead. Answers what
-    /// `gui.state` does.
+    /// Show a page of the window: `cut`; `effects`, the node editor of
+    /// the composition of the topmost clip at the playhead; or `color`, the
+    /// primary correction of that clip. Answers what `gui.state` does.
     #[serde(rename = "gui.page")]
     GuiPage { page: Page },
     /// Select nodes in the node editor of the effects page, by name. The
@@ -4751,6 +4780,9 @@ pub enum Page {
     /// The node editor of a clip's composition, its viewer and its
     /// Inspector.
     Effects,
+    /// The primary correction of the clip at the playhead, its viewer and
+    /// the timeline.
+    Color,
 }
 
 /// A window `gui.show` opens.
@@ -6182,6 +6214,7 @@ impl Request {
                     | Self::TitlesList { .. }
                     | Self::GeneratorsList { .. }
                     | Self::PictureGet { .. }
+                    | Self::GradeGet { .. }
                     | Self::MotionList { .. }
                     | Self::SubtitlesExport { .. }
                     | Self::AnalyzeWords { .. }

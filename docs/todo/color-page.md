@@ -1,8 +1,8 @@
-# A Color page
+# The Color page
 
 **When:** not decided.
 
-A page for the grade of a clip, with its own nodes. The Effects page holds the effects and the masks of a clip ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
+The Color page shows the primary correction of the clip at the playhead, the viewer and the timeline. Resolve's Color page also has nodes.
 
 **Why:**
 
@@ -12,16 +12,20 @@ A page for the grade of a clip, with its own nodes. The Effects page holds the e
 **What the manual says:**
 
 - Each clip has one node on the Color page. The user can add more nodes, and each node holds one or more corrections (p. 3385).
-- The Primaries palette holds the Lift, Gamma and Gain controls of a primary correction (p. 3141).
+- The Primaries palette shows the same controls as wheels or as bars (pp. 3142, 3151).
+- The palettes are at the bottom of the page, below the timeline (pp. 3046, 3053, 3055).
 
 **In the code:**
 
-- vidcut has no grade ([primary-grade.md](primary-grade.md)).
+- `crates/vidcut/src/gui/color_page.rs` draws the Primaries wheels, the Primaries bars and the Log wheels. It sends `grade.set` and `grade.clear`.
+- In the bars, each Offset bar has a Plus and a Minus button. Each button moves its channel by one printer point (pp. 3157, 3159).
+- The page puts the palette at the bottom and the timeline above it, at its smallest height. The viewer gets the rest.
+- Each clip has one correction (`model::Grade`, [primary-grade.md](primary-grade.md)).
 - The node editor of the Effects page is in `crates/vidcut/src/gui/effects_page.rs`.
 
 **To do:**
 
-- Decide the order of the grade and the composition of a clip ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
+- The Printer Light Hotkeys of the Color menu, and the Full, Half and Quarter printer points with their keys (p. 3158).
+- Nodes: more than one correction on a clip, in the order of the nodes.
 - Decide whether the Color page uses the node editor of the Effects page.
-- Build the corrections of [primary-grade.md](primary-grade.md) as nodes of this page.
-- The CLI, IPC and MCP perform the same action as the GUI.
+- The media panel on this page: its border runs past the panel when the top of the window is short.

@@ -327,7 +327,7 @@ impl Workspace {
                 }
                 live::GuiChange::Show(panel) => self.show_panel(panel, ctx),
                 live::GuiChange::Close(panel) => self.close_panel(panel),
-                live::GuiChange::Page(Page::Effects) if self.project().is_none() => {
+                live::GuiChange::Page(Page::Effects | Page::Color) if self.project().is_none() => {
                     return Err("Open a project first".into());
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
@@ -443,7 +443,7 @@ impl Workspace {
         let page = self.effects_page.page;
         live::GuiState {
             page,
-            clip: (page == Page::Effects)
+            clip: matches!(page, Page::Effects | Page::Color)
                 .then(|| self.effects_clip())
                 .flatten(),
             nodes: self.effects_page.nodes.clone(),
@@ -1229,7 +1229,11 @@ impl Workspace {
             self.fit_row(ui, row, |ws, ui, s| match s {
                 S::Pages => {
                     ui.horizontal(|ui| {
-                        for (page, text) in [(Page::Cut, "Cut"), (Page::Effects, "Effects")] {
+                        for (page, text) in [
+                            (Page::Cut, "Cut"),
+                            (Page::Effects, "Effects"),
+                            (Page::Color, "Color"),
+                        ] {
                             let on = ws.effects_page.page == page;
                             if ui.selectable_label(on, text).clicked() && !on {
                                 ws.send("gui.page", json!({ "page": page }));
@@ -2149,9 +2153,22 @@ impl Workspace {
             frame.total_margin().sum().y + spacing.interact_size.y + spacing.item_spacing.y;
         let wanted = self.timeline_wanted().unwrap_or(300.0) + chrome;
         let least = self.timeline_least(&spacing).map_or(140.0, |h| h + chrome);
-        egui::Panel::bottom("timeline")
+        let color = self.effects_page.page == Page::Color;
+        if color {
+            egui::Panel::bottom("primaries")
+                .resizable(true)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.primaries_panel(ui))
+                });
+        }
+        let size = match color {
+            true => least,
+            false => wanted.min(ctx.content_rect().height() * 0.6).max(least),
+        };
+        egui::Panel::bottom(if color { "color-timeline" } else { "timeline" })
             .resizable(true)
-            .default_size(wanted.min(ctx.content_rect().height() * 0.6).max(least))
+            .default_size(size)
             .min_size(least)
             .frame(frame)
             .show(ui, |ui| {
