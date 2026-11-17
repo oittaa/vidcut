@@ -5516,8 +5516,10 @@ These three controls use the pixels around a pixel. Shadows and Highlights are a
 
 - Midtone Detail changes a frame of one color by 1.5e-3 at most. It raises the contrast at edges (p. 3146). It changes the same pixels as `B`, but it does not follow these rules.
 - The frames of these renders are 588 × 260 pixels. The test project has the working luminance HDR 1000.
-- At 1176 × 520, a radius of 12 with ε 0.01 fits best. The error is 2.5e-3 near the ringing of the scaler.
-  - Thus the window grows with the frame. The exact rule at other sizes is not known.
+- At 588 × 520, these rules hold to 9.5e-6. Thus the height of the frame does not change the window.
+- At 1176 × 260 and 1176 × 520, the halo is about twice as wide. A radius of 12 fits best, but only to 2.5e-3 to 9e-3.
+  - At 1176 × 260, the base changes in steps of two pixels. A filter on a copy of half the width fits to 4.3e-3.
+  - Thus the window grows with the width. The exact rule at other widths is not known.
   - The grade runs at the size of the timeline, after the scaling of the clip.
 - Not measured: the formula of `g`, the exact window at other frame sizes, the effect of the working luminance, and Midtone Detail.
 
