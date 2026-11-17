@@ -5367,3 +5367,111 @@ These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 an
   - Pitch and Yaw: vidcut uses the same rule on the corners of the leaned picture.
   - A compound clip: vidcut uses the rule on each level by itself.
   - The rounding of an odd frame size for an encoder: vidcut does not use the limit there.
+
+## 14. Primary grade (pp. 3141–3157)
+
+The Primaries palette of the Color page is the model for the primary grade of a clip.
+
+- These facts are measured in Resolve Studio 21.2, with no color management (DaVinci YRGB), on one corrector node.
+- The test picture holds each R, G, B level from −0.5 to 2.0 in steps of 0.125. The renders are OpenEXR RGB float.
+- The math works on the code values of the timeline. A value above 1 or below 0 stays (§13).
+- The record of the runs and the scripts is in `$VIDCUT_TEST_DATA/fixtures/color/NOTES.md`.
+- The formulas use the values that the grade file of a still (DRX) keeps. The match of these values to the numbers in the window is not measured, except where this section tells it.
+
+### 14.1 Terms
+
+- `Y(v) = 0.2126 R + 0.7152 G + 0.0722 B`: the luma of the wheels (Rec.709 weights).
+- `S(v) = 0.21 R + 0.70 G + 0.09 B`: the luma of Saturation and Hue.
+- `spow(v, p) = sign(v) · |v|^p`. Thus a power works on a value below 0 and on a value above 1. There is no clamp.
+- `k = 187.5 / 1023`: the Offset step. An Offset value of 1 adds 0.183284.
+
+### 14.2 Lift, Gamma, Gain and Offset (pp. 3145, 3157)
+
+For each channel `c`, with Lift `L`, Gamma `g`, Gain `G` and Offset `o` of that channel:
+
+1. `W = G / (1 + L · (G − 1))`.
+2. `p = 1 / (1 + g)` when `g ≥ 0`, and `p = 1 − g` when `g < 0`.
+3. `f = spow(W · (L + (1 − L) · x) + k · o, p)`.
+
+Then the result keeps the luma of `x + k · o`: `r = f − Y(f) + Y(x + k · o)`.
+
+- Thus Lift, Gamma and Gain of one channel change the other two channels. The luma stays.
+- Offset changes only its own channel (p. 3157). Thus Offset changes the luma.
+- Offset is added before the Gamma power. The manual tells that Lift, Gamma and Gain come before Offset (p. 3154). The measurement shows the order above. This spec follows the measurement.
+- These are the results at the default Lum Mix of 100 (p. 3147). Lum Mix 0 turns the luma step off (p. 3147). Other Lum Mix values are not measured.
+- The largest error of these formulas is below 1e-6, over all test levels and all combinations measured.
+
+### 14.3 The master wheels (p. 3145)
+
+The master Lift `Lm`, Gamma `gm` and Gain `Gm` use the same formula on the luma:
+
+1. `Wm = Gm / (1 + Lm · (Gm − 1))`, and `pm` from `gm` as in §14.2.
+2. `Ym = spow(Wm · (Lm + (1 − Lm) · Y(x)) + Y(k · o), pm)`.
+3. `out = r + Ym − Y(x) − Y(k · o)`. R, G and B get the same change.
+
+- Thus master Lift and master Gain read the luma before Offset. Master Gamma comes after Offset.
+- The wheels of the channels come before the master wheels.
+- Lift, Gamma, Gain and Offset of one channel and the three master wheels together match these formulas to 4.3e-7.
+
+### 14.4 The CDL of a grade
+
+Resolve gives a primary grade as a CDL for each channel: `slope = W · (1 − L)`, `offset = W · L + k · o`, `power = p`.
+
+- The CDL does not hold the luma step of §14.2, the master wheels or Hue.
+- A CDL that is set on a node becomes Lift, Gamma, Gain and Saturation of that node.
+- The CDL math is `out = spow(x · slope + offset, power)` for each channel, then Saturation.
+- Saturation of a CDL: `out = S(v) + sat · (v − S(v))`.
+- The ASC CDL clamps before the power. Resolve does not clamp. This spec follows Resolve.
+
+### 14.5 Saturation and Hue (p. 3147)
+
+- Saturation: `out = S(v) + s · (v − S(v))`. The window shows 50 for `s = 1`. 0 removes all color, and 100 doubles it (p. 3147).
+- Hue turns the colors about the gray axis. It keeps `S(v)` and gray.
+  - The angle is `h · 180°`, with `h` the stored value. The window shows 50 for no turn (p. 3147).
+  - The turn works on `a = R − S(v)` and `b = B − S(v)`.
+  - It keeps the form `a² + 0.012262 · a · b + 1.045616 · b²`. Thus `u = a + 0.006131 · b` and `v = 1.022535 · b` turn as a plain rotation.
+  - The match is 1.5e-5. The source of the two constants is not known.
+- Saturation and Hue come after the wheels. Their order does not change the result.
+
+### 14.6 Temp and Tint (p. 3146)
+
+Temp and Tint are a Bradford adaptation, applied to the code values with the Rec.709 primaries.
+
+- The source white is a Planck radiator of 6500 K. Both whites have a luminance of 1.
+- Temp `T` sets the target white to a Planck radiator of `6500 − T` kelvin. The range is −4000 to 4000 (p. 3146).
+- Tint `t` sets the target white to 6500 K with `Duv = −t / 10000`. The range is −100 to 100 (p. 3146).
+- A positive Temp makes the picture warmer. A positive Tint makes it more magenta (p. 3146).
+- The adaptation factors match to 8e-4. The Planck values use the CIE 1931 2° observer.
+- The match of `T` and `t` to the numbers in the window is not measured.
+- The place of Temp and Tint in the order of the node is not measured.
+
+### 14.7 Contrast and Pivot (p. 3146)
+
+- A Contrast below 1 is a straight line through the Pivot. The default Pivot is 0.435.
+- A Contrast above 1 is an S-curve, with "Use S-curve for contrast" on (the default, pp. 156, 3146). Contrast 1.5 keeps 0, and 1 within 5e-4. Its slope at the Pivot is 2.05.
+- Contrast 2 is a step at the Pivot.
+- Outside 0 to 1, the curve goes on as a straight line with the slope of its end.
+- Not measured: the shape of the S-curve, a Pivot other than the default, and the order in the node.
+
+### 14.8 Log wheels (pp. 3152–3157)
+
+- Each Log wheel works on its own channel. There is no luma step.
+- The Shadow wheel `s` adds `s · (0.333 − x)` below about 0.333. The Highlight wheel `h` adds `h · (x − 0.55) / 0.45` above 0.55.
+- The Midtone wheel adds a bump between 0.333 and 0.55.
+- 0.333 and 0.55 are probably the default Low Range and High Range (p. 3156). That is not measured.
+- Not measured: the shapes of the change between the ranges, and the master Log wheels.
+- With a Log value set, values above 0 and up to 1 come out 0.00049 low. This spec does not copy this fault.
+
+### 14.9 Grades in interchange files
+
+- An OpenTimelineIO export of Resolve holds no grade.
+- An EDL export with CDL gives each event two lines: `*ASC_SOP (s s s)(o o o)(p p p)` and `*ASC_SAT s`, with six decimals.
+- An ALE export with CDL has the columns `ASC_SOP` and `ASC_SAT`, with four decimals.
+- The import of these files into Resolve is not measured.
+
+### 14.10 Not measured
+
+- Color Boost, Shadows, Highlights, Midtone Detail and Lum Mix values other than 100 (p. 3147).
+- Pivot, Low Range and High Range, and the numbers that the window shows for Lift, Gamma, Gain and Offset.
+- More than one node, the Parallel Mixer and the Layer Mixer.
+- The script interface has no call to add a node. These need a grade made in the window.
