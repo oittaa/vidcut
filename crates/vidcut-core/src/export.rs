@@ -230,7 +230,8 @@ impl HdrMode {
 pub enum HdrMetadata {
     /// From the sources: the mastering display and content light levels
     /// (PQ output), HDR10+ when any picture has it (made for the frames
-    /// without), and Dolby Vision when every picture has it.
+    /// without), and Dolby Vision when every picture has it. With a grade
+    /// or a LUT: the content light levels of the output frames.
     #[default]
     Auto,
     /// The mastering display and content light levels only.
@@ -383,18 +384,22 @@ pub struct VideoSettings {
     /// HDR metadata (decision D46): `auto` writes the mastering display and
     /// content light levels of the sources into PQ output, keeps HDR10+
     /// when any picture has it (made for the frames without), and Dolby
-    /// Vision when every picture has it; `static`, `hdr10plus`,
-    /// `dolby_vision` and `all` say which; `none` writes none.
+    /// Vision when every picture has it. With a grade or a LUT, it takes
+    /// nothing from the sources: PQ output gets the content light levels
+    /// of its own frames. `static`, `hdr10plus`, `dolby_vision` and `all`
+    /// say which; `none` writes none.
     #[serde(default, skip_serializing_if = "HdrMetadata::is_default")]
     pub hdr_metadata: HdrMetadata,
     /// The mastering display PQ output says it was made on, as x265 writes
     /// it: `G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min)`, chromaticity in 1/50000,
-    /// luminance in 1/10000 cd/m². Unset: from the sources.
+    /// luminance in 1/10000 cd/m². Unset: from the sources, or none with a
+    /// grade or a LUT.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mastering_display: Option<String>,
     /// MaxCLL and MaxFALL in cd/m² (`1000,400`), or `measure`: measured
     /// in every picture shown. Unset: from the sources, measured where they
-    /// say none.
+    /// say none. With a grade or a LUT, unset and `measure` measure the
+    /// output frames before the encode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cll: Option<String>,
     /// Export Alpha: the file holds the alpha of the timeline, and what shows

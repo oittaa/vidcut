@@ -264,11 +264,20 @@ pub fn probed_metadata<'a>(
     }
 }
 
+fn writes_light(v: &VideoSettings) -> bool {
+    v.hdr.transfer() == Some(Hdr::Pq)
+        && v.hdr_metadata != HdrMetadata::None
+        && v.image_bits().is_none()
+}
+
+pub fn needs_output_light(plan: &RenderPlan, v: &VideoSettings) -> bool {
+    plan.changes_light()
+        && writes_light(v)
+        && v.max_cll.as_deref().is_none_or(|s| s == metadata::MEASURE)
+}
+
 pub fn needs_light(v: &VideoSettings, m: &PieceMeta) -> bool {
-    if v.hdr.transfer() != Some(Hdr::Pq)
-        || v.hdr_metadata == HdrMetadata::None
-        || v.image_bits().is_some()
-    {
+    if !writes_light(v) {
         return false;
     }
     match v.max_cll.as_deref() {
@@ -342,8 +351,8 @@ pub fn choose_metadata(
     mut meta: impl FnMut(&VideoPiece) -> PieceMeta,
 ) -> Option<MetadataChoice> {
     let v = settings.video.as_ref()?;
-    if plan.has_lut() {
-        return Some(metadata::choose_through_lut(v));
+    if plan.changes_light() {
+        return Some(metadata::choose_graded(v));
     }
     let sdr = plan.colors.is_none();
     Some(metadata::choose(
@@ -355,6 +364,72 @@ pub fn choose_metadata(
         },
         encode::writes_dolby_vision(v),
     ))
+}
+
+pub fn output_light(
+    plan: &RenderPlan,
+    settings: &ExportSettings,
+    available: &Availability,
+    decoder: Option<&crate::hw::GpuDecoder>,
+    subs: &Subtitles,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(f64),
+) -> Result<Option<vidcut_core::model::LightLevel>> {
+    let Some(v) = settings.video.as_ref() else {
+        return Ok(None);
+    };
+    let Ok(enc) = encode::resolve_video(v, available) else {
+        return Ok(None);
+    };
+    let timeline = (plan.width, plan.height);
+    let sizes = (v.drawn_size(timeline), v.written_size(timeline));
+    let mut frames = frames_of(plan, &enc, enc.pixel, sizes, burned(subs), decoder)?
+        .writing_alpha(v.alpha.then_some(v.alpha_mode));
+    let total = plan.frames;
+    crate::light::made_level(|give| {
+        for j in 0..total {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Invalid(CANCELLED.into()));
+            }
+            let f = frames.next_frame()?.ok_or_else(|| {
+                Error::Invalid("plan has fewer video frames than expected".into())
+            })?;
+            if !give(f) {
+                return Ok(false);
+            }
+            progress((j + 1) as f64 / total as f64);
+        }
+        Ok(true)
+    })
+}
+
+fn frames_of(
+    plan: &RenderPlan,
+    enc: &encode::VideoEncoder,
+    pixel: format::Pixel,
+    (drawn, written): ((u32, u32), (u32, u32)),
+    burn: (Vec<subtitles::Cue>, SubtitleStyle),
+    decoder: Option<&crate::hw::GpuDecoder>,
+) -> Result<VideoFrames> {
+    let frames = VideoFrames::new(&plan.video, plan.fps, drawn.0, drawn.1, pixel, enc.hdr)
+        .written_at(written)
+        .in_frame((plan.width, plan.height))
+        .with_timeline(plan.colors)?
+        .with_output_lut(plan.output_lut.as_deref())?
+        .with_timeline_grade(plan.timeline_grade.as_ref())
+        .with_dynamic(enc.dynamic)
+        .with_burn(burn.0, burn.1, plan.height);
+    Ok(match decoder {
+        Some(d) => frames.decode_on(d.clone()),
+        None => frames,
+    })
+}
+
+fn burned(subs: &Subtitles) -> (Vec<subtitles::Cue>, SubtitleStyle) {
+    subs.burn
+        .as_ref()
+        .map(|t| (t.cues.clone(), t.style.clone()))
+        .unwrap_or_default()
 }
 
 pub fn probed_kinds(
@@ -509,8 +584,22 @@ pub fn run_decoding_on(
     {
         let v = settings.video.clone().expect("checked");
         let probed = probed_metadata(plan.fps, &v, decoder, Some(cancel));
-        let c = choose_metadata(plan, &settings, probed).expect("the settings have video");
+        let mut c = choose_metadata(plan, &settings, probed).expect("the settings have video");
         c.apply(settings.video.as_mut().expect("checked"));
+        if needs_output_light(plan, settings.video.as_ref().expect("checked")) {
+            let clock = Instant::now();
+            let light = output_light(
+                plan,
+                &settings,
+                available,
+                decoder,
+                subtitles,
+                cancel,
+                &mut |share| progress(Progress::measuring(share, clock.elapsed())),
+            )?;
+            c.measured(light);
+            c.apply(settings.video.as_mut().expect("checked"));
+        }
         metadata_chosen = Some(c);
     }
     if chosen.is_some() || metadata_chosen.is_some() {
@@ -706,17 +795,7 @@ fn first_run(
     started: Instant,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Option<String>> {
-    let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr)
-        .written_at(written)
-        .in_frame((plan.width, plan.height))
-        .with_timeline(plan.colors)?
-        .with_output_lut(plan.output_lut.as_deref())?
-        .with_timeline_grade(plan.timeline_grade.as_ref())
-        .with_dynamic(enc.dynamic)
-        .with_burn(burn.0, burn.1, plan.height);
-    if let Some(d) = decoder {
-        frames = frames.decode_on(d.clone());
-    }
+    let mut frames = frames_of(plan, enc, enc.pixel, ((w, h), written), burn, decoder)?;
     let (name, kind) = (enc.name.clone(), enc.kind);
     let mut passing = Worker::spawn(
         worker::AHEAD,
@@ -1187,12 +1266,6 @@ fn encode(
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
     let started = Instant::now();
-    let burn = || {
-        subs.burn
-            .as_ref()
-            .map(|t| (t.cues.clone(), t.style.clone()))
-            .unwrap_or_else(|| (Vec::new(), SubtitleStyle::default()))
-    };
     let fps = ffmpeg::Rational(plan.fps.num() as i32, plan.fps.den() as i32);
     let times = (fps.invert(), Some(fps));
     let mut octx = format::output_as(part, settings.container.muxer())
@@ -1284,7 +1357,7 @@ fn encode(
                         encoder,
                         (drawn, (w, h)),
                         decoder,
-                        burn(),
+                        burned(subs),
                         cancel,
                         started,
                         progress,
@@ -1298,9 +1371,9 @@ fn encode(
                 }
                 _ => (encoder, vaapi),
             };
-            let burned = burn();
+            let burn = burned(subs);
             let id = encoder.id();
-            let (copying, bypass_note) = plan_copies(plan, v, &enc, id, (drawn, (w, h)), &burned.0);
+            let (copying, bypass_note) = plan_copies(plan, v, &enc, id, (drawn, (w, h)), &burn.0);
             let reused = match (&gpu, &vaapi) {
                 (Some((_, frames)), _) => Some(frames.as_ptr()),
                 (None, Some(up)) => Some(up.frames),
@@ -1363,21 +1436,10 @@ fn encode(
                 Some(video::Handoff::Cuda(..)) => gpu_pixel(&enc),
                 _ => enc.pixel,
             };
-            let mut frames =
-                VideoFrames::new(&plan.video, plan.fps, drawn.0, drawn.1, pixel, enc.hdr)
-                    .encode_on(handoff)
-                    .written_at((w, h))
-                    .in_frame(timeline)
-                    .with_timeline(plan.colors)?
-                    .with_output_lut(plan.output_lut.as_deref())?
-                    .with_timeline_grade(plan.timeline_grade.as_ref())
-                    .with_dynamic(enc.dynamic)
-                    .with_light(light)
-                    .with_burn(burned.0, burned.1, plan.height)
-                    .writing_alpha(v.alpha.then_some(v.alpha_mode));
-            if let Some(d) = decoder {
-                frames = frames.decode_on(d.clone());
-            }
+            let frames = frames_of(plan, &enc, pixel, (drawn, (w, h)), burn, decoder)?
+                .encode_on(handoff)
+                .with_light(light)
+                .writing_alpha(v.alpha.then_some(v.alpha_mode));
             let hdr10plus = (enc.dynamic.hdr10plus
                 && matches!(id, ffmpeg::codec::Id::HEVC | ffmpeg::codec::Id::AV1))
             .then(|| (id, std::collections::HashMap::new()));

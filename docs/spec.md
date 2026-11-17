@@ -3681,7 +3681,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Thus an unset `video.passes` is two with a bitrate, where the encoder makes two. Otherwise it is one.
   - A request for two passes from an encoder that makes one is an error.
 - **D46. HDR metadata follows the footage** (§10; deviation X19).
-  - With no grade, an export carries what its sources give (`video.hdr_metadata` `auto`).
+  - With no grade and no LUT, an export carries what its sources give (`video.hdr_metadata` `auto`).
   - PQ output gets the widest mastering display of the pictures shown.
   - It also gets their highest MaxCLL and MaxFALL, measured where a source gives none.
   - SDR pictures count as BT.709 at 203 cd/m². HDR pictures without a display count as BT.2020 at 1000 cd/m².
@@ -3689,6 +3689,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Each frame keeps its HDR10+ and Dolby Vision where its transfer stays:
     - HDR10+ (PQ only) when any picture has it. For the other pictures, it is made from measured light.
     - Dolby Vision when every picture has it, in one profile.
+  - A grade or a LUT changes the light of the picture. Thus the metadata of the sources is wrong for the frames of the export.
+  - With a clip grade, a timeline grade, an input LUT or an output LUT in the export, the export takes nothing from the sources:
+    - A mastering display and light levels that the user gives stay as given.
+    - Without given light levels, PQ output gets the MaxCLL and MaxFALL of its own frames.
+    - A first pass draws the frames as the encode does, and measures them. The encode then writes these values.
+    - The export has no HDR10+ and no Dolby Vision.
+  - The report of the export tells where each value comes from: given, from the sources, or measured.
 - **D47. Drop-frame timecode** (§4.3).
   - At 29.97, 59.94 and 119.88 fps, record timecode can count drop-frame, as Resolve's project settings offer.
   - Resolve Studio 21.2 refuses it at other rates, also at 23.976, 47.952 and 95.904 (`timelineDropFrameTimecode` in a script).
