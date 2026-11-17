@@ -1175,7 +1175,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - A file with no size line gives no LUT.
     - Too few rows give a wrong picture.
     - `LUT_3D_SIZE 1` gives a black picture.
-  - The window of Resolve is not measured.
+  - The window of Resolve Studio 21.2 shows no message for these files.
 - **vidcut:**
   - `media.set` and `project.set` refuse the file and give the reason.
 - **Why:**

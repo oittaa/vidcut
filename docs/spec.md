@@ -5374,6 +5374,28 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - A LUT on the node of a compound clip gives the same picture as a LUT on the node of a plain clip.
 - A generator and a title have no Media Pool clip. A script gets no node graph for them, so it cannot give them a LUT.
 
+**The Input LUT of a clip**, measured in Resolve Studio 21.2:
+
+- The Media Pool menu of a compound clip has no LUT item. vidcut has none either.
+- The viewer of the Media page shows the Input LUT. vidcut does not yet ([todo](todo/luts.md)).
+- A subclip made after its parent gets an Input LUT copies that LUT. A subclip made before keeps none.
+  - After that, each one keeps its own. A change on the parent or on a subclip does not change the others.
+  - vidcut does the same: `create_subclip` copies the media item with its LUT.
+- With the Alpha Mode Invert, the alpha is `1 - A`:
+  - With no LUT, the color is `C * (1 - A)`.
+  - With a LUT, the color is `T(C) * (1 - A)`.
+  - vidcut does the same: Invert is a straight alpha of `1 - A`.
+- In a Smooth Cut, the LUT works on each source picture before the frames between them are made. The alpha of the clip stays.
+  - vidcut does the same: the made frame of a Smooth Cut gets no LUT of its own.
+
+**The Input LUT of the project**, measured in Resolve Studio 21.2 (p. 152):
+
+- A grid of values gives the same picture as the Output LUT of the project.
+- It applies to clips. A gap stays black.
+- A picture with alpha gives `T(clamp(C / A)) * A`, and each layer gets its own `T` before the mix.
+- The Input LUT of a clip replaces it on that clip.
+- vidcut has no Input LUT of the project yet ([todo](todo/luts.md)).
+
 **The Output LUT of the project**, measured in Resolve Studio 21.2:
 
 - It uses the math of a node LUT. A grid of values gives `T(x)`, with a difference of 5.8e-8 at most.
@@ -5382,12 +5404,13 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - In a render with alpha, a picture with alpha gives `T(clamp(C / A)) * A`. The alpha does not change. Where `A` is 0, the result is 0.
 - vidcut does the same (`fs_lut`, [design](design/README.md#lut-files)).
 
-A script gets no error for a broken file:
+A script gets no error for a broken file, and the window shows no message:
 
 - A lower-case `lut_3d_size` line, or no size line, gives no LUT.
 - 100 rows where 125 are due give a changed picture, which the rule above does not fit.
 - 130 rows where 125 are due use the first 125 rows.
 - `LUT_3D_SIZE 1` gives a black picture.
+- vidcut refuses these files ([X131](deviations.md#x131-a-broken-cube-file-is-refused)).
 
 ### The scaling filter
 
