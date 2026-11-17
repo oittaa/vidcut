@@ -1,3 +1,6 @@
+use vidcut_core::grade::{
+    Grading, HALF_KNOTS, LOG_KNOTS, LogCurve, TONE_EPS, TONE_SIZE, tone_filter,
+};
 use vidcut_core::lru::Lru;
 use vidcut_core::model::GlowOutput;
 use vidcut_core::place::{
@@ -41,7 +44,7 @@ const FLAG_SECOND: i32 = 4;
 
 const FLAG_NOISE: i32 = 8;
 
-const SPARE_TEXTURES: usize = 6;
+const SPARE_TEXTURES: usize = 8;
 
 const GRAIN_TILES: usize = 2;
 
@@ -50,6 +53,8 @@ const GRAIN_ONLY: i32 = 1;
 const GRAIN_DETAIL: i32 = 2;
 
 const DETAIL_SLOTS: [u32; 2] = [4, 5];
+
+const GRADE_SLOTS: [u32; 2] = [6, 7];
 
 pub(super) struct Pipes {
     layout: wgpu::BindGroupLayout,
@@ -68,6 +73,9 @@ pub(super) struct Pipes {
     shape: wgpu::RenderPipeline,
     mask_join: wgpu::RenderPipeline,
     masked: wgpu::RenderPipeline,
+    grade: wgpu::RenderPipeline,
+    grade_stats: wgpu::RenderPipeline,
+    grade_coef: wgpu::RenderPipeline,
 }
 
 impl Pipes {
@@ -160,6 +168,9 @@ impl Pipes {
             shape: pipeline(&of(&reading), "fs_shape"),
             mask_join: pipeline(&plain, "fs_mask_join"),
             masked: pipeline(&plain, "fs_masked"),
+            grade: pipeline(&plain, "fs_grade"),
+            grade_stats: pipeline(&plain, "fs_grade_stats"),
+            grade_coef: pipeline(&plain, "fs_grade_coef"),
             layout,
             reading,
         }
@@ -189,8 +200,55 @@ fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
             pipeline: &pipes.sharpen,
             params: sharpen_bytes(sharpening, effect),
         }],
-        Work::Glow(_) | Work::Grain(_) | Work::Clear => Vec::new(),
+        Work::Glow(_) | Work::Grain(_) | Work::Grade(_) | Work::Clear => Vec::new(),
     }
+}
+
+fn grade_bytes(g: &Grading, effect: &Working) -> Vec<u8> {
+    let row = |r: [f64; 3]| [r[0], r[1], r[2], 0.0];
+    let mut floats = vec![g.boost, effect.blend, 0.0, 0.0];
+    for r in g.temp {
+        floats.extend(row(r));
+    }
+    floats.extend(g.lift);
+    floats.extend(g.weight);
+    floats.extend(g.power);
+    floats.extend([g.offset[0], g.offset[1], g.offset[2], g.lum_mix]);
+    let c = &g.contrast;
+    floats.extend([c.pivot, c.slope, c.ends[0], c.ends[1]]);
+    for k in 0..3 {
+        floats.extend((0..HALF_KNOTS).map(|i| c.knots.get(i).map_or(0.0, |n| n[k])));
+    }
+    let count = |l: &Option<LogCurve>| l.as_ref().map_or(0, |l| l.knots.len()) as f64;
+    floats.extend([
+        c.knots.len() as f64,
+        count(&g.logs[0]),
+        count(&g.logs[1]),
+        count(&g.logs[2]),
+    ]);
+    for l in &g.logs {
+        floats.extend(
+            l.as_ref()
+                .map_or([0.0; 4], |l| [l.low, l.high, l.shadow, l.highlight]),
+        );
+    }
+    for l in &g.logs {
+        let knots = l.as_ref().map_or(&[][..], |l| &l.knots[..]);
+        for i in 0..LOG_KNOTS {
+            floats.extend(knots.get(i).map_or([0.0; 4], |[x, y, m]| [*x, *y, *m, 0.0]));
+        }
+    }
+    for r in g.color {
+        floats.extend(row(r));
+    }
+    match &g.tone {
+        Some(t) => {
+            floats.extend([1.0, t.below, t.detail, t.above]);
+            floats.extend(&t.table);
+        }
+        None => floats.extend(std::iter::repeat_n(0.0, 4 + TONE_SIZE)),
+    }
+    float_bytes(&floats)
 }
 
 fn box_passes(width: f64) -> Vec<Pass> {
@@ -953,22 +1011,37 @@ fn draw_step(
     drawing.draw(0..3, 0..1);
 }
 
-fn blurred_between<'a>(
+fn stepped_between<'a>(
     gpu: &Gpu,
-    (ways, border): (&[(Pass, bool)], u32),
-    (first, window): ([f64; 4], [f64; 4]),
+    steps: &[(&wgpu::RenderPipeline, &[u8])],
     (a, b): (&'a Texture, &'a Texture),
     encoder: &mut wgpu::CommandEncoder,
 ) -> &'a Texture {
     let (mut from, mut to) = (a, b);
-    for (j, (pass, down)) in ways.iter().enumerate() {
-        let more = if j == 0 { first } else { [0.0; 4] };
-        let bytes = pass_bytes(pass, *down, border, more, window);
-        let step = (&gpu.blur.blur, &bytes[..]);
-        draw_step(gpu, step, Views::same(&from.view), &to.view, encoder);
+    for step in steps {
+        draw_step(gpu, *step, Views::same(&from.view), &to.view, encoder);
         std::mem::swap(&mut from, &mut to);
     }
     from
+}
+
+fn blurred_between<'a>(
+    gpu: &Gpu,
+    (ways, border): (&[(Pass, bool)], u32),
+    (first, window): ([f64; 4], [f64; 4]),
+    textures: (&'a Texture, &'a Texture),
+    encoder: &mut wgpu::CommandEncoder,
+) -> &'a Texture {
+    let bytes: Vec<Vec<u8>> = ways
+        .iter()
+        .enumerate()
+        .map(|(j, (pass, down))| {
+            let more = if j == 0 { first } else { [0.0; 4] };
+            pass_bytes(pass, *down, border, more, window)
+        })
+        .collect();
+    let steps: Vec<_> = bytes.iter().map(|b| (&gpu.blur.blur, &b[..])).collect();
+    stepped_between(gpu, &steps, textures, encoder)
 }
 
 fn glow_blurred<'a>(
@@ -1063,6 +1136,51 @@ fn glow_into(
         gpu,
         (&gpu.blur.glow, &bytes[..]),
         views,
+        &made.view,
+        encoder,
+    );
+    landed(gpu, own, (made, free), on, encoder);
+}
+
+fn grade_into(
+    gpu: &Gpu,
+    own: &Texture,
+    (scratch, spare): (&[Texture; 2], &mut Spare),
+    (g, effect, on): (&Grading, &Working, Option<&wgpu::TextureView>),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let size = own.texture.size();
+    let mut source = &own.view;
+    if g.tone.is_some() {
+        let filter = tone_filter((size.width, size.height));
+        let (w, h) = filter.copy;
+        spare_ready(gpu, spare, filter.copy, GRADE_SLOTS);
+        let [Some(a), Some(b)] = GRADE_SLOTS.map(|slot| spare.peek(&(w, h, slot))) else {
+            return;
+        };
+        let guide = float_bytes(&[TONE_EPS, f64::from(w), f64::from(h), 0.0]);
+        let stats = (&gpu.blur.grade_stats, &guide[..]);
+        draw_step(gpu, stats, Views::same(&own.view), &a.view, encoder);
+        let width = f64::from(2 * filter.radius + 1);
+        let boxes: Vec<Vec<u8>> = box_ways(width, width, 1)
+            .iter()
+            .map(|(pass, down)| pass_bytes(pass, *down, BORDER_CLAMP, [0.0; 4], [1.0; 4]))
+            .collect();
+        let boxed = boxes.iter().map(|b| (&gpu.blur.boxes, &b[..]));
+        let steps: Vec<_> = boxed
+            .clone()
+            .chain([(&gpu.blur.grade_coef, &guide[..])])
+            .chain(boxed)
+            .collect();
+        source = &stepped_between(gpu, &steps, (a, b), encoder).view;
+    }
+    let [made, free] = scratch;
+    let bytes = grade_bytes(g, effect);
+    let grade = (&gpu.blur.grade, &bytes[..]);
+    draw_step(
+        gpu,
+        grade,
+        Views::with(source, &own.view),
         &made.view,
         encoder,
     );
@@ -1232,6 +1350,11 @@ fn effects_into(
             Work::Grain(grain) => {
                 let room = (scratch, &mut worked.spare, &mut worked.tiles, worked.shrink);
                 grain_into(gpu, own, room, (grain.as_ref(), effect, on), encoder);
+                continue;
+            }
+            Work::Grade(grading) => {
+                let room = (scratch, &mut worked.spare);
+                grade_into(gpu, own, room, (grading.as_ref(), effect, on), encoder);
                 continue;
             }
             Work::Vignette(shading) => {

@@ -380,7 +380,7 @@ What they read:
 - While a scope is on, `Screen::scoping` makes the canvas `Wide`, also for one SDR layer.
   - Why: an 8-bit canvas loses the values above 1 and below 0, and the steps between the 10-bit levels.
   - `fs_screen` only clips an SDR canvas. Thus the picture on the screen stays the same, but for rounding.
-- vidcut has no grade. It is an item in the todo files ([primary-grade](../todo/primary-grade.md)).
+- The scopes show the grade of each clip, because it runs before the mix ([export](export.md#the-grade)).
 - The source viewer has no timeline color space. There, the scopes read SDR values.
 
 How the GPU makes one scope (`scope.wgsl`, `Plots::paint`):

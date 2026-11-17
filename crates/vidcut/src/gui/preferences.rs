@@ -92,6 +92,7 @@ enum Page {
     #[default]
     General,
     Editing,
+    Color,
     Gpu,
     Memory,
     Sound,
@@ -101,9 +102,10 @@ enum Page {
     Fillers,
 }
 
-const PAGES: [(Page, &str, &str); 9] = [
+const PAGES: [(Page, &str, &str); 10] = [
     (Page::General, icon::GEAR_SIX, "General"),
     (Page::Editing, icon::SCISSORS, "Editing"),
+    (Page::Color, icon::PALETTE, "Color"),
     (Page::Gpu, icon::GRAPHICS_CARD, "GPU"),
     (Page::Memory, icon::MEMORY, "Memory"),
     (Page::Sound, icon::SPEAKER_HIGH, "Sound"),
@@ -604,6 +606,7 @@ impl Workspace {
                                     Page::Editing => {
                                         editing(ui, &state, busy, ui_state, &mut patch)
                                     }
+                                    Page::Color => color(ui, &state, busy, &mut patch),
                                     Page::Gpu => {
                                         gpu(ui, &state, busy, display.as_deref(), &mut patch)
                                     }
@@ -893,6 +896,47 @@ fn editing(
             });
             ui.end_row();
         });
+    });
+}
+
+fn color(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>) {
+    let p = &state["preferences"]["color"];
+    page(ui, "Color", "", |ui| {
+        ui.label(RichText::new("Printer Light Step Calibration").strong());
+        egui::Grid::new("preferences-printer")
+            .num_columns(4)
+            .min_col_width(LABEL / 2.0)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("");
+                for name in ["Red", "Green", "Blue"] {
+                    ui.label(dim(name));
+                }
+                ui.end_row();
+                for (key, name) in [
+                    ("printer_density", "Density Increment"),
+                    ("printer_step", "Step Size"),
+                ] {
+                    label(ui, name);
+                    let mut values: [f64; 3] =
+                        std::array::from_fn(|i| p[key][i].as_f64().unwrap_or(1.0));
+                    let mut changed = false;
+                    for v in &mut values {
+                        let r = ui.add_enabled(
+                            !busy,
+                            egui::DragValue::new(v)
+                                .speed(0.0)
+                                .fixed_decimals(2)
+                                .update_while_editing(false),
+                        );
+                        changed |= r.changed();
+                    }
+                    if changed {
+                        *patch = Some(json!({ "color": { key: values } }));
+                    }
+                    ui.end_row();
+                }
+            });
     });
 }
 

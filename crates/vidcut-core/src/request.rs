@@ -2611,7 +2611,7 @@ pub enum Request {
     /// video track above the highest one with clips in those frames, made
     /// when there is none, or V1 when nothing is there), over what is there.
     /// Returns its clip id. `picture.set` places it. It has no speed and takes
-    /// no effects.
+    /// no effects or grade.
     #[serde(rename = "generators.add")]
     GeneratorsAdd {
         /// `solid_color`: one color over the whole picture.
@@ -2759,6 +2759,35 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         tool: Option<PictureTool>,
+    },
+    /// The primary correction of a clip (`c3`, or `V2@15s`): every value of
+    /// the Primaries palette, usual ones too.
+    #[serde(rename = "grade.get")]
+    GradeGet { clip: ClipRef },
+    /// Change the primary correction of clips: footage, stills, image
+    /// sequences, compound clips and generators. It works after their
+    /// effects and before their composite mode and opacity. Each value given
+    /// replaces its own.
+    #[serde(rename = "grade.set")]
+    GradeSet {
+        clips: OneOrMany<ClipRef>,
+        #[serde(flatten)]
+        change: Box<GradeChange>,
+    },
+    /// Put the primary correction of clips back at its usual values.
+    #[serde(rename = "grade.clear")]
+    GradeClear { clips: OneOrMany<ClipRef> },
+    /// Move the Offset of clips by printer points. One point moves each
+    /// channel by its Step Size times its Density Increment (the `color`
+    /// preferences).
+    #[serde(rename = "grade.printer")]
+    GradePrinter {
+        clips: OneOrMany<ClipRef>,
+        /// The channels that move.
+        color: PrinterColor,
+        /// The points: 1 or -1 for a full point, 0.5 for a half point, 0.25
+        /// for a quarter point.
+        points: f64,
     },
     /// Add an effect at its usual values after the effects of clips:
     /// footage, stills, image sequences and compound clips. A generator takes
@@ -3853,9 +3882,9 @@ pub enum Request {
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
     #[serde(rename = "gui.close")]
     GuiClose { panel: GuiPanel },
-    /// Show a page of the window: `cut`, or `effects`, the node editor of
-    /// the composition of the topmost clip at the playhead. Answers what
-    /// `gui.state` does.
+    /// Show a page of the window: `cut`; `effects`, the node editor of
+    /// the composition of the topmost clip at the playhead; or `color`, the
+    /// primary correction of that clip. Answers what `gui.state` does.
     #[serde(rename = "gui.page")]
     GuiPage { page: Page },
     /// Select nodes in the node editor of the effects page, by name. The
@@ -4001,6 +4030,92 @@ pub enum Request {
         #[serde(default)]
         keep_downloads: bool,
     },
+}
+
+/// The values of a primary correction to change. Each value given replaces
+/// its own.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GradeChange {
+    /// Lift of red, green, blue and the master.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lift: Option<[f64; 4]>,
+    /// Gamma of red, green, blue and the master.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gamma: Option<[f64; 4]>,
+    /// Gain of red, green, blue and the master.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain: Option<[f64; 4]>,
+    /// Offset of red, green and blue. 25 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 3]>,
+    /// Contrast about the pivot, from 0 to 2. 1 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contrast: Option<f64>,
+    /// The pivot of the contrast, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot: Option<f64>,
+    /// Saturation, from 0 to 100. 50 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saturation: Option<f64>,
+    /// Hue, from 0 to 100. 50 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hue: Option<f64>,
+    /// How much the luma stays, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lum_mix: Option<f64>,
+    /// Temp, from -4000 to 4000. 0 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temp: Option<f64>,
+    /// Tint, from -100 to 100. 0 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tint: Option<f64>,
+    /// Color Boost, from -100 to 100. 0 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_boost: Option<f64>,
+    /// Shadows, from -100 to 100. 0 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadows: Option<f64>,
+    /// Highlights, from -100 to 100. 0 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlights: Option<f64>,
+    /// Midtone Detail, from -100 to 100. 0 for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midtone_detail: Option<f64>,
+    /// The Log Shadow wheel, red, green and blue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_shadow: Option<[f64; 3]>,
+    /// The Log Midtone wheel, red, green and blue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_midtone: Option<[f64; 3]>,
+    /// The Log Highlight wheel, red, green and blue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_highlight: Option<[f64; 3]>,
+    /// Where the Log Shadow range ends, above 0 and below the high range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub low_range: Option<f64>,
+    /// Where the Log Highlight range starts, below 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub high_range: Option<f64>,
+}
+
+/// The channels of a printer point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PrinterColor {
+    /// Red.
+    Red,
+    /// Green.
+    Green,
+    /// Blue.
+    Blue,
+    /// Green and blue.
+    Cyan,
+    /// Red and blue.
+    Magenta,
+    /// Red and green.
+    Yellow,
+    /// Red, green and blue.
+    Master,
 }
 
 /// What to export and how.
@@ -4751,6 +4866,9 @@ pub enum Page {
     /// The node editor of a clip's composition, its viewer and its
     /// Inspector.
     Effects,
+    /// The primary correction of the clip at the playhead, its viewer and
+    /// the timeline.
+    Color,
 }
 
 /// A window `gui.show` opens.
@@ -6182,6 +6300,7 @@ impl Request {
                     | Self::TitlesList { .. }
                     | Self::GeneratorsList { .. }
                     | Self::PictureGet { .. }
+                    | Self::GradeGet { .. }
                     | Self::MotionList { .. }
                     | Self::SubtitlesExport { .. }
                     | Self::AnalyzeWords { .. }

@@ -49,6 +49,12 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
             .as_ref()
             .map(composition_checked)
             .transpose()?,
+        grade: p
+            .grade
+            .as_ref()
+            .map(super::grade::checked)
+            .transpose()?
+            .flatten(),
         ..p.clone()
     };
     Ok((!out.is_usual()).then_some(out))
@@ -1048,6 +1054,7 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
             None => Picture {
                 effects: old.effects.clone(),
                 composition: old.composition.clone(),
+                grade: old.grade.clone(),
                 ..Picture::default()
             },
         };
@@ -1086,6 +1093,7 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
             opacity_keys: old.opacity_keys,
             effects: old.effects,
             composition: old.composition,
+            grade: old.grade,
             ..Picture::default()
         },
         PictureTool::Crop => {

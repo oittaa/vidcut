@@ -341,6 +341,7 @@ pub fn own_effects(placed: &mut [Placed]) {
     for p in placed.iter_mut().skip(1) {
         p.picture.effects.clear();
         p.picture.composition = None;
+        p.picture.grade = None;
     }
 }
 
@@ -354,6 +355,7 @@ pub fn baked(placed: &mut [Placed]) {
             .rposition(|e| e.on && e.render_cache)
     {
         own.picture.effects.truncate(j + 1);
+        own.picture.grade = None;
     }
 }
 

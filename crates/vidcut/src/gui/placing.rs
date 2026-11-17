@@ -509,12 +509,16 @@ pub(super) fn target<'a>(p: &'a Project, selected: &[String], at: i64) -> Option
 }
 
 pub(super) fn topmost(p: &Project, at: i64) -> Option<String> {
+    topmost_by(p, at, has_picture)
+}
+
+pub(super) fn topmost_by(p: &Project, at: i64, keep: fn(&Clip) -> bool) -> Option<String> {
     p.tracks
         .iter()
         .rev()
         .filter(|t| t.kind == TrackKind::Video && t.video_enabled)
         .flat_map(|t| t.clips.iter())
-        .find(|c| c.enabled && c.start <= at && at < c.end() && has_picture(c))
+        .find(|c| c.enabled && c.start <= at && at < c.end() && keep(c))
         .map(|c| c.id.clone())
 }
 
@@ -551,6 +555,9 @@ impl Workspace {
             let at = c.content_at(frame);
             (id.to_string(), stored.preview(baseline, picture, at))
         };
+        if let Some(graded) = self.graded_wanted() {
+            return vec![graded];
+        }
         match self.grab_wanted() {
             Some((id, picture, baseline)) => vec![preview(&id, &baseline, &picture)],
             None => self

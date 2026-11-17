@@ -1519,6 +1519,230 @@ fn fs_sharpen(in: Out) -> @location(0) vec4<f32> {
     return effect_mixed(px, vec4<f32>(made, was.a), sharpening.more.x, sharpening.more.y);
 }
 
+struct Grading {
+    boost: vec4<f32>,
+    temp: array<vec4<f32>, 3>,
+    lift: vec4<f32>,
+    weight: vec4<f32>,
+    power: vec4<f32>,
+    offset: vec4<f32>,
+    contrast: vec4<f32>,
+    half_x: vec4<f32>,
+    half_y: vec4<f32>,
+    half_m: vec4<f32>,
+    counts: vec4<f32>,
+    logs: array<vec4<f32>, 3>,
+    knots: array<vec4<f32>, 72>,
+    color: array<vec4<f32>, 3>,
+    tone: vec4<f32>,
+    curve: array<vec4<f32>, 256>,
+};
+
+@group(0) @binding(0) var<uniform> grading: Grading;
+
+struct Guide {
+    eps: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> guiding: Guide;
+
+const TONE_SIZE: i32 = 1024;
+
+const TONE_TOP: f32 = 2.0;
+
+const TONE_GAIN: f32 = 4.0;
+
+fn grade_luma(at: vec2<i32>) -> f32 {
+    return dot(effect_taken(textureLoad(blur_source, at, 0), 0.0).rgb, BT709);
+}
+
+@fragment
+fn fs_grade_stats(in: Out) -> @location(0) vec4<f32> {
+    let size = vec2<f32>(textureDimensions(blur_source));
+    let at = clamp(in.position.xy * size / guiding.eps.yz - 0.5, vec2<f32>(0.0), size - 1.0);
+    let i = vec2<i32>(floor(at));
+    let j = min(i + 1, vec2<i32>(size) - 1);
+    let f = at - floor(at);
+    let top = mix(grade_luma(i), grade_luma(vec2<i32>(j.x, i.y)), f.x);
+    let low = mix(grade_luma(vec2<i32>(i.x, j.y)), grade_luma(j), f.x);
+    let y = mix(top, low, f.y);
+    return vec4<f32>(y, y * y, 0.0, 1.0);
+}
+
+@fragment
+fn fs_grade_coef(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let m = textureLoad(blur_source, px, 0);
+    let spread = max(m.y - m.x * m.x, 0.0);
+    let a = spread / (spread + guiding.eps.x);
+    return vec4<f32>(a, m.x - a * m.x, 0.0, 1.0);
+}
+
+fn tone_entry(i: i32) -> f32 {
+    return grading.curve[i / 4][i % 4];
+}
+
+fn tone_curve(v: f32) -> f32 {
+    if v < 0.0 {
+        return v * grading.tone.y;
+    }
+    if v >= TONE_TOP {
+        return tone_entry(TONE_SIZE - 1) + (v - TONE_TOP) * grading.tone.w;
+    }
+    let x = v * f32(TONE_SIZE - 1) / TONE_TOP;
+    let i = min(i32(floor(x)), TONE_SIZE - 2);
+    return mix(tone_entry(i), tone_entry(i + 1), x - f32(i));
+}
+
+fn grade_guide(px: vec2<i32>) -> vec4<f32> {
+    let copy = vec2<f32>(textureDimensions(blur_source));
+    let size = vec2<f32>(textureDimensions(blur_start));
+    let at = clamp((vec2<f32>(px) + 0.5) * copy / size - 0.5, vec2<f32>(0.0), copy - 1.0);
+    let i = vec2<i32>(floor(at));
+    let j = min(i + 1, vec2<i32>(copy) - 1);
+    let f = at - floor(at);
+    let top = mix(textureLoad(blur_source, i, 0), textureLoad(blur_source, vec2<i32>(j.x, i.y), 0), f.x);
+    let low = mix(textureLoad(blur_source, vec2<i32>(i.x, j.y), 0), textureLoad(blur_source, j, 0), f.x);
+    return mix(top, low, f.y);
+}
+
+fn grade_tone(px: vec2<i32>, c: vec3<f32>) -> vec3<f32> {
+    if grading.tone.x < 0.5 {
+        return c;
+    }
+    let m = grade_guide(px);
+    let y = dot(c, BT709);
+    let b = m.x * y + m.y;
+    let g = tone_curve(b);
+    var k = 1.0;
+    if b > 0.0 {
+        k = clamp(g / b, 1.0, TONE_GAIN);
+    }
+    let y1 = k * y + g - k * b;
+    var w = 0.0;
+    if y1 >= 0.0 && y1 <= TONE_TOP {
+        w = y1 * (TONE_TOP - y1);
+    }
+    return k * c + (g - k * b) + grading.tone.z * w * (y - b);
+}
+
+const BOOST_POWER: f32 = -0.6;
+
+const LOG_KNOTS: i32 = 24;
+
+fn grade_spow(v: f32, p: f32) -> f32 {
+    return sign(v) * pow(abs(v), p);
+}
+
+fn grade_hermite(a: vec3<f32>, b: vec3<f32>, x: f32) -> f32 {
+    let h = b.x - a.x;
+    let t = (x - a.x) / h;
+    let t2 = t * t;
+    let t3 = t2 * t;
+    return (2.0 * t3 - 3.0 * t2 + 1.0) * a.y + (t3 - 2.0 * t2 + t) * h * a.z
+        + (-2.0 * t3 + 3.0 * t2) * b.y + (t3 - t2) * h * b.z;
+}
+
+fn grade_half(u: f32) -> f32 {
+    let n = i32(grading.counts.x);
+    var i = 0;
+    loop {
+        if i >= n - 2 || u <= grading.half_x[i + 1] {
+            break;
+        }
+        i++;
+    }
+    let a = vec3<f32>(grading.half_x[i], grading.half_y[i], grading.half_m[i]);
+    let b = vec3<f32>(grading.half_x[i + 1], grading.half_y[i + 1], grading.half_m[i + 1]);
+    return grade_hermite(a, b, u);
+}
+
+fn grade_inside(x: f32) -> f32 {
+    let p = grading.contrast.x;
+    var s = 1.0;
+    if x < p {
+        s = p - p * grade_half((p - x) / p);
+    } else if p < 1.0 {
+        s = p + (1.0 - p) * grade_half((x - p) / (1.0 - p));
+    }
+    return clamp(s, 0.0, 1.0);
+}
+
+fn grade_contrast(x: f32) -> f32 {
+    let c = grading.contrast;
+    if grading.counts.x < 0.5 {
+        return c.x + c.y * (x - c.x);
+    }
+    if x < 0.0 {
+        return grade_inside(0.0) + c.z * x;
+    }
+    if x > 1.0 {
+        return grade_inside(1.0) + c.w * (x - 1.0);
+    }
+    return grade_inside(x);
+}
+
+fn grade_log(c: u32, x: f32) -> f32 {
+    let n = i32(grading.counts[c + 1u]);
+    if n == 0 {
+        return x;
+    }
+    let l = grading.logs[c];
+    if x <= 0.0 {
+        return x + select(l.z / l.x * (l.x - x), l.z * (l.x - x), l.z >= 0.0);
+    }
+    if x > 1.0 {
+        return x + select(l.w * (x - l.y), l.w * (x - l.y) / (1.0 - l.y), l.w >= 0.0);
+    }
+    let base = i32(c) * LOG_KNOTS;
+    var i = 0;
+    loop {
+        if i >= n - 2 || x <= grading.knots[base + i + 1].x {
+            break;
+        }
+        i++;
+    }
+    return grade_hermite(grading.knots[base + i].xyz, grading.knots[base + i + 1].xyz, x);
+}
+
+fn grade_boost(v: vec3<f32>) -> vec3<f32> {
+    let b = grading.boost.x;
+    let d = sqrt((pow(v.r - v.g, 2.0) + pow(v.g - v.b, 2.0) + pow(v.b - v.r, 2.0)) / 2.0);
+    if b == 0.0 || d <= 0.0 {
+        return v;
+    }
+    let y = dot(v, BT709);
+    let k = max(1.0 + b * pow(d, BOOST_POWER), 0.0);
+    return y + k * (v - y);
+}
+
+@fragment
+fn fs_grade(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let was = effect_taken(textureLoad(blur_start, px, 0), 0.0);
+    let x = grade_boost(grade_tone(px, was.rgb));
+    let v = vec3<f32>(dot(grading.temp[0].xyz, x), dot(grading.temp[1].xyz, x), dot(grading.temp[2].xyz, x));
+    let l = grading.lift;
+    let w = grading.weight;
+    let p = grading.power;
+    let o = grading.offset.xyz;
+    let f = vec3<f32>(
+        grade_spow(w.x * (l.x + (1.0 - l.x) * v.x) + o.x, p.x),
+        grade_spow(w.y * (l.y + (1.0 - l.y) * v.y) + o.y, p.y),
+        grade_spow(w.z * (l.z + (1.0 - l.z) * v.z) + o.z, p.z),
+    );
+    let ym = grade_spow(w.w * (l.w + (1.0 - l.w) * dot(v, BT709)) + dot(o, BT709), p.w);
+    let ff = vec3<f32>(grade_contrast(f.x), grade_contrast(f.y), grade_contrast(f.z));
+    let mixed = ff + grading.offset.w * (grade_contrast(ym) - dot(ff, BT709));
+    let logged = vec3<f32>(grade_log(0u, mixed.x), grade_log(1u, mixed.y), grade_log(2u, mixed.z));
+    let made = vec3<f32>(
+        dot(grading.color[0].xyz, logged),
+        dot(grading.color[1].xyz, logged),
+        dot(grading.color[2].xyz, logged),
+    );
+    return effect_mixed(px, vec4<f32>(made, was.a), grading.boost.y, 0.0);
+}
+
 struct Mosaic {
     grid: vec4<f32>,
     way: vec4<i32>,

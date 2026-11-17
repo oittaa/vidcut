@@ -2746,6 +2746,52 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
 `comp.set` and `comp.key` take a `frame` of the composition. Without it, they take the frame at the playhead. `comp.paste` takes `after`, `place` or `replace`.
 `comp.set` with `connect` connects the Center of a mask to a pattern. `motion.track` tracks a pattern of a Tracker, and `motion.find` with `tracker` gives it patterns.
 
+### 8.20 Primaries palette (pp. 118, 3141–3159)
+
+- **Modes** (p. 3142):
+  - The Primaries palette of the Color page has three modes: Wheels, Bars and Log.
+  - Wheels and Bars show the same controls: Lift, Gamma and Gain of Y, R, G and B, and Offset of R, G and B.
+  - Log shows Shadow, Midtone, Highlight and Offset wheels. It also shows Low Range and High Range (p. 3156).
+  - Each clip has one or more nodes, and each node holds corrections (p. 3385).
+  - vidcut: each clip has one primary correction. Nodes come later ([todo](todo/color-page.md)).
+- **Clips**, measured in Resolve Studio 21.2:
+  - Generators and Text titles take no grade. They are not in the clip strip of the Color page.
+  - Text+ titles and compound clips take a grade.
+  - With a generator above a clip at the playhead, the Color page shows the clip below.
+  - vidcut: `grade.set` refuses a title or a generator. The Color page takes the topmost clip at the playhead that takes a grade.
+- **Values** (pp. 3146–3147). The defaults are measured in Resolve Studio 21.2:
+  - Lift and Gamma are 0. Gain is 1. Offset is 25.
+  - Contrast is 1, and Pivot is 0.435.
+  - Temp goes from −4000 to 4000. Tint goes from −100 to 100. Each is 0.
+  - Midtone Detail, Color Boost, Shadows and Highlights go from −100 to 100. Each is 0.
+  - Saturation goes from 0 to 100 and is 50. Hue is 50. Lum Mix is 100.
+  - The Log wheels are 0. Low Range is 0.333, and High Range is 0.550.
+  - A double-click on the name of a value resets it (p. 3146).
+- **How the values work**, measured in Resolve Studio 21.2 with float renders:
+  - A change of 1 in the Offset number moves its channel by 7.5/1023 in code values.
+  - In the render, Gain is 0.001 at least, and Lift is 0.4995 at most.
+  - Lift also stops where the slope of its channel reaches 200. Thus no Lift and Gain give an infinite slope.
+  - At a Lum Mix of 100, a change to R, G or B moves the other two channels. Thus the luma stays (p. 3147).
+  - Offset and printer points change only their own channel. They do not use Lum Mix (p. 3157).
+  - Shadows, Highlights and Midtone Detail use a smoothed luma. A guided filter makes it, so edges stay.
+  - The smoothed luma counts the clear parts of a picture as black.
+  - On a picture with alpha, the grade changes the colors before the alpha multiplies them. The alpha does not change.
+  - Contrast continues on straight lines below 0 and above 1. This is measured from −4 to 8.
+  - Without color management, the grade is the same in Rec.709, Rec.2020, DaVinci Wide Gamut, Rec.2100 ST2084 and Rec.2100 HLG timelines.
+  - The grade of a clip comes after its effects and before its speed change, composite mode and opacity ([§13](#13-order-of-operations-pp-287296-3407)).
+  - vidcut matches the renders, apart from a fault of Resolve that [gotchas](gotchas.md#resolves-renders) names. [design](design/export.md#the-grade) gives the math and the order of the parts.
+- **Printer points** (pp. 3157–3159):
+  - In Bars mode, each Offset bar has a Plus button at the top and a Minus button at the bottom.
+  - Measured: one point moves its channel by the Step Size times the Density Increment of that channel. With the defaults, this is 1 on the Offset number.
+  - The Color panel of the User Preferences has Printer Light Step Calibration (p. 118). It has Lab Aim Density, Step Size and Density Increment for R, G and B.
+  - Measured defaults: Lab Aim Density is 25, Step Size is 1, and Density Increment is 1. Lab Aim Density did not change a printer point.
+  - Printer Light Hotkeys in the Color menu turn on the printer point keys of the numeric keypad (p. 3158).
+  - Measured: Cyan moves G and B, Magenta moves R and B, Yellow moves R and G, and Master moves all three.
+  - vidcut: the Plus and Minus buttons, and the Color page of the preferences with Step Size and Density Increment.
+  - vidcut: the hotkeys come later ([todo](todo/color-page.md)).
+
+Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`. `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.

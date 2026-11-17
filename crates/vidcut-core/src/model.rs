@@ -3750,6 +3750,93 @@ pub struct Picture {
     /// transform and its effects. Left out, the picture comes as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition: Option<Composition>,
+    /// The primary correction of its colors, after its effects and before
+    /// its composite mode and its opacity. Left out at its usual values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade: Option<Grade>,
+}
+
+/// A primary correction: the numbers of the Primaries palette. Each value
+/// keeps its own channel order, `[red, green, blue]`, with the master
+/// last where it has one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Grade {
+    /// Lift of red, green, blue and the master. Usual: 0.
+    pub lift: [f64; 4],
+    /// Gamma of red, green, blue and the master. Usual: 0.
+    pub gamma: [f64; 4],
+    /// Gain of red, green, blue and the master. Usual: 1.
+    pub gain: [f64; 4],
+    /// Offset of red, green and blue. Usual: 25.
+    pub offset: [f64; 3],
+    /// Contrast about the pivot, from 0 to 2. Usual: 1.
+    pub contrast: f64,
+    /// The pivot of the contrast, from 0 to 1. Usual: 0.435.
+    pub pivot: f64,
+    /// Saturation, from 0 (gray) to 100 (double). Usual: 50.
+    pub saturation: f64,
+    /// Hue, from 0 to 100. 0 and 100 turn the colors half around. Usual: 50.
+    pub hue: f64,
+    /// How much the luma stays, from 0 to 100. Usual: 100.
+    pub lum_mix: f64,
+    /// Warmer above 0 and cooler below, from -4000 to 4000. Usual: 0.
+    pub temp: f64,
+    /// More magenta above 0 and more green below, from -100 to 100. Usual: 0.
+    pub tint: f64,
+    /// Saturation that changes pale colors more, from -100 to 100. Usual: 0.
+    pub color_boost: f64,
+    /// Lighter or darker shadow areas, from -100 to 100. Usual: 0.
+    pub shadows: f64,
+    /// Lighter or darker highlight areas, from -100 to 100. Usual: 0.
+    pub highlights: f64,
+    /// More or less contrast of the midtone detail, from -100 to 100.
+    /// Usual: 0.
+    pub midtone_detail: f64,
+    /// The Shadow wheel of the Log mode, red, green and blue. Usual: 0.
+    pub log_shadow: [f64; 3],
+    /// The Midtone wheel of the Log mode, red, green and blue. Usual: 0.
+    pub log_midtone: [f64; 3],
+    /// The Highlight wheel of the Log mode, red, green and blue. Usual: 0.
+    pub log_highlight: [f64; 3],
+    /// Where the Shadow range of the Log mode ends, above 0 and below
+    /// `high_range`. Usual: 0.333.
+    pub low_range: f64,
+    /// Where the Highlight range of the Log mode starts, below 1. Usual:
+    /// 0.55.
+    pub high_range: f64,
+}
+
+impl Default for Grade {
+    fn default() -> Self {
+        Self {
+            lift: [0.0; 4],
+            gamma: [0.0; 4],
+            gain: [1.0; 4],
+            offset: [25.0; 3],
+            contrast: 1.0,
+            pivot: 0.435,
+            saturation: 50.0,
+            hue: 50.0,
+            lum_mix: 100.0,
+            temp: 0.0,
+            tint: 0.0,
+            color_boost: 0.0,
+            shadows: 0.0,
+            highlights: 0.0,
+            midtone_detail: 0.0,
+            log_shadow: [0.0; 3],
+            log_midtone: [0.0; 3],
+            log_highlight: [0.0; 3],
+            low_range: 0.333,
+            high_range: 0.55,
+        }
+    }
+}
+
+impl Grade {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// An effect on a clip's picture. It works on the picture as its transform

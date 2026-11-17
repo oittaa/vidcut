@@ -343,6 +343,7 @@ pub enum Work {
     Grain(Box<Graining>),
     Vignette(Shading),
     Sharpen(Sharpening),
+    Grade(Box<crate::grade::Grading>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1124,12 +1125,20 @@ impl Placing {
             canvas: [frame.0, frame.1],
             back: own.back,
         };
-        let effects = p
+        let mut effects: Vec<Working> = p
             .picture
             .effects
             .iter()
             .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
             .collect();
+        if let Some(g) = p.picture.grade.as_ref().filter(|g| !g.is_usual()) {
+            effects.push(Working {
+                work: Work::Grade(Box::new(crate::grade::Grading::of(g))),
+                blend: 1.0,
+                use_alpha: false,
+                masks: Vec::new(),
+            });
+        }
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&own.back, c));
         if own.soft == Soft::default() && no_bars(quad, frame) {

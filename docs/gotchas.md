@@ -1,6 +1,6 @@
 # Gotchas
 
-This file lists the FFmpeg, driver, OS and library behavior that vidcut works around. Each item gives the quirk, what it breaks, and the code that handles it. [design/](design/README.md) tells how vidcut is built.
+This file lists the FFmpeg, driver, OS, library and Resolve behavior that vidcut works around. Each item gives the quirk, what it breaks, and the code that handles it. [design/](design/README.md) tells how vidcut is built.
 
 ## wgpu and egui
 
@@ -604,6 +604,16 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - When the optical flow does not find the move, the frame is a cross dissolve at the same point. A jump of 150 pixels gave this.
   - Speed Warp on gave one sharp bar for the 30-pixel jump. It smeared the 150-pixel jump.
   - Measured with renders of 24-frame Smooth Cuts between pictures with a bar at known places.
+
+## Resolve's renders
+
+These facts come from float renders in Resolve Studio 21.2, without color management.
+
+- **Resolve reads some curve tables of the Color page half a step off.**
+  - Shadows, Highlights and Midtone Detail share one table. In 0..1, it moves a value by up to 1/1023 where the curve makes no change.
+  - With Shadows 100, the ratio of the curve to the smoothed luma enlarges this move near black. Dark colored pixels then move by up to 0.061.
+  - The table of the Log wheels is read 1/2048 off. This moves each channel by about 0.0005, also a channel with no Log value.
+  - vidcut does not copy this fault. `Tone` reads its table with no shift. `LogCurve` gives the curve with no table.
 
 ## transcribe.cpp and its models
 

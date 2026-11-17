@@ -26,6 +26,7 @@ pub struct Preferences {
     pub services: Services,
     pub viewer: ViewerPrefs,
     pub editing: Editing,
+    pub color: ColorPrefs,
     /// The keys that differ from the defaults, by action. `keys.list` names
     /// the actions. An action that is not here has its default keys, and an
     /// empty list leaves an action with no key. `keys.set` and `keys.reset`
@@ -50,6 +51,35 @@ impl Default for Editing {
             still_duration: TimeSpec::Seconds(5.0),
         }
     }
+}
+
+/// The printer points of the Color page on this computer. One point moves
+/// the Offset of a channel by its Step Size times its Density Increment.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct ColorPrefs {
+    /// Density Increment of red, green and blue. Default 1.
+    pub printer_density: [f64; 3],
+    /// Step Size of red, green and blue. Default 1.
+    pub printer_step: [f64; 3],
+}
+
+impl Default for ColorPrefs {
+    fn default() -> Self {
+        Self {
+            printer_density: [1.0; 3],
+            printer_step: [1.0; 3],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ColorPrefsPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub printer_density: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub printer_step: Option<[f64; 3]>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -854,6 +884,8 @@ pub struct PreferencesPatch {
     pub viewer: Option<ViewerPrefsPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editing: Option<EditingPatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<ColorPrefsPatch>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1109,12 +1141,25 @@ impl Preferences {
         {
             p.editing.still_duration = d.clone();
         }
+        if let Some(x) = &patch.color {
+            let c = &mut p.color;
+            c.printer_density = x.printer_density.unwrap_or(c.printer_density);
+            c.printer_step = x.printer_step.unwrap_or(c.printer_step);
+        }
         p.check()?;
         Ok(p)
     }
 
     pub fn check(&self) -> Result<()> {
         crate::shortcuts::Bindings::of(&self.keys)?;
+        for (key, values) in [
+            ("color.printer_density", self.color.printer_density),
+            ("color.printer_step", self.color.printer_step),
+        ] {
+            if !values.iter().all(|v| v.is_finite()) {
+                return Err(Error::usage(format!("{key} must be three numbers")));
+            }
+        }
         match self.editing.still_duration {
             TimeSpec::Frames(n) if n > 0 => {}
             TimeSpec::Seconds(s) if s > 0.0 && s <= STILL_LIMIT_SECS => {}

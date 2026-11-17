@@ -87,9 +87,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Each clip goes into it from the tags of the clip. Where the tags are wrong, it uses the Input Color Space of the media ([D35](spec.md#12-decisions-on-gaps-and-contradictions)).
   - Every mix is a straight line in the code values of the timeline.
   - Each export converts the mixed frame to the colors that it selects ([D44](spec.md#12-decisions-on-gaps-and-contradictions)). The viewer uses the same math.
-  - There is no grading.
 - **Why:**
-  - vidcut cuts. Grading belongs in other tools.
   - With Auto, mixed phone, camera and screen footage comes out correctly without color settings. The HDR video of a phone stays HDR.
   - The working space of Resolve's color management is not known. A straight line in the code values is what Resolve does without color management.
 
@@ -127,7 +125,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - It also carries Dolby Vision and HDR10+ from the grade (pp. 151, 259–260).
   - Resolve Studio measures MaxCLL and MaxFALL (p. 282).
 - **vidcut:**
-  - There is no grade. Thus an export carries what its sources tell, or measures it from their frames ([D46](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - An export carries what its sources tell, or measures it from their frames ([D46](spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - Phone, camera and graded HDR footage looks on TVs as its sources do.
   - This needs no setup by a colorist.

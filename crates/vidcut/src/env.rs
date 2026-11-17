@@ -618,6 +618,12 @@ impl Env for AvEnv {
             .still_duration
     }
 
+    fn printer_lights(&self) -> vidcut_core::preferences::ColorPrefs {
+        crate::preferences::load()
+            .map(|p| p.color)
+            .unwrap_or_default()
+    }
+
     fn local_stamp(&self) -> String {
         crate::when::local_time(crate::when::now_ms())
             .map_or_else(String::new, |t| t.full().replacen(' ', "-", 1))

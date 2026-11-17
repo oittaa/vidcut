@@ -418,6 +418,14 @@ pub fn describe_at(
             Some(_) => format!("Reset the transform of {}", d.clips("clips")),
             None => format!("Reset the picture of {}", d.clips("clips")),
         },
+        "grade.set" => format!("Change the grade of {}", d.clips("clips")),
+        "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
+        "grade.printer" => format!(
+            "Printer points {} {:+} on {}",
+            d.text("color"),
+            d.params["points"].as_f64().unwrap_or(0.0),
+            d.clips("clips")
+        ),
         "subtitles.import" if d.params["media"].is_string() => {
             format!("Insert subtitles {}", d.media("media"))
         }

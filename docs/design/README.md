@@ -68,7 +68,7 @@ flowchart TD
   between["A frame between two pictures<br>VideoFrames::retimed_frame"]
   earlier["An earlier source frame<br>VideoFrames::reversed_frame"]
   place["The picture is placed<br>Screen::draw"]
-  fx["The effects work on it<br>fs_blur, fs_mosaic, fs_vignette, fs_sharpen"]
+  fx["The effects and the grade work on it<br>fs_blur, fs_mosaic, fs_vignette, fs_sharpen, fs_grade"]
   mix["The layers are on the canvas<br>Screen::draw"]
   looked["The output LUT<br>fs_lut"]
   show["The viewer shows this frame"]
@@ -125,6 +125,7 @@ A clip skips each step that it does not use. The steps run in this order:
   - A transition's two sides, and each clip placed over another, are layers of the same draw.
   - Titles and burned subtitles are draws in that same pass (`fs_title`, [export](export.md#subtitles)).
   - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, `fs_vignette`, `fs_sharpen`, [export](export.md#effects)).
+  - The grade of a clip works on that picture after its effects (`fs_grade`, [export](export.md#the-grade)).
 - `fs_lut` runs the output LUT of the project on the whole canvas, after the titles and subtitles.
 - The viewer shows the canvas. A wide canvas goes through `fs_screen` first ([playback](playback.md#the-viewer-thread)).
 - The scopes read the canvas after `fs_lut` and before `fs_screen` ([gpu](gpu.md#the-scopes)).
