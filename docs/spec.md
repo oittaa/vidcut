@@ -5534,17 +5534,52 @@ These three controls use the pixels around a pixel. On a frame of one color, the
   - 36 Divide, 38 Linear Dodge, 40 Linear Burn, 42 Linear Light, 44 Vivid Light, 46 Pin Light.
   - 48 Hard Mix, 50 Lighter Color, 52 Darker Color.
   - An odd number, or a number above 52, gives Normal.
-- Not measured: a Layer Mixer with more than two inputs, the Key Output Gain (p. 3415), and the Key Mixer.
+- Not measured: a Layer Mixer with more than two inputs, and the Key Output Gain of its inputs (p. 3415).
 - Not measured: the caps of D75 in a float render of the timeline.
 
-### 14.11 Grades in interchange files
+### 14.11 Keys and the Key Mixer (pp. 3431–3438)
+
+A key is a value for each pixel. It sets how much of the change of a node the picture gets. The Key Mixer combines the keys of other nodes (p. 3431).
+
+- These functions describe the keys:
+  - `smax(a, b) = max(a, b) + 0.5 · max(0, 0.5 − |a − b|)²`. This is a smooth maximum with a width of 0.5.
+  - `L(x) = (8x − 1) / 7`. Thus `L(1/8) = 0` and `L(1) = 1`.
+  - `U(a, b) = L(smax(a, b))`.
+  - `Q(x) = U(0, x)`. Below 0.5, `Q(x) = 4x(1 + x) / 7`. From 0.5, `Q(x) = (8x − 1) / 7`. Thus `Q(0) = 0`, `Q(0.5) = 3/7` and `Q(1) = 1`.
+- A window key in its own node is `v`.
+- The key output of a corrector gives `v` with its default values.
+- The key input of a corrector with no window gives `clamp(Q(k))`, with `k` the key at the input.
+  - Thus a key from a key output straight into a key input changes its shape.
+- The Key Mixer makes its output from the keys `kᵢ` at its inputs:
+  1. Each input gives `xᵢ = gᵢ · kᵢ + oᵢ`, with its Gain `gᵢ` and its Offset `oᵢ`.
+  2. With the Invert of the input on, the input gives `1 − xᵢ` in place of `xᵢ`.
+  3. The value starts as `acc = 0`. Each input in Mask mode then gives `acc = U(acc, xᵢ)`, in the order of the inputs.
+  4. Then each input in Matte mode gives `acc = 1 − U(1 − acc, 1 − xᵢ)`.
+  5. The output is `og · acc + oo`, with the output Gain `og` and the output Offset `oo`.
+  6. With the output Invert on, the output is 1 minus this value.
+- No step clamps the value. The key input of the next node clamps it.
+- Mask mode gives a smooth union of the keys, not a sum. The manual tells that the keys add (p. 3437).
+- An input in Matte mode with no input in Mask mode gives 0.
+- In the window, the left button of an input is Invert and the right button is Matte.
+- The Key Output Gain `kg` and the Key Output Offset `ko` of a corrector act last, with no curve: `clamp(kg · e + ko)`. Here `e` is the key of the node (p. 3436).
+- This model matches 43 renders to 8.2e-7. All of them have two inputs.
+- The grade file keeps the Invert and the Matte of the inputs as one byte for each input, with 2 for on. It keeps the Gain and the Offset of the inputs as one float for each input.
+- Not measured: more than two inputs, and the Key Input Gain and Offset of a corrector.
+- Not measured: a key input in a node with a window or a qualifier, in Matte or in Mask mode (p. 3436).
+
+### 14.12 Grades in interchange files
 
 - An OpenTimelineIO export of Resolve holds no grade.
 - An EDL export with CDL gives each event two lines: `*ASC_SOP (s s s)(o o o)(p p p)` and `*ASC_SAT s`, with six decimals.
 - An ALE export with CDL has the columns `ASC_SOP` and `ASC_SAT`, with four decimals.
-- The import of these files into Resolve is not measured.
+- A timeline import of an EDL or of an OpenTimelineIO file applies no grade.
+  - The `*ASC_SOP` and `*ASC_SAT` lines of an EDL have no effect.
+  - The `cdl` metadata of an OpenTimelineIO clip has no effect. The OpenTimelineIO adapter for CMX EDL writes this metadata.
+- A primary grade comes in only from a Final Cut Pro X XML (p. 469).
+- ColorTrace from CDL applies the CDL lines of an EDL to the clips of a timeline (pp. 3472–3474).
+- Not measured: the result of ColorTrace from CDL, and the import of an ALE with CDL.
 
-### 14.12 Not measured
+### 14.13 Not measured
 
 - Color Boost works on each pixel by itself, and it is not linear (p. 3147). Its formula is not found.
 - The S-curve of Contrast (§14.7).

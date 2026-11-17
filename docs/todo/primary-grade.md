@@ -7,7 +7,7 @@ The Primaries palette of the Color page is the model. [Spec §14](../spec.md#14-
 **Why:**
 
 - Auto Color is the only color control of vidcut ([auto-color.md](auto-color.md)). A quick edit has no manual correction.
-- Resolve exports no grade in an OpenTimelineIO file (spec §14.11). Thus a grade does not go between vidcut and Resolve in that file.
+- Resolve exports no grade in an OpenTimelineIO file (spec §14.12). Thus a grade does not go between vidcut and Resolve in that file.
 
 **In the code:**
 
@@ -29,13 +29,13 @@ The Primaries palette of the Color page is the model. [Spec §14](../spec.md#14-
 - The values take keyframes once effect keyframes exist ([effects-library.md](effects-library.md)).
 - The CLI, IPC and MCP perform the same action as the GUI.
 
-**To measure:** the items of spec §14.12.
+**To measure:** the items of spec §14.13.
 
 - The formula of the Contrast S-curve, and its place before or after Saturation and Hue. The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/cases/`.
 - The formula of Color Boost. The data is in the same folder.
 - The curves of Shadows and Highlights, and the filter of the three controls of spec §14.8. The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/flat_cases/`.
 - The shapes of the Log wheels between the ranges.
-- Whether Resolve reads a CDL from an OpenTimelineIO, EDL or ALE import.
+- The result of ColorTrace from CDL, and the import of an ALE with CDL (spec §14.12).
 
 **Not this item:**
 
