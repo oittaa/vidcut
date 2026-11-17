@@ -653,20 +653,12 @@ fn from_ycc(c: vec3<f32>) -> vec3<f32> {
     return c.x + c.y * vec3<f32>(-0.001336, -0.343456, 1.770592) + c.z * vec3<f32>(1.402406, -0.714457, 0.002013);
 }
 
-fn dodged(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
+fn dodge(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
     return select(b / (1.0 - a), vec3<f32>(1.0), a >= vec3<f32>(1.0));
 }
 
-fn dodge(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
-    return min(dodged(b, a), vec3<f32>(1.0));
-}
-
-fn burned(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
-    return select(1.0 - (1.0 - b) / a, vec3<f32>(0.0), a <= vec3<f32>(0.0));
-}
-
 fn burn(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
-    return max(burned(b, a), vec3<f32>(0.0));
+    return select(1.0 - (1.0 - b) / a, vec3<f32>(0.0), a <= vec3<f32>(0.0));
 }
 
 fn hard(by: vec3<f32>, other: vec3<f32>) -> vec3<f32> {
@@ -679,8 +671,7 @@ fn soft(a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
 }
 
 fn divide(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
-    let none = select(vec3<f32>(0.0), vec3<f32>(1.0), b > vec3<f32>(0.0));
-    return select(min(b / a, vec3<f32>(1.0)), none, a <= vec3<f32>(0.0));
+    return b / (a + 1e-6);
 }
 
 fn mixed(mode: u32, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
@@ -712,13 +703,13 @@ fn mixed(mode: u32, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
         case 16u: { return from_ycc(vec3<f32>(ycc(b).x, ycc(a).yz)); }
         case 17u: { return from_ycc(vec3<f32>(ycc(a).x, ycc(b).yz)); }
         case 18u: { return divide(b, a); }
-        case 20u: { return a + b - 1.0; }
+        case 20u: { return max(a + b - 1.0, vec3<f32>(0.0)); }
         case 21u: { return b + 2.0 * a - 1.0; }
         case 22u: { return select(dodge(b, 2.0 * a - 1.0), burn(b, 2.0 * a), a <= vec3<f32>(0.5)); }
-        case 23u: { return select(max(b, 2.0 * a - 1.0), min(b, 2.0 * a), a <= vec3<f32>(0.5)); }
+        case 23u: { return select(max(b, 2.0 * a - 1.0), min(b, 2.0 * a), a < vec3<f32>(0.5)); }
         case 24u: { return select(vec3<f32>(0.0), vec3<f32>(1.0), a + b >= vec3<f32>(1.0)); }
-        case 25u: { return select(b, a, dot(a, vec3<f32>(1.0)) > dot(b, vec3<f32>(1.0))); }
-        case 26u: { return select(b, a, dot(a, vec3<f32>(1.0)) < dot(b, vec3<f32>(1.0))); }
+        case 25u: { return select(b, a, dot(a, vec3<f32>(1.0)) >= dot(b, vec3<f32>(1.0))); }
+        case 26u: { return select(b, a, dot(a, vec3<f32>(1.0)) <= dot(b, vec3<f32>(1.0))); }
         default: { return a; }
     }
 }
@@ -1445,8 +1436,6 @@ const GRAY_HUE = vec3<f32>(-0.2625036, 0.14574469, -0.67075189);
 fn vignette_mixed(a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
     let mode = u32(vignetting.way.z);
     switch mode {
-        case 11u: { return dodged(b, a); }
-        case 12u: { return burned(b, a); }
         case 14u: {
             if spread(a) > 0.0 {
                 return mixed(mode, a, b);
@@ -1459,10 +1448,6 @@ fn vignette_mixed(a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
         case 18u: {
             return b / (max(a, vec3<f32>(0.0)) + 1e-6);
         }
-        case 20u: { return max(a + b - 1.0, vec3<f32>(0.0)); }
-        case 22u: { return select(dodged(b, 2.0 * a - 1.0), burned(b, 2.0 * a), a <= vec3<f32>(0.5)); }
-        case 25u: { return select(b, a, dot(a, vec3<f32>(1.0)) >= dot(b, vec3<f32>(1.0))); }
-        case 26u: { return select(b, a, dot(a, vec3<f32>(1.0)) <= dot(b, vec3<f32>(1.0))); }
         default: { return mixed(mode, a, b); }
     }
 }

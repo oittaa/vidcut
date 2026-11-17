@@ -439,7 +439,7 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - Vivid Light and Pin Light switch on the top layer. The manual names the bottom layer.
   - Hard Mix is a threshold of a + b at 1. The manual says that it adds the layers.
   - Color, Luminosity, Hue and Saturation are not HSL mixes. Spec D75 gives the measured sums.
-  - The renders had values from 0 to 1. Thus the caps of Color Dodge, Color Burn and Divide are not measured for values above 1.
+  - A 16-bit render clips the results to 0..1. Thus Color Dodge and Divide seem to stop at 1 there, and Color Burn at 0. A float render shows no cap.
 - **Resolve's Crop Softness is `cropSoftness` (Double) in Cropping,** from −100 to 100.
   - Its keyframes have the form of the keyframes of the crop sides.
   - The renders that fix the fade are in [spec D75](spec.md#12-decisions-on-gaps-and-contradictions).

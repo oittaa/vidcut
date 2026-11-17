@@ -2186,10 +2186,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The value of a pixel is the linear mix of the four cells around it.
   - The Center can put the shape outside the frame. Five Centers outside the frame follow the same rule.
   - The rule works on the premultiplied colors, and the alpha does not change. A clear part of the picture thus adds the Color to the lower track.
-  - Composite Type differs from the Composite section in these ways:
-    - Color Dodge, Color Burn, Divide and Vivid Light do not stop at 0 or 1 before the mix.
-    - Divide is b / (a + 0.000001).
-    - Linear Burn stops at 0.
+  - Composite Type uses the formulas of the Composite section, as the float renders of D75 give them.
+    - Thus Color Dodge, Color Burn, Divide and Vivid Light do not stop at 0 or 1 before the mix.
     - Lighter Color and Darker Color take the Color on a tie.
     - Hue with a black or a white Color takes the hue of red. The grays 0.2, 0.4, 0.6 and 0.8 give one other fixed hue.
 - **Vignette in vidcut:**
@@ -4533,8 +4531,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Across the fade, the coverage follows a smoothstep. It is full over the first eighth of the fade.
     - At a corner, the distances outside the two sides join in a smooth maximum. Thus the corners are round.
     - Keyframes of Softness and Opacity without handles change in a straight line. After the last keyframe, the value stays.
-  - **Composite modes** (measured in Resolve Studio 21.1.1, with 16-bit renders):
-    - A mode works on the R'G'B' code values of the clip (a) and of what is below it (b), from 0 to 1.
+  - **Composite modes** (measured in Resolve Studio 21.1.1 with 16-bit renders, and in 21.2 with 32-bit float renders):
+    - A mode works on the R'G'B' code values of the clip (a) and of what is below it (b).
     - Where there are no tracks below, b is black.
     - The mix of the mode is M. The result is b + (M − b) × the opacity.
     - vidcut also fades M by the coverage of the edges and the soft edges, as it fades a clip at Normal.
@@ -4545,15 +4543,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Darken and Lighten: the smaller and the larger of a and b.
       - Overlay: H(b, a). Hardlight: H(a, b). H(x, y) is 2xy for x ≤ 0.5. Above 0.5, it is 1 − 2(1 − x)(1 − y).
       - Softlight: the soft light of the W3C, with a as the source.
-      - Color Dodge: b / (1 − a), at most 1. For a ≥ 1, it is 1.
-      - Color Burn: 1 − (1 − b) / a, at least 0. For a ≤ 0, it is 0.
-      - Divide: b / a, at most 1. For a ≤ 0, it is 1 when b > 0, else 0.
-      - Linear Burn: a + b − 1. Linear Light: b + 2a − 1.
+      - Color Dodge: b / (1 − a), with no cap. For a ≥ 1, it is 1.
+      - Color Burn: 1 − (1 − b) / a, with no floor. For a ≤ 0, it is 0.
+      - Divide: b / (a + 0.000001), with no cap.
+      - Linear Burn: max(0, a + b − 1). Linear Light: b + 2a − 1.
       - Vivid Light: the Color Burn of b by 2a for a ≤ 0.5. Above 0.5, the Color Dodge of b by 2a − 1.
-      - Pin Light: min(b, 2a) for a ≤ 0.5. Above 0.5, max(b, 2a − 1).
-      - Hard Mix: 1 when a + b ≥ 1, else 0.
+      - Pin Light: min(b, 2a) for a < 0.5. From 0.5, max(b, 2a − 1).
+      - Hard Mix: 1 when the 32-bit float sum a + b is 1 or more, else 0.
+      - A 16-bit render clips these results to 0..1. Thus Color Dodge and Divide seem to stop at 1, and Color Burn at 0.
     - The whole color:
-      - Lighter Color and Darker Color take the color with the larger or the smaller sum of R, G and B. On a tie, they take b.
+      - Lighter Color and Darker Color take the color with the larger or the smaller sum of R, G and B. On a tie, they take a.
       - The spread of a color is the length of (R − G, G − B, B − R). The luma here is the luma of BT.709.
       - Hue: the luma of b, plus a minus the luma of a. That difference is scaled by the spread of b over the spread of a.
       - Saturation: the luma of b, plus b minus its luma. That difference is scaled by the spread of a over the spread of b.

@@ -4418,12 +4418,9 @@ pub struct Vignette {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f64; 3]>,
     /// How the color mixes with the picture, in `advanced`. The formulas are
-    /// those of a clip's composite mode, with these differences: nothing
-    /// stops the result of `color_dodge`, `color_burn`, `divide` and
-    /// `vivid_light` at 0 or 1 before the mix, `divide` adds 0.000001 to the
-    /// color, `linear_burn` stops at 0, `lighter_color` and `darker_color`
-    /// take the color on a tie, and `hue` with black or white takes the hue
-    /// of red and with another gray one fixed hue. Usual: `multiply`.
+    /// those of a clip's composite mode, with these differences: `divide`
+    /// takes a color below 0 as 0, and `hue` with black or white takes the
+    /// hue of red and with another gray one fixed hue. Usual: `multiply`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composite_type: Option<CompositeMode>,
 }
@@ -5705,9 +5702,9 @@ pub enum CompositeMode {
     Darken,
     /// The higher of `a` and `b`.
     Lighten,
-    /// `b / (1 − a)`, up to 1; 1 where `a` is 1.
+    /// `b / (1 − a)`; 1 where `a` is 1 or more.
     ColorDodge,
-    /// `1 − (1 − b) / a`, from 0; 0 where `a` is 0.
+    /// `1 − (1 − b) / a`; 0 where `a` is 0 or less.
     ColorBurn,
     /// `a + b − 2ab`.
     Exclusion,
@@ -5719,25 +5716,25 @@ pub enum CompositeMode {
     Color,
     /// The luma (BT.601) of `a`, with the chroma of `b`.
     Luminosity,
-    /// `b / a`, up to 1.
+    /// `b / (a + 0.000001)`.
     Divide,
     /// `a + b`, as `add`.
     LinearDodge,
-    /// `a + b − 1`.
+    /// `a + b − 1`, from 0.
     LinearBurn,
     /// `b + 2a − 1`.
     LinearLight,
     /// `color_burn` by `2a` where `a` is up to 0.5, else `color_dodge` by
     /// `2a − 1`.
     VividLight,
-    /// The lower of `b` and `2a` where `a` is up to 0.5, else the higher of
+    /// The lower of `b` and `2a` where `a` is below 0.5, else the higher of
     /// `b` and `2a − 1`.
     PinLight,
     /// 1 where `a + b` is 1 or more, else 0.
     HardMix,
-    /// `a` where the sum of its channels is more than that of `b`, else `b`.
+    /// `a` where the sum of its channels is at least that of `b`, else `b`.
     LighterColor,
-    /// `a` where the sum of its channels is less than that of `b`, else `b`.
+    /// `a` where the sum of its channels is at most that of `b`, else `b`.
     DarkerColor,
 }
 
