@@ -21,28 +21,44 @@ const BRADFORD: [[f64; 3]; 3] = [
     [0.0389, -0.0685, 1.0296],
 ];
 
-const PLANCK_U: [f64; 9] = [
-    0.17974010196483373,
-    0.07215506820121004,
-    -0.008043884176963433,
-    5.55473618568263,
-    -27.032152908369465,
-    68.71567204412175,
-    -103.81110787405582,
-    87.91043671155502,
-    -32.18225368793109,
+const BRADFORD_BACK: [[f64; 3]; 3] = [
+    [0.9870, -0.1471, 0.1600],
+    [0.4323, 0.5184, 0.0493],
+    [-0.0085, 0.0400, 0.9685],
 ];
 
-const PLANCK_V: [f64; 9] = [
-    0.26480436774103844,
-    0.16960053906710726,
-    2.06154621742016,
-    -11.486467199932205,
-    26.337090785049178,
-    -25.963728337451204,
-    -6.661635292181216,
-    37.24195997977927,
-    -23.47137754153343,
+const ISOTEMPERATURE: [[f64; 4]; 31] = [
+    [0.0, 0.18006, 0.26352, -0.24341],
+    [10.0, 0.18066, 0.26589, -0.25479],
+    [20.0, 0.18133, 0.26846, -0.26876],
+    [30.0, 0.18208, 0.27119, -0.28539],
+    [40.0, 0.18293, 0.27407, -0.30470],
+    [50.0, 0.18388, 0.27709, -0.32675],
+    [60.0, 0.18494, 0.28021, -0.35156],
+    [70.0, 0.18611, 0.28342, -0.37915],
+    [80.0, 0.18740, 0.28668, -0.40955],
+    [90.0, 0.18880, 0.28997, -0.44278],
+    [100.0, 0.19032, 0.29326, -0.47888],
+    [125.0, 0.19462, 0.30141, -0.58204],
+    [150.0, 0.19962, 0.30921, -0.70471],
+    [175.0, 0.20525, 0.31647, -0.84901],
+    [200.0, 0.21142, 0.32312, -1.0182],
+    [225.0, 0.21807, 0.32909, -1.2168],
+    [250.0, 0.22511, 0.33439, -1.4512],
+    [275.0, 0.23247, 0.33904, -1.7298],
+    [300.0, 0.24010, 0.34308, -2.0637],
+    [325.0, 0.24792, 0.34655, -2.4681],
+    [350.0, 0.25591, 0.34951, -2.9641],
+    [375.0, 0.26400, 0.35200, -3.5814],
+    [400.0, 0.27218, 0.35407, -4.3633],
+    [425.0, 0.28039, 0.35577, -5.3762],
+    [450.0, 0.28863, 0.35714, -6.7262],
+    [475.0, 0.29685, 0.35823, -8.5955],
+    [500.0, 0.30505, 0.35907, -11.324],
+    [525.0, 0.31320, 0.35968, -15.628],
+    [550.0, 0.32129, 0.36011, -23.325],
+    [575.0, 0.32931, 0.36038, -40.770],
+    [600.0, 0.33724, 0.36051, -116.45],
 ];
 
 const WHITE_KELVIN: f64 = 6500.0;
@@ -217,41 +233,43 @@ fn inverse(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
     std::array::from_fn(|i| std::array::from_fn(|j| c(j, i) / det))
 }
 
-fn polynomial(c: &[f64], x: f64) -> f64 {
-    c.iter().rev().fold(0.0, |acc, k| acc * x + k)
-}
-
-fn planck_uv(kelvin: f64) -> [f64; 2] {
-    let m = 1000.0 / kelvin;
-    [polynomial(&PLANCK_U, m), polynomial(&PLANCK_V, m)]
-}
-
 fn white_xyz(kelvin: f64, duv: f64) -> [f64; 3] {
-    let [u, v] = planck_uv(kelvin);
-    let step = kelvin * 1e-4;
-    let [u0, v0] = planck_uv(kelvin - step);
-    let [u1, v1] = planck_uv(kelvin + step);
-    let (du, dv) = (u1 - u0, v1 - v0);
-    let length = du.hypot(dv);
-    let (mut nu, mut nv) = (-dv / length, du / length);
-    if nv < 0.0 {
-        nu = -nu;
-        nv = -nv;
-    }
-    let (u, v) = (u + duv * nu, v + duv * nv);
+    let mired = 1e6 / kelvin;
+    let last = ISOTEMPERATURE.len() - 2;
+    let i = ISOTEMPERATURE
+        .iter()
+        .rposition(|row| row[0] <= mired)
+        .unwrap_or(0)
+        .min(last);
+    let (a, b) = (ISOTEMPERATURE[i], ISOTEMPERATURE[i + 1]);
+    let f = (b[0] - mired) / (b[0] - a[0]);
+    let between = |p: f64, q: f64| p * f + q * (1.0 - f);
+    let unit = |slope: f64| {
+        let length = 1.0f64.hypot(slope);
+        [1.0 / length, slope / length]
+    };
+    let (da, db) = (unit(a[3]), unit(b[3]));
+    let (nu, nv) = (between(da[0], db[0]), between(da[1], db[1]));
+    let length = nu.hypot(nv);
+    let u = between(a[1], b[1]) - duv * nu / length;
+    let v = between(a[2], b[2]) - duv * nv / length;
     let d = 2.0 * u - 8.0 * v + 4.0;
     let (x, y) = (3.0 * u / d, 2.0 * v / d);
     [x / y, 1.0, (1.0 - x - y) / y]
 }
 
 fn temp_matrix(temp: f64, tint: f64) -> [[f64; 3]; 3] {
-    let cones = product(&BRADFORD, &RGB_TO_XYZ);
+    if temp == 0.0 && tint == 0.0 {
+        return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    }
     let from = apply(&BRADFORD, white_xyz(WHITE_KELVIN, 0.0));
     let to = apply(&BRADFORD, white_xyz(WHITE_KELVIN - temp, -tint / TINT_DUV));
     let scale: [[f64; 3]; 3] = std::array::from_fn(|i| {
         std::array::from_fn(|j| if i == j { to[i] / from[i] } else { 0.0 })
     });
-    product(&inverse(&cones), &product(&scale, &cones))
+    let into = product(&BRADFORD, &RGB_TO_XYZ);
+    let back = product(&inverse(&RGB_TO_XYZ), &BRADFORD_BACK);
+    product(&back, &product(&scale, &into))
 }
 
 fn color_matrix(saturation: f64, hue: f64) -> [[f64; 3]; 3] {
