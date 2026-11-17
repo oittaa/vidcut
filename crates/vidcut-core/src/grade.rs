@@ -340,8 +340,10 @@ impl ContrastCurve {
         let p = self.pivot;
         let s = if x < p {
             p - p * hermite(&self.knots, (p - x) / p)
-        } else {
+        } else if p < 1.0 {
             p + (1.0 - p) * hermite(&self.knots, (x - p) / (1.0 - p))
+        } else {
+            1.0
         };
         s.clamp(0.0, 1.0)
     }

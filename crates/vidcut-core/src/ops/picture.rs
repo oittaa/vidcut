@@ -1093,6 +1093,7 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
             opacity_keys: old.opacity_keys,
             effects: old.effects,
             composition: old.composition,
+            grade: old.grade,
             ..Picture::default()
         },
         PictureTool::Crop => {

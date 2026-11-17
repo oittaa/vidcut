@@ -107,7 +107,12 @@ fn number(ui: &mut Ui, (text, v): (&str, &mut f64), w: &Wheel) -> bool {
             *v += f64::from(dx) * w.step;
             out = true;
         }
-        let r = ui.add(DragValue::new(v).speed(w.step).fixed_decimals(2));
+        let r = ui.add(
+            DragValue::new(v)
+                .speed(w.step)
+                .fixed_decimals(2)
+                .update_while_editing(false),
+        );
         out |= r.changed();
     });
     out
@@ -223,7 +228,8 @@ fn bars(ui: &mut Ui, w: &Wheel) -> (Option<Vec<f64>>, Option<(PrinterColor, f64)
                     let r = ui.add(
                         DragValue::new(&mut values[i])
                             .speed(w.step)
-                            .fixed_decimals(2),
+                            .fixed_decimals(2)
+                            .update_while_editing(false),
                     );
                     if r.changed() {
                         out = true;
@@ -274,7 +280,8 @@ fn slider(
             DragValue::new(&mut v)
                 .speed(step)
                 .range(range.0..=range.1)
-                .fixed_decimals(3),
+                .fixed_decimals(3)
+                .update_while_editing(false),
         );
         if changed || r.changed() {
             changes.push(Change {
@@ -360,7 +367,12 @@ fn wheel(ui: &mut Ui, w: &Wheel) -> Option<Vec<f64>> {
             let mut master = mean;
             ui.horizontal(|ui| {
                 ui.label("Master");
-                let r = ui.add(DragValue::new(&mut master).speed(w.step).fixed_decimals(2));
+                let r = ui.add(
+                    DragValue::new(&mut master)
+                        .speed(w.step)
+                        .fixed_decimals(2)
+                        .update_while_editing(false),
+                );
                 if r.changed() {
                     for v in values.iter_mut().take(3) {
                         *v += master - mean;

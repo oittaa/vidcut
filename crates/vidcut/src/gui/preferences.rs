@@ -924,7 +924,10 @@ fn color(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>
                     for v in &mut values {
                         let r = ui.add_enabled(
                             !busy,
-                            egui::DragValue::new(v).speed(0.0).fixed_decimals(2),
+                            egui::DragValue::new(v)
+                                .speed(0.0)
+                                .fixed_decimals(2)
+                                .update_while_editing(false),
                         );
                         changed |= r.changed();
                     }

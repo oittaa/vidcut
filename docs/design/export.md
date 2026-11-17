@@ -753,12 +753,12 @@ The primary correction of a clip (`model::Grade`, the `grade.set` request, the C
   - Contrast is a curve about the pivot (`ContrastCurve`). Its knots give exact Hermite segments, with no table.
   - Each Log color is a curve (`LogCurve`). Between Low Range and High Range it is a Bezier curve, solved to 1e-12.
   - Shadows, Highlights and Midtone Detail give the tone stage (`Tone`). The changes of Shadows and Highlights add into one curve of the luma.
-  - `tone_tables` holds the measured change of each control at 18 amounts. Each change is a table of 1024 values from 0 to 2.
+  - `tone_tables` holds the measured change of each control at the `TONE_AMOUNTS`. Each change is a table of `TONE_SIZE` values from 0 to `TONE_TOP`.
   - Between the amounts, a cubic through the four nearest amounts gives the change.
-  - Below 0, the curve is a line through 0, with the mean slope from 0 to 0.25. Above 2, it continues with its slope from 1.75 to 2.
+  - Below 0, the curve is a line through 0, with the mean slope from 0 to `TONE_LOW`. Above `TONE_TOP`, it continues with its slope from `TONE_HIGH` to `TONE_TOP`.
 - The tone stage needs a filtered luma. A fast guided filter makes it on a smaller copy of the luma (`grade_into`):
-  - `tone_filter` gives the size of the copy and the radius of the box. The scale is the width divided by 320, from 1 to 4.
-  - The radius is the longer side divided by 100, rounded up, then divided by the scale. Thus the filter reaches the same part of the picture at each size.
+  - `tone_filter` gives the size of the copy and the radius of the box. The scale is the width divided by `TONE_SCALE_WIDTH`, from 1 to `TONE_MOST_SCALE`.
+  - The radius is the longer side divided by `TONE_RADIUS_STEP`, rounded up, then divided by the scale. Thus the filter reaches the same part of the picture at each size.
   - `fs_grade_stats` makes the copy. Each copy pixel is one bilinear read of the luma, at the center of its block. It keeps the luma and its square.
   - Box blurs (`fs_boxes`) give their means. The border pixels repeat.
   - `fs_grade_coef` gives the coefficients of a guided filter. A box blur gives their means.
@@ -767,7 +767,7 @@ The primary correction of a clip (`model::Grade`, the `grade.set` request, the C
   - Why a guided filter: it keeps edges and ramps. Thus a ramp keeps its shape, and only the detail near an edge changes.
   - Parts of the canvas with no picture count as black in the filter. The grade keeps them empty.
 - The tone stage:
-  - The colors are multiplied by the ratio of the curve to the filtered luma, from 1 to 4. The stage then adds the rest of the curve.
+  - The colors are multiplied by the ratio of the curve to the filtered luma, from 1 to `TONE_GAIN`. The stage then adds the rest of the curve.
   - Where the filtered luma is 0 or less, the ratio is 1.
   - Thus a positive Shadows or Highlights keeps the ratios of the colors. A negative one keeps their differences.
   - Midtone Detail adds the luma minus the filtered luma. A parabola of the new luma weights it, so that black and the top of the range stay.
