@@ -5577,7 +5577,10 @@ A key is a value for each pixel. It sets how much of the change of a node the pi
   - The `cdl` metadata of an OpenTimelineIO clip has no effect. The OpenTimelineIO adapter for CMX EDL writes this metadata.
 - A primary grade comes in only from a Final Cut Pro X XML (p. 469).
 - ColorTrace from CDL applies the CDL lines of an EDL to the clips of a timeline (pp. 3472–3474).
-- Not measured: the result of ColorTrace from CDL, and the import of an ALE with CDL.
+  - It puts the CDL into node 1 of the matched clip. The grade file then holds the same values as a CDL set by script (§14.4).
+  - An event with a reel name does not match a clip with no reel name. With "Ignore Reel Names" on, the event matches.
+  - In the window, the command is in the Media Pool: Timelines > ColorTrace > ColorTrace from CDL.
+- A metadata import of an ALE with CDL gives no grade (p. 422). `ASC_SOP` and `ASC_SAT` become text metadata of the clip.
 
 ### 14.13 Not measured
 

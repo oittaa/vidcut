@@ -35,7 +35,6 @@ The Primaries palette of the Color page is the model. [Spec §14](../spec.md#14-
 - The formula of Color Boost. The data is in the same folder.
 - The curves of Shadows and Highlights, and the filter of the three controls of spec §14.8. The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/flat_cases/`.
 - The shapes of the Log wheels between the ranges.
-- The result of ColorTrace from CDL, and the import of an ALE with CDL (spec §14.12).
 
 **Not this item:**
 
