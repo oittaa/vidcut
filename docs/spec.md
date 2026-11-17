@@ -5401,6 +5401,9 @@ The window shows other numbers than the values of the formulas:
 
 - Contrast, Pivot, Temp, Tint, Color Boost, Shadows, Highlights, Midtone Detail, Low Range and the Log wheels keep the number of the window.
 - Thus one step of the Offset window is 7.5 / 1023 of a code value.
+- The defaults in the window come from the test project. It had the value 2 of the legacy Log setting (§14.9).
+  - With the setting off, a grade with no value uses Pivot 0.5 and High Range 0.667.
+  - The window of a project with the setting off was not checked.
 
 ### 14.2 Lift, Gamma, Gain and Offset (pp. 3145, 3157)
 
@@ -5450,6 +5453,13 @@ Resolve gives a primary grade as a CDL for each channel: `slope = W · (1 − L)
   - It keeps the form `a² + 0.012262 · a · b + 1.045616 · b²`. Thus `u = a + 0.006131 · b` and `v = 1.022535 · b` turn as a plain rotation.
   - The match is 1.5e-5. The source of the two constants is not known.
 - Saturation and Hue come after the wheels. Their order does not change the result.
+- Color Boost changes the saturation of each pixel by itself. Pixels of low saturation change more (p. 3147).
+  - `out = Y(v) + k · (v − Y(v))`, with `D = sqrt(((R − G)² + (G − B)² + (B − R)²) / 2)` and the Color Boost value `b`.
+  - A positive `b` gives `k = 1 + 0.0040204 · b · D^−0.6`.
+  - A negative `b` gives `k = max(0, 1 − 0.0057435 · |b| · D^−0.6)`. Thus −100 removes all color from pixels of low saturation.
+  - These rules match the renders to 4e-6 in 0 to 1.
+  - Resolve also moves each value by up to 0.00096 in 0 to 1, the same for each `b`. The cause is not known.
+  - At gray, the change of the formula goes to 0. Resolve gives gray a small color from rounding noise, up to 3.3e-4 at `b` = 100.
 
 ### 14.6 Temp and Tint (p. 3146)
 
@@ -5467,7 +5477,8 @@ Temp and Tint are a Bradford adaptation, applied to the code values with the Rec
 
 ### 14.7 Contrast and Pivot (p. 3146)
 
-- A Contrast `c` below 1 is a straight line on each channel: `out = pivot + c · (x − pivot)`. The default Pivot is 0.435.
+- A Contrast `c` below 1 is a straight line on each channel: `out = pivot + c · (x − pivot)`.
+- A grade with no Pivot value uses 0.5. With the value 2 of the legacy Log setting (§14.9), it uses 0.435.
 - A Contrast above 1 is an S-curve, with "Use S-curve for contrast" on (the default, pp. 156, 3146).
   - On gray, the curve keeps 0, and 1 within 5e-4.
   - Contrast 1.5 has a slope of about 2.1 near the Pivot and 0.35 at 0 and 1. Contrast 2 is a step at the Pivot.
@@ -5499,15 +5510,28 @@ These three controls use the pixels around a pixel. On a frame of one color, the
 - The test project has the working luminance HDR 1000. The effect of this setting on the curves is not measured.
 - Not measured: the formula of `g`, and the filter that reads the pixels around a pixel.
 
-### 14.9 Log wheels (pp. 3152–3157)
+### 14.9 Log wheels (pp. 156, 3152–3157)
 
-- Each Log wheel works on its own channel. There is no luma step.
-- The defaults of the window are Low Range 0.333 and High Range 0.550.
-- The Shadow wheel `s` adds `s · (0.333 − x)` below about 0.333. The Highlight wheel `h` adds `h · (x − 0.55) / 0.45` above 0.55.
-- The Midtone wheel adds a bump between 0.333 and 0.55.
+The project setting "Use legacy Log grading ranges and curve" is off in a new project (p. 156). This section gives the Log wheels with the setting off.
+
+- Each Log wheel adds its value to its own channel, with a weight `w` between 0 and 1.
+  - `out_c = v_c + s_c · ws(y) + m_c · wm(y) + h_c · wh(y)`, with `s`, `m` and `h` the Shadow, Midtone and Highlight values of channel `c`.
+  - The weights read the luma `y = Y(clamp(v, 0, 1))`. Each channel is clamped to 0 to 1 before the luma.
+  - Thus the change of one channel also depends on the other two channels.
+- `S(t) = t² · (3 − 2t)`, with `t` clamped to 0 to 1. With Low Range `lo` and High Range `hi` of the window:
+  - `ws(y) = 1 − S(y / (lo + 0.1))`.
+  - `wh(y) = S((y − hi + 0.1) / (1.1 − hi))`.
+  - `wm` rises as `S` from `lo − 0.1` to `c = (lo + hi) / 2`, then falls as `1 − S` from `c` to `hi + 0.1`.
+  - Thus the ranges overlap by 0.1 on each side. The window cannot change the overlap (p. 3156).
+- A grade with no range values uses Low Range 0.333 and High Range 0.667.
+- The change is linear in each value, also for a negative value. The three wheels add.
+- Pivot does not change the weights.
+- The weights read the picture after the wheels, the master wheels and Contrast. Saturation comes after the Log wheels.
 - The master ring of a Log wheel sets R, G and B to the same value.
-- Not measured: the shapes of the change between the ranges, and other ranges.
-- With a Log value set, values above 0 and up to 1 come out 0.00049 low. This spec does not copy this fault.
+- These rules match 38 renders to 4.1e-7, and the renders of the order to 5.7e-7.
+- The script value of this setting is `colorUseLegacyLogGrades`. The values 0 and 1 give the rules above. The test project had the value 2, which gives other curves.
+  - With the value 2, the Shadow wheel `s` adds about `s · (0.333 − x)` below 0.333, and the Highlight wheel `h` adds about `h · (x − 0.55) / 0.45` above 0.55.
+  - These changes are per channel. The joins are pieces of cubics, on a grid of 0.05.
 
 ### 14.10 Nodes and mixers (pp. 3385, 3409–3417)
 
@@ -5589,8 +5613,8 @@ A key is a value for each pixel. It sets how much of the change of a node the pi
 
 ### 14.13 Not measured
 
-- Color Boost works on each pixel by itself, and it is not linear (p. 3147). Its formula is not found.
 - The S-curve of Contrast (§14.7).
 - The curves and the filter of Shadows, Highlights and Midtone Detail (§14.8).
-- The shapes of the Log wheels (§14.9).
+- The Log wheels with the value 2 of the legacy setting (§14.9).
+- The window of a project with the legacy Log setting off (§14.1).
 - The effect of the working luminance on Shadows and Highlights. These runs use HDR 1000. A script cannot change this setting.
