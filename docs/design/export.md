@@ -792,6 +792,9 @@ The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline
 - `Screen::draw` runs it on the whole canvas after the last layer and title (`Screen::set_timeline_grade`, `Blurred::composed`).
   - The canvas is then `Wide`. Thus the grade gets float colors.
   - A gap and the bars around a smaller picture get the grade. The filter of the tone stage reads them, as in the spec (§8.20).
+  - A gap is a black layer of the draw (`VideoFrames::solid_frame`), in the player, the export, `frame.render` and the storyboard. Thus it takes the same route as a picture.
+  - With alpha output, the gap layer is transparent. The grade keeps a pixel with no alpha empty.
+  - A draw with no layer has no grade, as it has no output LUT. An example is the draw of the viewer before its first picture.
 - The burned subtitles go on the canvas after the grade (`TitleOver::SUBTITLES`). Then `fs_lut` runs the output LUT.
 - The viewer gets the grade from the player (`Shown`). `Player::preview_grade` shows a dragged grade before the project has it.
 - An export gets it with `VideoFrames::with_timeline_grade`. `frame.render`, the storyboard and `FrameReader` get it in `Finish`.
