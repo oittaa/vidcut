@@ -1,18 +1,13 @@
 # AGENTS.md
 
-Guide for AI agents (and humans) who work on this repository.
-
-vidcut is a video editor in Rust. It aims to be the best open source video editor. Its model is DaVinci Resolve. [README.md](README.md) tells what vidcut does and how to build it. [docs/design/](docs/design/README.md) tells how it is built.
-
 ## Ground rules
 
-1. **Resolve is the model.** By default, vidcut does what DaVinci Resolve does. Any page of Resolve that has a feature is its model, not only the Cut page. [docs/spec.md](docs/spec.md) records the behavior, with the manual's page numbers.
+1. **Resolve is the model.** By default, vidcut does what DaVinci Resolve does. [docs/spec.md](docs/spec.md) records the behavior, with the manual's page numbers.
    - Do a different thing only when Resolve has a bug, or when a more modern way is clearly better. Example: Smooth Cut has better defaults and gives a cleaner result.
    - A feature that Resolve does not have is an extra, not a deviation.
    - OTIO files go between vidcut and Resolve with as little loss as possible.
-   - The same applies to the order in which a picture is processed: [spec §13](docs/spec.md#13-order-of-operations-pp-287296-3407).
    - The picture path is a pipeline ([spec §13](docs/spec.md#13-order-of-operations-pp-287296-3407), Chapter 144 of the manual). Each stage takes the output of the stage before it.
-   - A stage does not branch on the kind of its input: compound or plain, placed or whole, with a composite mode or without.
+   - A stage does not branch on the kind of its input.
    - A difference from a measurement shows a fault in a stage. Fix that stage. Do not add a case for the input that failed.
    - Only the owner adds a deviation. Ask first. Tell the owner what Resolve does and what a match costs.
    - Record each difference in [docs/deviations.md](docs/deviations.md): Resolve's behavior and page, our behavior, and the reason.
@@ -24,29 +19,28 @@ vidcut is a video editor in Rust. It aims to be the best open source video edito
      - The schema's doc comments. They are shipped text: `vidcut schema`, `--help` and MCP show them.
      - One-line `// SAFETY:` comments.
      - The `# Safety` section that clippy requires on a public unsafe fn, one line under its heading.
-   - `scripts/check.sh` enforces these rules.
    - The reasons for how the code is built go in the design docs in `docs/design/`.
 3. **Everything is scriptable.** The CLI, IPC and MCP can do every GUI action.
 4. **No media in git.**
-   - Test media, generated fixtures and the manual are in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`). This is the one place for test data.
+   - Test media, generated fixtures and the manual are in `$VIDCUT_TEST_DATA` (default `~/Downloads/vidcut-tmp`).
    - Test outputs go to temp dirs.
-   - `scripts/check.sh` (the pre-commit hook and CI) refuses any binary file, whatever its name. Thus `.gitignore` lists no file types.
+   - `scripts/check.sh` refuses any binary file. Thus `.gitignore` lists no file types.
    - `tests/media-manifest.toml` lists the real-world clips (URL, license, sha256). `scripts/fetch-test-media.sh` gets them.
-5. **No ffmpeg or ffprobe subprocesses.** Use `vidcut-av`, which uses the FFmpeg libraries, for exports and for the preview.
+5. **No ffmpeg or ffprobe subprocesses.** Use `vidcut-av`, which links the FFmpeg libraries.
 6. **License:** MIT.
 7. **FFmpeg:** from 8.0 (the latest Ubuntu LTS) to the newest release. Do not write code for FFmpeg before 8.0.
-8. **A unit test is a unit test.** It has one behavior, a fixed input, and the output it must give, written out. Example: `assert_eq!(sha("test text"), "abcd")`.
+8. **Each unit test checks one behavior.** It has a fixed input and the output it must give, written out. Example: `assert_eq!(sha("test text"), "abcd")`.
    - It does not implement the code a second time to compute the expected output.
-   - It does not test many things at once, and it is not 100 lines or more.
+   - It is under 100 lines.
    - Check by hand what needs more than that. No tests that open a window, play real media or depend on timing.
-9. **The GPU first, where the user lets it work.** With `gpu.acceleration` and `gpu.decoding` on, decoding and encoding run on the GPU in every path where the GPU gives correct results, H.264 too.
+9. **The GPU first, where the user lets it work.** With `gpu.acceleration` and `gpu.decoding` on, decoding and encoding run on the GPU in every path where the GPU gives correct results.
    - Do not move work to the CPU because the CPU is faster. A GPU that is fast enough is sufficient, and it saves CPU time and battery.
    - The only exception is a GPU that gives wrong results, for example wrong frames after a seek. Name it in `GpuDecoder::why_not` and in gotchas.md.
 10. **The user's settings go to the encoder as they are.**
     - Do not rescale, clamp or replace quality, speed, codec or any other preference without telling the user.
     - If an encoder cannot take a value, ask before you add a conversion.
     - Show the conversion where the user sets the value and in the export's report.
-11. **The docs state facts about the current code. They are not a history: git is the history.**
+11. **The docs state facts about the current code. Git is the history.**
     - Write the `.md` files in ASD-STE100 Simplified Technical English (STE). Use short sentences, one fact in each sentence, active voice and the present tense. Use lists for complex text, and use the same word for the same thing.
     - A doc tells what the code does now and why. A todo file tells what is still to do and why.
     - Do not write progress notes, earlier attempts, "before, X did Y" or why a mistake occurred. Put them in commit messages and PR descriptions.
@@ -54,18 +48,17 @@ vidcut is a video editor in Rust. It aims to be the best open source video edito
     - `scripts/check-docs.sh` refuses a sentence of more than 25 words and a line of more than 300 characters.
 12. **GUI text is short.** The title of a window tells what the window does. Thus no window opens with a paragraph about itself.
     - Labels and buttons have a few words, in Title Case.
-    - Use a tooltip only where the label is not sufficient, for example the full text of a label that is cut off. A tooltip never repeats the label.
+    - Use a tooltip only where the label is not sufficient, for example the full text of a label that is cut off.
     - Put a line under the controls only for things that change the result: a download, a warning, files to transcribe first.
-    - No string in `crates/vidcut/src/gui/` has more than 12 words. `scripts/check.sh` enforces this. The details go in the docs.
+    - No string in `crates/vidcut/src/gui/` has more than 12 words. The details go in the docs.
     - Windows use `gui/dialog.rs`: labeled rows, a switch for two or three choices, and rarely used settings under Advanced. Cancel and one main button are at the bottom right.
-13. **vidcut is not released yet. It is not backwards compatible.**
-    - The code never tries to be backwards compatible. It reads and writes only the current form of files, settings, histories and requests.
-    - Do not add migrations, fallbacks or serde defaults for a form that an older version of vidcut wrote.
+13. **No backwards compatibility.**
+    - Read and write only the current form of files, settings, histories and requests.
+    - Do not add migrations, fallbacks or serde defaults for older forms.
     - A field is optional only when the current code leaves it out. The docs say when that occurs.
-    - The docs never mention old versions of vidcut, earlier builds or older files.
 14. **A cache uses `vidcut_core::lru::Lru`.** A cache keeps values that vidcut can make again.
     - Do not write a new cache with a `HashMap`, a `HashSet`, a `Vec` or a `static`.
-    - Data of the same kind shares one `Lru` and one limit. Do not add a second store for it.
+    - Data of the same kind shares one `Lru` and one limit.
     - Each cache has a named limit, for example `DISPLAYS_KEPT`.
     - A limit in bytes uses `lru::ByBytes`. Use `lru::Uncapped` only when the owner removes entries by another rule.
     - A global cache follows a memory limit in the preferences or a fixed budget in bytes.
@@ -74,8 +67,6 @@ vidcut is a video editor in Rust. It aims to be the best open source video edito
 
 ## Quality gates
 
-These gates are mandatory.
-
 | When | Command |
 |---|---|
 | Before **each commit** (`.githooks/pre-commit` enforces it) | `make check` (`scripts/check.sh`). For `.md` files only, `scripts/check-docs.sh`. |
@@ -83,10 +74,10 @@ These gates are mandatory.
 
 `make check` runs these checks:
 
-- No binary files in git.
+- No binary files in git (rule 4).
 - No comments in `crates/` (rule 2).
 - GUI text of 12 words at most (rule 12).
-- The docs: names, links, style and no conflict marks (`scripts/check-docs.sh`).
+- The docs: names, links, style and no conflict marks (`scripts/check-docs.sh`, rule 11).
 - `cargo fmt --check`.
 - `cargo clippy --workspace --all-targets -D warnings`.
 - The unit tests (`--lib --bins`).
