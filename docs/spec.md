@@ -2785,10 +2785,28 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - Measured: one point moves its channel by the Step Size times the Density Increment of that channel. With the defaults, this is 1 on the Offset number.
   - The Color panel of the User Preferences has Printer Light Step Calibration (p. 118). It has Lab Aim Density, Step Size and Density Increment for R, G and B.
   - Measured defaults: Lab Aim Density is 25, Step Size is 1, and Density Increment is 1. Lab Aim Density did not change a printer point.
-  - Printer Light Hotkeys in the Color menu turn on the printer point keys of the numeric keypad (p. 3158).
+  - Printer Light Hotkeys in the Color menu turn on the printer point keys of the numeric keypad (p. 3158). Its key is Ctrl+Alt+` (Option-Command-` on a Mac).
   - Measured: Cyan moves G and B, Magenta moves R and B, Yellow moves R and G, and Master moves all three.
+  - The full point keys (p. 3158; Master measured):
+
+    | Channels | Plus | Minus |
+    |---|---|---|
+    | Master | Num + | Num Enter |
+    | Red | Num 7 | Num 4 |
+    | Green | Num 8 | Num 5 |
+    | Blue | Num 9 | Num 6 |
+    | Cyan | Num 1 | Num - |
+    | Magenta | Num 2 | Num 0 |
+    | Yellow | Num 3 | Num . |
+
+  - The same keys with Ctrl (Command on a Mac) give a quarter point. The half points have no keys (p. 3158).
+  - Measured: the Color menu has Full Printer Light, Half Printer Light and Quarter Printer Light. Each has a Plus and a Minus item for each row of the table. The items work only while the hotkeys are on.
+  - A key of the numeric keypad is a key of its own in Keyboard Customization (p. 125).
+  - A key of the numeric keypad that has an action does that action. The other keys of the numeric keypad type timecode (p. 878).
   - vidcut: the Plus and Minus buttons, and the Color page of the preferences with Step Size and Density Increment.
-  - vidcut: the hotkeys come later ([todo](todo/color-page.md)).
+  - vidcut: the Color menu and the keys of the table. Each item and key sends `grade.printer` for the grade that the palette shows.
+  - vidcut: the hotkeys are off when the GUI starts. They work only on the Color page. The menu items are off on the other pages.
+  - vidcut: the main keys and the main Enter key do not move printer points. Keyboard Customization can give each item other keys.
 - **Timeline grade** (pp. 3404–3405, 3407):
   - The Node Editor has a Clip mode and a Timeline mode. A menu at its top right selects the mode.
   - The Timeline grade is one grade for the whole timeline. It applies to all clips at the same time.
@@ -2813,6 +2831,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
 - Each takes `clips` (`clip` for `grade.get`), or `timeline` for the timeline grade of the open timeline.
 - `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
 - `gui.page` with `grade` selects Clip or Timeline on the Color page.
+- `gui.printer_keys` turns the printer light hotkeys on or off. `gui.state` gives `printer_keys`.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

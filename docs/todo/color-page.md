@@ -17,16 +17,16 @@ The Color page shows the primary correction of the clip at the playhead or of th
 
 **In the code:**
 
-- `crates/vidcut/src/gui/color_page.rs` draws the Primaries wheels, the Primaries bars and the Log wheels. It sends `grade.set` and `grade.clear`.
+- `crates/vidcut/src/gui/color_page.rs` draws the Primaries wheels, the Primaries bars and the Log wheels. It sends `grade.set`, `grade.clear` and `grade.printer`.
 - A Clip and Timeline switch at the top right selects the grade that the palette shows (pp. 3404–3405). It sends `gui.page` with `grade`.
 - In the bars, each Offset bar has a Plus and a Minus button. Each button moves its channel by one printer point (pp. 3157, 3159).
+- The Color menu has the Printer Light Hotkeys and the Full, Half and Quarter printer points. The keys of the numeric keypad move printer points (p. 3158).
 - The page puts the palette at the bottom and the timeline above it, at its smallest height. The viewer gets the rest.
 - Each clip has one correction (`model::Grade`, [primary-grade.md](primary-grade.md)).
 - The node editor of the Effects page is in `crates/vidcut/src/gui/effects_page.rs`.
 
 **To do:**
 
-- The Printer Light Hotkeys of the Color menu, and the Full, Half and Quarter printer points with their keys (p. 3158).
 - Nodes: more than one correction on a clip, in the order of the nodes.
 - Decide whether the Color page uses the node editor of the Effects page.
 - The media panel on this page: its border runs past the panel when the top of the window is short.

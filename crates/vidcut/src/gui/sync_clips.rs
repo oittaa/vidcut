@@ -11,7 +11,7 @@ use vidcut_core::multicam::{
     sync_clips_files, visible,
 };
 use vidcut_core::render::{RenderPlan, places_sound};
-use vidcut_core::shortcuts::{Action, Bindings, Panel};
+use vidcut_core::shortcuts::{Action, Panel};
 use vidcut_core::time::format_timecode;
 
 use super::dialog;
@@ -203,12 +203,12 @@ impl SyncClips {
     }
 }
 
-fn nudge_of(b: &Bindings, event: &egui::Event) -> i64 {
-    match owner(b, Panel::App, event) {
-        Some((Action::TrimLeft, _)) => -1,
-        Some((Action::TrimRight, _)) => 1,
-        Some((Action::TrimSecondLeft, _)) => -FAST_NUDGE,
-        Some((Action::TrimSecondRight, _)) => FAST_NUDGE,
+fn nudge_of(action: Action) -> i64 {
+    match action {
+        Action::TrimLeft => -1,
+        Action::TrimRight => 1,
+        Action::TrimSecondLeft => -FAST_NUDGE,
+        Action::TrimSecondRight => FAST_NUDGE,
         _ => 0,
     }
 }
@@ -314,13 +314,22 @@ impl Workspace {
             return;
         }
         let bindings = self.snap.bindings.clone();
-        let nudge: i64 = ctx.input(|i| i.events.iter().map(|e| nudge_of(&bindings, e)).sum());
+        let pads = &self.pads;
+        let nudge: i64 = ctx.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|e| owner(&bindings, Panel::App, e))
+                .chain(pads.owners(&bindings, Panel::App))
+                .map(|(a, _)| nudge_of(a))
+                .sum()
+        });
         if nudge != 0
             && let Some(p) = self.project_shared()
         {
             self.sync_clips.nudge(&p, nudge);
         }
-        if ctx.input_mut(|i| take(&bindings, i, Action::PlayOrStop)) {
+        let pads = &mut self.pads;
+        if ctx.input_mut(|i| take(&bindings, i, pads, Action::PlayOrStop)) {
             if self.sync_clips.playing {
                 self.sync_clips.stop();
             } else {

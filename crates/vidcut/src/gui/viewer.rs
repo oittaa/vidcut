@@ -204,18 +204,20 @@ impl Workspace {
         }
         let frame = self.snap.viewer_frame;
         let bindings = self.snap.bindings.clone();
+        let pads = &mut self.pads;
         if frame != ViewerFrame::Page
-            && ctx.input_mut(|i| take(&bindings, i, Action::LeaveFullScreen))
+            && ctx.input_mut(|i| take(&bindings, i, pads, Action::LeaveFullScreen))
         {
             self.send_frame(ViewerFrame::Page);
             return;
         }
         self.sync_keys(ctx);
         self.multi_keys(ctx);
+        let pads = &mut self.pads;
         let key = ctx.input_mut(|i| {
-            if take(&bindings, i, Action::FullScreen) {
+            if take(&bindings, i, pads, Action::FullScreen) {
                 Some(ViewerFrameKey::FullScreen)
-            } else if take(&bindings, i, Action::EnhancedViewer) {
+            } else if take(&bindings, i, pads, Action::EnhancedViewer) {
                 Some(ViewerFrameKey::Enhanced)
             } else {
                 None
@@ -1402,7 +1404,7 @@ impl Workspace {
         let bindings = self.snap.bindings.clone();
         let (held, pos) = ui.input(|i| {
             (
-                super::shortcuts::held(&bindings, i, Action::Skim),
+                super::shortcuts::held(&bindings, i, &self.pads, Action::Skim),
                 i.pointer.hover_pos(),
             )
         });

@@ -73,6 +73,7 @@ pub struct Workspace {
     pub display: Option<String>,
     pub levels: Option<vidcut_av::player::Levels>,
     pub main_window: Option<eframe::wgpu::rwh::RawWindowHandle>,
+    pub(super) pads: super::shortcuts::Pads,
     pub(super) search: String,
     pub(super) bins: super::pool::BinsUi,
     pub(super) timecode: Option<TimecodeEntry>,
@@ -173,6 +174,7 @@ impl Workspace {
             display: None,
             levels: None,
             main_window: None,
+            pads: Default::default(),
             search: String::new(),
             bins: Default::default(),
             timecode: None,
@@ -332,6 +334,9 @@ impl Workspace {
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
                 live::GuiChange::Grade(level) => self.set_grading(level),
+                live::GuiChange::PrinterKeys(on) => {
+                    self.effects_page.printer_keys = on.unwrap_or(!self.effects_page.printer_keys)
+                }
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
                 live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
@@ -445,6 +450,7 @@ impl Workspace {
         live::GuiState {
             page,
             grade: self.effects_page.grading,
+            printer_keys: self.effects_page.printer_keys,
             clip: match (page, self.effects_page.grading) {
                 (Page::Effects, _) => self.effects_clip(),
                 (Page::Color, GradeLevel::Clip) => self.color_clip(),
@@ -1146,6 +1152,7 @@ impl Workspace {
                 }
             });
             ui.menu_button("Playback", |ui| self.playback_menu(ui));
+            ui.menu_button("Color", |ui| self.color_menu(ui));
             ui.separator();
             self.bar_buttons(ui);
         });
@@ -1426,7 +1433,7 @@ impl Workspace {
         }
         let bindings = self.snap.bindings.clone();
         if self.transcription.over {
-            self.transcription.take_keys(ctx, &bindings);
+            self.transcription.take_keys(ctx, &bindings, &mut self.pads);
         }
         self.sync_clips_keys(ctx);
         if self.asking() {
@@ -1451,13 +1458,17 @@ impl Workspace {
         if self.help.open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
             self.help.open = false;
         }
+        self.printer_keys(ctx);
         self.history_keys(ctx);
         self.sync_numbers(ctx);
         self.multi_numbers(ctx);
         let input = ctx.input(|i| i.clone());
-        let fired = Fired::of(&bindings, &input);
+        let fired = Fired::of(&bindings, &input, &self.pads);
         if fired.pressed(Action::Help) {
             self.help.open = !self.help.open;
+        }
+        if fired.struck(Action::PrinterKeys) {
+            self.send("gui.printer_keys", json!({}));
         }
         if fired.pressed(Action::Preferences) {
             self.open_preferences(ctx);
@@ -1527,7 +1538,7 @@ impl Workspace {
         if fired.struck(Action::Stop) && !trimming {
             self.send("player.pause", json!({}));
         }
-        for jkl in self.shuttle.input(&bindings, &input) {
+        for jkl in self.shuttle.input(&bindings, &input, &self.pads) {
             if trimming {
                 self.dynamic_jkl(jkl, input.time);
                 continue;

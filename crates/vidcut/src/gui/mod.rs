@@ -23,6 +23,7 @@ mod import;
 mod inspector;
 mod isolation;
 mod keyframe_editor;
+mod keypad;
 mod leveler;
 mod look_tiles;
 mod looks;
@@ -110,15 +111,7 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
         viewport,
         ..Default::default()
     };
-    let ran = eframe::run_native(
-        "vidcut",
-        options,
-        Box::new(move |cc| {
-            app::App::new(cc, project, window)
-                .map(|a| Box::new(a) as Box<dyn eframe::App>)
-                .map_err(Into::into)
-        }),
-    );
+    let ran = open(options, project, window);
     crate::threads::ending("the closing threads");
     crate::threads::join_closing();
     crate::threads::ending("the process's exit");
@@ -135,4 +128,36 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
             format!("can't start the GUI{hint}: {e}"),
         )
     })
+}
+
+fn open(
+    options: eframe::NativeOptions,
+    project: Option<PathBuf>,
+    window: window::Window,
+) -> std::result::Result<(), String> {
+    use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
+    let failed = |e: winit::error::EventLoopError| eframe::Error::from(e).to_string();
+    let mut event_loop = winit::event_loop::EventLoop::<eframe::UserEvent>::with_user_event()
+        .build()
+        .map_err(failed)?;
+    let keypad = keypad::Keypad::default();
+    let made = std::cell::RefCell::new(None);
+    let app = eframe::create_native(
+        "vidcut",
+        options,
+        Box::new(|cc| {
+            let app = app::App::new(cc, project, window, keypad.clone());
+            made.replace(Some(app.as_ref().map(|_| ()).map_err(Clone::clone)));
+            app.map(|a| Box::new(a) as Box<dyn eframe::App>)
+                .map_err(Into::into)
+        }),
+        &event_loop,
+    );
+    let mut looped = keypad::Loop::new(app, keypad.clone());
+    event_loop.run_app_on_demand(&mut looped).map_err(failed)?;
+    drop(looped);
+    match made.take() {
+        Some(made) => made.map_err(|e| eframe::Error::AppCreation(e.into()).to_string()),
+        None => Err("the window or its GPU did not start".into()),
+    }
 }

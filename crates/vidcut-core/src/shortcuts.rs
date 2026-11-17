@@ -6,6 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::request::PrinterColor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -16,17 +17,19 @@ pub enum Group {
     Clips,
     Trim,
     Nodes,
+    Color,
     App,
 }
 
 impl Group {
-    pub const ALL: [Group; 7] = [
+    pub const ALL: [Group; 8] = [
         Group::Play,
         Group::Mark,
         Group::Edit,
         Group::Clips,
         Group::Trim,
         Group::Nodes,
+        Group::Color,
         Group::App,
     ];
 
@@ -38,6 +41,7 @@ impl Group {
             Group::Clips => "Change clips",
             Group::Trim => "Select and trim",
             Group::Nodes => "Effects page",
+            Group::Color => "Color page",
             Group::App => "Project and app",
         }
     }
@@ -48,6 +52,7 @@ pub enum Panel {
     App,
     Transcription,
     Effects,
+    Color,
 }
 
 macro_rules! actions {
@@ -158,6 +163,49 @@ actions! {
     NewTimeline "new_timeline",
     Preferences "preferences",
     Help "help",
+    PrinterKeys "printer_keys",
+    PrinterFullMasterPlus "printer_full_master_plus",
+    PrinterFullMasterMinus "printer_full_master_minus",
+    PrinterFullRedPlus "printer_full_red_plus",
+    PrinterFullRedMinus "printer_full_red_minus",
+    PrinterFullGreenPlus "printer_full_green_plus",
+    PrinterFullGreenMinus "printer_full_green_minus",
+    PrinterFullBluePlus "printer_full_blue_plus",
+    PrinterFullBlueMinus "printer_full_blue_minus",
+    PrinterFullCyanPlus "printer_full_cyan_plus",
+    PrinterFullCyanMinus "printer_full_cyan_minus",
+    PrinterFullMagentaPlus "printer_full_magenta_plus",
+    PrinterFullMagentaMinus "printer_full_magenta_minus",
+    PrinterFullYellowPlus "printer_full_yellow_plus",
+    PrinterFullYellowMinus "printer_full_yellow_minus",
+    PrinterHalfMasterPlus "printer_half_master_plus",
+    PrinterHalfMasterMinus "printer_half_master_minus",
+    PrinterHalfRedPlus "printer_half_red_plus",
+    PrinterHalfRedMinus "printer_half_red_minus",
+    PrinterHalfGreenPlus "printer_half_green_plus",
+    PrinterHalfGreenMinus "printer_half_green_minus",
+    PrinterHalfBluePlus "printer_half_blue_plus",
+    PrinterHalfBlueMinus "printer_half_blue_minus",
+    PrinterHalfCyanPlus "printer_half_cyan_plus",
+    PrinterHalfCyanMinus "printer_half_cyan_minus",
+    PrinterHalfMagentaPlus "printer_half_magenta_plus",
+    PrinterHalfMagentaMinus "printer_half_magenta_minus",
+    PrinterHalfYellowPlus "printer_half_yellow_plus",
+    PrinterHalfYellowMinus "printer_half_yellow_minus",
+    PrinterQuarterMasterPlus "printer_quarter_master_plus",
+    PrinterQuarterMasterMinus "printer_quarter_master_minus",
+    PrinterQuarterRedPlus "printer_quarter_red_plus",
+    PrinterQuarterRedMinus "printer_quarter_red_minus",
+    PrinterQuarterGreenPlus "printer_quarter_green_plus",
+    PrinterQuarterGreenMinus "printer_quarter_green_minus",
+    PrinterQuarterBluePlus "printer_quarter_blue_plus",
+    PrinterQuarterBlueMinus "printer_quarter_blue_minus",
+    PrinterQuarterCyanPlus "printer_quarter_cyan_plus",
+    PrinterQuarterCyanMinus "printer_quarter_cyan_minus",
+    PrinterQuarterMagentaPlus "printer_quarter_magenta_plus",
+    PrinterQuarterMagentaMinus "printer_quarter_magenta_minus",
+    PrinterQuarterYellowPlus "printer_quarter_yellow_plus",
+    PrinterQuarterYellowMinus "printer_quarter_yellow_minus",
 }
 
 impl Action {
@@ -172,8 +220,16 @@ impl Action {
             | Action::SourceEnd
             | Action::ClipIn
             | Action::ClipOut => Panel::Effects,
+            a if a.printer().is_some() => Panel::Color,
             _ => Panel::App,
         }
+    }
+
+    pub fn printer(self) -> Option<(PrinterColor, f64)> {
+        PRINTER
+            .iter()
+            .find(|(a, ..)| *a == self)
+            .map(|&(_, color, points)| (color, points))
     }
 
     pub fn title(self) -> &'static str {
@@ -200,6 +256,67 @@ impl Action {
             .collect()
     }
 }
+
+pub const PRINTER: [(Action, PrinterColor, f64); 42] = [
+    (Action::PrinterFullMasterPlus, PrinterColor::Master, 1.0),
+    (Action::PrinterFullMasterMinus, PrinterColor::Master, -1.0),
+    (Action::PrinterFullRedPlus, PrinterColor::Red, 1.0),
+    (Action::PrinterFullRedMinus, PrinterColor::Red, -1.0),
+    (Action::PrinterFullGreenPlus, PrinterColor::Green, 1.0),
+    (Action::PrinterFullGreenMinus, PrinterColor::Green, -1.0),
+    (Action::PrinterFullBluePlus, PrinterColor::Blue, 1.0),
+    (Action::PrinterFullBlueMinus, PrinterColor::Blue, -1.0),
+    (Action::PrinterFullCyanPlus, PrinterColor::Cyan, 1.0),
+    (Action::PrinterFullCyanMinus, PrinterColor::Cyan, -1.0),
+    (Action::PrinterFullMagentaPlus, PrinterColor::Magenta, 1.0),
+    (Action::PrinterFullMagentaMinus, PrinterColor::Magenta, -1.0),
+    (Action::PrinterFullYellowPlus, PrinterColor::Yellow, 1.0),
+    (Action::PrinterFullYellowMinus, PrinterColor::Yellow, -1.0),
+    (Action::PrinterHalfMasterPlus, PrinterColor::Master, 0.5),
+    (Action::PrinterHalfMasterMinus, PrinterColor::Master, -0.5),
+    (Action::PrinterHalfRedPlus, PrinterColor::Red, 0.5),
+    (Action::PrinterHalfRedMinus, PrinterColor::Red, -0.5),
+    (Action::PrinterHalfGreenPlus, PrinterColor::Green, 0.5),
+    (Action::PrinterHalfGreenMinus, PrinterColor::Green, -0.5),
+    (Action::PrinterHalfBluePlus, PrinterColor::Blue, 0.5),
+    (Action::PrinterHalfBlueMinus, PrinterColor::Blue, -0.5),
+    (Action::PrinterHalfCyanPlus, PrinterColor::Cyan, 0.5),
+    (Action::PrinterHalfCyanMinus, PrinterColor::Cyan, -0.5),
+    (Action::PrinterHalfMagentaPlus, PrinterColor::Magenta, 0.5),
+    (Action::PrinterHalfMagentaMinus, PrinterColor::Magenta, -0.5),
+    (Action::PrinterHalfYellowPlus, PrinterColor::Yellow, 0.5),
+    (Action::PrinterHalfYellowMinus, PrinterColor::Yellow, -0.5),
+    (Action::PrinterQuarterMasterPlus, PrinterColor::Master, 0.25),
+    (
+        Action::PrinterQuarterMasterMinus,
+        PrinterColor::Master,
+        -0.25,
+    ),
+    (Action::PrinterQuarterRedPlus, PrinterColor::Red, 0.25),
+    (Action::PrinterQuarterRedMinus, PrinterColor::Red, -0.25),
+    (Action::PrinterQuarterGreenPlus, PrinterColor::Green, 0.25),
+    (Action::PrinterQuarterGreenMinus, PrinterColor::Green, -0.25),
+    (Action::PrinterQuarterBluePlus, PrinterColor::Blue, 0.25),
+    (Action::PrinterQuarterBlueMinus, PrinterColor::Blue, -0.25),
+    (Action::PrinterQuarterCyanPlus, PrinterColor::Cyan, 0.25),
+    (Action::PrinterQuarterCyanMinus, PrinterColor::Cyan, -0.25),
+    (
+        Action::PrinterQuarterMagentaPlus,
+        PrinterColor::Magenta,
+        0.25,
+    ),
+    (
+        Action::PrinterQuarterMagentaMinus,
+        PrinterColor::Magenta,
+        -0.25,
+    ),
+    (Action::PrinterQuarterYellowPlus, PrinterColor::Yellow, 0.25),
+    (
+        Action::PrinterQuarterYellowMinus,
+        PrinterColor::Yellow,
+        -0.25,
+    ),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keys {
@@ -371,6 +488,15 @@ const NAMED_KEYS: &[&str] = &[
     "Sleep",
 ];
 
+const KEYPAD: [&str; 16] = [
+    "Num0", "Num1", "Num2", "Num3", "Num4", "Num5", "Num6", "Num7", "Num8", "Num9", "Num+", "Num-",
+    "Num*", "Num/", "Num.", "NumEnter",
+];
+
+pub fn on_keypad(key: &str) -> bool {
+    KEYPAD.contains(&key)
+}
+
 pub fn key_named(name: &str) -> Option<&'static str> {
     if name.eq_ignore_ascii_case("Esc") {
         return Some("Escape");
@@ -382,6 +508,7 @@ pub fn key_named(name: &str) -> Option<&'static str> {
         .or_else(|| {
             NAMED_KEYS
                 .iter()
+                .chain(KEYPAD.iter())
                 .find(|k| k.eq_ignore_ascii_case(name))
                 .copied()
         })
@@ -685,7 +812,11 @@ const fn pointer(
     }
 }
 
-use Group::{App, Clips, Edit, Mark, Nodes, Play, Trim};
+const fn printer(action: Action, keys: &'static [&'static str], title: &'static str) -> Shortcut {
+    own(Color, action, keys, title, None)
+}
+
+use Group::{App, Clips, Color, Edit, Mark, Nodes, Play, Trim};
 
 pub const SHORTCUTS: &[Shortcut] = &[
     own(
@@ -1422,6 +1553,199 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     same(Nodes, Action::SelectAll, "Select all nodes", None),
     same(Nodes, Action::SelectNothing, "Select no node", None),
+    own(
+        Color,
+        Action::PrinterKeys,
+        &["Ctrl+Alt+`"],
+        "Printer light hotkeys on or off",
+        Some(
+            "While they are on, the keys of the numeric keypad move the printer points of \
+             the grade on the Color page. A full point moves the Offset of each of its \
+             channels by its Step Size times its Density Increment (Preferences, Color).",
+        ),
+    ),
+    printer(
+        Action::PrinterFullMasterPlus,
+        &["Num+"],
+        "Plus Master, full point",
+    ),
+    printer(
+        Action::PrinterFullMasterMinus,
+        &["NumEnter"],
+        "Minus Master, full point",
+    ),
+    printer(
+        Action::PrinterFullRedPlus,
+        &["Num7"],
+        "Plus Red, full point",
+    ),
+    printer(
+        Action::PrinterFullRedMinus,
+        &["Num4"],
+        "Minus Red, full point",
+    ),
+    printer(
+        Action::PrinterFullGreenPlus,
+        &["Num8"],
+        "Plus Green, full point",
+    ),
+    printer(
+        Action::PrinterFullGreenMinus,
+        &["Num5"],
+        "Minus Green, full point",
+    ),
+    printer(
+        Action::PrinterFullBluePlus,
+        &["Num9"],
+        "Plus Blue, full point",
+    ),
+    printer(
+        Action::PrinterFullBlueMinus,
+        &["Num6"],
+        "Minus Blue, full point",
+    ),
+    printer(
+        Action::PrinterFullCyanPlus,
+        &["Num1"],
+        "Plus Cyan, full point",
+    ),
+    printer(
+        Action::PrinterFullCyanMinus,
+        &["Num-"],
+        "Minus Cyan, full point",
+    ),
+    printer(
+        Action::PrinterFullMagentaPlus,
+        &["Num2"],
+        "Plus Magenta, full point",
+    ),
+    printer(
+        Action::PrinterFullMagentaMinus,
+        &["Num0"],
+        "Minus Magenta, full point",
+    ),
+    printer(
+        Action::PrinterFullYellowPlus,
+        &["Num3"],
+        "Plus Yellow, full point",
+    ),
+    printer(
+        Action::PrinterFullYellowMinus,
+        &["Num."],
+        "Minus Yellow, full point",
+    ),
+    printer(
+        Action::PrinterHalfMasterPlus,
+        &[],
+        "Plus Master, half point",
+    ),
+    printer(
+        Action::PrinterHalfMasterMinus,
+        &[],
+        "Minus Master, half point",
+    ),
+    printer(Action::PrinterHalfRedPlus, &[], "Plus Red, half point"),
+    printer(Action::PrinterHalfRedMinus, &[], "Minus Red, half point"),
+    printer(Action::PrinterHalfGreenPlus, &[], "Plus Green, half point"),
+    printer(
+        Action::PrinterHalfGreenMinus,
+        &[],
+        "Minus Green, half point",
+    ),
+    printer(Action::PrinterHalfBluePlus, &[], "Plus Blue, half point"),
+    printer(Action::PrinterHalfBlueMinus, &[], "Minus Blue, half point"),
+    printer(Action::PrinterHalfCyanPlus, &[], "Plus Cyan, half point"),
+    printer(Action::PrinterHalfCyanMinus, &[], "Minus Cyan, half point"),
+    printer(
+        Action::PrinterHalfMagentaPlus,
+        &[],
+        "Plus Magenta, half point",
+    ),
+    printer(
+        Action::PrinterHalfMagentaMinus,
+        &[],
+        "Minus Magenta, half point",
+    ),
+    printer(
+        Action::PrinterHalfYellowPlus,
+        &[],
+        "Plus Yellow, half point",
+    ),
+    printer(
+        Action::PrinterHalfYellowMinus,
+        &[],
+        "Minus Yellow, half point",
+    ),
+    printer(
+        Action::PrinterQuarterMasterPlus,
+        &["Ctrl+Num+"],
+        "Plus Master, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterMasterMinus,
+        &["Ctrl+NumEnter"],
+        "Minus Master, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterRedPlus,
+        &["Ctrl+Num7"],
+        "Plus Red, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterRedMinus,
+        &["Ctrl+Num4"],
+        "Minus Red, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterGreenPlus,
+        &["Ctrl+Num8"],
+        "Plus Green, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterGreenMinus,
+        &["Ctrl+Num5"],
+        "Minus Green, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterBluePlus,
+        &["Ctrl+Num9"],
+        "Plus Blue, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterBlueMinus,
+        &["Ctrl+Num6"],
+        "Minus Blue, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterCyanPlus,
+        &["Ctrl+Num1"],
+        "Plus Cyan, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterCyanMinus,
+        &["Ctrl+Num-"],
+        "Minus Cyan, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterMagentaPlus,
+        &["Ctrl+Num2"],
+        "Plus Magenta, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterMagentaMinus,
+        &["Ctrl+Num0"],
+        "Minus Magenta, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterYellowPlus,
+        &["Ctrl+Num3"],
+        "Plus Yellow, quarter point",
+    ),
+    printer(
+        Action::PrinterQuarterYellowMinus,
+        &["Ctrl+Num."],
+        "Minus Yellow, quarter point",
+    ),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),
     own(App, Action::NewTimeline, &["Ctrl+N"], "New timeline", None),
     own(App, Action::Preferences, &["Ctrl+,"], "Preferences", None),

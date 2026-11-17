@@ -409,8 +409,12 @@ impl Workspace {
         };
         let bindings = &self.snap.bindings;
         let panel = capture.action.panel();
+        let pad = std::mem::take(&mut self.pads.struck)
+            .into_iter()
+            .find(|(_, repeat)| !repeat)
+            .map(|(c, _)| (c, bindings.owner(panel, c)));
         let caught = ctx.input_mut(|i| {
-            let mut found = None;
+            let mut found = pad;
             i.events.retain(|e| {
                 if found.is_none() {
                     found = super::shortcuts::caught(bindings, panel, e);

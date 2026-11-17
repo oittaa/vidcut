@@ -1,7 +1,7 @@
 use eframe::egui;
 use vidcut_core::shortcuts::{Action, Bindings, Panel};
 
-use super::shortcuts::{held, owner};
+use super::shortcuts::{Pads, held, owner};
 
 pub const HOLD: f64 = 0.25;
 pub const SLOW: f64 = 0.5;
@@ -54,21 +54,23 @@ impl Shuttle {
         out
     }
 
-    pub fn input(&mut self, b: &Bindings, input: &egui::InputState) -> Vec<Jkl> {
+    pub fn input(&mut self, b: &Bindings, input: &egui::InputState, pads: &Pads) -> Vec<Jkl> {
         let pressed: Vec<f64> = input
             .events
             .iter()
-            .filter_map(|e| match owner(b, Panel::App, e) {
-                Some((Action::PlayForward, false)) => Some(1.0),
-                Some((Action::PlayBackward, false)) => Some(-1.0),
+            .filter_map(|e| owner(b, Panel::App, e))
+            .chain(pads.owners(b, Panel::App))
+            .filter_map(|fired| match fired {
+                (Action::PlayForward, false) => Some(1.0),
+                (Action::PlayBackward, false) => Some(-1.0),
                 _ => None,
             })
             .collect();
         self.keys(
             &pressed,
-            held(b, input, Action::Stop),
-            held(b, input, Action::PlayBackward),
-            held(b, input, Action::PlayForward),
+            held(b, input, pads, Action::Stop),
+            held(b, input, pads, Action::PlayBackward),
+            held(b, input, pads, Action::PlayForward),
             input.time,
         )
     }
@@ -112,7 +114,10 @@ mod tests {
     #[test]
     fn a_repeat_of_l_held_alone_is_not_a_press() {
         let input = input(vec![key(Key::L, true, true)], &[Key::L]);
-        assert_eq!(Shuttle::default().input(&Bindings::default(), &input), []);
+        assert_eq!(
+            Shuttle::default().input(&Bindings::default(), &input, &Pads::default()),
+            []
+        );
     }
 
     #[test]
@@ -122,7 +127,7 @@ mod tests {
             &[Key::K],
         );
         assert_eq!(
-            Shuttle::default().input(&Bindings::default(), &input),
+            Shuttle::default().input(&Bindings::default(), &input, &Pads::default()),
             [Jkl::Step(-1.0)]
         );
     }

@@ -94,6 +94,7 @@ pub enum GuiChange {
     Close(GuiPanel),
     Page(Page),
     Grade(GradeLevel),
+    PrinterKeys(Option<bool>),
     Nodes(Vec<String>),
     PageTime(PageTime),
 }
@@ -148,6 +149,7 @@ pub struct TimelineState {
 pub struct GuiState {
     pub page: Page,
     pub grade: GradeLevel,
+    pub printer_keys: bool,
     pub clip: Option<String>,
     pub nodes: Vec<String>,
     pub time: Option<PageClock>,
@@ -3205,6 +3207,9 @@ impl Live {
                 let mut changes: Vec<GuiChange> = grade.map(GuiChange::Grade).into_iter().collect();
                 changes.push(GuiChange::Page(page));
                 self.gui_change(changes, |s| json!(s))
+            }
+            Request::GuiPrinterKeys { on } => {
+                self.gui_change(vec![GuiChange::PrinterKeys(on)], |s| json!(s))
             }
             Request::GuiNodes { nodes } => {
                 self.gui_change(vec![GuiChange::Nodes(nodes)], |s| json!(s))

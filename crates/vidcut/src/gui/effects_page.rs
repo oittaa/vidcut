@@ -84,6 +84,7 @@ pub(super) struct EffectsPage {
     held: Option<Held>,
     pub(super) graded: Option<super::color_page::Graded>,
     pub(super) grading: GradeLevel,
+    pub(super) printer_keys: bool,
     boxed: Option<Boxed>,
     pan: Vec2,
     zoom: f32,
@@ -112,6 +113,7 @@ impl Default for EffectsPage {
             held: None,
             graded: None,
             grading: GradeLevel::Clip,
+            printer_keys: false,
             boxed: None,
             pan: Vec2::ZERO,
             zoom: 1.0,
@@ -2475,7 +2477,7 @@ impl Workspace {
 
     pub(super) fn effects_keys(&mut self, fired: &Fired, input: &egui::InputState) {
         let bindings = self.snap.bindings.clone();
-        let mine = Fired::of_panel(&bindings, input, Panel::Effects);
+        let mine = Fired::of_panel(&bindings, input, &self.pads, Panel::Effects);
         if mine.pressed(Action::PreviousNodeKeyframe) {
             self.node_key_step(-1);
         }
@@ -2503,7 +2505,7 @@ impl Workspace {
         if fired.struck(Action::Stop) {
             asks.push(json!({ "speed": 0.0 }));
         }
-        for jkl in self.shuttle.input(&bindings, input) {
+        for jkl in self.shuttle.input(&bindings, input, &self.pads) {
             asks.push(match jkl {
                 Jkl::Play(dir) => {
                     json!({ "speed": crate::gui::timeline::tools::faster(speed, dir) })

@@ -7,6 +7,7 @@ use vidcut_core::model::{Grade, Picture};
 use vidcut_core::ops::grade::{GradeOf, checked, printed};
 use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::request::{GradeLevel, Page, PrinterColor};
+use vidcut_core::shortcuts::{Action, PRINTER, Panel};
 
 use super::workspace::Workspace;
 
@@ -89,6 +90,20 @@ fn named(of: &GradeOf) -> (String, Value) {
         GradeOf::Clip(id) => ("clips".into(), json!(id)),
         GradeOf::Timeline => ("timeline".into(), json!(true)),
     }
+}
+
+fn printer_label(color: PrinterColor, points: f64) -> String {
+    let name = match color {
+        PrinterColor::Master => "Master",
+        PrinterColor::Red => "Red",
+        PrinterColor::Green => "Green",
+        PrinterColor::Blue => "Blue",
+        PrinterColor::Cyan => "Cyan",
+        PrinterColor::Magenta => "Magenta",
+        PrinterColor::Yellow => "Yellow",
+    };
+    let sign = if points > 0.0 { "Plus" } else { "Minus" };
+    format!("{sign} {name}")
 }
 
 fn grade_switch(ui: &mut Ui, level: GradeLevel) -> Option<GradeLevel> {
@@ -652,15 +667,6 @@ impl Workspace {
                 ui.add_space(12.0);
             }
         });
-        if let Some(point) = point {
-            let lights = crate::preferences::load()
-                .map(|p| p.color)
-                .unwrap_or_default();
-            changes.push(Change {
-                field: "offset",
-                value: json!(printed(g.offset, point, &lights)),
-            });
-        }
         let c = &mut changes;
         ui.horizontal(|ui| {
             let percent = (0.0, 100.0);
@@ -733,6 +739,100 @@ impl Workspace {
                 self.send("grade.set", Value::Object(params));
             }
             None => {}
+        }
+        if let Some(point) = point {
+            self.printer_point(point);
+        }
+    }
+
+    fn printer_point(&mut self, point: (PrinterColor, f64)) {
+        let Some((of, _, _)) = self.grade_shown() else {
+            return;
+        };
+        if let Some(h) = &mut self.effects_page.graded
+            && h.of == of
+        {
+            let lights = crate::preferences::load()
+                .map(|p| p.color)
+                .unwrap_or_default();
+            h.grade.offset = printed(h.grade.offset, point, &lights);
+        }
+        let (field, target) = named(&of);
+        let mut params = Map::from_iter([(field, target)]);
+        params.insert("color".into(), json!(point.0));
+        params.insert("points".into(), json!(point.1));
+        self.send("grade.printer", Value::Object(params));
+    }
+
+    fn printing(&self) -> bool {
+        self.effects_page.printer_keys
+            && self.effects_page.page == Page::Color
+            && self.project().is_some()
+    }
+
+    pub(super) fn printer_keys(&mut self, ctx: &egui::Context) {
+        if !self.printing() {
+            return;
+        }
+        let bindings = self.snap.bindings.clone();
+        let mut points = Vec::new();
+        let mut keep = |action: Option<Action>| match action.and_then(Action::printer) {
+            Some(point) => {
+                points.push(point);
+                false
+            }
+            None => true,
+        };
+        ctx.input_mut(|i| {
+            i.events.retain(|e| {
+                keep(super::shortcuts::owner(&bindings, Panel::Color, e).map(|(a, _)| a))
+            })
+        });
+        self.pads
+            .struck
+            .retain(|(c, _)| keep(bindings.owner(Panel::Color, *c)));
+        for point in points {
+            self.printer_point(point);
+        }
+    }
+
+    pub(super) fn color_menu(&mut self, ui: &mut Ui) {
+        let on = self.effects_page.printer_keys;
+        let bindings = self.snap.bindings.clone();
+        let shortcut = |a: Action| bindings.first(a).unwrap_or_default();
+        let toggle = egui::Button::selectable(on, "Printer Light Hotkeys")
+            .shortcut_text(shortcut(Action::PrinterKeys));
+        if ui.add(toggle).clicked() {
+            self.send("gui.printer_keys", json!({ "on": !on }));
+            ui.close();
+        }
+        ui.separator();
+        let printing = self.printing();
+        for (menu, size) in [
+            ("Full Printer Light", 1.0),
+            ("Half Printer Light", 0.5),
+            ("Quarter Printer Light", 0.25),
+        ] {
+            ui.add_enabled_ui(printing, |ui| {
+                ui.menu_button(menu, |ui| {
+                    for &(action, color, points) in &PRINTER {
+                        if points.abs() != size {
+                            continue;
+                        }
+                        let item = egui::Button::new(printer_label(color, points))
+                            .shortcut_text(shortcut(action));
+                        if ui.add(item).clicked() {
+                            self.printer_point((color, points));
+                            ui.close();
+                        }
+                    }
+                });
+            });
+        }
+        if !on {
+            super::dialog::why(ui, "printer light hotkeys are off");
+        } else if !printing {
+            super::dialog::why(ui, "open the Color page");
         }
     }
 }

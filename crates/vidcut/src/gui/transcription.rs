@@ -14,7 +14,7 @@ use vidcut_core::shortcuts::{Action, Bindings, Panel};
 
 use super::export::Ask;
 use super::fillers::{FillerEditor, Lists, Scope};
-use super::shortcuts::owner;
+use super::shortcuts::{Pads, owner};
 use super::subclip::NewSubclip;
 use super::theme;
 use super::window::{Separate, Tool};
@@ -283,8 +283,36 @@ fn digit(key: Key) -> Option<usize> {
     .position(|k| *k == key)
 }
 
+fn pressed_of(
+    own: Option<(Action, bool)>,
+    app: Option<(Action, bool)>,
+    timeline: bool,
+) -> Option<Pressed> {
+    match (own, app) {
+        (Some((Action::SelectSentence, false)), _) => Some(Pressed::Sentence),
+        (_, Some((Action::Delete, false))) => Some(Pressed::Delete),
+        (_, Some((Action::SelectAll, _))) => Some(Pressed::All),
+        (_, Some((Action::Copy, _))) => Some(Pressed::Copy),
+        (_, Some((Action::Cut, _))) if timeline => Some(Pressed::Cut),
+        (_, Some((Action::Paste, _))) if timeline => Some(Pressed::Paste),
+        _ => None,
+    }
+}
+
+fn keep(keys: &mut Vec<Pressed>, pressed: Option<Pressed>) -> bool {
+    match pressed {
+        Some(k) => {
+            if !keys.contains(&k) {
+                keys.push(k);
+            }
+            false
+        }
+        None => true,
+    }
+}
+
 impl TranscriptionUi {
-    pub(super) fn take_keys(&mut self, ctx: &egui::Context, b: &Bindings) {
+    pub(super) fn take_keys(&mut self, ctx: &egui::Context, b: &Bindings, pads: &mut Pads) {
         let keys = &mut self.keys;
         let picking = self.picking.is_some();
         let timeline = self
@@ -309,26 +337,21 @@ impl TranscriptionUi {
                         modifiers,
                         ..
                     } if !modifiers.any() => Some(Pressed::Clear),
-                    _ => match (owner(b, Panel::Transcription, e), owner(b, Panel::App, e)) {
-                        (Some((Action::SelectSentence, false)), _) => Some(Pressed::Sentence),
-                        (_, Some((Action::Delete, false))) => Some(Pressed::Delete),
-                        (_, Some((Action::SelectAll, _))) => Some(Pressed::All),
-                        (_, Some((Action::Copy, _))) => Some(Pressed::Copy),
-                        (_, Some((Action::Cut, _))) if timeline => Some(Pressed::Cut),
-                        (_, Some((Action::Paste, _))) if timeline => Some(Pressed::Paste),
-                        _ => None,
-                    },
+                    _ => pressed_of(
+                        owner(b, Panel::Transcription, e),
+                        owner(b, Panel::App, e),
+                        timeline,
+                    ),
                 };
-                match pressed {
-                    Some(k) => {
-                        if !keys.contains(&k) {
-                            keys.push(k);
-                        }
-                        false
-                    }
-                    None => true,
-                }
+                keep(keys, pressed)
             });
+        });
+        pads.struck.retain(|(c, repeat)| {
+            let of = |panel| b.owner(panel, *c).map(|a| (a, *repeat));
+            keep(
+                keys,
+                pressed_of(of(Panel::Transcription), of(Panel::App), timeline),
+            )
         });
     }
 
@@ -975,7 +998,7 @@ impl Workspace {
             ui.spacing_mut().item_spacing.y = 8.0;
             let separate = ui.ctx().viewport_id() != egui::ViewportId::ROOT;
             if separate && !ui.ctx().egui_wants_keyboard_input() {
-                t.take_keys(ui.ctx(), &bindings);
+                t.take_keys(ui.ctx(), &bindings, &mut Pads::default());
                 if !t.keys.is_empty() {
                     ui.ctx().request_repaint_of(egui::ViewportId::ROOT);
                 }
