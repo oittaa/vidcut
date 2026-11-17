@@ -21,7 +21,8 @@ The Primaries palette of the Color page is the model. [Spec §14](../spec.md#14-
 
 - One corrector with the math of spec §14.1–§14.7 and §14.9. It holds Temp, Tint, Lift, Gamma, Gain, Offset and the master wheels.
   It also holds Lum Mix, Saturation, Hue, Color Boost, Contrast below 1 and the Log wheels.
-- The defaults are those of a new project: Pivot 0.5, Low Range 0.333 and High Range 0.667 (spec §14.9).
+- The defaults are those of a new project: Pivot 0.435, Low Range 0.333 and High Range 0.55 (spec §14.1, §14.9).
+- The Log wheels use the curves of a new project: the legacy Log setting off (spec §14.9).
 - The controls show the numbers of the window in §14.1.
 - The clip grade runs after the effects of the clip and before the speed change ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
 - The timeline grade runs on the mixed picture, before subtitles and the encode (§13).
@@ -34,8 +35,8 @@ The Primaries palette of the Color page is the model. [Spec §14](../spec.md#14-
 
 - The formula of the Contrast S-curve, and its place before or after Saturation and Hue. The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/cases/`.
 - The curves of Shadows and Highlights, and the filter of the three controls of spec §14.8. The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/flat_cases/`.
-- The window of a project with the legacy Log setting off: the defaults that it shows (spec §14.1).
-- The Log wheels with the legacy setting on. The data is in `out/logfit/` and `out/cases/` (cases `l_C*`, `m_log_*`).
+- The cubic pieces of the Log curves with the legacy setting off, and the Midtone bump (spec §14.9).
+  The data is in `out/logfit/` and `out/cases/` (cases `l_C*`, `m_log_*`).
 
 **Not this item:**
 

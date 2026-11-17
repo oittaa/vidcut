@@ -5401,9 +5401,8 @@ The window shows other numbers than the values of the formulas:
 
 - Contrast, Pivot, Temp, Tint, Color Boost, Shadows, Highlights, Midtone Detail, Low Range and the Log wheels keep the number of the window.
 - Thus one step of the Offset window is 7.5 / 1023 of a code value.
-- The defaults in the window come from the test project. It had the value 2 of the legacy Log setting (§14.9).
-  - With the setting off, a grade with no value uses Pivot 0.5 and High Range 0.667.
-  - The window of a project with the setting off was not checked.
+- The defaults in the window are those of a new project. There, the legacy Log setting is off (§14.9).
+  - With the setting on, a grade with no value uses Pivot 0.5 and High Range 0.667.
 
 ### 14.2 Lift, Gamma, Gain and Offset (pp. 3145, 3157)
 
@@ -5478,7 +5477,7 @@ Temp and Tint are a Bradford adaptation, applied to the code values with the Rec
 ### 14.7 Contrast and Pivot (p. 3146)
 
 - A Contrast `c` below 1 is a straight line on each channel: `out = pivot + c · (x − pivot)`.
-- A grade with no Pivot value uses 0.5. With the value 2 of the legacy Log setting (§14.9), it uses 0.435.
+- A grade with no Pivot value uses 0.435. With the legacy Log setting on (§14.9), it uses 0.5.
 - A Contrast above 1 is an S-curve, with "Use S-curve for contrast" on (the default, pp. 156, 3146).
   - On gray, the curve keeps 0, and 1 within 5e-4.
   - Contrast 1.5 has a slope of about 2.1 near the Pivot and 0.35 at 0 and 1. Contrast 2 is a step at the Pivot.
@@ -5512,7 +5511,29 @@ These three controls use the pixels around a pixel. On a frame of one color, the
 
 ### 14.9 Log wheels (pp. 156, 3152–3157)
 
-The project setting "Use legacy Log grading ranges and curve" is off in a new project (p. 156). This section gives the Log wheels with the setting off.
+The project setting "Use legacy Log grading ranges and curve" selects one of two sets of Log curves (p. 156). It is off in a new project. A project from an older version opens with it on.
+
+- The script value of this setting is `colorUseLegacyLogGrades`. Off is 2, and on is 1.
+  - A script can set only 0 and 1. The value 0 gives the curves of on, but the window shows it as off.
+
+With the setting off (the default):
+
+- Each Log wheel changes only its own channel. The change reads that channel, not the luma.
+- A grade with no range values uses Low Range 0.333 and High Range 0.55.
+- With Low Range `lo` and High Range `hi`, these parts are exact:
+  - The Shadow wheel `s` adds `s · (lo − x)` when `s > 0`, and `s · (lo − x) / lo` when `s < 0`. This holds up to a point of a grid of 0.05, about 0.1 below `lo`.
+  - Thus it holds up to 0.2 for `lo` from 0.3 to 0.34, and up to 0.25 for `lo` 0.345 and 0.35.
+  - The Shadow change is 0 from about `lo + 0.06`. This point also moves in steps of 0.05.
+  - The Highlight wheel `h` adds `h · (x − hi) / (1 − hi)` when `h > 0`, and `h · (x − hi)` when `h < 0`, well above `hi`.
+- Between these parts, the curves are pieces of cubics, with small overshoots. The fit of these pieces is not done.
+- The Midtone wheel `m` adds a bump between the ranges. At the default ranges, the bump is not 0 from 0.2 to 0.63.
+  - Its height is about `0.75 · |m| · (hi − lo)`.
+  - Its peak moves to a lower value when `m` increases. Thus the bump is not linear in `m`.
+- The change of a positive Shadow value is linear in the value to 3.7e-4.
+- Outside 0 to 1, the exact parts match to 1.3e-6.
+- With a Log value set, values above 0 and up to 1 come out about 0.00049 low, in all channels. This spec does not copy this fault.
+
+With the setting on:
 
 - Each Log wheel adds its value to its own channel, with a weight `w` between 0 and 1.
   - `out_c = v_c + s_c · ws(y) + m_c · wm(y) + h_c · wh(y)`, with `s`, `m` and `h` the Shadow, Midtone and Highlight values of channel `c`.
@@ -5527,11 +5548,9 @@ The project setting "Use legacy Log grading ranges and curve" is off in a new pr
 - The change is linear in each value, also for a negative value. The three wheels add.
 - Pivot does not change the weights.
 - The weights read the picture after the wheels, the master wheels and Contrast. Saturation comes after the Log wheels.
-- The master ring of a Log wheel sets R, G and B to the same value.
 - These rules match 38 renders to 4.1e-7, and the renders of the order to 5.7e-7.
-- The script value of this setting is `colorUseLegacyLogGrades`. The values 0 and 1 give the rules above. The test project had the value 2, which gives other curves.
-  - With the value 2, the Shadow wheel `s` adds about `s · (0.333 − x)` below 0.333, and the Highlight wheel `h` adds about `h · (x − 0.55) / 0.45` above 0.55.
-  - These changes are per channel. The joins are pieces of cubics, on a grid of 0.05.
+
+With both settings, the master ring of a Log wheel sets R, G and B to the same value.
 
 ### 14.10 Nodes and mixers (pp. 3385, 3409–3417)
 
@@ -5557,7 +5576,10 @@ The project setting "Use legacy Log grading ranges and curve" is off in a new pr
   - 36 Divide, 38 Linear Dodge, 40 Linear Burn, 42 Linear Light, 44 Vivid Light, 46 Pin Light.
   - 48 Hard Mix, 50 Lighter Color, 52 Darker Color.
   - An odd number, or a number above 52, gives Normal.
-- Not measured: an input node with a window or a qualifier. Its key output can then act as the opacity and also limit the change of the node.
+- An input node with a window gives its full change to a Layer Mixer. The window does not limit this change.
+  - The key output of the node is its opacity `kᵢ`: `clamp(kg · w + ko)`, with `w` the key of the window (§14.11).
+  - Thus outside the window, the inputs below show. This matches renders with a Circle window on input 0, 1 or 2 to 6e-7.
+- Not measured: an input node with a qualifier.
 
 ### 14.11 Keys and the Key Mixer (pp. 3431–3438)
 
@@ -5615,6 +5637,5 @@ A key is a value for each pixel. It sets how much of the change of a node the pi
 
 - The S-curve of Contrast (§14.7).
 - The curves and the filter of Shadows, Highlights and Midtone Detail (§14.8).
-- The Log wheels with the value 2 of the legacy setting (§14.9).
-- The window of a project with the legacy Log setting off (§14.1).
+- The cubic pieces of the Log curves with the legacy setting off, and the Midtone bump (§14.9).
 - The effect of the working luminance on Shadows and Highlights. These runs use HDR 1000. A script cannot change this setting.
