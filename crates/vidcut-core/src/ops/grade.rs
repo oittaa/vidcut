@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::error::{Error, Result};
-use crate::model::{Grade, Project};
+use crate::model::{Clip, Grade, Project};
 use crate::preferences::ColorPrefs;
 use crate::request::{GradeChange, PrinterColor};
 
@@ -148,10 +148,21 @@ pub fn printer(
     Ok(())
 }
 
+fn grades(p: &Project, ti: usize, c: &Clip) -> Result<()> {
+    takes(p, ti, c)?;
+    if c.generator.is_some() {
+        return Err(Error::invalid(format!(
+            "{} is a generator, which takes no grade",
+            c.id
+        )));
+    }
+    Ok(())
+}
+
 fn clip_grade(p: &Project, id: &str) -> Result<Grade> {
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
-    takes(p, ti, c)?;
+    grades(p, ti, c)?;
     Ok(c.picture
         .as_ref()
         .and_then(|pic| pic.grade.clone())
@@ -164,7 +175,7 @@ pub fn set(p: &mut Project, ids: &[String], change: &GradeChange) -> Result<()> 
     }
     for id in ids {
         let (ti, ci) = locate(p, id)?;
-        takes(p, ti, &p.tracks[ti].clips[ci])?;
+        grades(p, ti, &p.tracks[ti].clips[ci])?;
         let c = &p.tracks[ti].clips[ci];
         let old = c
             .picture

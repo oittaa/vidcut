@@ -443,9 +443,11 @@ impl Workspace {
         let page = self.effects_page.page;
         live::GuiState {
             page,
-            clip: matches!(page, Page::Effects | Page::Color)
-                .then(|| self.effects_clip())
-                .flatten(),
+            clip: match page {
+                Page::Effects => self.effects_clip(),
+                Page::Color => self.color_clip(),
+                Page::Cut => None,
+            },
             nodes: self.effects_page.nodes.clone(),
             time: self.page_clock(),
             edit,

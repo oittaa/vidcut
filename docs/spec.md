@@ -2754,6 +2754,11 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - Log shows Shadow, Midtone, Highlight and Offset wheels. It also shows Low Range and High Range (p. 3156).
   - Each clip has one or more nodes, and each node holds corrections (p. 3385).
   - vidcut: each clip has one primary correction. Nodes come later ([todo](todo/color-page.md)).
+- **Clips**, measured in Resolve Studio 21.2:
+  - Generators and Text titles take no grade. They are not in the clip strip of the Color page.
+  - Text+ titles and compound clips take a grade.
+  - With a generator above a clip at the playhead, the Color page shows the clip below.
+  - vidcut: `grade.set` refuses a title or a generator. The Color page takes the topmost clip at the playhead that takes a grade.
 - **Values** (pp. 3146–3147). The defaults are measured in Resolve Studio 21.2:
   - Lift and Gamma are 0. Gain is 1. Offset is 25.
   - Contrast is 1, and Pivot is 0.435.
@@ -2769,8 +2774,15 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - At a Lum Mix of 100, a change to R, G or B moves the other two channels. Thus the luma stays (p. 3147).
   - Offset and printer points change only their own channel. They do not use Lum Mix (p. 3157).
   - Shadows, Highlights and Midtone Detail use a smoothed luma. A guided filter makes it, so edges stay.
+  - The smoothed luma counts the clear parts of a picture as black.
+  - On a picture with alpha, the grade changes the colors before the alpha multiplies them. The alpha does not change.
+  - Contrast continues on straight lines below 0 and above 1. This is measured from −4 to 8.
+  - Without color management, the grade is the same in Rec.709, Rec.2020, DaVinci Wide Gamut, Rec.2100 ST2084 and Rec.2100 HLG timelines.
   - The grade of a clip comes after its effects and before its speed change, composite mode and opacity ([§13](#13-order-of-operations-pp-287296-3407)).
-  - vidcut matches the renders. [design](design/export.md#the-grade) gives the math and the order of the parts.
+  - Resolve reads its curve tables of Shadows, Highlights, Midtone Detail and the Log wheels half a step off.
+  - Thus these parts move a value by up to 1/1023, also where their curve makes no change.
+  - vidcut does not copy this fault. With Shadows 100, vidcut and Resolve differ by up to 0.06 on dark colored pixels.
+  - vidcut matches the other renders. [design](design/export.md#the-grade) gives the math and the order of the parts.
 - **Printer points** (pp. 3157–3159):
   - In Bars mode, each Offset bar has a Plus button at the top and a Minus button at the bottom.
   - Measured: one point moves its channel by the Step Size times the Density Increment of that channel. With the defaults, this is 1 on the Offset number.

@@ -5,6 +5,7 @@ use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
 use vidcut_core::model::{Grade, Picture};
 use vidcut_core::ops::grade::{checked, printed};
+use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::request::{Page, PrinterColor};
 
 use super::workspace::Workspace;
@@ -469,8 +470,13 @@ impl Workspace {
         self.sync_picture_preview();
     }
 
+    pub(super) fn color_clip(&self) -> Option<String> {
+        let p = self.project()?;
+        super::placing::topmost_by(p, self.snap.timeline.position, takes_effects)
+    }
+
     fn palette(&mut self, ui: &mut Ui) {
-        let Some(id) = self.effects_clip() else {
+        let Some(id) = self.color_clip() else {
             self.effects_page.graded = None;
             ui.label("No Clip at the Playhead");
             return;
@@ -479,11 +485,6 @@ impl Workspace {
             self.effects_page.graded = None;
             return;
         };
-        if !vidcut_core::ops::picture::has_picture(clip) {
-            self.effects_page.graded = None;
-            ui.label("This Clip Has No Picture");
-            return;
-        }
         let name = clip.name.clone().unwrap_or_else(|| id.clone());
         let stored = clip
             .picture

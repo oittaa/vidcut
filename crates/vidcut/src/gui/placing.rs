@@ -509,12 +509,16 @@ pub(super) fn target<'a>(p: &'a Project, selected: &[String], at: i64) -> Option
 }
 
 pub(super) fn topmost(p: &Project, at: i64) -> Option<String> {
+    topmost_by(p, at, has_picture)
+}
+
+pub(super) fn topmost_by(p: &Project, at: i64, keep: fn(&Clip) -> bool) -> Option<String> {
     p.tracks
         .iter()
         .rev()
         .filter(|t| t.kind == TrackKind::Video && t.video_enabled)
         .flat_map(|t| t.clips.iter())
-        .find(|c| c.enabled && c.start <= at && at < c.end() && has_picture(c))
+        .find(|c| c.enabled && c.start <= at && at < c.end() && keep(c))
         .map(|c| c.id.clone())
 }
 

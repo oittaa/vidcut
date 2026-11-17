@@ -2611,7 +2611,7 @@ pub enum Request {
     /// video track above the highest one with clips in those frames, made
     /// when there is none, or V1 when nothing is there), over what is there.
     /// Returns its clip id. `picture.set` places it. It has no speed and takes
-    /// no effects.
+    /// no effects or grade.
     #[serde(rename = "generators.add")]
     GeneratorsAdd {
         /// `solid_color`: one color over the whole picture.
