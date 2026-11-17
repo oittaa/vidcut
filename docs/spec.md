@@ -5374,6 +5374,14 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - A LUT on the node of a compound clip gives the same picture as a LUT on the node of a plain clip.
 - A generator and a title have no Media Pool clip. A script gets no node graph for them, so it cannot give them a LUT.
 
+**The Output LUT of the project**, measured in Resolve Studio 21.2:
+
+- It uses the math of a node LUT. A grid of values gives `T(x)`, with a difference of 5.8e-8 at most.
+- It works on the mixed picture of the timeline.
+- It also applies to a gap. In a render without alpha, a gap becomes `T(0)`, with a difference of 5e-9 at most.
+- In a render with alpha, a picture with alpha gives `T(clamp(C / A)) * A`. The alpha does not change. Where `A` is 0, the result is 0.
+- vidcut does the same (`fs_lut`, [design](design/README.md#lut-files)).
+
 A script gets no error for a broken file:
 
 - A lower-case `lut_3d_size` line, or no size line, gives no LUT.

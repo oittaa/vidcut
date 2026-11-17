@@ -24,9 +24,6 @@ vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../desi
   - Why: the LUT runs on the enlarged frames, and they have no alpha ([upscale.md](upscale.md)).
 - The Input Lookup Table of the project (manual p. 152). vidcut has an input LUT on a media item only.
 - Measure in Resolve. No script reaches these, so each needs the window of Resolve:
-  - The Output LUT of the project: does it use the math of the node LUT?
-  - A gap through the Output LUT.
-  - A picture with an alpha channel through the Output LUT.
   - An input LUT on a clip with the Alpha Mode Invert: is it `T(C) * (1 - A)`?
   - An input LUT on a Premultiplied clip in a Smooth Cut.
   - A LUT on a generator and on a title, in the Color page.
