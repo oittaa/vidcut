@@ -102,8 +102,7 @@ fn printer_label(color: PrinterColor, points: f64) -> String {
         PrinterColor::Magenta => "Magenta",
         PrinterColor::Yellow => "Yellow",
     };
-    let sign = if points > 0.0 { "Plus" } else { "Minus" };
-    format!("{sign} {name}")
+    format!("{name} {}", if points > 0.0 { "+" } else { "-" })
 }
 
 fn grade_switch(ui: &mut Ui, level: GradeLevel) -> Option<GradeLevel> {
@@ -765,9 +764,15 @@ impl Workspace {
     }
 
     fn printing(&self) -> bool {
-        self.effects_page.printer_keys
-            && self.effects_page.page == Page::Color
-            && self.project().is_some()
+        self.snap.printer_keys && self.effects_page.page == Page::Color && self.project().is_some()
+    }
+
+    pub(super) fn switch_printer_keys(&mut self) {
+        let on = !self.snap.printer_keys;
+        self.send(
+            "preferences.set",
+            json!({ "color": { "printer_keys": on } }),
+        );
     }
 
     pub(super) fn printer_keys(&mut self, ctx: &egui::Context) {
@@ -797,16 +802,16 @@ impl Workspace {
     }
 
     pub(super) fn color_menu(&mut self, ui: &mut Ui) {
-        let on = self.effects_page.printer_keys;
+        let on = self.snap.printer_keys;
+        let page = self.effects_page.page == Page::Color && self.project().is_some();
         let bindings = self.snap.bindings.clone();
         let shortcut = |a: Action| bindings.first(a).unwrap_or_default();
         let toggle = egui::Button::selectable(on, "Printer Light Hotkeys")
             .shortcut_text(shortcut(Action::PrinterKeys));
-        if ui.add(toggle).clicked() {
-            self.send("gui.printer_keys", json!({ "on": !on }));
+        if ui.add_enabled(page, toggle).clicked() {
+            self.switch_printer_keys();
             ui.close();
         }
-        ui.separator();
         let printing = self.printing();
         for (menu, size) in [
             ("Full Printer Light", 1.0),
@@ -829,10 +834,10 @@ impl Workspace {
                 });
             });
         }
-        if !on {
-            super::dialog::why(ui, "printer light hotkeys are off");
-        } else if !printing {
+        if !page {
             super::dialog::why(ui, "open the Color page");
+        } else if !on {
+            super::dialog::why(ui, "printer light hotkeys are off");
         }
     }
 }

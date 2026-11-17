@@ -3917,15 +3917,6 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         grade: Option<GradeLevel>,
     },
-    /// The printer light hotkeys. While they are on, the keys of the numeric
-    /// keypad move the printer points of the grade that the `color` page
-    /// shows (`grade.printer`). Without `on`, they switch. They are off
-    /// when the GUI starts. Answers what `gui.state` does.
-    #[serde(rename = "gui.printer_keys")]
-    GuiPrinterKeys {
-        #[serde(default)]
-        on: Option<bool>,
-    },
     /// Select nodes in the node editor of the effects page, by name. The
     /// Inspector and the viewer then show the last one. An empty list
     /// selects none. Answers what `gui.state` does.
@@ -3951,9 +3942,8 @@ pub enum Request {
     },
     /// What only the GUI keeps: the page, the clip of the effects page, its
     /// nodes selected and its playhead (`time`, in frames from the In), the
-    /// grade of the color page and its printer light hotkeys
-    /// (`printer_keys`), the edit points selected, the target track, the
-    /// timeline's zoom and Timeline Options, and the windows open.
+    /// grade of the color page, the edit points selected, the target track,
+    /// the timeline's zoom and Timeline Options, and the windows open.
     #[serde(rename = "gui.state")]
     GuiState {},
     /// What an edit takes from the source. The two icons at the left of the edit buttons.
@@ -6282,7 +6272,6 @@ impl Request {
                 | Self::GuiShow { .. }
                 | Self::GuiClose { .. }
                 | Self::GuiPage { .. }
-                | Self::GuiPrinterKeys { .. }
                 | Self::GuiNodes { .. }
                 | Self::GuiPageTime { .. }
                 | Self::GuiState {}

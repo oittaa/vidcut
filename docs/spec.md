@@ -2791,21 +2791,30 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
 
     | Channels | Plus | Minus |
     |---|---|---|
-    | Master | Num + | Num Enter |
-    | Red | Num 7 | Num 4 |
-    | Green | Num 8 | Num 5 |
-    | Blue | Num 9 | Num 6 |
-    | Cyan | Num 1 | Num - |
-    | Magenta | Num 2 | Num 0 |
-    | Yellow | Num 3 | Num . |
+    | Master | Num++ | Num+Enter |
+    | Red | Num+7 | Num+4 |
+    | Green | Num+8 | Num+5 |
+    | Blue | Num+9 | Num+6 |
+    | Cyan | Num+1 | Num+- |
+    | Magenta | Num+2 | Num+0 |
+    | Yellow | Num+3 | Num+. |
 
-  - The same keys with Ctrl (Command on a Mac) give a quarter point. The half points have no keys (p. 3158).
-  - Measured: the Color menu has Full Printer Light, Half Printer Light and Quarter Printer Light. Each has a Plus and a Minus item for each row of the table. The items work only while the hotkeys are on.
+  - The same keys with Ctrl (Command on a Mac) give a quarter point, for example Ctrl+Num+7. The half points have no keys (p. 3158).
   - A key of the numeric keypad is a key of its own in Keyboard Customization (p. 125).
   - A key of the numeric keypad that has an action does that action. The other keys of the numeric keypad type timecode (p. 878).
+  - Measured in Resolve Studio 21.2 (Windows):
+    - The Color menu has the item Printer Light Hotkeys (Ctrl+Alt+`). Under it are three submenus: Full Printer Light, Half Printer Light and Quarter Printer Light.
+    - Each submenu has 14 items in this order: Master +, Master -, Red +, Red -, Green +, Green -, Blue +, Blue -, Cyan +, Cyan -, Magenta +, Magenta -, Yellow +, Yellow -.
+    - The menu and Keyboard Customization name a key of the numeric keypad Num+ and the key, for example Num+7, Num++ and Num+Enter.
+    - The state of Printer Light Hotkeys stays after a restart.
+    - On the Edit page, the item Printer Light Hotkeys is grey, and its check mark stays. The three submenus are grey too.
+    - A held key of the numeric keypad repeats. Ten repeats of Num+7 moved the Red Offset by 10 points.
+    - With Num Lock off, the 7 of the numeric keypad gives Home. It did not move a printer point.
   - vidcut: the Plus and Minus buttons, and the Color page of the preferences with Step Size and Density Increment.
   - vidcut: the Color menu and the keys of the table. Each item and key sends `grade.printer` for the grade that the palette shows.
-  - vidcut: the hotkeys are off when the GUI starts. They work only on the Color page. The menu items are off on the other pages.
+  - vidcut: the preference `color.printer_keys` keeps the state of Printer Light Hotkeys.
+  - vidcut: on the other pages, the item Printer Light Hotkeys, its key and the printer items do nothing.
+  - vidcut: a key of the numeric keypad moves printer points only while it gives its digit or sign. Thus with Num Lock off, the key does what it did before.
   - vidcut: the main keys and the main Enter key do not move printer points. Keyboard Customization can give each item other keys.
 - **Timeline grade** (pp. 3404–3405, 3407):
   - The Node Editor has a Clip mode and a Timeline mode. A menu at its top right selects the mode.
@@ -2831,7 +2840,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
 - Each takes `clips` (`clip` for `grade.get`), or `timeline` for the timeline grade of the open timeline.
 - `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
 - `gui.page` with `grade` selects Clip or Timeline on the Color page.
-- `gui.printer_keys` turns the printer light hotkeys on or off. `gui.state` gives `printer_keys`.
+- `preferences.set` with `color.printer_keys` turns the printer light hotkeys on or off.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

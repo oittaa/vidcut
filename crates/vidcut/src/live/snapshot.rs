@@ -284,6 +284,7 @@ pub struct Snapshot {
     pub guides: vidcut_core::preferences::Guides,
     pub scopes: vidcut_core::preferences::Scopes,
     pub show_upscale: bool,
+    pub printer_keys: bool,
     pub bindings: Arc<vidcut_core::shortcuts::Bindings>,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,

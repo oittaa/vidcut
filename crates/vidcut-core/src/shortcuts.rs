@@ -489,8 +489,22 @@ const NAMED_KEYS: &[&str] = &[
 ];
 
 const KEYPAD: [&str; 16] = [
-    "Num0", "Num1", "Num2", "Num3", "Num4", "Num5", "Num6", "Num7", "Num8", "Num9", "Num+", "Num-",
-    "Num*", "Num/", "Num.", "NumEnter",
+    "Num+0",
+    "Num+1",
+    "Num+2",
+    "Num+3",
+    "Num+4",
+    "Num+5",
+    "Num+6",
+    "Num+7",
+    "Num+8",
+    "Num+9",
+    "Num++",
+    "Num+-",
+    "Num+*",
+    "Num+/",
+    "Num+.",
+    "Num+Enter",
 ];
 
 pub fn on_keypad(key: &str) -> bool {
@@ -565,7 +579,8 @@ impl FromStr for Combo {
     fn from_str(text: &str) -> Result<Self> {
         let mut held = Held::default();
         let mut rest = text.trim();
-        while let Some((name, after)) = rest.split_once('+')
+        while key_named(rest).is_none()
+            && let Some((name, after)) = rest.split_once('+')
             && !after.is_empty()
         {
             match name.to_ascii_lowercase().as_str() {
@@ -1566,72 +1581,72 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     printer(
         Action::PrinterFullMasterPlus,
-        &["Num+"],
+        &["Num++"],
         "Plus Master, full point",
     ),
     printer(
         Action::PrinterFullMasterMinus,
-        &["NumEnter"],
+        &["Num+Enter"],
         "Minus Master, full point",
     ),
     printer(
         Action::PrinterFullRedPlus,
-        &["Num7"],
+        &["Num+7"],
         "Plus Red, full point",
     ),
     printer(
         Action::PrinterFullRedMinus,
-        &["Num4"],
+        &["Num+4"],
         "Minus Red, full point",
     ),
     printer(
         Action::PrinterFullGreenPlus,
-        &["Num8"],
+        &["Num+8"],
         "Plus Green, full point",
     ),
     printer(
         Action::PrinterFullGreenMinus,
-        &["Num5"],
+        &["Num+5"],
         "Minus Green, full point",
     ),
     printer(
         Action::PrinterFullBluePlus,
-        &["Num9"],
+        &["Num+9"],
         "Plus Blue, full point",
     ),
     printer(
         Action::PrinterFullBlueMinus,
-        &["Num6"],
+        &["Num+6"],
         "Minus Blue, full point",
     ),
     printer(
         Action::PrinterFullCyanPlus,
-        &["Num1"],
+        &["Num+1"],
         "Plus Cyan, full point",
     ),
     printer(
         Action::PrinterFullCyanMinus,
-        &["Num-"],
+        &["Num+-"],
         "Minus Cyan, full point",
     ),
     printer(
         Action::PrinterFullMagentaPlus,
-        &["Num2"],
+        &["Num+2"],
         "Plus Magenta, full point",
     ),
     printer(
         Action::PrinterFullMagentaMinus,
-        &["Num0"],
+        &["Num+0"],
         "Minus Magenta, full point",
     ),
     printer(
         Action::PrinterFullYellowPlus,
-        &["Num3"],
+        &["Num+3"],
         "Plus Yellow, full point",
     ),
     printer(
         Action::PrinterFullYellowMinus,
-        &["Num."],
+        &["Num+."],
         "Minus Yellow, full point",
     ),
     printer(
@@ -1678,72 +1693,72 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     printer(
         Action::PrinterQuarterMasterPlus,
-        &["Ctrl+Num+"],
+        &["Ctrl+Num++"],
         "Plus Master, quarter point",
     ),
     printer(
         Action::PrinterQuarterMasterMinus,
-        &["Ctrl+NumEnter"],
+        &["Ctrl+Num+Enter"],
         "Minus Master, quarter point",
     ),
     printer(
         Action::PrinterQuarterRedPlus,
-        &["Ctrl+Num7"],
+        &["Ctrl+Num+7"],
         "Plus Red, quarter point",
     ),
     printer(
         Action::PrinterQuarterRedMinus,
-        &["Ctrl+Num4"],
+        &["Ctrl+Num+4"],
         "Minus Red, quarter point",
     ),
     printer(
         Action::PrinterQuarterGreenPlus,
-        &["Ctrl+Num8"],
+        &["Ctrl+Num+8"],
         "Plus Green, quarter point",
     ),
     printer(
         Action::PrinterQuarterGreenMinus,
-        &["Ctrl+Num5"],
+        &["Ctrl+Num+5"],
         "Minus Green, quarter point",
     ),
     printer(
         Action::PrinterQuarterBluePlus,
-        &["Ctrl+Num9"],
+        &["Ctrl+Num+9"],
         "Plus Blue, quarter point",
     ),
     printer(
         Action::PrinterQuarterBlueMinus,
-        &["Ctrl+Num6"],
+        &["Ctrl+Num+6"],
         "Minus Blue, quarter point",
     ),
     printer(
         Action::PrinterQuarterCyanPlus,
-        &["Ctrl+Num1"],
+        &["Ctrl+Num+1"],
         "Plus Cyan, quarter point",
     ),
     printer(
         Action::PrinterQuarterCyanMinus,
-        &["Ctrl+Num-"],
+        &["Ctrl+Num+-"],
         "Minus Cyan, quarter point",
     ),
     printer(
         Action::PrinterQuarterMagentaPlus,
-        &["Ctrl+Num2"],
+        &["Ctrl+Num+2"],
         "Plus Magenta, quarter point",
     ),
     printer(
         Action::PrinterQuarterMagentaMinus,
-        &["Ctrl+Num0"],
+        &["Ctrl+Num+0"],
         "Minus Magenta, quarter point",
     ),
     printer(
         Action::PrinterQuarterYellowPlus,
-        &["Ctrl+Num3"],
+        &["Ctrl+Num+3"],
         "Plus Yellow, quarter point",
     ),
     printer(
         Action::PrinterQuarterYellowMinus,
-        &["Ctrl+Num."],
+        &["Ctrl+Num+."],
         "Minus Yellow, quarter point",
     ),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),

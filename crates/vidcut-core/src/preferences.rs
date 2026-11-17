@@ -62,6 +62,9 @@ pub struct ColorPrefs {
     pub printer_density: [f64; 3],
     /// Step Size of red, green and blue. Default 1.
     pub printer_step: [f64; 3],
+    /// The printer light hotkeys: the keys of the numeric keypad move printer
+    /// points on the Color page. Default off.
+    pub printer_keys: bool,
 }
 
 impl Default for ColorPrefs {
@@ -69,6 +72,7 @@ impl Default for ColorPrefs {
         Self {
             printer_density: [1.0; 3],
             printer_step: [1.0; 3],
+            printer_keys: false,
         }
     }
 }
@@ -80,6 +84,8 @@ pub struct ColorPrefsPatch {
     pub printer_density: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub printer_step: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub printer_keys: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1145,6 +1151,7 @@ impl Preferences {
             let c = &mut p.color;
             c.printer_density = x.printer_density.unwrap_or(c.printer_density);
             c.printer_step = x.printer_step.unwrap_or(c.printer_step);
+            c.printer_keys = x.printer_keys.unwrap_or(c.printer_keys);
         }
         p.check()?;
         Ok(p)

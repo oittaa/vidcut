@@ -334,9 +334,6 @@ impl Workspace {
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
                 live::GuiChange::Grade(level) => self.set_grading(level),
-                live::GuiChange::PrinterKeys(on) => {
-                    self.effects_page.printer_keys = on.unwrap_or(!self.effects_page.printer_keys)
-                }
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
                 live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
@@ -450,7 +447,6 @@ impl Workspace {
         live::GuiState {
             page,
             grade: self.effects_page.grading,
-            printer_keys: self.effects_page.printer_keys,
             clip: match (page, self.effects_page.grading) {
                 (Page::Effects, _) => self.effects_clip(),
                 (Page::Color, GradeLevel::Clip) => self.color_clip(),
@@ -1467,8 +1463,8 @@ impl Workspace {
         if fired.pressed(Action::Help) {
             self.help.open = !self.help.open;
         }
-        if fired.struck(Action::PrinterKeys) {
-            self.send("gui.printer_keys", json!({}));
+        if fired.struck(Action::PrinterKeys) && self.effects_page.page == Page::Color {
+            self.switch_printer_keys();
         }
         if fired.pressed(Action::Preferences) {
             self.open_preferences(ctx);

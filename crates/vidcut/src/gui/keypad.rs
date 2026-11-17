@@ -6,7 +6,7 @@ use vidcut_core::shortcuts::{Action, Combo, Held, Panel, key_named, on_keypad};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, ElementState, KeyEvent, StartCause, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
-use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::WindowId;
 
 use super::shortcuts::Pads;
@@ -72,6 +72,7 @@ impl Keypad {
             (ElementState::Pressed, false) => {
                 let w = &s.watch;
                 !synthetic
+                    && gives_sign(&key.logical_key)
                     && (w.capture || (w.root == Some(window) && w.free && w.taken.contains(&combo)))
             }
         };
@@ -90,25 +91,29 @@ impl Keypad {
 
 fn pad_name(code: KeyCode) -> Option<&'static str> {
     let name = match code {
-        KeyCode::Numpad0 => "Num0",
-        KeyCode::Numpad1 => "Num1",
-        KeyCode::Numpad2 => "Num2",
-        KeyCode::Numpad3 => "Num3",
-        KeyCode::Numpad4 => "Num4",
-        KeyCode::Numpad5 => "Num5",
-        KeyCode::Numpad6 => "Num6",
-        KeyCode::Numpad7 => "Num7",
-        KeyCode::Numpad8 => "Num8",
-        KeyCode::Numpad9 => "Num9",
-        KeyCode::NumpadAdd => "Num+",
-        KeyCode::NumpadSubtract => "Num-",
-        KeyCode::NumpadMultiply => "Num*",
-        KeyCode::NumpadDivide => "Num/",
-        KeyCode::NumpadDecimal => "Num.",
-        KeyCode::NumpadEnter => "NumEnter",
+        KeyCode::Numpad0 => "Num+0",
+        KeyCode::Numpad1 => "Num+1",
+        KeyCode::Numpad2 => "Num+2",
+        KeyCode::Numpad3 => "Num+3",
+        KeyCode::Numpad4 => "Num+4",
+        KeyCode::Numpad5 => "Num+5",
+        KeyCode::Numpad6 => "Num+6",
+        KeyCode::Numpad7 => "Num+7",
+        KeyCode::Numpad8 => "Num+8",
+        KeyCode::Numpad9 => "Num+9",
+        KeyCode::NumpadAdd => "Num++",
+        KeyCode::NumpadSubtract => "Num+-",
+        KeyCode::NumpadMultiply => "Num+*",
+        KeyCode::NumpadDivide => "Num+/",
+        KeyCode::NumpadDecimal => "Num+.",
+        KeyCode::NumpadEnter => "Num+Enter",
         _ => return None,
     };
     key_named(name)
+}
+
+fn gives_sign(key: &Key) -> bool {
+    matches!(key, Key::Character(_) | Key::Named(NamedKey::Enter))
 }
 
 fn held_of(m: ModifiersState) -> Held {
@@ -247,11 +252,11 @@ impl ApplicationHandler<UserEvent> for Loop<'_> {
 impl Workspace {
     pub(super) fn keypad_watch(&self, root: Option<WindowId>, ctx: &egui::Context) -> Watch {
         let page = self.effects_page.page;
-        let works = |panel: Panel| match panel {
-            Panel::App => true,
+        let works = |action: Action| match action.panel() {
+            Panel::App => action != Action::PrinterKeys || page == Page::Color,
             Panel::Transcription => self.transcription.over,
             Panel::Effects => page == Page::Effects,
-            Panel::Color => page == Page::Color && self.effects_page.printer_keys,
+            Panel::Color => page == Page::Color && self.snap.printer_keys,
         };
         let b = &self.snap.bindings;
         Watch {
@@ -260,7 +265,7 @@ impl Workspace {
             capture: self.preferences.capturing(),
             taken: Action::ALL
                 .iter()
-                .filter(|a| works(a.panel()))
+                .filter(|a| works(**a))
                 .flat_map(|a| b.keys(*a))
                 .filter(|c| on_keypad(c.key))
                 .copied()

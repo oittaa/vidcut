@@ -440,7 +440,7 @@ The bar and the Jobs button:
 - A double-click on a name resets its value. A drag on a name changes its value (pp. 3146, 3148).
 - A Plus or Minus button of the bars sends `grade.printer` (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) and a printer key do the same.
   - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.
-- `gui.printer_keys` turns the printer light hotkeys on or off. `gui.state` gives `printer_keys`. The hotkeys are off when the GUI starts.
+- Printer Light Hotkeys sends `preferences.set` with `color.printer_keys`. The snapshot gives the value (`Snapshot::printer_keys`). It works only on the Color page.
 
 **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`).
 
@@ -762,9 +762,11 @@ From an event to an action (`crates/vidcut/src/gui/shortcuts.rs`):
 
 The numeric keypad (`crates/vidcut/src/gui/keypad.rs`):
 
-- The keys of the numeric keypad are keys of their own (`on_keypad`). Their names start with Num, for example Num7, Num+ and NumEnter.
+- The keys of the numeric keypad are keys of their own (`on_keypad`). Their names are Num+ and the key, for example Num+7, Num++ and Num+Enter.
+- The parse of a key (`Combo`) reads a whole keypad name before it splits the modifiers at each +.
 - egui gives them the keys of the main keyboard and drops their place. Thus `keypad::Loop` reads the physical key of each winit `KeyboardInput` itself.
-- It takes a press away from eframe when one of these is true:
+- It takes only a press that gives its digit or sign, or Enter (`Key::Character`, `NamedKey::Enter`). Why: with Num Lock off, the keys give Home, End and the arrows, and they do what they did before.
+- It takes such a press away from eframe when one of these is true:
   - The Keyboard Customization window waits for a key.
   - The press is in the main window, no text field has the keyboard, and an action that works now owns the key.
 - Each frame, `Workspace::keypad_watch` gives the keys that work now, and `App::ui` sends them to `Keypad`. An action of `Panel::Color` works only while the printer light hotkeys are on and the Color page shows.
