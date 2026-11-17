@@ -718,8 +718,8 @@ The draw:
   - `Blurred` keeps the two buffers (`vignette::Cells`). Each frame makes the cells again, so there is no cache to keep up to date.
   - The effects of a compound clip use the same buffers (`Blurred::canvas_effects`).
 - `fs_vignette` reads the cells and mixes the Color (`vignette_shape`, `vignette_mixed`).
-  - `vignette_mixed` adds its own rules to `mixed`. The shared forms `dodged` and `burned` have no limits. `dodge` and `burn` put the limits of a layer's mode on them.
-  - Divide, Hue, Lighter Color and Darker Color have their own rules in `vignette_mixed`. A layer's mode has other rules for a Color of 0, a gray Color and a tie.
+  - `vignette_mixed` uses `mixed`, the formulas of a layer's mode, with two rules of its own.
+  - Divide takes a Color below 0 as 0. Hue with a gray Color takes a fixed hue.
 - `fs_sharpen_taken` writes the colors that a Sharpen works on into one of the two pictures.
 - `sharpen::planes` makes the changes of a Sharpen in compute passes, before its one fragment pass:
   - The `split` entry makes the plane. The `linked` entry makes the links. The `sweep` entry makes one half sweep of a solve.
