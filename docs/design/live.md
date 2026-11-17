@@ -73,7 +73,9 @@ flowchart LR
 - `gui::run` runs eframe with `App` on the main thread.
   - It makes the winit event loop itself. `eframe::create_native` makes the eframe application in that loop.
   - `keypad::Loop` gives each event of the loop to the eframe application. It first takes some presses of the numeric keypad ([Themes and keys](#themes-and-keys)).
-  - An error of `App::new` stops the GUI with its text. A window or GPU that does not start gives an error without details.
+  - `keypad::Loop` keeps the first error record of eframe in the event that ends the loop. `gui::run` returns its text, and the process exits with an error.
+  - Why: eframe only logs the error that ends its loop. `eframe::create_native` gives it to no caller. A start failure and a failure during the run both come this way.
+  - Other error records of eframe do not end the run, so the loop drops them.
 - `App::new` starts the viewer thread, the core (`live::start`) with `Port` as its `Renderer`, and the IPC server.
 - In each frame, `App::logic` runs the `UiTask`s that the core queued in `Port`: captures, window and GUI changes, trims, quit.
 - `App::ui` takes the viewer's target (`Viewer::sync`) and calls `Workspace::ui`, which reads `Handle::snapshot` once and draws from it.

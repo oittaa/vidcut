@@ -140,24 +140,19 @@ fn open(
     let mut event_loop = winit::event_loop::EventLoop::<eframe::UserEvent>::with_user_event()
         .build()
         .map_err(failed)?;
+    keypad::keep_errors()?;
     let keypad = keypad::Keypad::default();
-    let made = std::cell::RefCell::new(None);
     let app = eframe::create_native(
         "vidcut",
         options,
         Box::new(|cc| {
-            let app = app::App::new(cc, project, window, keypad.clone());
-            made.replace(Some(app.as_ref().map(|_| ()).map_err(Clone::clone)));
-            app.map(|a| Box::new(a) as Box<dyn eframe::App>)
+            app::App::new(cc, project, window, keypad.clone())
+                .map(|a| Box::new(a) as Box<dyn eframe::App>)
                 .map_err(Into::into)
         }),
         &event_loop,
     );
     let mut looped = keypad::Loop::new(app, keypad.clone());
     event_loop.run_app_on_demand(&mut looped).map_err(failed)?;
-    drop(looped);
-    match made.take() {
-        Some(made) => made.map_err(|e| eframe::Error::AppCreation(e.into()).to_string()),
-        None => Err("the window or its GPU did not start".into()),
-    }
+    looped.failed().map_or(Ok(()), Err)
 }

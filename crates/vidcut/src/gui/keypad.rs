@@ -121,10 +121,46 @@ fn held_of(m: ModifiersState) -> Held {
     }
 }
 
+struct Errors(Mutex<Option<String>>);
+
+static ERRORS: Errors = Errors(Mutex::new(None));
+
+impl Errors {
+    fn take(&self) -> Option<String> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+}
+
+impl log::Log for Errors {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() == log::Level::Error && metadata.target().starts_with("eframe")
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let text = record.args().to_string();
+        let mut kept = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if kept.is_none() {
+            *kept = Some(text);
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+pub(super) fn keep_errors() -> Result<(), String> {
+    log::set_logger(&ERRORS).map_err(|e| e.to_string())?;
+    log::set_max_level(log::LevelFilter::Error);
+    Ok(())
+}
+
 pub(super) struct Loop<'a> {
     app: EframeWinitApplication<'a>,
     keypad: Keypad,
     modifiers: ModifiersState,
+    failed: Option<String>,
 }
 
 impl<'a> Loop<'a> {
@@ -133,13 +169,32 @@ impl<'a> Loop<'a> {
             app,
             keypad,
             modifiers: ModifiersState::empty(),
+            failed: None,
+        }
+    }
+
+    pub(super) fn failed(&self) -> Option<String> {
+        self.failed.clone()
+    }
+
+    fn pass(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        call: impl FnOnce(&mut EframeWinitApplication<'a>, &ActiveEventLoop),
+    ) {
+        let open = !event_loop.exiting();
+        ERRORS.take();
+        call(&mut self.app, event_loop);
+        let logged = ERRORS.take();
+        if open && event_loop.exiting() {
+            self.failed = logged;
         }
     }
 }
 
 impl ApplicationHandler<UserEvent> for Loop<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.app.resumed(event_loop);
+        self.pass(event_loop, |app, l| app.resumed(l));
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, window: WindowId, event: WindowEvent) {
@@ -157,35 +212,35 @@ impl ApplicationHandler<UserEvent> for Loop<'_> {
             }
             _ => {}
         }
-        self.app.window_event(event_loop, window, event);
+        self.pass(event_loop, |app, l| app.window_event(l, window, event));
     }
 
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
-        self.app.new_events(event_loop, cause);
+        self.pass(event_loop, |app, l| app.new_events(l, cause));
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
-        self.app.user_event(event_loop, event);
+        self.pass(event_loop, |app, l| app.user_event(l, event));
     }
 
     fn device_event(&mut self, event_loop: &ActiveEventLoop, device: DeviceId, event: DeviceEvent) {
-        self.app.device_event(event_loop, device, event);
+        self.pass(event_loop, |app, l| app.device_event(l, device, event));
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.app.about_to_wait(event_loop);
+        self.pass(event_loop, |app, l| app.about_to_wait(l));
     }
 
     fn suspended(&mut self, event_loop: &ActiveEventLoop) {
-        self.app.suspended(event_loop);
+        self.pass(event_loop, |app, l| app.suspended(l));
     }
 
     fn exiting(&mut self, event_loop: &ActiveEventLoop) {
-        self.app.exiting(event_loop);
+        self.pass(event_loop, |app, l| app.exiting(l));
     }
 
     fn memory_warning(&mut self, event_loop: &ActiveEventLoop) {
-        self.app.memory_warning(event_loop);
+        self.pass(event_loop, |app, l| app.memory_warning(l));
     }
 }
 
