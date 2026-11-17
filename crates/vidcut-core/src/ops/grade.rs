@@ -128,22 +128,28 @@ pub fn printed(
     })
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum GradeOf {
+    Timeline,
+    Clip(String),
+}
+
 pub fn printer(
     p: &mut Project,
-    ids: &[String],
+    of: &[GradeOf],
     point: (PrinterColor, f64),
     lights: &ColorPrefs,
 ) -> Result<()> {
     if !point.1.is_finite() {
         return Err(Error::invalid("points must be a number"));
     }
-    for id in ids {
-        let offset = clip_grade(p, id)?.offset;
+    for one in of {
+        let offset = stored(p, one)?.offset;
         let change = GradeChange {
             offset: Some(printed(offset, point, lights)),
             ..GradeChange::default()
         };
-        set(p, std::slice::from_ref(id), &change)?;
+        set(p, std::slice::from_ref(one), &change)?;
     }
     Ok(())
 }
@@ -159,49 +165,55 @@ fn grades(p: &Project, ti: usize, c: &Clip) -> Result<()> {
     Ok(())
 }
 
-fn clip_grade(p: &Project, id: &str) -> Result<Grade> {
-    let (ti, ci) = locate(p, id)?;
-    let c = &p.tracks[ti].clips[ci];
-    grades(p, ti, c)?;
-    Ok(c.picture
-        .as_ref()
-        .and_then(|pic| pic.grade.clone())
-        .unwrap_or_default())
+fn no_timeline() -> Error {
+    Error::invalid("the project has no timeline: make one with timeline.new")
 }
 
-pub fn set(p: &mut Project, ids: &[String], change: &GradeChange) -> Result<()> {
-    if change.is_empty() {
-        return Err(Error::usage(NEEDS));
-    }
-    for id in ids {
-        let (ti, ci) = locate(p, id)?;
-        grades(p, ti, &p.tracks[ti].clips[ci])?;
-        let c = &p.tracks[ti].clips[ci];
-        let old = c
-            .picture
-            .as_ref()
-            .and_then(|pic| pic.grade.clone())
-            .unwrap_or_default();
-        let grade = checked(&change.changed(&old))?;
-        let mut picture = c.picture.clone().unwrap_or_default();
-        picture.grade = grade;
-        p.tracks[ti].clips[ci].picture = (!picture.is_usual()).then_some(picture);
-    }
-    Ok(())
+fn stored(p: &Project, of: &GradeOf) -> Result<Grade> {
+    let grade = match of {
+        GradeOf::Timeline => p.timeline().ok_or_else(no_timeline)?.grade.as_ref(),
+        GradeOf::Clip(id) => {
+            let (ti, ci) = locate(p, id)?;
+            let c = &p.tracks[ti].clips[ci];
+            grades(p, ti, c)?;
+            c.picture.as_ref().and_then(|pic| pic.grade.as_ref())
+        }
+    };
+    Ok(grade.cloned().unwrap_or_default())
 }
 
-pub fn clear(p: &mut Project, ids: &[String]) -> Result<()> {
-    for id in ids {
-        let (ti, ci) = locate(p, id)?;
-        let c = &mut p.tracks[ti].clips[ci];
-        if let Some(mut picture) = c.picture.take() {
-            picture.grade = None;
+fn store(p: &mut Project, of: &GradeOf, grade: Option<Grade>) -> Result<()> {
+    match of {
+        GradeOf::Timeline => p.timeline_mut().ok_or_else(no_timeline)?.grade = grade,
+        GradeOf::Clip(id) => {
+            let (ti, ci) = locate(p, id)?;
+            let c = &mut p.tracks[ti].clips[ci];
+            let mut picture = c.picture.take().unwrap_or_default();
+            picture.grade = grade;
             c.picture = (!picture.is_usual()).then_some(picture);
         }
     }
     Ok(())
 }
 
-pub fn get(p: &Project, id: &str) -> Result<Value> {
-    serde_json::to_value(clip_grade(p, id)?).map_err(|e| Error::invalid(e.to_string()))
+pub fn set(p: &mut Project, of: &[GradeOf], change: &GradeChange) -> Result<()> {
+    if change.is_empty() {
+        return Err(Error::usage(NEEDS));
+    }
+    for one in of {
+        let grade = checked(&change.changed(&stored(p, one)?))?;
+        store(p, one, grade)?;
+    }
+    Ok(())
+}
+
+pub fn clear(p: &mut Project, of: &[GradeOf]) -> Result<()> {
+    for one in of {
+        store(p, one, None)?;
+    }
+    Ok(())
+}
+
+pub fn get(p: &Project, of: &GradeOf) -> Result<Value> {
+    serde_json::to_value(stored(p, of)?).map_err(|e| Error::invalid(e.to_string()))
 }

@@ -2,7 +2,7 @@
 
 **When:** not decided.
 
-The Color page shows the primary correction of the clip at the playhead, the viewer and the timeline. Resolve's Color page also has nodes.
+The Color page shows the primary correction of the clip at the playhead or of the timeline, the viewer and the timeline. Resolve's Color page also has nodes.
 
 **Why:**
 
@@ -18,6 +18,7 @@ The Color page shows the primary correction of the clip at the playhead, the vie
 **In the code:**
 
 - `crates/vidcut/src/gui/color_page.rs` draws the Primaries wheels, the Primaries bars and the Log wheels. It sends `grade.set` and `grade.clear`.
+- A Clip and Timeline switch at the top right selects the grade that the palette shows (pp. 3404–3405). It sends `gui.page` with `grade`.
 - In the bars, each Offset bar has a Plus and a Minus button. Each button moves its channel by one printer point (pp. 3157, 3159).
 - The page puts the palette at the bottom and the timeline above it, at its smallest height. The viewer gets the rest.
 - Each clip has one correction (`model::Grade`, [primary-grade.md](primary-grade.md)).

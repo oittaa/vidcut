@@ -301,7 +301,7 @@ struct Reader<'a> {
 
 impl Reader<'_> {
     fn run(&self, from: i64, to: i64) -> Result<VideoFrames> {
-        let colors = (self.plan.colors, None);
+        let colors = (self.plan.colors, None, None);
         let pixel = format::Pixel::RGB24;
         let frames =
             crate::export::renderer::stream(self.plan.fps, self.size, pixel, colors, self.gpu)?;

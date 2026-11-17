@@ -96,7 +96,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.get", &["clip"]),
     ("grade.set", &["clips"]),
     ("grade.clear", &["clips"]),
-    ("grade.printer", &["clips", "color"]),
+    ("grade.printer", &["color", "clips"]),
     ("effects.add", &["clips", "kind"]),
     ("comp.add", &["clip", "tool"]),
     ("comp.set", &["clip", "node"]),
@@ -212,7 +212,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("generators", "Pictures made with no file"),
     (
         "grade",
-        "The primary correction of clips: wheels, contrast, saturation and the Log wheels",
+        "The primary correction of clips and of the timeline: wheels, contrast, saturation and the Log wheels",
     ),
     (
         "gui",

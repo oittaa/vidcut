@@ -785,6 +785,20 @@ The primary correction of a clip (`model::Grade`, the `grade.set` request, the C
 - The grade works on the colors without their alpha, as an effect with Use Alpha off does.
 - Below 0 and above 1, the Contrast curve and the Log curves continue on straight lines.
 
+The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline switch of the Color page):
+
+- It has the math of the grade of a clip. `Working::graded` makes the same `Work::Grade` for both.
+- `RenderPlan::timeline_grade` holds the grade of the open timeline. A plan of a source, of a generator or of the render cache has none.
+- `Screen::draw` runs it on the whole canvas after the last layer and title (`Screen::set_timeline_grade`, `Blurred::composed`).
+  - The canvas is then `Wide`. Thus the grade gets float colors.
+  - A gap and the bars around a smaller picture get the grade. The filter of the tone stage reads them, as in the spec (§8.20).
+- The burned subtitles go on the canvas after the grade (`TitleOver::SUBTITLES`). Then `fs_lut` runs the output LUT.
+- The viewer gets the grade from the player (`Shown`). `Player::preview_grade` shows a dragged grade before the project has it.
+- An export gets it with `VideoFrames::with_timeline_grade`. `frame.render`, the storyboard and `FrameReader` get it in `Finish`.
+- The render cache holds no timeline grade. Thus a change of the timeline grade renders nothing again.
+- An export with a timeline grade copies no frame ([bypass re-encode](#bypass-re-encode)).
+- An OTIO file of vidcut keeps the grade in the vidcut metadata of the timeline (`otio::Imported`).
+
 A made frame of a speed change ([which source frame](#which-source-frame)):
 
 - The effects of the clip work on each source picture before the frame between them is made, as in the spec (§13).

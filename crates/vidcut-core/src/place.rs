@@ -836,6 +836,15 @@ impl Working {
         }
     }
 
+    pub fn graded(g: &crate::model::Grade) -> Option<Self> {
+        (!g.is_usual()).then(|| Self {
+            work: Work::Grade(Box::new(crate::grade::Grading::of(g))),
+            blend: 1.0,
+            use_alpha: false,
+            masks: Vec::new(),
+        })
+    }
+
     fn of_blur(b: &Blur, blend: f64, w: f64) -> Option<Self> {
         let [x, y] = [b.across(), b.down()].map(|s| s * w);
         let channels = b.channels();
@@ -1131,14 +1140,7 @@ impl Placing {
             .iter()
             .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
             .collect();
-        if let Some(g) = p.picture.grade.as_ref().filter(|g| !g.is_usual()) {
-            effects.push(Working {
-                work: Work::Grade(Box::new(crate::grade::Grading::of(g))),
-                blend: 1.0,
-                use_alpha: false,
-                masks: Vec::new(),
-            });
-        }
+        effects.extend(p.picture.grade.as_ref().and_then(Working::graded));
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&own.back, c));
         if own.soft == Soft::default() && no_bars(quad, frame) {

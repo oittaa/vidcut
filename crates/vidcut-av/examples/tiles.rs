@@ -70,7 +70,7 @@ fn main() {
             };
             let t = Instant::now();
             reader
-                .rgba(&piece, fps, (width, height), (None, None))
+                .rgba(&piece, fps, (width, height), (None, None, None))
                 .expect("tile");
             first.get_or_insert(t.elapsed());
             n += 1;

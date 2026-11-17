@@ -70,6 +70,7 @@ flowchart TD
   place["The picture is placed<br>Screen::draw"]
   fx["The effects and the grade work on it<br>fs_blur, fs_mosaic, fs_vignette, fs_sharpen, fs_grade"]
   mix["The layers are on the canvas<br>Screen::draw"]
+  graded["The timeline grade, then the burned subtitles<br>fs_grade, fs_title"]
   looked["The output LUT<br>fs_lut"]
   show["The viewer shows this frame"]
   mapped["Fitted to the display<br>fs_screen"]
@@ -95,6 +96,12 @@ flowchart TD
   place --> fx
   place --> mix
   fx --> mix
+  mix --> graded
+  graded --> looked
+  graded --> show
+  graded --> mapped
+  graded --> file
+  graded --> scopes
   mix --> looked
   mix --> show
   mix --> mapped
@@ -123,9 +130,11 @@ A clip skips each step that it does not use. The steps run in this order:
   - With an AI upscaler, the weave and the enlargement come before the choice.
 - `Screen::draw` places the picture and mixes the layers (`place::Placing`, `screen::kernel`, [export](export.md#placed-pictures)).
   - A transition's two sides, and each clip placed over another, are layers of the same draw.
-  - Titles and burned subtitles are draws in that same pass (`fs_title`, [export](export.md#subtitles)).
+  - Titles are draws in that same pass (`fs_title`, [export](export.md#titles)).
   - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, `fs_vignette`, `fs_sharpen`, [export](export.md#effects)).
   - The grade of a clip works on that picture after its effects (`fs_grade`, [export](export.md#the-grade)).
+- The timeline grade works on the whole canvas after the last layer and title (`fs_grade`, [export](export.md#the-grade)).
+- The burned subtitles then go on the canvas (`fs_title`, [export](export.md#subtitles)).
 - `fs_lut` runs the output LUT of the project on the whole canvas, after the titles and subtitles.
 - The viewer shows the canvas. A wide canvas goes through `fs_screen` first ([playback](playback.md#the-viewer-thread)).
 - The scopes read the canvas after `fs_lut` and before `fs_screen` ([gpu](gpu.md#the-scopes)).
@@ -139,7 +148,7 @@ The AI stages get the picture in the timeline color space (`Single`).
 vidcut has none of the other stages of the spec:
 
 - Camera Raw, Lens Correction, the display LUT and Fusion;
-- Input Sizing, Image Stabilization and the grades;
+- Input Sizing, Image Stabilization and the Pre-Clip and Post-Clip grades of a group;
 - Open FX, the Resolve FX other than Gaussian Blur, Mosaic Blur, Glow, Film Grain, Vignette and Sharpen, Output Sizing and Data Burn-In.
 
 ### LUT files

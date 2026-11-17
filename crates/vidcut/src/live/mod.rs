@@ -25,9 +25,9 @@ use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GuiPanel, OneOrMany, Page,
-    PoolMode, ScreenshotTarget, TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame,
-    ViewerMode,
+    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GradeLevel, GuiPanel,
+    OneOrMany, Page, PoolMode, ScreenshotTarget, TimecodeDisplay, TimelineOptions, TrimSide,
+    ViewerFrame, ViewerMode,
 };
 use vidcut_core::time::{DurationSpec, Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -93,6 +93,7 @@ pub enum GuiChange {
     Show(GuiPanel),
     Close(GuiPanel),
     Page(Page),
+    Grade(GradeLevel),
     Nodes(Vec<String>),
     PageTime(PageTime),
 }
@@ -146,6 +147,7 @@ pub struct TimelineState {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct GuiState {
     pub page: Page,
+    pub grade: GradeLevel,
     pub clip: Option<String>,
     pub nodes: Vec<String>,
     pub time: Option<PageClock>,
@@ -336,6 +338,7 @@ pub(crate) enum Msg {
     Skip(Option<Vec<ClipSpans>>),
     PreviewTitle(Option<(String, Title)>),
     PreviewPictures(Vec<(String, vidcut_core::model::Picture)>),
+    PreviewGrade(Option<vidcut_core::model::Grade>),
     Subtitles(Option<vidcut_av::player::SubtitleView>),
     FreeTitle(Option<FreeTitle>),
     RenderCache(render_cache::Event),
@@ -412,6 +415,10 @@ impl Handle {
 
     pub fn preview_pictures(&self, pictures: Vec<(String, vidcut_core::model::Picture)>) {
         let _ = self.tx.send(Msg::PreviewPictures(pictures));
+    }
+
+    pub fn preview_grade(&self, grade: Option<vidcut_core::model::Grade>) {
+        let _ = self.tx.send(Msg::PreviewGrade(grade));
     }
 
     pub fn show_subtitles(&self, view: Option<vidcut_av::player::SubtitleView>) {
@@ -1125,6 +1132,12 @@ impl Live {
                     self.schedule_timeline();
                     (self.notify)();
                 }
+            }
+            Msg::PreviewGrade(grade) => {
+                self.render.touch();
+                changed = false;
+                self.player.preview_grade(grade);
+                (self.notify)();
             }
             Msg::Subtitles(view) => {
                 changed = false;
@@ -3188,7 +3201,11 @@ impl Live {
             Request::GuiClose { panel } => {
                 self.gui_change(vec![GuiChange::Close(panel)], |s| json!(s))
             }
-            Request::GuiPage { page } => self.gui_change(vec![GuiChange::Page(page)], |s| json!(s)),
+            Request::GuiPage { page, grade } => {
+                let mut changes: Vec<GuiChange> = grade.map(GuiChange::Grade).into_iter().collect();
+                changes.push(GuiChange::Page(page));
+                self.gui_change(changes, |s| json!(s))
+            }
             Request::GuiNodes { nodes } => {
                 self.gui_change(vec![GuiChange::Nodes(nodes)], |s| json!(s))
             }

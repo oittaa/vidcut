@@ -14,7 +14,7 @@ use vidcut_core::model::{
 use vidcut_core::motion::Area;
 use vidcut_core::place::{Figure, MaskBase, Outline, Shaping, turned};
 use vidcut_core::render::RenderPlan;
-use vidcut_core::request::{NodeInput, Page};
+use vidcut_core::request::{GradeLevel, NodeInput, Page};
 use vidcut_core::shortcuts::{Action, Panel};
 
 use super::shortcuts::Fired;
@@ -83,6 +83,7 @@ pub(super) struct EffectsPage {
     cells: Option<super::cells::Cells>,
     held: Option<Held>,
     pub(super) graded: Option<super::color_page::Graded>,
+    pub(super) grading: GradeLevel,
     boxed: Option<Boxed>,
     pan: Vec2,
     zoom: f32,
@@ -110,6 +111,7 @@ impl Default for EffectsPage {
             cells: None,
             held: None,
             graded: None,
+            grading: GradeLevel::Clip,
             boxed: None,
             pan: Vec2::ZERO,
             zoom: 1.0,
@@ -667,6 +669,7 @@ impl Workspace {
         }
         self.effects_page.graded = None;
         self.effects_page.page = page;
+        self.sync_grade_preview();
         self.sync_bounds();
     }
 

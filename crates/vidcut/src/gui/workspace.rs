@@ -5,7 +5,7 @@ use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::model::{Marker, PictureTool, Project, RenderCache};
 use vidcut_core::preferences::Scope;
-use vidcut_core::request::{Page, ViewerMode};
+use vidcut_core::request::{GradeLevel, Page, ViewerMode};
 use vidcut_core::shortcuts::Action;
 use vidcut_core::time::{Rational, format_timecode};
 
@@ -331,6 +331,7 @@ impl Workspace {
                     return Err("Open a project first".into());
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
+                live::GuiChange::Grade(level) => self.set_grading(level),
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
                 live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
@@ -443,10 +444,11 @@ impl Workspace {
         let page = self.effects_page.page;
         live::GuiState {
             page,
-            clip: match page {
-                Page::Effects => self.effects_clip(),
-                Page::Color => self.color_clip(),
-                Page::Cut => None,
+            grade: self.effects_page.grading,
+            clip: match (page, self.effects_page.grading) {
+                (Page::Effects, _) => self.effects_clip(),
+                (Page::Color, GradeLevel::Clip) => self.color_clip(),
+                (Page::Color, GradeLevel::Timeline) | (Page::Cut, _) => None,
             },
             nodes: self.effects_page.nodes.clone(),
             time: self.page_clock(),

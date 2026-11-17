@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use vidcut_core::model::Hdr;
+use vidcut_core::model::{Grade, Hdr};
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
@@ -10,7 +10,7 @@ use crate::thumbs::Image;
 
 use super::video::VideoFrames;
 
-pub type Finish<'a> = (Option<Hdr>, Option<&'a Path>);
+pub type Finish<'a> = (Option<Hdr>, Option<&'a Path>, Option<&'a Grade>);
 
 type Opened = (
     Rational,
@@ -44,14 +44,14 @@ impl FrameReader {
         piece: &VideoPiece,
         fps: Rational,
         (width, height): (u32, u32),
-        (colors, lut): Finish<'_>,
+        (colors, lut, grade): Finish<'_>,
     ) -> Result<Image> {
         crate::cancel::stop()?;
         crate::init();
         let same = matches!(&self.frames, Some((f, w, h, c, l, _))
             if (*f, *w, *h, *c) == (fps, width, height, colors) && l.as_deref() == lut);
         if !same {
-            let finish = (colors, lut);
+            let finish = (colors, lut, grade);
             let frames = frames(fps, (width, height), RGBA, finish, self.decoder.as_ref())?;
             self.frames = Some((
                 fps,
@@ -63,6 +63,7 @@ impl FrameReader {
             ));
         }
         let (.., frames) = self.frames.as_mut().expect("set above");
+        frames.set_timeline_grade(grade);
         frames.read_piece(&piece.part(0, 1));
         let frame = frames
             .next_frame()?
@@ -87,12 +88,13 @@ pub(crate) fn stream(
     fps: Rational,
     (width, height): (u32, u32),
     pixel: format::Pixel,
-    (colors, lut): Finish<'_>,
+    (colors, lut, grade): Finish<'_>,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<VideoFrames> {
     let frames = VideoFrames::new(&[], fps, width, height, pixel, None)
         .with_timeline(colors)?
-        .with_output_lut(lut)?;
+        .with_output_lut(lut)?
+        .with_timeline_grade(grade);
     Ok(match decoder {
         Some(d) => frames.decode_on(d.clone()),
         None => frames,

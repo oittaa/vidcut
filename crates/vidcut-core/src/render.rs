@@ -9,9 +9,9 @@ use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
     AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, Compound, DuckDetect,
-    Generator, Gradient, Hdr, Keyframe, Media, MediaUpscale, MotionPath, PathSample, Picture,
-    PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode,
-    TimelineColors, Title, Track, TrackKind, Transition, Upscale,
+    Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, MotionPath, PathSample,
+    Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
+    SmoothMode, TimelineColors, Title, Track, TrackKind, Transition, Upscale,
 };
 use crate::motion::Area;
 use crate::otio::transitions;
@@ -44,6 +44,10 @@ pub struct RenderPlan {
     /// subtitles, before the output's colors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_lut: Option<PathBuf>,
+    /// The timeline grade: one primary correction of the whole frame after
+    /// the tracks mix, before its subtitles. Left out when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline_grade: Option<Grade>,
 }
 
 pub fn timeline_colors(p: &Project) -> Option<Hdr> {
@@ -3380,6 +3384,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         name: "timeline".into(),
         colors: None,
         output_lut: s.output_lut.clone(),
+        timeline_grade: p.timeline_grade().cloned(),
     };
     Ok((plan, lanes))
 }
@@ -4230,6 +4235,7 @@ pub fn generator_tape(p: &Project, generator: &Generator, a: i64, b: i64) -> Res
         .push(clip);
     let mut plan = flatten(&alone, a, b)?;
     plan.colors = timeline_colors(p);
+    plan.timeline_grade = None;
     plan.name = crate::generators::name(generator).to_string();
     Ok(plan)
 }
@@ -4438,6 +4444,7 @@ fn tape_plan(
         name: "tape".into(),
         colors: None,
         output_lut: None,
+        timeline_grade: None,
     }
 }
 
@@ -4489,6 +4496,7 @@ pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<Rend
         name: "places".into(),
         colors: None,
         output_lut: None,
+        timeline_grade: None,
     })
 }
 

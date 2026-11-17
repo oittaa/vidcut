@@ -39,7 +39,11 @@ pub fn render(
         return Err(Error::invalid("the storyboard's range is empty"));
     }
     let plan = render::flatten(p, a, b)?;
-    let colors = (plan.colors, plan.output_lut.as_deref());
+    let colors = (
+        plan.colors,
+        plan.output_lut.as_deref(),
+        plan.timeline_grade.as_ref(),
+    );
     let at = |piece: &VideoPiece, k: i64| piece.part(k, 1);
     let mut cells = Vec::new();
     match every {

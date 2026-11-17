@@ -2789,8 +2789,30 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - Measured: Cyan moves G and B, Magenta moves R and B, Yellow moves R and G, and Master moves all three.
   - vidcut: the Plus and Minus buttons, and the Color page of the preferences with Step Size and Density Increment.
   - vidcut: the hotkeys come later ([todo](todo/color-page.md)).
+- **Timeline grade** (pp. 3404–3405, 3407):
+  - The Node Editor has a Clip mode and a Timeline mode. A menu at its top right selects the mode.
+  - The Timeline grade is one grade for the whole timeline. It applies to all clips at the same time.
+  - It comes after the track compositing ([§13](#13-order-of-operations-pp-287296-3407)).
+  - The Reset All Grades and Nodes command of the Color menu can reset the Timeline grade (pp. 3393, 3404).
+  - Measured in Resolve Studio 21.2 with float renders:
+    - The math is the math of a clip grade. Lift Y 0.2 gives 0.4 + 0.6 × x, because the stored Lift is two times the field.
+    - Contrast 1.5 and Gain Y 0.5 also give the values of a clip grade. The difference is 2e-7 at most.
+    - Inside the picture, Shadows 30 gives the values of a clip grade.
+    - The grade works on the mixed picture of all tracks.
+    - A gap gets the grade. With Lift Y 0.2, the black of a gap becomes 0.4.
+    - The black bars around a smaller clip get the grade. The filter of Shadows reads them.
+    - At an edge with partial alpha, the result is different from a clip grade. Why: the timeline grade works after the alpha mix.
+    - Burned-in subtitles come after the grade. With a timeline Gain of 0.5, white text stays at 1.0.
+    - The OTIO export of Resolve has no timeline grade. An OTIO import gives no timeline grade.
+  - vidcut: each timeline has one primary correction. The project file and the undo history keep it.
+  - vidcut: the Color page has a Clip and Timeline switch at its top right. Timeline shows the timeline grade in the palette.
+  - vidcut: an OTIO file of vidcut keeps the timeline grade in the vidcut metadata of the timeline. Resolve does not read it.
 
-Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`. `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
+Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
+
+- Each takes `clips` (`clip` for `grade.get`), or `timeline` for the timeline grade of the open timeline.
+- `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
+- `gui.page` with `grade` selects Clip or Timeline on the Color page.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -3131,6 +3153,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`. `grade.pr
       - The timeline colors are not those of the output.
       - The output size is not the timeline size.
       - The timeline has an output LUT.
+      - The timeline has a timeline grade.
       - The output gets HDR10+ or Dolby Vision metadata.
     - With `video.alpha`, the Alpha Mode of the clip must be the `video.alpha_mode` of the file. A clip with alpha copies only over a gap.
     - H.264, HEVC, AV1 and VP9 also copy.
@@ -5310,6 +5333,8 @@ Then the compositing of the Fusion page.
 6. The output of the Deliver page.
 
 The display LUT of the Color page is on a branch after Data Burn-In. The output of the Deliver page does not get it.
+
+vidcut runs the timeline grade, then the burned-in subtitles, then the output LUT. [§8.20](#820-primaries-palette-pp-118-31413159) gives the measured facts of the timeline grade.
 
 **Sizing:**
 

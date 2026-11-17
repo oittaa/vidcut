@@ -553,6 +553,7 @@ pub struct Shown {
     pub scales: Vec<Option<vidcut_core::model::Sharpness>>,
     pub colors: Option<vidcut_core::model::Hdr>,
     pub output_lut: Option<crate::screen::Lut>,
+    pub timeline_grade: Option<vidcut_core::model::Grade>,
     pub size: (u32, u32),
 }
 
@@ -577,6 +578,10 @@ pub struct TitleOver {
     pub alpha: f32,
     pub placed: Vec<vidcut_core::render::Placed>,
     pub nth: usize,
+}
+
+impl TitleOver {
+    pub const SUBTITLES: usize = usize::MAX;
 }
 
 #[cfg(test)]

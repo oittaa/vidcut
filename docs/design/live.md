@@ -422,7 +422,10 @@ The bar and the Jobs button:
 **The Color page** (`Workspace::primaries_panel`).
 
 - The palette shows the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
+- A Clip and Timeline switch at the top right selects the grade (`GradeLevel`). In Timeline mode, the palette shows the timeline grade.
+  - The switch sends `gui.page` with `grade`. `gui.state` gives the `grade`, and gives no `clip` in Timeline mode.
 - The dragged grade goes to the core with `Handle::preview_pictures`, through `Workspace::graded_wanted`. Thus the viewer follows each frame of the drag.
+  - A dragged timeline grade goes with `Handle::preview_grade`, through `Workspace::timeline_grade_wanted`. The player draws it in place of the grade of the plan.
 - When the pointer is up, the palette sends one `grade.set` with the changed values. Thus a drag is one undo step.
 - After that, the palette shows the sent grade until the project has it. If the request fails, the palette shows the project again after a short time.
 - A drag in a wheel moves the puck by the move of the pointer (manual p. 3144):

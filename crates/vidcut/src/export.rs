@@ -1499,7 +1499,7 @@ pub fn frame(
     playhead: Option<i64>,
 ) -> Result<Value> {
     let fps = p.fps();
-    let (piece, (w, h), frame, colors, lut) = match (media, generator) {
+    let (piece, (w, h), frame, colors, lut, grade) = match (media, generator) {
         (Some(_), Some(_)) => {
             return Err(Error::usage("give media or generator, not both"));
         }
@@ -1518,6 +1518,7 @@ pub fn frame(
                 t,
                 plan.colors,
                 plan.output_lut,
+                plan.timeline_grade,
             )
         }
         (None, None) => {
@@ -1535,6 +1536,7 @@ pub fn frame(
                 t,
                 plan.colors,
                 plan.output_lut,
+                plan.timeline_grade,
             )
         }
         (Some(id), None) => {
@@ -1564,6 +1566,7 @@ pub fn frame(
                 t,
                 None,
                 None,
+                None,
             )
         }
     };
@@ -1577,7 +1580,7 @@ pub fn frame(
     };
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     let size = (w.max(2), h.max(2));
-    let colors = (colors, lut.as_deref());
+    let colors = (colors, lut.as_deref(), grade.as_ref());
     let sizes = (size, frame_size);
     vidcut_av::export::still::write_png(&piece, fps, sizes, colors, out, decoder.as_ref())
         .map_err(from_av)?;

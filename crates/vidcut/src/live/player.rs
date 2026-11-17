@@ -116,6 +116,12 @@ impl Player {
         }
     }
 
+    pub fn preview_grade(&self, grade: Option<vidcut_core::model::Grade>) {
+        if let Some(e) = &self.engine {
+            e.preview_grade(grade);
+        }
+    }
+
     pub fn preview_title(&self, title: Option<(String, Title)>) {
         if let Some(e) = &self.engine {
             e.preview_title(title);

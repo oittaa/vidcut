@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Compound, ImageSequence, Keyframe, Marks, Media, MotionPath, Picture, Project, Section,
-    Speed, Title, TrackKind,
+    Clip, Compound, Grade, ImageSequence, Keyframe, Marks, Media, MotionPath, Picture, Project,
+    Section, Speed, Title, TrackKind,
 };
 use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
@@ -1148,6 +1148,9 @@ pub fn export_drawn(
             .map(|o| o - a),
     };
     let mut ours = json!({ "fps": p.fps(), "marks": marks });
+    if let Some(grade) = p.timeline_grade() {
+        ours["grade"] = json!(grade);
+    }
     if span.is_none() {
         ours["project"] = json!(ProjectMeta {
             settings: p.settings.clone(),
@@ -1672,6 +1675,7 @@ pub struct Imported {
     pub tracks: Vec<ImportedTrack>,
     pub markers: Vec<ImportedMarker>,
     pub marks: Marks,
+    pub grade: Option<Grade>,
     pub has_audio_tracks: bool,
     pub project: Option<ProjectMeta>,
     pub warnings: Vec<String>,
@@ -2750,6 +2754,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     markers.dedup();
     let marks: Marks =
         serde_json::from_value(tl["metadata"][VIDCUT]["marks"].clone()).unwrap_or_default();
+    let grade = tl["metadata"][VIDCUT]
+        .get("grade")
+        .and_then(|v| serde_json::from_value::<Grade>(v.clone()).ok())
+        .and_then(|g| crate::ops::grade::checked(&g).ok().flatten());
     let project = tl["metadata"][VIDCUT]
         .get("project")
         .and_then(|v| match serde_json::from_value::<ProjectMeta>(v.clone()) {
@@ -2780,6 +2788,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         tracks: settings,
         markers,
         marks,
+        grade,
         has_audio_tracks: !audio_tracks.is_empty(),
         project,
         warnings,

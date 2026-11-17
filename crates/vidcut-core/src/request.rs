@@ -2760,29 +2760,53 @@ pub enum Request {
         #[serde(default)]
         tool: Option<PictureTool>,
     },
-    /// The primary correction of a clip (`c3`, or `V2@15s`): every value of
-    /// the Primaries palette, usual ones too.
+    /// The primary correction of a clip (`c3`, or `V2@15s`), or with
+    /// `timeline` the timeline grade: every value of the Primaries palette,
+    /// usual ones too.
     #[serde(rename = "grade.get")]
-    GradeGet { clip: ClipRef },
+    GradeGet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+    },
     /// Change the primary correction of clips: footage, stills, image
-    /// sequences, compound clips and generators. It works after their
-    /// effects and before their composite mode and opacity. Each value given
+    /// sequences and compound clips. It works after their effects and before
+    /// their composite mode and opacity. With `timeline` in place of
+    /// `clips`, change the timeline grade. It works on the picture of all
+    /// tracks after they mix, before the subtitles. Each value given
     /// replaces its own.
     #[serde(rename = "grade.set")]
     GradeSet {
-        clips: OneOrMany<ClipRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The timeline grade of the open timeline, in place of clips.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
         #[serde(flatten)]
         change: Box<GradeChange>,
     },
-    /// Put the primary correction of clips back at its usual values.
+    /// Put the primary correction of clips, or with `timeline` the timeline
+    /// grade, back at its usual values.
     #[serde(rename = "grade.clear")]
-    GradeClear { clips: OneOrMany<ClipRef> },
-    /// Move the Offset of clips by printer points. One point moves each
-    /// channel by its Step Size times its Density Increment (the `color`
-    /// preferences).
+    GradeClear {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The timeline grade of the open timeline, in place of clips.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+    },
+    /// Move the Offset of clips, or with `timeline` of the timeline grade, by
+    /// printer points. One point moves each channel by its Step Size times
+    /// its Density Increment (the `color` preferences).
     #[serde(rename = "grade.printer")]
     GradePrinter {
-        clips: OneOrMany<ClipRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The timeline grade of the open timeline, in place of clips.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
         /// The channels that move.
         color: PrinterColor,
         /// The points: 1 or -1 for a full point, 0.5 for a half point, 0.25
@@ -3884,9 +3908,15 @@ pub enum Request {
     GuiClose { panel: GuiPanel },
     /// Show a page of the window: `cut`; `effects`, the node editor of
     /// the composition of the topmost clip at the playhead; or `color`, the
-    /// primary correction of that clip. Answers what `gui.state` does.
+    /// primary correction of that clip or of the timeline. Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.page")]
-    GuiPage { page: Page },
+    GuiPage {
+        page: Page,
+        /// The grade that the `color` page shows. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        grade: Option<GradeLevel>,
+    },
     /// Select nodes in the node editor of the effects page, by name. The
     /// Inspector and the viewer then show the last one. An empty list
     /// selects none. Answers what `gui.state` does.
@@ -3912,8 +3942,8 @@ pub enum Request {
     },
     /// What only the GUI keeps: the page, the clip of the effects page, its
     /// nodes selected and its playhead (`time`, in frames from the In), the
-    /// edit points selected, the target track, the timeline's zoom and
-    /// Timeline Options, and the windows open.
+    /// grade of the color page, the edit points selected, the target track,
+    /// the timeline's zoom and Timeline Options, and the windows open.
     #[serde(rename = "gui.state")]
     GuiState {},
     /// What an edit takes from the source. The two icons at the left of the edit buttons.
@@ -4866,9 +4896,20 @@ pub enum Page {
     /// The node editor of a clip's composition, its viewer and its
     /// Inspector.
     Effects,
-    /// The primary correction of the clip at the playhead, its viewer and
-    /// the timeline.
+    /// The primary correction of the clip at the playhead or of the
+    /// timeline, its viewer and the timeline.
     Color,
+}
+
+/// Which grade the Color page shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GradeLevel {
+    /// The grade of the topmost clip at the playhead that takes one.
+    #[default]
+    Clip,
+    /// The timeline grade, on the picture of all tracks.
+    Timeline,
 }
 
 /// A window `gui.show` opens.

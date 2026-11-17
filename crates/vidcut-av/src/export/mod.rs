@@ -711,6 +711,7 @@ fn first_run(
         .in_frame((plan.width, plan.height))
         .with_timeline(plan.colors)?
         .with_output_lut(plan.output_lut.as_deref())?
+        .with_timeline_grade(plan.timeline_grade.as_ref())
         .with_dynamic(enc.dynamic)
         .with_burn(burn.0, burn.1, plan.height);
     if let Some(d) = decoder {
@@ -1369,6 +1370,7 @@ fn encode(
                     .in_frame(timeline)
                     .with_timeline(plan.colors)?
                     .with_output_lut(plan.output_lut.as_deref())?
+                    .with_timeline_grade(plan.timeline_grade.as_ref())
                     .with_dynamic(enc.dynamic)
                     .with_light(light)
                     .with_burn(burned.0, burned.1, plan.height)
@@ -1747,6 +1749,8 @@ fn plan_copies(
     }
     let why_not = if plan.output_lut.is_some() {
         Some("the timeline has an output LUT")
+    } else if plan.timeline_grade.is_some() {
+        Some("the timeline has a grade")
     } else if enc.dynamic.hdr10plus || enc.dynamic.dolby_vision {
         Some("the output gets HDR10+ or Dolby Vision metadata")
     } else if plan.colors != enc.hdr {

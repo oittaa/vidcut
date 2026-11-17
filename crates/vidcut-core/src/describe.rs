@@ -418,13 +418,18 @@ pub fn describe_at(
             Some(_) => format!("Reset the transform of {}", d.clips("clips")),
             None => format!("Reset the picture of {}", d.clips("clips")),
         },
+        "grade.set" if d.flag("timeline") => "Change the timeline grade".into(),
         "grade.set" => format!("Change the grade of {}", d.clips("clips")),
+        "grade.clear" if d.flag("timeline") => "Reset the timeline grade".into(),
         "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
         "grade.printer" => format!(
             "Printer points {} {:+} on {}",
             d.text("color"),
             d.params["points"].as_f64().unwrap_or(0.0),
-            d.clips("clips")
+            match d.flag("timeline") {
+                true => "the timeline grade".into(),
+                false => d.clips("clips"),
+            }
         ),
         "subtitles.import" if d.params["media"].is_string() => {
             format!("Insert subtitles {}", d.media("media"))

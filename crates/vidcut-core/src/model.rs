@@ -171,6 +171,10 @@ pub struct Timeline {
     /// the project's.
     #[serde(default)]
     pub own: Option<TimelineSettings>,
+    /// The timeline grade: one primary correction of the mixed picture of
+    /// all its tracks, before the subtitles. Left out at its usual values.
+    #[serde(default)]
+    pub grade: Option<Grade>,
     /// Video tracks `V1…` first, then audio tracks `A1…`.
     pub tracks: Vec<Track>,
     /// Timeline In/Out marks.
@@ -223,6 +227,8 @@ struct TimelineOut<'a> {
     start_tc: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     own: Option<TimelineSettings>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    grade: Option<&'a Grade>,
     tracks: &'a [Track],
     #[serde(skip_serializing_if = "Marks::is_empty")]
     marks: &'a Marks,
@@ -240,6 +246,7 @@ impl<'a> TimelineOut<'a> {
             bin: &t.bin,
             start_tc: t.start_tc,
             own: t.own,
+            grade: t.grade.as_ref(),
             tracks: s.tracks,
             marks: s.marks,
             markers: s.markers,
@@ -7349,6 +7356,7 @@ impl Project {
             bin,
             start_tc: self.settings.first_hour(),
             own: None,
+            grade: None,
             tracks: Self::fresh_tracks(),
             marks: Marks::default(),
             markers: Vec::new(),
@@ -7396,6 +7404,10 @@ impl Project {
     pub fn start_tc(&self) -> i64 {
         self.timeline()
             .map_or_else(|| self.settings.first_hour(), |t| t.start_tc)
+    }
+
+    pub fn timeline_grade(&self) -> Option<&Grade> {
+        self.timeline().and_then(|t| t.grade.as_ref())
     }
 
     pub fn set_start_tc(&mut self, frames: i64) {

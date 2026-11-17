@@ -4,9 +4,9 @@ use egui::{Color32, CursorIcon, DragValue, Label, Rect, Response, Sense, Stroke,
 use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
 use vidcut_core::model::{Grade, Picture};
-use vidcut_core::ops::grade::{checked, printed};
+use vidcut_core::ops::grade::{GradeOf, checked, printed};
 use vidcut_core::ops::picture::takes_effects;
-use vidcut_core::request::{Page, PrinterColor};
+use vidcut_core::request::{GradeLevel, Page, PrinterColor};
 
 use super::workspace::Workspace;
 
@@ -37,7 +37,7 @@ const PRINTED: [(PrinterColor, &str); 3] = [
 ];
 
 pub(super) struct Graded {
-    clip: String,
+    of: GradeOf,
     grade: Grade,
     sent: Option<Instant>,
 }
@@ -83,6 +83,31 @@ enum Mode {
 }
 
 const BAR: Vec2 = Vec2::new(16.0, 110.0);
+
+fn named(of: &GradeOf) -> (String, Value) {
+    match of {
+        GradeOf::Clip(id) => ("clips".into(), json!(id)),
+        GradeOf::Timeline => ("timeline".into(), json!(true)),
+    }
+}
+
+fn grade_switch(ui: &mut Ui, level: GradeLevel) -> Option<GradeLevel> {
+    let mut picked = None;
+    let right = egui::Layout::right_to_left(egui::Align::Center);
+    ui.with_layout(right, |ui| {
+        super::dialog::switch(ui, |ui| {
+            for (l, text) in [
+                (GradeLevel::Clip, "Clip"),
+                (GradeLevel::Timeline, "Timeline"),
+            ] {
+                if ui.selectable_label(level == l, text).clicked() && level != l {
+                    picked = Some(l);
+                }
+            }
+        });
+    });
+    picked
+}
 
 fn usual(field: &str) -> f64 {
     serde_json::to_value(Grade::default())
@@ -459,10 +484,45 @@ impl Workspace {
             return None;
         }
         let h = self.effects_page.graded.as_ref()?;
-        let c = self.project()?.clip(&h.clip)?;
+        let GradeOf::Clip(id) = &h.of else {
+            return None;
+        };
+        let c = self.project()?.clip(id)?;
         let mut picture = c.picture.clone().unwrap_or_default();
         picture.grade = checked(&h.grade).ok()?;
-        Some((h.clip.clone(), picture))
+        Some((id.clone(), picture))
+    }
+
+    pub(super) fn timeline_grade_wanted(&self) -> Option<Grade> {
+        let h = self.effects_page.graded.as_ref()?;
+        let on = self.effects_page.page == Page::Color && h.of == GradeOf::Timeline;
+        on.then(|| h.grade.clone())
+    }
+
+    pub(super) fn set_grading(&mut self, level: GradeLevel) {
+        if level != self.effects_page.grading {
+            self.effects_page.graded = None;
+            self.effects_page.grading = level;
+            self.sync_grade_preview();
+        }
+    }
+
+    fn grade_shown(&self) -> Option<(GradeOf, String, Grade)> {
+        let p = self.project()?;
+        match self.effects_page.grading {
+            GradeLevel::Clip => {
+                let id = self.color_clip()?;
+                let c = p.clip(&id)?;
+                let stored = c.picture.as_ref().and_then(|pic| pic.grade.clone());
+                let name = c.name.clone().unwrap_or_else(|| id.clone());
+                Some((GradeOf::Clip(id), name, stored.unwrap_or_default()))
+            }
+            GradeLevel::Timeline => {
+                let t = p.timeline()?;
+                let stored = t.grade.clone().unwrap_or_default();
+                Some((GradeOf::Timeline, t.name.clone(), stored))
+            }
+        }
     }
 
     pub(super) fn primaries_panel(&mut self, ui: &mut Ui) {
@@ -476,23 +536,24 @@ impl Workspace {
     }
 
     fn palette(&mut self, ui: &mut Ui) {
-        let Some(id) = self.color_clip() else {
+        let level = self.effects_page.grading;
+        let mut picked = None;
+        let Some((of, name, stored)) = self.grade_shown() else {
             self.effects_page.graded = None;
-            ui.label("No Clip at the Playhead");
+            ui.horizontal(|ui| {
+                ui.label(match level {
+                    GradeLevel::Clip => "No Clip at the Playhead",
+                    GradeLevel::Timeline => "No Timeline",
+                });
+                picked = grade_switch(ui, level);
+            });
+            if let Some(l) = picked {
+                self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
+            }
             return;
         };
-        let Some(clip) = self.project().and_then(|p| p.clip(&id)) else {
-            self.effects_page.graded = None;
-            return;
-        };
-        let name = clip.name.clone().unwrap_or_else(|| id.clone());
-        let stored = clip
-            .picture
-            .as_ref()
-            .and_then(|p| p.grade.clone())
-            .unwrap_or_default();
         if let Some(h) = &self.effects_page.graded
-            && (h.clip != id
+            && (h.of != of
                 || h.sent
                     .is_some_and(|t| h.grade == stored || t.elapsed() > LANDING))
         {
@@ -561,8 +622,12 @@ impl Workspace {
                     (low + 0.001, 0.999),
                 );
             }
+            picked = grade_switch(ui, level);
         });
         ui.data_mut(|d| d.insert_temp(key, mode));
+        if let Some(l) = picked {
+            self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
+        }
         let wheels = match mode {
             Mode::Log => logs(&g),
             Mode::Wheels | Mode::Bars => primaries(&g),
@@ -634,9 +699,13 @@ impl Workspace {
             slider(ui, c, ("Hue", "hue"), g.hue, 0.5, percent);
             slider(ui, c, ("Lum Mix", "lum_mix"), g.lum_mix, 0.5, percent);
         });
+        let (field, target) = named(&of);
         if reset {
             self.effects_page.graded = None;
-            self.send("grade.clear", json!({ "clips": id }));
+            self.send(
+                "grade.clear",
+                Value::Object(Map::from_iter([(field, target)])),
+            );
             return;
         }
         if !changes.is_empty() {
@@ -644,7 +713,7 @@ impl Workspace {
                 .into_iter()
                 .fold(g, |g, c| changed_grade(&g, c.field, c.value));
             self.effects_page.graded = Some(Graded {
-                clip: id.clone(),
+                of: of.clone(),
                 grade,
                 sent: None,
             });
@@ -660,7 +729,7 @@ impl Workspace {
         match ready {
             Some(params) if params.is_empty() => self.effects_page.graded = None,
             Some(mut params) => {
-                params.insert("clips".into(), json!(id));
+                params.insert(field, target);
                 self.send("grade.set", Value::Object(params));
             }
             None => {}

@@ -729,14 +729,26 @@ pub fn since(before: &Project, after: &Project) -> Since {
     out
 }
 
-type Head = (String, String, i64, Option<TimelineSettings>);
+type Head = (
+    String,
+    String,
+    i64,
+    Option<TimelineSettings>,
+    Option<crate::model::Grade>,
+);
 
 fn heads(p: &Project) -> Vec<(String, Head)> {
     (p.timelines.iter())
         .map(|t| {
             (
                 t.id.clone(),
-                (t.name.clone(), t.bin.clone(), t.start_tc, t.own),
+                (
+                    t.name.clone(),
+                    t.bin.clone(),
+                    t.start_tc,
+                    t.own,
+                    t.grade.clone(),
+                ),
             )
         })
         .collect()

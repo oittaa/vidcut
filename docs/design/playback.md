@@ -320,6 +320,7 @@ The audio device:
   - With an output LUT, the draw also uses `Wide`, and `fs_lut` runs on the whole canvas after the last layer and title (`Screen::set_output_lut`, `Shown`).
     - `Plan::output_lut` loads the file when a plan first needs it.
     - A gap goes through the output LUT. Before the first picture, the viewer draws no LUT.
+  - With a timeline grade, the draw also uses `Wide`. The grade runs on the whole canvas before the subtitles and `fs_lut` (`Screen::set_timeline_grade`, [export](export.md#the-grade)).
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
 - With a scope on, each turn also calls `Screen::scopes` after `Screen::draw` ([gpu](gpu.md#the-scopes)). `Viewer::sync_scopes` shows each scope's target in the same way.
 - A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.

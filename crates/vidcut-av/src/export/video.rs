@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use vidcut_core::export::AlphaOut;
 use vidcut_core::generators::Pattern;
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{AlphaMode, ColorSpace, Hdr, Retime, SubtitleStyle, Upscale, Upscaler};
+use vidcut_core::model::{
+    AlphaMode, ColorSpace, Grade, Hdr, Retime, SubtitleStyle, Upscale, Upscaler,
+};
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Placed, Shape, Smooth, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
@@ -1896,6 +1898,7 @@ pub struct VideoFrames {
     written_alpha: Option<AlphaOut>,
     written: Option<(u32, u32)>,
     output_lut: Option<crate::screen::Lut>,
+    timeline_grade: Option<Grade>,
     frame_size: Option<(u32, u32)>,
     input_luts: vidcut_core::lru::Lru<String, crate::screen::Lut, INPUT_LUTS_KEPT>,
 }
@@ -2238,6 +2241,7 @@ impl VideoFrames {
             written_alpha: None,
             written: None,
             output_lut: None,
+            timeline_grade: None,
             frame_size: None,
             input_luts: Default::default(),
         }
@@ -2267,6 +2271,18 @@ impl VideoFrames {
     pub fn with_output_lut(mut self, path: Option<&Path>) -> Result<Self> {
         self.output_lut = path.map(crate::screen::load_lut).transpose()?;
         Ok(self)
+    }
+
+    pub fn with_timeline_grade(mut self, grade: Option<&Grade>) -> Self {
+        self.set_timeline_grade(grade);
+        self
+    }
+
+    pub fn set_timeline_grade(&mut self, grade: Option<&Grade>) {
+        self.timeline_grade = grade.cloned();
+        if let Some(drawer) = &mut self.drawer {
+            drawer.screen.set_timeline_grade(grade);
+        }
     }
 
     pub fn in_frame(mut self, size: (u32, u32)) -> Self {
@@ -2409,6 +2425,9 @@ impl VideoFrames {
                 .premultiply(self.written_alpha == Some(AlphaOut::Premultiplied));
             drawer.screen.write_at(self.written);
             drawer.screen.set_output_lut(self.output_lut.clone());
+            drawer
+                .screen
+                .set_timeline_grade(self.timeline_grade.as_ref());
             drawer.screen.set_frame_size(self.frame_size);
             let (out, reading) = (self.maker.out(), self.maker.reading());
             self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();

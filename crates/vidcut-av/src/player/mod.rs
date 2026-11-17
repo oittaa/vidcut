@@ -329,6 +329,7 @@ pub(crate) struct Shared {
     pub(crate) titles: titles::Titles,
     pub(crate) subtitles: subtitles::Subtitles,
     placing: Mutex<Vec<(String, vidcut_core::model::Picture)>>,
+    grading: Mutex<Option<vidcut_core::model::Grade>>,
 }
 
 pub(crate) struct Level {
@@ -849,6 +850,7 @@ impl Player {
             titles: titles::Titles::default(),
             subtitles: subtitles::Subtitles::default(),
             placing: Mutex::new(Vec::new()),
+            grading: Mutex::new(None),
         });
         output.start(source)?;
         let mut player = Self {
@@ -1098,6 +1100,9 @@ impl Player {
                 None
             }
         };
+        let timeline_grade = lock(&self.shared.grading)
+            .clone()
+            .or_else(|| plan.plan.timeline_grade.clone());
         let (mut titles, titled) = self.shared.titles.shown(&plan, pos, &placing);
         let (cues, cued) = self.shared.subtitles.shown(&plan, pos);
         titles.extend(cues);
@@ -1123,6 +1128,7 @@ impl Player {
                     scales,
                     colors,
                     output_lut,
+                    timeline_grade,
                     size,
                 };
                 p.shown = Some(shown.clone());
@@ -1146,6 +1152,7 @@ impl Player {
                         scales: scales.clone(),
                         colors,
                         output_lut: output_lut.clone(),
+                        timeline_grade: timeline_grade.clone(),
                         size,
                     });
                 }
@@ -1157,6 +1164,7 @@ impl Player {
                     scales,
                     colors,
                     output_lut,
+                    timeline_grade,
                     size,
                     ..s
                 })
@@ -1299,6 +1307,10 @@ impl Player {
 
     pub fn preview_pictures(&self, pictures: Vec<(String, vidcut_core::model::Picture)>) {
         *lock(&self.shared.placing) = pictures;
+    }
+
+    pub fn preview_grade(&self, grade: Option<vidcut_core::model::Grade>) {
+        *lock(&self.shared.grading) = grade;
     }
 
     pub fn preview_title(&self, title: Option<(String, Title)>) {
@@ -1456,6 +1468,7 @@ mod tests {
             name: "copies".into(),
             colors: None,
             output_lut: None,
+            timeline_grade: None,
         };
         let config = Config {
             audio_scrubbing: false,
@@ -1523,6 +1536,7 @@ mod tests {
             name: "smooth".into(),
             colors: None,
             output_lut: None,
+            timeline_grade: None,
         }
     }
 
