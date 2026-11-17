@@ -377,15 +377,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - How far it goes past the height of the frame changes with the text size and the picture size. It is 1.9 to 2.9 times the text size.
     - Thus the text leaves the top before the clip ends.
     - Its default lines align left, at 1% of the width of the picture.
-    - Its text box stays at 51% of the width when the alignment changes. Thus its middle alignment is 1% right of the middle, and its right alignment goes 1% past the right edge and cuts the last letters.
 - **vidcut:**
   - A `scroll` title rises at a steady speed.
   - It starts just below the picture at the first frame of the clip. It ends just above the picture at the last frame.
-  - Its middle alignment is at the middle of the picture. Its right alignment ends at 99% of the width.
 - **Why:**
   - Credits need a scroll that uses the full clip, and that starts and ends clear of the picture.
   - The distance in Resolve cannot be found from the size of the text and of the picture.
-  - A right alignment that cuts letters is a fault in Resolve.
 
 ## X56. Create Subtitles from Audio reads each clip's file
 
@@ -755,41 +752,25 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:**
   - Add Keyframe, Delete Keyframe and Delete All Keyframes act on the selected values of the Keyframes panel or the keyframe tray (p. 4343).
   - With the panel and the tray closed, they act on the speed keyframes of the selected clips.
-  - Then Delete Keyframe and Delete All Keyframes do the same thing in Resolve Studio 21.1.2.
-    - Each removes one speed keyframe: the one at the playhead, or else the nearest one before it. No question opens.
   - With the tray open and no row selected, Add Keyframe also adds a speed keyframe.
   - In Resolve Studio 21.1.2, the three items are always on, also when they cannot act.
   - Delete All Keyframes with no keyframe selected asks "Delete All Keyframes?". The question names the value and the media file.
   - With no row and no keyframe selected, the question names a value that no row shows as selected.
-  - In one check, the question named no value. After Delete, a Position X with no keyframes also went back to 0.
+  - In one check, the question named no value.
   - The keyframe tray has a Speed group with two rows, Retime Frame and Retime Speed. Each row has a key at each speed keyframe.
 - **vidcut:**
   - The Keyframes tab and the keyframe tray have one Speed row, in a Speed group.
   - With the Keyframes tab or the tray open, the three items act on the selected rows and keyframes.
   - With the Keyframes tab open and no row selected, Add Keyframe stays off.
   - With both closed, they act on the speed keyframes of the selected clips ([D48](spec.md#12-decisions-on-gaps-and-contradictions)).
-    - Delete All Keyframes then asks first, for example "Delete 3 Speed keyframes of Clip 2?". Then it removes all the speed keyframes.
   - An item that cannot act is off. Its tooltip tells the next click, for example "Click a parameter name, such as Opacity".
   - When the three items are off for one reason, a line in the menu tells the next step, for example "Select a clip first".
   - With no row and no keyframe selected, Delete All Keyframes is off.
   - The question of Delete All Keyframes names the values, the number of keyframes and the clip.
-  - Delete All Keyframes removes only the keyframes of the selected rows. A value with no keyframes keeps its value.
+  - Delete All Keyframes removes only the keyframes of the selected rows.
 - **Why:**
   - Retime Frame and Retime Speed show the same speed keyframes, so one row is sufficient.
   - An item that does nothing gives the user no clue. The user sees which keyframes go, and how many, before they go.
-  - A Delete All that removes one speed keyframe is a fault in Resolve. The reset of a value with no keyframes is a fault too. vidcut does not copy them.
-
-## X95. A speed change keeps the last source frame
-
-- **Resolve:**
-  - The last key of a clip's speed is one frame of the retimed media before the media's end. Its source time is the media's end less the speed of the last section.
-  - Thus a section slower than 100% at the end of the media does not show the last source frame.
-  - Example in Resolve Studio 21.1.2: a 900-frame clip, a speed keyframe at frame 30, and 50% after it. The clip shows source frames 0 to 898.
-  - The manual does not tell this.
-- **vidcut:**
-  - The last section shows each source frame to the end of the media, the last frame too ([D48](spec.md#12-decisions-on-gaps-and-contradictions)).
-- **Why:**
-  - A speed change does not remove pictures from a clip. The lost frame is a fault in Resolve. vidcut does not copy it.
 
 ## X96. Reverse keeps the speeds of the other sections
 
@@ -806,24 +787,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - The user changes the direction of one section. The other sections keep their speeds.
   - In Resolve, the next section changes its speed, and the clip gets shorter. vidcut does not copy this.
-
-## X97. Ease In and Ease Out ease their own side of a section
-
-- **Resolve:**
-  - The Ease list of the Inspector acts on the section under the playhead. It has Linear, Ease In, Ease Out and Ease In and Out.
-  - Example in Resolve Studio 21.1.2: speed keyframes at frames 30 and 60, and 25% between them.
-    - Ease In, Ease Out and Ease In and Out each ease only the speed keyframe at frame 30. They give the same export and the same render.
-    - The speed keyframe at frame 60 stays linear. There, the speed changes at once.
-  - The manual does not tell this. Its Speed Change controls of the Cut page have no Ease list.
-- **vidcut:**
-  - Ease In eases the speed keyframe where the section starts. Ease Out eases the one where it ends. Ease In and Out eases both, and Linear neither.
-  - The list shows the eases of the two speed keyframes of the section (`speed.ease`, [D48](spec.md#12-decisions-on-gaps-and-contradictions)).
-  - The first section has no speed keyframe at its start, and the last none at its end. Their lists offer only the eases that apply.
-  - The Speed row of the Keyframes tab and the tray offers Linear and Ease In and Out for one speed keyframe.
-- **Why:**
-  - Three choices that give the same result are a fault in Resolve. vidcut does not copy it.
-  - Ease In and Ease Out then do what their names tell, as the Dynamic Zoom ease does. Ease In is slow at the start, Ease Out at the end.
-  - A handle on one side of a speed keyframe alone gives a straight line. Thus one speed keyframe takes an ease on both sides or on none.
 
 ## X98. In an HDR timeline, AI Slow works before the conversion
 
@@ -961,19 +924,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Above 8:1, the filter gives some source pixels more weight than others. Thin lines then make bands.
   - A 4K picture with one-pixel lines every 25 pixels has a mean of 70.4. At a shrink of 32:1, the filter alone reads 64 to 84. With the halving, it reads 69 to 71.
   - Timeline thumbnails and storyboards often shrink this far.
-
-## X111. A very negative line spacing keeps all the lines
-
-- **Resolve:**
-  - Line spacing moves the lines closer, and lines can overlap (p. 1184).
-  - These are measurements in Resolve Studio 21.1.2 from files, with Arial at size 96:
-    - At -112, it draws both lines.
-    - At -200 and at -500, it draws only the first of two lines.
-    - At -200 on the first line alone, or on the last line alone, it also draws only the first line.
-- **vidcut:**
-  - It draws all the lines at any line spacing.
-- **Why:**
-  - Lines that disappear are a fault in Resolve. The manual does not name them.
 
 ## X112. A title from an OTIO file has no black edge
 
@@ -1281,18 +1231,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - No rule for the steps is known. The difference is small.
 
-## X142. A Glow keeps the tracks below around a smaller picture
-
-- **Resolve:**
-  - These are measurements in Resolve Studio 21.1.2 (Glow, p. 3590), with Use Alpha on, as an effect added in the GUI has it.
-  - The output of a Glow has an alpha of 1, also outside a smaller picture and in the clear parts of the picture.
-  - Thus a Glow on a clip at Zoom 0.5 makes the frame black around the clip. The tracks below do not show.
-- **vidcut:**
-  - The alpha of the output is the larger of the picture's alpha and the brightest color of the output.
-  - Other tracks below show around the clip and through its clear parts. The glow around the clip covers them by its brightest color.
-- **Why:**
-  - The black is a fault in Resolve. An effect on a clip does not hide the tracks below.
-
 ## X143. The noise of a Film Grain has its own pattern
 
 - **Resolve:**
@@ -1303,26 +1241,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - The noise has the spectrum and the statistics of the renders. Its pattern on each frame is not the pattern of Resolve.
 - **Why:**
   - No render shows how Resolve makes the pattern. Thus no frame can be the same.
-
-## X144. A Film Grain has no jumps at Symmetry 0.4 and 0.6
-
-- **Resolve:**
-  - These are measurements in Resolve Studio 21.1.2 (Film Grain, p. 3559), with Grain Only and Softness 0, at each 0.02 of Symmetry.
-  - At exactly 0.4 and 0.6, the standard deviation of the noise is 0.0109 and 0.0855. At the values on each side, it is about 0.026.
-- **vidcut:**
-  - Symmetry follows a table of the measured curves and blends between them ([spec §8.16](spec.md#816-effects-pp-765-3526-3536)).
-  - The table has no curve at 0.4 and 0.6. There, vidcut blends the curves at 0.38 and 0.42, and at 0.58 and 0.62.
-- **Why:**
-  - The jumps are a fault in Resolve. A small change of Symmetry does not make a large change of the grain.
-
-## X146. Straight ProRes 4444 holds straight colors
-
-- **Resolve:**
-  - With Straight, a ProRes 4444 file still holds premultiplied colors (measured in Resolve Studio 21.2). ProRes 4444 XQ is not measured.
-- **vidcut:**
-  - With `video.alpha_mode` `straight`, ProRes 4444 and 4444 XQ hold straight colors.
-- **Why:**
-  - The file holds what its Alpha Mode says. The file from Resolve does not agree with its own setting.
 
 ## X147. An image sequence refuses sound settings
 
@@ -1575,14 +1493,10 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - One setting does the work of a tracker node and a connection.
   - A title with keyframes, and a title that stops following, wait for a measurement in Resolve ([todo](todo/motion-tracking.md)).
 
-## X170. The Equalizer: Notch, Bell width and OTIO export
+## X170. The Equalizer: Bell width and OTIO export
 
-The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the controls of the Equalizer. vidcut is different in three things.
+The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the controls of the Equalizer. vidcut is different in two things.
 
-- **Notch band:**
-  - Resolve: the graph shows a cut at the frequency of the band. The exported sound has no cut. This is a fault in Resolve.
-  - vidcut: the exported sound has the cut that the graph shows. The width of the cut is fixed.
-  - Why: vidcut does not copy a fault.
 - **Bell band:**
   - Resolve: above 8000 Hz, the band is wider than its Q value. At 8000 Hz, Q 1 gives the width of Q 0.94. At 16000 Hz, Q 1 gives the width of Q 0.75, and Q 4 gives the width of Q 2.
   - vidcut: the width agrees with the Q value at all frequencies.

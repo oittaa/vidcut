@@ -2069,12 +2069,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Alpha Masks Sources: the mask is `a` × the mask of `P`.
     - Usual Behavior gives the same picture as Alpha Masks Sources.
     - Alpha Is Source: the mask is `max(0, a − th + 0.001) / (1 − th + 0.001)`, with `th` the Alpha Level Threshold, for all three colors.
-    - The output of each Select Output has an alpha of 1, also outside a smaller picture. vidcut does not copy this black ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+    - The output of each Select Output has an alpha of 1, also outside a smaller picture. vidcut does not copy this black ([gotchas](gotchas.md#resolves-renders)).
     - Blend mixes the input and that output, with their alphas.
     - With Use Alpha off, the mask takes the color without its alpha, times `a`. The output is `a` × the result on that color, and `a` stays.
     - Invert Effect takes the negative of `P` and of the output, with an alpha of 1.
 - **Glow in vidcut:**
-  - With Use Alpha on, the alpha of the output is the larger of `a` and the brightest color of the output. Thus the tracks below show around a smaller picture ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+  - With Use Alpha on, the alpha of the output is the larger of `a` and the brightest color of the output. Thus the tracks below show around a smaller picture ([gotchas](gotchas.md#resolves-renders)).
   - Up to a Spread of 0.1, Resolve's blur has steps of 8 pixels that the renders do not explain. vidcut uses the plain curve, with the coarse grid only at a large sigma ([X141](deviations.md#x141-a-glow-up-to-a-spread-of-01-has-a-plain-blur)).
   - vidcut makes the Atmosphere noise itself. It has the statistics of the renders at the defaults and the measured sizes, not their pattern ([X140](deviations.md#x140-the-atmosphere-noise-of-a-glow-has-its-own-pattern)).
     - The noise has one layer of Perlin noise for each octave, with 7 octaves. Detail is the gain from one octave to the next.
@@ -2145,7 +2145,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - One picture of noise comes from an inverse Fourier transform at the size of the canvas. Each frame reads it at another random shift.
     - A cubic curve on the noise gives the kurtosis.
   - Symmetry is a table of measured curves, with a step of 0.02 to 0.06. Each curve is a cubic near the middle and a straight line on each side.
-    - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them ([X144](deviations.md#x144-a-film-grain-has-no-jumps-at-symmetry-04-and-06)).
+    - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them ([gotchas](gotchas.md#resolves-renders)).
   - vidcut adds the folds of `R` at each frequency of the canvas. Thus the noise keeps its standard deviation before Softness on each frame height.
     - The table of `K` for Grain Size 0 to 0.4 comes from fits to the renders on 1280×720, 1920×1080 and 3840×2160.
     - The value at Grain Size 0.2156 comes from the values of 8mm 100D with Softness 0. The value at 0 also fits 35mm 400T.
@@ -2933,8 +2933,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`. `grade.pr
   - vidcut: `clip.set` sets `equalizer`. Its `on` is the switch.
     - On a clip with no equalizer, a change makes a flat one. It is on, unless `on` is false.
     - null makes the equalizer off again, with the usual values. Reset sends it.
-  - vidcut: a Notch band makes a cut in the sound. A Bell band keeps the width of its Q value ([X170](deviations.md#x170-the-equalizer-notch-bell-width-and-otio-export)).
-  - vidcut: an OTIO export keeps the equalizer in fields that only vidcut reads ([X170](deviations.md#x170-the-equalizer-notch-bell-width-and-otio-export)).
+  - vidcut: a Notch band makes a cut in the sound ([gotchas](gotchas.md#resolves-renders)). A Bell band keeps the width of its Q value ([X170](deviations.md#x170-the-equalizer-bell-width-and-otio-export)).
+  - vidcut: an OTIO export keeps the equalizer in fields that only vidcut reads ([X170](deviations.md#x170-the-equalizer-bell-width-and-otio-export)).
     - An equalizer that changes the sound gives the note `equalizer_kept`.
     - An equalizer that is off does not change the sound, also after an import.
 - **Dialogue Leveler** (pp. 743, 774–775):
@@ -3103,7 +3103,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`. `grade.pr
     - A PNG holds straight colors in both modes.
   - **In vidcut:**
     - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export dialog shows both only for ProRes 4444, 4444 XQ, TIFF and OpenEXR.
-    - Straight writes straight colors in a TIFF and in ProRes 4444 and 4444 XQ ([X146](deviations.md#x146-straight-prores-4444-holds-straight-colors)).
+    - Straight writes straight colors in a TIFF and in ProRes 4444 and 4444 XQ ([gotchas](gotchas.md#resolves-renders)).
     - OpenEXR takes only Premultiplied. An export refuses Straight with it, and the Export dialog lists only Premultiplied. Why: the OpenEXR format takes premultiplied colors, so another program reads a straight file wrongly.
     - An export refuses `video.alpha` in another format. It does not change a setting without a word.
     - DNxHR 444 has no alpha ([X136](deviations.md#x136-dnxhr-444-exports-without-alpha)).
@@ -3680,7 +3680,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It shows as `;` before the frames.
   - When you type a timecode, `;` means drop-frame. So does `:` in a drop-frame project.
   - A skipped label is refused. Digits that fill one land on the first frame of the minute.
-- **D48. Clips at another speed** (§1, §8.6; deviations X9, X95, X96, X97).
+- **D48. Clips at another speed** (§1, §8.6; deviations X9 and X96; Resolve's faults in [renders](gotchas.md#resolves-renders) and [controls](gotchas.md#resolves-controls)).
   - A clip's speed comes from Change Clip Speed, the Speed section of the Inspector, speed keyframes, or an OTIO file.
   - The speed applies wherever its pictures and sound go.
   - Change Clip Speed takes 0.01% to 100000%, forward or backward (measured in Resolve Studio 21.1.2).
@@ -3741,7 +3741,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Direction buttons act on that section. In one check, Reverse played it backward to the media's first frame ([X96](deviations.md#x96-reverse-keeps-the-speeds-of-the-other-sections)).
     - The Duration field shows the section's length in one check and the clip's length in two others. The reason is not measured.
     - The Ease list under Direction has Linear, Ease In, Ease Out and Ease In and Out.
-      - In one check, each of the three eases set only the speed keyframe at the start of the section ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
+      - In one check, each of the three eases set only the speed keyframe at the start of the section ([gotchas](gotchas.md#resolves-controls)).
       - Its handles are 1/6 s before and after the speed keyframe at 30 fps.
   - **In vidcut:**
     - The Inspector's Speed section shows the section under the playhead. With the playhead outside the clip, it shows the nearest section.
@@ -3749,7 +3749,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Freeze sends `speed.freeze`. Forward and Reverse send `speed.reverse`. They are off when the section is frozen.
       - Reverse turns the section at the speed keyframe where it starts, and the first section at the one where it ends.
       - The sections after it go on from where it stops, at their own speeds. Thus the picture does not jump.
-      - Ease sends `speed.ease` ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)). Ease In eases the speed keyframe at the section's start, and Ease Out the one at its end.
+      - Ease sends `speed.ease` ([gotchas](gotchas.md#resolves-controls)). Ease In eases the speed keyframe at the section's start, and Ease Out the one at its end.
         - The list shows the eases of the section's two speed keyframes. It offers only the eases that they can take.
       - An ease reaches 1/6 s before and after its speed keyframe, at each frame rate. Resolve's length at other rates than 30 fps is not measured.
       - An ease stops at the speed keyframes next to it and at the clip's edges, as in Resolve. Where two eases overlap, the later one keeps its length.
@@ -3764,7 +3764,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Add Speed Point in the right-click menu adds a speed keyframe at the playhead.
     - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
       - A speed keyframe does not move or copy. Its value is the speed of the section after it.
-      - Its ease menu has Linear and Ease In and Out ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
+      - Its ease menu has Linear and Ease In and Out ([gotchas](gotchas.md#resolves-controls)).
       - Ctrl+X leaves the selected speed keyframes in place, and they stay selected.
       - A change of its value in the tab sends `speed.set`. The field takes 0.01% to 100000%.
       - The field is off when the section is frozen or plays backward.
@@ -4161,7 +4161,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Inspector takes -270 to 540, and the file holds the same number in `line-height`. A file can hold more, and Resolve draws 2000 from a file. Thus vidcut takes -4096 to 4096 (measured in Resolve Studio 21.1.2).
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
     - Below the last line, a positive value makes the block taller and a negative value does nothing (measured in Resolve Studio 21.1.2).
-    - A very negative value keeps all the lines (X111).
+    - A very negative value keeps all the lines ([gotchas](gotchas.md#resolves-renders)).
     - Tracking adds space after each letter, also after the last letter (p. 1184). `tracking` in the style goes on each letter. `tracking` in markup goes on its words.
     - The Inspector takes -100 to 100 (measured in Resolve Studio 21.1.2).
     - One unit is 1/100 of the width of the font's letter X, and 1/200 below 0. Zoom scales it.

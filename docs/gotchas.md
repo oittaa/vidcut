@@ -607,13 +607,81 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
 
 ## Resolve's renders
 
-These facts come from float renders in Resolve Studio 21.2, without color management.
+These facts come from measurements of the pictures, the sound and the files that Resolve Studio makes.
 
 - **Resolve reads some curve tables of the Color page half a step off.**
+  - These facts come from float renders in Resolve Studio 21.2, without color management.
   - Shadows, Highlights and Midtone Detail share one table. In 0..1, it moves a value by up to 1/1023 where the curve makes no change.
   - With Shadows 100, the ratio of the curve to the smoothed luma enlarges this move near black. Dark colored pixels then move by up to 0.061.
   - The table of the Log wheels is read 1/2048 off. This moves each channel by about 0.0005, also a channel with no Log value.
   - vidcut does not copy this fault. `Tone` reads its table with no shift. `LogCurve` gives the curve with no table.
+- **The text box of Resolve's Scroll title stays at 51% of the width when the alignment changes.**
+  - These are measurements in Resolve Studio 21.1.1. [X55](deviations.md#x55-a-scroll-rises-over-the-whole-clip-its-lines-spaced-as-other-titles) gives the other measurements of Scroll.
+  - Thus its middle alignment is 1% right of the middle.
+  - Its right alignment goes 1% past the right edge and cuts the last letters.
+  - vidcut does not copy this fault. The middle alignment of a `scroll` title is at the middle of the picture.
+  - Its right alignment ends at 99% of the width (`Title::usual_position`).
+- **A section slower than 100% at the end of the media does not show the last source frame in Resolve.**
+  - The last key of a clip's speed is one frame of the retimed media before the media's end.
+  - Its source time is the media's end less the speed of the last section.
+  - Example in Resolve Studio 21.1.2: a 900-frame clip, a speed keyframe at frame 30, and 50% after it. The clip shows source frames 0 to 898.
+  - The manual does not tell this.
+  - A speed change does not remove pictures from a clip. vidcut does not copy this fault.
+  - The last section shows each source frame to the end of the media, the last frame too ([D48](spec.md#12-decisions-on-gaps-and-contradictions)).
+- **At a very negative line spacing, Resolve draws only the first of two lines.**
+  - Line spacing moves the lines closer, and lines can overlap (p. 1184). The manual does not name lines that disappear.
+  - These are measurements in Resolve Studio 21.1.2 from files, with Arial at size 96:
+    - At -112, it draws both lines.
+    - At -200 and at -500, it draws only the first of two lines.
+    - At -200 on the first line alone, or on the last line alone, it also draws only the first line.
+  - vidcut does not copy this fault. It draws all the lines at any line spacing.
+- **The output of Resolve's Glow has an alpha of 1, also outside a smaller picture and in the clear parts of the picture.**
+  - These are measurements in Resolve Studio 21.1.2 (Glow, p. 3590), with Use Alpha on, as an effect added in the GUI has it.
+  - Thus a Glow on a clip at Zoom 0.5 makes the frame black around the clip. The tracks below do not show.
+  - An effect on a clip does not hide the tracks below. vidcut does not copy this fault.
+  - In `fs_glow`, the alpha of the output is the larger of the picture's alpha and the brightest color of the output.
+  - Other tracks below show around the clip and through its clear parts. The glow around the clip covers them by its brightest color.
+- **Resolve's Film Grain jumps at exactly 0.4 and 0.6 of Symmetry.**
+  - These are measurements in Resolve Studio 21.1.2 (Film Grain, p. 3559), with Grain Only and Softness 0, at each 0.02 of Symmetry.
+  - At exactly 0.4 and 0.6, the standard deviation of the noise is 0.0109 and 0.0855. At the values on each side, it is about 0.026.
+  - A small change of Symmetry does not make a large change of the grain. vidcut does not copy these jumps.
+  - Symmetry follows a table of the measured curves and blends between them (`Graining::SYMMETRIES`, [spec §8.16](spec.md#816-effects-pp-765-3526-3536)).
+  - The table has no curve at 0.4 and 0.6. There, vidcut blends the curves at 0.38 and 0.42, and at 0.58 and 0.62.
+- **With Alpha Mode Straight, a ProRes 4444 file from Resolve still holds premultiplied colors.**
+  - Measured in Resolve Studio 21.2. ProRes 4444 XQ is not measured.
+  - The file from Resolve does not agree with its own setting.
+  - vidcut does not copy this fault. The file holds what its Alpha Mode says.
+  - With `video.alpha_mode` `straight`, ProRes 4444 and 4444 XQ hold straight colors (`writing_alpha`).
+- **A Notch band of Resolve's Equalizer does not change the exported sound.**
+  - The graph shows a cut at the frequency of the band. The exported sound has no cut.
+  - [Spec §9](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the measured filters of the Equalizer.
+  - vidcut does not copy this fault. The exported sound has the cut that the graph shows (`EqKind::Notch`).
+  - The width of the cut is fixed (`NOTCH_Q`).
+
+## Resolve's controls
+
+These facts come from the Mark menu and the Inspector of Resolve Studio 21.1.2.
+
+- **With the Keyframes panel and the keyframe tray closed, Delete All Keyframes removes only one speed keyframe.**
+  - Then Delete Keyframe and Delete All Keyframes do the same thing.
+  - Each removes one speed keyframe: the one at the playhead, or else the nearest one before it. No question opens.
+  - [X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items) gives the other measurements of these items.
+  - vidcut does not copy this fault. Its Delete All Keyframes asks first, for example "Delete 3 Speed keyframes of Clip 2?".
+  - Then it removes all the speed keyframes (`KeyCmd::DeleteAll`).
+- **Delete All Keyframes can reset a value that has no keyframes.**
+  - In one check, Delete in its question also put a Position X with no keyframes back to 0.
+  - vidcut does not copy this fault. A value with no keyframes keeps its value.
+- **Ease In, Ease Out and Ease In and Out in the speed Ease list give the same result.**
+  - The Ease list of the Inspector acts on the section under the playhead. It has Linear, Ease In, Ease Out and Ease In and Out.
+  - Example: speed keyframes at frames 30 and 60, and 25% between them.
+    - Ease In, Ease Out and Ease In and Out each ease only the speed keyframe at frame 30. They give the same export and the same render.
+    - The speed keyframe at frame 60 stays linear. There, the speed changes at once.
+  - The manual does not tell this. Its Speed Change controls of the Cut page have no Ease list.
+  - vidcut does not copy this fault. Ease In eases the speed keyframe where the section starts. Ease Out eases the one where it ends.
+  - Ease In and Out eases both, and Linear neither (`speed.ease`, [D48](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Thus Ease In and Ease Out do what their names tell, as the Dynamic Zoom ease does. Ease In is slow at the start, Ease Out at the end.
+  - A handle on one side of a speed keyframe alone gives a straight line. Thus one speed keyframe takes an ease on both sides or on none.
+  - The Speed row of the Keyframes tab and the tray offers Linear and Ease In and Out for one speed keyframe.
 
 ## transcribe.cpp and its models
 
