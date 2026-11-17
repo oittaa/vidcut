@@ -5455,11 +5455,14 @@ Resolve gives a primary grade as a CDL for each channel: `slope = W · (1 − L)
 Temp and Tint are a Bradford adaptation, applied to the code values with the Rec.709 primaries.
 
 - The source white is a Planck radiator of 6500 K. Both whites have a luminance of 1.
-- Temp `T` sets the target white to a Planck radiator of `6500 − T` kelvin. The range is −4000 to 4000 (p. 3146).
-- Tint `t` sets the target white to 6500 K with `Duv = −t / 10000`. The range is −100 to 100 (p. 3146).
+- With Temp `T` and Tint `t`, the target white has a CCT of `6500 − T` kelvin and a Duv of `−t / 10000`.
+  - Thus Temp alone gives a Planck radiator of `6500 − T` kelvin.
+  - Tint alone moves the white of 6500 K off the Planck line.
+  - Temp and Tint together give one adaptation, not two adaptations in a row.
+- The range of Temp is −4000 to 4000. The range of Tint is −100 to 100 (p. 3146).
 - A positive Temp makes the picture warmer. A positive Tint makes it more magenta (p. 3146).
 - The adaptation factors match to 8e-4. The Planck values use the CIE 1931 2° observer.
-- The place of Temp and Tint in the order of the node is not measured.
+- Temp and Tint come first in the node: before Offset, the wheels, the master wheels, Saturation and Hue. This order matches to 5.4e-6.
 
 ### 14.7 Contrast and Pivot (p. 3146)
 
@@ -5469,9 +5472,33 @@ Temp and Tint are a Bradford adaptation, applied to the code values with the Rec
   - Contrast 1.5 has a slope of about 2.1 near the Pivot and 0.35 at 0 and 1. Contrast 2 is a step at the Pivot.
   - The curve does not act on each channel by itself, and it does not act on the luma alone.
 - Outside 0 to 1, the curve goes on as a straight line with the slope of its end.
-- Not measured: the formula of the S-curve, and the order in the node.
+- Contrast comes after the wheels, the master wheels, Temp and Tint. Contrast 0.5 shows this order to 8.2e-4, the error of its straight line.
+- A straight Contrast gives the same result before and after Saturation and Hue.
+- Not measured: the formula of the S-curve, and its place before or after Saturation and Hue.
 
-### 14.8 Log wheels (pp. 3152–3157)
+### 14.8 Shadows, Highlights and Midtone Detail (pp. 3146–3147)
+
+These three controls use the pixels around a pixel. On a frame of one color, the result is again one color. There, Shadows and Highlights are a curve `g` on the luma `Y` of §14.1.
+
+- A positive value multiplies R, G and B by `g(Y) / Y`. Thus the ratios of the channels stay.
+- A negative value adds `g(Y) − Y` to R, G and B. Thus the differences of the channels stay.
+- Gray stays gray. These two rules match to 1.7e-7.
+- The curves are straight lines through 0 below 0. Shadows has almost no effect above 1. Highlights acts up to 2.
+- These points are on the gray curves:
+
+| In | 0.125 | 0.25 | 0.5 | 0.75 | 1 | 1.5 | 2 |
+|---|---|---|---|---|---|---|---|
+| Shadows 100 | 0.27898 | 0.41428 | 0.6213 | 0.8078 | 1.00478 | 1.50049 | 2 |
+| Shadows −100 | 0.03578 | 0.11569 | 0.35822 | 0.66619 | 0.99191 | 1.50049 | 2 |
+| Highlights 100 | 0.13702 | 0.29641 | 0.65267 | 1.01992 | 1.3592 | 1.84558 | 2 |
+| Highlights −100 | 0.11922 | 0.22966 | 0.42301 | 0.58343 | 0.71734 | 0.95644 | 1.98546 |
+
+- Midtone Detail changes a frame of one color by 1.5e-3 at most. It raises the contrast at edges (p. 3146).
+- At a step from 0.1 to 0.8, all three controls change the pixels within about 10 pixels of the edge. The frame is 588 pixels wide.
+- The test project has the working luminance HDR 1000. The effect of this setting on the curves is not measured.
+- Not measured: the formula of `g`, and the filter that reads the pixels around a pixel.
+
+### 14.9 Log wheels (pp. 3152–3157)
 
 - Each Log wheel works on its own channel. There is no luma step.
 - The defaults of the window are Low Range 0.333 and High Range 0.550.
@@ -5481,23 +5508,45 @@ Temp and Tint are a Bradford adaptation, applied to the code values with the Rec
 - Not measured: the shapes of the change between the ranges, and other ranges.
 - With a Log value set, values above 0 and up to 1 come out 0.00049 low. This spec does not copy this fault.
 
-### 14.9 Nodes and mixers (pp. 3385, 3409–3417)
+### 14.10 Nodes and mixers (pp. 3385, 3409–3417)
 
 - A serial node works on the output of the node before it.
 - The Parallel Mixer adds the changes of its inputs: `out = x + Σ (nᵢ − x)`, with `x` the picture that enters the parallel nodes.
-- The Layer Mixer, with the composite mode Normal, gives the input with the highest number. That is the lowest node in the Node Editor.
-- These three match to 7e-6.
-- Not measured: the other composite modes of the Layer Mixer, and the Key Mixer.
+- These two match to 7e-6.
+- The Layer Mixer makes a composite of its inputs (pp. 3413–3414).
+  - With two inputs, input 1 is the layer on top. Input 0 is the layer below. Input 1 is the lower node in the Node Editor.
+  - Normal gives input 1.
+  - The other composite modes are the modes of the timeline ([D75](#12-decisions-on-gaps-and-contradictions)). The clip of D75 is input 1. The tracks below are input 0.
+  - Color and Luminosity use the same Y′CbCr matrix as D75.
+  - The modes match to 3e-6. Color Dodge, Color Burn, Divide and Vivid Light match to 3e-5 near a division by almost 0.
+- The renders are 32-bit float. They show what the 16-bit renders of D75 cannot show. Here `a` is the layer on top and `b` the layer below, as in D75:
+  - Color Dodge: `b / (1 − a)`, with no cap. For `a ≥ 1`, it is 1.
+  - Color Burn: `1 − (1 − b) / a`, with no floor. For `a ≤ 0`, it is 0.
+  - Divide: `b / (a + 0.000001)`, with no cap.
+  - Linear Burn: `max(0, a + b − 1)`.
+  - Pin Light at `a = 0.5` takes `max(b, 2a − 1)`.
+  - Hard Mix compares the 32-bit float sum `a + b` with 1.
+  - The other modes keep values above 1 and below 0.
+- With a gray `a`, Hue has no direction. Resolve then gives a hue from rounding noise. Saturation with a gray `b` does the same.
+- The grade file keeps the mode of a Layer Mixer as an even number:
+  - 0 Normal, 2 Add, 4 Subtract, 6 Difference, 8 Multiply, 10 Screen, 12 Overlay, 14 Hardlight, 16 Softlight.
+  - 18 Darken, 20 Lighten, 22 Color Dodge, 24 Color Burn, 26 Exclusion, 28 Hue, 30 Saturation, 32 Color, 34 Luminosity.
+  - 36 Divide, 38 Linear Dodge, 40 Linear Burn, 42 Linear Light, 44 Vivid Light, 46 Pin Light.
+  - 48 Hard Mix, 50 Lighter Color, 52 Darker Color.
+  - An odd number, or a number above 52, gives Normal.
+- Not measured: a Layer Mixer with more than two inputs, the Key Output Gain (p. 3415), and the Key Mixer.
+- Not measured: the caps of D75 in a float render of the timeline.
 
-### 14.10 Grades in interchange files
+### 14.11 Grades in interchange files
 
 - An OpenTimelineIO export of Resolve holds no grade.
 - An EDL export with CDL gives each event two lines: `*ASC_SOP (s s s)(o o o)(p p p)` and `*ASC_SAT s`, with six decimals.
 - An ALE export with CDL has the columns `ASC_SOP` and `ASC_SAT`, with four decimals.
 - The import of these files into Resolve is not measured.
 
-### 14.11 Not measured
+### 14.12 Not measured
 
-- Color Boost works on each pixel by itself, and it is not linear. Its formula is not found.
-- Shadows, Highlights and Midtone Detail use the pixels around a pixel (p. 3146). The test picture cannot measure them.
-- The S-curve of Contrast (§14.7) and the shapes of the Log wheels (§14.8).
+- Color Boost works on each pixel by itself, and it is not linear (p. 3147). Its formula is not found.
+- The S-curve of Contrast (§14.7).
+- The curves and the filter of Shadows, Highlights and Midtone Detail (§14.8).
+- The shapes of the Log wheels (§14.9).

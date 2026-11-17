@@ -7,7 +7,7 @@ The Primaries palette of the Color page is the model. [Spec §14](../spec.md#14-
 **Why:**
 
 - Auto Color is the only color control of vidcut ([auto-color.md](auto-color.md)). A quick edit has no manual correction.
-- Resolve exports no grade in an OpenTimelineIO file (spec §14.9). Thus a grade does not go between vidcut and Resolve in that file.
+- Resolve exports no grade in an OpenTimelineIO file (spec §14.11). Thus a grade does not go between vidcut and Resolve in that file.
 
 **In the code:**
 
@@ -19,7 +19,8 @@ The Primaries palette of the Color page is the model. [Spec §14](../spec.md#14-
 
 **To do:**
 
-- One corrector with the math of spec §14.1–§14.6: Lift, Gamma, Gain, Offset, the master wheels, Lum Mix, Saturation, Hue, Temp and Tint.
+- One corrector with the math of spec §14.1–§14.7. It holds Temp, Tint, Lift, Gamma, Gain, Offset and the master wheels.
+  It also holds Lum Mix, Saturation, Hue and Contrast below 1.
 - The controls show the numbers of the window in §14.1.
 - The clip grade runs after the effects of the clip and before the speed change ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
 - The timeline grade runs on the mixed picture, before subtitles and the encode (§13).
@@ -28,13 +29,12 @@ The Primaries palette of the Color page is the model. [Spec §14](../spec.md#14-
 - The values take keyframes once effect keyframes exist ([effects-library.md](effects-library.md)).
 - The CLI, IPC and MCP perform the same action as the GUI.
 
-**To measure:** the items of spec §14.11.
+**To measure:** the items of spec §14.12.
 
-- The formula of the Contrast S-curve, and its place in the order of a node. The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/cases/`.
+- The formula of the Contrast S-curve, and its place before or after Saturation and Hue. The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/cases/`.
 - The formula of Color Boost. The data is in the same folder.
-- Shadows, Highlights and Midtone Detail, with test frames that are flat.
+- The curves of Shadows and Highlights, and the filter of the three controls of spec §14.8. The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/flat_cases/`.
 - The shapes of the Log wheels between the ranges.
-- The place of Temp and Tint in the order of a node.
 - Whether Resolve reads a CDL from an OpenTimelineIO, EDL or ALE import.
 
 **Not this item:**
