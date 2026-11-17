@@ -5,9 +5,10 @@
 1. **Resolve is the model.** By default, vidcut does what DaVinci Resolve does. [docs/spec.md](docs/spec.md) records the behavior, with the manual's page numbers.
    - Do a different thing only when Resolve has a bug, or when a more modern way is clearly better. Example: Smooth Cut has better defaults and gives a cleaner result.
    - A feature that Resolve does not have is an extra, not a deviation.
+   - If Resolve has on obvious bug, fixing it or working around it is not a deviation. Record the bug in gotchas.md.
    - OTIO files go between vidcut and Resolve with as little loss as possible.
    - The picture path is a pipeline ([spec §13](docs/spec.md#13-order-of-operations-pp-287296-3407), Chapter 144 of the manual). Each stage takes the output of the stage before it.
-   - All image data is processed as full range, uncompressed, 32-bit floating point data
+   - All image data is processed as full range, uncompressed, 32-bit floating point data.
    - A stage does not branch on the kind of its input.
    - A difference from a measurement shows a fault in a stage. Fix that stage. Do not add a case for the input that failed.
    - Only the owner adds a deviation. Ask first. Tell the owner what Resolve does and what a match costs.
