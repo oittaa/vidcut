@@ -5515,8 +5515,11 @@ These three controls use the pixels around a pixel. Shadows and Highlights are a
 | Highlights −100 | 0.11922 | 0.22966 | 0.42301 | 0.58343 | 0.71734 | 0.95644 | 1.98546 |
 
 - Midtone Detail changes a frame of one color by 1.5e-3 at most. It raises the contrast at edges (p. 3146). It changes the same pixels as `B`, but it does not follow these rules.
-- The frames of these renders are 588 pixels wide. The test project has the working luminance HDR 1000.
-- Not measured: the formula of `g`, the window at other frame sizes, the effect of the working luminance, and Midtone Detail.
+- The frames of these renders are 588 × 260 pixels. The test project has the working luminance HDR 1000.
+- At 1176 × 520, a radius of 12 with ε 0.01 fits best. The error is 2.5e-3 near the ringing of the scaler.
+  - Thus the window grows with the frame. The exact rule at other sizes is not known.
+  - The grade runs at the size of the timeline, after the scaling of the clip.
+- Not measured: the formula of `g`, the exact window at other frame sizes, the effect of the working luminance, and Midtone Detail.
 
 ### 14.9 Log wheels (pp. 156, 3152–3157)
 
