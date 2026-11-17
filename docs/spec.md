@@ -2764,6 +2764,8 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - A double-click on the name of a value resets it (p. 3146).
 - **How the values work**, measured in Resolve Studio 21.2 with float renders:
   - A change of 1 in the Offset number moves its channel by 7.5/1023 in code values.
+  - In the render, Gain is 0.001 at least, and Lift is 0.4995 at most.
+  - Lift also stops where the slope of its channel reaches 200. Thus no Lift and Gain give an infinite slope.
   - At a Lum Mix of 100, a change to R, G or B moves the other two channels. Thus the luma stays (p. 3147).
   - Offset and printer points change only their own channel. They do not use Lum Mix (p. 3157).
   - Shadows, Highlights and Midtone Detail use a smoothed luma. A guided filter makes it, so edges stay.

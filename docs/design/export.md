@@ -749,6 +749,7 @@ The primary correction of a clip (`model::Grade`, the `grade.set` request, the C
   - Temp and Tint give one 3×3 matrix. It adapts the white of 6500 K to the new white, with the Bradford cone matrix.
   - The new white is on the Planck curve at 6500 K minus Temp. Tint moves it across the curve.
   - `PLANCK_U` and `PLANCK_V` give the Planck curve in CIE 1960 uv. From 2000 K to 12000 K, the error is less than 2e-6.
+  - `wheel` keeps Gain at `WHEEL_LEAST_GAIN` or more, and the stored Lift at `WHEEL_MOST_LIFT` or less. Lift also stops where the slope reaches `WHEEL_STEEPEST` ([spec §8.20](../spec.md#820-primaries-palette-pp-118-31413159)).
   - Saturation and Hue give one 3×3 matrix.
   - Contrast is a curve about the pivot (`ContrastCurve`). Its knots give exact Hermite segments, with no table.
   - Each Log color is a curve (`LogCurve`). Between Low Range and High Range it is a Bezier curve, solved to 1e-12.

@@ -67,6 +67,12 @@ const CONTRAST_ENDS: [f64; 2] = [126.5 / 1023.0, 894.5 / 1023.0];
 
 const CONTRAST_REACH: f64 = 0.125;
 
+const WHEEL_LEAST_GAIN: f64 = 0.001;
+
+const WHEEL_MOST_LIFT: f64 = 0.999;
+
+const WHEEL_STEEPEST: f64 = 200.0;
+
 const NEWTON_STEPS: usize = 100;
 
 const NEWTON_CLOSE: f64 = 1e-12;
@@ -272,7 +278,13 @@ fn color_matrix(saturation: f64, hue: f64) -> [[f64; 3]; 3] {
 }
 
 fn wheel(lift: f64, gamma: f64, gain: f64) -> (f64, f64, f64) {
-    let lift = 2.0 * lift;
+    let gain = gain.max(WHEEL_LEAST_GAIN);
+    let steep = WHEEL_STEEPEST * (gain - 1.0) + gain;
+    let least = match steep > 0.0 {
+        true => (gain - WHEEL_STEEPEST) / steep,
+        false => f64::NEG_INFINITY,
+    };
+    let lift = (2.0 * lift).max(least).min(WHEEL_MOST_LIFT);
     let gamma = 4.0 * gamma;
     let weight = gain / (1.0 + lift * (gain - 1.0));
     let power = if gamma >= 0.0 {
