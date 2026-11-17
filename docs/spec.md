@@ -2779,10 +2779,7 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - Contrast continues on straight lines below 0 and above 1. This is measured from −4 to 8.
   - Without color management, the grade is the same in Rec.709, Rec.2020, DaVinci Wide Gamut, Rec.2100 ST2084 and Rec.2100 HLG timelines.
   - The grade of a clip comes after its effects and before its speed change, composite mode and opacity ([§13](#13-order-of-operations-pp-287296-3407)).
-  - Resolve reads its curve tables of Shadows, Highlights, Midtone Detail and the Log wheels half a step off.
-  - Thus these parts move a value by up to 1/1023, also where their curve makes no change.
-  - vidcut does not copy this fault. With Shadows 100, vidcut and Resolve differ by up to 0.06 on dark colored pixels.
-  - vidcut matches the other renders. [design](design/export.md#the-grade) gives the math and the order of the parts.
+  - vidcut matches the renders, apart from a fault of Resolve that [gotchas](gotchas.md#resolves-renders) names. [design](design/export.md#the-grade) gives the math and the order of the parts.
 - **Printer points** (pp. 3157–3159):
   - In Bars mode, each Offset bar has a Plus button at the top and a Minus button at the bottom.
   - Measured: one point moves its channel by the Step Size times the Density Increment of that channel. With the defaults, this is 1 on the Offset number.
