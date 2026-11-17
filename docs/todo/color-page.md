@@ -24,9 +24,8 @@ A page for the grade of a clip, with its own nodes, as the Color page of Resolve
 **To do:**
 
 - A Node Editor for the Color page, with the corrector node of [primary-grade.md](primary-grade.md), serial nodes, the Parallel Mixer and the Layer Mixer ([spec §14.10](../spec.md#1410-nodes-and-mixers-pp-3385-34093417)).
-- The composite modes of the Layer Mixer use the composite code of the timeline (spec §14.10).
+- The composite modes of the Layer Mixer use the composite code of the timeline (spec §14.10), with the rules of [composite-float-rules.md](composite-float-rules.md).
+- The Key Output Gain of each input sets its strength in the Layer Mixer and in the Parallel Mixer (spec §14.10).
 - The Key Mixer, the key input and the key output of a corrector ([spec §14.11](../spec.md#1411-keys-and-the-key-mixer-pp-34313438)). Their keys come from windows and qualifiers (p. 3431).
-- Measure a Key Mixer and a Layer Mixer with more than two inputs, and the Key Input Gain and Offset. The script interface of Resolve cannot add a node, so a grade made in the window is necessary.
-- Measure a key input in a node with a window, in Matte and in Mask mode (spec §14.11).
-- Measure the composite modes of the timeline in a float render. The Layer Mixer has no cap at 0 or 1 in Color Dodge, Color Burn and Divide (spec §14.10).
+- Measure a node with a window as an input of the Layer Mixer (spec §14.10). The script interface of Resolve cannot add a window, so a grade made in the window is necessary.
 - The CLI, IPC and MCP perform the same action as the GUI.

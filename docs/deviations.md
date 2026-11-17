@@ -1593,3 +1593,17 @@ The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the contro
   - Resolve: the Equalizer is the effect `Fairlight Clip Equaliser`, with one more effect for each band.
   - vidcut: the Equalizer is in fields that only vidcut reads. The export report shows the note `equalizer_kept`.
   - Why: vidcut cannot write the Equalizer effects of Resolve yet ([todo](todo/effects-library.md)).
+
+## X171. Six composite rules come from 16-bit renders
+
+- **Resolve:**
+  - The composite mode of a clip mixes it with the tracks below (pp. 1199–1203).
+  - In 32-bit float renders of Resolve Studio 21.2, Color Dodge, Color Burn and Divide have no cap at 0 or 1. Thus Vivid Light has none.
+  - Divide is `b / (a + 0.000001)`. Linear Burn stops at 0. Pin Light at `a = 0.5` takes `max(b, 2a − 1)`.
+  - Lighter Color and Darker Color take the clip on a tie.
+  - Details: [D75](spec.md#12-decisions-on-gaps-and-contradictions).
+- **vidcut:**
+  - Color Dodge and Divide stop at 1. Color Burn stops at 0. Divide is `b / a`.
+  - Linear Burn does not stop at 0. Pin Light at `a = 0.5` takes `min(b, 2a)`.
+  - Lighter Color and Darker Color take the tracks below on a tie.
+- **Why:** these rules come from 16-bit renders, which cannot show values outside 0..1. [composite-float-rules.md](todo/composite-float-rules.md) removes this difference.

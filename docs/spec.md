@@ -2186,10 +2186,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The value of a pixel is the linear mix of the four cells around it.
   - The Center can put the shape outside the frame. Five Centers outside the frame follow the same rule.
   - The rule works on the premultiplied colors, and the alpha does not change. A clear part of the picture thus adds the Color to the lower track.
-  - Composite Type differs from the Composite section in these ways:
-    - Color Dodge, Color Burn, Divide and Vivid Light do not stop at 0 or 1 before the mix.
-    - Divide is b / (a + 0.000001).
-    - Linear Burn stops at 0.
+  - Composite Type uses the formulas of the Composite section, as the float renders of D75 give them.
+    - Thus Color Dodge, Color Burn, Divide and Vivid Light do not stop at 0 or 1 before the mix.
     - Lighter Color and Darker Color take the Color on a tie.
     - Hue with a black or a white Color takes the hue of red. The grays 0.2, 0.4, 0.6 and 0.8 give one other fixed hue.
 - **Vignette in vidcut:**
@@ -4533,8 +4531,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Across the fade, the coverage follows a smoothstep. It is full over the first eighth of the fade.
     - At a corner, the distances outside the two sides join in a smooth maximum. Thus the corners are round.
     - Keyframes of Softness and Opacity without handles change in a straight line. After the last keyframe, the value stays.
-  - **Composite modes** (measured in Resolve Studio 21.1.1, with 16-bit renders):
-    - A mode works on the R'G'B' code values of the clip (a) and of what is below it (b), from 0 to 1.
+  - **Composite modes** (measured in Resolve Studio 21.1.1 with 16-bit renders, and in 21.2 with 32-bit float renders):
+    - A mode works on the R'G'B' code values of the clip (a) and of what is below it (b).
     - Where there are no tracks below, b is black.
     - The mix of the mode is M. The result is b + (M − b) × the opacity.
     - vidcut also fades M by the coverage of the edges and the soft edges, as it fades a clip at Normal.
@@ -4545,15 +4543,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Darken and Lighten: the smaller and the larger of a and b.
       - Overlay: H(b, a). Hardlight: H(a, b). H(x, y) is 2xy for x ≤ 0.5. Above 0.5, it is 1 − 2(1 − x)(1 − y).
       - Softlight: the soft light of the W3C, with a as the source.
-      - Color Dodge: b / (1 − a), at most 1. For a ≥ 1, it is 1.
-      - Color Burn: 1 − (1 − b) / a, at least 0. For a ≤ 0, it is 0.
-      - Divide: b / a, at most 1. For a ≤ 0, it is 1 when b > 0, else 0.
-      - Linear Burn: a + b − 1. Linear Light: b + 2a − 1.
+      - Color Dodge: b / (1 − a), with no cap. For a ≥ 1, it is 1.
+      - Color Burn: 1 − (1 − b) / a, with no floor. For a ≤ 0, it is 0.
+      - Divide: b / (a + 0.000001), with no cap.
+      - Linear Burn: max(0, a + b − 1). Linear Light: b + 2a − 1.
       - Vivid Light: the Color Burn of b by 2a for a ≤ 0.5. Above 0.5, the Color Dodge of b by 2a − 1.
-      - Pin Light: min(b, 2a) for a ≤ 0.5. Above 0.5, max(b, 2a − 1).
-      - Hard Mix: 1 when a + b ≥ 1, else 0.
+      - Pin Light: min(b, 2a) for a < 0.5. From 0.5, max(b, 2a − 1).
+      - Hard Mix: 1 when the 32-bit float sum a + b is 1 or more, else 0.
+      - A 16-bit render clips these results to 0..1. Thus Color Dodge and Divide seem to stop at 1, and Color Burn at 0.
     - The whole color:
-      - Lighter Color and Darker Color take the color with the larger or the smaller sum of R, G and B. On a tie, they take b.
+      - Lighter Color and Darker Color take the color with the larger or the smaller sum of R, G and B. On a tie, they take a.
       - The spread of a color is the length of (R − G, G − B, B − R). The luma here is the luma of BT.709.
       - Hue: the luma of b, plus a minus the luma of a. That difference is scaled by the spread of b over the spread of a.
       - Saturation: the luma of b, plus b minus its luma. That difference is scaled by the spread of a over the spread of b.
@@ -4561,6 +4560,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Resolve goes back from Y, Cb and Cr by a matrix a little off BT.601. vidcut uses the matrix fitted to the renders.
     - The manual's words do not match the renders for some modes, for example Subtract and Hard Mix (pp. 1200–1202). vidcut follows the renders.
     - vidcut also keeps these values between the layers, in 32-bit floats.
+    - vidcut differs in Color Dodge, Color Burn, Divide, Linear Burn, Pin Light and the tie of Lighter Color and Darker Color ([X171](deviations.md#x171-six-composite-rules-come-from-16-bit-renders)).
     - In an export, a title between layers cuts them ([todo](todo/composite-masks.md)).
   - **Units** (vidcut's):
     - `position` is where the middle of the picture goes before the zoom and the turn: `[x, y]` in fractions of the frame from its top left.
@@ -5382,6 +5382,7 @@ The Primaries palette of the Color page is the model for the primary grade of a 
 
 - `Y(v) = 0.2126 R + 0.7152 G + 0.0722 B`: the luma of the wheels (Rec.709 weights).
 - `S(v) = 0.21 R + 0.70 G + 0.09 B`: the luma of Saturation and Hue.
+- Without color management, the timeline color space does not change `Y` or `S`. Rec.709 (Scene), Rec.2020 Gamma 2.4 and DaVinci WG/Intermediate give the same weights.
 - `spow(v, p) = sign(v) · |v|^p`. Thus a power works on a value below 0 and on a value above 1. There is no clamp.
 - `k = 187.5 / 1023`: the Offset step. An Offset value of 1 adds 0.183284.
 
@@ -5514,28 +5515,25 @@ These three controls use the pixels around a pixel. On a frame of one color, the
 - The Parallel Mixer adds the changes of its inputs: `out = x + Σ (nᵢ − x)`, with `x` the picture that enters the parallel nodes.
 - These two match to 7e-6.
 - The Layer Mixer makes a composite of its inputs (pp. 3413–3414).
-  - With two inputs, input 1 is the layer on top. Input 0 is the layer below. Input 1 is the lower node in the Node Editor.
-  - Normal gives input 1.
-  - The other composite modes are the modes of the timeline ([D75](#12-decisions-on-gaps-and-contradictions)). The clip of D75 is input 1. The tracks below are input 0.
+  - Input 0 is the layer at the bottom. Each next input goes on top of the result of the inputs before it: `acc = F(acc, nᵢ)`, with `F` the composite mode.
+  - Thus the input with the highest number is on top. It is the lowest node in the Node Editor. Normal gives this input.
+  - The composite modes are the modes of the timeline ([D75](#12-decisions-on-gaps-and-contradictions)). In each step, `nᵢ` is the clip of D75 and `acc` is the tracks below.
   - Color and Luminosity use the same Y′CbCr matrix as D75.
-  - The modes match to 3e-6. Color Dodge, Color Burn, Divide and Vivid Light match to 3e-5 near a division by almost 0.
-- The renders are 32-bit float. They show what the 16-bit renders of D75 cannot show. Here `a` is the layer on top and `b` the layer below, as in D75:
-  - Color Dodge: `b / (1 − a)`, with no cap. For `a ≥ 1`, it is 1.
-  - Color Burn: `1 − (1 − b) / a`, with no floor. For `a ≤ 0`, it is 0.
-  - Divide: `b / (a + 0.000001)`, with no cap.
-  - Linear Burn: `max(0, a + b − 1)`.
-  - Pin Light at `a = 0.5` takes `max(b, 2a − 1)`.
-  - Hard Mix compares the 32-bit float sum `a + b` with 1.
-  - The other modes keep values above 1 and below 0.
-- With a gray `a`, Hue has no direction. Resolve then gives a hue from rounding noise. Saturation with a gray `b` does the same.
+  - The modes match to 3e-6. Color Dodge, Color Burn, Divide and Vivid Light match to 3e-4 near a division by almost 0. There, the float32 rounding of the inputs decides the result.
+- With a gray clip, Hue has no direction. Resolve then gives a hue from rounding noise. Saturation with gray tracks below does the same.
+- The Key Output Gain of an input node sets its strength (p. 3415). Its key output `kᵢ` (§14.11) acts as an opacity:
+  - Input 0: `acc = x + k₀ · (n₀ − x)`, with `x` the picture that enters the nodes.
+  - Each next input: `acc = acc + kᵢ · (F(acc, nᵢ) − acc)`.
+  - The Parallel Mixer scales the change of each input: `out = x + Σ kᵢ · (nᵢ − x)` (p. 3415).
+  - A node with no window or qualifier has `kᵢ = clamp(kg + ko)`. Thus the Key Output Offset has no effect at the default Gain.
+- These rules match renders of a Layer Mixer with three inputs and of a Parallel Mixer to 7e-7.
 - The grade file keeps the mode of a Layer Mixer as an even number:
   - 0 Normal, 2 Add, 4 Subtract, 6 Difference, 8 Multiply, 10 Screen, 12 Overlay, 14 Hardlight, 16 Softlight.
   - 18 Darken, 20 Lighten, 22 Color Dodge, 24 Color Burn, 26 Exclusion, 28 Hue, 30 Saturation, 32 Color, 34 Luminosity.
   - 36 Divide, 38 Linear Dodge, 40 Linear Burn, 42 Linear Light, 44 Vivid Light, 46 Pin Light.
   - 48 Hard Mix, 50 Lighter Color, 52 Darker Color.
   - An odd number, or a number above 52, gives Normal.
-- Not measured: a Layer Mixer with more than two inputs, and the Key Output Gain of its inputs (p. 3415).
-- Not measured: the caps of D75 in a float render of the timeline.
+- Not measured: an input node with a window or a qualifier. Its key output can then act as the opacity and also limit the change of the node.
 
 ### 14.11 Keys and the Key Mixer (pp. 3431–3438)
 
@@ -5548,9 +5546,15 @@ A key is a value for each pixel. It sets how much of the change of a node the pi
   - `Q(x) = U(0, x)`. Below 0.5, `Q(x) = 4x(1 + x) / 7`. From 0.5, `Q(x) = (8x − 1) / 7`. Thus `Q(0) = 0`, `Q(0.5) = 3/7` and `Q(1) = 1`.
 - A window key in its own node is `v`.
 - The key output of a corrector gives `v` with its default values.
-- The key input of a corrector with no window gives `clamp(Q(k))`, with `k` the key at the input.
+- A key on a link is clamped to 0..1. The output of a Key Mixer can be above 1 before this clamp.
+- The key input of a corrector makes `x = ig · k + io` from the key `k` at the input, with its Key Input Gain `ig` and Offset `io` (p. 3436).
+  - With the Invert of the key input on, it makes `1 − x` in place of `x`.
+- A corrector with no window gives `clamp(Q(x))`, in Matte mode and in Mask mode.
   - Thus a key from a key output straight into a key input changes its shape.
-- The Key Mixer makes its output from the keys `kᵢ` at its inputs:
+- A corrector with a window has its own key `w`: the key that the window gives alone. With `a = Q(w)` (p. 3436):
+  - Matte mode, the default, gives `clamp(1 − U(1 − a, 1 − x))`. This is an intersection.
+  - Mask mode gives `clamp(U(a, x))`. This is a union.
+- The Key Mixer makes its output from the keys `kᵢ` at its inputs, for any number of inputs:
   1. Each input gives `xᵢ = gᵢ · kᵢ + oᵢ`, with its Gain `gᵢ` and its Offset `oᵢ`.
   2. With the Invert of the input on, the input gives `1 − xᵢ` in place of `xᵢ`.
   3. The value starts as `acc = 0`. Each input in Mask mode then gives `acc = U(acc, xᵢ)`, in the order of the inputs.
@@ -5560,17 +5564,18 @@ A key is a value for each pixel. It sets how much of the change of a node the pi
 - No step clamps the value. The key input of the next node clamps it.
 - Mask mode gives a smooth union of the keys, not a sum. The manual tells that the keys add (p. 3437).
 - An input in Matte mode with no input in Mask mode gives 0.
-- In the window, the left button of an input is Invert and the right button is Matte.
+- In the window, the left button of an input is Invert and the right button is Matte. The same holds for the Key Input of a corrector.
 - The Key Output Gain `kg` and the Key Output Offset `ko` of a corrector act last, with no curve: `clamp(kg · e + ko)`. Here `e` is the key of the node (p. 3436).
-- This model matches 43 renders to 8.2e-7. All of them have two inputs.
+- This model matches 43 renders with two inputs and 38 renders with three inputs to 8.2e-7.
 - The grade file keeps the Invert and the Matte of the inputs as one byte for each input, with 2 for on. It keeps the Gain and the Offset of the inputs as one float for each input.
-- Not measured: more than two inputs, and the Key Input Gain and Offset of a corrector.
-- Not measured: a key input in a node with a window or a qualifier, in Matte or in Mask mode (p. 3436).
+  - An input with no value in these lists has the default values.
+- Not measured: a key input in a node with a qualifier, and a node with two windows.
 
 ### 14.12 Grades in interchange files
 
 - An OpenTimelineIO export of Resolve holds no grade.
 - An EDL export with CDL gives each event two lines: `*ASC_SOP (s s s)(o o o)(p p p)` and `*ASC_SAT s`, with six decimals.
+  - The values are the CDL of §14.4. Thus Lift, Gamma, Gain and Offset go into the EDL without the luma step of §14.2.
 - An ALE export with CDL has the columns `ASC_SOP` and `ASC_SAT`, with four decimals.
 - A timeline import of an EDL or of an OpenTimelineIO file applies no grade.
   - The `*ASC_SOP` and `*ASC_SAT` lines of an EDL have no effect.
@@ -5588,3 +5593,4 @@ A key is a value for each pixel. It sets how much of the change of a node the pi
 - The S-curve of Contrast (§14.7).
 - The curves and the filter of Shadows, Highlights and Midtone Detail (§14.8).
 - The shapes of the Log wheels (§14.9).
+- The effect of the working luminance on Shadows and Highlights. These runs use HDR 1000. A script cannot change this setting.
