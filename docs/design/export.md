@@ -748,8 +748,10 @@ The primary correction of a clip (`model::Grade`, the `grade.set` request, the C
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
 - `Grading::of` changes the values of the controls into the numbers that `fs_grade` uses:
   - Temp and Tint give one 3×3 matrix. It adapts the white of 6500 K to the new white, with the Bradford cone matrix.
-  - The new white is on the Planck curve at 6500 K minus Temp. Tint moves it across the curve.
-  - `PLANCK_U` and `PLANCK_V` give the Planck curve in CIE 1960 uv. From 2000 K to 12000 K, the error is less than 2e-6.
+  - The new white is at 6500 K minus Temp, in CIE 1960 uv. `ISOTEMPERATURE` is the table of Robertson (1968). `white_xyz` reads it linearly in mired.
+  - Tint moves the white along the isotemperature line. Its direction is the mean of the unit directions of the two rows, weighted as the row values.
+  - The way back from the cones is `BRADFORD_BACK`, the inverse of the Bradford matrix rounded to 4 decimals. The renders fit this matrix to 6e-8, and the exact inverse to 1.6e-4 only.
+  - At Temp 0 and Tint 0, the matrix is the identity. The rounded inverse would move the colors by 1.6e-4 there, and the renders show no change.
   - `wheel` keeps Gain at `WHEEL_LEAST_GAIN` or more, and the stored Lift at `WHEEL_MOST_LIFT` or less. Lift also stops where the slope reaches `WHEEL_STEEPEST` ([spec §8.20](../spec.md#820-primaries-palette-pp-118-31413159)).
   - Saturation and Hue give one 3×3 matrix.
   - Contrast is a curve about the pivot (`ContrastCurve`). Its knots give exact Hermite segments, with no table.
