@@ -8,7 +8,7 @@ Each clip has one primary correction, on the Color page ([color-page.md](color-p
 
 - The Primaries palette holds these controls (pp. 3146–3147).
 - A program grade still finishes in Resolve ([roadmap](../roadmap.md)).
-- The OpenTimelineIO files of Resolve keep no timeline grade ([spec §8.20](../spec.md#820-primaries-palette-pp-118-31413159)). Whether they keep a clip grade is not measured.
+- The OpenTimelineIO files of Resolve keep no grade, of a clip or of a timeline ([spec §8.20](../spec.md#820-primaries-palette-pp-118-31413159)).
 
 **In the code:**
 
@@ -19,7 +19,6 @@ Each clip has one primary correction, on the Color page ([color-page.md](color-p
 
 **To do:**
 
-- Measure whether an OpenTimelineIO file of Resolve keeps a clip grade, in each direction.
 - With a grade, the export measures light on the graded frames ([X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)).
 - The values take keyframes once effect keyframes exist ([effects-library.md](effects-library.md)).
 

@@ -2816,6 +2816,14 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - vidcut: on the other pages, the item Printer Light Hotkeys, its key and the printer items do nothing.
   - vidcut: a key of the numeric keypad moves printer points only while it gives its digit or sign. Thus with Num Lock off, the key does what it did before.
   - vidcut: the main keys and the main Enter key do not move printer points. Keyboard Customization can give each item other keys.
+- **Grades in timeline files**, measured by script in Resolve Studio 21.2 with a CDL on a clip:
+  - The OTIO export has no grade. The `Resolve_OTIO` metadata of the clip is empty.
+  - The EDL export with CDL gives each event an `*ASC_SOP` line and an `*ASC_SAT` line, with six decimals.
+  - The ALE export with CDL gives the columns `ASC_SOP` and `ASC_SAT`, with four decimals.
+  - A timeline import of an OTIO or an EDL gives no grade. This is also true for the `cdl` clip metadata of the CMX adapter of OTIO.
+  - Only a Final Cut Pro X XML brings a primary grade in on import (p. 469).
+  - ColorTrace from CDL applies the CDL of an EDL to the clips of a timeline (pp. 3472–3474). The result is the same as a CDL that a script sets.
+  - vidcut: an OTIO file of vidcut keeps the grade of each clip in the vidcut metadata of its picture. Resolve does not read it.
 - **Timeline grade** (pp. 3404–3405, 3407):
   - The Node Editor has a Clip mode and a Timeline mode. A menu at its top right selects the mode.
   - The Timeline grade is one grade for the whole timeline. It applies to all clips at the same time.
