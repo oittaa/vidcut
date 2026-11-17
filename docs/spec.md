@@ -5489,11 +5489,21 @@ Temp and Tint are a Bradford adaptation, applied to the code values with the Rec
 
 ### 14.8 Shadows, Highlights and Midtone Detail (pp. 3146–3147)
 
-These three controls use the pixels around a pixel. On a frame of one color, the result is again one color. There, Shadows and Highlights are a curve `g` on the luma `Y` of §14.1.
+These three controls use the pixels around a pixel. Shadows and Highlights are a curve `g` on a smoothed luma `B`:
 
-- A positive value multiplies R, G and B by `g(Y) / Y`. Thus the ratios of the channels stay.
-- A negative value adds `g(Y) − Y` to R, G and B. Thus the differences of the channels stay.
-- Gray stays gray. These two rules match to 1.7e-7.
+1. `Y` is the luma of §14.1.
+2. `B` is a guided filter of `Y`, with `Y` as its own guide. The window is 13 × 13 pixels (radius 6), and ε is 0.01.
+   - For each window: `a = var / (var + ε)` and `b = mean · (1 − a)`, with the mean and the variance of `Y` in the window.
+   - `B = ā · Y + b̄`, with `ā` and `b̄` the means of `a` and `b` over the windows that hold the pixel.
+   - The windows repeat the pixels at the borders of the frame.
+3. The gain `k = clamp(g(B) / B, 1, 4)`. Where `B ≤ 0`, `k = 1`.
+4. Each channel `c` gives `out_c = k · c + g(B) − k · B`.
+
+- Thus where the curve raises the value, the change multiplies R, G and B, up to 4 times. Where it lowers the value, it adds the same amount to R, G and B.
+- On a frame of one color, `B = Y`. There, gray gives `g(Y)`, and gray stays gray.
+- These rules match renders of the grid with Shadows ±100 and Highlights ±100. The error is 2.6e-5 for `B` above 0.5, and 1.3e-3 for `B` from 0.03.
+  - The error comes from the table of `g`. It grows where `B` is small, because `k` is then large.
+  - They also match 8 renders of a step from 0.1 to 0.8, and uniform frames to 1.7e-7.
 - The curves are straight lines through 0 below 0. Shadows has almost no effect above 1. Highlights acts up to 2.
 - These points are on the gray curves:
 
@@ -5504,10 +5514,9 @@ These three controls use the pixels around a pixel. On a frame of one color, the
 | Highlights 100 | 0.13702 | 0.29641 | 0.65267 | 1.01992 | 1.3592 | 1.84558 | 2 |
 | Highlights −100 | 0.11922 | 0.22966 | 0.42301 | 0.58343 | 0.71734 | 0.95644 | 1.98546 |
 
-- Midtone Detail changes a frame of one color by 1.5e-3 at most. It raises the contrast at edges (p. 3146).
-- At a step from 0.1 to 0.8, all three controls change the pixels within about 10 pixels of the edge. The frame is 588 pixels wide.
-- The test project has the working luminance HDR 1000. The effect of this setting on the curves is not measured.
-- Not measured: the formula of `g`, and the filter that reads the pixels around a pixel.
+- Midtone Detail changes a frame of one color by 1.5e-3 at most. It raises the contrast at edges (p. 3146). It changes the same pixels as `B`, but it does not follow these rules.
+- The frames of these renders are 588 pixels wide. The test project has the working luminance HDR 1000.
+- Not measured: the formula of `g`, the window at other frame sizes, the effect of the working luminance, and Midtone Detail.
 
 ### 14.9 Log wheels (pp. 156, 3152–3157)
 

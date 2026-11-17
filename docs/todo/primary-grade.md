@@ -34,7 +34,8 @@ The Primaries palette of the Color page is the model. [Spec §14](../spec.md#14-
 **To measure:** the items of spec §14.13.
 
 - The formula of the Contrast S-curve, and its place before or after Saturation and Hue. The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/cases/`.
-- The curves of Shadows and Highlights, and the filter of the three controls of spec §14.8. The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/flat_cases/`.
+- The curves `g` of Shadows and Highlights, the window of `B` at other frame sizes, and Midtone Detail (spec §14.8).
+  The data is in `$VIDCUT_TEST_DATA/fixtures/color/out/flat_cases/`. Frame 43 of each case gives `g` at 588 points.
 - The cubic pieces of the Log curves with the legacy setting off, and the Midtone bump (spec §14.9).
   The data is in `out/logfit/` and `out/cases/` (cases `l_C*`, `m_log_*`).
 
