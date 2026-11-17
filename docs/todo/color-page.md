@@ -23,6 +23,6 @@ A page for the grade of a clip, with its own nodes, as the Color page of Resolve
 
 **To do:**
 
-- Measure the serial node, the Parallel Mixer and the Layer Mixer. The script interface of Resolve cannot add a node, so a grade made in the window is necessary.
-- A Node Editor for the Color page, with the corrector node of [primary-grade.md](primary-grade.md).
+- A Node Editor for the Color page, with the corrector node of [primary-grade.md](primary-grade.md), serial nodes, the Parallel Mixer and the Layer Mixer ([spec §14.9](../spec.md#149-nodes-and-mixers-pp-3385-34093417)).
+- Measure the composite modes of the Layer Mixer and the Key Mixer. The script interface of Resolve cannot add a node or set a composite mode, so a grade made in the window is necessary.
 - The CLI, IPC and MCP perform the same action as the GUI.
