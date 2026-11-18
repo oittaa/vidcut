@@ -49,15 +49,15 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
   - In a Layer Mixer, Key Output Gain k of input 0 gives x + k (n₀ − x). Each next input gives mix + k (F(mix, nᵢ) − mix).
   - In a Parallel Mixer, out = x + Σ kᵢ (nᵢ − x).
   - The errors are below 8.2e-7. The record is in `fixtures/color/NOTES.md` of the test data.
+  - A Layer Mixer that is off keeps the Key Output Gain of its inputs.
+- Lock Node and Remove One Input in the menu of a mixer. Measure first what each one does.
 - Measure in Resolve, then match:
-  - A Parallel Mixer whose inputs do not all start from the same picture.
-  - Delete Node on a mixer: what then takes the picture of the nodes after it.
-  - A mixer that is turned off.
-  - Lighter Color and Darker Color in a Layer Mixer when the two sums are equal.
-  - Alt+P and Alt+L at a corrector on an input of a mixer that is not the last input.
-  - A click on the empty Node Editor: does the current node stay.
-  - An input of a mixer with no connection, from Add One Input: does the grade work.
-  - Do the mixers show a number in the Node Editor.
-  - Ctrl+D with selected nodes of which some are on and some are off. vidcut does nothing.
-  - Delete with more than one selected node. vidcut does nothing.
-  - Alt+D when each corrector is off by Ctrl+D. vidcut turns them all on.
+  - Remove One Input: which input goes, and the least number of inputs.
+  - Lock Node: what a locked node refuses.
+  - The items of the Add Node submenu of a mixer, and the menu of a Parallel Mixer.
+  - Alt+L at a corrector on a Parallel Mixer.
+  - Alt+P and Alt+L at a corrector on a mixer when the corrector does not take the source: what the new corrector takes.
+  - Delete of node 2 in 1 to 2 to a mixer input: does the mixer input take node 1, or nothing.
+  - Delete after a drag box that does not hold the current node: does the current node go too.
+  - A click on the empty Node Editor: do the other selected nodes stay selected.
+  - A Ctrl-click on a node that is selected already.

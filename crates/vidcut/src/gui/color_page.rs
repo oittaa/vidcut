@@ -41,6 +41,8 @@ const PRINTED: [(PrinterColor, &str); 3] = [
     (PrinterColor::Blue, "Blue"),
 ];
 
+const CURRENT: Color32 = Color32::from_rgb(255, 140, 0);
+
 const ADDS: [(Action, GradeAdd); 5] = [
     (Action::AddSerialNode, GradeAdd::Serial),
     (Action::AddNodeBefore, GradeAdd::Before),
@@ -235,7 +237,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         let (label, inlets) = match &d.tool {
             GradeTool::Corrector(_) => (format!("{n:02}"), vec![input(0, "RGB Input".into())]),
             tool => (
-                format!("{n:02} {}", kind(tool)),
+                kind(tool).to_string(),
                 (0..d.inputs.len())
                     .map(|i| input(i, format!("Input {}", i + 1)))
                     .collect(),
@@ -346,20 +348,23 @@ fn grade_links(g: &Grade, of: &GradeOf, l: &Link<Port>) -> Vec<Value> {
     out
 }
 
-fn node_menu(ui: &mut Ui, d: &GradeNode, act: &mut Option<NodeAct>) {
+fn node_menu(ui: &mut Ui, d: &GradeNode, delete_key: &str, act: &mut Option<NodeAct>) {
     let mut pick = |ui: &mut Ui, on: bool, button: egui::Button, a: NodeAct| {
         if ui.add_enabled(on, button).clicked() {
             *act = Some(a);
             ui.close();
         }
     };
-    match &d.tool {
+    let mixer = d.tool.is_mixer();
+    ui.menu_button("Add Node", |ui| {
+        for (add, text) in ADD_MENU {
+            let can = !mixer || matches!(add, GradeAdd::Serial | GradeAdd::Append);
+            pick(ui, can, egui::Button::new(text), NodeAct::Add(add));
+        }
+    });
+    let delete = || egui::Button::new("Delete Node").shortcut_text(delete_key);
+    let (morph, to) = match &d.tool {
         GradeTool::Corrector(_) => {
-            ui.menu_button("Add Node", |ui| {
-                for (add, text) in ADD_MENU {
-                    pick(ui, true, egui::Button::new(text), NodeAct::Add(add));
-                }
-            });
             pick(
                 ui,
                 true,
@@ -375,41 +380,29 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, act: &mut Option<NodeAct>) {
                 egui::Button::new("Extract Node"),
                 NodeAct::Extract,
             );
+            pick(ui, true, delete(), NodeAct::Delete);
+            return;
         }
-        GradeTool::ParallelMixer => {
-            pick(
-                ui,
-                true,
-                egui::Button::new("Add One Input"),
-                NodeAct::AddInput,
-            );
-            let to = NodeAct::Morph(GradeMixer::LayerMixer);
-            pick(
-                ui,
-                true,
-                egui::Button::new("Morph Into Layer Mixer Node"),
-                to,
-            );
-        }
-        GradeTool::LayerMixer { mode } => {
-            pick(
-                ui,
-                true,
-                egui::Button::new("Add One Input"),
-                NodeAct::AddInput,
-            );
-            let to = NodeAct::Morph(GradeMixer::ParallelMixer);
-            pick(ui, true, egui::Button::new("Morph Into Parallel Node"), to);
-            ui.menu_button("Composite Mode", |ui| {
-                for m in CompositeMode::ALL {
-                    let text = super::placing::mode_label(m);
-                    let item = egui::Button::selectable(m == *mode, text);
-                    pick(ui, true, item, NodeAct::Mode(m));
-                }
-            });
-        }
+        GradeTool::ParallelMixer => ("Morph Into Layer Mixer Node", GradeMixer::LayerMixer),
+        GradeTool::LayerMixer { .. } => ("Morph Into Parallel Node", GradeMixer::ParallelMixer),
+    };
+    pick(ui, true, delete(), NodeAct::Delete);
+    pick(
+        ui,
+        true,
+        egui::Button::new("Add One Input"),
+        NodeAct::AddInput,
+    );
+    pick(ui, true, egui::Button::new(morph), NodeAct::Morph(to));
+    if let GradeTool::LayerMixer { mode } = &d.tool {
+        ui.menu_button("Composite Mode", |ui| {
+            for m in CompositeMode::ALL {
+                let text = super::placing::mode_label(m);
+                let item = egui::Button::selectable(m == *mode, text);
+                pick(ui, true, item, NodeAct::Mode(m));
+            }
+        });
     }
-    pick(ui, true, egui::Button::new("Delete Node"), NodeAct::Delete);
 }
 
 fn field_menu(ui: &mut Ui, act: &mut Option<FieldAct>) {
@@ -1261,19 +1254,25 @@ impl Workspace {
             return;
         };
         self.settle_grade(&of);
-        let current = self.current_grade_node(&g);
-        let corrector = current.filter(|n| g.corrector(*n).is_some());
-        for (action, act, n) in [
-            (Action::ExtractNode, NodeAct::Extract, corrector),
-            (Action::ResetNodeGrade, NodeAct::Reset, corrector),
-            (Action::DeleteNode, NodeAct::Delete, current),
+        let corrector = self
+            .current_grade_node(&g)
+            .filter(|n| g.corrector(*n).is_some());
+        for (action, act) in [
+            (Action::ExtractNode, NodeAct::Extract),
+            (Action::ResetNodeGrade, NodeAct::Reset),
         ] {
-            if let Some(n) = n
+            if let Some(n) = corrector
                 && struck(action)
-                && (action != Action::DeleteNode || self.effects_page.grade_nodes.len() == 1)
             {
                 self.grade_node_act(&of, &g, (act, n));
             }
+        }
+        if struck(Action::DeleteNode) {
+            let picked: Vec<u32> = (self.effects_page.grade_nodes.iter())
+                .copied()
+                .filter(|n| g.node(*n).is_some())
+                .collect();
+            self.delete_grade_nodes(&of, &g, &picked);
         }
         if struck(Action::SwitchSelectedNodes) {
             let picked = self.effects_page.grade_nodes.clone();
@@ -1294,24 +1293,47 @@ impl Workspace {
     }
 
     fn switch_grade_nodes(&mut self, of: &GradeOf, g: &Grade, picked: Option<&[u32]>, label: &str) {
-        let correctors: Vec<(u32, bool)> = (g.nodes.iter().zip(1u32..))
-            .filter(|(d, n)| !d.tool.is_mixer() && picked.is_none_or(|p| p.contains(n)))
+        let nodes: Vec<(u32, bool)> = (g.nodes.iter().zip(1u32..))
+            .filter(|(_, n)| picked.is_none_or(|p| p.contains(n)))
             .map(|(d, n)| (n, d.on))
             .collect();
-        let any_on = correctors.iter().any(|(_, on)| *on);
-        let all_on = correctors.iter().all(|(_, on)| *on);
-        if picked.is_some() && any_on != all_on {
-            return;
-        }
-        let commands = (correctors.iter())
-            .filter(|(_, on)| *on == any_on)
+        let to = match picked {
+            Some(_) => match self.current_grade_node(g).and_then(|n| g.node(n)) {
+                Some(d) => !d.on,
+                None => return,
+            },
+            None => !nodes.iter().any(|(_, on)| *on),
+        };
+        let commands = (nodes.iter())
+            .filter(|(_, on)| *on != to)
             .map(|(n, _)| {
-                let more = json!({ "node": n, "on": !any_on });
+                let more = json!({ "node": n, "on": to });
                 command("grade.set", params(of, "clips", more))
             })
             .collect();
         self.effects_page.graded = None;
         self.send_all(commands, label);
+    }
+
+    fn delete_grade_nodes(&mut self, of: &GradeOf, g: &Grade, gone: &[u32]) {
+        if gone.is_empty() {
+            return;
+        }
+        let mut order = gone.to_vec();
+        order.sort_unstable_by(|a, b| b.cmp(a));
+        order.dedup();
+        let commands = (order.iter())
+            .map(|n| command("grade.remove", params(of, "clip", json!({ "node": n }))))
+            .collect();
+        let left = |k: &u32| !order.contains(k);
+        let renumbered = |k: u32| k - order.iter().filter(|n| **n < k).count() as u32;
+        let correctors = (g.nodes.iter().zip(1u32..))
+            .filter(|(d, k)| !d.tool.is_mixer() && left(k))
+            .map(|(_, k)| k);
+        let last = correctors.max().or_else(|| (1..=g.last()).rev().find(left));
+        self.effects_page.grade_nodes = last.map(renumbered).into_iter().collect();
+        self.effects_page.graded = None;
+        self.send_all(commands, "Delete Node");
     }
 
     fn add_grade_node(&mut self, add: GradeAdd) {
@@ -1333,10 +1355,17 @@ impl Workspace {
         let Some(d) = g.node(n) else {
             return;
         };
-        if let NodeAct::Add(add) = act {
-            self.effects_page.grade_nodes = vec![n];
-            self.add_grade_node(add);
-            return;
+        match act {
+            NodeAct::Add(add) => {
+                self.effects_page.grade_nodes = vec![n];
+                self.add_grade_node(add);
+                return;
+            }
+            NodeAct::Delete => {
+                self.delete_grade_nodes(of, g, &[n]);
+                return;
+            }
+            _ => {}
         }
         let set = |more: Value| {
             let mut more = more;
@@ -1344,7 +1373,7 @@ impl Workspace {
             ("grade.set", params(of, "clips", more))
         };
         let (method, p) = match act {
-            NodeAct::Add(_) => return,
+            NodeAct::Add(_) | NodeAct::Delete => return,
             NodeAct::Reset => ("grade.clear", params(of, "clips", json!({ "node": n }))),
             NodeAct::Toggle => set(json!({ "on": !d.on })),
             NodeAct::Morph(to) => set(json!({ "mixer": to })),
@@ -1353,12 +1382,6 @@ impl Workspace {
             NodeAct::Extract => {
                 let more = json!({ "node": n, "extract": true });
                 ("grade.remove", params(of, "clip", more))
-            }
-            NodeAct::Delete => {
-                let kept = self.effects_page.grade_nodes.iter().filter(|k| **k != n);
-                let shifted = kept.map(|k| if *k > n { k - 1 } else { *k });
-                self.effects_page.grade_nodes = shifted.collect();
-                ("grade.remove", params(of, "clip", json!({ "node": n })))
             }
         };
         self.effects_page.graded = None;
@@ -1414,7 +1437,13 @@ impl Workspace {
             tiles: tiles(&stored),
             wires: wires(&stored),
             selected: &selected,
+            active: CURRENT,
         };
+        let delete_key = self
+            .snap
+            .bindings
+            .first(Action::DeleteNode)
+            .unwrap_or_default();
         let mut node_act: Option<(NodeAct, u32)> = None;
         let mut field_act: Option<FieldAct> = None;
         let done = node_editor::show(
@@ -1429,7 +1458,7 @@ impl Workspace {
                     return;
                 };
                 let mut act = None;
-                node_menu(ui, d, &mut act);
+                node_menu(ui, d, &delete_key, &mut act);
                 if let Some(a) = act {
                     node_act = Some((a, n));
                 }
@@ -1444,10 +1473,12 @@ impl Workspace {
                 })
                 .collect();
             let mut nodes = self.effects_page.grade_nodes.clone();
+            let current = nodes.last().copied();
             if off {
-                nodes.retain(|n| !inside.contains(n));
+                nodes.retain(|n| !inside.contains(n) || Some(*n) == current);
             } else {
-                nodes = inside;
+                let others = inside.into_iter().filter(|n| Some(*n) != current);
+                nodes = others.chain(current).collect();
             }
             self.send("gui.grade_nodes", json!({ "nodes": nodes }));
         }
@@ -1487,12 +1518,9 @@ impl Workspace {
                 nodes.retain(|k| *k != n);
                 nodes.push(n);
             }
-            Some((Port::Node(n), Pick::Toggle)) => match nodes.iter().position(|k| *k == n) {
-                Some(i) => {
-                    nodes.remove(i);
-                }
-                None => nodes.push(n),
-            },
+            Some((Port::Node(n), Pick::Toggle)) if !nodes.contains(&n) => {
+                nodes.insert(nodes.len().saturating_sub(1), n);
+            }
             Some((Port::Node(n), Pick::Only)) => nodes = vec![n],
             None if done.clicked && done.unlink.is_none() => {
                 nodes = nodes.last().copied().into_iter().collect();

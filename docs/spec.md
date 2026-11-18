@@ -2866,14 +2866,18 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured in Resolve Studio 21.2: the still file of a grade holds the number of each node in the Node Editor.
   - Measured: in a grade with three correctors and a Key Mixer, the third corrector had number 4. Thus a mixer has a number too.
   - vidcut: a grade is a list of nodes. The number of a node is its place in the list, from 1. The number 0 is the Source input.
-  - vidcut: the Node Editor shows the number of each node, mixers too.
+  - Measured in Resolve Studio 21.2: a mixer shows no number in the Node Editor.
+  - vidcut: the Node Editor shows the number of each corrector. A mixer shows its kind and no number.
 - **The current node** (p. 3391):
   - The current node has an orange outline. The palettes change the current node.
-  - A Command-click or a drag box selects more nodes. They have a white outline.
+  - A Command-click or a drag box selects more nodes. They have a white outline. The current node stays orange.
   - Resolve keeps the last current node of each clip. The setting "Switching clips" changes this.
+  - Measured in Resolve Studio 21.2: a drag box from the empty Node Editor selects the nodes in the box.
+  - Measured: a click on the empty Node Editor keeps the current node.
   - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
+  - vidcut: a Ctrl-click adds a node to the selection, and a drag box adds the nodes in the box. The current node stays.
   - vidcut: a new clip or a new grade mode selects node 1 ([todo](todo/color-page.md)).
-  - vidcut: a click on the empty Node Editor keeps only the current node. This is not measured in Resolve.
+  - vidcut: a click on the empty Node Editor keeps the current node. The other selected nodes are no longer selected. This part is not measured in Resolve.
 - **Add nodes** (pp. 3394–3395, 3410–3413):
   - The menu of a node has an Add Node submenu. The menu of the empty Node Editor has Add Node > Corrector. That corrector has no connection.
   - Alt+S adds a serial node after the current node. Alt+K appends a serial node at the end of the tree.
@@ -2883,18 +2887,27 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Another parallel node adds another input to the mixer (p. 3411).
   - Measured in Resolve Studio 21.2: the new corrector takes the input of the current node. Node 1 goes to mixer input 0, and node 2 to input 1.
   - Measured: a Layer node does the same with a Layer Mixer. Alt+L at the corrector on input 1 of a Layer Mixer added a corrector on input 2.
+  - Measured: Alt+P and Alt+L at a corrector that feeds a Layer Mixer each add a new last input to that mixer. The new corrector takes the source.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
   - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append` or `corrector`. The menus of the Node Editor have each one.
+  - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
+  - vidcut: the new corrector takes the input of the current node. In the measured tree, that input is the source.
+  - Not measured in Resolve: Alt+L at a corrector on a Parallel Mixer, and a current node that does not take the source.
   - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L and Alt+K. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
 - **Delete and extract** (pp. 3395–3396):
   - Delete Node removes a node. The nodes at its left and its right then connect.
   - The Forward-Delete key deletes the selected node (p. 3395).
   - After a delete, each node after it gets one number less.
+  - Measured in Resolve Studio 21.2: the Delete key deletes the current node. With two nodes selected by a drag box, it deletes both.
+  - Measured: a mixer input that took a deleted corrector stays, with no connection. Thus the mixer keeps all its inputs.
+  - Measured: after the delete of a mixer, its input nodes keep their inputs. Nothing connects to the Node Tree output. The result is the source picture.
+  - Measured: after a delete, the last corrector is the current node.
+  - Measured: the menu of a mixer shows Shift+Backspace at Delete Node.
   - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
-  - vidcut: on the Color page, Delete deletes the current node when it is the only selected node.
-  - vidcut: with more than one selected node, Delete does nothing. This is not measured in Resolve.
-  - vidcut: what took the picture of a deleted mixer then takes nothing. This is not measured in Resolve.
+  - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. The last corrector then becomes the current node.
+  - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
+  - vidcut: what took the picture of a deleted mixer then takes nothing.
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.
@@ -2907,18 +2920,27 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.
   - With more than one selected node, Command-D turns the selected nodes off or on. The current node is always one of them (p. 3392).
   - Option-D turns all nodes off, and then all on. After that, each node is on, also a node that was off before (p. 3392).
-  - vidcut: Ctrl+D turns the selected correctors off when all are on, and on when all are off.
-  - vidcut: with some selected correctors on and some off, Ctrl+D does nothing. This is not measured in Resolve.
-  - vidcut: Alt+D turns all correctors off when one or more is on. Else it turns all of them on.
+  - Measured in Resolve Studio 21.2: Command-D gives each selected node the opposite of the state of the current node.
+  - Measured: Option-D turns all nodes off when one or more is on, mixers too. Else it turns all of them on.
+  - vidcut: Ctrl+D and Alt+D do the same, mixers too.
   - Reset Node Grade in the menu of a node resets that node (Shift-Home).
   - Reset Grades and Keep Nodes resets each node and keeps the tree (Shift-Command-Home).
   - Reset All Grades and Nodes leaves one node at its defaults (Command-Home). The menu of the empty Node Editor has it.
   - vidcut: `grade.set` with `on`, and `grade.clear` with `node`, with `keep_nodes`, or alone.
   - vidcut: Disable Node in the menu turns a corrector off. Shift+Home, Ctrl+Shift+Home and Ctrl+Home reset.
-  - vidcut: a corrector that is off passes on its input. A mixer cannot be off. This is not measured in Resolve.
+  - Measured in Resolve Studio 21.2: Command-D turns a mixer off too.
+  - Measured: a Layer Mixer that is off mixes in Normal. The Key Output Gain of its inputs still applies.
+  - Measured: a Parallel Mixer that is off gives the same result as when it is on.
+  - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
+  - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
+  - vidcut: the menu of a mixer has these items in this order, but not Lock Node and Remove One Input ([todo](todo/color-page.md)).
+  - vidcut: in the Add Node submenu of a mixer, only Add Serial and Append Node work. The other items are grey. This is not measured in Resolve.
 - **Mixers**, measured in Resolve Studio 21.2 with float renders:
   - Serial: node 2 works on the output of node 1. The error is 6.8e-6.
-  - Parallel Mixer: out = x + Σ (nᵢ − x), with x the picture that goes into the correctors. The error is 8.4e-7.
+  - Parallel Mixer: out = x + Σ (nᵢ − x). The error is 8.4e-7.
+  - x is the nearest node that each path to each input goes through. An input node counts for its own path.
+  - Measured: with 1 to 2, 1 to 3 and inputs 2 and 3, x is node 1. With 1 to 2 to 3 and inputs 2 and 3, in either order, x is node 2.
+  - Measured: an input of a mixer with no connection does not change the result.
   - The manual: the Parallel Mixer combines all its inputs equally (p. 3412).
   - Layer Mixer in Normal: out = the input with the highest number. The error is 4.5e-7.
   - The manual: the lowest input in the Node Editor has the priority (p. 3413).
@@ -2929,12 +2951,14 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Morph Into Layer Mixer Node and Morph Into Parallel Node change the kind of a mixer (pp. 3412, 3415).
   - The manual: the RGB input of each corrector on a Parallel Mixer is usually the same picture (p. 3411).
   - vidcut: `grade.set` with `mixer` and `mode`. A new Layer Mixer is in Normal.
-  - vidcut: each input of a Parallel Mixer is x, or a corrector on x. Else the grade does nothing. Other trees are not measured in Resolve.
-  - vidcut: Lighter Color and Darker Color in the Layer Mixer take the top input on a tie. This is not measured in Resolve.
+  - vidcut: x and the empty inputs work as measured.
+  - Measured: in Lighter Color and Darker Color, a tie of R + G + B goes to the later input.
+  - vidcut: the same. The composite of the timeline uses the same formulas.
 - **Key Output Gain** (p. 3415), measured in Resolve Studio 21.2:
   - It sets the strength of a node in a Layer Mixer or a Parallel Mixer.
   - Layer Mixer with Key Output Gain k: input 0 gives x + k (n₀ − x). Each next input gives mix + k (F(mix, nᵢ) − mix). The error is 3.4e-7.
   - Parallel Mixer: out = x + Σ kᵢ (nᵢ − x).
+  - A Layer Mixer that is off mixes in Normal, with the Key Output Gain of each input. Subtract with a gain of 0.5 on the last input, off, equals Normal with that gain, on.
   - vidcut: keys, Key Output Gain and the Key Mixer come later ([todo](todo/color-page.md)).
 
 Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `grade.set` with `on`, `place`, `mixer` and `mode` changes a node. `grade.get` gives the nodes and the `output`.

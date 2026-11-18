@@ -124,7 +124,6 @@ pub fn checked(g: &Grade) -> Result<Option<Grade>> {
                 }
                 corrector_checked(c)?;
             }
-            _ if !n.on => return Err(Error::invalid(format!("mixer {k} cannot be off"))),
             _ if n.inputs.is_empty() => {
                 return Err(Error::invalid(format!("mixer {k} needs an input")));
             }
@@ -265,9 +264,6 @@ fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
         d.place = at;
     }
     if let Some(on) = change.on {
-        if d.tool.is_mixer() {
-            return Err(Error::invalid(format!("mixer {n} cannot be off")));
-        }
         d.on = on;
     }
     if let Some(to) = change.mixer {
@@ -409,17 +405,9 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd) -> Result<u32> {
     let at = g.node(n).map_or([0.0; 2], |d| d.place);
     let added = g.last() + 1;
     let takers = takers(g, n);
-    let same = |m: u32| {
-        g.node(m).is_some_and(|d| {
-            matches!(
-                (&d.tool, kind),
-                (GradeTool::ParallelMixer, GradeAdd::Parallel)
-                    | (GradeTool::LayerMixer { .. }, GradeAdd::Layer)
-            )
-        })
-    };
+    let mixes = |m: u32| g.node(m).is_some_and(|d| d.tool.is_mixer());
     let mixer = match (takers.as_slice(), g.output == Some(n)) {
-        ([(m, _)], false) => Some(*m).filter(|m| same(*m)),
+        ([(m, _)], false) => Some(*m).filter(|m| mixes(*m)),
         _ => None,
     };
     match mixer {
@@ -529,10 +517,19 @@ pub fn remove(p: &mut Project, of: &GradeOf, n: u32, extract: bool) -> Result<()
             }
             _ => None,
         };
-        retake(g, n, input, n);
         if extract {
+            retake(g, n, input, n);
             node(g, n)?.inputs = vec![None];
             return Ok(());
+        }
+        for (d, k) in g.nodes.iter_mut().zip(1..) {
+            let to = if d.tool.is_mixer() { None } else { input };
+            for v in d.inputs.iter_mut().filter(|v| **v == Some(n) && k != n) {
+                *v = to;
+            }
+        }
+        if g.output == Some(n) {
+            g.output = input;
         }
         g.nodes.remove(n as usize - 1);
         renumbered(g, n);

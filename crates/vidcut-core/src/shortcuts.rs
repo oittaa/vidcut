@@ -1830,23 +1830,23 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         Color,
         Action::DeleteNode,
-        &["Delete"],
-        "Delete the current node",
-        Some("The nodes at its two sides join. The nodes after it get one number less."),
+        &["Shift+Backspace", "Delete"],
+        "Delete the selected nodes",
+        Some("The nodes after them get lower numbers. The last corrector becomes current."),
     ),
     own(
         Color,
         Action::SwitchSelectedNodes,
         &["Ctrl+D"],
         "Turn the selected nodes off or on",
-        Some("The current node is always one of the selected nodes."),
+        Some("Each selected node gets the opposite of the state of the current node."),
     ),
     own(
         Color,
         Action::SwitchAllNodes,
         &["Alt+D"],
         "Turn all nodes off or on",
-        Some("Off and on again turns on each node, also a node that was off."),
+        Some("With any node on, all go off. Else all go on."),
     ),
     own(
         Color,

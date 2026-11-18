@@ -1953,6 +1953,7 @@ impl Workspace {
             tiles: comp.nodes.iter().map(tile).collect(),
             wires: joins(&comp),
             selected: &self.effects_page.nodes,
+            active: theme::colors().accent,
         };
         let done = node_editor::show(
             ui,

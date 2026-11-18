@@ -431,13 +431,17 @@ The bar and the Jobs button:
 
 - The palette shows the current node of the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
 - The Node Editor of the grade is at the right of the viewer (`Workspace::grade_nodes_panel`).
-  - Each node is a tile with its number. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
+  - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
   - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.
+  - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
+  - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.
   - Another clip or another grade mode selects node 1 (`Workspace::settle_grade`).
   - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
   - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.set` and `grade.clear`.
   - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, and reset.
-  - Ctrl+D and Alt+D send one `grade.set` with `on` for each corrector that changes (`Workspace::switch_grade_nodes`).
+  - Ctrl+D and Alt+D send one `grade.set` with `on` for each node that changes (`Workspace::switch_grade_nodes`).
+  - A delete sends one `grade.remove` for each node, from the highest number down (`Workspace::delete_grade_nodes`). Thus each number stays right until its turn.
+  - After a delete, the last corrector becomes the current node.
 - A Clip and Timeline switch at the top right selects the grade (`GradeLevel`). In Timeline mode, the palette shows the timeline grade.
   - The switch sends `gui.page` with `grade`. `gui.state` gives the `grade`, and gives no `clip` in Timeline mode.
 - The dragged grade goes to the core with `Handle::preview_pictures`, through `Workspace::graded_wanted`. Thus the viewer follows each frame of the drag.

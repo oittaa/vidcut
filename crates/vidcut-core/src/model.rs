@@ -3822,8 +3822,9 @@ pub struct GradeNode {
     /// the picture that comes into the grade, or null for nothing. A
     /// corrector has one input. A mixer has one or more.
     pub inputs: Vec<Option<u32>>,
-    /// Off, a corrector passes on the picture that comes into it. A mixer is
-    /// always on. Usual: on.
+    /// Off, a corrector passes on the picture that comes into it, and a
+    /// layer mixer mixes in `normal`. A parallel mixer mixes the same way
+    /// off and on. Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub on: bool,
     /// Its place in the node editor, `[x, y]` in node widths across and

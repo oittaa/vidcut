@@ -545,17 +545,27 @@ pub fn complete(g: &Grade) -> bool {
         })
 }
 
-pub fn base(g: &Grade, k: u32) -> Option<u32> {
-    let inputs: Vec<u32> = g.node(k)?.inputs.iter().flatten().copied().collect();
-    let into = |v: u32| match g.node(v) {
-        Some(n) if !n.tool.is_mixer() => n.inputs.first().copied().flatten(),
-        _ => None,
-    };
-    let fits = |x: u32| inputs.iter().all(|&v| v == x || into(v) == Some(x));
-    inputs
-        .iter()
-        .flat_map(|&v| into(v).into_iter().chain([v]))
-        .find(|&x| fits(x))
+fn shared(lists: impl IntoIterator<Item = Vec<u32>>) -> Option<Vec<u32>> {
+    lists
+        .into_iter()
+        .reduce(|a, b| a.into_iter().filter(|v| b.contains(v)).collect())
+}
+
+fn passed(g: &Grade) -> Option<Vec<Vec<u32>>> {
+    let mut through = vec![Vec::new(); g.nodes.len() + 1];
+    through[0] = vec![0];
+    for k in order(g)? {
+        let ins = g.node(k)?.inputs.iter().flatten();
+        let mut path = shared(ins.map(|v| through[*v as usize].clone()))?;
+        path.push(k);
+        through[k as usize] = path;
+    }
+    Some(through)
+}
+
+fn base(through: &[Vec<u32>], g: &Grade, k: u32) -> Option<u32> {
+    let ins = g.node(k)?.inputs.iter().flatten();
+    shared(ins.map(|v| through[*v as usize].clone()))?.pop()
 }
 
 struct Registers {
@@ -608,11 +618,12 @@ impl Graded {
         }
         let order = order(g)?;
         let out = g.output? as usize;
+        let through = passed(g)?;
         let mut bases = vec![None; g.nodes.len() + 1];
         let mut uses = vec![0usize; g.nodes.len() + 1];
         for &k in &order {
             if matches!(g.node(k)?.tool, GradeTool::ParallelMixer) {
-                let x = base(g, k)?;
+                let x = base(&through, g, k)?;
                 bases[k as usize] = Some(x as usize);
                 uses[x as usize] += 1;
             }
@@ -653,14 +664,15 @@ impl Graded {
                     r.hold(k, on, uses[k]);
                 }
                 GradeTool::LayerMixer { mode } => {
+                    let mode = if node.on {
+                        *mode
+                    } else {
+                        CompositeMode::Normal
+                    };
                     let on = r.take(ins[0], &mut passes);
                     for &v in &ins[1..] {
                         let top = r.holder[v];
-                        passes.push(Pass::Layer {
-                            on,
-                            top,
-                            mode: *mode,
-                        });
+                        passes.push(Pass::Layer { on, top, mode });
                         r.done(v);
                     }
                     r.hold(k, on, uses[k]);

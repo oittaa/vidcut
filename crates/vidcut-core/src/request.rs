@@ -2850,10 +2850,12 @@ pub enum Request {
         place: Option<[f64; 2]>,
     },
     /// Take a node out of the grade of a clip, or with `timeline` of the
-    /// timeline grade. What took the picture of a corrector takes the
-    /// picture that came into it. What took the picture of a mixer takes
+    /// timeline grade. A corrector or the output that took the picture of
+    /// a corrector takes the picture that came into it. A mixer input that
+    /// took it takes nothing. What took the picture of a mixer takes
     /// nothing. The nodes after it get one number less. With `extract`, a
-    /// corrector stays, joined to nothing.
+    /// corrector stays, joined to nothing, and each node that took its
+    /// picture takes the picture that came into it.
     #[serde(rename = "grade.remove")]
     GradeRemove {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4208,7 +4210,9 @@ pub struct GradeChange {
 /// What changes on a node of a grade, apart from the values of a corrector.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GradeNodeChange {
-    /// Off, a corrector passes on the picture that comes into it.
+    /// Off, a corrector passes on the picture that comes into it, and a
+    /// layer mixer mixes in `normal`. A parallel mixer mixes the same way
+    /// off and on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
     /// Its place in the node editor, `[x, y]` in node widths across and
@@ -4244,11 +4248,11 @@ pub enum GradeAdd {
     /// `node` takes its picture.
     Before,
     /// Beside the corrector `node`: it takes what comes into `node`. When
-    /// `node` goes only into a parallel mixer, the mixer gets an input for
-    /// it. Else a new parallel mixer takes both, and what took the picture
-    /// of `node` takes the picture of the mixer.
+    /// `node` goes only into a mixer, of either kind, the mixer gets a new
+    /// last input for it. Else a new parallel mixer takes both, and what
+    /// took the picture of `node` takes the picture of the mixer.
     Parallel,
-    /// As `parallel`, with a layer mixer.
+    /// As `parallel`, with a new layer mixer.
     Layer,
     /// After the node whose picture goes out. Its picture then goes out.
     Append,

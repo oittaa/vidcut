@@ -69,6 +69,7 @@ pub(super) struct Graph<'a, K> {
     pub(super) tiles: Vec<Tile<K>>,
     pub(super) wires: Vec<Wire<K>>,
     pub(super) selected: &'a [K],
+    pub(super) active: Color32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -446,7 +447,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         let fade = if t.faded { FADED } else { 1.0 };
         painter.rect_filled(r, CornerRadius::same(4), c.panel.gamma_multiply(fade));
         let edge = match (active, selected) {
-            (true, _) => Stroke::new(2.0, c.accent),
+            (true, _) => Stroke::new(2.0, graph.active),
             (false, true) => Stroke::new(1.5, Color32::WHITE),
             _ => Stroke::new(1.0, c.text_dim.gamma_multiply(0.6)),
         };

@@ -746,6 +746,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
   - It also refuses a corrector without one input and a mixer without an input.
   - `ops::grade` changes the tree for `grade.add`, `grade.remove` and `grade.connect`. A removed node gives each node after it one number less (`renumbered`).
+  - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
 - `Placing::new` adds the grade after the effects of the clip, as the last `place::Working` (`Work::Grade`).
   - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
   - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
@@ -757,8 +758,12 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - Why: most trees then need no texture more than the picture.
   - A corrector that is off or at its defaults takes the texture of its input. It costs no pass.
   - A `Correct` pass runs `grade_into` with the `Grading` of the corrector.
-  - A `Parallel` pass adds the change of one input: mix + input − base. `grade::base` finds the base, the picture that goes into the correctors of the mixer.
+  - A `Parallel` pass adds the change of one input: mix + input − base.
+  - `grade::base` finds the base: the nearest node that each path to each input goes through. An input counts for its own path.
+  - `grade::passed` gives these nodes for each node, from the source, in the order of `grade::order`.
   - A `Layer` pass puts one input over the mix of the inputs before it, with the composite mode of the mixer. The passes go in input order.
+  - A Layer Mixer that is off mixes in Normal. A Parallel Mixer that is off mixes as when on.
+  - An input with no link gives no pass.
   - The last pass copies the output to texture 0.
 - `graded_into` runs the passes. Each texture past 0 has the size of the picture. `Held` keeps `GRADE_HELD` of them between draws.
 - `fs_grade_mix` makes a `Parallel` or a `Layer` pass in a scratch texture. A copy then takes it back.
