@@ -227,7 +227,7 @@ pub enum VideoPiece {
         /// cache: colors over the whole frame. `placed` gives their edges
         /// and alpha.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        made: Option<Made>,
+        made: Option<CacheFrames>,
         /// The `.cube` file that its pictures go through just after their
         /// conversion into the timeline color space.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -605,7 +605,7 @@ pub struct Shape {
 
 /// The made frames of a placed picture in the render cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct Made {
+pub struct CacheFrames {
     /// The shape of its media.
     pub shape: Shape,
     /// The frames hold all the effects and the grade of its clip. Else

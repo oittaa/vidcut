@@ -467,9 +467,9 @@ The two levels (spec D98):
 - `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).
   - The layer keeps its `placed`. The file takes the place of the media, as a proxy does. Thus the Transform and the effects work on it as on the media.
   - The layer takes the Nearest retime. A layer with a Retime Process or a checked effect also takes no `upscale`. Why: the file holds its frames as the timeline shows them.
-  - A placed layer with a Retime Process or a checked effect also takes `made` (`Made`): the `Shape` of its media (`Setup::shape`). The draw then places the colors of the file as a made frame (`Sampling::Placed`).
+  - A placed layer with a Retime Process or a checked effect also takes `made` (`CacheFrames`): the `Shape` of its media (`Setup::shape`). The draw then places the colors of the file as a made frame (`Sampling::Placed`).
     - The shape is that of the media. With AI Upscale, the enlarged picture has the shape of the media, with its sides rounded to whole pixels.
-    - With a Retime Process, `Made` has `whole`. The draw then takes all the effects and the grade of the clip as done. Why: the file holds them all, because they come before the frames between two source frames.
+    - With a Retime Process, `CacheFrames` has `whole`. The draw then takes all the effects and the grade of the clip as done. Why: the file holds them all, because they come before the frames between two source frames.
     - Without a Retime Process, the draw takes the effects up to the last checked effect as done. It applies the later effects and the grade.
     - `alone` and the draw get what the file holds from one function (`render_cache::held`). Thus they cannot differ.
     - The player's key of such a frame holds the placement (`source_key`). Why: the draw takes the opacity and the composite mode from the placement of the kept picture. A change of these keeps the file.

@@ -11,7 +11,7 @@ use crate::model::{
     Upscaler,
 };
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
-use crate::render::{Image, Made, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
+use crate::render::{CacheFrames, Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
 
 pub type Key = [u8; 16];
 
@@ -1048,7 +1048,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
             false => {}
             true => {
                 *upscale = Default::default();
-                *made = shape.map(|shape| Made {
+                *made = shape.map(|shape| CacheFrames {
                     shape,
                     whole: retimed,
                 });
