@@ -21,7 +21,6 @@ Each clip has one primary correction, on the Color page ([color-page.md](color-p
 
 - Temp and Tint: at Temp 1000, the result is 0.00065 off at an input of 1. Find the rule that makes the matrix exact.
 - Measure whether an OpenTimelineIO file of Resolve keeps a clip grade, in each direction.
-- With a grade, the export measures light on the graded frames ([X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)).
 - The values take keyframes once effect keyframes exist ([effects-library.md](effects-library.md)).
 
 **Not this item:**
