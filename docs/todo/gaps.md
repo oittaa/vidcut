@@ -21,3 +21,7 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - Copy and paste of the Equalizer settings of a clip (p. 745; [§9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779))
 - Keyframes of the Angle and the Border of an Edge Wipe. Resolve can keyframe them. vidcut keeps one value of each ([§8.11](../spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173))
 - The Reset of the Dialogue Leveler section, once its values are measured (p. 734; [§9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779))
+- The Sizing mode, the Auto-Keyframe buttons and the Lock buttons of the Keyframe Editor of the Color page (pp. 3454–3455; [§8.22](../spec.md#822-color-page-keyframes-pp-34533465))
+- The keyframe tracks inside a corrector track, and the keyframe badge of a node (pp. 3458–3459)
+- Previous and Next Keyframe on the Color page, and a box that selects keyframes there (p. 3462)
+- Add EDL Marks on Tracks, and the keyframes of a grade that a copy or a still takes (pp. 3464–3465)
