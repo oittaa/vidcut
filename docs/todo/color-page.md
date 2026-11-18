@@ -24,10 +24,12 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - In the bars, each Offset bar has a Plus and a Minus button. Each button moves its channel by one printer point (pp. 3157, 3159).
 - The page puts the palette at the bottom and the timeline above it, at its smallest height. The viewer gets the rest.
 - A grade is a tree of correctors and mixers (`model::Grade`, [spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
+- The palette and the timeline start at 60 percent of the window height at most (`BOTTOM_SHARE`). They also leave the media panel the height of its rows and a short list (`pool_least`).
+  - The palette scrolls when it needs more height.
+  - A drag cannot make the timeline taller than that limit.
 
 **To do:**
 
-- The media panel on this page: its border runs past the panel when the top of the window is short.
 - A click on the number of a node turns the node off or on (p. 3392).
 - The current node of each clip stays when the clip changes, with the setting "Switching clips" (p. 3391).
 - Previous Node and Next Node (Option-Shift-Semicolon, Option-Shift-Apostrophe, p. 3391).
