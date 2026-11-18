@@ -343,7 +343,7 @@ pub enum Work {
     Grain(Box<Graining>),
     Vignette(Shading),
     Sharpen(Sharpening),
-    Grade(Box<crate::grade::Grading>),
+    Grade(Box<crate::grade::Graded>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -837,8 +837,8 @@ impl Working {
     }
 
     pub fn graded(g: &crate::model::Grade) -> Option<Self> {
-        (!g.is_usual()).then(|| Self {
-            work: Work::Grade(Box::new(crate::grade::Grading::of(g))),
+        crate::grade::Graded::of(g).map(|graded| Self {
+            work: Work::Grade(Box::new(graded)),
             blend: 1.0,
             use_alpha: false,
             masks: Vec::new(),

@@ -171,8 +171,8 @@ pub struct Timeline {
     /// the project's.
     #[serde(default)]
     pub own: Option<TimelineSettings>,
-    /// The timeline grade: one primary correction of the mixed picture of
-    /// all its tracks, before the subtitles. Left out at its usual values.
+    /// The timeline grade: a grade of the mixed picture of all its tracks,
+    /// before the subtitles. Left out at its usual value.
     #[serde(default)]
     pub grade: Option<Grade>,
     /// Video tracks `V1…` first, then audio tracks `A1…`.
@@ -3757,17 +3757,122 @@ pub struct Picture {
     /// transform and its effects. Left out, the picture comes as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition: Option<Composition>,
-    /// The primary correction of its colors, after its effects and before
-    /// its composite mode and its opacity. Left out at its usual values.
+    /// The grade of its colors, after its effects and before its composite
+    /// mode and its opacity. Left out at its usual value: one corrector at
+    /// its usual values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grade: Option<Grade>,
+}
+
+/// A grade: the nodes of the color page. The picture comes in, goes through
+/// the nodes that the inputs join, and goes out from the node `output`.
+/// A node's number is its place in `nodes`, from 1. The number 0 is the
+/// picture that comes into the grade. While a node has an empty input, or
+/// its picture goes nowhere, or nothing goes out, the grade does nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Grade {
+    /// The nodes, in the order they were added.
+    pub nodes: Vec<GradeNode>,
+    /// The number of the node whose picture goes out, or 0 for the picture
+    /// that comes in. Left out when nothing goes out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<u32>,
+}
+
+impl Default for Grade {
+    fn default() -> Self {
+        Self {
+            nodes: vec![GradeNode::corrector(Some(0), [0.0, 0.0])],
+            output: Some(1),
+        }
+    }
+}
+
+impl Grade {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn node(&self, number: u32) -> Option<&GradeNode> {
+        self.nodes.get((number as usize).checked_sub(1)?)
+    }
+
+    pub fn node_mut(&mut self, number: u32) -> Option<&mut GradeNode> {
+        self.nodes.get_mut((number as usize).checked_sub(1)?)
+    }
+
+    pub fn corrector(&self, number: u32) -> Option<&Corrector> {
+        match &self.node(number)?.tool {
+            GradeTool::Corrector(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub fn last(&self) -> u32 {
+        self.nodes.len() as u32
+    }
+}
+
+/// A node of a grade.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GradeNode {
+    #[serde(flatten)]
+    pub tool: GradeTool,
+    /// What comes into each input, in order: the number of a node, 0 for
+    /// the picture that comes into the grade, or null for nothing. A
+    /// corrector has one input. A mixer has one or more.
+    pub inputs: Vec<Option<u32>>,
+    /// Off, a corrector passes on the picture that comes into it. A mixer is
+    /// always on. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub on: bool,
+    /// Its place in the node editor, `[x, y]` in node widths across and
+    /// node heights down.
+    pub place: [f64; 2],
+}
+
+impl GradeNode {
+    pub fn corrector(input: Option<u32>, place: [f64; 2]) -> Self {
+        Self {
+            tool: GradeTool::Corrector(Box::default()),
+            inputs: vec![input],
+            on: true,
+            place,
+        }
+    }
+}
+
+/// What a node of a grade does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "node", rename_all = "snake_case")]
+pub enum GradeTool {
+    /// A primary correction of the picture on its input.
+    Corrector(Box<Corrector>),
+    /// It adds the change of each corrector on its inputs to the picture
+    /// that comes into these correctors. Each input is such a corrector, or
+    /// that picture itself. Else the grade does nothing.
+    ParallelMixer,
+    /// Each input goes over the mix of the inputs before it with `mode`, as
+    /// a clip goes over the tracks below it. With `normal`, the last input
+    /// shows.
+    LayerMixer {
+        /// How each input mixes with the inputs before it. Usual: `normal`.
+        #[serde(default, skip_serializing_if = "CompositeMode::is_normal")]
+        mode: CompositeMode,
+    },
+}
+
+impl GradeTool {
+    pub fn is_mixer(&self) -> bool {
+        !matches!(self, Self::Corrector(_))
+    }
 }
 
 /// A primary correction: the numbers of the Primaries palette. Each value
 /// keeps its own channel order, `[red, green, blue]`, with the master
 /// last where it has one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Grade {
+pub struct Corrector {
     /// Lift of red, green, blue and the master. Usual: 0.
     pub lift: [f64; 4],
     /// Gamma of red, green, blue and the master. Usual: 0.
@@ -3813,7 +3918,7 @@ pub struct Grade {
     pub high_range: f64,
 }
 
-impl Default for Grade {
+impl Default for Corrector {
     fn default() -> Self {
         Self {
             lift: [0.0; 4],
@@ -3840,7 +3945,7 @@ impl Default for Grade {
     }
 }
 
-impl Grade {
+impl Corrector {
     pub fn is_usual(&self) -> bool {
         *self == Self::default()
     }
@@ -5869,6 +5974,10 @@ impl CompositeMode {
 
     pub fn of_code(code: u32) -> Option<Self> {
         Self::ALL.get(usize::try_from(code).ok()?).copied()
+    }
+
+    pub fn is_normal(&self) -> bool {
+        *self == Self::Normal
     }
 }
 

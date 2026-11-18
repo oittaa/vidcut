@@ -1,4 +1,4 @@
-use crate::model::Grade;
+use crate::model::{CompositeMode, Corrector, Grade, GradeTool};
 use crate::tone_tables::{HIGHLIGHTS, SHADOWS, TONE_AMOUNTS};
 
 pub const OFFSET_STEP: f64 = 187.5 / 1023.0;
@@ -159,7 +159,7 @@ fn tone_change(table: &[[f64; TONE_SIZE]; TONE_AMOUNTS.len()], amount: f64) -> V
 }
 
 impl Tone {
-    fn of(g: &Grade) -> Option<Self> {
+    fn of(g: &Corrector) -> Option<Self> {
         if g.shadows == 0.0 && g.highlights == 0.0 && g.midtone_detail == 0.0 {
             return None;
         }
@@ -477,8 +477,212 @@ impl LogCurve {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pass {
+    Copy {
+        from: usize,
+        to: usize,
+    },
+    Correct {
+        on: usize,
+        grading: Box<Grading>,
+    },
+    Parallel {
+        on: usize,
+        change: usize,
+        base: usize,
+    },
+    Layer {
+        on: usize,
+        top: usize,
+        mode: CompositeMode,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Graded {
+    pub passes: Vec<Pass>,
+    pub registers: usize,
+}
+
+pub fn order(g: &Grade) -> Option<Vec<u32>> {
+    fn visit(g: &Grade, k: u32, state: &mut [u8], out: &mut Vec<u32>) -> Option<()> {
+        match state[k as usize] {
+            2 => return Some(()),
+            1 => return None,
+            _ => {}
+        }
+        state[k as usize] = 1;
+        for &v in g.node(k)?.inputs.iter().flatten() {
+            if v > g.last() {
+                return None;
+            }
+            if v > 0 {
+                visit(g, v, state, out)?;
+            }
+        }
+        state[k as usize] = 2;
+        out.push(k);
+        Some(())
+    }
+    let mut state = vec![0u8; g.nodes.len() + 1];
+    let mut out = Vec::new();
+    for k in 1..=g.last() {
+        visit(g, k, &mut state, &mut out)?;
+    }
+    Some(out)
+}
+
+pub fn complete(g: &Grade) -> bool {
+    let used = |k: u32| g.output == Some(k) || g.nodes.iter().any(|n| n.inputs.contains(&Some(k)));
+    g.output.is_some()
+        && g.nodes.iter().zip(1..).all(|(n, k)| {
+            let fed = match n.tool {
+                GradeTool::Corrector(_) => n.inputs.iter().all(Option::is_some),
+                _ => n.inputs.iter().any(Option::is_some),
+            };
+            fed && used(k)
+        })
+}
+
+pub fn base(g: &Grade, k: u32) -> Option<u32> {
+    let inputs: Vec<u32> = g.node(k)?.inputs.iter().flatten().copied().collect();
+    let into = |v: u32| match g.node(v) {
+        Some(n) if !n.tool.is_mixer() => n.inputs.first().copied().flatten(),
+        _ => None,
+    };
+    let fits = |x: u32| inputs.iter().all(|&v| v == x || into(v) == Some(x));
+    inputs
+        .iter()
+        .flat_map(|&v| into(v).into_iter().chain([v]))
+        .find(|&x| fits(x))
+}
+
+struct Registers {
+    holder: Vec<usize>,
+    left: Vec<usize>,
+    free: Vec<usize>,
+}
+
+impl Registers {
+    fn done(&mut self, v: usize) {
+        let r = self.holder[v];
+        self.left[r] -= 1;
+        if self.left[r] == 0 {
+            self.free.push(r);
+        }
+    }
+
+    fn take(&mut self, v: usize, passes: &mut Vec<Pass>) -> usize {
+        let r = self.holder[v];
+        if self.left[r] == 1 {
+            self.left[r] = 0;
+            return r;
+        }
+        self.left[r] -= 1;
+        let to = self.free.pop().unwrap_or_else(|| {
+            self.left.push(0);
+            self.left.len() - 1
+        });
+        passes.push(Pass::Copy { from: r, to });
+        to
+    }
+
+    fn hold(&mut self, k: usize, r: usize, uses: usize) {
+        self.holder[k] = r;
+        self.left[r] = uses;
+    }
+
+    fn alias(&mut self, k: usize, v: usize, uses: usize) {
+        let r = self.holder[v];
+        self.holder[k] = r;
+        self.left[r] += uses;
+        self.done(v);
+    }
+}
+
+impl Graded {
+    pub fn of(g: &Grade) -> Option<Self> {
+        if !complete(g) {
+            return None;
+        }
+        let order = order(g)?;
+        let out = g.output? as usize;
+        let mut bases = vec![None; g.nodes.len() + 1];
+        let mut uses = vec![0usize; g.nodes.len() + 1];
+        for &k in &order {
+            if matches!(g.node(k)?.tool, GradeTool::ParallelMixer) {
+                let x = base(g, k)?;
+                bases[k as usize] = Some(x as usize);
+                uses[x as usize] += 1;
+            }
+        }
+        for v in g.nodes.iter().flat_map(|n| n.inputs.iter().flatten()) {
+            uses[*v as usize] += 1;
+        }
+        uses[out] += 1;
+        let mut r = Registers {
+            holder: vec![0; g.nodes.len() + 1],
+            left: vec![uses[0]],
+            free: Vec::new(),
+        };
+        let mut passes = Vec::new();
+        for &k in &order {
+            let node = g.node(k)?;
+            let ins: Vec<usize> = node.inputs.iter().flatten().map(|v| *v as usize).collect();
+            let k = k as usize;
+            match &node.tool {
+                GradeTool::Corrector(c) if node.on && !c.is_usual() => {
+                    let on = r.take(ins[0], &mut passes);
+                    let grading = Box::new(Grading::of(c));
+                    passes.push(Pass::Correct { on, grading });
+                    r.hold(k, on, uses[k]);
+                }
+                GradeTool::Corrector(_) => r.alias(k, ins[0], uses[k]),
+                GradeTool::ParallelMixer => {
+                    let x = bases[k]?;
+                    let on = r.take(ins[0], &mut passes);
+                    for &v in &ins[1..] {
+                        if v != x {
+                            let (change, base) = (r.holder[v], r.holder[x]);
+                            passes.push(Pass::Parallel { on, change, base });
+                        }
+                        r.done(v);
+                    }
+                    r.done(x);
+                    r.hold(k, on, uses[k]);
+                }
+                GradeTool::LayerMixer { mode } => {
+                    let on = r.take(ins[0], &mut passes);
+                    for &v in &ins[1..] {
+                        let top = r.holder[v];
+                        passes.push(Pass::Layer {
+                            on,
+                            top,
+                            mode: *mode,
+                        });
+                        r.done(v);
+                    }
+                    r.hold(k, on, uses[k]);
+                }
+            }
+        }
+        if r.holder[out] != 0 {
+            passes.push(Pass::Copy {
+                from: r.holder[out],
+                to: 0,
+            });
+        }
+        let only_copies = passes.iter().all(|p| matches!(p, Pass::Copy { .. }));
+        (!only_copies).then_some(Self {
+            passes,
+            registers: r.left.len(),
+        })
+    }
+}
+
 impl Grading {
-    pub fn of(g: &Grade) -> Self {
+    pub fn of(g: &Corrector) -> Self {
         let mut lift = [0.0; 4];
         let mut weight = [0.0; 4];
         let mut power = [0.0; 4];

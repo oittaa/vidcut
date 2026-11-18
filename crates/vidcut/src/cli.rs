@@ -97,6 +97,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.set", &["clips"]),
     ("grade.clear", &["clips"]),
     ("grade.printer", &["color", "clips"]),
+    ("grade.add", &["add", "clip"]),
+    ("grade.remove", &["node", "clip"]),
+    ("grade.connect", &["node", "clip"]),
     ("effects.add", &["clips", "kind"]),
     ("comp.add", &["clip", "tool"]),
     ("comp.set", &["clip", "node"]),
@@ -177,6 +180,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("gui.close", &["panel"]),
     ("gui.page", &["page"]),
     ("gui.nodes", &["nodes"]),
+    ("gui.grade_nodes", &["nodes"]),
     ("gui.page_time", &["at"]),
     ("gui.target", &["track"]),
     ("gui.trim_editor", &["at"]),
@@ -212,7 +216,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("generators", "Pictures made with no file"),
     (
         "grade",
-        "The primary correction of clips and of the timeline: wheels, contrast, saturation and the Log wheels",
+        "The grades of clips and of the timeline: nodes of primary corrections and mixers",
     ),
     (
         "gui",

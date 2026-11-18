@@ -28,6 +28,7 @@ mod leveler;
 mod look_tiles;
 mod looks;
 mod mixer;
+mod node_editor;
 mod noise;
 mod normalize;
 mod onscreen;

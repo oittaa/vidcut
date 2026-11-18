@@ -95,6 +95,7 @@ pub enum GuiChange {
     Page(Page),
     Grade(GradeLevel),
     Nodes(Vec<String>),
+    GradeNodes(Vec<u32>),
     PageTime(PageTime),
 }
 
@@ -150,6 +151,7 @@ pub struct GuiState {
     pub grade: GradeLevel,
     pub clip: Option<String>,
     pub nodes: Vec<String>,
+    pub grade_nodes: Vec<u32>,
     pub time: Option<PageClock>,
     pub edit: Option<EditPoint>,
     pub edits: Vec<EditPoint>,
@@ -3217,6 +3219,9 @@ impl Live {
             }
             Request::GuiNodes { nodes } => {
                 self.gui_change(vec![GuiChange::Nodes(nodes)], |s| json!(s))
+            }
+            Request::GuiGradeNodes { nodes } => {
+                self.gui_change(vec![GuiChange::GradeNodes(nodes)], |s| json!(s))
             }
             Request::GuiPageTime { at, fast, speed } => {
                 if speed.is_some_and(|s| !s.is_finite() || s.abs() > MAX_SPEED) {

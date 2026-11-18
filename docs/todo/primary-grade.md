@@ -2,7 +2,7 @@
 
 **When:** not decided.
 
-Each clip has one primary correction, on the Color page ([color-page.md](color-page.md)). Each timeline also has one.
+Each clip has a grade of nodes, on the Color page ([color-page.md](color-page.md)). Each timeline also has one. Each corrector node holds one primary correction.
 
 **Why:**
 
@@ -12,7 +12,7 @@ Each clip has one primary correction, on the Color page ([color-page.md](color-p
 
 **In the code:**
 
-- `model::Grade` holds the values. `fs_grade` applies them ([export](../design/export.md#the-grade)).
+- `model::Grade` holds the nodes, and `model::Corrector` holds the values of a corrector. `fs_grade` applies them, and `fs_grade_mix` mixes ([export](../design/export.md#the-grade)).
 - The grade runs after the effects of the clip and before the composite mode and the opacity (§13).
 - The timeline grade runs on the mixed canvas, before the subtitles and the output LUT ([export](../design/export.md#the-grade)).
 - The scopes read the canvas after the mix ([gpu](../design/gpu.md#the-scopes)). Thus they show the grade.

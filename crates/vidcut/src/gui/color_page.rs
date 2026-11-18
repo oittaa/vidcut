@@ -3,12 +3,16 @@ use std::time::{Duration, Instant};
 use egui::{Color32, CursorIcon, DragValue, Label, Rect, Response, Sense, Stroke, Ui, Vec2};
 use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
-use vidcut_core::model::{Grade, Picture};
-use vidcut_core::ops::grade::{GradeOf, checked, printed};
+use vidcut_core::model::{CompositeMode, Corrector, Grade, GradeNode, GradeTool, Picture};
+use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed};
 use vidcut_core::ops::picture::takes_effects;
-use vidcut_core::request::{GradeLevel, Page, PrinterColor};
+use vidcut_core::request::{GradeAdd, GradeLevel, GradeMixer, Page, PrinterColor};
 use vidcut_core::shortcuts::{Action, PRINTER, Panel};
 
+use super::node_editor::{
+    self, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, Side, Spot, Tile, Wire,
+};
+use super::theme;
 use super::workspace::Workspace;
 
 const WHEEL: f32 = 132.0;
@@ -37,8 +41,51 @@ const PRINTED: [(PrinterColor, &str); 3] = [
     (PrinterColor::Blue, "Blue"),
 ];
 
+const ADDS: [(Action, GradeAdd); 5] = [
+    (Action::AddSerialNode, GradeAdd::Serial),
+    (Action::AddNodeBefore, GradeAdd::Before),
+    (Action::AddParallelNode, GradeAdd::Parallel),
+    (Action::AddLayerNode, GradeAdd::Layer),
+    (Action::AppendNode, GradeAdd::Append),
+];
+
+const ADD_MENU: [(GradeAdd, &str); 5] = [
+    (GradeAdd::Serial, "Add Serial"),
+    (GradeAdd::Before, "Add Before Current"),
+    (GradeAdd::Parallel, "Add Parallel"),
+    (GradeAdd::Layer, "Add Layer"),
+    (GradeAdd::Append, "Append Node"),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum Port {
+    Source,
+    Node(u32),
+    Output,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum NodeAct {
+    Add(GradeAdd),
+    Reset,
+    Toggle,
+    Extract,
+    Delete,
+    AddInput,
+    Morph(GradeMixer),
+    Mode(CompositeMode),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FieldAct {
+    Corrector,
+    ResetAll,
+    KeepNodes,
+}
+
 pub(super) struct Graded {
     of: GradeOf,
+    node: u32,
     grade: Grade,
     sent: Option<Instant>,
 }
@@ -58,16 +105,28 @@ struct Change {
     value: Value,
 }
 
-fn changed_grade(g: &Grade, field: &str, value: Value) -> Grade {
+fn changed_corrector(g: &Corrector, field: &str, value: Value) -> Corrector {
     let mut v = serde_json::to_value(g).unwrap_or_default();
     v[field] = value;
     serde_json::from_value(v)
         .ok()
-        .filter(|n| checked(n).is_ok())
+        .filter(|n| corrector_checked(n).is_ok())
         .unwrap_or_else(|| g.clone())
 }
 
-fn differences(from: &Grade, to: &Grade) -> Map<String, Value> {
+fn with_corrector(g: &Grade, n: u32, c: Corrector) -> Grade {
+    let mut out = g.clone();
+    if let Some(GradeNode {
+        tool: GradeTool::Corrector(old),
+        ..
+    }) = out.node_mut(n)
+    {
+        **old = c;
+    }
+    out
+}
+
+fn differences(from: &Corrector, to: &Corrector) -> Map<String, Value> {
     let (Ok(Value::Object(a)), Ok(Value::Object(b))) =
         (serde_json::to_value(from), serde_json::to_value(to))
     else {
@@ -105,6 +164,266 @@ fn printer_label(color: PrinterColor, points: f64) -> String {
     format!("{name} {}", if points > 0.0 { "+" } else { "-" })
 }
 
+fn params(of: &GradeOf, field: &str, more: Value) -> Value {
+    let mut v = match of {
+        GradeOf::Clip(id) => json!({ field: id }),
+        GradeOf::Timeline => json!({ "timeline": true }),
+    };
+    if let (Value::Object(to), Value::Object(from)) = (&mut v, more) {
+        to.extend(from);
+    }
+    v
+}
+
+fn command(method: &str, params: Value) -> Value {
+    json!({ "method": method, "params": params })
+}
+
+fn port(v: u32) -> Port {
+    match v {
+        0 => Port::Source,
+        n => Port::Node(n),
+    }
+}
+
+fn from_number(p: Port) -> Option<u32> {
+    match p {
+        Port::Source => Some(0),
+        Port::Node(n) => Some(n),
+        Port::Output => None,
+    }
+}
+
+fn to_number(p: Port) -> Option<u32> {
+    match p {
+        Port::Node(n) => Some(n),
+        Port::Output => Some(0),
+        Port::Source => None,
+    }
+}
+
+fn kind(tool: &GradeTool) -> &'static str {
+    match tool {
+        GradeTool::Corrector(_) => "Corrector",
+        GradeTool::ParallelMixer => "Parallel Mixer",
+        GradeTool::LayerMixer { .. } => "Layer Mixer",
+    }
+}
+
+fn tiles(g: &Grade) -> Vec<Tile<Port>> {
+    let line = Stroke::new(1.5, theme::colors().text_dim);
+    let input = |slot: usize, name: String| Inlet {
+        slot,
+        side: Side::Left,
+        knot: RGB_KNOT,
+        wire: line,
+        name,
+    };
+    let mut out = vec![Tile {
+        key: Port::Source,
+        label: "Source".into(),
+        place: [0.0; 2],
+        faded: false,
+        outlet: Some(Outlet {
+            name: "Source".into(),
+            color: RGB_KNOT,
+        }),
+        inlets: Vec::new(),
+        edge: Some(Edge::Left),
+    }];
+    for (d, n) in g.nodes.iter().zip(1u32..) {
+        let (label, inlets) = match &d.tool {
+            GradeTool::Corrector(_) => (format!("{n:02}"), vec![input(0, "RGB Input".into())]),
+            tool => (
+                format!("{n:02} {}", kind(tool)),
+                (0..d.inputs.len())
+                    .map(|i| input(i, format!("Input {}", i + 1)))
+                    .collect(),
+            ),
+        };
+        out.push(Tile {
+            key: Port::Node(n),
+            label,
+            place: d.place,
+            faded: !d.on,
+            outlet: Some(Outlet {
+                name: "RGB Output".into(),
+                color: RGB_KNOT,
+            }),
+            inlets,
+            edge: None,
+        });
+    }
+    out.push(Tile {
+        key: Port::Output,
+        label: "Output".into(),
+        place: [0.0; 2],
+        faded: false,
+        outlet: None,
+        inlets: vec![input(0, "Output".into())],
+        edge: Some(Edge::Right),
+    });
+    out
+}
+
+fn wires(g: &Grade) -> Vec<Wire<Port>> {
+    let mut out: Vec<Wire<Port>> = g
+        .nodes
+        .iter()
+        .zip(1u32..)
+        .flat_map(|(d, n)| {
+            d.inputs.iter().enumerate().filter_map(move |(slot, v)| {
+                v.map(|v| Wire {
+                    from: port(v),
+                    to: Port::Node(n),
+                    slot,
+                })
+            })
+        })
+        .collect();
+    if let Some(o) = g.output {
+        out.push(Wire {
+            from: port(o),
+            to: Port::Output,
+            slot: 0,
+        });
+    }
+    out
+}
+
+fn linked_now(g: &Grade, to: Port, slot: usize) -> Option<Port> {
+    match to {
+        Port::Node(n) => g.node(n)?.inputs.get(slot).copied().flatten().map(port),
+        Port::Output => g.output.map(port),
+        Port::Source => None,
+    }
+}
+
+fn connect(of: &GradeOf, to: Port, slot: Option<usize>, from: Option<Port>) -> Option<Value> {
+    let mut more = json!({ "node": to_number(to)? });
+    if let Some(s) = slot {
+        more["input"] = json!(s);
+    }
+    if let Some(f) = from.and_then(from_number) {
+        more["from"] = json!(f);
+    }
+    Some(command("grade.connect", params(of, "clip", more)))
+}
+
+fn grade_links(g: &Grade, of: &GradeOf, l: &Link<Port>) -> Vec<Value> {
+    let onto = |dst: Port| -> Option<Option<usize>> {
+        match dst {
+            Port::Node(n) if g.node(n)?.tool.is_mixer() => Some(None),
+            Port::Node(_) | Port::Output => Some(Some(0)),
+            Port::Source => None,
+        }
+    };
+    let new = match (&l.anchor, &l.spot) {
+        (End::Output(src), Spot::Knot(End::Input(dst, s))) => Some((*dst, Some(*s), *src)),
+        (End::Output(src), Spot::Tile(dst)) => match l.pulled {
+            Some((pd, ps)) if pd == *dst => Some((*dst, Some(ps), *src)),
+            _ => onto(*dst).map(|s| (*dst, s, *src)),
+        },
+        (End::Input(dst, s), Spot::Knot(End::Output(src)) | Spot::Tile(src))
+            if *src != Port::Output =>
+        {
+            Some((*dst, Some(*s), *src))
+        }
+        _ => None,
+    };
+    let new = new.filter(|(d, _, s)| d != s);
+    let mut out = Vec::new();
+    if let Some((pd, ps)) = l.pulled
+        && new.is_none_or(|(d, s, _)| d != pd || s != Some(ps))
+    {
+        out.extend(connect(of, pd, Some(ps), None));
+    }
+    if let Some((d, s, src)) = new
+        && s.is_none_or(|s| linked_now(g, d, s) != Some(src))
+    {
+        out.extend(connect(of, d, s, Some(src)));
+    }
+    out
+}
+
+fn node_menu(ui: &mut Ui, d: &GradeNode, act: &mut Option<NodeAct>) {
+    let mut pick = |ui: &mut Ui, on: bool, button: egui::Button, a: NodeAct| {
+        if ui.add_enabled(on, button).clicked() {
+            *act = Some(a);
+            ui.close();
+        }
+    };
+    match &d.tool {
+        GradeTool::Corrector(_) => {
+            ui.menu_button("Add Node", |ui| {
+                for (add, text) in ADD_MENU {
+                    pick(ui, true, egui::Button::new(text), NodeAct::Add(add));
+                }
+            });
+            pick(
+                ui,
+                true,
+                egui::Button::new("Reset Node Grade"),
+                NodeAct::Reset,
+            );
+            let off = egui::Button::selectable(!d.on, "Disable Node");
+            pick(ui, true, off, NodeAct::Toggle);
+            let free = d.inputs.iter().all(Option::is_none);
+            pick(
+                ui,
+                !free,
+                egui::Button::new("Extract Node"),
+                NodeAct::Extract,
+            );
+        }
+        GradeTool::ParallelMixer => {
+            pick(
+                ui,
+                true,
+                egui::Button::new("Add One Input"),
+                NodeAct::AddInput,
+            );
+            let to = NodeAct::Morph(GradeMixer::LayerMixer);
+            pick(
+                ui,
+                true,
+                egui::Button::new("Morph Into Layer Mixer Node"),
+                to,
+            );
+        }
+        GradeTool::LayerMixer { mode } => {
+            pick(
+                ui,
+                true,
+                egui::Button::new("Add One Input"),
+                NodeAct::AddInput,
+            );
+            let to = NodeAct::Morph(GradeMixer::ParallelMixer);
+            pick(ui, true, egui::Button::new("Morph Into Parallel Node"), to);
+            ui.menu_button("Composite Mode", |ui| {
+                for m in CompositeMode::ALL {
+                    let text = super::placing::mode_label(m);
+                    let item = egui::Button::selectable(m == *mode, text);
+                    pick(ui, true, item, NodeAct::Mode(m));
+                }
+            });
+        }
+    }
+    pick(ui, true, egui::Button::new("Delete Node"), NodeAct::Delete);
+}
+
+fn field_menu(ui: &mut Ui, act: &mut Option<FieldAct>) {
+    let mut pick = |ui: &mut Ui, text: &str, a: FieldAct| {
+        if ui.button(text).clicked() {
+            *act = Some(a);
+            ui.close();
+        }
+    };
+    ui.menu_button("Add Node", |ui| pick(ui, "Corrector", FieldAct::Corrector));
+    pick(ui, "Reset Grades and Keep Nodes", FieldAct::KeepNodes);
+    pick(ui, "Reset All Grades and Nodes", FieldAct::ResetAll);
+}
+
 fn grade_switch(ui: &mut Ui, level: GradeLevel) -> Option<GradeLevel> {
     let mut picked = None;
     let right = egui::Layout::right_to_left(egui::Align::Center);
@@ -124,7 +443,7 @@ fn grade_switch(ui: &mut Ui, level: GradeLevel) -> Option<GradeLevel> {
 }
 
 fn usual(field: &str) -> f64 {
-    serde_json::to_value(Grade::default())
+    serde_json::to_value(Corrector::default())
         .ok()
         .and_then(|v| v.get(field).and_then(Value::as_f64))
         .unwrap_or_default()
@@ -425,7 +744,7 @@ fn wheel(ui: &mut Ui, w: &Wheel) -> Option<Vec<f64>> {
     out.then_some(values)
 }
 
-fn primaries(g: &Grade) -> [Wheel; 4] {
+fn primaries(g: &Corrector) -> [Wheel; 4] {
     [
         Wheel {
             name: "Lift",
@@ -466,7 +785,7 @@ fn primaries(g: &Grade) -> [Wheel; 4] {
     ]
 }
 
-fn logs(g: &Grade) -> [Wheel; 4] {
+fn logs(g: &Corrector) -> [Wheel; 4] {
     let log = |name, field, values: [f64; 3]| Wheel {
         name,
         field,
@@ -566,16 +885,34 @@ impl Workspace {
             }
             return;
         };
+        self.settle_grade(&of);
+        let node = self.current_grade_node(&stored);
         if let Some(h) = &self.effects_page.graded
             && (h.of != of
+                || Some(h.node) != node
                 || h.sent
                     .is_some_and(|t| h.grade == stored || t.elapsed() > LANDING))
         {
             self.effects_page.graded = None;
         }
-        let g = match &self.effects_page.graded {
+        let grade = match &self.effects_page.graded {
             Some(h) => h.grade.clone(),
             None => stored.clone(),
+        };
+        let Some((n, g)) = node.and_then(|n| Some((n, grade.corrector(n)?.clone()))) else {
+            let what = node
+                .and_then(|n| stored.node(n))
+                .map_or("No Node Selected", |d| kind(&d.tool));
+            ui.horizontal(|ui| {
+                ui.strong(&name);
+                ui.separator();
+                ui.label(what);
+                picked = grade_switch(ui, level);
+            });
+            if let Some(l) = picked {
+                self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
+            }
+            return;
         };
         let key = egui::Id::unique("color-wheels-mode");
         let mut mode = ui.data(|d| d.get_temp::<Mode>(key)).unwrap_or(Mode::Wheels);
@@ -583,6 +920,7 @@ impl Workspace {
         let mut reset = false;
         ui.horizontal(|ui| {
             ui.strong(name);
+            ui.label(format!("Node {n:02}"));
             ui.separator();
             for (m, text) in [
                 (Mode::Wheels, "Wheels"),
@@ -707,19 +1045,21 @@ impl Workspace {
         let (field, target) = named(&of);
         if reset {
             self.effects_page.graded = None;
+            let at = ("node".to_string(), json!(n));
             self.send(
                 "grade.clear",
-                Value::Object(Map::from_iter([(field, target)])),
+                Value::Object(Map::from_iter([(field, target), at])),
             );
             return;
         }
         if !changes.is_empty() {
-            let grade = changes
+            let c = changes
                 .into_iter()
-                .fold(g, |g, c| changed_grade(&g, c.field, c.value));
+                .fold(g, |g, c| changed_corrector(&g, c.field, c.value));
             self.effects_page.graded = Some(Graded {
                 of: of.clone(),
-                grade,
+                node: n,
+                grade: with_corrector(&grade, n, c),
                 sent: None,
             });
         }
@@ -727,7 +1067,10 @@ impl Workspace {
         let ready = match &mut self.effects_page.graded {
             Some(h) if h.sent.is_none() && !down => {
                 h.sent = Some(Instant::now());
-                Some(differences(&stored, &h.grade))
+                Some(match (stored.corrector(n), h.grade.corrector(n)) {
+                    (Some(a), Some(b)) => differences(a, b),
+                    _ => Map::new(),
+                })
             }
             _ => None,
         };
@@ -735,6 +1078,7 @@ impl Workspace {
             Some(params) if params.is_empty() => self.effects_page.graded = None,
             Some(mut params) => {
                 params.insert(field, target);
+                params.insert("node".into(), json!(n));
                 self.send("grade.set", Value::Object(params));
             }
             None => {}
@@ -745,19 +1089,31 @@ impl Workspace {
     }
 
     fn printer_point(&mut self, point: (PrinterColor, f64)) {
-        let Some((of, _, _)) = self.grade_shown() else {
+        let Some((of, _, g)) = self.grade_shown() else {
+            return;
+        };
+        self.settle_grade(&of);
+        let Some(n) = self
+            .current_grade_node(&g)
+            .filter(|n| g.corrector(*n).is_some())
+        else {
             return;
         };
         if let Some(h) = &mut self.effects_page.graded
             && h.of == of
+            && h.node == n
+            && let Some(c) = h.grade.corrector(n)
         {
             let lights = crate::preferences::load()
                 .map(|p| p.color)
                 .unwrap_or_default();
-            h.grade.offset = printed(h.grade.offset, point, &lights);
+            let mut c = c.clone();
+            c.offset = printed(c.offset, point, &lights);
+            h.grade = with_corrector(&h.grade, n, c);
         }
         let (field, target) = named(&of);
         let mut params = Map::from_iter([(field, target)]);
+        params.insert("node".into(), json!(n));
         params.insert("color".into(), json!(point.0));
         params.insert("points".into(), json!(point.1));
         self.send("grade.printer", Value::Object(params));
@@ -838,6 +1194,313 @@ impl Workspace {
             super::dialog::why(ui, "open the Color page");
         } else if !on {
             super::dialog::why(ui, "printer light hotkeys are off");
+        }
+    }
+
+    fn settle_grade(&mut self, of: &GradeOf) {
+        if self.effects_page.grade_seen.as_ref() != Some(of) {
+            self.effects_page.grade_seen = Some(of.clone());
+            self.effects_page.grade_nodes = vec![1];
+            self.effects_page.grade_view.stop();
+            self.effects_page.grade_spot = None;
+        }
+    }
+
+    fn current_grade_node(&self, g: &Grade) -> Option<u32> {
+        let n = *self.effects_page.grade_nodes.last()?;
+        g.node(n).map(|_| n)
+    }
+
+    pub(super) fn pick_grade_nodes(&mut self, nodes: Vec<u32>) -> Result<(), String> {
+        let (of, _, g) = self.grade_shown().ok_or(match self.effects_page.grading {
+            GradeLevel::Clip => "There is no clip at the playhead",
+            GradeLevel::Timeline => "There is no timeline",
+        })?;
+        if let Some(missing) = nodes.iter().find(|n| g.node(**n).is_none()) {
+            return Err(format!("the grade has no node {missing}"));
+        }
+        let mut kept: Vec<u32> = Vec::new();
+        for n in nodes {
+            kept.retain(|k| *k != n);
+            kept.push(n);
+        }
+        self.settle_grade(&of);
+        self.effects_page.grade_nodes = kept;
+        Ok(())
+    }
+
+    pub(super) fn color_keys(&mut self, ctx: &egui::Context) {
+        if self.effects_page.page != Page::Color || self.project().is_none() {
+            return;
+        }
+        let bindings = self.snap.bindings.clone();
+        let mut mine: Vec<Action> = Vec::new();
+        let mut keep = |found: Option<(Action, bool)>| match found {
+            Some((a, repeat)) if a.printer().is_none() => {
+                if !repeat {
+                    mine.push(a);
+                }
+                false
+            }
+            _ => true,
+        };
+        ctx.input_mut(|i| {
+            i.events
+                .retain(|e| keep(super::shortcuts::owner(&bindings, Panel::Color, e)))
+        });
+        self.pads
+            .struck
+            .retain(|(c, repeat)| keep(bindings.owner(Panel::Color, *c).map(|a| (a, *repeat))));
+        let struck = |a: Action| mine.contains(&a);
+        for (action, add) in ADDS {
+            if struck(action) {
+                self.add_grade_node(add);
+            }
+        }
+        let Some((of, _, g)) = self.grade_shown() else {
+            return;
+        };
+        self.settle_grade(&of);
+        let current = self.current_grade_node(&g);
+        let corrector = current.filter(|n| g.corrector(*n).is_some());
+        for (action, act, n) in [
+            (Action::ExtractNode, NodeAct::Extract, corrector),
+            (Action::ResetNodeGrade, NodeAct::Reset, corrector),
+            (Action::DeleteNode, NodeAct::Delete, current),
+        ] {
+            if let Some(n) = n
+                && struck(action)
+                && (action != Action::DeleteNode || self.effects_page.grade_nodes.len() == 1)
+            {
+                self.grade_node_act(&of, &g, (act, n));
+            }
+        }
+        if struck(Action::SwitchSelectedNodes) {
+            let picked = self.effects_page.grade_nodes.clone();
+            let label = "Enable/Disable Selected Nodes";
+            self.switch_grade_nodes(&of, &g, Some(&picked), label);
+        }
+        if struck(Action::SwitchAllNodes) {
+            self.switch_grade_nodes(&of, &g, None, "Enable/Disable All Nodes");
+        }
+        for (action, act) in [
+            (Action::ResetGradesKeepNodes, FieldAct::KeepNodes),
+            (Action::ResetAllGrades, FieldAct::ResetAll),
+        ] {
+            if struck(action) {
+                self.grade_field_act(&of, &g, act);
+            }
+        }
+    }
+
+    fn switch_grade_nodes(&mut self, of: &GradeOf, g: &Grade, picked: Option<&[u32]>, label: &str) {
+        let correctors: Vec<(u32, bool)> = (g.nodes.iter().zip(1u32..))
+            .filter(|(d, n)| !d.tool.is_mixer() && picked.is_none_or(|p| p.contains(n)))
+            .map(|(d, n)| (n, d.on))
+            .collect();
+        let any_on = correctors.iter().any(|(_, on)| *on);
+        let all_on = correctors.iter().all(|(_, on)| *on);
+        if picked.is_some() && any_on != all_on {
+            return;
+        }
+        let commands = (correctors.iter())
+            .filter(|(_, on)| *on == any_on)
+            .map(|(n, _)| {
+                let more = json!({ "node": n, "on": !any_on });
+                command("grade.set", params(of, "clips", more))
+            })
+            .collect();
+        self.effects_page.graded = None;
+        self.send_all(commands, label);
+    }
+
+    fn add_grade_node(&mut self, add: GradeAdd) {
+        let Some((of, _, g)) = self.grade_shown() else {
+            return;
+        };
+        self.settle_grade(&of);
+        let node = self.current_grade_node(&g);
+        let more = match (add, node) {
+            (GradeAdd::Append, _) => json!({ "add": add }),
+            (_, Some(n)) => json!({ "add": add, "node": n }),
+            (_, None) => return,
+        };
+        self.effects_page.grade_nodes = vec![g.last() + 1];
+        self.send("grade.add", params(&of, "clip", more));
+    }
+
+    fn grade_node_act(&mut self, of: &GradeOf, g: &Grade, (act, n): (NodeAct, u32)) {
+        let Some(d) = g.node(n) else {
+            return;
+        };
+        if let NodeAct::Add(add) = act {
+            self.effects_page.grade_nodes = vec![n];
+            self.add_grade_node(add);
+            return;
+        }
+        let set = |more: Value| {
+            let mut more = more;
+            more["node"] = json!(n);
+            ("grade.set", params(of, "clips", more))
+        };
+        let (method, p) = match act {
+            NodeAct::Add(_) => return,
+            NodeAct::Reset => ("grade.clear", params(of, "clips", json!({ "node": n }))),
+            NodeAct::Toggle => set(json!({ "on": !d.on })),
+            NodeAct::Morph(to) => set(json!({ "mixer": to })),
+            NodeAct::Mode(mode) => set(json!({ "mode": mode })),
+            NodeAct::AddInput => ("grade.connect", params(of, "clip", json!({ "node": n }))),
+            NodeAct::Extract => {
+                let more = json!({ "node": n, "extract": true });
+                ("grade.remove", params(of, "clip", more))
+            }
+            NodeAct::Delete => {
+                let kept = self.effects_page.grade_nodes.iter().filter(|k| **k != n);
+                let shifted = kept.map(|k| if *k > n { k - 1 } else { *k });
+                self.effects_page.grade_nodes = shifted.collect();
+                ("grade.remove", params(of, "clip", json!({ "node": n })))
+            }
+        };
+        self.effects_page.graded = None;
+        self.send(method, p);
+    }
+
+    fn grade_field_act(&mut self, of: &GradeOf, g: &Grade, act: FieldAct) {
+        let (method, more) = match act {
+            FieldAct::Corrector => {
+                let at = self.effects_page.grade_spot.unwrap_or_default();
+                self.effects_page.grade_nodes = vec![g.last() + 1];
+                (
+                    "grade.add",
+                    json!({ "add": GradeAdd::Corrector, "place": at }),
+                )
+            }
+            FieldAct::KeepNodes => ("grade.clear", json!({ "keep_nodes": true })),
+            FieldAct::ResetAll => {
+                self.effects_page.grade_nodes = vec![1];
+                ("grade.clear", json!({}))
+            }
+        };
+        let field = if method == "grade.add" {
+            "clip"
+        } else {
+            "clips"
+        };
+        self.effects_page.graded = None;
+        self.send(method, params(of, field, more));
+    }
+
+    pub(super) fn grade_nodes_panel(&mut self, ui: &mut Ui) {
+        let Some((of, _, stored)) = self.grade_shown() else {
+            node_editor::empty(
+                ui,
+                match self.effects_page.grading {
+                    GradeLevel::Clip => "No Clip at the Playhead",
+                    GradeLevel::Timeline => "No Timeline",
+                },
+            );
+            return;
+        };
+        self.settle_grade(&of);
+        let salt = match &of {
+            GradeOf::Clip(id) => format!("grade-node-{id}"),
+            GradeOf::Timeline => "grade-node-timeline".to_string(),
+        };
+        let selected: Vec<Port> = (self.effects_page.grade_nodes.iter())
+            .map(|n| Port::Node(*n))
+            .collect();
+        let graph = Graph {
+            salt,
+            tiles: tiles(&stored),
+            wires: wires(&stored),
+            selected: &selected,
+        };
+        let mut node_act: Option<(NodeAct, u32)> = None;
+        let mut field_act: Option<FieldAct> = None;
+        let done = node_editor::show(
+            ui,
+            &mut self.effects_page.grade_view,
+            &graph,
+            |ui, p| {
+                let Port::Node(n) = *p else {
+                    return;
+                };
+                let Some(d) = stored.node(n) else {
+                    return;
+                };
+                let mut act = None;
+                node_menu(ui, d, &mut act);
+                if let Some(a) = act {
+                    node_act = Some((a, n));
+                }
+            },
+            |ui| field_menu(ui, &mut field_act),
+        );
+        if let Some((inside, off)) = done.band {
+            let inside: Vec<u32> = (inside.into_iter())
+                .filter_map(|p| match p {
+                    Port::Node(n) => Some(n),
+                    _ => None,
+                })
+                .collect();
+            let mut nodes = self.effects_page.grade_nodes.clone();
+            if off {
+                nodes.retain(|n| !inside.contains(n));
+            } else {
+                nodes = inside;
+            }
+            self.send("gui.grade_nodes", json!({ "nodes": nodes }));
+        }
+        if let Some(at) = done.spot {
+            self.effects_page.grade_spot = Some(at);
+        }
+        let mut commands = done
+            .link
+            .map(|l| grade_links(&stored, &of, &l))
+            .unwrap_or_default();
+        if let Some((to, slot)) = done.unlink {
+            commands.extend(connect(&of, to, Some(slot), None));
+        }
+        self.send_all(commands, "Link Nodes");
+        let moves = (done.moved.into_iter())
+            .filter_map(|(p, to)| match p {
+                Port::Node(n) => {
+                    let more = json!({ "node": n, "place": to });
+                    Some(command("grade.set", params(&of, "clips", more)))
+                }
+                _ => None,
+            })
+            .collect();
+        self.send_all(moves, "Move Nodes");
+        if let Some(Port::Node(n)) = done.pointed {
+            self.effects_page.grade_nodes = vec![n];
+        }
+        if let Some(act) = node_act {
+            self.grade_node_act(&of, &stored, act);
+        }
+        if let Some(act) = field_act {
+            self.grade_field_act(&of, &stored, act);
+        }
+        let mut nodes = self.effects_page.grade_nodes.clone();
+        match done.picked {
+            Some((Port::Node(n), Pick::Active)) => {
+                nodes.retain(|k| *k != n);
+                nodes.push(n);
+            }
+            Some((Port::Node(n), Pick::Toggle)) => match nodes.iter().position(|k| *k == n) {
+                Some(i) => {
+                    nodes.remove(i);
+                }
+                None => nodes.push(n),
+            },
+            Some((Port::Node(n), Pick::Only)) => nodes = vec![n],
+            None if done.clicked && done.unlink.is_none() => {
+                nodes = nodes.last().copied().into_iter().collect();
+            }
+            _ => return,
+        }
+        if nodes != self.effects_page.grade_nodes {
+            self.send("gui.grade_nodes", json!({ "nodes": nodes }));
         }
     }
 }

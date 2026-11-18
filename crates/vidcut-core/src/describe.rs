@@ -422,6 +422,18 @@ pub fn describe_at(
         "grade.set" => format!("Change the grade of {}", d.clips("clips")),
         "grade.clear" if d.flag("timeline") => "Reset the timeline grade".into(),
         "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
+        "grade.add" | "grade.remove" | "grade.connect" => format!(
+            "{} {}",
+            match method {
+                "grade.add" => "Add a node to",
+                "grade.remove" => "Remove a node from",
+                _ => "Link the nodes of",
+            },
+            match d.flag("timeline") {
+                true => "the timeline grade".into(),
+                false => format!("the grade of {}", d.clips("clip")),
+            }
+        ),
         "grade.printer" => format!(
             "Printer points {} {:+} on {}",
             d.text("color"),

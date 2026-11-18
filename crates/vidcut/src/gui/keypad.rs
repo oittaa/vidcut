@@ -256,7 +256,9 @@ impl Workspace {
             Panel::App => action != Action::PrinterKeys || page == Page::Color,
             Panel::Transcription => self.transcription.over,
             Panel::Effects => page == Page::Effects,
-            Panel::Color => page == Page::Color && self.snap.printer_keys,
+            Panel::Color => {
+                page == Page::Color && (self.snap.printer_keys || action.printer().is_none())
+            }
         };
         let b = &self.snap.bindings;
         Watch {

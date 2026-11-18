@@ -739,14 +739,34 @@ The draw:
 
 ## The grade
 
-The primary correction of a clip (`model::Grade`, the `grade.set` request, the Color page):
+The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 
+- A grade is a list of nodes (`GradeNode`). Each node is a corrector (`model::Corrector`) or a mixer (`GradeTool`).
+  - Each node names the nodes on its inputs by number. The number 0 is the picture that comes in. `Grade::output` names the node that goes out.
+  - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
+  - It also refuses a corrector without one input and a mixer without an input.
+  - `ops::grade` changes the tree for `grade.add`, `grade.remove` and `grade.connect`. A removed node gives each node after it one number less (`renumbered`).
 - `Placing::new` adds the grade after the effects of the clip, as the last `place::Working` (`Work::Grade`).
   - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
-  - A grade at its defaults is left out (`Grade::is_usual`).
+  - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
+- `Graded::of` makes the tree into a list of passes on numbered textures (`grade::Pass`). A grade with only copies is no grade.
+  - `grade::complete` tells if the grade works. Else the grade does nothing, as in the spec (§8.21).
+  - It works when something goes out, each input of a corrector has a link, each mixer has a link, and each node goes somewhere.
+  - `grade::order` puts each node after the nodes on its inputs.
+  - Texture 0 is the picture of the clip. A node writes on the texture of its first input when no other node reads it later. Else a `Copy` pass first gives it a new texture (`Registers`).
+  - Why: most trees then need no texture more than the picture.
+  - A corrector that is off or at its defaults takes the texture of its input. It costs no pass.
+  - A `Correct` pass runs `grade_into` with the `Grading` of the corrector.
+  - A `Parallel` pass adds the change of one input: mix + input − base. `grade::base` finds the base, the picture that goes into the correctors of the mixer.
+  - A `Layer` pass puts one input over the mix of the inputs before it, with the composite mode of the mixer. The passes go in input order.
+  - The last pass copies the output to texture 0.
+- `graded_into` runs the passes. Each texture past 0 has the size of the picture. `Held` keeps `GRADE_HELD` of them between draws.
+- `fs_grade_mix` makes a `Parallel` or a `Layer` pass in a scratch texture. A copy then takes it back.
+  - `Layer` uses `mixed`, the composite of the timeline, on the colors without their alpha. Thus a Layer Mixer and a track give the same mix.
+  - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.
 - `grade.set` and `grade.get` refuse a title or a generator. The Color page takes its clip with `topmost_by` and `takes_effects`, so it skips them.
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
-- `Grading::of` changes the values of the controls into the numbers that `fs_grade` uses:
+- `Grading::of` changes the values of a corrector into the numbers that `fs_grade` uses:
   - Temp and Tint give one 3×3 matrix. It adapts the white of 6500 K to the new white, with the Bradford cone matrix.
   - The new white is at 6500 K minus Temp, in CIE 1960 uv. `ISOTEMPERATURE` is the table of Robertson (1968). `white_xyz` reads it linearly in mired.
   - Tint moves the white along the isotemperature line. Its direction is the mean of the unit directions of the two rows, weighted as the row values.

@@ -4561,25 +4561,65 @@ fn mutate(
         Request::GradeSet {
             clips,
             timeline,
+            node,
+            node_change,
             change,
         } => {
             let of = grades_of(p, clips, *timeline, playhead)?;
-            ops::grade::set(p, &of, change)?;
+            ops::grade::set(p, &of, node.unwrap_or(1), (change, node_change))?;
             Value::Null
         }
-        Request::GradeClear { clips, timeline } => {
+        Request::GradeClear {
+            clips,
+            timeline,
+            node,
+            keep_nodes,
+        } => {
             let of = grades_of(p, clips, *timeline, playhead)?;
-            ops::grade::clear(p, &of)?;
+            ops::grade::clear(p, &of, *node, *keep_nodes)?;
             Value::Null
         }
         Request::GradePrinter {
             clips,
             timeline,
+            node,
             color,
             points,
         } => {
             let of = grades_of(p, clips, *timeline, playhead)?;
-            ops::grade::printer(p, &of, (*color, *points), &env.printer_lights())?;
+            let lights = env.printer_lights();
+            ops::grade::printer(p, &of, node.unwrap_or(1), (*color, *points), &lights)?;
+            Value::Null
+        }
+        Request::GradeAdd {
+            clip,
+            timeline,
+            add,
+            node,
+            place,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade::add(p, &of, *add, *node, *place)?
+        }
+        Request::GradeRemove {
+            clip,
+            timeline,
+            node,
+            extract,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade::remove(p, &of, *node, *extract)?;
+            Value::Null
+        }
+        Request::GradeConnect {
+            clip,
+            timeline,
+            node,
+            input,
+            from,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade::connect(p, &of, *node, *input, *from)?;
             Value::Null
         }
         Request::EffectsAdd { clips, kind } => {

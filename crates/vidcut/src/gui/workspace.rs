@@ -335,6 +335,7 @@ impl Workspace {
                 live::GuiChange::Page(page) => self.set_page(page),
                 live::GuiChange::Grade(level) => self.set_grading(level),
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
+                live::GuiChange::GradeNodes(nodes) => self.pick_grade_nodes(nodes)?,
                 live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
         }
@@ -453,6 +454,10 @@ impl Workspace {
                 (Page::Color, GradeLevel::Timeline) | (Page::Cut, _) => None,
             },
             nodes: self.effects_page.nodes.clone(),
+            grade_nodes: match page {
+                Page::Color => self.effects_page.grade_nodes.clone(),
+                Page::Effects | Page::Cut => Vec::new(),
+            },
             time: self.page_clock(),
             edit,
             edits,
@@ -1458,6 +1463,7 @@ impl Workspace {
         self.history_keys(ctx);
         self.sync_numbers(ctx);
         self.multi_numbers(ctx);
+        self.color_keys(ctx);
         let input = ctx.input(|i| i.clone());
         let fired = Fired::of(&bindings, &input, &self.pads);
         if fired.pressed(Action::Help) {
@@ -2192,6 +2198,16 @@ impl Workspace {
                 .frame(theme::card(panel))
                 .show(ui, |ui| {
                     theme::decorated(ui, Deco::Card, |ui| self.mixer_panel(ui))
+                });
+        }
+        if color {
+            egui::Panel::right("color-nodes")
+                .resizable(true)
+                .default_size(380.0)
+                .min_size(220.0)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.grade_nodes_panel(ui))
                 });
         }
         let left = (self.left != LeftTab::Hidden).then(|| {

@@ -152,6 +152,18 @@ actions! {
     RenameNode "rename_node",
     PreviousNodeKeyframe "previous_node_keyframe",
     NextNodeKeyframe "next_node_keyframe",
+    AddSerialNode "add_serial_node",
+    AddNodeBefore "add_node_before",
+    AddParallelNode "add_parallel_node",
+    AddLayerNode "add_layer_node",
+    AppendNode "append_node",
+    ExtractNode "extract_node",
+    DeleteNode "delete_node",
+    SwitchSelectedNodes "switch_selected_nodes",
+    SwitchAllNodes "switch_all_nodes",
+    ResetNodeGrade "reset_node_grade",
+    ResetGradesKeepNodes "reset_grades_keep_nodes",
+    ResetAllGrades "reset_all_grades",
     SourceStart "source_start",
     SourceEnd "source_end",
     ClipIn "clip_in",
@@ -220,6 +232,18 @@ impl Action {
             | Action::SourceEnd
             | Action::ClipIn
             | Action::ClipOut => Panel::Effects,
+            Action::AddSerialNode
+            | Action::AddNodeBefore
+            | Action::AddParallelNode
+            | Action::AddLayerNode
+            | Action::AppendNode
+            | Action::ExtractNode
+            | Action::DeleteNode
+            | Action::SwitchSelectedNodes
+            | Action::SwitchAllNodes
+            | Action::ResetNodeGrade
+            | Action::ResetGradesKeepNodes
+            | Action::ResetAllGrades => Panel::Color,
             a if a.printer().is_some() => Panel::Color,
             _ => Panel::App,
         }
@@ -1760,6 +1784,90 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Action::PrinterQuarterYellowMinus,
         &["Ctrl+Num+."],
         "Minus Yellow, quarter point",
+    ),
+    own(
+        Color,
+        Action::AddSerialNode,
+        &["Alt+S"],
+        "Add a serial node",
+        Some("A corrector after the current node."),
+    ),
+    own(
+        Color,
+        Action::AddNodeBefore,
+        &["Shift+S"],
+        "Add a node before the current node",
+        Some("A corrector before the current node."),
+    ),
+    own(
+        Color,
+        Action::AddParallelNode,
+        &["Alt+P"],
+        "Add a parallel node",
+        Some("A corrector beside the current node, into a parallel mixer."),
+    ),
+    own(
+        Color,
+        Action::AddLayerNode,
+        &["Alt+L"],
+        "Add a layer node",
+        Some("A corrector beside the current node, into a layer mixer."),
+    ),
+    own(
+        Color,
+        Action::AppendNode,
+        &["Alt+K"],
+        "Append a node",
+        Some("A corrector after the node whose picture goes out."),
+    ),
+    own(
+        Color,
+        Action::ExtractNode,
+        &["E"],
+        "Extract the current node",
+        Some("The nodes at its two sides join. It stays, joined to nothing."),
+    ),
+    own(
+        Color,
+        Action::DeleteNode,
+        &["Delete"],
+        "Delete the current node",
+        Some("The nodes at its two sides join. The nodes after it get one number less."),
+    ),
+    own(
+        Color,
+        Action::SwitchSelectedNodes,
+        &["Ctrl+D"],
+        "Turn the selected nodes off or on",
+        Some("The current node is always one of the selected nodes."),
+    ),
+    own(
+        Color,
+        Action::SwitchAllNodes,
+        &["Alt+D"],
+        "Turn all nodes off or on",
+        Some("Off and on again turns on each node, also a node that was off."),
+    ),
+    own(
+        Color,
+        Action::ResetNodeGrade,
+        &["Shift+Home"],
+        "Reset the current node",
+        None,
+    ),
+    own(
+        Color,
+        Action::ResetGradesKeepNodes,
+        &["Ctrl+Shift+Home"],
+        "Reset the grades and keep the nodes",
+        None,
+    ),
+    own(
+        Color,
+        Action::ResetAllGrades,
+        &["Ctrl+Home"],
+        "Reset all grades and nodes",
+        Some("One node at its usual values stays."),
     ),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),
     own(App, Action::NewTimeline, &["Ctrl+N"], "New timeline", None),

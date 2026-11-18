@@ -2753,7 +2753,7 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - Wheels and Bars show the same controls: Lift, Gamma and Gain of Y, R, G and B, and Offset of R, G and B.
   - Log shows Shadow, Midtone, Highlight and Offset wheels. It also shows Low Range and High Range (p. 3156).
   - Each clip has one or more nodes, and each node holds corrections (p. 3385).
-  - vidcut: each clip has one primary correction. Nodes come later ([todo](todo/color-page.md)).
+  - vidcut: the palette shows the corrector that is the current node ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
 - **Clips**, measured in Resolve Studio 21.2:
   - Generators and Text titles take no grade. They are not in the clip strip of the Color page.
   - Text+ titles and compound clips take a grade.
@@ -2811,7 +2811,7 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
     - A held key of the numeric keypad repeats. Ten repeats of Num+7 moved the Red Offset by 10 points.
     - With Num Lock off, the 7 of the numeric keypad gives Home. It did not move a printer point.
   - vidcut: the Plus and Minus buttons, and the Color page of the preferences with Step Size and Density Increment.
-  - vidcut: the Color menu and the keys of the table. Each item and key sends `grade.printer` for the grade that the palette shows.
+  - vidcut: the Color menu and the keys of the table. Each item and key sends `grade.printer` for the current node of the grade that the palette shows.
   - vidcut: the preference `color.printer_keys` keeps the state of Printer Light Hotkeys.
   - vidcut: on the other pages, the item Printer Light Hotkeys, its key and the printer items do nothing.
   - vidcut: a key of the numeric keypad moves printer points only while it gives its digit or sign. Thus with Num Lock off, the key does what it did before.
@@ -2839,16 +2839,105 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
     - At an edge with partial alpha, the result is different from a clip grade. Why: the timeline grade works after the alpha mix.
     - Burned-in subtitles come after the grade. With a timeline Gain of 0.5, white text stays at 1.0.
     - The OTIO export of Resolve has no timeline grade. An OTIO import gives no timeline grade.
-  - vidcut: each timeline has one primary correction. The project file and the undo history keep it.
+  - vidcut: each timeline has one grade of nodes, as a clip has. The project file and the undo history keep it.
   - vidcut: the Color page has a Clip and Timeline switch at its top right. Timeline shows the timeline grade in the palette.
   - vidcut: an OTIO file of vidcut keeps the timeline grade in the vidcut metadata of the timeline. Resolve does not read it.
 
 Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
 
 - Each takes `clips` (`clip` for `grade.get`), or `timeline` for the timeline grade of the open timeline.
+- `grade.set`, `grade.clear` and `grade.printer` take `node`, the number of a corrector. Without it, they change node 1.
 - `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
 - `gui.page` with `grade` selects Clip or Timeline on the Color page.
 - `preferences.set` with `color.printer_keys` turns the printer light hotkeys on or off.
+
+### 8.21 Color page nodes (pp. 3385–3399, 3409–3415)
+
+- **The node tree** (pp. 3385–3390):
+  - Each clip has one node by default. Each node holds corrections (p. 3385).
+  - The Node Editor is at the right of the viewer. A drag on the border between them changes its width (p. 3387).
+  - The picture flows from the Source input at the left of the Node Editor, through the nodes, to the Node Tree output (p. 3389).
+  - The Node Tree output is at the right of the Node Editor (p. 3389).
+  - A Corrector node has an RGB input and an RGB output. Inputs are triangles, and outputs are squares (p. 3388).
+  - A corrector has an effect only when its RGB input and its RGB output have connections (p. 3389).
+  - A node with no connection turns the grade off. With no connection to the Node Tree output, the grade is off too (p. 3389).
+  - Only one RGB output connects to the Node Tree output (p. 3389).
+  - Nodes are numbered in the order in which they were added (pp. 3390, 3395).
+  - Measured in Resolve Studio 21.2: the still file of a grade holds the number of each node in the Node Editor.
+  - Measured: in a grade with three correctors and a Key Mixer, the third corrector had number 4. Thus a mixer has a number too.
+  - vidcut: a grade is a list of nodes. The number of a node is its place in the list, from 1. The number 0 is the Source input.
+  - vidcut: the Node Editor shows the number of each node, mixers too.
+- **The current node** (p. 3391):
+  - The current node has an orange outline. The palettes change the current node.
+  - A Command-click or a drag box selects more nodes. They have a white outline.
+  - Resolve keeps the last current node of each clip. The setting "Switching clips" changes this.
+  - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
+  - vidcut: a new clip or a new grade mode selects node 1 ([todo](todo/color-page.md)).
+  - vidcut: a click on the empty Node Editor keeps only the current node. This is not measured in Resolve.
+- **Add nodes** (pp. 3394–3395, 3410–3413):
+  - The menu of a node has an Add Node submenu. The menu of the empty Node Editor has Add Node > Corrector. That corrector has no connection.
+  - Alt+S adds a serial node after the current node. Alt+K appends a serial node at the end of the tree.
+  - Shift+S adds a serial node before the current node.
+  - Alt+P adds a node in parallel, and Alt+L adds a node in a layer.
+  - A Parallel node is a corrector below the current node, with a Parallel Mixer at its output (p. 3410).
+  - Another parallel node adds another input to the mixer (p. 3411).
+  - Measured in Resolve Studio 21.2: the new corrector takes the input of the current node. Node 1 goes to mixer input 0, and node 2 to input 1.
+  - Measured: a Layer node does the same with a Layer Mixer. Alt+L at the corrector on input 1 of a Layer Mixer added a corrector on input 2.
+  - A new node gets the next number, wherever it goes in the tree (p. 3395).
+  - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append` or `corrector`. The menus of the Node Editor have each one.
+  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L and Alt+K. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+- **Delete and extract** (pp. 3395–3396):
+  - Delete Node removes a node. The nodes at its left and its right then connect.
+  - The Forward-Delete key deletes the selected node (p. 3395).
+  - After a delete, each node after it gets one number less.
+  - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
+  - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
+  - vidcut: on the Color page, Delete deletes the current node when it is the only selected node.
+  - vidcut: with more than one selected node, Delete does nothing. This is not measured in Resolve.
+  - vidcut: what took the picture of a deleted mixer then takes nothing. This is not measured in Resolve.
+- **Connections** (p. 3396):
+  - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
+  - A click on the right-hand half of a connection removes it.
+  - An input takes one connection. A new connection replaces the old one. An output connects to many inputs.
+  - The Parallel Mixer, the Layer Mixer and the Key Mixer take many inputs.
+  - A drag from an output to a Parallel Mixer or a Layer Mixer adds an input (pp. 3410, 3413).
+  - Add One Input in the menu of a mixer adds an input with no connection (p. 3411).
+  - vidcut: `grade.connect`. The Color page and the Effects page share one Node Editor, with the same drags and clicks.
+- **Turn off and reset** (pp. 3392–3393):
+  - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.
+  - With more than one selected node, Command-D turns the selected nodes off or on. The current node is always one of them (p. 3392).
+  - Option-D turns all nodes off, and then all on. After that, each node is on, also a node that was off before (p. 3392).
+  - vidcut: Ctrl+D turns the selected correctors off when all are on, and on when all are off.
+  - vidcut: with some selected correctors on and some off, Ctrl+D does nothing. This is not measured in Resolve.
+  - vidcut: Alt+D turns all correctors off when one or more is on. Else it turns all of them on.
+  - Reset Node Grade in the menu of a node resets that node (Shift-Home).
+  - Reset Grades and Keep Nodes resets each node and keeps the tree (Shift-Command-Home).
+  - Reset All Grades and Nodes leaves one node at its defaults (Command-Home). The menu of the empty Node Editor has it.
+  - vidcut: `grade.set` with `on`, and `grade.clear` with `node`, with `keep_nodes`, or alone.
+  - vidcut: Disable Node in the menu turns a corrector off. Shift+Home, Ctrl+Shift+Home and Ctrl+Home reset.
+  - vidcut: a corrector that is off passes on its input. A mixer cannot be off. This is not measured in Resolve.
+- **Mixers**, measured in Resolve Studio 21.2 with float renders:
+  - Serial: node 2 works on the output of node 1. The error is 6.8e-6.
+  - Parallel Mixer: out = x + Σ (nᵢ − x), with x the picture that goes into the correctors. The error is 8.4e-7.
+  - The manual: the Parallel Mixer combines all its inputs equally (p. 3412).
+  - Layer Mixer in Normal: out = the input with the highest number. The error is 4.5e-7.
+  - The manual: the lowest input in the Node Editor has the priority (p. 3413).
+  - Layer Mixer with a composite mode F: the mix starts with input 0. Each next input i gives mix = F(mix, nᵢ), in input order.
+  - In F, the mix is the backdrop and nᵢ is on top. The error is 6.1e-7. The reverse order is wrong by 0.05 to 0.6.
+  - The composite modes are the modes of the timeline (p. 3414). Their formulas fit the timeline composite within 3.3e-7.
+  - Composite Mode is a submenu of the menu of the Layer Mixer.
+  - Morph Into Layer Mixer Node and Morph Into Parallel Node change the kind of a mixer (pp. 3412, 3415).
+  - The manual: the RGB input of each corrector on a Parallel Mixer is usually the same picture (p. 3411).
+  - vidcut: `grade.set` with `mixer` and `mode`. A new Layer Mixer is in Normal.
+  - vidcut: each input of a Parallel Mixer is x, or a corrector on x. Else the grade does nothing. Other trees are not measured in Resolve.
+  - vidcut: Lighter Color and Darker Color in the Layer Mixer take the top input on a tie. This is not measured in Resolve.
+- **Key Output Gain** (p. 3415), measured in Resolve Studio 21.2:
+  - It sets the strength of a node in a Layer Mixer or a Parallel Mixer.
+  - Layer Mixer with Key Output Gain k: input 0 gives x + k (n₀ − x). Each next input gives mix + k (F(mix, nᵢ) − mix). The error is 3.4e-7.
+  - Parallel Mixer: out = x + Σ kᵢ (nᵢ − x).
+  - vidcut: keys, Key Output Gain and the Key Mixer come later ([todo](todo/color-page.md)).
+
+Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `grade.set` with `on`, `place`, `mixer` and `mode` changes a node. `grade.get` gives the nodes and the `output`.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -3268,6 +3357,9 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
+  - The Color page has its own level too. There, its keys go first. Thus Shift+S, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
+  - On the other pages, these four keys keep the actions of the table.
+  - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
 - These keys and gestures do not change:
   - The wheel, click and drag gestures. They have no key.
   - The number keys of the Sync Bin, Multi Source and the Transcription window. The number is on the screen.

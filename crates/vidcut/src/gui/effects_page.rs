@@ -12,21 +12,23 @@ use vidcut_core::model::{
     Clip, Composition, EffectValue, Mask, Node, Pattern, Project, Tool, ToolType,
 };
 use vidcut_core::motion::Area;
+use vidcut_core::ops::grade::GradeOf;
 use vidcut_core::place::{Figure, MaskBase, Outline, Shaping, turned};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::request::{GradeLevel, NodeInput, Page};
 use vidcut_core::shortcuts::{Action, Panel};
 
+use super::color_page::Port;
+use super::node_editor::{
+    self, End, Graph, Inlet, Link, MASK_KNOT, NodeView, Outlet, PICTURE_KNOT, Pick, Side, Spot,
+    Tile, Wire,
+};
 use super::shortcuts::Fired;
 use super::shuttle::Jkl;
 use super::theme::{self, Deco};
 use super::workspace::{Workspace, dim, fit};
 use crate::live::{Answer, PageClock, PageTime, PlayerId};
 
-const CELL: Vec2 = vec2(132.0, 64.0);
-const BOX: Vec2 = vec2(104.0, 30.0);
-const MARGIN: Vec2 = vec2(40.0, 40.0);
-const KNOT: f32 = 5.0;
 const GRIP: f32 = 9.0;
 const DASH: f32 = 4.0;
 const JUST_BELOW: f64 = 1e-6;
@@ -47,10 +49,6 @@ const TOOLS: f32 = 30.0;
 const TRANSPORT: f32 = 36.0;
 const SETTLE: f64 = 2.0;
 const SCREEN: usize = 0;
-const ZOOMS: (f32, f32) = (0.3, 3.0);
-const ROUND: f64 = 100.0;
-const WIRE_HIT: f32 = 6.0;
-const STEPS: usize = 24;
 const LIBRARY: [(&str, &[ToolType]); 4] = [
     ("Tools", &[ToolType::Blur]),
     (
@@ -84,13 +82,13 @@ pub(super) struct EffectsPage {
     held: Option<Held>,
     pub(super) graded: Option<super::color_page::Graded>,
     pub(super) grading: GradeLevel,
+    pub(super) grade_nodes: Vec<u32>,
+    pub(super) grade_seen: Option<GradeOf>,
+    pub(super) grade_view: NodeView<Port>,
+    pub(super) grade_spot: Option<[f64; 2]>,
     boxed: Option<Boxed>,
-    pan: Vec2,
-    zoom: f32,
-    moving: Option<Moving>,
+    graph: NodeView<String>,
     asked: Vec<(Answer, Then)>,
-    linking: Option<Linking>,
-    band: Option<(Pos2, bool)>,
     renaming: Option<Renaming>,
     replacing: Option<(String, String)>,
     spot: Option<(String, [f64; 2])>,
@@ -112,13 +110,13 @@ impl Default for EffectsPage {
             held: None,
             graded: None,
             grading: GradeLevel::Clip,
+            grade_nodes: Vec::new(),
+            grade_seen: None,
+            grade_view: NodeView::default(),
+            grade_spot: None,
             boxed: None,
-            pan: Vec2::ZERO,
-            zoom: 1.0,
-            moving: None,
+            graph: NodeView::default(),
             asked: Vec::new(),
-            linking: None,
-            band: None,
             renaming: None,
             replacing: None,
             spot: None,
@@ -140,9 +138,8 @@ impl EffectsPage {
         self.alone = None;
         self.held = None;
         self.boxed = None;
-        self.moving = None;
-        self.linking = None;
-        self.band = None;
+        self.graph.stop();
+        self.grade_view.stop();
         self.renaming = None;
         self.replacing = None;
         self.spot = None;
@@ -285,23 +282,6 @@ struct Shown {
     spots: Vec<(Grip, Pos2)>,
 }
 
-struct Moving {
-    node: String,
-    from: Vec<(String, [f64; 2])>,
-    by: Vec2,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum End {
-    Output(String),
-    Input(String, NodeInput),
-}
-
-struct Linking {
-    anchor: End,
-    pulled: Option<(String, NodeInput)>,
-}
-
 struct Renaming {
     clip: String,
     queue: Vec<String>,
@@ -313,31 +293,6 @@ struct Renaming {
 enum Then {
     Select,
     Renamed(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Pick {
-    Only,
-    Toggle,
-    Active,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Half {
-    Output,
-    Input,
-}
-
-struct Wire {
-    to: String,
-    which: NodeInput,
-    from: String,
-}
-
-enum Spot {
-    Knot(End),
-    Tile(String),
-    Empty,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -356,14 +311,28 @@ fn joined(n: &Node, which: NodeInput) -> Option<String> {
     }
 }
 
-fn joins(comp: &Composition) -> Vec<Wire> {
+fn which(slot: usize) -> NodeInput {
+    match slot {
+        1 => NodeInput::EffectMask,
+        _ => NodeInput::Input,
+    }
+}
+
+fn slot(which: NodeInput) -> usize {
+    match which {
+        NodeInput::Input => 0,
+        NodeInput::EffectMask => 1,
+    }
+}
+
+fn joins(comp: &Composition) -> Vec<Wire<String>> {
     let mut out = Vec::new();
     for n in &comp.nodes {
         for which in [NodeInput::Input, NodeInput::EffectMask] {
             if let Some(from) = joined(n, which) {
                 out.push(Wire {
                     to: n.name.clone(),
-                    which,
+                    slot: slot(which),
                     from,
                 });
             }
@@ -372,68 +341,39 @@ fn joins(comp: &Composition) -> Vec<Wire> {
     out
 }
 
-fn inlet(r: Rect, which: NodeInput) -> Pos2 {
-    match which {
-        NodeInput::Input => r.left_center(),
-        NodeInput::EffectMask => r.center_top(),
+fn tile(n: &Node) -> Tile<String> {
+    let c = theme::colors();
+    let mut inlets = Vec::new();
+    if n.tool.takes_input() {
+        inlets.push(Inlet {
+            slot: slot(NodeInput::Input),
+            side: Side::Left,
+            knot: PICTURE_KNOT,
+            wire: Stroke::new(1.5, c.text_dim),
+            name: "Input".into(),
+        });
     }
-}
-
-fn along(which: NodeInput) -> Vec2 {
-    match which {
-        NodeInput::Input => vec2(1.0, 0.0),
-        NodeInput::EffectMask => vec2(0.0, 1.0),
+    if n.tool.takes_mask() {
+        inlets.push(Inlet {
+            slot: slot(NodeInput::EffectMask),
+            side: Side::Top,
+            knot: MASK_KNOT,
+            wire: Stroke::new(1.5, MASK_KNOT),
+            name: "Effect Mask".into(),
+        });
     }
-}
-
-fn bezier((from, to): (Pos2, Pos2), into: Vec2) -> [Pos2; 4] {
-    let bend = (from.distance(to) * 0.4).max(24.0);
-    [from, from + vec2(bend, 0.0), to - into * bend, to]
-}
-
-fn on_curve(b: &[Pos2; 4], t: f32) -> Pos2 {
-    let u = 1.0 - t;
-    let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
-    let v = b
-        .iter()
-        .zip(w)
-        .fold(Vec2::ZERO, |sum, (p, k)| sum + p.to_vec2() * k);
-    v.to_pos2()
-}
-
-fn sampled_curve(b: &[Pos2; 4], (from, to): (f32, f32)) -> Vec<Pos2> {
-    (0..=STEPS)
-        .map(|k| from + (to - from) * k as f32 / STEPS as f32)
-        .map(|t| on_curve(b, t))
-        .collect()
-}
-
-fn closest(b: &[Pos2; 4], at: Pos2) -> (f32, Half) {
-    let points = sampled_curve(b, (0.0, 1.0));
-    let mut best = (f32::MAX, Half::Output);
-    for (k, pair) in points.windows(2).enumerate() {
-        let d = egui::emath::Rangef::new(0.0, 1.0);
-        let seg = pair[1] - pair[0];
-        let len = seg.length_sq().max(1e-6);
-        let t = d.clamp((at - pair[0]).dot(seg) / len);
-        let dist = at.distance(pair[0] + seg * t);
-        if dist < best.0 {
-            let half = if k < STEPS / 2 {
-                Half::Output
-            } else {
-                Half::Input
-            };
-            best = (dist, half);
-        }
-    }
-    best
-}
-
-fn knot_name(end: &End) -> &'static str {
-    match end {
-        End::Output(_) => "Output",
-        End::Input(_, NodeInput::Input) => "Input",
-        End::Input(_, NodeInput::EffectMask) => "Effect Mask",
+    let outlet = (!matches!(n.tool, Tool::MediaOut)).then(|| Outlet {
+        name: "Output".into(),
+        color: Color32::WHITE,
+    });
+    Tile {
+        key: n.name.clone(),
+        label: n.name.clone(),
+        place: n.place,
+        faded: n.pass_through,
+        outlet,
+        inlets,
+        edge: None,
     }
 }
 
@@ -456,25 +396,29 @@ fn join_command(clip: &str, (dst, which): (&str, NodeInput), src: Option<&str>) 
     command("comp.connect", params)
 }
 
-fn linked(comp: &Composition, clip: &str, l: &Linking, spot: Spot) -> Vec<Value> {
-    let new = match (&l.anchor, spot) {
-        (End::Output(src), Spot::Knot(End::Input(dst, which))) => Some((dst, which, src.clone())),
+fn linked(comp: &Composition, clip: &str, l: &Link<String>) -> Vec<Value> {
+    let new = match (&l.anchor, &l.spot) {
+        (End::Output(src), Spot::Knot(End::Input(dst, s))) => {
+            Some((dst.clone(), which(*s), src.clone()))
+        }
         (End::Output(src), Spot::Tile(dst)) => comp
             .node(src)
-            .zip(comp.node(&dst))
+            .zip(comp.node(dst))
             .and_then(|(s, d)| default_input(d, s))
-            .map(|which| (dst, which, src.clone())),
-        (End::Input(dst, which), Spot::Knot(End::Output(src)) | Spot::Tile(src)) => {
-            Some((dst.clone(), *which, src))
+            .map(|w| (dst.clone(), w, src.clone())),
+        (End::Input(dst, s), Spot::Knot(End::Output(src)) | Spot::Tile(src)) => {
+            Some((dst.clone(), which(*s), src.clone()))
         }
         _ => None,
     };
     let new = new.filter(|(d, _, s)| d != s);
     let mut out = Vec::new();
-    if let Some((pd, pw)) = &l.pulled
-        && new.as_ref().is_none_or(|(d, w, _)| d != pd || w != pw)
+    if let Some((pd, ps)) = &l.pulled
+        && new
+            .as_ref()
+            .is_none_or(|(d, w, _)| d != pd || *w != which(*ps))
     {
-        out.push(join_command(clip, (pd, *pw), None));
+        out.push(join_command(clip, (pd, which(*ps)), None));
     }
     if let Some((d, w, s)) = new {
         let now = comp.node(&d).and_then(|n| joined(n, w));
@@ -494,10 +438,6 @@ pub(super) fn stored_composition(c: &Clip) -> Composition {
 
 fn plus(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
     [a[0] + b[0], a[1] + b[1]]
-}
-
-fn rounded(x: f64) -> f64 {
-    (x * ROUND).round() / ROUND
 }
 
 fn grips(f: &Figure) -> Vec<(Grip, [f64; 2])> {
@@ -713,9 +653,7 @@ impl Workspace {
         if clip != self.effects_page.seen {
             self.effects_page.seen = clip;
             self.effects_page.nodes.clear();
-            self.effects_page.moving = None;
-            self.effects_page.linking = None;
-            self.effects_page.band = None;
+            self.effects_page.graph.stop();
             self.effects_page.away = None;
             self.effects_page.replacing = None;
             self.effects_page.spot = None;
@@ -1994,229 +1932,37 @@ impl Workspace {
 
     fn node_editor(&mut self, ui: &mut egui::Ui) {
         if !self.tracks_running().is_empty() {
-            self.effects_page.linking = None;
-            self.effects_page.band = None;
+            self.effects_page.graph.calm();
             ui.disable();
         }
-        let rect = ui.available_rect_before_wrap();
-        let resp = ui.allocate_rect(rect, Sense::click_and_drag());
-        let painter = ui.painter_at(rect);
-        let c = theme::colors();
-        painter.rect_filled(rect, CornerRadius::same(2), c.panel_dark);
         let p = self.project_shared();
         let clip = self
             .effects_clip()
             .and_then(|id| p.as_ref().and_then(|p| p.clip(&id)).cloned());
         let Some(clip) = clip else {
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                "No clip at the playhead",
-                FontId::proportional(14.0),
-                c.text_dim,
-            );
+            node_editor::empty(ui, "No clip at the playhead");
             return;
         };
-        if resp.hovered() {
-            let (scroll, zoom) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta()));
-            if zoom != 1.0 {
-                self.effects_page.zoom = (self.effects_page.zoom * zoom).clamp(ZOOMS.0, ZOOMS.1);
-            } else {
-                self.effects_page.pan += scroll;
-            }
-        }
-        if resp.dragged_by(PointerButton::Middle) {
-            self.effects_page.pan += resp.drag_delta();
-        }
         let comp = self.page_composition(&clip);
-        let z = self.effects_page.zoom;
-        let origin = rect.min + MARGIN * z + self.effects_page.pan;
-        let grid_at = |at: Pos2| {
-            let d = (at - origin) / (CELL * z);
-            [rounded(f64::from(d.x)), rounded(f64::from(d.y))]
-        };
-        let moving = self.effects_page.moving.as_ref();
-        let place = |n: &Node| -> [f64; 2] {
-            let from = moving.and_then(|m| {
-                let (_, at) = m.from.iter().find(|(name, _)| *name == n.name)?;
-                Some((m.by, *at))
-            });
-            match from {
-                Some((by, at)) => [
-                    at[0] + f64::from(by.x / (CELL.x * z)),
-                    at[1] + f64::from(by.y / (CELL.y * z)),
-                ],
-                None => n.place,
-            }
-        };
-        let boxes: Vec<(String, Rect)> = comp
-            .nodes
-            .iter()
-            .map(|n| {
-                let [x, y] = place(n);
-                let at = origin + vec2(x as f32 * CELL.x, y as f32 * CELL.y) * z;
-                (n.name.clone(), Rect::from_min_size(at, BOX * z))
-            })
-            .collect();
-        let box_of = |name: &str| boxes.iter().find(|(n, _)| n == name).map(|(_, r)| *r);
-        let mut knots: Vec<(End, Pos2)> = Vec::new();
-        for n in &comp.nodes {
-            let Some(r) = box_of(&n.name) else {
-                continue;
-            };
-            if !matches!(n.tool, Tool::MediaOut) {
-                knots.push((End::Output(n.name.clone()), r.right_center()));
-            }
-            for which in [NodeInput::Input, NodeInput::EffectMask] {
-                let takes = match which {
-                    NodeInput::Input => n.tool.takes_input(),
-                    NodeInput::EffectMask => n.tool.takes_mask(),
-                };
-                if takes {
-                    knots.push((End::Input(n.name.clone(), which), inlet(r, which)));
-                }
-            }
-        }
-        let knot_rect = |at: Pos2| Rect::from_center_size(at, Vec2::splat(KNOT * 3.0));
-        let spot_at = |at: Pos2| -> Spot {
-            if let Some((end, _)) = knots.iter().find(|(_, k)| knot_rect(*k).contains(at)) {
-                return Spot::Knot(end.clone());
-            }
-            match boxes.iter().find(|(_, r)| r.contains(at)) {
-                Some((name, _)) => Spot::Tile(name.clone()),
-                None => Spot::Empty,
-            }
-        };
-        let wires = joins(&comp);
-        let pulled = self
-            .effects_page
-            .linking
-            .as_ref()
-            .and_then(|l| l.pulled.clone());
-        let curve = |w: &Wire| -> Option<[Pos2; 4]> {
-            let from = box_of(&w.from)?.right_center();
-            let to = inlet(box_of(&w.to)?, w.which);
-            Some(bezier((from, to), along(w.which)))
-        };
-        let wire_at = |at: Pos2| -> Option<(usize, Half)> {
-            if boxes.iter().any(|(_, r)| r.expand(KNOT * 2.0).contains(at)) {
-                return None;
-            }
-            wires
-                .iter()
-                .enumerate()
-                .filter_map(|(k, w)| {
-                    let (d, half) = closest(&curve(w)?, at);
-                    (d <= WIRE_HIT).then_some((k, half, d))
-                })
-                .min_by(|a, b| a.2.total_cmp(&b.2))
-                .map(|(k, half, _)| (k, half))
-        };
-        let busy = self.effects_page.linking.is_some()
-            || self.effects_page.band.is_some()
-            || self.effects_page.moving.is_some();
-        let pointer = ui
-            .input(|i| i.pointer.hover_pos())
-            .filter(|at| rect.contains(*at));
-        let near = pointer.filter(|_| !busy).and_then(wire_at);
-        let picture_line = Stroke::new(1.5, c.text_dim);
-        let mask_line = Stroke::new(1.5, Color32::from_rgb(90, 140, 230));
-        let lit = Stroke::new(2.5, Color32::from_rgb(110, 170, 255));
-        for (k, w) in wires.iter().enumerate() {
-            if pulled.as_ref() == Some(&(w.to.clone(), w.which)) {
-                continue;
-            }
-            let Some(b) = curve(w) else {
-                continue;
-            };
-            let line = match w.which {
-                NodeInput::Input => picture_line,
-                NodeInput::EffectMask => mask_line,
-            };
-            painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
-                b,
-                false,
-                Color32::TRANSPARENT,
-                line,
-            ));
-            if let Some((_, half)) = near.filter(|(j, _)| *j == k) {
-                let span = match half {
-                    Half::Output => (0.0, 0.5),
-                    Half::Input => (0.5, 1.0),
-                };
-                painter.add(egui::Shape::line(sampled_curve(&b, span), lit));
-            }
-        }
-        let mut picked: Option<(String, Pick)> = None;
-        let mut moved: Vec<(String, [f64; 2])> = Vec::new();
-        let mut menu: Option<(MenuAct, String)> = None;
-        let mut pointed: Option<String> = None;
         let one_copied = self.effects_page.copied.len() == 1;
-        for n in &comp.nodes {
-            let Some(r) = box_of(&n.name) else {
-                continue;
-            };
-            let id = ui.scope_id().with(("effects-node", &clip.id, &n.name));
-            let node_resp = ui.interact(r, id, Sense::click_and_drag());
-            let selected = self.effects_page.nodes.contains(&n.name);
-            let active = self.effects_page.picked() == Some(n.name.as_str());
-            let fade = if n.pass_through { 0.45 } else { 1.0 };
-            let fill = c.panel.gamma_multiply(fade);
-            painter.rect_filled(r, CornerRadius::same(4), fill);
-            let edge = match (active, selected) {
-                (true, _) => Stroke::new(2.0, c.accent),
-                (false, true) => Stroke::new(1.5, Color32::WHITE),
-                _ => Stroke::new(1.0, c.text_dim.gamma_multiply(0.6)),
-            };
-            painter.rect_stroke(r, CornerRadius::same(4), edge, StrokeKind::Inside);
-            painter.text(
-                r.center(),
-                Align2::CENTER_CENTER,
-                &n.name,
-                FontId::proportional(12.0 * z.clamp(0.6, 1.4)),
-                c.text.gamma_multiply(fade),
-            );
-            let used = comp.nodes.iter().any(|x| {
-                x.input.as_deref() == Some(&n.name) || x.effect_mask.as_deref() == Some(&n.name)
-            });
-            if !matches!(n.tool, Tool::MediaOut) {
-                let out = if used { Color32::WHITE } else { c.text_dim };
-                painter.rect_filled(
-                    Rect::from_center_size(r.right_center(), Vec2::splat(KNOT * 2.0)),
-                    CornerRadius::ZERO,
-                    out,
-                );
-            }
-            if n.tool.takes_input() {
-                knot(
-                    &painter,
-                    r.left_center(),
-                    vec2(1.0, 0.0),
-                    Color32::from_rgb(230, 200, 60),
-                );
-            }
-            if n.tool.takes_mask() {
-                knot(
-                    &painter,
-                    r.center_top(),
-                    vec2(0.0, 1.0),
-                    Color32::from_rgb(90, 140, 230),
-                );
-            }
-            if node_resp.clicked() {
-                let (add, alt) = ui.input(|i| (i.modifiers.command, i.modifiers.alt));
-                let how = match (alt && selected, add) {
-                    (true, _) => Pick::Active,
-                    (false, true) => Pick::Toggle,
-                    (false, false) => Pick::Only,
+        let can_paste = !self.effects_page.copied.is_empty();
+        let mut menu: Option<(MenuAct, String)> = None;
+        let mut paste_here = false;
+        let graph = Graph {
+            salt: format!("effects-node-{}", clip.id),
+            tiles: comp.nodes.iter().map(tile).collect(),
+            wires: joins(&comp),
+            selected: &self.effects_page.nodes,
+        };
+        let done = node_editor::show(
+            ui,
+            &mut self.effects_page.graph,
+            &graph,
+            |ui, name| {
+                let Some(n) = comp.node(name) else {
+                    return;
                 };
-                picked = Some((n.name.clone(), how));
-            }
-            if node_resp.secondary_clicked() && !selected {
-                pointed = Some(n.name.clone());
-            }
-            let tool = n.tool.flows() || n.tool.is_mask();
-            node_resp.context_menu(|ui| {
+                let tool = n.tool.flows() || n.tool.is_mask();
                 let items = [
                     (MenuAct::Rename, "Rename", true),
                     (MenuAct::PassThrough, "Pass Through", tool),
@@ -2232,169 +1978,43 @@ impl Workspace {
                         _ => ui.add_enabled(on, egui::Button::new(text)),
                     };
                     if item.clicked() {
-                        menu = Some((act, n.name.clone()));
+                        menu = Some((act, name.clone()));
                         ui.close();
                     }
                 }
-            });
-            if node_resp.drag_started_by(PointerButton::Primary) {
-                let group = match selected {
-                    true => self.effects_page.nodes.clone(),
-                    false => vec![n.name.clone()],
-                };
-                let from = comp
-                    .nodes
-                    .iter()
-                    .filter(|g| group.contains(&g.name))
-                    .map(|g| (g.name.clone(), g.place))
-                    .collect();
-                self.effects_page.moving = Some(Moving {
-                    node: n.name.clone(),
-                    from,
-                    by: Vec2::ZERO,
-                });
-            }
-            if node_resp.dragged_by(PointerButton::Primary)
-                && let Some(m) = self
-                    .effects_page
-                    .moving
-                    .as_mut()
-                    .filter(|m| m.node == n.name)
-            {
-                m.by += node_resp.drag_delta();
-            }
-            if node_resp.drag_stopped()
-                && let Some(m) = self.effects_page.moving.take().filter(|m| m.node == n.name)
-            {
-                for (name, from) in &m.from {
-                    let to = [
-                        rounded(from[0] + f64::from(m.by.x / (CELL.x * z))),
-                        rounded(from[1] + f64::from(m.by.y / (CELL.y * z))),
-                    ];
-                    if to != *from {
-                        moved.push((name.clone(), to));
-                    }
+            },
+            |ui| {
+                if ui
+                    .add_enabled(can_paste, egui::Button::new("Paste"))
+                    .clicked()
+                {
+                    paste_here = true;
+                    ui.close();
                 }
+            },
+        );
+        if let Some((inside, off)) = done.band {
+            let mut nodes = self.effects_page.nodes.clone();
+            if off {
+                nodes.retain(|n| !inside.contains(n));
+            } else {
+                nodes = inside;
             }
+            self.send("gui.nodes", json!({ "nodes": nodes }));
         }
-        let mut started: Option<Linking> = None;
-        for (k, (end, at)) in knots.iter().enumerate() {
-            let id = ui.scope_id().with(("effects-knot", &clip.id, k));
-            let knot_resp = ui
-                .interact(knot_rect(*at), id, Sense::drag())
-                .on_hover_text(knot_name(end));
-            if !knot_resp.drag_started_by(PointerButton::Primary) {
-                continue;
-            }
-            let from = match end {
-                End::Input(dst, which) => comp.node(dst).and_then(|n| joined(n, *which)),
-                End::Output(_) => None,
-            };
-            started = Some(match (end, from) {
-                (End::Input(dst, which), Some(src)) => Linking {
-                    anchor: End::Output(src),
-                    pulled: Some((dst.clone(), *which)),
-                },
-                _ => Linking {
-                    anchor: end.clone(),
-                    pulled: None,
-                },
-            });
+        if let Some(at) = done.spot {
+            self.effects_page.spot = Some((clip.id.clone(), at));
         }
-        if resp.drag_started_by(PointerButton::Primary)
-            && let Some(press) = ui.input(|i| i.pointer.press_origin())
-        {
-            match wire_at(press).map(|(k, half)| (&wires[k], half)) {
-                Some((w, Half::Input)) => {
-                    started = Some(Linking {
-                        anchor: End::Output(w.from.clone()),
-                        pulled: Some((w.to.clone(), w.which)),
-                    });
-                }
-                Some((w, Half::Output)) => {
-                    started = Some(Linking {
-                        anchor: End::Input(w.to.clone(), w.which),
-                        pulled: Some((w.to.clone(), w.which)),
-                    });
-                }
-                None => {
-                    let off = ui.input(|i| i.modifiers.command);
-                    self.effects_page.band = Some((press, off));
-                }
-            }
-        }
-        if started.is_some() {
-            self.effects_page.linking = started;
-        }
-        let released = ui.input(|i| i.pointer.primary_released());
-        let at = ui.input(|i| i.pointer.interact_pos());
-        if let Some(l) = &self.effects_page.linking
-            && let Some(to) = at
-        {
-            let from = match &l.anchor {
-                End::Output(s) => box_of(s).map(|r| r.right_center()),
-                End::Input(d, w) => box_of(d).map(|r| inlet(r, *w)),
-            };
-            if let Some(from) = from {
-                painter.line_segment([from, to], lit);
-            }
-        }
-        let mut commands = Vec::new();
-        if released && let Some(l) = self.effects_page.linking.take() {
-            let spot = at.map_or(Spot::Empty, spot_at);
-            commands = linked(&comp, &clip.id, &l, spot);
-        }
-        if let Some((start, off)) = self.effects_page.band
-            && let Some(to) = at
-        {
-            let band = Rect::from_two_pos(start, to);
-            painter.rect_filled(band, CornerRadius::ZERO, c.accent.gamma_multiply(0.12));
-            painter.rect_stroke(
-                band,
-                CornerRadius::ZERO,
-                Stroke::new(1.0, c.accent),
-                StrokeKind::Inside,
-            );
-            if released {
-                self.effects_page.band = None;
-                let inside: Vec<String> = boxes
-                    .iter()
-                    .filter(|(_, r)| band.intersects(*r))
-                    .map(|(n, _)| n.clone())
-                    .collect();
-                let mut nodes = self.effects_page.nodes.clone();
-                if off {
-                    nodes.retain(|n| !inside.contains(n));
-                } else {
-                    nodes = inside;
-                }
-                self.send("gui.nodes", json!({ "nodes": nodes }));
-            }
-        }
-        if released {
-            self.effects_page.band = None;
-        }
-        if resp.secondary_clicked()
-            && let Some(at) = ui.input(|i| i.pointer.interact_pos())
-        {
-            self.effects_page.spot = Some((clip.id.clone(), grid_at(at)));
-        }
-        let can_paste = !self.effects_page.copied.is_empty();
-        let mut paste_here = false;
-        resp.context_menu(|ui| {
-            if ui
-                .add_enabled(can_paste, egui::Button::new("Paste"))
-                .clicked()
-            {
-                paste_here = true;
-                ui.close();
-            }
-        });
         if paste_here && let Some((_, at)) = self.effects_page.spot.clone() {
             self.paste_to(json!({ "place": at }));
         }
+        let commands = done
+            .link
+            .map(|l| linked(&comp, &clip.id, &l))
+            .unwrap_or_default();
         self.send_all(commands, "Join Nodes");
-        let moves = moved
+        let moves = done
+            .moved
             .into_iter()
             .map(|(name, to)| {
                 let params = json!({ "clip": clip.id, "node": name, "place": to });
@@ -2402,13 +2022,13 @@ impl Workspace {
             })
             .collect();
         self.send_all(moves, "Move Nodes");
-        if let Some(name) = pointed {
+        if let Some(name) = done.pointed {
             self.effects_page.nodes = vec![name];
         }
         if let Some((act, node)) = menu {
             self.menu_act(act, node);
         }
-        match picked {
+        match done.picked {
             Some((name, Pick::Active)) => {
                 let mut nodes = self.effects_page.nodes.clone();
                 nodes.retain(|n| *n != name);
@@ -2426,22 +2046,16 @@ impl Workspace {
                 self.send("gui.nodes", json!({ "nodes": nodes }));
             }
             Some((name, Pick::Only)) => self.send("gui.nodes", json!({ "nodes": [name] })),
-            None if resp.clicked() => {
-                let press = ui.input(|i| i.pointer.interact_pos());
-                if let Some(at) = press {
-                    self.effects_page.spot = Some((clip.id.clone(), grid_at(at)));
+            None if done.clicked => match done.unlink {
+                Some((to, s)) => {
+                    let off = join_command(&clip.id, (&to, which(s)), None);
+                    self.send_all(vec![off], "Join Nodes");
                 }
-                match press.and_then(wire_at).map(|(k, half)| (&wires[k], half)) {
-                    Some((w, Half::Input)) => {
-                        let off = join_command(&clip.id, (&w.to, w.which), None);
-                        self.send_all(vec![off], "Join Nodes");
-                    }
-                    _ if !self.effects_page.nodes.is_empty() => {
-                        self.send("gui.nodes", json!({ "nodes": [] }));
-                    }
-                    _ => {}
+                None if !self.effects_page.nodes.is_empty() => {
+                    self.send("gui.nodes", json!({ "nodes": [] }));
                 }
-            }
+                None => {}
+            },
             None => {}
         }
     }
@@ -2548,14 +2162,4 @@ fn clip_name(p: &Project, c: &Clip) -> String {
         .clone()
         .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
         .unwrap_or_else(|| c.id.clone())
-}
-
-fn knot(painter: &egui::Painter, tip: Pos2, along: Vec2, color: Color32) {
-    let back = tip - along * KNOT * 1.6;
-    let side = vec2(-along.y, along.x) * KNOT;
-    painter.add(egui::Shape::convex_polygon(
-        vec![tip, back + side, back - side],
-        color,
-        Stroke::NONE,
-    ));
 }
