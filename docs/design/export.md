@@ -76,9 +76,17 @@ Colors:
   - SDR takes 10 bits only from the encoder that an 8-bit export starts with. Why: vidcut does not move to a slower encoder for 10 bits.
   - DNxHR HQ in 10 bits becomes HQX (`ColorChoice::apply`).
 - `export::choose_metadata` picks the HDR metadata, by the rules of `vidcut_core::export` (spec D46). With an SDR timeline, each picture counts as SDR.
-- With a LUT in the plan (`RenderPlan::has_lut`), `metadata::choose_through_lut` takes nothing from the sources. Why: a LUT changes the light of the picture.
+- With a grade or a LUT in the plan (`RenderPlan::changes_light`), `metadata::choose_graded` takes nothing from the sources. Why: a grade or a LUT changes the light of the picture.
   - It keeps the mastering display and the light that the user gives. The report says this.
-  - It does not measure the light. The [todo](../todo/luts.md) holds that work.
+  - Without given light, the choice says that the output frames give it (`metadata::FROM_OUTPUT`). The plan shows this.
+- Before the export, `export::choose_colors` measures the light of those output frames (`export::output_light`).
+  - `output_light` draws each frame as the encode does (`frames_of`). It uses the same decoder, draw, grades, LUTs and burned subtitles.
+  - It uses the sizes of the export and the pixel format of the first encoder (`encode::resolve_video`).
+  - The frames come back to memory. `light::made_level` measures them with `light::Meter` on up to four threads.
+  - The source files use the same math (`measure_with`). `light::level_of` gives MaxCLL and MaxFALL for both.
+  - `MetadataChoice::measured` puts the values into the choice. The report says that they come from the output frames.
+  - `export::run_decoding_on` does the same when it chooses the metadata itself.
+  - Nothing keeps the result. Why: any edit can change the frames.
 - An export first measures the light that the files do not state (`Lights::analysis`), and caches it.
   - The GPU measures the HDR pictures that stay on the GPU ([gpu](gpu.md#the-light-meter)).
   - A generator has no file. Thus it adds no light (`light::sampled`).

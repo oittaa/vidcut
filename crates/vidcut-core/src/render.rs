@@ -1797,8 +1797,10 @@ impl RenderPlan {
             .map(|p| p.clip.as_str())
     }
 
-    pub fn has_lut(&self) -> bool {
+    pub fn changes_light(&self) -> bool {
+        let graded = |g: &Option<Grade>| g.as_ref().is_some_and(|g| !g.is_usual());
         self.output_lut.is_some()
+            || graded(&self.timeline_grade)
             || self
                 .video
                 .iter()
@@ -1810,7 +1812,10 @@ impl RenderPlan {
                             input_lut: Some(_),
                             ..
                         }
-                    )
+                    ) || p
+                        .placed()
+                        .iter()
+                        .any(|placed| graded(&placed.picture.grade))
                 })
     }
 

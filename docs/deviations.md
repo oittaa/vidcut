@@ -126,6 +126,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Resolve Studio measures MaxCLL and MaxFALL (p. 282).
 - **vidcut:**
   - An export carries what its sources tell, or measures it from their frames ([D46](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - With a grade or a LUT, an export measures MaxCLL and MaxFALL on its own frames. It takes nothing from the sources.
 - **Why:**
   - Phone, camera and graded HDR footage looks on TVs as its sources do.
   - This needs no setup by a colorist.
@@ -1175,7 +1176,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - A file with no size line gives no LUT.
     - Too few rows give a wrong picture.
     - `LUT_3D_SIZE 1` gives a black picture.
-  - The window of Resolve is not measured.
+  - The window of Resolve Studio 21.2 shows no message for these files.
 - **vidcut:**
   - `media.set` and `project.set` refuse the file and give the reason.
 - **Why:**

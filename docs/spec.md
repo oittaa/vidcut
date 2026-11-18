@@ -3915,7 +3915,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Thus an unset `video.passes` is two with a bitrate, where the encoder makes two. Otherwise it is one.
   - A request for two passes from an encoder that makes one is an error.
 - **D46. HDR metadata follows the footage** (§10; deviation X19).
-  - With no grade, an export carries what its sources give (`video.hdr_metadata` `auto`).
+  - With no grade and no LUT, an export carries what its sources give (`video.hdr_metadata` `auto`).
   - PQ output gets the widest mastering display of the pictures shown.
   - It also gets their highest MaxCLL and MaxFALL, measured where a source gives none.
   - SDR pictures count as BT.709 at 203 cd/m². HDR pictures without a display count as BT.2020 at 1000 cd/m².
@@ -3923,6 +3923,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Each frame keeps its HDR10+ and Dolby Vision where its transfer stays:
     - HDR10+ (PQ only) when any picture has it. For the other pictures, it is made from measured light.
     - Dolby Vision when every picture has it, in one profile.
+  - A grade or a LUT changes the light of the picture. Thus the metadata of the sources is wrong for the frames of the export.
+  - With a clip grade, a timeline grade, an input LUT or an output LUT in the export, the export takes nothing from the sources:
+    - A mastering display and light levels that the user gives stay as given.
+    - Without given light levels, PQ output gets the MaxCLL and MaxFALL of its own frames.
+    - A first pass draws the frames as the encode does, and measures them. The encode then writes these values.
+    - The export has no HDR10+ and no Dolby Vision.
+  - The report of the export tells where each value comes from: given, from the sources, or measured.
 - **D47. Drop-frame timecode** (§4.3).
   - At 29.97, 59.94 and 119.88 fps, record timecode can count drop-frame, as Resolve's project settings offer.
   - Resolve Studio 21.2 refuses it at other rates, also at 23.976, 47.952 and 95.904 (`timelineDropFrameTimecode` in a script).
@@ -5608,12 +5615,43 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - A LUT on the node of a compound clip gives the same picture as a LUT on the node of a plain clip.
 - A generator and a title have no Media Pool clip. A script gets no node graph for them, so it cannot give them a LUT.
 
-A script gets no error for a broken file:
+**The Input LUT of a clip**, measured in Resolve Studio 21.2:
+
+- The Media Pool menu of a compound clip has no LUT item. vidcut has none either.
+- The viewer of the Media page shows the Input LUT. vidcut does not yet ([todo](todo/luts.md)).
+- A subclip made after its parent gets an Input LUT copies that LUT. A subclip made before keeps none.
+  - After that, each one keeps its own. A change on the parent or on a subclip does not change the others.
+  - vidcut does the same: `create_subclip` copies the media item with its LUT.
+- With the Alpha Mode Invert, the alpha is `1 - A`:
+  - With no LUT, the color is `C * (1 - A)`.
+  - With a LUT, the color is `T(C) * (1 - A)`.
+  - vidcut does the same: Invert is a straight alpha of `1 - A`.
+- In a Smooth Cut, the LUT works on each source picture before the frames between them are made. The alpha of the clip stays.
+  - vidcut does the same: the made frame of a Smooth Cut gets no LUT of its own.
+
+**The Input LUT of the project**, measured in Resolve Studio 21.2 (p. 152):
+
+- A grid of values gives the same picture as the Output LUT of the project.
+- It applies to clips. A gap stays black.
+- A picture with alpha gives `T(clamp(C / A)) * A`, and each layer gets its own `T` before the mix.
+- The Input LUT of a clip replaces it on that clip.
+- vidcut has no Input LUT of the project yet ([todo](todo/luts.md)).
+
+**The Output LUT of the project**, measured in Resolve Studio 21.2:
+
+- It uses the math of a node LUT. A grid of values gives `T(x)`, with a difference of 5.8e-8 at most.
+- It works on the mixed picture of the timeline.
+- It also applies to a gap. In a render without alpha, a gap becomes `T(0)`, with a difference of 5e-9 at most.
+- In a render with alpha, a picture with alpha gives `T(clamp(C / A)) * A`. The alpha does not change. Where `A` is 0, the result is 0.
+- vidcut does the same (`fs_lut`, [design](design/README.md#lut-files)).
+
+A script gets no error for a broken file, and the window shows no message:
 
 - A lower-case `lut_3d_size` line, or no size line, gives no LUT.
 - 100 rows where 125 are due give a changed picture, which the rule above does not fit.
 - 130 rows where 125 are due use the first 125 rows.
 - `LUT_3D_SIZE 1` gives a black picture.
+- vidcut refuses these files ([X131](deviations.md#x131-a-broken-cube-file-is-refused)).
 
 ### The scaling filter
 

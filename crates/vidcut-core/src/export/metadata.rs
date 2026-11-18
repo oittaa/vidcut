@@ -45,7 +45,9 @@ const D65: [f64; 2] = [0.3127, 0.3290];
 
 const SDR_WHITE: u32 = 203;
 
-pub const THROUGH_LUT: &str = "Nothing from the sources: a LUT changes the light of the picture";
+pub const GRADED: &str = "Nothing from the sources: a grade or a LUT changes the light";
+
+pub const FROM_OUTPUT: &str = "MaxCLL and MaxFALL: measured on the output frames during the export";
 
 fn volume(m: &PieceMeta) -> (MasteringDisplay, bool) {
     let assumed = |primaries, min_nits, max_nits| MasteringDisplay {
@@ -474,7 +476,7 @@ pub fn choose(
     choice
 }
 
-pub fn choose_through_lut(v: &VideoSettings) -> MetadataChoice {
+pub fn choose_graded(v: &VideoSettings) -> MetadataChoice {
     let asked = v.hdr_metadata;
     let mut choice = MetadataChoice {
         mode: HdrMetadata::None,
@@ -495,24 +497,49 @@ pub fn choose_through_lut(v: &VideoSettings) -> MetadataChoice {
         choice.why.push(NO_METADATA.into());
         return choice;
     }
-    choice.why.push(THROUGH_LUT.into());
+    choice.why.push(GRADED.into());
+    let mut measured = false;
     if out == Hdr::Pq {
         if let Some(s) = &v.mastering_display {
             choice.why.push("Mastering display: given".into());
             choice.mastering = parse_mastering(s).ok();
         }
-        if let Some(s) = v.max_cll.as_deref().filter(|s| *s != MEASURE) {
-            choice.why.push("Light levels: given".into());
-            choice.light = parse_light(s).ok();
+        match v.max_cll.as_deref().filter(|s| *s != MEASURE) {
+            Some(s) => {
+                choice.why.push("Light levels: given".into());
+                choice.light = parse_light(s).ok();
+            }
+            None => {
+                choice.why.push(FROM_OUTPUT.into());
+                measured = true;
+            }
         }
     }
-    if choice.mastering.is_some() || choice.light.is_some() {
+    if measured || choice.mastering.is_some() || choice.light.is_some() {
         choice.mode = HdrMetadata::Static;
     }
     choice
 }
 
 impl MetadataChoice {
+    pub fn measured(&mut self, light: Option<LightLevel>) {
+        let said = match light {
+            Some(l) => format!(
+                "MaxCLL {}, MaxFALL {}: measured on the output frames",
+                l.max_cll, l.max_fall
+            ),
+            None => "No light levels: the output frames couldn't be measured".into(),
+        };
+        match self.why.iter_mut().find(|w| *w == FROM_OUTPUT) {
+            Some(w) => *w = said,
+            None => self.why.push(said),
+        }
+        self.light = light;
+        if self.mastering.is_none() && light.is_none() {
+            self.mode = HdrMetadata::None;
+        }
+    }
+
     pub fn apply(&self, v: &mut VideoSettings) {
         v.hdr_metadata = self.mode;
         v.mastering_display = self.mastering.as_ref().map(format_mastering);

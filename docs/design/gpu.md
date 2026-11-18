@@ -363,6 +363,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 - Then the CPU computes the light of these codes, with the code that measures frames in memory (`Spread`).
 - The CPU measures SDR pictures, other layouts and pictures in memory.
   - Why: the matrix of an SDR picture to BT.2020 mixes the three channels. Thus the highest code of each channel does not give the peak.
+  - The output frames of an export with a grade or a LUT come back to memory. Thus the CPU measures them (`light::made_level`).
   - It measures RGB and gray of more than 8 bits as RGB (`measure_rgb`). Why: the conversion to YUV makes these pictures too bright ([gotchas](../gotchas.md#ffmpeg-filters-and-colors)).
   - It measures a float picture with its values above 1 and below 0 (`Planar`, `float_light`).
   - Why: the draw converts an SDR picture into an HDR timeline with no limit at 1 (`rgb` in `picture.wgsl`). Thus a value above 1 gives more light than SDR white.
