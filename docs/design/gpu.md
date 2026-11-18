@@ -363,6 +363,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 - Then the CPU computes the light of these codes, with the code that measures frames in memory (`Spread`).
 - The CPU measures SDR pictures, other layouts and pictures in memory.
   - Why: the matrix of an SDR picture to BT.2020 mixes the three channels. Thus the highest code of each channel does not give the peak.
+  - The output frames of an export with a grade or a LUT come back to memory. Thus the CPU measures them (`light::made_level`).
   - It measures RGB and gray of more than 8 bits as RGB (`measure_rgb`). Why: the conversion to YUV makes these pictures too bright ([gotchas](../gotchas.md#ffmpeg-filters-and-colors)).
   - It measures a float picture with its values above 1 and below 0 (`Planar`, `float_light`).
   - Why: the draw converts an SDR picture into an HDR timeline with no limit at 1 (`rgb` in `picture.wgsl`). Thus a value above 1 gives more light than SDR white.
@@ -376,11 +377,11 @@ The Waveform, the Parade and the Vectorscope show the picture that the viewer dr
 
 What they read:
 
-- `Screen::scopes` reads the canvas of the last `Screen::draw`. That is the mix after the output LUT, in the timeline color space, before `fs_screen`.
+- `Screen::scopes` reads the canvas of the last `Screen::draw`. That is the mix after the timeline grade, the subtitles and the output LUT, in the timeline color space, before `fs_screen`.
 - While a scope is on, `Screen::scoping` makes the canvas `Wide`, also for one SDR layer.
   - Why: an 8-bit canvas loses the values above 1 and below 0, and the steps between the 10-bit levels.
   - `fs_screen` only clips an SDR canvas. Thus the picture on the screen stays the same, but for rounding.
-- The scopes show the grade of each clip, because it runs before the mix ([export](export.md#the-grade)).
+- The scopes show the grade of each clip and the timeline grade, because both run before the scopes read the canvas ([export](export.md#the-grade)).
 - The source viewer has no timeline color space. There, the scopes read SDR values.
 
 How the GPU makes one scope (`scope.wgsl`, `Plots::paint`):

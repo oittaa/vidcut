@@ -116,7 +116,7 @@ fn drawn_at(timed: &[Timed], fps: f64, size: (u32, u32), timeline: u32, t: i64) 
 
 fn over(picture: Arc<TitlePicture>, placed: Vec<Placed>) -> TitleOver {
     TitleOver {
-        above: usize::MAX,
+        above: TitleOver::SUBTITLES,
         picture,
         dx: 0,
         dy: 0,

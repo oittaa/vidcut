@@ -57,22 +57,11 @@ impl LightAnalysis {
 
     pub fn level(&self, sampled: impl IntoIterator<Item = f64>) -> Option<LightLevel> {
         let last = self.frames.len().checked_sub(1)?;
-        let mut out: Option<(f32, f32)> = None;
         let mut i = 0;
-        for t in sampled {
+        level_of(sampled.into_iter().map(|t| {
             i += self.frames[i..].partition_point(|(f, _)| *f < t - EPS);
-            let l = &self.frames[i.min(last)].1;
-            let (m, a) = out.get_or_insert((0.0, 0.0));
-            *m = m.max(l.max);
-            *a = a.max(l.average);
-        }
-        out.map(|(m, a)| {
-            let max_cll = (m.ceil() as u32).max(1);
-            LightLevel {
-                max_cll,
-                max_fall: (a.ceil() as u32).clamp(1, max_cll),
-            }
-        })
+            &self.frames[i.min(last)].1
+        }))
     }
 
     pub fn at(&self, t: f64) -> Option<&FrameLight> {
@@ -96,6 +85,26 @@ impl LightAnalysis {
             }
         }
         self.spans = merged;
+    }
+}
+
+fn level_of<'a>(lights: impl IntoIterator<Item = &'a FrameLight>) -> Option<LightLevel> {
+    lights
+        .into_iter()
+        .fold(None, |out, l| Some(brightest(out, l)))
+        .map(level)
+}
+
+fn brightest(out: Option<(f32, f32)>, l: &FrameLight) -> (f32, f32) {
+    let (m, a) = out.unwrap_or((0.0, 0.0));
+    (m.max(l.max), a.max(l.average))
+}
+
+fn level((m, a): (f32, f32)) -> LightLevel {
+    let max_cll = (m.ceil() as u32).max(1);
+    LightLevel {
+        max_cll,
+        max_fall: (a.ceil() as u32).clamp(1, max_cll),
     }
 }
 
@@ -805,9 +814,8 @@ fn measure(
     {
         reader.seek(((span.from - EPS) / tick).floor() as i64)?;
     }
-    let threads = std::thread::available_parallelism().map_or(2, |n| n.get().clamp(2, 4));
     let (mut frames, ended) = on_threads(
-        threads,
+        threads(),
         || crate::export::normalize::Relayout::passing(readable),
         |give| {
             let mut gpu = OnGpu::default();
@@ -839,6 +847,24 @@ fn measure(
     )?;
     frames.sort_by(|a, b| a.0.total_cmp(&b.0));
     Ok((frames, ended))
+}
+
+fn threads() -> usize {
+    std::thread::available_parallelism().map_or(2, |n| n.get().clamp(2, 4))
+}
+
+pub(crate) fn made_level(
+    feed: impl FnOnce(&mut dyn FnMut(frame::Video) -> bool) -> Result<bool>,
+) -> Result<Option<LightLevel>> {
+    let most = Mutex::new(Some(None));
+    on_threads(threads(), Meter::new, feed, |meter, f: frame::Video| {
+        let light = meter.measure(&f).ok();
+        let mut most = most.lock().unwrap_or_else(|e| e.into_inner());
+        *most = most.zip(light).map(|(m, l)| Some(brightest(m, &l)));
+        Ok(())
+    })?;
+    let most = most.into_inner().unwrap_or_else(|e| e.into_inner());
+    Ok(most.flatten().map(level))
 }
 
 fn on_threads<T: Send, R: Send, S>(

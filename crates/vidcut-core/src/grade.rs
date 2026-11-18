@@ -1,4 +1,4 @@
-use crate::model::Grade;
+use crate::model::{CompositeMode, Corrector, Grade, GradeTool};
 use crate::tone_tables::{HIGHLIGHTS, SHADOWS, TONE_AMOUNTS};
 
 pub const OFFSET_STEP: f64 = 187.5 / 1023.0;
@@ -21,28 +21,44 @@ const BRADFORD: [[f64; 3]; 3] = [
     [0.0389, -0.0685, 1.0296],
 ];
 
-const PLANCK_U: [f64; 9] = [
-    0.17974010196483373,
-    0.07215506820121004,
-    -0.008043884176963433,
-    5.55473618568263,
-    -27.032152908369465,
-    68.71567204412175,
-    -103.81110787405582,
-    87.91043671155502,
-    -32.18225368793109,
+const BRADFORD_BACK: [[f64; 3]; 3] = [
+    [0.9870, -0.1471, 0.1600],
+    [0.4323, 0.5184, 0.0493],
+    [-0.0085, 0.0400, 0.9685],
 ];
 
-const PLANCK_V: [f64; 9] = [
-    0.26480436774103844,
-    0.16960053906710726,
-    2.06154621742016,
-    -11.486467199932205,
-    26.337090785049178,
-    -25.963728337451204,
-    -6.661635292181216,
-    37.24195997977927,
-    -23.47137754153343,
+const ISOTEMPERATURE: [[f64; 4]; 31] = [
+    [0.0, 0.18006, 0.26352, -0.24341],
+    [10.0, 0.18066, 0.26589, -0.25479],
+    [20.0, 0.18133, 0.26846, -0.26876],
+    [30.0, 0.18208, 0.27119, -0.28539],
+    [40.0, 0.18293, 0.27407, -0.30470],
+    [50.0, 0.18388, 0.27709, -0.32675],
+    [60.0, 0.18494, 0.28021, -0.35156],
+    [70.0, 0.18611, 0.28342, -0.37915],
+    [80.0, 0.18740, 0.28668, -0.40955],
+    [90.0, 0.18880, 0.28997, -0.44278],
+    [100.0, 0.19032, 0.29326, -0.47888],
+    [125.0, 0.19462, 0.30141, -0.58204],
+    [150.0, 0.19962, 0.30921, -0.70471],
+    [175.0, 0.20525, 0.31647, -0.84901],
+    [200.0, 0.21142, 0.32312, -1.0182],
+    [225.0, 0.21807, 0.32909, -1.2168],
+    [250.0, 0.22511, 0.33439, -1.4512],
+    [275.0, 0.23247, 0.33904, -1.7298],
+    [300.0, 0.24010, 0.34308, -2.0637],
+    [325.0, 0.24792, 0.34655, -2.4681],
+    [350.0, 0.25591, 0.34951, -2.9641],
+    [375.0, 0.26400, 0.35200, -3.5814],
+    [400.0, 0.27218, 0.35407, -4.3633],
+    [425.0, 0.28039, 0.35577, -5.3762],
+    [450.0, 0.28863, 0.35714, -6.7262],
+    [475.0, 0.29685, 0.35823, -8.5955],
+    [500.0, 0.30505, 0.35907, -11.324],
+    [525.0, 0.31320, 0.35968, -15.628],
+    [550.0, 0.32129, 0.36011, -23.325],
+    [575.0, 0.32931, 0.36038, -40.770],
+    [600.0, 0.33724, 0.36051, -116.45],
 ];
 
 const WHITE_KELVIN: f64 = 6500.0;
@@ -143,7 +159,7 @@ fn tone_change(table: &[[f64; TONE_SIZE]; TONE_AMOUNTS.len()], amount: f64) -> V
 }
 
 impl Tone {
-    fn of(g: &Grade) -> Option<Self> {
+    fn of(g: &Corrector) -> Option<Self> {
         if g.shadows == 0.0 && g.highlights == 0.0 && g.midtone_detail == 0.0 {
             return None;
         }
@@ -217,41 +233,43 @@ fn inverse(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
     std::array::from_fn(|i| std::array::from_fn(|j| c(j, i) / det))
 }
 
-fn polynomial(c: &[f64], x: f64) -> f64 {
-    c.iter().rev().fold(0.0, |acc, k| acc * x + k)
-}
-
-fn planck_uv(kelvin: f64) -> [f64; 2] {
-    let m = 1000.0 / kelvin;
-    [polynomial(&PLANCK_U, m), polynomial(&PLANCK_V, m)]
-}
-
 fn white_xyz(kelvin: f64, duv: f64) -> [f64; 3] {
-    let [u, v] = planck_uv(kelvin);
-    let step = kelvin * 1e-4;
-    let [u0, v0] = planck_uv(kelvin - step);
-    let [u1, v1] = planck_uv(kelvin + step);
-    let (du, dv) = (u1 - u0, v1 - v0);
-    let length = du.hypot(dv);
-    let (mut nu, mut nv) = (-dv / length, du / length);
-    if nv < 0.0 {
-        nu = -nu;
-        nv = -nv;
-    }
-    let (u, v) = (u + duv * nu, v + duv * nv);
+    let mired = 1e6 / kelvin;
+    let last = ISOTEMPERATURE.len() - 2;
+    let i = ISOTEMPERATURE
+        .iter()
+        .rposition(|row| row[0] <= mired)
+        .unwrap_or(0)
+        .min(last);
+    let (a, b) = (ISOTEMPERATURE[i], ISOTEMPERATURE[i + 1]);
+    let f = (b[0] - mired) / (b[0] - a[0]);
+    let between = |p: f64, q: f64| p * f + q * (1.0 - f);
+    let unit = |slope: f64| {
+        let length = 1.0f64.hypot(slope);
+        [1.0 / length, slope / length]
+    };
+    let (da, db) = (unit(a[3]), unit(b[3]));
+    let (nu, nv) = (between(da[0], db[0]), between(da[1], db[1]));
+    let length = nu.hypot(nv);
+    let u = between(a[1], b[1]) - duv * nu / length;
+    let v = between(a[2], b[2]) - duv * nv / length;
     let d = 2.0 * u - 8.0 * v + 4.0;
     let (x, y) = (3.0 * u / d, 2.0 * v / d);
     [x / y, 1.0, (1.0 - x - y) / y]
 }
 
 fn temp_matrix(temp: f64, tint: f64) -> [[f64; 3]; 3] {
-    let cones = product(&BRADFORD, &RGB_TO_XYZ);
+    if temp == 0.0 && tint == 0.0 {
+        return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    }
     let from = apply(&BRADFORD, white_xyz(WHITE_KELVIN, 0.0));
     let to = apply(&BRADFORD, white_xyz(WHITE_KELVIN - temp, -tint / TINT_DUV));
     let scale: [[f64; 3]; 3] = std::array::from_fn(|i| {
         std::array::from_fn(|j| if i == j { to[i] / from[i] } else { 0.0 })
     });
-    product(&inverse(&cones), &product(&scale, &cones))
+    let into = product(&BRADFORD, &RGB_TO_XYZ);
+    let back = product(&inverse(&RGB_TO_XYZ), &BRADFORD_BACK);
+    product(&back, &product(&scale, &into))
 }
 
 fn color_matrix(saturation: f64, hue: f64) -> [[f64; 3]; 3] {
@@ -459,8 +477,230 @@ impl LogCurve {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pass {
+    Copy {
+        from: usize,
+        to: usize,
+    },
+    Correct {
+        on: usize,
+        grading: Box<Grading>,
+    },
+    Parallel {
+        on: usize,
+        change: usize,
+        base: usize,
+    },
+    Layer {
+        on: usize,
+        top: usize,
+        mode: CompositeMode,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Graded {
+    pub passes: Vec<Pass>,
+    pub registers: usize,
+}
+
+pub fn order(g: &Grade) -> Option<Vec<u32>> {
+    fn visit(g: &Grade, k: u32, state: &mut [u8], out: &mut Vec<u32>) -> Option<()> {
+        match state[k as usize] {
+            2 => return Some(()),
+            1 => return None,
+            _ => {}
+        }
+        state[k as usize] = 1;
+        for &v in g.node(k)?.inputs.iter().flatten() {
+            if v > g.last() {
+                return None;
+            }
+            if v > 0 {
+                visit(g, v, state, out)?;
+            }
+        }
+        state[k as usize] = 2;
+        out.push(k);
+        Some(())
+    }
+    let mut state = vec![0u8; g.nodes.len() + 1];
+    let mut out = Vec::new();
+    for k in 1..=g.last() {
+        visit(g, k, &mut state, &mut out)?;
+    }
+    Some(out)
+}
+
+pub fn complete(g: &Grade) -> bool {
+    let used = |k: u32| g.output == Some(k) || g.nodes.iter().any(|n| n.inputs.contains(&Some(k)));
+    g.output.is_some()
+        && g.nodes.iter().zip(1..).all(|(n, k)| {
+            let fed = match n.tool {
+                GradeTool::Corrector(_) => n.inputs.iter().all(Option::is_some),
+                _ => n.inputs.iter().any(Option::is_some),
+            };
+            fed && used(k)
+        })
+}
+
+fn shared(lists: impl IntoIterator<Item = Vec<u32>>) -> Option<Vec<u32>> {
+    lists
+        .into_iter()
+        .reduce(|a, b| a.into_iter().filter(|v| b.contains(v)).collect())
+}
+
+fn passed(g: &Grade) -> Option<Vec<Vec<u32>>> {
+    let mut through = vec![Vec::new(); g.nodes.len() + 1];
+    through[0] = vec![0];
+    for k in order(g)? {
+        let ins = g.node(k)?.inputs.iter().flatten();
+        let mut path = shared(ins.map(|v| through[*v as usize].clone()))?;
+        path.push(k);
+        through[k as usize] = path;
+    }
+    Some(through)
+}
+
+fn base(through: &[Vec<u32>], g: &Grade, k: u32) -> Option<u32> {
+    let ins = g.node(k)?.inputs.iter().flatten();
+    shared(ins.map(|v| through[*v as usize].clone()))?.pop()
+}
+
+struct Registers {
+    holder: Vec<usize>,
+    left: Vec<usize>,
+    free: Vec<usize>,
+}
+
+impl Registers {
+    fn done(&mut self, v: usize) {
+        let r = self.holder[v];
+        self.left[r] -= 1;
+        if self.left[r] == 0 {
+            self.free.push(r);
+        }
+    }
+
+    fn take(&mut self, v: usize, passes: &mut Vec<Pass>) -> usize {
+        let r = self.holder[v];
+        if self.left[r] == 1 {
+            self.left[r] = 0;
+            return r;
+        }
+        self.left[r] -= 1;
+        let to = self.free.pop().unwrap_or_else(|| {
+            self.left.push(0);
+            self.left.len() - 1
+        });
+        passes.push(Pass::Copy { from: r, to });
+        to
+    }
+
+    fn hold(&mut self, k: usize, r: usize, uses: usize) {
+        self.holder[k] = r;
+        self.left[r] = uses;
+    }
+
+    fn alias(&mut self, k: usize, v: usize, uses: usize) {
+        let r = self.holder[v];
+        self.holder[k] = r;
+        self.left[r] += uses;
+        self.done(v);
+    }
+}
+
+impl Grade {
+    pub fn is_active(&self) -> bool {
+        self.is_keyed() || Graded::of(self).is_some()
+    }
+}
+
+impl Graded {
+    pub fn of(g: &Grade) -> Option<Self> {
+        if !complete(g) {
+            return None;
+        }
+        let order = order(g)?;
+        let out = g.output? as usize;
+        let through = passed(g)?;
+        let mut bases = vec![None; g.nodes.len() + 1];
+        let mut uses = vec![0usize; g.nodes.len() + 1];
+        for &k in &order {
+            if matches!(g.node(k)?.tool, GradeTool::ParallelMixer) {
+                let x = base(&through, g, k)?;
+                bases[k as usize] = Some(x as usize);
+                uses[x as usize] += 1;
+            }
+        }
+        for v in g.nodes.iter().flat_map(|n| n.inputs.iter().flatten()) {
+            uses[*v as usize] += 1;
+        }
+        uses[out] += 1;
+        let mut r = Registers {
+            holder: vec![0; g.nodes.len() + 1],
+            left: vec![uses[0]],
+            free: Vec::new(),
+        };
+        let mut passes = Vec::new();
+        for &k in &order {
+            let node = g.node(k)?;
+            let ins: Vec<usize> = node.inputs.iter().flatten().map(|v| *v as usize).collect();
+            let k = k as usize;
+            match &node.tool {
+                GradeTool::Corrector(c) if node.on && !c.is_usual() => {
+                    let on = r.take(ins[0], &mut passes);
+                    let grading = Box::new(Grading::of(c));
+                    passes.push(Pass::Correct { on, grading });
+                    r.hold(k, on, uses[k]);
+                }
+                GradeTool::Corrector(_) => r.alias(k, ins[0], uses[k]),
+                GradeTool::ParallelMixer => {
+                    let x = bases[k]?;
+                    let on = r.take(ins[0], &mut passes);
+                    for &v in &ins[1..] {
+                        if v != x {
+                            let (change, base) = (r.holder[v], r.holder[x]);
+                            passes.push(Pass::Parallel { on, change, base });
+                        }
+                        r.done(v);
+                    }
+                    r.done(x);
+                    r.hold(k, on, uses[k]);
+                }
+                GradeTool::LayerMixer { mode } => {
+                    let mode = if node.on {
+                        *mode
+                    } else {
+                        CompositeMode::Normal
+                    };
+                    let on = r.take(ins[0], &mut passes);
+                    for &v in &ins[1..] {
+                        let top = r.holder[v];
+                        passes.push(Pass::Layer { on, top, mode });
+                        r.done(v);
+                    }
+                    r.hold(k, on, uses[k]);
+                }
+            }
+        }
+        if r.holder[out] != 0 {
+            passes.push(Pass::Copy {
+                from: r.holder[out],
+                to: 0,
+            });
+        }
+        let only_copies = passes.iter().all(|p| matches!(p, Pass::Copy { .. }));
+        (!only_copies).then_some(Self {
+            passes,
+            registers: r.left.len(),
+        })
+    }
+}
+
 impl Grading {
-    pub fn of(g: &Grade) -> Self {
+    pub fn of(g: &Corrector) -> Self {
         let mut lift = [0.0; 4];
         let mut weight = [0.0; 4];
         let mut power = [0.0; 4];

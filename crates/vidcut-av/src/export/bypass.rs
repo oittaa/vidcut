@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 use vidcut_core::export::AlphaOut;
-use vidcut_core::model::{AlphaMode, Hdr};
+use vidcut_core::model::{AlphaMode, Hdr, Picture};
 use vidcut_core::render::{Over, RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -1054,7 +1054,7 @@ fn copyable(
         && match (alone, placed.as_slice()) {
             (false, []) => true,
             (true, [p]) => {
-                p.picture.is_usual() && p.ramp.is_none() && !p.crossing && p.moving.is_none()
+                plain_picture(&p.picture) && p.ramp.is_none() && !p.crossing && p.moving.is_none()
             }
             _ => false,
         }
@@ -1066,6 +1066,17 @@ fn copyable(
             Some(AlphaOut::Straight) => *alpha_mode == AlphaMode::Straight,
         };
     plain.then(|| (path.as_path(), Clock::of(fps, *origin, *per_frame), piece))
+}
+
+fn plain_picture(picture: &Picture) -> bool {
+    match &picture.grade {
+        Some(g) if !g.is_active() => Picture {
+            grade: None,
+            ..picture.clone()
+        }
+        .is_usual(),
+        _ => picture.is_usual(),
+    }
 }
 
 fn outside(cues: &[Cue], from: i64, to: i64) -> Vec<(i64, i64)> {

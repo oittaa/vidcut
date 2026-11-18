@@ -10,9 +10,10 @@ use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom,
     Ease, EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha,
-    GlowFraming, GlowOutput, GrainComposite, GrainPreset, Handle, LowerThirdLine, Node, PathSample,
-    PictureTool, PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor,
-    TitleKind, TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape, ZoomBox,
+    GlowFraming, GlowOutput, GradeKeyKind, GrainComposite, GrainPreset, Handle, LowerThirdLine,
+    Node, PathSample, PictureTool, PictureTransition, Place, Subject, SubtitleStyle, TitleAlign,
+    TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape,
+    ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2760,34 +2761,252 @@ pub enum Request {
         #[serde(default)]
         tool: Option<PictureTool>,
     },
-    /// The primary correction of a clip (`c3`, or `V2@15s`): every value of
-    /// the Primaries palette, usual ones too.
+    /// The grade of a clip (`c3`, or `V2@15s`), or with `timeline` the
+    /// timeline grade: its nodes, with every value of each corrector, usual
+    /// ones too, their keyframes, and the node whose picture goes out.
     #[serde(rename = "grade.get")]
-    GradeGet { clip: ClipRef },
-    /// Change the primary correction of clips: footage, stills, image
-    /// sequences, compound clips and generators. It works after their
-    /// effects and before their composite mode and opacity. Each value given
-    /// replaces its own.
+    GradeGet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// With `at`, each corrector gives the values that the picture gets
+        /// at that time, and no keyframes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+    },
+    /// Change one node of the grade of clips: footage, stills, image
+    /// sequences and compound clips. The grade works after their effects
+    /// and before their composite mode and opacity. With `timeline` in place
+    /// of `clips`, change the timeline grade. It works on the picture of all
+    /// tracks after they mix, before the subtitles. Each value given
+    /// replaces its own. The values of the Primaries palette go to a
+    /// corrector, and `mode` and `mixer` go to a mixer.
+    ///
+    /// On a corrector with keyframes, the values go to the keyframe at `at`,
+    /// or the last one before it. Before the first keyframe, the
+    /// corrector's own values change: they act as a static keyframe at the
+    /// start. A static keyframe and a dynamic keyframe right after it change
+    /// together: the values that change in one go to the other. Without
+    /// `at`, or a playhead, that is an error.
     #[serde(rename = "grade.set")]
     GradeSet {
-        clips: OneOrMany<ClipRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The timeline grade of the open timeline, in place of clips.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// The number of the node, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The time whose keyframe changes. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+        #[serde(flatten)]
+        node_change: GradeNodeChange,
         #[serde(flatten)]
         change: Box<GradeChange>,
     },
-    /// Put the primary correction of clips back at its usual values.
+    /// Put the grade of clips, or with `timeline` the timeline grade, back
+    /// at its usual value: one corrector at its usual values, with no
+    /// keyframes. With `node`, only that corrector goes back to its usual
+    /// values. With `keep_nodes`, each corrector does, and the nodes and
+    /// their links stay. With `node` or `keep_nodes`, the keyframes stay,
+    /// and the values go back where `grade.set` changes them.
     #[serde(rename = "grade.clear")]
-    GradeClear { clips: OneOrMany<ClipRef> },
-    /// Move the Offset of clips by printer points. One point moves each
-    /// channel by its Step Size times its Density Increment (the `color`
-    /// preferences).
+    GradeClear {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The timeline grade of the open timeline, in place of clips.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_nodes: bool,
+        /// The time whose keyframe goes back. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+    },
+    /// Move the Offset of a corrector of clips, or with `timeline` of the
+    /// timeline grade, by printer points. One point moves each channel by
+    /// its Step Size times its Density Increment (the `color`
+    /// preferences). On a corrector with keyframes, the Offset moves where
+    /// `grade.set` changes the values.
     #[serde(rename = "grade.printer")]
     GradePrinter {
-        clips: OneOrMany<ClipRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The timeline grade of the open timeline, in place of clips.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// The number of the corrector, from 1. Left out: node 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The time whose keyframe changes. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
         /// The channels that move.
         color: PrinterColor,
         /// The points: 1 or -1 for a full point, 0.5 for a half point, 0.25
         /// for a quarter point.
         points: f64,
+    },
+    /// Add a corrector to the grade of a clip, or with `timeline` to the
+    /// timeline grade, as `add` says. The new node gets the next number.
+    /// Returns its `node` number.
+    #[serde(rename = "grade.add")]
+    GradeAdd {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        add: GradeAdd,
+        /// The node it goes beside: for `serial`, `before`, `parallel` and
+        /// `layer`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// Its place in the node editor, for `corrector`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        place: Option<[f64; 2]>,
+    },
+    /// Take a node out of the grade of a clip, or with `timeline` of the
+    /// timeline grade. A corrector or the output that took the picture of
+    /// a corrector takes the picture that came into it. A mixer input that
+    /// took it takes nothing. What took the picture of a mixer takes
+    /// nothing. The nodes after it get one number less. With `extract`, a
+    /// corrector stays, joined to nothing, and each node that took its
+    /// picture takes the picture that came into it.
+    #[serde(rename = "grade.remove")]
+    GradeRemove {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        node: u32,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        extract: bool,
+    },
+    /// Join the picture of node `from` (0: the picture that comes into the
+    /// grade) to an input of `node` (0: the output of the grade), in place of
+    /// what was there. Without `from`, the input takes nothing. On a mixer,
+    /// an `input` one past the last, or no `input`, adds an input. A link
+    /// that makes a loop is an error.
+    #[serde(rename = "grade.connect")]
+    GradeConnect {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        node: u32,
+        /// The input of `node`, from 0. A corrector has input 0 only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<u32>,
+    },
+    /// Add a keyframe at `at` to a corrector of the grade of a clip, or with
+    /// `timeline` of the timeline grade. On a clip, it goes on the source
+    /// frame of the clip at `at`. Without `node`, each corrector gets one.
+    /// A new keyframe holds the values that the picture gets on its frame,
+    /// with the `start` and `end` of the project's `dynamics_profile`. A
+    /// keyframe already on that frame takes the `kind`. Returns the `frame`
+    /// and the `nodes` that have the keyframe.
+    #[serde(rename = "grade.keys.add")]
+    GradeKeysAdd {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// The number of the corrector, from 1. Left out: each corrector.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+        /// Usual: `dynamic`.
+        #[serde(default)]
+        kind: GradeKeyKind,
+    },
+    /// Change the kind, the `start` or the `end` of keyframes of the grade
+    /// of a clip, or with `timeline` of the timeline grade: those on the
+    /// `frames`, those at the timeline frames `at`, or, with neither, all
+    /// of them. Without `node`, the keyframes of each corrector change.
+    #[serde(rename = "grade.keys.set")]
+    GradeKeysSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The frames of the keyframes: source frames on a clip, timeline
+        /// frames on the timeline grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frames: Option<OneOrMany<i64>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<OneOrMany<TimeSpec>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<GradeKeyKind>,
+        /// From 0 to 10, as the `start` of a keyframe.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<u8>,
+        /// From 0 to 10, as the `end` of a keyframe.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<u8>,
+    },
+    /// Move keyframes of the grade of a clip, or with `timeline` of the
+    /// timeline grade (those on the `frames`, those at the timeline frames
+    /// `at`, or all of them) `by` timeline frames, or move the keyframes of
+    /// one frame `to` a timeline frame. Without `node`, the keyframes of each
+    /// corrector move. A corrector has one keyframe on a frame at most.
+    #[serde(rename = "grade.keys.move")]
+    GradeKeysMove {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The frames of the keyframes: source frames on a clip, timeline
+        /// frames on the timeline grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frames: Option<OneOrMany<i64>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<OneOrMany<TimeSpec>>,
+        /// Timeline frames. Negative moves them earlier.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<TimeSpec>,
+    },
+    /// Remove keyframes of the grade of a clip, or with `timeline` of the
+    /// timeline grade: those on the `frames`, those at the timeline frames
+    /// `at`, or, with neither, all of them. Without `node`, the keyframes of
+    /// each corrector go. Before its first keyframe, a corrector has its own
+    /// values.
+    #[serde(rename = "grade.keys.remove")]
+    GradeKeysRemove {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node: Option<u32>,
+        /// The frames of the keyframes: source frames on a clip, timeline
+        /// frames on the timeline grade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frames: Option<OneOrMany<i64>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<OneOrMany<TimeSpec>>,
     },
     /// Add an effect at its usual values after the effects of clips:
     /// footage, stills, image sequences and compound clips. A generator takes
@@ -3884,14 +4103,25 @@ pub enum Request {
     GuiClose { panel: GuiPanel },
     /// Show a page of the window: `cut`; `effects`, the node editor of
     /// the composition of the topmost clip at the playhead; or `color`, the
-    /// primary correction of that clip. Answers what `gui.state` does.
+    /// primary correction of that clip or of the timeline. Answers what
+    /// `gui.state` does.
     #[serde(rename = "gui.page")]
-    GuiPage { page: Page },
+    GuiPage {
+        page: Page,
+        /// The grade that the `color` page shows. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        grade: Option<GradeLevel>,
+    },
     /// Select nodes in the node editor of the effects page, by name. The
     /// Inspector and the viewer then show the last one. An empty list
     /// selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes { nodes: Vec<String> },
+    /// Select nodes in the node editor of the color page, by number. The
+    /// palette then shows the last one. An empty list selects none.
+    /// Answers what `gui.state` does.
+    #[serde(rename = "gui.grade_nodes")]
+    GuiGradeNodes { nodes: Vec<u32> },
     /// The playhead of the effects page. It moves over the whole source of
     /// the clip: the head before its In and the tail after its Out too.
     /// `at` moves it, in frames from the In (negative: in the head).
@@ -3912,6 +4142,7 @@ pub enum Request {
     },
     /// What only the GUI keeps: the page, the clip of the effects page, its
     /// nodes selected and its playhead (`time`, in frames from the In), the
+    /// grade of the color page and its nodes selected (`grade_nodes`), the
     /// edit points selected, the target track, the timeline's zoom and
     /// Timeline Options, and the windows open.
     #[serde(rename = "gui.state")]
@@ -4096,6 +4327,59 @@ pub struct GradeChange {
     /// Where the Log Highlight range starts, below 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub high_range: Option<f64>,
+}
+
+/// What changes on a node of a grade, apart from the values of a corrector.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GradeNodeChange {
+    /// Off, a corrector passes on the picture that comes into it, and a
+    /// layer mixer mixes in `normal`. A parallel mixer mixes the same way
+    /// off and on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// Its place in the node editor, `[x, y]` in node widths across and
+    /// node heights down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<[f64; 2]>,
+    /// The composite mode of a layer mixer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<CompositeMode>,
+    /// A mixer becomes this kind of mixer. A layer mixer starts at `normal`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mixer: Option<GradeMixer>,
+}
+
+/// A kind of mixer of a grade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GradeMixer {
+    /// It adds the changes of its inputs.
+    ParallelMixer,
+    /// Each input goes over the inputs before it.
+    LayerMixer,
+}
+
+/// Where a new corrector of a grade goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GradeAdd {
+    /// After `node`: it takes the picture of `node`, and what took that
+    /// picture takes its picture.
+    Serial,
+    /// Before the corrector `node`: it takes what came into `node`, and
+    /// `node` takes its picture.
+    Before,
+    /// Beside the corrector `node`: it takes what comes into `node`. When
+    /// `node` goes only into a mixer, of either kind, the mixer gets a new
+    /// last input for it. Else a new parallel mixer takes both, and what
+    /// took the picture of `node` takes the picture of the mixer.
+    Parallel,
+    /// As `parallel`, with a new layer mixer.
+    Layer,
+    /// After the node whose picture goes out. Its picture then goes out.
+    Append,
+    /// A corrector that joins nothing, at `place`.
+    Corrector,
 }
 
 /// The channels of a printer point.
@@ -4866,9 +5150,20 @@ pub enum Page {
     /// The node editor of a clip's composition, its viewer and its
     /// Inspector.
     Effects,
-    /// The primary correction of the clip at the playhead, its viewer and
-    /// the timeline.
+    /// The primary correction of the clip at the playhead or of the
+    /// timeline, its viewer and the timeline.
     Color,
+}
+
+/// Which grade the Color page shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GradeLevel {
+    /// The grade of the topmost clip at the playhead that takes one.
+    #[default]
+    Clip,
+    /// The timeline grade, on the picture of all tracks.
+    Timeline,
 }
 
 /// A window `gui.show` opens.
@@ -5276,6 +5571,10 @@ pub struct ProjectSet {
     /// empty path clears it.
     #[serde(default)]
     pub output_lut: Option<PathBuf>,
+    /// The `start` and `end` that each new keyframe of a grade gets, each
+    /// from 0 to 10. Usual: 1 and 1.
+    #[serde(default)]
+    pub dynamics_profile: Option<crate::model::DynamicsProfile>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]
@@ -6232,6 +6531,7 @@ impl Request {
                 | Self::GuiClose { .. }
                 | Self::GuiPage { .. }
                 | Self::GuiNodes { .. }
+                | Self::GuiGradeNodes { .. }
                 | Self::GuiPageTime { .. }
                 | Self::GuiState {}
                 | Self::GuiOnly { .. }

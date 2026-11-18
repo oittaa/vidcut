@@ -96,7 +96,14 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.get", &["clip"]),
     ("grade.set", &["clips"]),
     ("grade.clear", &["clips"]),
-    ("grade.printer", &["clips", "color"]),
+    ("grade.printer", &["color", "clips"]),
+    ("grade.add", &["add", "clip"]),
+    ("grade.remove", &["node", "clip"]),
+    ("grade.connect", &["node", "clip"]),
+    ("grade.keys.add", &["clip"]),
+    ("grade.keys.set", &["clip"]),
+    ("grade.keys.move", &["clip"]),
+    ("grade.keys.remove", &["clip"]),
     ("effects.add", &["clips", "kind"]),
     ("comp.add", &["clip", "tool"]),
     ("comp.set", &["clip", "node"]),
@@ -177,6 +184,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("gui.close", &["panel"]),
     ("gui.page", &["page"]),
     ("gui.nodes", &["nodes"]),
+    ("gui.grade_nodes", &["nodes"]),
     ("gui.page_time", &["at"]),
     ("gui.target", &["track"]),
     ("gui.trim_editor", &["at"]),
@@ -212,8 +220,9 @@ const GROUPS: &[(&str, &str)] = &[
     ("generators", "Pictures made with no file"),
     (
         "grade",
-        "The primary correction of clips: wheels, contrast, saturation and the Log wheels",
+        "The grades of clips and of the timeline: nodes of primary corrections and mixers",
     ),
+    ("grade.keys", "Keyframes of the correctors of a grade"),
     (
         "gui",
         "The running GUI: its window, command log, screenshots, panels, target track and timeline view",
@@ -516,6 +525,11 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "effects.key",
         "vidcut effects key c3 0 --at 2s\n  vidcut effects key c3 0 --at 2s --ease ease_in_out",
+    ),
+    (
+        "grade.keys.add",
+        "vidcut grade keys add c3 --at 1s\n  vidcut grade keys add c3 --at 3s --node 2 --kind static\n  \
+         vidcut grade set c3 --at 3s --contrast 1.4",
     ),
     (
         "motion.list",

@@ -8,7 +8,7 @@ use crate::cuda::{CudaDevice, PlaneCopy};
 use crate::hw::Kind;
 use crate::player::{AlphaUse, Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
-use vidcut_core::model::{AlphaMode, Hdr};
+use vidcut_core::model::{AlphaMode, Grade, Hdr};
 use vidcut_core::place::{Level, Mix, MixPart, Mixes, Placing, Working, chain, lettered};
 use vidcut_core::preferences::{Scope, ScopeScale};
 use vidcut_core::render::{Moving, Placed, Shift};
@@ -1027,6 +1027,8 @@ pub struct Screen {
     blurred: blur::Blurred,
     output_lut: Option<Lut>,
     drawn_output_lut: Option<Lut>,
+    timeline_grade: Option<Grade>,
+    drawn_timeline_grade: Option<Grade>,
     frame: Option<(u32, u32)>,
     looked_up: Option<lut::LookedUp>,
     scoping: bool,
@@ -1601,6 +1603,10 @@ impl Screen {
         self.output_lut = lut;
     }
 
+    pub fn set_timeline_grade(&mut self, grade: Option<&Grade>) {
+        self.timeline_grade = grade.filter(|g| g.is_active()).cloned();
+    }
+
     pub fn set_frame_size(&mut self, frame: Option<(u32, u32)>) {
         if self.frame != frame {
             self.frame = frame;
@@ -1635,6 +1641,7 @@ impl Screen {
                 && self.drawn_kernels == kernels
                 && self.drawn_colors == colors
                 && self.drawn_output_lut == self.output_lut
+                && self.drawn_timeline_grade == self.timeline_grade
                 && self.drawn_scoping == self.scoping;
             if same {
                 return Drawn::Same;
@@ -1675,6 +1682,13 @@ impl Screen {
                 label: Some("vidcut picture"),
             });
         let n = layers.len();
+        let graded = (self.timeline_grade.as_ref())
+            .filter(|_| n > 0)
+            .and_then(Working::graded);
+        let (mixed, late): (Vec<TitleOver>, Vec<TitleOver>) = titles
+            .iter()
+            .cloned()
+            .partition(|t| t.above != TitleOver::SUBTITLES);
         let nests = match layers
             .iter()
             .any(|(p, ..)| matches!(p.sampling(), Sampling::Colors { .. }))
@@ -1684,7 +1698,7 @@ impl Screen {
                 let chains: Vec<&[Placed]> = (0..n)
                     .map(|i| placed.get(i).map_or(&[][..], Vec::as_slice))
                     .collect();
-                let over: Vec<(usize, &[Placed])> = titles
+                let over: Vec<(usize, &[Placed])> = mixed
                     .iter()
                     .map(|t| (t.above, t.placed.as_slice()))
                     .collect();
@@ -1776,8 +1790,8 @@ impl Screen {
             }
         }
         let free: std::borrow::Cow<'_, [TitleOver]> = match nests.outer.is_empty() {
-            true => titles.into(),
-            false => titles
+            true => mixed.as_slice().into(),
+            false => mixed
                 .iter()
                 .enumerate()
                 .filter(|(j, _)| !nests.title_in_mix(*j) && nests.follows[*j].is_none())
@@ -1797,7 +1811,8 @@ impl Screen {
             || blending
             || n > 1
             || !nests.outer.is_empty()
-            || self.output_lut.is_some();
+            || self.output_lut.is_some()
+            || graded.is_some();
         if !floats {
             self.wide = None;
         } else if self
@@ -1874,7 +1889,7 @@ impl Screen {
                     blurred: &mut self.blurred,
                     below,
                     letters: &self.letters,
-                    titles,
+                    titles: &mixed,
                     size,
                     moves: &mut moves,
                     colors,
@@ -1900,7 +1915,7 @@ impl Screen {
                 }
                 pass.set_bind_group(0, &bind, &[]);
                 pass.draw(0..3, 0..1);
-                for (t, _) in titles
+                for (t, _) in mixed
                     .iter()
                     .zip(&nests.follows)
                     .filter(|(_, follows)| **follows == Some(next_mix))
@@ -1949,6 +1964,20 @@ impl Screen {
                 pass.draw(0..3, 0..1);
                 letter(&mut pass, lettering, &self.letters, &free, (i + 1, n));
                 i += 1;
+            }
+        }
+        if let (Some(w), Some(work)) = (wide, &graded) {
+            let canvas = blur::Texture {
+                texture: w.texture.clone(),
+                view: w.view.clone(),
+            };
+            let works = std::slice::from_ref(work);
+            self.blurred.composed(gpu, &canvas, works, &mut encoder);
+        }
+        if n > 0 && !late.is_empty() {
+            let mut pass = begin(&mut encoder, canvas, None);
+            for t in &late {
+                lettered_over(&mut pass, lettering, &self.letters, t);
             }
         }
         if let (Some(w), Some(table), Some(out), true) =
@@ -2008,6 +2037,7 @@ impl Screen {
         self.drawn_kernels = kernels.to_vec();
         self.drawn_colors = colors;
         self.drawn_output_lut = self.output_lut.clone();
+        self.drawn_timeline_grade = self.timeline_grade.clone();
         self.drawn_scoping = self.scoping;
         self.draws += 1;
         drawn

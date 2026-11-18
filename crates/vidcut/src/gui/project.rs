@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::Project;
-use vidcut_core::model::{Hdr, ProjectRetime, ProjectUpscaler, TimelineColors, TimelineSettings};
+use vidcut_core::model::{
+    DynamicsProfile, Hdr, ProjectRetime, ProjectUpscaler, TimelineColors, TimelineSettings,
+};
 use vidcut_core::time::{Rational, STANDARD_RATES, TimeSpec};
 
 use super::export::{Ask, Picked, near_center};
@@ -37,6 +39,7 @@ pub(super) struct Format {
     retime: ProjectRetime,
     upscaler: ProjectUpscaler,
     output_lut: Option<PathBuf>,
+    dynamics: DynamicsProfile,
 }
 
 impl Default for Format {
@@ -52,6 +55,7 @@ impl Default for Format {
             retime: ProjectRetime::Auto,
             upscaler: ProjectUpscaler::Auto,
             output_lut: None,
+            dynamics: DynamicsProfile::default(),
         }
     }
 }
@@ -85,6 +89,7 @@ impl Format {
             retime: p.settings.retime,
             upscaler: p.settings.upscaler,
             output_lut: p.settings.output_lut.clone(),
+            dynamics: p.settings.dynamics_profile,
         }
     }
 
@@ -176,6 +181,29 @@ impl Format {
                     })
                     .response
                     .labelled_by(label.id);
+                ui.end_row();
+            });
+    }
+
+    fn edit_dynamics(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new(ui.scope_id().with("dynamics"))
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Dynamics Profile");
+                ui.horizontal(|ui| {
+                    let last = vidcut_core::grade_keys::LAST_PROFILE;
+                    for (v, name) in [
+                        (&mut self.dynamics.start, "Start"),
+                        (&mut self.dynamics.end, "End"),
+                    ] {
+                        ui.label(name);
+                        let r = ui.add(egui::DragValue::new(v).range(0..=last).speed(0.1));
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::SpinButton, true, name)
+                        });
+                    }
+                });
                 ui.end_row();
             });
     }
@@ -714,6 +742,7 @@ impl Workspace {
                 format.edit(ui, (!empty).then_some("only with no timelines"));
                 format.edit_colors(ui, Some(&mut choose));
                 format.edit_ai(ui);
+                format.edit_dynamics(ui);
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let changes = changes(&format, &was);
@@ -768,6 +797,9 @@ fn changes(now: &Format, was: &Format) -> Value {
     if now.output_lut != was.output_lut {
         let path = now.output_lut.clone().unwrap_or_default();
         set.insert("output_lut".into(), json!(path));
+    }
+    if now.dynamics != was.dynamics {
+        set.insert("dynamics_profile".into(), json!(now.dynamics));
     }
     Value::Object(set)
 }

@@ -487,6 +487,7 @@ mod tests {
             name: "keys".into(),
             colors: None,
             output_lut: None,
+            timeline_grade: None,
         }
     }
 

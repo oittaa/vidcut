@@ -1,6 +1,6 @@
 use crate::effect_keys::Keyed;
 use crate::model::{
-    Clip, ClipAudio, Composition, Crop, Ease, Effect, Handle, Keyframe, Node, Picture,
+    Clip, ClipAudio, Composition, Crop, Ease, Effect, Grade, Handle, Keyframe, Node, Picture,
     PositionHandles, Title, TitleKind,
 };
 use crate::otio::effects::rounded;
@@ -651,6 +651,7 @@ impl Picture {
         PictureValue::ALL.into_iter().any(|v| self.has_keys(v))
             || self.effects.iter().any(Effect::has_keys)
             || self.nodes().any(Node::has_keys)
+            || self.grade.as_ref().is_some_and(Grade::is_keyed)
     }
 
     pub fn has_keys(&self, v: PictureValue) -> bool {
@@ -711,6 +712,7 @@ impl Picture {
             }
         }
         p.effects = self.effects.iter().map(|e| e.sampled(frame)).collect();
+        p.grade = self.grade.as_ref().map(|g| g.at(frame).into_owned());
         p.clear_keys();
         p
     }
@@ -732,6 +734,9 @@ impl Picture {
         }
         for e in &mut self.effects {
             e.keys.clear();
+        }
+        if let Some(g) = &mut self.grade {
+            g.clear_keys();
         }
     }
 
@@ -842,6 +847,9 @@ impl Picture {
         for e in &mut self.effects {
             e.scale_key_times(conv, ratio);
         }
+        if let Some(g) = &mut self.grade {
+            g.map_key_frames(conv);
+        }
     }
 
     pub fn retimed_to(&mut self, old: &Clip, new: &Clip) {
@@ -852,6 +860,9 @@ impl Picture {
         for e in &mut self.effects {
             e.retime_keys(old, new);
         }
+        if let Some(g) = &mut self.grade {
+            g.map_key_frames(|f| new.key_at(old.key_time(f)).round() as i64);
+        }
     }
 
     pub fn retarget(&mut self, map: impl Fn(i64) -> i64) {
@@ -861,6 +872,9 @@ impl Picture {
         }
         for e in &mut self.effects {
             e.retarget_keys(&map);
+        }
+        if let Some(g) = &mut self.grade {
+            g.map_key_frames(&map);
         }
     }
 

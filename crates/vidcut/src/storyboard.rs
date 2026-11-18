@@ -39,7 +39,11 @@ pub fn render(
         return Err(Error::invalid("the storyboard's range is empty"));
     }
     let plan = render::flatten(p, a, b)?;
-    let colors = (plan.colors, plan.output_lut.as_deref());
+    let colors = (
+        plan.colors,
+        plan.output_lut.as_deref(),
+        plan.timeline_grade.as_ref(),
+    );
     let at = |piece: &VideoPiece, k: i64| piece.part(k, 1);
     let mut cells = Vec::new();
     match every {
@@ -161,6 +165,8 @@ fn pictures(
                     };
                     part.iter()
                         .map(|c| {
+                            let grade = colors.2.map(|g| g.at(c.frame as f64));
+                            let colors = (colors.0, colors.1, grade.as_deref());
                             reader
                                 .rgba(&c.piece, fps, (w as u32, h as u32), colors)
                                 .map(|image| image.rgba)

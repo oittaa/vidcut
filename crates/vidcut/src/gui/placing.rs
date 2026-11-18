@@ -102,6 +102,7 @@ pub struct Grab {
     wheel: Option<Wheeled>,
     landing: Option<(String, Picture, Instant, Picture)>,
     sent: Vec<(String, Picture)>,
+    graded: Option<vidcut_core::model::Grade>,
 }
 
 impl Grab {
@@ -585,6 +586,16 @@ impl Workspace {
         if shown != g.sent {
             self.live.preview_pictures(shown.clone());
             g.sent = shown;
+        }
+        self.sync_grade_preview();
+    }
+
+    pub(super) fn sync_grade_preview(&mut self) {
+        let grade = self.timeline_grade_wanted();
+        let g = &mut self.timeline.picture_grab;
+        if grade != g.graded {
+            self.live.preview_grade(grade.clone());
+            g.graded = grade;
         }
     }
 

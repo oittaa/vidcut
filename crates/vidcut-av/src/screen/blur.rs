@@ -1,5 +1,6 @@
 use vidcut_core::grade::{
-    Grading, HALF_KNOTS, LOG_KNOTS, LogCurve, TONE_EPS, TONE_SIZE, tone_filter,
+    Graded, Grading, HALF_KNOTS, LOG_KNOTS, LogCurve, Pass as GradePass, TONE_EPS, TONE_SIZE,
+    tone_filter,
 };
 use vidcut_core::lru::Lru;
 use vidcut_core::model::GlowOutput;
@@ -44,7 +45,7 @@ const FLAG_SECOND: i32 = 4;
 
 const FLAG_NOISE: i32 = 8;
 
-const SPARE_TEXTURES: usize = 8;
+const SPARE_TEXTURES: usize = 16;
 
 const GRAIN_TILES: usize = 2;
 
@@ -55,6 +56,10 @@ const GRAIN_DETAIL: i32 = 2;
 const DETAIL_SLOTS: [u32; 2] = [4, 5];
 
 const GRADE_SLOTS: [u32; 2] = [6, 7];
+
+const MIX_PARALLEL: f64 = 0.0;
+
+const MIX_LAYER: f64 = 1.0;
 
 pub(super) struct Pipes {
     layout: wgpu::BindGroupLayout,
@@ -76,6 +81,7 @@ pub(super) struct Pipes {
     grade: wgpu::RenderPipeline,
     grade_stats: wgpu::RenderPipeline,
     grade_coef: wgpu::RenderPipeline,
+    grade_mix: wgpu::RenderPipeline,
 }
 
 impl Pipes {
@@ -171,6 +177,7 @@ impl Pipes {
             grade: pipeline(&plain, "fs_grade"),
             grade_stats: pipeline(&plain, "fs_grade_stats"),
             grade_coef: pipeline(&plain, "fs_grade_coef"),
+            grade_mix: pipeline(&plain, "fs_grade_mix"),
             layout,
             reading,
         }
@@ -1187,6 +1194,85 @@ fn grade_into(
     landed(gpu, own, (made, free), on, encoder);
 }
 
+fn mix_into(
+    gpu: &Gpu,
+    on: &Texture,
+    (top, base): (&Texture, &Texture),
+    (scratch, how): (&Texture, [f64; 2]),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let bytes = float_bytes(&[how[0], how[1], 0.0, 0.0]);
+    let views = Views {
+        source: &top.view,
+        second: &base.view,
+        ..Views::same(&on.view)
+    };
+    draw_step(
+        gpu,
+        (&gpu.blur.grade_mix, &bytes[..]),
+        views,
+        &scratch.view,
+        encoder,
+    );
+    encoder.copy_texture_to_texture(
+        scratch.texture.as_image_copy(),
+        on.texture.as_image_copy(),
+        on.texture.size(),
+    );
+}
+
+fn graded_into(
+    gpu: &Gpu,
+    own: &Texture,
+    (scratch, spare): (&[Texture; 2], &mut Spare),
+    (graded, effect): (&Graded, &Working),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let size = own.texture.size();
+    let (w, h) = (size.width, size.height);
+    let slot = |i: usize| GRADE_SLOTS[1] + i as u32;
+    let taken: Vec<Texture> = (1..graded.registers)
+        .map(|i| match spare.remove(&(w, h, slot(i))) {
+            Some((_, t)) => t,
+            None => Texture::new(gpu, (w, h)),
+        })
+        .collect();
+    let at = |r: usize| if r == 0 { own } else { &taken[r - 1] };
+    for pass in &graded.passes {
+        match pass {
+            GradePass::Copy { from, to } => encoder.copy_texture_to_texture(
+                at(*from).texture.as_image_copy(),
+                at(*to).texture.as_image_copy(),
+                size,
+            ),
+            GradePass::Correct { on, grading } => grade_into(
+                gpu,
+                at(*on),
+                (scratch, &mut *spare),
+                (grading.as_ref(), effect, None),
+                encoder,
+            ),
+            GradePass::Parallel { on, change, base } => mix_into(
+                gpu,
+                at(*on),
+                (at(*change), at(*base)),
+                (&scratch[0], [MIX_PARALLEL, 0.0]),
+                encoder,
+            ),
+            GradePass::Layer { on, top, mode } => mix_into(
+                gpu,
+                at(*on),
+                (at(*top), at(*on)),
+                (&scratch[0], [MIX_LAYER, f64::from(mode.code())]),
+                encoder,
+            ),
+        }
+    }
+    for (i, t) in taken.into_iter().enumerate() {
+        spare.insert((w, h, slot(i + 1)), t);
+    }
+}
+
 fn gaussian_ways(sigma: f64) -> Vec<(Pass, bool)> {
     let want = [sigma, sigma, sigma, 0.0];
     passes(want)
@@ -1352,9 +1438,9 @@ fn effects_into(
                 grain_into(gpu, own, room, (grain.as_ref(), effect, on), encoder);
                 continue;
             }
-            Work::Grade(grading) => {
+            Work::Grade(graded) => {
                 let room = (scratch, &mut worked.spare);
-                grade_into(gpu, own, room, (grading.as_ref(), effect, on), encoder);
+                graded_into(gpu, own, room, (graded.as_ref(), effect), encoder);
                 continue;
             }
             Work::Vignette(shading) => {

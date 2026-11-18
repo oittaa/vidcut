@@ -1689,6 +1689,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
             &'a str,
             i64,
             Option<crate::model::TimelineSettings>,
+            Option<&'a crate::model::Grade>,
         ),
     }
     fn index(p: &Project, sheet: bool) -> HashMap<&str, Named<'_>> {
@@ -1702,7 +1703,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         for t in &p.timelines {
             m.insert(
                 t.id.as_str(),
-                Named::Timeline(&t.name, &t.bin, t.start_tc, t.own),
+                Named::Timeline(&t.name, &t.bin, t.start_tc, t.own, t.grade.as_ref()),
             );
         }
         if !sheet {
@@ -2396,6 +2397,55 @@ pub fn resolve_clip(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<S
 
 fn resolve_clips(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result<Vec<String>> {
     refs.iter().map(|r| resolve_clip(p, r, playhead)).collect()
+}
+
+fn grades_of(
+    p: &mut Project,
+    clips: &Option<OneOrMany<ClipRef>>,
+    timeline: bool,
+    playhead: Option<i64>,
+) -> Result<Vec<ops::grade::GradeOf>> {
+    match (clips, timeline) {
+        (Some(_), true) => Err(Error::usage("give `clips` or `timeline`, not both")),
+        (None, false) => Err(Error::usage(
+            "give `clips`, or `timeline` for the timeline grade",
+        )),
+        (None, true) => {
+            need_timeline(p)?;
+            Ok(vec![ops::grade::GradeOf::Timeline])
+        }
+        (Some(refs), false) => Ok(resolve_clips(p, &refs.to_vec(), playhead)?
+            .into_iter()
+            .map(ops::grade::GradeOf::Clip)
+            .collect()),
+    }
+}
+
+fn time_or_playhead(
+    p: &Project,
+    at: Option<&TimeSpec>,
+    playhead: Option<i64>,
+) -> Result<Option<i64>> {
+    match at {
+        Some(t) => resolve(p, t, playhead).map(Some),
+        None => Ok(playhead),
+    }
+}
+
+fn grade_of(
+    p: &Project,
+    clip: &Option<ClipRef>,
+    timeline: bool,
+    playhead: Option<i64>,
+) -> Result<ops::grade::GradeOf> {
+    match (clip, timeline) {
+        (Some(_), true) => Err(Error::usage("give `clip` or `timeline`, not both")),
+        (None, false) => Err(Error::usage(
+            "give `clip`, or `timeline` for the timeline grade",
+        )),
+        (None, true) => Ok(ops::grade::GradeOf::Timeline),
+        (Some(r), false) => resolve_clip(p, r, playhead).map(ops::grade::GradeOf::Clip),
+    }
 }
 
 fn resolve_holder(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<String> {
@@ -4519,23 +4569,134 @@ fn mutate(
             ops::picture::clear(p, &ids, *tool)?;
             Value::Null
         }
-        Request::GradeSet { clips, change } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            ops::grade::set(p, &ids, change)?;
+        Request::GradeSet {
+            clips,
+            timeline,
+            node,
+            at,
+            node_change,
+            change,
+        } => {
+            let of = grades_of(p, clips, *timeline, playhead)?;
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
+            ops::grade::set(p, &of, node.unwrap_or(1), (change, node_change), at)?;
             Value::Null
         }
-        Request::GradeClear { clips } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            ops::grade::clear(p, &ids)?;
+        Request::GradeClear {
+            clips,
+            timeline,
+            node,
+            keep_nodes,
+            at,
+        } => {
+            let of = grades_of(p, clips, *timeline, playhead)?;
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
+            ops::grade::clear(p, &of, (*node, *keep_nodes), at)?;
             Value::Null
         }
         Request::GradePrinter {
             clips,
+            timeline,
+            node,
+            at,
             color,
             points,
         } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            ops::grade::printer(p, &ids, (*color, *points), &env.printer_lights())?;
+            let of = grades_of(p, clips, *timeline, playhead)?;
+            let lights = env.printer_lights();
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
+            let n = (node.unwrap_or(1), at);
+            ops::grade::printer(p, &of, n, (*color, *points), &lights)?;
+            Value::Null
+        }
+        Request::GradeAdd {
+            clip,
+            timeline,
+            add,
+            node,
+            place,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade::add(p, &of, *add, *node, *place)?
+        }
+        Request::GradeRemove {
+            clip,
+            timeline,
+            node,
+            extract,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade::remove(p, &of, *node, *extract)?;
+            Value::Null
+        }
+        Request::GradeConnect {
+            clip,
+            timeline,
+            node,
+            input,
+            from,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade::connect(p, &of, *node, *input, *from)?;
+            Value::Null
+        }
+        Request::GradeKeysAdd {
+            clip,
+            timeline,
+            node,
+            at,
+            kind,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let at = time_or_playhead(p, at.as_ref(), playhead)?
+                .ok_or_else(|| Error::usage("give `at`: there is no playhead"))?;
+            ops::grade_keys::add(p, &of, *node, at, *kind)?
+        }
+        Request::GradeKeysSet {
+            clip,
+            timeline,
+            node,
+            frames,
+            at,
+            kind,
+            start,
+            end,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let pick = key_pick(p, frames, at, playhead)?;
+            let change = ops::grade_keys::KindChange {
+                kind: *kind,
+                start: *start,
+                end: *end,
+            };
+            ops::grade_keys::set(p, &of, *node, &pick, &change)?;
+            Value::Null
+        }
+        Request::GradeKeysMove {
+            clip,
+            timeline,
+            node,
+            frames,
+            at,
+            by,
+            to,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let pick = key_pick(p, frames, at, playhead)?;
+            let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            ops::grade_keys::shift(p, &of, *node, &pick, (*by, to))?;
+            Value::Null
+        }
+        Request::GradeKeysRemove {
+            clip,
+            timeline,
+            node,
+            frames,
+            at,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let pick = key_pick(p, frames, at, playhead)?;
+            ops::grade_keys::remove(p, &of, *node, &pick)?;
             Value::Null
         }
         Request::EffectsAdd { clips, kind } => {
@@ -7055,6 +7216,11 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             None => {}
         }
         p.set_start_tc(t.start_tc);
+        if let Some(grade) = t.grade.clone()
+            && let Some(open) = p.timeline_mut()
+        {
+            open.grade = Some(grade);
+        }
         p.settings.auto_format = false;
     }
     if t.fps != p.fps() {
@@ -7606,6 +7772,15 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     if let Some(path) = &set.output_lut {
         p.settings.output_lut = checked_lut(env, path)?;
     }
+    if let Some(profile) = set.dynamics_profile {
+        let last = crate::grade_keys::LAST_PROFILE;
+        if profile.start > last || profile.end > last {
+            return Err(Error::invalid(format!(
+                "the dynamics profile's start and end must be from 0 to {last}"
+            )));
+        }
+        p.settings.dynamics_profile = profile;
+    }
     if let Some(fillers) = &set.fillers {
         crate::preferences::set_fillers(&mut p.settings.fillers, fillers)?;
     }
@@ -7960,9 +8135,10 @@ pub fn query(
         ),
         Request::BinsList {} => json!(p.bins),
         Request::TimelineList {} => ops::timelines::list(p),
-        Request::GradeGet { clip } => {
-            let id = resolve_clip(p, clip, playhead)?;
-            ops::grade::get(p, &id)?
+        Request::GradeGet { clip, timeline, at } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let at = at.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            ops::grade::get(p, &of, at)?
         }
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;

@@ -76,9 +76,20 @@ Colors:
   - SDR takes 10 bits only from the encoder that an 8-bit export starts with. Why: vidcut does not move to a slower encoder for 10 bits.
   - DNxHR HQ in 10 bits becomes HQX (`ColorChoice::apply`).
 - `export::choose_metadata` picks the HDR metadata, by the rules of `vidcut_core::export` (spec D46). With an SDR timeline, each picture counts as SDR.
-- With a LUT in the plan (`RenderPlan::has_lut`), `metadata::choose_through_lut` takes nothing from the sources. Why: a LUT changes the light of the picture.
+- With a grade or a LUT in the plan (`RenderPlan::changes_light`), `metadata::choose_graded` takes nothing from the sources. Why: a grade or a LUT changes the light of the picture.
+  - A grade counts only when it has keyframes or `Graded::of` gives passes (`Grade::is_active`). The grades inside compound clips count too.
   - It keeps the mastering display and the light that the user gives. The report says this.
-  - It does not measure the light. The [todo](../todo/luts.md) holds that work.
+  - Without given light, the choice says that the output frames give it (`metadata::FROM_OUTPUT`). The plan shows this.
+  - An asked HDR10+ or Dolby Vision gets a line that says that the grade drops it (`metadata::GRADED_DROPS`).
+  - The report, the job details and a line beside the metadata menu of the export window show that line (`graded_drops`).
+- Before the export, `export::choose_colors` measures the light of those output frames (`export::output_light`).
+  - `output_light` draws each frame as the encode does (`frames_of`). It uses the same decoder, draw, grades, LUTs and burned subtitles.
+  - It uses the sizes of the export and the pixel format of the first encoder (`encode::resolve_video`).
+  - The frames come back to memory. `light::made_level` measures them with `light::Meter` on up to four threads. It keeps only the highest light and the highest frame average so far.
+  - The source files use the same math (`measure_with`). `light::level_of` gives MaxCLL and MaxFALL for both.
+  - `MetadataChoice::measured` puts the values into the choice. The report says that they come from the output frames.
+  - `export::run_decoding_on` does the same when it chooses the metadata itself.
+  - Nothing keeps the result. Why: any edit can change the frames.
 - An export first measures the light that the files do not state (`Lights::analysis`), and caches it.
   - The GPU measures the HDR pictures that stay on the GPU ([gpu](gpu.md#the-light-meter)).
   - A generator has no file. Thus it adds no light (`light::sampled`).
@@ -739,17 +750,44 @@ The draw:
 
 ## The grade
 
-The primary correction of a clip (`model::Grade`, the `grade.set` request, the Color page):
+The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 
+- A grade is a list of nodes (`GradeNode`). Each node is a corrector (`model::Corrector`) or a mixer (`GradeTool`).
+  - Each node names the nodes on its inputs by number. The number 0 is the picture that comes in. `Grade::output` names the node that goes out.
+  - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
+  - It also refuses a corrector without one input and a mixer without an input.
+  - `ops::grade` changes the tree for `grade.add`, `grade.remove` and `grade.connect`. A removed node gives each node after it one number less (`renumbered`).
+  - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
 - `Placing::new` adds the grade after the effects of the clip, as the last `place::Working` (`Work::Grade`).
   - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
-  - A grade at its defaults is left out (`Grade::is_usual`).
+  - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
+- `Graded::of` makes the tree into a list of passes on numbered textures (`grade::Pass`). A grade with only copies is no grade.
+  - `grade::complete` tells if the grade works. Else the grade does nothing, as in the spec (§8.21).
+  - It works when something goes out, each input of a corrector has a link, each mixer has a link, and each node goes somewhere.
+  - `grade::order` puts each node after the nodes on its inputs.
+  - Texture 0 is the picture of the clip. A node writes on the texture of its first input when no other node reads it later. Else a `Copy` pass first gives it a new texture (`Registers`).
+  - Why: most trees then need no texture more than the picture.
+  - A corrector that is off or at its defaults takes the texture of its input. It costs no pass.
+  - A `Correct` pass runs `grade_into` with the `Grading` of the corrector.
+  - A `Parallel` pass adds the change of one input: mix + input − base.
+  - `grade::base` finds the base: the nearest node that each path to each input goes through. An input counts for its own path.
+  - `grade::passed` gives these nodes for each node, from the source, in the order of `grade::order`.
+  - A `Layer` pass puts one input over the mix of the inputs before it, with the composite mode of the mixer. The passes go in input order.
+  - A Layer Mixer that is off mixes in Normal. A Parallel Mixer that is off mixes as when on.
+  - An input with no link gives no pass.
+  - The last pass copies the output to texture 0.
+- `graded_into` runs the passes. Each texture past 0 has the size of the picture. They stay between draws in the spare textures, in the slots after `GRADE_SLOTS`. One limit holds all spare textures (`SPARE_TEXTURES`).
+- `fs_grade_mix` makes a `Parallel` or a `Layer` pass in a scratch texture. A copy then takes it back.
+  - `Layer` uses `mixed`, the composite of the timeline, on the colors without their alpha. Thus a Layer Mixer and a track give the same mix.
+  - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.
 - `grade.set` and `grade.get` refuse a title or a generator. The Color page takes its clip with `topmost_by` and `takes_effects`, so it skips them.
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
-- `Grading::of` changes the values of the controls into the numbers that `fs_grade` uses:
+- `Grading::of` changes the values of a corrector into the numbers that `fs_grade` uses:
   - Temp and Tint give one 3×3 matrix. It adapts the white of 6500 K to the new white, with the Bradford cone matrix.
-  - The new white is on the Planck curve at 6500 K minus Temp. Tint moves it across the curve.
-  - `PLANCK_U` and `PLANCK_V` give the Planck curve in CIE 1960 uv. From 2000 K to 12000 K, the error is less than 2e-6.
+  - The new white is at 6500 K minus Temp, in CIE 1960 uv. `ISOTEMPERATURE` is the table of Robertson (1968). `white_xyz` reads it linearly in mired.
+  - Tint moves the white along the isotemperature line. Its direction is the mean of the unit directions of the two rows, weighted as the row values.
+  - The way back from the cones is `BRADFORD_BACK`, the inverse of the Bradford matrix rounded to 4 decimals. The renders fit this matrix to 6e-8, and the exact inverse to 1.6e-4 only.
+  - At Temp 0 and Tint 0, the matrix is the identity. The rounded inverse would move the colors by 1.6e-4 there, and the renders show no change.
   - `wheel` keeps Gain at `WHEEL_LEAST_GAIN` or more, and the stored Lift at `WHEEL_MOST_LIFT` or less. Lift also stops where the slope reaches `WHEEL_STEEPEST` ([spec §8.20](../spec.md#820-primaries-palette-pp-118-31413159)).
   - Saturation and Hue give one 3×3 matrix.
   - Contrast is a curve about the pivot (`ContrastCurve`). Its knots give exact Hermite segments, with no table.
@@ -784,6 +822,54 @@ The primary correction of a clip (`model::Grade`, the `grade.set` request, the C
   8. Saturation and Hue.
 - The grade works on the colors without their alpha, as an effect with Use Alpha off does.
 - Below 0 and above 1, the Contrast curve and the Log curves continue on straight lines.
+
+The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline switch of the Color page):
+
+- It has the math of the grade of a clip. `Working::graded` makes the same `Work::Grade` for both.
+- `RenderPlan::timeline_grade` holds the grade of the open timeline. A plan of a source, of a generator or of the render cache has none.
+- `Screen::draw` runs it on the whole canvas after the last layer and title (`Screen::set_timeline_grade`, `Blurred::composed`).
+  - The canvas is then `Wide`. Thus the grade gets float colors.
+  - A gap and the bars around a smaller picture get the grade. The filter of the tone stage reads them, as in the spec (§8.20).
+  - A gap is a black layer of the draw (`VideoFrames::solid_frame`), in the player, the export, `frame.render` and the storyboard. Thus it takes the same route as a picture.
+  - With alpha output, the gap layer is transparent. The grade keeps a pixel with no alpha empty.
+  - A draw with no layer has no grade, as it has no output LUT. An example is the draw of the viewer before its first picture.
+- The burned subtitles go on the canvas after the grade (`TitleOver::SUBTITLES`). Then `fs_lut` runs the output LUT.
+- The viewer gets the grade from the player (`Shown`). `Player::preview_grade` shows a dragged grade before the project has it.
+- An export gets it with `VideoFrames::with_timeline_grade`. `frame.render`, the storyboard and `FrameReader` get it in `Finish`.
+- The render cache holds no timeline grade. Thus a change of the timeline grade renders nothing again.
+- An export with a timeline grade copies no frame ([bypass re-encode](#bypass-re-encode)). A grade that draws nothing does not count (`Grade::is_active`).
+- An OTIO file of vidcut keeps the grade in the vidcut metadata of the timeline (`otio::Imported`).
+
+The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes panel of the Color page):
+
+- `GradeNode::keys` holds the keyframes of a corrector, in the order of their frames. A mixer has none.
+  - Each `GradeKey` holds every value of the corrector, its `GradeKeyKind`, and its `start` and `end`.
+  - A keyframe of a clip grade is on a source frame, as a `Keyframe` of an effect is. A keyframe of the timeline grade is on a timeline frame.
+  - `ops::grade::checked` refuses keyframes on a mixer, frames out of order, two keyframes on one frame, and a `start` or `end` past `LAST_PROFILE`.
+- `GradeNode::corrector_at` gives the values on a frame:
+  - Before the first keyframe, they are the values of the corrector itself.
+  - After a Static keyframe, or after the last keyframe, the values of that keyframe hold.
+  - After a Dynamic keyframe, `Dissolve::at` gives the weight of the next keyframe. `Corrector::blended` then mixes each value linearly.
+  - Why linear: the renders of the spec equal a grade with no keyframes at the blended values (spec §8.22).
+- `Dissolve::of` finds the joints of the curve once: where the straight line touches the start curve and the end curve.
+  - `root` scans `STEPS` points for a change of sign, and then halves the step `HALVINGS` times.
+  - Where no line touches both curves, the joint is where the slopes of the two curves are equal.
+  - There, a line touches the curve that is farther from w = u. It ends where it meets the other curve.
+- `Grade::at` gives the grade of one frame, with no keyframes. Each path that draws a frame takes it:
+  - `Placing::new` gives `Working::graded` the clip grade at the source frame of the placement. `Picture::sampled` does the same.
+  - The player gives the viewer the timeline grade at the playhead (`Shown`).
+  - `VideoFrames::grading_from` gives an export the timeline frame of its first frame. Each drawn frame then sets the timeline grade of its own frame.
+  - `frame.render` and the storyboard give `Finish` the timeline grade of their frame.
+- `ops::grade_keys` changes the keyframes for `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`.
+  - `at` is a timeline time. On a clip, `Clip::content_at` gives its source frame (`ops::grade::frame_of`).
+  - A new keyframe takes the values of `corrector_at` on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
+- `grade.set` and `grade.printer` change the values with `GradeNode::change_at`:
+  - The keyframe on or before `at` changes (`GradeNode::changed_key`). Before the first keyframe, the corrector itself changes.
+  - A Static keyframe, or the corrector itself, and the Dynamic keyframe right after it are a pair.
+  - The other keyframe of the pair takes only the values that changed (`Corrector::carried`). Each channel of a wheel is one value.
+- `grade.clear` with `node` or `keep_nodes` puts these values back to the usual values in the same way. The keyframes stay.
+  - `grade.clear` alone gives `Grade::default`, with no keyframes.
+- `Picture::retimed_to`, `Picture::scale_times` and `Picture::retarget` move the keyframes of a clip grade with the keyframes of its effects.
 
 A made frame of a speed change ([which source frame](#which-source-frame)):
 

@@ -106,6 +106,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
         if method == "motion.find" {
             found_paths(&r.result);
         }
+        if method == "grade.add" {
+            println!("  node     {}", r.result["node"]);
+        }
         if method == "motion.track" {
             let v = &r.result;
             let text = |key: &str| v[key].as_str().unwrap_or("-").to_string();
@@ -1418,13 +1421,19 @@ fn live(method: &str, r: &Response) -> Option<()> {
             println!("ok {method}")
         }
         "gui.state" | "gui.show" | "gui.close" | "gui.target" | "gui.timeline" | "gui.page"
-        | "gui.nodes" | "gui.page_time" => {
+        | "gui.nodes" | "gui.grade_nodes" | "gui.page_time" => {
             let t = &v["timeline"];
             let nodes: Vec<&str> = v["nodes"]
                 .as_array()
                 .into_iter()
                 .flatten()
                 .filter_map(Value::as_str)
+                .collect();
+            let grade_nodes: Vec<String> = v["grade_nodes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(Value::to_string)
                 .collect();
             println!("page {}", v["page"].as_str().unwrap_or("-"));
             println!(
@@ -1434,6 +1443,15 @@ fn live(method: &str, r: &Response) -> Option<()> {
                     "-".to_string()
                 } else {
                     nodes.join(" ")
+                }
+            );
+            println!(
+                "color grade {}, nodes {}",
+                v["grade"].as_str().unwrap_or("-"),
+                if grade_nodes.is_empty() {
+                    "-".to_string()
+                } else {
+                    grade_nodes.join(" ")
                 }
             );
             let on = |k: &str| if t[k] == true { "on" } else { "off" };
@@ -1940,6 +1958,9 @@ fn print_metadata(m: &Value) {
         return;
     }
     println!("    HDR metadata: {}", crate::export::metadata_words(m));
+    for line in crate::export::graded_drops(m) {
+        println!("    {line}");
+    }
 }
 
 fn print_copies(c: &Value) {

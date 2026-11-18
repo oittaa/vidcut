@@ -1743,6 +1743,29 @@ fn fs_grade(in: Out) -> @location(0) vec4<f32> {
     return effect_mixed(px, vec4<f32>(made, was.a), grading.boost.y, 0.0);
 }
 
+struct GradeMix {
+    how: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> grade_mixing: GradeMix;
+@group(0) @binding(14) var grade_base: texture_2d<f32>;
+
+@fragment
+fn fs_grade_mix(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let under = textureLoad(blur_start, px, 0);
+    let top = textureLoad(blur_source, px, 0);
+    if grade_mixing.how.x < 0.5 {
+        return under + top - textureLoad(grade_base, px, 0);
+    }
+    let a = under.a;
+    if a <= 0.0 {
+        return under;
+    }
+    let m = mixed(u32(grade_mixing.how.y + 0.5), top.rgb / a, under.rgb / a);
+    return vec4<f32>(m * a, a);
+}
+
 struct Mosaic {
     grid: vec4<f32>,
     way: vec4<i32>,

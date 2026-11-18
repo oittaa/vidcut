@@ -9,13 +9,12 @@ The Color section of the Cut page viewer Tools has one control, Auto Color. vidc
 - Auto Color balances the blacks and the whites of the current clip.
 - It uses the frame at the playhead.
 - It is the color item in the Cut page scope ([spec §1](../spec.md#1-scope)).
-- The primary correction of the Color page is a different control ([primary-grade.md](primary-grade.md)).
 
 **In the code:**
 
 - The viewer Tools row has Transform, Crop and Dynamic Zoom ([spec §8.15](../spec.md#815-transform-and-crop-pp-766768)).
 - That row has no Color section.
-- Each clip has a primary correction on the Color page ([primary-grade.md](primary-grade.md)).
+- Each clip has a primary correction on the Color page ([spec §8.20](../spec.md#820-primaries-palette-pp-118-31413159)).
 
 **To do:**
 

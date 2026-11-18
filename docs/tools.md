@@ -210,7 +210,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
     - The wait for the draw has two parts: the wait for the GPU, and the copy into the encoder's frame.
     - The draw is the CPU's time to record and submit the GPU's work. It does not wait for the GPU.
     - When NVENC takes the planes in GPU memory, the encoder's thread waits for the GPU. Otherwise, the export thread waits for it in the encoder's planes.
-    - The line times only the last pass over the frames. It leaves out the first pass of a two-pass export and the HDR10+ light measurement.
+    - The line times only the last pass over the frames. It leaves out the first pass of a two-pass export and the light measurements.
   - The `[upscale]` lines give the time of each step of each AI Fast chunk.
   - The `[flashvsr]` lines give the time of each step of each AI Slow chunk: the input projection, the blocks and the decoder. They also give how many caches are in main memory, how many GB go there and back, and how long AI Slow waits for them.
   - On macOS, an `[ai]` line names the pixel formats that each processor of macOS takes, as four-character codes (`format_in`). A 10-bit or half-float format can carry HDR.

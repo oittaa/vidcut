@@ -1076,6 +1076,7 @@ fn clip_plan(plan: &RenderPlan, layer: VideoPiece, (width, height): (u32, u32)) 
         name: plan.name.clone(),
         colors: plan.colors,
         output_lut: None,
+        timeline_grade: None,
     }
 }
 
@@ -1104,6 +1105,7 @@ pub fn segment(plan: &RenderPlan, look: &Look, start: i64, frames: i64) -> Rende
         name: plan.name.clone(),
         colors: plan.colors,
         output_lut: None,
+        timeline_grade: None,
     }
 }
 
@@ -1423,6 +1425,7 @@ mod tests {
             name: "title".into(),
             colors: None,
             output_lut: None,
+            timeline_grade: None,
         }
     }
 
@@ -1488,6 +1491,7 @@ mod tests {
             name: "blocked".into(),
             colors: None,
             output_lut: None,
+            timeline_grade: None,
         };
         let project = Project::new(Settings::default());
         let prefs = RenderCachePrefs::default();

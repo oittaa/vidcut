@@ -2753,7 +2753,7 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - Wheels and Bars show the same controls: Lift, Gamma and Gain of Y, R, G and B, and Offset of R, G and B.
   - Log shows Shadow, Midtone, Highlight and Offset wheels. It also shows Low Range and High Range (p. 3156).
   - Each clip has one or more nodes, and each node holds corrections (p. 3385).
-  - vidcut: each clip has one primary correction. Nodes come later ([todo](todo/color-page.md)).
+  - vidcut: the palette shows the corrector that is the current node ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
 - **Clips**, measured in Resolve Studio 21.2:
   - Generators and Text titles take no grade. They are not in the clip strip of the Color page.
   - Text+ titles and compound clips take a grade.
@@ -2785,12 +2785,280 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
   - Measured: one point moves its channel by the Step Size times the Density Increment of that channel. With the defaults, this is 1 on the Offset number.
   - The Color panel of the User Preferences has Printer Light Step Calibration (p. 118). It has Lab Aim Density, Step Size and Density Increment for R, G and B.
   - Measured defaults: Lab Aim Density is 25, Step Size is 1, and Density Increment is 1. Lab Aim Density did not change a printer point.
-  - Printer Light Hotkeys in the Color menu turn on the printer point keys of the numeric keypad (p. 3158).
+  - Printer Light Hotkeys in the Color menu turn on the printer point keys of the numeric keypad (p. 3158). Its key is Ctrl+Alt+` (Option-Command-` on a Mac).
   - Measured: Cyan moves G and B, Magenta moves R and B, Yellow moves R and G, and Master moves all three.
-  - vidcut: the Plus and Minus buttons, and the Color page of the preferences with Step Size and Density Increment.
-  - vidcut: the hotkeys come later ([todo](todo/color-page.md)).
+  - The full point keys (p. 3158; Master measured):
 
-Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`. `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
+    | Channels | Plus | Minus |
+    |---|---|---|
+    | Master | Num++ | Num+Enter |
+    | Red | Num+7 | Num+4 |
+    | Green | Num+8 | Num+5 |
+    | Blue | Num+9 | Num+6 |
+    | Cyan | Num+1 | Num+- |
+    | Magenta | Num+2 | Num+0 |
+    | Yellow | Num+3 | Num+. |
+
+  - The same keys with Ctrl (Command on a Mac) give a quarter point, for example Ctrl+Num+7. The half points have no keys (p. 3158).
+  - A key of the numeric keypad is a key of its own in Keyboard Customization (p. 125).
+  - A key of the numeric keypad that has an action does that action. The other keys of the numeric keypad type timecode (p. 878).
+  - Measured in Resolve Studio 21.2 (Windows):
+    - The Color menu has the item Printer Light Hotkeys (Ctrl+Alt+`). Under it are three submenus: Full Printer Light, Half Printer Light and Quarter Printer Light.
+    - Each submenu has 14 items in this order: Master +, Master -, Red +, Red -, Green +, Green -, Blue +, Blue -, Cyan +, Cyan -, Magenta +, Magenta -, Yellow +, Yellow -.
+    - The menu and Keyboard Customization name a key of the numeric keypad Num+ and the key, for example Num+7, Num++ and Num+Enter.
+    - The state of Printer Light Hotkeys stays after a restart.
+    - On the Edit page, the item Printer Light Hotkeys is grey, and its check mark stays. The three submenus are grey too.
+    - A held key of the numeric keypad repeats. Ten repeats of Num+7 moved the Red Offset by 10 points.
+    - With Num Lock off, the 7 of the numeric keypad gives Home. It did not move a printer point.
+  - vidcut: the Plus and Minus buttons, and the Color page of the preferences with Step Size and Density Increment.
+  - vidcut: the Color menu has the three submenus, with the 14 items each. Each item sends `grade.printer` for the current node of the grade that the palette shows.
+  - vidcut: on the other pages, the three submenus are grey.
+  - vidcut: the Color menu has no Printer Light Hotkeys item, and the printer items have no keys. The keys of the numeric keypad wait for egui ([todo](todo/egui-keypad-keys.md)).
+- **Grades in timeline files**, measured by script in Resolve Studio 21.2 with a CDL on a clip:
+  - The OTIO export has no grade. The `Resolve_OTIO` metadata of the clip is empty.
+  - The EDL export with CDL gives each event an `*ASC_SOP` line and an `*ASC_SAT` line, with six decimals.
+  - The ALE export with CDL gives the columns `ASC_SOP` and `ASC_SAT`, with four decimals.
+  - A timeline import of an OTIO or an EDL gives no grade. This is also true for the `cdl` clip metadata of the CMX adapter of OTIO.
+  - Only a Final Cut Pro X XML brings a primary grade in on import (p. 469).
+  - ColorTrace from CDL applies the CDL of an EDL to the clips of a timeline (pp. 3472–3474). The result is the same as a CDL that a script sets.
+  - vidcut: an OTIO file of vidcut keeps the grade of each clip in the vidcut metadata of its picture. Resolve does not read it.
+- **Timeline grade** (pp. 3404–3405, 3407):
+  - The Node Editor has a Clip mode and a Timeline mode. A menu at its top right selects the mode.
+  - The Timeline grade is one grade for the whole timeline. It applies to all clips at the same time.
+  - It comes after the track compositing ([§13](#13-order-of-operations-pp-287296-3407)).
+  - The Reset All Grades and Nodes command of the Color menu can reset the Timeline grade (pp. 3393, 3404).
+  - Measured in Resolve Studio 21.2 with float renders:
+    - The math is the math of a clip grade. Lift Y 0.2 gives 0.4 + 0.6 × x, because the stored Lift is two times the field.
+    - Contrast 1.5 and Gain Y 0.5 also give the values of a clip grade. The difference is 2e-7 at most.
+    - Inside the picture, Shadows 30 gives the values of a clip grade.
+    - The grade works on the mixed picture of all tracks.
+    - A gap gets the grade. With Lift Y 0.2, the black of a gap becomes 0.4.
+    - The black bars around a smaller clip get the grade. The filter of Shadows reads them.
+    - At an edge with partial alpha, the result is different from a clip grade. Why: the timeline grade works after the alpha mix.
+    - Burned-in subtitles come after the grade. With a timeline Gain of 0.5, white text stays at 1.0.
+    - The OTIO export of Resolve has no timeline grade. An OTIO import gives no timeline grade.
+  - vidcut: each timeline has one grade of nodes, as a clip has. The project file and the undo history keep it.
+  - vidcut: the Color page has a Clip and Timeline switch at its top right. Timeline shows the timeline grade in the palette.
+  - vidcut: an OTIO file of vidcut keeps the timeline grade in the vidcut metadata of the timeline. Resolve does not read it.
+
+Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
+
+- Each takes `clips` (`clip` for `grade.get`), or `timeline` for the timeline grade of the open timeline.
+- `grade.set`, `grade.clear` and `grade.printer` take `node`, the number of a corrector. Without it, they change node 1.
+- `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
+- `gui.page` with `grade` selects Clip or Timeline on the Color page.
+
+### 8.21 Color page nodes (pp. 3385–3399, 3409–3415)
+
+- **The node tree** (pp. 3385–3390):
+  - Each clip has one node by default. Each node holds corrections (p. 3385).
+  - The Node Editor is at the right of the viewer. A drag on the border between them changes its width (p. 3387).
+  - The picture flows from the Source input at the left of the Node Editor, through the nodes, to the Node Tree output (p. 3389).
+  - The Node Tree output is at the right of the Node Editor (p. 3389).
+  - A Corrector node has an RGB input and an RGB output. Inputs are triangles, and outputs are squares (p. 3388).
+  - A corrector has an effect only when its RGB input and its RGB output have connections (p. 3389).
+  - A node with no connection turns the grade off. With no connection to the Node Tree output, the grade is off too (p. 3389).
+  - Only one RGB output connects to the Node Tree output (p. 3389).
+  - Nodes are numbered in the order in which they were added (pp. 3390, 3395).
+  - Measured in Resolve Studio 21.2: the still file of a grade holds the number of each node in the Node Editor.
+  - Measured: in a grade with three correctors and a Key Mixer, the third corrector had number 4. Thus a mixer has a number too.
+  - vidcut: a grade is a list of nodes. The number of a node is its place in the list, from 1. The number 0 is the Source input.
+  - Measured in Resolve Studio 21.2: a mixer shows no number in the Node Editor.
+  - vidcut: the Node Editor shows the number of each corrector. A mixer shows its kind and no number.
+- **The current node** (p. 3391):
+  - The current node has an orange outline. The palettes change the current node.
+  - A Command-click or a drag box selects more nodes. They have a white outline. The current node stays orange.
+  - Resolve keeps the last current node of each clip. The setting "Switching clips" changes this.
+  - Measured in Resolve Studio 21.2: a drag box from the empty Node Editor selects the nodes in the box.
+  - Measured: a click on the empty Node Editor keeps the current node.
+  - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
+  - vidcut: a Ctrl-click adds a node to the selection, and a drag box adds the nodes in the box. The current node stays.
+  - vidcut: a new clip or a new grade mode selects node 1 ([todo](todo/color-page.md)).
+  - vidcut: a click on the empty Node Editor keeps the current node. The other selected nodes are no longer selected. This part is not measured in Resolve.
+- **Add nodes** (pp. 3394–3395, 3410–3413):
+  - The menu of a node has an Add Node submenu. The menu of the empty Node Editor has Add Node > Corrector. That corrector has no connection.
+  - Alt+S adds a serial node after the current node. Alt+K appends a serial node at the end of the tree.
+  - Shift+S adds a serial node before the current node.
+  - Alt+P adds a node in parallel, and Alt+L adds a node in a layer.
+  - A Parallel node is a corrector below the current node, with a Parallel Mixer at its output (p. 3410).
+  - Another parallel node adds another input to the mixer (p. 3411).
+  - Measured in Resolve Studio 21.2: the new corrector takes the input of the current node. Node 1 goes to mixer input 0, and node 2 to input 1.
+  - Measured: a Layer node does the same with a Layer Mixer. Alt+L at the corrector on input 1 of a Layer Mixer added a corrector on input 2.
+  - Measured: Alt+P and Alt+L at a corrector that feeds a Layer Mixer each add a new last input to that mixer. The new corrector takes the source.
+  - A new node gets the next number, wherever it goes in the tree (p. 3395).
+  - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append` or `corrector`. The menus of the Node Editor have each one.
+  - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
+  - vidcut: the new corrector takes the input of the current node. In the measured tree, that input is the source.
+  - Not measured in Resolve: Alt+L at a corrector on a Parallel Mixer, and a current node that does not take the source.
+  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L and Alt+K. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+- **Delete and extract** (pp. 3395–3396):
+  - Delete Node removes a node. The nodes at its left and its right then connect.
+  - The Forward-Delete key deletes the selected node (p. 3395).
+  - After a delete, each node after it gets one number less.
+  - Measured in Resolve Studio 21.2: the Delete key deletes the current node. With two nodes selected by a drag box, it deletes both.
+  - Measured: a mixer input that took a deleted corrector stays, with no connection. Thus the mixer keeps all its inputs.
+  - Measured: after the delete of a mixer, its input nodes keep their inputs. Nothing connects to the Node Tree output. The result is the source picture.
+  - Measured: after a delete, the last corrector is the current node.
+  - Measured: the menu of a mixer shows Shift+Backspace at Delete Node.
+  - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
+  - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
+  - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. The last corrector then becomes the current node.
+  - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
+  - vidcut: what took the picture of a deleted mixer then takes nothing.
+- **Connections** (p. 3396):
+  - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
+  - A click on the right-hand half of a connection removes it.
+  - An input takes one connection. A new connection replaces the old one. An output connects to many inputs.
+  - The Parallel Mixer, the Layer Mixer and the Key Mixer take many inputs.
+  - A drag from an output to a Parallel Mixer or a Layer Mixer adds an input (pp. 3410, 3413).
+  - Add One Input in the menu of a mixer adds an input with no connection (p. 3411).
+  - vidcut: `grade.connect`. The Color page and the Effects page share one Node Editor, with the same drags and clicks.
+- **Turn off and reset** (pp. 3392–3393):
+  - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.
+  - With more than one selected node, Command-D turns the selected nodes off or on. The current node is always one of them (p. 3392).
+  - Option-D turns all nodes off, and then all on. After that, each node is on, also a node that was off before (p. 3392).
+  - Measured in Resolve Studio 21.2: Command-D gives each selected node the opposite of the state of the current node.
+  - Measured: Option-D turns all nodes off when one or more is on, mixers too. Else it turns all of them on.
+  - vidcut: Ctrl+D and Alt+D do the same, mixers too.
+  - Reset Node Grade in the menu of a node resets that node (Shift-Home).
+  - Reset Grades and Keep Nodes resets each node and keeps the tree (Shift-Command-Home).
+  - Reset All Grades and Nodes leaves one node at its defaults (Command-Home). The menu of the empty Node Editor has it.
+  - vidcut: `grade.set` with `on`, and `grade.clear` with `node`, with `keep_nodes`, or alone.
+  - vidcut: Disable Node in the menu turns a corrector off. Shift+Home, Ctrl+Shift+Home and Ctrl+Home reset.
+  - Measured in Resolve Studio 21.2: Command-D turns a mixer off too.
+  - Measured: a Layer Mixer that is off mixes in Normal. The Key Output Gain of its inputs still applies.
+  - Measured: a Parallel Mixer that is off gives the same result as when it is on.
+  - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
+  - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
+  - vidcut: the menu of a mixer has these items in this order, but not Lock Node and Remove One Input ([todo](todo/color-page.md)).
+  - vidcut: in the Add Node submenu of a mixer, only Add Serial and Append Node work. The other items are grey. This is not measured in Resolve.
+- **Mixers**, measured in Resolve Studio 21.2 with float renders:
+  - Serial: node 2 works on the output of node 1. The error is 6.8e-6.
+  - Parallel Mixer: out = x + Σ (nᵢ − x). The error is 8.4e-7.
+  - x is the nearest node that each path to each input goes through. An input node counts for its own path.
+  - Measured: with 1 to 2, 1 to 3 and inputs 2 and 3, x is node 1. With 1 to 2 to 3 and inputs 2 and 3, in either order, x is node 2.
+  - Measured: an input of a mixer with no connection does not change the result.
+  - The manual: the Parallel Mixer combines all its inputs equally (p. 3412).
+  - Layer Mixer in Normal: out = the input with the highest number. The error is 4.5e-7.
+  - The manual: the lowest input in the Node Editor has the priority (p. 3413).
+  - Layer Mixer with a composite mode F: the mix starts with input 0. Each next input i gives mix = F(mix, nᵢ), in input order.
+  - In F, the mix is the backdrop and nᵢ is on top. The error is 6.1e-7. The reverse order is wrong by 0.05 to 0.6.
+  - The composite modes are the modes of the timeline (p. 3414). Their formulas fit the timeline composite within 3.3e-7.
+  - Composite Mode is a submenu of the menu of the Layer Mixer.
+  - Morph Into Layer Mixer Node and Morph Into Parallel Node change the kind of a mixer (pp. 3412, 3415).
+  - The manual: the RGB input of each corrector on a Parallel Mixer is usually the same picture (p. 3411).
+  - vidcut: `grade.set` with `mixer` and `mode`. A new Layer Mixer is in Normal.
+  - vidcut: x and the empty inputs work as measured.
+  - Measured: in Lighter Color and Darker Color, a tie of R + G + B goes to the later input.
+  - vidcut: the same. The composite of the timeline uses the same formulas.
+- **Key Output Gain** (p. 3415), measured in Resolve Studio 21.2:
+  - It sets the strength of a node in a Layer Mixer or a Parallel Mixer.
+  - Layer Mixer with Key Output Gain k: input 0 gives x + k (n₀ − x). Each next input gives mix + k (F(mix, nᵢ) − mix). The error is 3.4e-7.
+  - Parallel Mixer: out = x + Σ kᵢ (nᵢ − x).
+  - A Layer Mixer that is off mixes in Normal, with the Key Output Gain of each input. Subtract with a gain of 0.5 on the last input, off, equals Normal with that gain, on.
+  - vidcut: keys, Key Output Gain and the Key Mixer come later ([todo](todo/color-page.md)).
+
+Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `grade.set` with `on`, `place`, `mixer` and `mode` changes a node. `grade.get` gives the nodes and the `output`.
+
+### 8.22 Color page keyframes (pp. 3453–3465)
+
+- **The Keyframe Editor** (pp. 3453–3455):
+  - Each node of the grade has a keyframe track. A master keyframe track at the top shows every keyframe (p. 3454).
+  - A drag in the timeline ruler moves the playhead. A timecode at its left shows the current frame (p. 3454).
+  - A Dynamic keyframe is a diamond, and a Static keyframe is a circle (p. 3454).
+  - The grade links to the keyframe before the playhead. That can be a default keyframe on the first frame of the clip (p. 3454).
+  - The Keyframe Timeline mode sets the tracks that get a new keyframe: All, Color or Sizing (p. 3455).
+  - All is the default. It adds a keyframe to every track. An orange bar marks the master track.
+  - Color adds a keyframe to the current node only. A green bar marks its track.
+  - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector.
+  - vidcut: a mixer has no track, and it takes no keyframes.
+  - vidcut: an All and Color switch at the top of the panel sets the mode. All is the default.
+- **Dynamic and Static keyframes** (pp. 3456–3459):
+  - Mark > Add Keyframe (Command-[) adds a Dynamic keyframe at the playhead (p. 3456).
+  - Mark > Make Static Keyframe (Command-]) adds a Static keyframe (p. 3457).
+  - A right-click in a track gives Add Static Keyframe and Add Dynamic Keyframe (p. 3459).
+  - A Dynamic keyframe blends into the next keyframe. A Static keyframe makes a change on one frame (pp. 3456–3457).
+  - After a Static keyframe, the values do not blend into a Dynamic keyframe. After a Dynamic keyframe, they blend into a Static keyframe (p. 3457).
+  - A right-click on a selected keyframe gives Change to Dynamic Keyframe and Change to Static Keyframe (p. 3458).
+  - Measured in Resolve Studio 21.2: the grade file of a still keeps the keyframes of each corrector. Each keyframe holds every value of the corrector.
+  - Measured: the first keyframe has no frame. It is at the start of the clip, and it is Static.
+  - Measured: a Static keyframe holds its values up to the frame of the next keyframe.
+  - Measured: the values blend in the units that the grade stores. The result equals a grade with no keyframes at the blended values, to 0.
+  - Measured: the menu items are "Add Static Keyframe" and "Add Dynamic Keyframe".
+  - vidcut: `grade.keys.add` with `kind`. Without `node`, each corrector gets a keyframe, as in All mode.
+  - vidcut: Ctrl+[ adds a Dynamic keyframe, and Ctrl+] adds a Static keyframe, in the mode of the panel. Mark > Make Static Keyframe is on the Color page only.
+  - vidcut: the values of the corrector itself are the first keyframe. They hold up to the first keyframe in the list.
+  - Measured: a new keyframe takes the blended values on its frame. Add Keyframe at 70, between 20 and 120, gave Contrast 1.4995.
+  - Measured: Add Static Keyframe on a keyframe changes only its kind. Its values stay.
+  - vidcut: the same. A new keyframe holds the values that the picture has on its frame, as a keyframe of an effect does (§2).
+  - When a grade with keyframes goes to another clip, its keyframes go on the same source timecode (p. 3464).
+  - vidcut: a keyframe of a clip grade is on a source frame, as a keyframe of an effect is (§8.16).
+- **Dynamic Attributes** (pp. 3462–3463):
+  - By default, the blend from one Dynamic keyframe to the next is linear (p. 3462).
+  - Change Dynamic Attributes in the menu of a keyframe opens a window. It has a Start slider, an End slider and the curve (pp. 3462–3463).
+  - The manual: Start sets the blend at the right of the keyframe, and End sets the blend at its left (p. 3462).
+  - The Dynamics Profile in the General Options of the Project Settings gives the Start and End of each new keyframe (p. 3463).
+  - Measured in Resolve Studio 21.2: the Start and the End of the keyframe at the start of a segment shape that segment.
+  - Measured: the End of the keyframe at the end of a segment does not change that segment. Thus the manual is wrong about End.
+  - Measured: Start and End go from 0 to 11. The default is 1. 0, in Start or in End, holds the values up to the next keyframe.
+  - Measured: 1 gives no ease. u goes from 0 to 1 over the segment.
+  - Measured: Start n gives the start curve s(u). 2: 4u³, 3: 6u³, 4: 2u², 5: 3u², 6: 5u², 7: (u/5)^½, 8: (u/3)^½, 9: (u/2)^½, 10: (u/6)^⅓.
+  - Measured: End n gives the same curve, turned: 1 − s(1 − u).
+  - Measured: between the two curves, a straight line touches both. With 1 at one side, the line goes through 0 or 1 at that side.
+  - Measured: all 18 sweeps fit this rule within 2.5/1024 of the blend.
+  - Measured: Resolve reads the curve from a table. vidcut uses the curve itself ([gotchas](gotchas.md#resolves-renders)).
+  - Measured: the window offers 11, but a keyframe does not keep it. vidcut offers 0 to 10 ([gotchas](gotchas.md#resolves-renders)).
+  - Measured: with a Dynamics Profile of Start 5 and End 7, a new keyframe got Start 5 and End 7.
+  - Measured: for the pairs (2, 4), (4, 2) and (9, 9), no straight line touches both curves.
+  - Measured: there, u* is the u where both curves have the same slope. For (2, 4), u* = (√13 − 1) / 6 = 0.4343.
+  - Measured: the line touches the curve that is farther from w = u at u*. It goes from u* to where it meets the other curve.
+  - Measured: (2, 4) is the start curve to 0.4343, the line, and the end curve from 0.5613. The line meets the end curve at an angle.
+  - Measured: (4, 2) is the mirror of (2, 4). (9, 9) is the start curve to 0.5, and then the end curve.
+  - Measured: these three sweeps fit this rule within 5.5/1024 of the blend.
+  - vidcut: the same curves.
+  - vidcut: `grade.keys.set` with `start` and `end`. The Dynamic Attributes window has the two sliders and the curve.
+  - vidcut: `project.set` with `dynamics_profile`, and the Dynamics Profile row of the Project Settings window.
+- **Change, move and delete** (pp. 3456–3457, 3462–3463):
+  - The controls do not show the blend. They show the values of a keyframe until the playhead reaches the next keyframe (p. 3456).
+  - A change goes to a keyframe that depends on the playhead (p. 3462):
+    - On or before the first Dynamic keyframe: that Dynamic keyframe changes. It is the Dynamic keyframe at or after the playhead.
+    - On or after the last Dynamic keyframe: the keyframe at or before the playhead changes.
+    - Between two Dynamic keyframes: the keyframe before the playhead changes.
+    - Between two Static keyframes: the keyframe before the playhead changes. Its whole segment changes equally.
+  - With the playhead on a Static keyframe, a change goes to the part after it (p. 3457).
+  - Measured in Resolve Studio 21.2: a change goes to the keyframe at or before the playhead.
+  - Measured: before the first keyframe, a change goes to the values of the corrector itself. They act as a Static keyframe at the start of the clip.
+  - Measured: a Static keyframe and the Dynamic keyframe right after it take the same change. Only the changed values go to the other one.
+  - Measured: thus, when the first keyframe is Dynamic, a change before it shows on the frames before it.
+  - Measured: Static start, Dynamic 20 and Dynamic 120. A change at 5, at 20 or at 70 goes to the start and to 20.
+  - Measured: all keyframes Static. A change at 5 goes to the start only.
+  - Measured: Static 70, then Dynamic 120. A change at 70 goes to 70 and to 120. 120 keeps its other values.
+  - Measured: Dynamic 20, then Static 120. A change at 70 goes to the start and to 20, not to 120.
+  - Measured: each channel of a wheel is one value. Static 70, then Dynamic 120. A change of Lift R at 70 goes to 70 and to 120. 120 keeps its Lift Y.
+  - vidcut: the same.
+  - Measured: the palette shows the values of the keyframe that a change goes to, not the blend.
+  - Measured: at 70, between Contrast 1.2 at 20 and 2.0 at 120, the palette shows 1.200.
+  - vidcut: the same. `grade.set` and `grade.printer` take `at`. Without `at`, the playhead gives it.
+  - vidcut: `grade.get` with `at` gives the blended values at that time.
+  - A drag moves a keyframe with its values. A drag in a top-level track moves the keyframes of the corrector on that frame (p. 3462).
+  - vidcut: a drag in the Master track moves the keyframe of each corrector on that frame. A drag in a node track moves the keyframe of that node.
+  - vidcut: a drag sends `grade.keys.move`. A corrector has one keyframe on a frame at most. Thus a move onto another keyframe of that corrector fails.
+  - Mark > Delete Keyframe (Option-]) deletes every keyframe at the playhead (p. 3463).
+  - Delete Selected Keyframe in the menu of a keyframe deletes only that keyframe (p. 3463).
+  - Mark > Delete All Keyframes deletes every keyframe of the clip (p. 3463).
+  - vidcut: the same, with `grade.keys.remove`. Alt+] deletes the keyframes at the playhead. Delete All Keyframes does not ask first on the Color page.
+  - Measured in Resolve Studio 21.2: a reset keeps the keyframes. It resets the keyframe that a change goes to, with the same pairs.
+  - Measured: Reset in the Primaries palette, Reset Node Grade and Reset Grades and Keep Nodes work so.
+  - Measured: Reset All Grades and Nodes leaves no keyframes.
+  - vidcut: the same. `grade.clear` with `node` or `keep_nodes` takes `at`. Without `at`, the playhead gives it.
+- **The timeline grade** (p. 3465):
+  - The keyframes of the timeline grade work as the keyframes of a clip grade (p. 3465).
+  - vidcut: `timeline` in each `grade.keys` request. The keyframes are on timeline frames.
+  - Measured in Resolve Studio 21.2: an edit of the timeline does not move them. After a ripple delete, they stay on their timeline frames.
+  - vidcut: the same.
+- vidcut: the viewer, the export, `frame.render` and the storyboard give each frame the grade of its own frame.
+
+Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`. `grade.set`, `grade.printer` and `grade.get` take `at`. `project.set` takes `dynamics_profile`.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -3131,6 +3399,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`. `grade.pr
       - The timeline colors are not those of the output.
       - The output size is not the timeline size.
       - The timeline has an output LUT.
+      - The timeline has a timeline grade.
       - The output gets HDR10+ or Dolby Vision metadata.
     - With `video.alpha`, the Alpha Mode of the clip must be the `video.alpha_mode` of the file. A clip with alpha copies only over a gap.
     - H.264, HEVC, AV1 and VP9 also copy.
@@ -3209,6 +3478,10 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`. `grade.pr
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
+  - The Color page has its own level too. There, its keys go first. Thus Shift+S, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
+  - On the other pages, these four keys keep the actions of the table.
+  - On the Color page, Ctrl+[, Alt+] and the Mark menu act on the keyframes of the grade ([§8.22](#822-color-page-keyframes-pp-34533465)).
+  - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
 - These keys and gestures do not change:
   - The wheel, click and drag gestures. They have no key.
   - The number keys of the Sync Bin, Multi Source and the Transcription window. The number is on the screen.
@@ -3246,6 +3519,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`. `grade.pr
 | Alt+Delete | Lift the selection (D9) |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste; after a click in the Keyframes tab or the keyframe tray, the keyframes (§2) |
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
+| Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | Shift+V† | Select one clip under the playhead (§8.1) |
@@ -3658,7 +3932,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Thus an unset `video.passes` is two with a bitrate, where the encoder makes two. Otherwise it is one.
   - A request for two passes from an encoder that makes one is an error.
 - **D46. HDR metadata follows the footage** (§10; deviation X19).
-  - With no grade, an export carries what its sources give (`video.hdr_metadata` `auto`).
+  - With no grade and no LUT, an export carries what its sources give (`video.hdr_metadata` `auto`).
   - PQ output gets the widest mastering display of the pictures shown.
   - It also gets their highest MaxCLL and MaxFALL, measured where a source gives none.
   - SDR pictures count as BT.709 at 203 cd/m². HDR pictures without a display count as BT.2020 at 1000 cd/m².
@@ -3666,6 +3940,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Each frame keeps its HDR10+ and Dolby Vision where its transfer stays:
     - HDR10+ (PQ only) when any picture has it. For the other pictures, it is made from measured light.
     - Dolby Vision when every picture has it, in one profile.
+  - A grade or a LUT changes the light of the picture. Thus the metadata of the sources is wrong for the frames of the export.
+  - With a clip grade, a timeline grade, an input LUT or an output LUT in the export, the export takes nothing from the sources:
+    - A mastering display and light levels that the user gives stay as given.
+    - Without given light levels, PQ output gets the MaxCLL and MaxFALL of its own frames.
+    - A first pass draws the frames as the encode does, and measures them. The encode then writes these values.
+    - The export has no HDR10+ and no Dolby Vision.
+    - When the user asks for HDR10+ or Dolby Vision, the report and the export window name what the export drops.
+  - The report of the export tells where each value comes from: given, from the sources, or measured.
 - **D47. Drop-frame timecode** (§4.3).
   - At 29.97, 59.94 and 119.88 fps, record timecode can count drop-frame, as Resolve's project settings offer.
   - Resolve Studio 21.2 refuses it at other rates, also at 23.976, 47.952 and 95.904 (`timelineDropFrameTimecode` in a script).
@@ -5311,6 +5593,8 @@ Then the compositing of the Fusion page.
 
 The display LUT of the Color page is on a branch after Data Burn-In. The output of the Deliver page does not get it.
 
+vidcut runs the timeline grade, then the burned-in subtitles, then the output LUT. [§8.20](#820-primaries-palette-pp-118-31413159) gives the measured facts of the timeline grade.
+
 **Sizing:**
 
 - Resolve combines the fit to the timeline, Edit Sizing and Input Sizing into one transform of the source (p. 287).
@@ -5349,12 +5633,43 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - A LUT on the node of a compound clip gives the same picture as a LUT on the node of a plain clip.
 - A generator and a title have no Media Pool clip. A script gets no node graph for them, so it cannot give them a LUT.
 
-A script gets no error for a broken file:
+**The Input LUT of a clip**, measured in Resolve Studio 21.2:
+
+- The Media Pool menu of a compound clip has no LUT item. vidcut has none either.
+- The viewer of the Media page shows the Input LUT. vidcut does not yet ([todo](todo/luts.md)).
+- A subclip made after its parent gets an Input LUT copies that LUT. A subclip made before keeps none.
+  - After that, each one keeps its own. A change on the parent or on a subclip does not change the others.
+  - vidcut does the same: `create_subclip` copies the media item with its LUT.
+- With the Alpha Mode Invert, the alpha is `1 - A`:
+  - With no LUT, the color is `C * (1 - A)`.
+  - With a LUT, the color is `T(C) * (1 - A)`.
+  - vidcut does the same: Invert is a straight alpha of `1 - A`.
+- In a Smooth Cut, the LUT works on each source picture before the frames between them are made. The alpha of the clip stays.
+  - vidcut does the same: the made frame of a Smooth Cut gets no LUT of its own.
+
+**The Input LUT of the project**, measured in Resolve Studio 21.2 (p. 152):
+
+- A grid of values gives the same picture as the Output LUT of the project.
+- It applies to clips. A gap stays black.
+- A picture with alpha gives `T(clamp(C / A)) * A`, and each layer gets its own `T` before the mix.
+- The Input LUT of a clip replaces it on that clip.
+- vidcut has no Input LUT of the project yet ([todo](todo/luts.md)).
+
+**The Output LUT of the project**, measured in Resolve Studio 21.2:
+
+- It uses the math of a node LUT. A grid of values gives `T(x)`, with a difference of 5.8e-8 at most.
+- It works on the mixed picture of the timeline.
+- It also applies to a gap. In a render without alpha, a gap becomes `T(0)`, with a difference of 5e-9 at most.
+- In a render with alpha, a picture with alpha gives `T(clamp(C / A)) * A`. The alpha does not change. Where `A` is 0, the result is 0.
+- vidcut does the same (`fs_lut`, [design](design/README.md#lut-files)).
+
+A script gets no error for a broken file, and the window shows no message:
 
 - A lower-case `lut_3d_size` line, or no size line, gives no LUT.
 - 100 rows where 125 are due give a changed picture, which the rule above does not fit.
 - 130 rows where 125 are due use the first 125 rows.
 - `LUT_3D_SIZE 1` gives a black picture.
+- vidcut refuses these files ([X131](deviations.md#x131-a-broken-cube-file-is-refused)).
 
 ### The scaling filter
 

@@ -63,6 +63,7 @@ fn main() {
     };
     let plan = RenderPlan {
         output_lut: None,
+        timeline_grade: None,
         fps,
         width: v.width,
         height: v.height,

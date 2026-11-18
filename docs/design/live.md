@@ -283,6 +283,9 @@ The bar and the Jobs button:
 **The Effects page** ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
 
 - `EffectsPage` holds the page that shows, the selected nodes, and the state of the Node Editor and of a mask drag.
+- The Node Editor is `node_editor::show`. The Color page uses it too.
+  - A page gives it a `Graph`: the tiles, the wires and the selection. It keeps its pan, zoom and drags in a `NodeView`.
+  - It gives back a `Done`: the picks, the moves, the drops of a link, the box and the clicks. Each page makes them into its own requests.
 - `Workspace::effects_clip` finds the clip of the page: the topmost visible clip at the playhead (`placing::topmost`).
 - The viewer renders that clip alone through `render::composition_alone` and `Cells::show_plan`, at the size of its own picture.
   - The plan covers the whole source of the clip, at the frame rate of its file. Each frame of the plan is a frame of the file.
@@ -329,7 +332,7 @@ The bar and the Jobs button:
 **View state.**
 
 - The view state is the selected edit points (`TimelineView::edit`, `TimelineView::edits`) and the selected dissolve (`TimelineView::transition`). It is also the target track, the zoom, the Timeline Options and the open windows.
-- It is also the page and the selected nodes of the Effects page.
+- It is also the page and the selected nodes of the Effects page and of the Color page.
 - `timeline.json` keeps the target track, the zoom and the Timeline Options. Requests reach the view state through `Renderer::gui`.
 - When another project opens, `TimelineView::switch_project` clears the view state. It keeps the Timeline Options and the choices that are not about one project. The open windows of the timeline close.
 - `LeftTab::Hidden` is the left area with no tab open. Each place that opens a tab sets `Workspace::left`, thus it also shows the area.
@@ -421,15 +424,49 @@ The bar and the Jobs button:
 
 **The Color page** (`Workspace::primaries_panel`).
 
-- The palette shows the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
+- The palette shows the current node of the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
+- The Node Editor of the grade is at the right of the viewer (`Workspace::grade_nodes_panel`).
+  - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
+  - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.
+  - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
+  - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.
+  - Another clip, another grade mode or another timeline selects node 1 (`Workspace::settle_grade`).
+  - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.
+  - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
+  - On a mixer, the keys add only a serial node or an appended node, as the menu does.
+  - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
+  - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.set` and `grade.clear`.
+  - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, and reset.
+  - Ctrl+D and Alt+D send one `grade.set` with `on` for each node that changes (`Workspace::switch_grade_nodes`).
+  - A delete sends one `grade.remove` for each node, from the highest number down (`Workspace::delete_grade_nodes`). Thus each number stays right until its turn.
+  - After a delete, the last corrector becomes the current node.
+- A Clip and Timeline switch at the top right selects the grade (`GradeLevel`). In Timeline mode, the palette shows the timeline grade.
+  - The switch sends `gui.page` with `grade`. `gui.state` gives the `grade`, and gives no `clip` in Timeline mode.
 - The dragged grade goes to the core with `Handle::preview_pictures`, through `Workspace::graded_wanted`. Thus the viewer follows each frame of the drag.
-- When the pointer is up, the palette sends one `grade.set` with the changed values. Thus a drag is one undo step.
+  - A dragged timeline grade goes with `Handle::preview_grade`, through `Workspace::timeline_grade_wanted`. The player draws it in place of the grade of the plan.
+- When the pointer is up, the palette sends one `grade.set` with the changed values, the `node` and `at`. Thus a drag is one undo step.
+  - `at` is the playhead when the drag starts. Thus a drag during playback changes one keyframe.
+  - On a corrector with keyframes, the palette shows the keyframe that a change at the playhead goes to (`GradeNode::changed_at`).
+  - The dragged grade changes that keyframe and the other keyframe of its pair, as `grade.set` does (`GradeNode::change_at`).
+  - The dragged grade (`Graded`) stays until the playhead comes to a frame that picks a different keyframe (`GradeNode::changed_key`).
 - After that, the palette shows the sent grade until the project has it. If the request fails, the palette shows the project again after a short time.
 - A drag in a wheel moves the puck by the move of the pointer (manual p. 3144):
   - With Shift, the puck jumps to the pointer.
   - With Ctrl (Cmd on macOS), the drag moves the master values, as the dial does.
 - The dial under a wheel adds the same amount to each value of the wheel (p. 3145).
 - A double-click on a name resets its value. A drag on a name changes its value (pp. 3146, 3148).
+- A Plus or Minus button of the bars sends `grade.printer` with the current node (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) does the same.
+  - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.
+- The Keyframes panel is at the right of the palette (`Workspace::grade_keys_panel`). Its height follows the palette, and it scrolls by itself. `GradeKeys` holds its mode, the selected keyframe and a drag.
+  - It has a ruler, a Master track and a track for each corrector. A click or a drag in the ruler moves the playhead.
+  - A Dynamic keyframe is a diamond, and a Static keyframe is a dot. On the Master track, a frame is a diamond when one of its keyframes is Dynamic.
+  - The All and Color switch (`KeyMode`) sets the correctors that get a new keyframe: each one, or the current node. A bar at the left marks that track.
+  - A drag of a keyframe sends `grade.keys.move` with `by`. The drag picks the keyframe at the press, and `by` is the move of the pointer from the press. The menus of a track and of a keyframe send `grade.keys.add`, `grade.keys.set` and `grade.keys.remove`.
+  - Change Dynamic Attributes opens a window with the Start and End sliders and the curve of `Dissolve`.
+  - Another clip or another grade mode clears the selection (`GradeKeys::forget`).
+- On the Color page, Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the grade (`Workspace::grade_key_cmd`). `Workspace::grade_key_cmd_why` gives the next step.
+  - Mark > Make Static Keyframe is on the Color page only (`Workspace::static_key_item`). Its key is `Action::AddStaticKeyframe`.
+- The Dynamics Profile row of the Project Settings window sends `project.set` with `dynamics_profile`.
 
 **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`).
 
@@ -753,6 +790,7 @@ Order:
 
 - The windows and panels take their keys first: `TranscriptionUi::take_keys`, `Workspace::sync_clips_keys`, `Workspace::history_keys`, `Workspace::sync_numbers` and `Workspace::multi_numbers`.
 - `TranscriptionUi::take_keys` also reads `Panel::Transcription`. Thus a key can have one action in that window and another action in the main window.
+- Then `Workspace::color_keys` takes the keys of `Panel::Color` on the Color page. Thus a key can act on the nodes there and do another action on the other pages.
 - `Workspace::viewer_keys` takes the viewer frame keys with `take`, after the windows that ask for an answer. Why: Esc closes the question first.
 - `Shuttle` and the skim use `held`, because they need a key that stays down.
 
@@ -796,6 +834,7 @@ sequenceDiagram
 ## Code
 
 - `crates/vidcut/src/gui/app.rs`, `crates/vidcut/src/gui/workspace.rs`, `crates/vidcut/src/gui/export.rs`
+- `crates/vidcut/src/gui/shortcuts.rs`
 - `crates/vidcut/src/gui/video.rs`, `crates/vidcut-av/src/screen/gate.rs`, `crates/vidcut/src/gui/cells.rs`, `crates/vidcut/src/gui/tiles.rs`
 - `crates/vidcut/src/gui/trim_strips.rs`, `crates/vidcut/src/gui/timeline/`
 - `crates/vidcut/src/gui/subtitles.rs`, `crates/vidcut/src/gui/titles.rs`

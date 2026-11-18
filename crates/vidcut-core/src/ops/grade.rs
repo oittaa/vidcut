@@ -1,9 +1,9 @@
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Grade, Project};
+use crate::model::{Clip, Corrector, Grade, GradeNode, GradeTool, Project};
 use crate::preferences::ColorPrefs;
-use crate::request::{GradeChange, PrinterColor};
+use crate::request::{GradeAdd, GradeChange, GradeMixer, GradeNodeChange, PrinterColor};
 
 use super::locate;
 use super::picture::takes;
@@ -13,7 +13,7 @@ impl GradeChange {
         *self == Self::default()
     }
 
-    pub fn changed(&self, old: &Grade) -> Grade {
+    pub fn changed(&self, old: &Corrector) -> Corrector {
         let mut g = old.clone();
         let put = |to: &mut f64, v: Option<f64>| {
             if let Some(v) = v {
@@ -58,6 +58,12 @@ impl GradeChange {
     }
 }
 
+impl GradeNodeChange {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 fn within(v: f64, (low, high): (f64, f64), what: &str) -> Result<()> {
     match v.is_finite() && (low..=high).contains(&v) {
         true => Ok(()),
@@ -74,7 +80,7 @@ fn finite(values: &[f64], what: &str) -> Result<()> {
     }
 }
 
-pub fn checked(g: &Grade) -> Result<Option<Grade>> {
+pub fn corrector_checked(g: &Corrector) -> Result<()> {
     finite(&g.lift, "lift")?;
     finite(&g.gamma, "gamma")?;
     finite(&g.gain, "gain")?;
@@ -98,10 +104,64 @@ pub fn checked(g: &Grade) -> Result<Option<Grade>> {
             "low_range must be above 0, below high_range, and high_range below 1",
         ));
     }
-    Ok((!g.is_usual()).then(|| g.clone()))
+    Ok(())
 }
 
-const NEEDS: &str = "grade.set needs a value to change";
+fn keys_checked(d: &GradeNode, k: u32) -> Result<()> {
+    if d.keys.is_empty() {
+        return Ok(());
+    }
+    if d.tool.is_mixer() {
+        return Err(Error::invalid(format!(
+            "node {k} is a mixer, which takes no keyframes"
+        )));
+    }
+    if d.keys.windows(2).any(|w| w[0].frame >= w[1].frame) {
+        return Err(Error::invalid(format!(
+            "the keyframes of node {k} must be in the order of their frames, one on a frame"
+        )));
+    }
+    let last = crate::grade_keys::LAST_PROFILE;
+    for key in &d.keys {
+        if key.start > last || key.end > last {
+            return Err(Error::invalid(format!(
+                "start and end must be from 0 to {last}"
+            )));
+        }
+        corrector_checked(&key.values)?;
+    }
+    Ok(())
+}
+
+pub fn checked(g: &Grade) -> Result<Option<Grade>> {
+    let last = g.last();
+    if let Some(o) = g.output.filter(|o| *o > last) {
+        return Err(no_node(o));
+    }
+    for (n, k) in g.nodes.iter().zip(1..) {
+        if let Some(v) = n.inputs.iter().flatten().find(|v| **v > last || **v == k) {
+            return Err(Error::invalid(format!("node {k} cannot take node {v}")));
+        }
+        finite(&n.place, "place")?;
+        match &n.tool {
+            GradeTool::Corrector(c) => {
+                if n.inputs.len() != 1 {
+                    return Err(Error::invalid(format!("corrector {k} has one input")));
+                }
+                corrector_checked(c)?;
+            }
+            _ if n.inputs.is_empty() => {
+                return Err(Error::invalid(format!("mixer {k} needs an input")));
+            }
+            _ => {}
+        }
+        keys_checked(n, k)?;
+    }
+    if crate::grade::order(g).is_none() {
+        return Err(Error::invalid("the links of the grade make a loop"));
+    }
+    Ok((!g.is_usual()).then(|| g.clone()))
+}
 
 impl PrinterColor {
     pub fn channels(self) -> [f64; 3] {
@@ -128,24 +188,10 @@ pub fn printed(
     })
 }
 
-pub fn printer(
-    p: &mut Project,
-    ids: &[String],
-    point: (PrinterColor, f64),
-    lights: &ColorPrefs,
-) -> Result<()> {
-    if !point.1.is_finite() {
-        return Err(Error::invalid("points must be a number"));
-    }
-    for id in ids {
-        let offset = clip_grade(p, id)?.offset;
-        let change = GradeChange {
-            offset: Some(printed(offset, point, lights)),
-            ..GradeChange::default()
-        };
-        set(p, std::slice::from_ref(id), &change)?;
-    }
-    Ok(())
+#[derive(Debug, Clone, PartialEq)]
+pub enum GradeOf {
+    Timeline,
+    Clip(String),
 }
 
 fn grades(p: &Project, ti: usize, c: &Clip) -> Result<()> {
@@ -159,49 +205,449 @@ fn grades(p: &Project, ti: usize, c: &Clip) -> Result<()> {
     Ok(())
 }
 
-fn clip_grade(p: &Project, id: &str) -> Result<Grade> {
-    let (ti, ci) = locate(p, id)?;
-    let c = &p.tracks[ti].clips[ci];
-    grades(p, ti, c)?;
-    Ok(c.picture
-        .as_ref()
-        .and_then(|pic| pic.grade.clone())
-        .unwrap_or_default())
+fn no_timeline() -> Error {
+    Error::invalid("the project has no timeline: make one with timeline.new")
 }
 
-pub fn set(p: &mut Project, ids: &[String], change: &GradeChange) -> Result<()> {
-    if change.is_empty() {
-        return Err(Error::usage(NEEDS));
+pub fn frame_of(p: &Project, of: &GradeOf, at: i64) -> Result<i64> {
+    match of {
+        GradeOf::Timeline => Ok(at),
+        GradeOf::Clip(id) => {
+            let (ti, ci) = locate(p, id)?;
+            Ok(p.tracks[ti].clips[ci].content_at(at))
+        }
     }
-    for id in ids {
-        let (ti, ci) = locate(p, id)?;
-        grades(p, ti, &p.tracks[ti].clips[ci])?;
-        let c = &p.tracks[ti].clips[ci];
-        let old = c
-            .picture
-            .as_ref()
-            .and_then(|pic| pic.grade.clone())
-            .unwrap_or_default();
-        let grade = checked(&change.changed(&old))?;
-        let mut picture = c.picture.clone().unwrap_or_default();
-        picture.grade = grade;
-        p.tracks[ti].clips[ci].picture = (!picture.is_usual()).then_some(picture);
-    }
-    Ok(())
 }
 
-pub fn clear(p: &mut Project, ids: &[String]) -> Result<()> {
-    for id in ids {
-        let (ti, ci) = locate(p, id)?;
-        let c = &mut p.tracks[ti].clips[ci];
-        if let Some(mut picture) = c.picture.take() {
-            picture.grade = None;
+pub fn stored(p: &Project, of: &GradeOf) -> Result<Grade> {
+    let grade = match of {
+        GradeOf::Timeline => p.timeline().ok_or_else(no_timeline)?.grade.as_ref(),
+        GradeOf::Clip(id) => {
+            let (ti, ci) = locate(p, id)?;
+            let c = &p.tracks[ti].clips[ci];
+            grades(p, ti, c)?;
+            c.picture.as_ref().and_then(|pic| pic.grade.as_ref())
+        }
+    };
+    Ok(grade.cloned().unwrap_or_default())
+}
+
+fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
+    let grade = checked(grade)?;
+    match of {
+        GradeOf::Timeline => p.timeline_mut().ok_or_else(no_timeline)?.grade = grade,
+        GradeOf::Clip(id) => {
+            let (ti, ci) = locate(p, id)?;
+            let c = &mut p.tracks[ti].clips[ci];
+            let mut picture = c.picture.take().unwrap_or_default();
+            picture.grade = grade;
             c.picture = (!picture.is_usual()).then_some(picture);
         }
     }
     Ok(())
 }
 
-pub fn get(p: &Project, id: &str) -> Result<Value> {
-    serde_json::to_value(clip_grade(p, id)?).map_err(|e| Error::invalid(e.to_string()))
+pub(super) fn edited(
+    p: &mut Project,
+    of: &GradeOf,
+    edit: impl FnOnce(&mut Grade) -> Result<()>,
+) -> Result<()> {
+    let mut g = stored(p, of)?;
+    edit(&mut g)?;
+    store(p, of, &g)
+}
+
+pub(super) fn no_node(n: u32) -> Error {
+    Error::not_found(format!("the grade has no node {n}"))
+}
+
+pub(super) fn node(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
+    g.node_mut(n).ok_or_else(|| no_node(n))
+}
+
+fn changed(
+    g: &mut Grade,
+    n: u32,
+    frame: Option<i64>,
+    change: impl FnOnce(&Corrector) -> Corrector,
+) -> Result<()> {
+    let d = node(g, n)?;
+    if d.tool.is_mixer() {
+        return Err(Error::invalid(format!("node {n} is a mixer")));
+    }
+    let frame = match frame {
+        Some(f) => f,
+        None if d.keys.is_empty() => i64::MIN,
+        None => {
+            return Err(Error::usage(format!(
+                "node {n} has keyframes: give `at` for the keyframe"
+            )));
+        }
+    };
+    d.change_at(frame, change).ok_or_else(|| no_node(n))
+}
+
+const NEEDS: &str = "grade.set needs a value to change";
+
+pub fn set(
+    p: &mut Project,
+    of: &[GradeOf],
+    n: u32,
+    (change, node_change): (&GradeChange, &GradeNodeChange),
+    at: Option<i64>,
+) -> Result<()> {
+    if change.is_empty() && node_change.is_empty() {
+        return Err(Error::usage(NEEDS));
+    }
+    for one in of {
+        let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
+        edited(p, one, |g| {
+            if !change.is_empty() {
+                changed(g, n, frame, |c| change.changed(c))?;
+            }
+            node_changed(g, n, node_change)
+        })?;
+    }
+    Ok(())
+}
+
+fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
+    let d = node(g, n)?;
+    if let Some(at) = change.place {
+        d.place = at;
+    }
+    if let Some(on) = change.on {
+        d.on = on;
+    }
+    if let Some(to) = change.mixer {
+        d.tool = match (&d.tool, to) {
+            (GradeTool::Corrector(_), _) => {
+                return Err(Error::invalid(format!("node {n} is a corrector")));
+            }
+            (GradeTool::LayerMixer { .. }, GradeMixer::LayerMixer) => d.tool.clone(),
+            (_, GradeMixer::LayerMixer) => GradeTool::LayerMixer {
+                mode: Default::default(),
+            },
+            (_, GradeMixer::ParallelMixer) => GradeTool::ParallelMixer,
+        };
+    }
+    if let Some(mode) = change.mode {
+        match &mut d.tool {
+            GradeTool::LayerMixer { mode: m } => *m = mode,
+            _ => {
+                return Err(Error::invalid(format!(
+                    "node {n} is not a layer mixer, which takes a mode"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn clear(
+    p: &mut Project,
+    of: &[GradeOf],
+    (n, keep_nodes): (Option<u32>, bool),
+    at: Option<i64>,
+) -> Result<()> {
+    let usual = |_: &Corrector| Corrector::default();
+    for one in of {
+        let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
+        edited(p, one, |g| match (n, keep_nodes) {
+            (Some(n), _) => changed(g, n, frame, usual),
+            (None, true) => {
+                let correctors: Vec<u32> = (g.nodes.iter().zip(1..))
+                    .filter(|(d, _)| !d.tool.is_mixer())
+                    .map(|(_, k)| k)
+                    .collect();
+                for k in correctors {
+                    changed(g, k, frame, usual)?;
+                }
+                Ok(())
+            }
+            (None, false) => {
+                *g = Grade::default();
+                Ok(())
+            }
+        })?;
+    }
+    Ok(())
+}
+
+pub fn printer(
+    p: &mut Project,
+    of: &[GradeOf],
+    (n, at): (u32, Option<i64>),
+    point: (PrinterColor, f64),
+    lights: &ColorPrefs,
+) -> Result<()> {
+    if !point.1.is_finite() {
+        return Err(Error::invalid("points must be a number"));
+    }
+    for one in of {
+        let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
+        edited(p, one, |g| {
+            changed(g, n, frame, |c| Corrector {
+                offset: printed(c.offset, point, lights),
+                ..c.clone()
+            })
+        })?;
+    }
+    Ok(())
+}
+
+pub fn get(p: &Project, of: &GradeOf, at: Option<i64>) -> Result<Value> {
+    let g = stored(p, of)?;
+    let g = match at {
+        Some(t) => g.at(frame_of(p, of, t)? as f64).into_owned(),
+        None => g,
+    };
+    serde_json::to_value(g).map_err(|e| Error::invalid(e.to_string()))
+}
+
+fn takers(g: &Grade, n: u32) -> Vec<(u32, usize)> {
+    g.nodes
+        .iter()
+        .zip(1..)
+        .flat_map(|(d, k)| {
+            d.inputs
+                .iter()
+                .enumerate()
+                .filter(move |(_, v)| **v == Some(n))
+                .map(move |(i, _)| (k, i))
+        })
+        .collect()
+}
+
+fn retake(g: &mut Grade, from: u32, to: Option<u32>, except: u32) {
+    for (d, k) in g.nodes.iter_mut().zip(1..) {
+        if k == except {
+            continue;
+        }
+        for v in &mut d.inputs {
+            if *v == Some(from) {
+                *v = to;
+            }
+        }
+    }
+    if g.output == Some(from) {
+        g.output = to;
+    }
+}
+
+fn shifted(g: &mut Grade, from_x: f64) {
+    for d in &mut g.nodes {
+        if d.place[0] >= from_x {
+            d.place[0] += 1.0;
+        }
+    }
+}
+
+fn free_below(g: &Grade, [x, y]: [f64; 2]) -> [f64; 2] {
+    let mut below = y + 1.0;
+    while g.nodes.iter().any(|d| d.place == [x, below]) {
+        below += 1.0;
+    }
+    [x, below]
+}
+
+fn input_of(g: &Grade, n: u32) -> Result<Option<u32>> {
+    match g.node(n) {
+        Some(d) if !d.tool.is_mixer() => Ok(d.inputs[0]),
+        Some(_) => Err(Error::invalid(format!(
+            "node {n} is a mixer: give a corrector"
+        ))),
+        None => Err(no_node(n)),
+    }
+}
+
+fn mixer_of(kind: GradeAdd) -> GradeTool {
+    match kind {
+        GradeAdd::Layer => GradeTool::LayerMixer {
+            mode: Default::default(),
+        },
+        _ => GradeTool::ParallelMixer,
+    }
+}
+
+fn beside(g: &mut Grade, n: u32, kind: GradeAdd) -> Result<u32> {
+    let input = input_of(g, n)?;
+    let at = g.node(n).map_or([0.0; 2], |d| d.place);
+    let added = g.last() + 1;
+    let takers = takers(g, n);
+    let mixes = |m: u32| g.node(m).is_some_and(|d| d.tool.is_mixer());
+    let mixer = match (takers.as_slice(), g.output == Some(n)) {
+        ([(m, _)], false) => Some(*m).filter(|m| mixes(*m)),
+        _ => None,
+    };
+    match mixer {
+        Some(m) => {
+            let place = free_below(g, at);
+            g.nodes.push(GradeNode::corrector(input, place));
+            node(g, m)?.inputs.push(Some(added));
+        }
+        None => {
+            shifted(g, at[0] + 1.0);
+            let place = free_below(g, at);
+            g.nodes.push(GradeNode::corrector(input, place));
+            retake(g, n, Some(added + 1), 0);
+            g.nodes.push(GradeNode {
+                tool: mixer_of(kind),
+                inputs: vec![Some(n), Some(added)],
+                on: true,
+                place: [at[0] + 1.0, at[1]],
+                keys: Vec::new(),
+            });
+        }
+    }
+    Ok(added)
+}
+
+pub fn add(
+    p: &mut Project,
+    of: &GradeOf,
+    kind: GradeAdd,
+    n: Option<u32>,
+    place: Option<[f64; 2]>,
+) -> Result<Value> {
+    let mut made = 0;
+    edited(p, of, |g| {
+        let added = g.last() + 1;
+        let around = |g: &Grade| -> Result<(u32, [f64; 2])> {
+            let n = n.ok_or_else(|| Error::usage("give `node`, the node it goes beside"))?;
+            let d = g.node(n).ok_or_else(|| no_node(n))?;
+            Ok((n, d.place))
+        };
+        made = match kind {
+            GradeAdd::Serial => {
+                let (n, [x, y]) = around(g)?;
+                shifted(g, x + 1.0);
+                g.nodes.push(GradeNode::corrector(Some(n), [x + 1.0, y]));
+                retake(g, n, Some(added), added);
+                added
+            }
+            GradeAdd::Before => {
+                let (n, [x, y]) = around(g)?;
+                let input = input_of(g, n)?;
+                shifted(g, x);
+                g.nodes.push(GradeNode::corrector(input, [x, y]));
+                node(g, n)?.inputs[0] = Some(added);
+                added
+            }
+            GradeAdd::Parallel | GradeAdd::Layer => {
+                let (n, _) = around(g)?;
+                beside(g, n, kind)?
+            }
+            GradeAdd::Append => {
+                let at = match g.output.and_then(|o| g.node(o)) {
+                    Some(d) => [d.place[0] + 1.0, d.place[1]],
+                    None => {
+                        let right = g.nodes.iter().map(|d| d.place[0] + 1.0).fold(0.0, f64::max);
+                        [right, 0.0]
+                    }
+                };
+                g.nodes.push(GradeNode::corrector(g.output, at));
+                g.output = Some(added);
+                added
+            }
+            GradeAdd::Corrector => {
+                let below = g.nodes.iter().map(|d| d.place[1] + 1.0).fold(0.0, f64::max);
+                let at = place.unwrap_or([0.0, below]);
+                g.nodes.push(GradeNode::corrector(None, at));
+                added
+            }
+        };
+        Ok(())
+    })?;
+    Ok(json!({ "node": made }))
+}
+
+fn renumbered(g: &mut Grade, gone: u32) {
+    let after = |v: &mut Option<u32>| {
+        if let Some(k) = v
+            && *k > gone
+        {
+            *k -= 1;
+        }
+    };
+    for d in &mut g.nodes {
+        d.inputs.iter_mut().for_each(after);
+    }
+    after(&mut g.output);
+}
+
+pub fn remove(p: &mut Project, of: &GradeOf, n: u32, extract: bool) -> Result<()> {
+    edited(p, of, |g| {
+        let d = g.node(n).ok_or_else(|| no_node(n))?;
+        let input = match &d.tool {
+            GradeTool::Corrector(_) => d.inputs[0],
+            _ if extract => {
+                return Err(Error::invalid(format!(
+                    "node {n} is a mixer: only a corrector comes out"
+                )));
+            }
+            _ => None,
+        };
+        if extract {
+            retake(g, n, input, n);
+            node(g, n)?.inputs = vec![None];
+            return Ok(());
+        }
+        for (d, k) in g.nodes.iter_mut().zip(1..) {
+            let to = if d.tool.is_mixer() { None } else { input };
+            for v in d.inputs.iter_mut().filter(|v| **v == Some(n) && k != n) {
+                *v = to;
+            }
+        }
+        if g.output == Some(n) {
+            g.output = input;
+        }
+        g.nodes.remove(n as usize - 1);
+        renumbered(g, n);
+        Ok(())
+    })
+}
+
+pub fn connect(
+    p: &mut Project,
+    of: &GradeOf,
+    n: u32,
+    input: Option<u32>,
+    from: Option<u32>,
+) -> Result<()> {
+    edited(p, of, |g| {
+        if let Some(f) = from.filter(|f| *f > g.last()) {
+            return Err(no_node(f));
+        }
+        if n == 0 {
+            if input.is_some_and(|i| i > 0) {
+                return Err(Error::invalid("the output has one input"));
+            }
+            g.output = from;
+            return Ok(());
+        }
+        if from == Some(n) {
+            return Err(Error::invalid(format!("node {n} cannot take itself")));
+        }
+        let d = node(g, n)?;
+        match (d.tool.is_mixer(), input) {
+            (false, None | Some(0)) => d.inputs[0] = from,
+            (false, Some(_)) => {
+                return Err(Error::invalid(format!("corrector {n} has one input")));
+            }
+            (true, None) => d.inputs.push(from),
+            (true, Some(i)) if (i as usize) < d.inputs.len() => d.inputs[i as usize] = from,
+            (true, Some(i)) if i as usize == d.inputs.len() => d.inputs.push(from),
+            (true, Some(i)) => {
+                return Err(Error::invalid(format!(
+                    "mixer {n} has {} inputs: input {i} is past the next one",
+                    d.inputs.len()
+                )));
+            }
+        }
+        if crate::grade::order(g).is_none() {
+            return Err(Error::invalid("that link makes a loop"));
+        }
+        Ok(())
+    })
 }

@@ -17,6 +17,7 @@ pub mod fingerprint;
 pub mod folder;
 pub mod generators;
 pub mod grade;
+pub mod grade_keys;
 mod history;
 pub mod keyframes;
 pub mod leveler;

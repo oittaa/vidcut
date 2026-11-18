@@ -883,11 +883,51 @@ pub fn choose_colors(
 ) -> Result<()> {
     let lights = Lights::default();
     let todo = choose_once(prepared, p, available, &lights, false);
-    if let Some(m) = measure
-        && !todo.is_empty()
-    {
-        measure_spans(&todo, &lights, m)?;
+    let Some(mut m) = measure else {
+        return Ok(());
+    };
+    if !todo.is_empty() {
+        measure_spans(&todo, &lights, &mut m)?;
         choose_once(prepared, p, available, &lights, true);
+    }
+    measure_outputs(prepared, available, &mut m)
+}
+
+fn measure_outputs(
+    prepared: &mut Prepared,
+    available: &Availability,
+    m: &mut Measuring<'_>,
+) -> Result<()> {
+    let todo: Vec<usize> = (0..prepared.outputs.len())
+        .filter(|&i| {
+            let o = &prepared.outputs[i];
+            o.metadata.is_some()
+                && o.settings
+                    .video
+                    .as_ref()
+                    .is_some_and(|v| engine::needs_output_light(&o.plan, v))
+        })
+        .collect();
+    let count = todo.len() as f64;
+    for (done, i) in todo.into_iter().enumerate() {
+        let o = &mut prepared.outputs[i];
+        let light = engine::output_light(
+            &o.plan,
+            &o.settings,
+            available,
+            m.decoder,
+            &o.subtitles,
+            m.cancel,
+            &mut |share| (m.progress)((done as f64 + share) / count),
+        )
+        .map_err(|e| match engine::is_cancelled(&e) {
+            true => Error::new(ErrorCode::Cancelled, "export cancelled"),
+            false => av_error(&e, ErrorCode::Export, format!("{}: ", o.path.display())),
+        })?;
+        if let (Some(c), Some(v)) = (o.metadata.as_mut(), o.settings.video.as_mut()) {
+            c.measured(light);
+            c.apply(v);
+        }
     }
     Ok(())
 }
@@ -1049,7 +1089,7 @@ fn choose_once(
     unique
 }
 
-fn measure_spans(todo: &[Span], lights: &Lights, m: Measuring<'_>) -> Result<()> {
+fn measure_spans(todo: &[Span], lights: &Lights, m: &mut Measuring<'_>) -> Result<()> {
     let weight = |s: &Span| {
         let d = s.to - s.from;
         if d.is_finite() { d.max(0.04) } else { 0.04 }
@@ -1144,6 +1184,8 @@ pub fn metadata_words(m: &Value) -> String {
             "MaxCLL {}, MaxFALL {}",
             m["light"]["max_cll"], m["light"]["max_fall"]
         ));
+    } else if says(m, vidcut_core::export::metadata::FROM_OUTPUT) {
+        parts.push("MaxCLL and MaxFALL from the output frames".into());
     }
     let mut words = if parts.is_empty() {
         String::new()
@@ -1162,21 +1204,30 @@ pub fn metadata_words(m: &Value) -> String {
             words += name;
         }
     }
-    if words.is_empty() && through_lut(m) {
-        return "None: a LUT changes the light of the picture".into();
+    if words.is_empty() && graded(m) {
+        return "None: a grade or a LUT changes the light".into();
     }
     words
 }
 
-fn through_lut(m: &Value) -> bool {
-    m["why"].as_array().is_some_and(|why| {
-        why.iter()
-            .any(|w| w == vidcut_core::export::metadata::THROUGH_LUT)
-    })
+fn says(m: &Value, line: &str) -> bool {
+    m["why"]
+        .as_array()
+        .is_some_and(|why| why.iter().any(|w| w == line))
+}
+
+fn graded(m: &Value) -> bool {
+    says(m, vidcut_core::export::metadata::GRADED)
+}
+
+pub fn graded_drops(m: &Value) -> Vec<&'static str> {
+    (vidcut_core::export::metadata::GRADED_DROPS.into_iter())
+        .filter(|line| says(m, line))
+        .collect()
 }
 
 pub fn metadata_shown(m: &Value) -> bool {
-    m.is_object() && (m["mode"].as_str() != Some("none") || through_lut(m))
+    m.is_object() && (m["mode"].as_str() != Some("none") || graded(m))
 }
 
 pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
@@ -1499,7 +1550,7 @@ pub fn frame(
     playhead: Option<i64>,
 ) -> Result<Value> {
     let fps = p.fps();
-    let (piece, (w, h), frame, colors, lut) = match (media, generator) {
+    let (piece, (w, h), frame, colors, lut, grade) = match (media, generator) {
         (Some(_), Some(_)) => {
             return Err(Error::usage("give media or generator, not both"));
         }
@@ -1518,6 +1569,7 @@ pub fn frame(
                 t,
                 plan.colors,
                 plan.output_lut,
+                plan.timeline_grade,
             )
         }
         (None, None) => {
@@ -1535,6 +1587,7 @@ pub fn frame(
                 t,
                 plan.colors,
                 plan.output_lut,
+                plan.timeline_grade,
             )
         }
         (Some(id), None) => {
@@ -1564,6 +1617,7 @@ pub fn frame(
                 t,
                 None,
                 None,
+                None,
             )
         }
     };
@@ -1577,7 +1631,8 @@ pub fn frame(
     };
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     let size = (w.max(2), h.max(2));
-    let colors = (colors, lut.as_deref());
+    let grade = grade.map(|g| g.at(frame as f64).into_owned());
+    let colors = (colors, lut.as_deref(), grade.as_ref());
     let sizes = (size, frame_size);
     vidcut_av::export::still::write_png(&piece, fps, sizes, colors, out, decoder.as_ref())
         .map_err(from_av)?;

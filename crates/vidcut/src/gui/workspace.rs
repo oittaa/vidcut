@@ -5,7 +5,7 @@ use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::model::{Marker, PictureTool, Project, RenderCache};
 use vidcut_core::preferences::Scope;
-use vidcut_core::request::{Page, ViewerMode};
+use vidcut_core::request::{GradeLevel, Page, ViewerMode};
 use vidcut_core::shortcuts::Action;
 use vidcut_core::time::{Rational, format_timecode};
 
@@ -333,7 +333,9 @@ impl Workspace {
                     return Err("Open a project first".into());
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
+                live::GuiChange::Grade(level) => self.set_grading(level),
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
+                live::GuiChange::GradeNodes(nodes) => self.pick_grade_nodes(nodes)?,
                 live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
         }
@@ -445,12 +447,17 @@ impl Workspace {
         let page = self.effects_page.page;
         live::GuiState {
             page,
-            clip: match page {
-                Page::Effects => self.effects_clip(),
-                Page::Color => self.color_clip(),
-                Page::Cut => None,
+            grade: self.effects_page.grading,
+            clip: match (page, self.effects_page.grading) {
+                (Page::Effects, _) => self.effects_clip(),
+                (Page::Color, GradeLevel::Clip) => self.color_clip(),
+                (Page::Color, GradeLevel::Timeline) | (Page::Cut, _) => None,
             },
             nodes: self.effects_page.nodes.clone(),
+            grade_nodes: match page {
+                Page::Color => self.effects_page.grade_nodes.clone(),
+                Page::Effects | Page::Cut => Vec::new(),
+            },
             time: self.page_clock(),
             edit,
             edits,
@@ -1119,6 +1126,7 @@ impl Workspace {
                         ui.close();
                     }
                 }
+                self.static_key_item(ui);
                 if let Some(why) = shared {
                     super::dialog::why(ui, why);
                 }
@@ -1146,6 +1154,7 @@ impl Workspace {
                 }
             });
             ui.menu_button("Playback", |ui| self.playback_menu(ui));
+            ui.menu_button("Color", |ui| self.color_menu(ui));
             ui.separator();
             self.bar_buttons(ui);
         });
@@ -1454,6 +1463,7 @@ impl Workspace {
         self.history_keys(ctx);
         self.sync_numbers(ctx);
         self.multi_numbers(ctx);
+        self.color_keys(ctx);
         let input = ctx.input(|i| i.clone());
         let fired = Fired::of(&bindings, &input);
         if fired.pressed(Action::Help) {
@@ -2173,14 +2183,7 @@ impl Workspace {
                 .max_size(cap)
                 .frame(theme::card(panel))
                 .show(ui, |ui| {
-                    theme::decorated(ui, Deco::Card, |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("primaries-scroll")
-                            .max_height(inner)
-                            .min_scrolled_height(inner)
-                            .auto_shrink([false, true])
-                            .show(ui, |ui| self.primaries_panel(ui));
-                    })
+                    theme::decorated(ui, Deco::Card, |ui| self.primaries_panel(ui, inner))
                 })
                 .response
                 .rect
@@ -2210,6 +2213,16 @@ impl Workspace {
                 .frame(theme::card(panel))
                 .show(ui, |ui| {
                     theme::decorated(ui, Deco::Card, |ui| self.mixer_panel(ui))
+                });
+        }
+        if color {
+            egui::Panel::right("color-nodes")
+                .resizable(true)
+                .default_size(380.0)
+                .min_size(220.0)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| self.grade_nodes_panel(ui))
                 });
         }
         let left = (self.left != LeftTab::Hidden).then(|| {
