@@ -3009,8 +3009,13 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
   - Measured: Resolve reads the curve from a table. vidcut uses the curve itself ([gotchas](gotchas.md#resolves-renders)).
   - Measured: the window offers 11, but a keyframe does not keep it. vidcut offers 0 to 10 ([gotchas](gotchas.md#resolves-renders)).
   - Measured: with a Dynamics Profile of Start 5 and End 7, a new keyframe got Start 5 and End 7.
-  - vidcut: the same curves. Where no straight line touches both curves, the start curve changes to the end curve where they cross.
-  - vidcut: the pairs (2, 4), (4, 2) and (9, 9) cross. These pairs are not measured in Resolve.
+  - Measured: for the pairs (2, 4), (4, 2) and (9, 9), no straight line touches both curves.
+  - Measured: there, u* is the u where both curves have the same slope. For (2, 4), u* = (√13 − 1) / 6 = 0.4343.
+  - Measured: the line touches the curve that is farther from w = u at u*. It goes from u* to where it meets the other curve.
+  - Measured: (2, 4) is the start curve to 0.4343, the line, and the end curve from 0.5613. The line meets the end curve at an angle.
+  - Measured: (4, 2) is the mirror of (2, 4). (9, 9) is the start curve to 0.5, and then the end curve.
+  - Measured: these three sweeps fit this rule within 5.5/1024 of the blend.
+  - vidcut: the same curves.
   - vidcut: `grade.keys.set` with `start` and `end`. The Dynamic Attributes window has the two sliders and the curve.
   - vidcut: `project.set` with `dynamics_profile`, and the Dynamics Profile row of the Project Settings window.
 - **Change, move and delete** (pp. 3456–3457, 3462–3463):

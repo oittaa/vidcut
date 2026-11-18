@@ -76,12 +76,19 @@ fn joints(s: Ease, e: Ease) -> (f64, f64) {
         let b = 1.0 - (m / (e.1 * e.0)).powf(1.0 / (e.0 - 1.0));
         (a <= b && b <= 1.0).then(|| (b, fall(e, b) - rise(s, a) - m * (b - a)))
     };
-    match root(|a| tangent(a).map(|(_, g)| g)) {
-        Some(a) => (a, tangent(a).map_or(a, |(b, _)| b)),
-        None => {
-            let c = root(|u| Some(rise(s, u) - fall(e, u))).unwrap_or(0.5);
-            (c, c)
-        }
+    if let Some(a) = root(|a| tangent(a).map(|(_, g)| g)) {
+        return (a, tangent(a).map_or(a, |(b, _)| b));
+    }
+    let u = root(|u| Some(rise_slope(s, u) - fall_slope(e, u))).unwrap_or(0.5);
+    let (low, high) = (rise(s, u), fall(e, u));
+    if (low - u).abs() >= (high - u).abs() {
+        let m = rise_slope(s, u);
+        let b = root(|x| (x > u).then(|| low + m * (x - u) - fall(e, x)));
+        (u, b.unwrap_or(u))
+    } else {
+        let m = fall_slope(e, u);
+        let a = root(|x| (x < u).then(|| high + m * (x - u) - rise(s, x)));
+        (a.unwrap_or(u), u)
     }
 }
 

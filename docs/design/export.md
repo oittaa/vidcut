@@ -853,7 +853,8 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - Why linear: the renders of the spec equal a grade with no keyframes at the blended values (spec §8.22).
 - `Dissolve::of` finds the joints of the curve once: where the straight line touches the start curve and the end curve.
   - `root` scans `STEPS` points for a change of sign, and then halves the step `HALVINGS` times.
-  - Where no line touches both curves, the joint is where the two curves cross.
+  - Where no line touches both curves, the joint is where the slopes of the two curves are equal.
+  - There, a line touches the curve that is farther from w = u. It ends where it meets the other curve.
 - `Grade::at` gives the grade of one frame, with no keyframes. Each path that draws a frame takes it:
   - `Placing::new` gives `Working::graded` the clip grade at the source frame of the placement. `Picture::sampled` does the same.
   - The player gives the viewer the timeline grade at the playhead (`Shown`).
