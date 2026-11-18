@@ -97,6 +97,7 @@ pub struct Workspace {
     title: String,
     theme: Option<Arc<crate::themes::Theme>>,
     pub(super) pool_buttons: f32,
+    pub(super) pool_least: f32,
     pub(super) pool_focus: bool,
     pub(super) removing: Option<Vec<String>>,
     pub(super) video_only: bool,
@@ -197,6 +198,7 @@ impl Workspace {
             title: String::new(),
             theme: None,
             pool_buttons: 84.0,
+            pool_least: 0.0,
             pool_focus: false,
             removing: None,
             video_only: false,
@@ -2156,11 +2158,17 @@ impl Workspace {
         let wanted = self.timeline_wanted().unwrap_or(300.0) + chrome;
         let least = self.timeline_least(&spacing).map_or(140.0, |h| h + chrome);
         let color = self.effects_page.page == Page::Color;
-        let bottom = ctx.content_rect().height() * BOTTOM_SHARE;
+        let pool = match self.left {
+            LeftTab::Hidden => 0.0,
+            _ => self.pool_least + frame.total_margin().sum().y,
+        };
+        let room = ui.available_rect_before_wrap().height();
+        let bottom = (ctx.content_rect().height() * BOTTOM_SHARE).min(room - pool);
+        let mut palette = 0.0;
         if color {
             let cap = (bottom - least).max(chrome);
             let inner = cap - frame.total_margin().sum().y;
-            egui::Panel::bottom("primaries")
+            palette = egui::Panel::bottom("primaries")
                 .resizable(true)
                 .max_size(cap)
                 .frame(theme::card(panel))
@@ -2169,19 +2177,28 @@ impl Workspace {
                         egui::ScrollArea::vertical()
                             .id_salt("primaries-scroll")
                             .max_height(inner)
+                            .min_scrolled_height(inner)
                             .auto_shrink([false, true])
                             .show(ui, |ui| self.primaries_panel(ui));
                     })
-                });
+                })
+                .response
+                .rect
+                .height();
         }
         let size = match color {
             true => least,
             false => wanted.min(bottom).max(least),
         };
+        let most = match color {
+            true => (bottom - palette).max(least),
+            false => f32::INFINITY,
+        };
         egui::Panel::bottom(if color { "color-timeline" } else { "timeline" })
             .resizable(true)
             .default_size(size)
             .min_size(least)
+            .max_size(most)
             .frame(frame)
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Card, |ui| self.timeline_panel(ui))

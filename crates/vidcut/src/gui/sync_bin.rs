@@ -237,7 +237,7 @@ impl Workspace {
             ui.label(dim(self.snap.pool.bin.clone()));
         });
         ui.separator();
-        let height = (ui.available_height() - self.pool_buttons).max(60.0);
+        let height = (ui.available_height() - self.pool_buttons).max(0.0);
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         let mut inside = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         match self.sync_rows_at(&p, at) {
