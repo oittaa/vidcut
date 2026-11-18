@@ -47,6 +47,11 @@ const SDR_WHITE: u32 = 203;
 
 pub const GRADED: &str = "Nothing from the sources: a grade or a LUT changes the light";
 
+pub const GRADED_DROPS: [&str; 2] = [
+    "No HDR10+: a grade or a LUT changes the light",
+    "No Dolby Vision: a grade or a LUT changes the light",
+];
+
 pub const FROM_OUTPUT: &str = "MaxCLL and MaxFALL: measured on the output frames during the export";
 
 fn volume(m: &PieceMeta) -> (MasteringDisplay, bool) {
@@ -498,6 +503,14 @@ pub fn choose_graded(v: &VideoSettings) -> MetadataChoice {
         return choice;
     }
     choice.why.push(GRADED.into());
+    for (asked, line) in [asked.hdr10plus(), asked.dolby_vision()]
+        .into_iter()
+        .zip(GRADED_DROPS)
+    {
+        if asked {
+            choice.why.push(line.into());
+        }
+    }
     let mut measured = false;
     if out == Hdr::Pq {
         if let Some(s) = &v.mastering_display {

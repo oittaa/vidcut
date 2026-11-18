@@ -1958,6 +1958,9 @@ fn print_metadata(m: &Value) {
         return;
     }
     println!("    HDR metadata: {}", crate::export::metadata_words(m));
+    for line in crate::export::graded_drops(m) {
+        println!("    {line}");
+    }
 }
 
 fn print_copies(c: &Value) {

@@ -1220,6 +1220,12 @@ fn graded(m: &Value) -> bool {
     says(m, vidcut_core::export::metadata::GRADED)
 }
 
+pub fn graded_drops(m: &Value) -> Vec<&'static str> {
+    (vidcut_core::export::metadata::GRADED_DROPS.into_iter())
+        .filter(|line| says(m, line))
+        .collect()
+}
+
 pub fn metadata_shown(m: &Value) -> bool {
     m.is_object() && (m["mode"].as_str() != Some("none") || graded(m))
 }

@@ -80,6 +80,8 @@ Colors:
   - A grade counts only when it has keyframes or `Graded::of` gives passes (`Grade::is_active`). The grades inside compound clips count too.
   - It keeps the mastering display and the light that the user gives. The report says this.
   - Without given light, the choice says that the output frames give it (`metadata::FROM_OUTPUT`). The plan shows this.
+  - An asked HDR10+ or Dolby Vision gets a line that says that the grade drops it (`metadata::GRADED_DROPS`).
+  - The report, the job details and a line beside the metadata menu of the export window show that line (`graded_drops`).
 - Before the export, `export::choose_colors` measures the light of those output frames (`export::output_light`).
   - `output_light` draws each frame as the encode does (`frames_of`). It uses the same decoder, draw, grades, LUTs and burned subtitles.
   - It uses the sizes of the export and the pixel format of the first encoder (`encode::resolve_video`).

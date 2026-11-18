@@ -2744,6 +2744,18 @@ fn settings_form(
     let plan = d.plan_result.as_ref().and_then(|r| r.as_ref().ok());
     let planned = plan.map(|p| p["video_encoder"].clone()).unwrap_or_default();
     let picked = plan.map(|p| p["auto"].clone()).unwrap_or_default();
+    let mut drops: Vec<&str> = Vec::new();
+    for o in plan
+        .and_then(|p| p["outputs"].as_array())
+        .into_iter()
+        .flatten()
+    {
+        for line in crate::export::graded_drops(&o["metadata"]) {
+            if !drops.contains(&line) {
+                drops.push(line);
+            }
+        }
+    }
     egui::Grid::new("export-settings")
         .num_columns(2)
         .spacing([12.0, 6.0])
@@ -3110,6 +3122,9 @@ fn settings_form(
                                         ui.selectable_value(&mut v.hdr_metadata, m, label(m));
                                     }
                                 });
+                            for line in &drops {
+                                ui.label(dim(*line));
+                            }
                         }
                     } else if v.hdr.transfer().is_some() {
                         v.hdr = HdrMode::Auto;

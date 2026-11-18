@@ -3926,6 +3926,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Without given light levels, PQ output gets the MaxCLL and MaxFALL of its own frames.
     - A first pass draws the frames as the encode does, and measures them. The encode then writes these values.
     - The export has no HDR10+ and no Dolby Vision.
+    - When the user asks for HDR10+ or Dolby Vision, the report and the export window name what the export drops.
   - The report of the export tells where each value comes from: given, from the sources, or measured.
 - **D47. Drop-frame timecode** (§4.3).
   - At 29.97, 59.94 and 119.88 fps, record timecode can count drop-frame, as Resolve's project settings offer.
