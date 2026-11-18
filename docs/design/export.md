@@ -874,14 +874,14 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
 A made frame of a speed change ([which source frame](#which-source-frame)):
 
 - The effects of the clip work on each source picture before the frame between them is made, as in the spec (§13).
-- The effects of a compound clip around it work later, at the draw (`render_cache::own_effects`). A file of the render cache also holds none of them.
+- The effects of a compound clip around it work later, at the draw (`render_cache::held`). A file of the render cache also holds none of them.
 - The draw that places a source picture also blurs it (`Sampling::Colors`). It covers the whole frame, because the blur spreads past the picture (`placed_look`).
 - The made frame holds colors only. The later draw thus takes its alpha from the placement at that frame (`Sampling::Placed`, `Blurred::made`):
   - It draws the colors of the made frame with no edges (`blur::opened`).
   - It draws the coverage of the picture, and blurs it by the same effects (`blur::mask_bind`).
   - The layer takes its colors from the first and its alpha from the second. It thus has no color at an alpha of 0.
-- A frame from a file of the render cache holds the effects up to the last checked effect ([playback](playback.md#the-render-cache)).
-  - `VideoFrames` gives it a placement with only these effects (`Sampling::Placed`, `render_cache::baked`). The coverage takes only these effects.
+- A frame from a file of the render cache holds the effects up to the last checked effect ([playback](playback.md#the-render-cache)). With a Retime Process, it holds all the effects and the grade.
+  - `VideoFrames` gives it a placement with only these effects (`Sampling::Placed`, `render_cache::held`). The coverage takes only these effects.
   - The draw takes the later effects from the placement of the frame. It joins the colors and the coverage into one picture, then blurs it by these effects (`Blurred::made`).
 
 The colors mode (`VideoFrames::colors_only`):
@@ -965,7 +965,7 @@ The boxes:
 
 Other parts:
 
-- `render_cache::own_effects` drops the compositions of the compound clips around a picture. They work later, at the draw, as their effects do.
+- `render_cache::held` drops the compositions of the compound clips around a picture. They work later, at the draw, as their effects do.
 - `Composition::moves_by_itself` is true for an effect tool that moves by itself. Then `render_cache` keeps a frame for each frame of the clip.
 - `export::prepare` stops an export with an error when a clip in it has a composition without a chain (`RenderPlan::broken_composition`).
 

@@ -11,7 +11,7 @@ use crate::model::{
     Upscaler,
 };
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
-use crate::render::{Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
+use crate::render::{CacheFrames, Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
 
 pub type Key = [u8; 16];
 
@@ -325,10 +325,7 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
                     p.picture.opacity_keys.clear();
                     p.picture.composite_mode = None;
                 }
-                own_effects(placed);
-                if !retimed {
-                    baked(placed);
-                }
+                held(placed, retimed);
             }
         }
         *cache = ClipCache::Auto;
@@ -337,7 +334,7 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
     out
 }
 
-pub fn own_effects(placed: &mut [Placed]) {
+fn own_effects(placed: &mut [Placed]) {
     for p in placed.iter_mut().skip(1) {
         p.picture.effects.clear();
         p.picture.composition = None;
@@ -345,8 +342,11 @@ pub fn own_effects(placed: &mut [Placed]) {
     }
 }
 
-pub fn baked(placed: &mut [Placed]) {
+pub fn held(placed: &mut [Placed], whole: bool) {
     own_effects(placed);
+    if whole {
+        return;
+    }
     if let Some(own) = placed.first_mut()
         && let Some(j) = own
             .picture
@@ -1026,7 +1026,6 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         alpha_mode,
         upscale,
         retime,
-        placed,
         made,
         input_lut,
         ..
@@ -1049,12 +1048,10 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
             false => {}
             true => {
                 *upscale = Default::default();
-                *made = shape;
-                if retimed {
-                    for e in placed.iter_mut().flat_map(|p| &mut p.picture.effects) {
-                        e.render_cache = true;
-                    }
-                }
+                *made = shape.map(|shape| CacheFrames {
+                    shape,
+                    whole: retimed,
+                });
             }
         }
     }

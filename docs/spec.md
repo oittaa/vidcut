@@ -5459,7 +5459,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It holds a Retime Process other than Nearest, and the checked effects (p. 204).
       - It holds the frame at the size of the timeline. Why: a Retime Process and an effect make each frame at the size that the clip shows.
       - With a checked effect, it holds the effects of the clip up to the last checked effect. The viewer applies the later effects, as in Resolve (p. 202).
-      - With a Retime Process, it holds all the effects of the clip. Why: the effects come before the frames between two source frames (§13).
+      - With a Retime Process, it holds all the effects and the grade of the clip. Why: they come before Speed Effects (§13).
       - It never holds the effects of a compound clip around the clip. A checked effect there makes no file. Why: that effect can work on the mix of the compound clip.
       - For a placed clip, it holds the colors of the frame, with no edges and no alpha. The viewer makes them again from the placement. Thus the cache needs no alpha.
       - A change of the Transform, the crop or an effect that it holds renders it again.
