@@ -2649,7 +2649,7 @@ impl VideoFrames {
                     retime,
                     alpha_mode,
                     upscale,
-                    made: shape,
+                    made: cached,
                     ..
                 } = layer
                 else {
@@ -2746,19 +2746,22 @@ impl VideoFrames {
                     self.source_frame(i, s, layer, k)?
                 };
                 self.note_classic(s, at, *upscale);
-                let sampling = match (backward, shape) {
+                let sampling = match (backward, cached) {
                     (true, _) => Sampling::Own,
-                    (false, Some(shape)) => Sampling::Placed {
+                    (false, Some(cached)) => Sampling::Placed {
                         fit: Fit {
-                            size: shape.size,
-                            sar: shape.sar,
-                            rotation: shape.rotation,
+                            size: cached.shape.size,
+                            sar: cached.shape.sar,
+                            rotation: cached.shape.rotation,
                         },
                         part: [0.0, 0.0, 1.0, 1.0],
                         placed: {
-                            let mut baked = placed.get(i).cloned().unwrap_or_default();
-                            vidcut_core::render_cache::baked(&mut baked);
-                            baked.into()
+                            let mut held = placed.get(i).cloned().unwrap_or_default();
+                            match cached.whole {
+                                true => vidcut_core::render_cache::own_effects(&mut held),
+                                false => vidcut_core::render_cache::baked(&mut held),
+                            }
+                            held.into()
                         },
                     },
                     (false, None) => self.open[s].sampling.clone(),

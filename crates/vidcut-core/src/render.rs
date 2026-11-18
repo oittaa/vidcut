@@ -223,11 +223,11 @@ pub enum VideoPiece {
         /// Its track is out of the render cache's User mode.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         excluded: bool,
-        /// Its frames are made frames of a placed picture of this shape,
-        /// from the render cache: colors over the whole frame. `placed`
-        /// gives their edges and alpha.
+        /// Its frames are made frames of a placed picture, from the render
+        /// cache: colors over the whole frame. `placed` gives their edges
+        /// and alpha.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        made: Option<Shape>,
+        made: Option<Made>,
         /// The `.cube` file that its pictures go through just after their
         /// conversion into the timeline color space.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -601,6 +601,16 @@ pub struct Shape {
     pub sar: (i32, i32),
     /// Clockwise degrees that make it upright.
     pub rotation: u16,
+}
+
+/// The made frames of a placed picture in the render cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Made {
+    /// The shape of its media.
+    pub shape: Shape,
+    /// The frames hold all the effects and the grade of its clip. Else
+    /// they hold its effects up to the last checked effect.
+    pub whole: bool,
 }
 
 /// A clip's picture as it goes over the frame.

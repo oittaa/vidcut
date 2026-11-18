@@ -11,7 +11,7 @@ use crate::model::{
     Upscaler,
 };
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
-use crate::render::{Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
+use crate::render::{Image, Made, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
 
 pub type Key = [u8; 16];
 
@@ -1026,7 +1026,6 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         alpha_mode,
         upscale,
         retime,
-        placed,
         made,
         input_lut,
         ..
@@ -1049,12 +1048,10 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
             false => {}
             true => {
                 *upscale = Default::default();
-                *made = shape;
-                if retimed {
-                    for e in placed.iter_mut().flat_map(|p| &mut p.picture.effects) {
-                        e.render_cache = true;
-                    }
-                }
+                *made = shape.map(|shape| Made {
+                    shape,
+                    whole: retimed,
+                });
             }
         }
     }
