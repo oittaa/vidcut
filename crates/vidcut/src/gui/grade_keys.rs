@@ -283,7 +283,7 @@ impl Workspace {
         let Some((of, _, g)) = self.grade_shown() else {
             return;
         };
-        self.settle_grade(&of);
+        self.settle_grade(&of, &g);
         let Ok(node) = self.grade_key_node(&g) else {
             return;
         };
@@ -318,7 +318,7 @@ impl Workspace {
             ui.strong("Keyframes");
             return;
         };
-        self.settle_grade(&of);
+        self.settle_grade(&of, &g);
         let Some(span) = self.project().and_then(|p| Span::of(p, &of)) else {
             return;
         };

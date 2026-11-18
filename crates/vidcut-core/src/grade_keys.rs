@@ -183,7 +183,7 @@ impl GradeNode {
         }
     }
 
-    fn changed_key(&self, frame: i64) -> Option<usize> {
+    pub fn changed_key(&self, frame: i64) -> Option<usize> {
         match self.keys.iter().position(|k| !k.is_static()) {
             Some(i) if frame <= self.keys[i].frame => Some(i),
             _ => self

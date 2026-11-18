@@ -430,7 +430,10 @@ The bar and the Jobs button:
   - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.
   - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
   - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.
-  - Another clip or another grade mode selects node 1 (`Workspace::settle_grade`).
+  - Another clip, another grade mode or another timeline selects node 1 (`Workspace::settle_grade`).
+  - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.
+  - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
+  - On a mixer, the keys add only a serial node or an appended node, as the menu does.
   - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
   - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.set` and `grade.clear`.
   - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, and reset.
@@ -441,8 +444,10 @@ The bar and the Jobs button:
   - The switch sends `gui.page` with `grade`. `gui.state` gives the `grade`, and gives no `clip` in Timeline mode.
 - The dragged grade goes to the core with `Handle::preview_pictures`, through `Workspace::graded_wanted`. Thus the viewer follows each frame of the drag.
   - A dragged timeline grade goes with `Handle::preview_grade`, through `Workspace::timeline_grade_wanted`. The player draws it in place of the grade of the plan.
-- When the pointer is up, the palette sends one `grade.set` with the changed values, the `node` and the playhead as `at`. Thus a drag is one undo step.
-  - On a corrector with keyframes, the palette shows the keyframe that a change at the playhead goes to (`GradeNode::changed_at`). A move of the playhead drops the dragged grade (`Graded`).
+- When the pointer is up, the palette sends one `grade.set` with the changed values, the `node` and `at`. Thus a drag is one undo step.
+  - `at` is the playhead when the drag starts. Thus a drag during playback changes one keyframe.
+  - On a corrector with keyframes, the palette shows the keyframe that a change at the playhead goes to (`GradeNode::changed_at`).
+  - The dragged grade (`Graded`) stays until the playhead comes to a frame that picks a different keyframe (`GradeNode::changed_key`).
 - After that, the palette shows the sent grade until the project has it. If the request fails, the palette shows the project again after a short time.
 - A drag in a wheel moves the puck by the move of the pointer (manual p. 3144):
   - With Shift, the puck jumps to the pointer.

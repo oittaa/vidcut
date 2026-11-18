@@ -89,6 +89,7 @@ pub(super) struct Graded {
     of: GradeOf,
     node: u32,
     frame: i64,
+    at: i64,
     grade: Grade,
     sent: Option<Instant>,
 }
@@ -127,6 +128,19 @@ fn with_corrector(g: &Grade, n: u32, frame: i64, c: Corrector) -> Grade {
 
 fn held(g: &Grade, n: u32, frame: i64) -> Option<&Corrector> {
     g.node(n)?.changed_at(frame)
+}
+
+fn key_at(g: &Grade, n: u32, frame: i64) -> Option<usize> {
+    g.node(n)?.changed_key(frame)
+}
+
+fn last_corrector(g: &Grade, kept: impl Fn(u32) -> bool) -> Option<u32> {
+    let correctors = (g.nodes.iter().zip(1u32..))
+        .filter(|(d, k)| !d.tool.is_mixer() && kept(*k))
+        .map(|(_, k)| k);
+    correctors
+        .max()
+        .or_else(|| (1..=g.last()).rev().find(|k| kept(*k)))
 }
 
 fn differences(from: &Corrector, to: &Corrector) -> Map<String, Value> {
@@ -929,21 +943,21 @@ impl Workspace {
             }
             return;
         };
-        self.settle_grade(&of);
+        self.settle_grade(&of, &stored);
         let node = self.current_grade_node(&stored);
         let frame = self.grade_frame(&of);
         if let Some(h) = &self.effects_page.graded
             && (h.of != of
                 || Some(h.node) != node
-                || h.frame != frame
+                || key_at(&stored, h.node, h.frame) != key_at(&stored, h.node, frame)
                 || h.sent
                     .is_some_and(|t| h.grade == stored || t.elapsed() > LANDING))
         {
             self.effects_page.graded = None;
         }
-        let grade = match &self.effects_page.graded {
-            Some(h) => h.grade.clone(),
-            None => stored.clone(),
+        let (grade, frame, at) = match &self.effects_page.graded {
+            Some(h) => (h.grade.clone(), h.frame, h.at),
+            None => (stored.clone(), frame, self.snap.timeline.position),
         };
         let Some((n, g)) = node.and_then(|n| Some((n, held(&grade, n, frame)?.clone()))) else {
             let what = node
@@ -1106,6 +1120,7 @@ impl Workspace {
                 of: of.clone(),
                 node: n,
                 frame,
+                at,
                 grade: with_corrector(&grade, n, frame, c),
                 sent: None,
             });
@@ -1126,7 +1141,7 @@ impl Workspace {
             Some(mut params) => {
                 params.insert(field, target);
                 params.insert("node".into(), json!(n));
-                params.insert("at".into(), json!(self.snap.timeline.position));
+                params.insert("at".into(), json!(at));
                 self.send("grade.set", Value::Object(params));
             }
             None => {}
@@ -1140,7 +1155,7 @@ impl Workspace {
         let Some((of, _, g)) = self.grade_shown() else {
             return;
         };
-        self.settle_grade(&of);
+        self.settle_grade(&of, &g);
         let Some(n) = self
             .current_grade_node(&g)
             .filter(|n| g.corrector(*n).is_some())
@@ -1151,15 +1166,15 @@ impl Workspace {
         if let Some(h) = &mut self.effects_page.graded
             && h.of == of
             && h.node == n
-            && h.frame == frame
-            && let Some(c) = held(&h.grade, n, frame)
+            && key_at(&g, n, h.frame) == key_at(&g, n, frame)
+            && let Some(c) = held(&h.grade, n, h.frame)
         {
             let lights = crate::preferences::load()
                 .map(|p| p.color)
                 .unwrap_or_default();
             let mut c = c.clone();
             c.offset = printed(c.offset, point, &lights);
-            h.grade = with_corrector(&h.grade, n, frame, c);
+            h.grade = with_corrector(&h.grade, n, h.frame, c);
         }
         let (field, target) = named(&of);
         let mut params = Map::from_iter([(field, target)]);
@@ -1195,14 +1210,38 @@ impl Workspace {
         }
     }
 
-    pub(super) fn settle_grade(&mut self, of: &GradeOf) {
-        if self.effects_page.grade_seen.as_ref() != Some(of) {
-            self.effects_page.grade_seen = Some(of.clone());
-            self.effects_page.grade_nodes = vec![1];
-            self.effects_page.grade_view.stop();
-            self.effects_page.grade_spot = None;
-            self.effects_page.grade_keys.forget();
+    pub(super) fn settle_grade(&mut self, of: &GradeOf, g: &Grade) {
+        let open = (self.project().and_then(|p| p.open_id()))
+            .unwrap_or_default()
+            .to_string();
+        let page = &mut self.effects_page;
+        if page
+            .grade_seen
+            .as_ref()
+            .is_none_or(|(t, o)| *t != open || o != of)
+        {
+            page.grade_seen = Some((open, of.clone()));
+            page.grade_nodes = vec![1];
+            page.grade_coming = None;
+            page.grade_view.stop();
+            page.grade_spot = None;
+            page.grade_keys.forget();
         }
+        if (page.grade_coming).is_some_and(|(n, t)| g.node(n).is_some() || t.elapsed() > LANDING) {
+            page.grade_coming = None;
+        }
+        let coming = page.grade_coming.map(|(n, _)| n);
+        let before = page.grade_nodes.len();
+        page.grade_nodes
+            .retain(|n| g.node(*n).is_some() || Some(*n) == coming);
+        if page.grade_nodes.is_empty() && before > 0 {
+            page.grade_nodes = last_corrector(g, |_| true).into_iter().collect();
+        }
+    }
+
+    fn select_coming(&mut self, n: u32) {
+        self.effects_page.grade_nodes = vec![n];
+        self.effects_page.grade_coming = Some((n, Instant::now()));
     }
 
     pub(super) fn current_grade_node(&self, g: &Grade) -> Option<u32> {
@@ -1223,7 +1262,7 @@ impl Workspace {
             kept.retain(|k| *k != n);
             kept.push(n);
         }
-        self.settle_grade(&of);
+        self.settle_grade(&of, &g);
         self.effects_page.grade_nodes = kept;
         Ok(())
     }
@@ -1259,7 +1298,7 @@ impl Workspace {
         let Some((of, _, g)) = self.grade_shown() else {
             return;
         };
-        self.settle_grade(&of);
+        self.settle_grade(&of, &g);
         let corrector = self
             .current_grade_node(&g)
             .filter(|n| g.corrector(*n).is_some());
@@ -1331,12 +1370,8 @@ impl Workspace {
         let commands = (order.iter())
             .map(|n| command("grade.remove", params(of, "clip", json!({ "node": n }))))
             .collect();
-        let left = |k: &u32| !order.contains(k);
         let renumbered = |k: u32| k - order.iter().filter(|n| **n < k).count() as u32;
-        let correctors = (g.nodes.iter().zip(1u32..))
-            .filter(|(d, k)| !d.tool.is_mixer() && left(k))
-            .map(|(_, k)| k);
-        let last = correctors.max().or_else(|| (1..=g.last()).rev().find(left));
+        let last = last_corrector(g, |k| !order.contains(&k));
         self.effects_page.grade_nodes = last.map(renumbered).into_iter().collect();
         self.effects_page.graded = None;
         self.send_all(commands, "Delete Node");
@@ -1346,14 +1381,20 @@ impl Workspace {
         let Some((of, _, g)) = self.grade_shown() else {
             return;
         };
-        self.settle_grade(&of);
+        self.settle_grade(&of, &g);
         let node = self.current_grade_node(&g);
+        let mixer = node
+            .and_then(|n| g.node(n))
+            .is_some_and(|d| d.tool.is_mixer());
+        if mixer && !matches!(add, GradeAdd::Serial | GradeAdd::Append) {
+            return;
+        }
         let more = match (add, node) {
             (GradeAdd::Append, _) => json!({ "add": add }),
             (_, Some(n)) => json!({ "add": add, "node": n }),
             (_, None) => return,
         };
-        self.effects_page.grade_nodes = vec![g.last() + 1];
+        self.select_coming(g.last() + 1);
         self.send("grade.add", params(&of, "clip", more));
     }
 
@@ -1398,7 +1439,7 @@ impl Workspace {
         let (method, more) = match act {
             FieldAct::Corrector => {
                 let at = self.effects_page.grade_spot.unwrap_or_default();
-                self.effects_page.grade_nodes = vec![g.last() + 1];
+                self.select_coming(g.last() + 1);
                 (
                     "grade.add",
                     json!({ "add": GradeAdd::Corrector, "place": at }),
@@ -1430,7 +1471,7 @@ impl Workspace {
             );
             return;
         };
-        self.settle_grade(&of);
+        self.settle_grade(&of, &stored);
         let salt = match &of {
             GradeOf::Clip(id) => format!("grade-node-{id}"),
             GradeOf::Timeline => "grade-node-timeline".to_string(),
