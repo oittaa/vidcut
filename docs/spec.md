@@ -3034,7 +3034,8 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
   - Measured: all keyframes Static. A change at 5 goes to the start only.
   - Measured: Static 70, then Dynamic 120. A change at 70 goes to 70 and to 120. 120 keeps its other values.
   - Measured: Dynamic 20, then Static 120. A change at 70 goes to the start and to 20, not to 120.
-  - vidcut: the same. Each channel of a wheel counts as one value. This is not measured in Resolve.
+  - Measured: each channel of a wheel is one value. Static 70, then Dynamic 120. A change of Lift R at 70 goes to 70 and to 120. 120 keeps its Lift Y.
+  - vidcut: the same.
   - Measured: the palette shows the values of the keyframe that a change goes to, not the blend.
   - Measured: at 70, between Contrast 1.2 at 20 and 2.0 at 120, the palette shows 1.200.
   - vidcut: the same. `grade.set` and `grade.printer` take `at`. Without `at`, the playhead gives it.
@@ -3053,7 +3054,8 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
 - **The timeline grade** (p. 3465):
   - The keyframes of the timeline grade work as the keyframes of a clip grade (p. 3465).
   - vidcut: `timeline` in each `grade.keys` request. The keyframes are on timeline frames.
-  - vidcut: an edit of the timeline does not move them. This is not measured in Resolve.
+  - Measured in Resolve Studio 21.2: an edit of the timeline does not move them. After a ripple delete, they stay on their timeline frames.
+  - vidcut: the same.
 - vidcut: the viewer, the export, `frame.render` and the storyboard give each frame the grade of its own frame.
 
 Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`. `grade.set`, `grade.printer` and `grade.get` take `at`. `project.set` takes `dynamics_profile`.
