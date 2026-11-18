@@ -2988,8 +2988,9 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
   - vidcut: `grade.keys.add` with `kind`. Without `node`, each corrector gets a keyframe, as in All mode.
   - vidcut: Ctrl+[ adds a Dynamic keyframe, and Ctrl+] adds a Static keyframe, in the mode of the panel. Mark > Make Static Keyframe is on the Color page only.
   - vidcut: the values of the corrector itself are the first keyframe. They hold up to the first keyframe in the list.
-  - vidcut: a new keyframe holds the values that the picture has on its frame, as a keyframe of an effect does (§2).
-  - vidcut: a keyframe that is already on that frame takes the new kind. These two rules are not measured in Resolve.
+  - Measured: a new keyframe takes the blended values on its frame. Add Keyframe at 70, between 20 and 120, gave Contrast 1.4995.
+  - Measured: Add Static Keyframe on a keyframe changes only its kind. Its values stay.
+  - vidcut: the same. A new keyframe holds the values that the picture has on its frame, as a keyframe of an effect does (§2).
   - When a grade with keyframes goes to another clip, its keyframes go on the same source timecode (p. 3464).
   - vidcut: a keyframe of a clip grade is on a source frame, as a keyframe of an effect is (§8.16).
 - **Dynamic Attributes** (pp. 3462–3463):
