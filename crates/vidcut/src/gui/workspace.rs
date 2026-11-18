@@ -73,7 +73,6 @@ pub struct Workspace {
     pub display: Option<String>,
     pub levels: Option<vidcut_av::player::Levels>,
     pub main_window: Option<eframe::wgpu::rwh::RawWindowHandle>,
-    pub(super) pads: super::shortcuts::Pads,
     pub(super) search: String,
     pub(super) bins: super::pool::BinsUi,
     pub(super) timecode: Option<TimecodeEntry>,
@@ -174,7 +173,6 @@ impl Workspace {
             display: None,
             levels: None,
             main_window: None,
-            pads: Default::default(),
             search: String::new(),
             bins: Default::default(),
             timecode: None,
@@ -1435,7 +1433,7 @@ impl Workspace {
         }
         let bindings = self.snap.bindings.clone();
         if self.transcription.over {
-            self.transcription.take_keys(ctx, &bindings, &mut self.pads);
+            self.transcription.take_keys(ctx, &bindings);
         }
         self.sync_clips_keys(ctx);
         if self.asking() {
@@ -1460,18 +1458,14 @@ impl Workspace {
         if self.help.open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
             self.help.open = false;
         }
-        self.printer_keys(ctx);
         self.history_keys(ctx);
         self.sync_numbers(ctx);
         self.multi_numbers(ctx);
         self.color_keys(ctx);
         let input = ctx.input(|i| i.clone());
-        let fired = Fired::of(&bindings, &input, &self.pads);
+        let fired = Fired::of(&bindings, &input);
         if fired.pressed(Action::Help) {
             self.help.open = !self.help.open;
-        }
-        if fired.struck(Action::PrinterKeys) && self.effects_page.page == Page::Color {
-            self.switch_printer_keys();
         }
         if fired.pressed(Action::Preferences) {
             self.open_preferences(ctx);
@@ -1541,7 +1535,7 @@ impl Workspace {
         if fired.struck(Action::Stop) && !trimming {
             self.send("player.pause", json!({}));
         }
-        for jkl in self.shuttle.input(&bindings, &input, &self.pads) {
+        for jkl in self.shuttle.input(&bindings, &input) {
             if trimming {
                 self.dynamic_jkl(jkl, input.time);
                 continue;

@@ -7,7 +7,7 @@ use vidcut_core::model::{CompositeMode, Corrector, Grade, GradeNode, GradeTool, 
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed};
 use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::request::{GradeAdd, GradeLevel, GradeMixer, Page, PrinterColor};
-use vidcut_core::shortcuts::{Action, PRINTER, Panel};
+use vidcut_core::shortcuts::{Action, Panel};
 
 use super::node_editor::{
     self, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, Side, Spot, Tile, Wire,
@@ -153,6 +153,16 @@ fn named(of: &GradeOf) -> (String, Value) {
         GradeOf::Timeline => ("timeline".into(), json!(true)),
     }
 }
+
+const PRINTER_COLORS: [PrinterColor; 7] = [
+    PrinterColor::Master,
+    PrinterColor::Red,
+    PrinterColor::Green,
+    PrinterColor::Blue,
+    PrinterColor::Cyan,
+    PrinterColor::Magenta,
+    PrinterColor::Yellow,
+];
 
 fn printer_label(color: PrinterColor, points: f64) -> String {
     let name = match color {
@@ -1136,72 +1146,21 @@ impl Workspace {
         self.send("grade.printer", Value::Object(params));
     }
 
-    fn printing(&self) -> bool {
-        self.snap.printer_keys && self.effects_page.page == Page::Color && self.project().is_some()
-    }
-
-    pub(super) fn switch_printer_keys(&mut self) {
-        let on = !self.snap.printer_keys;
-        self.send(
-            "preferences.set",
-            json!({ "color": { "printer_keys": on } }),
-        );
-    }
-
-    pub(super) fn printer_keys(&mut self, ctx: &egui::Context) {
-        if !self.printing() {
-            return;
-        }
-        let bindings = self.snap.bindings.clone();
-        let mut points = Vec::new();
-        let mut keep = |action: Option<Action>| match action.and_then(Action::printer) {
-            Some(point) => {
-                points.push(point);
-                false
-            }
-            None => true,
-        };
-        ctx.input_mut(|i| {
-            i.events.retain(|e| {
-                keep(super::shortcuts::owner(&bindings, Panel::Color, e).map(|(a, _)| a))
-            })
-        });
-        self.pads
-            .struck
-            .retain(|(c, _)| keep(bindings.owner(Panel::Color, *c)));
-        for point in points {
-            self.printer_point(point);
-        }
-    }
-
     pub(super) fn color_menu(&mut self, ui: &mut Ui) {
-        let on = self.snap.printer_keys;
         let page = self.effects_page.page == Page::Color && self.project().is_some();
-        let bindings = self.snap.bindings.clone();
-        let shortcut = |a: Action| bindings.first(a).unwrap_or_default();
-        let toggle = egui::Button::selectable(on, "Printer Light Hotkeys")
-            .shortcut_text(shortcut(Action::PrinterKeys));
-        if ui.add_enabled(page, toggle).clicked() {
-            self.switch_printer_keys();
-            ui.close();
-        }
-        let printing = self.printing();
         for (menu, size) in [
             ("Full Printer Light", 1.0),
             ("Half Printer Light", 0.5),
             ("Quarter Printer Light", 0.25),
         ] {
-            ui.add_enabled_ui(printing, |ui| {
+            ui.add_enabled_ui(page, |ui| {
                 ui.menu_button(menu, |ui| {
-                    for &(action, color, points) in &PRINTER {
-                        if points.abs() != size {
-                            continue;
-                        }
-                        let item = egui::Button::new(printer_label(color, points))
-                            .shortcut_text(shortcut(action));
-                        if ui.add(item).clicked() {
-                            self.printer_point((color, points));
-                            ui.close();
+                    for color in PRINTER_COLORS {
+                        for points in [size, -size] {
+                            if ui.button(printer_label(color, points)).clicked() {
+                                self.printer_point((color, points));
+                                ui.close();
+                            }
                         }
                     }
                 });
@@ -1209,8 +1168,6 @@ impl Workspace {
         }
         if !page {
             super::dialog::why(ui, "open the Color page");
-        } else if !on {
-            super::dialog::why(ui, "printer light hotkeys are off");
         }
     }
 
@@ -1254,7 +1211,7 @@ impl Workspace {
         let bindings = self.snap.bindings.clone();
         let mut mine: Vec<Action> = Vec::new();
         let mut keep = |found: Option<(Action, bool)>| match found {
-            Some((a, repeat)) if a.printer().is_none() => {
+            Some((a, repeat)) => {
                 if !repeat {
                     mine.push(a);
                 }
@@ -1266,9 +1223,6 @@ impl Workspace {
             i.events
                 .retain(|e| keep(super::shortcuts::owner(&bindings, Panel::Color, e)))
         });
-        self.pads
-            .struck
-            .retain(|(c, repeat)| keep(bindings.owner(Panel::Color, *c).map(|a| (a, *repeat))));
         let struck = |a: Action| mine.contains(&a);
         for (action, add) in ADDS {
             if struck(action) {

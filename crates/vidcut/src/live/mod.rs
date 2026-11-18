@@ -597,7 +597,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         show_upscale: crate::preferences::load().is_ok_and(|p| p.viewer.upscale),
-        printer_keys: crate::preferences::load().is_ok_and(|p| p.color.printer_keys),
         bindings: Arc::new(crate::preferences::bindings()),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
@@ -702,7 +701,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         show_upscale: crate::preferences::load().is_ok_and(|p| p.viewer.upscale),
-        printer_keys: crate::preferences::load().is_ok_and(|p| p.color.printer_keys),
         bindings: Arc::new(crate::preferences::bindings()),
         audio_noticed: None,
         playing: false,
@@ -976,7 +974,6 @@ struct Live {
     guides: vidcut_core::preferences::Guides,
     scopes: vidcut_core::preferences::Scopes,
     show_upscale: bool,
-    printer_keys: bool,
     bindings: Arc<vidcut_core::shortcuts::Bindings>,
     audio_noticed: Option<String>,
     playing: bool,
@@ -1255,11 +1252,6 @@ impl Live {
                     self.show_upscale = show_upscale;
                     self.schedule_timeline();
                     self.refresh_source();
-                    changed = true;
-                }
-                let printer_keys = crate::preferences::load().is_ok_and(|p| p.color.printer_keys);
-                if self.printer_keys != printer_keys {
-                    self.printer_keys = printer_keys;
                     changed = true;
                 }
                 let bindings = crate::preferences::bindings();
@@ -1625,7 +1617,6 @@ impl Live {
             guides: self.guides,
             scopes: self.scopes,
             show_upscale: self.show_upscale,
-            printer_keys: self.printer_keys,
             bindings: self.bindings.clone(),
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),

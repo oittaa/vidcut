@@ -2275,7 +2275,7 @@ impl Workspace {
             (
                 i.pointer.latest_pos(),
                 i.pointer.any_released(),
-                Fired::of(&bindings, i, &self.pads).pressed(Action::Snapping),
+                Fired::of(&bindings, i).pressed(Action::Snapping),
                 i.key_pressed(Key::Escape),
             )
         });

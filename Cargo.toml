@@ -235,9 +235,6 @@ naga = { version = "30", features = ["wgsl-in"] }
 # Direct dep only to keep winit's default features (client-side decorations on
 # GNOME/Wayland, runtime-loaded libwayland), which eframe enables only by default.
 winit = "0.30"
-# Keeps the error that ends eframe's window loop: eframe logs it, and
-# create_native gives it to no caller.
-log = "0.4"
 # Icons for the timeline's controls (Phosphor). MIT or Apache-2.0.
 egui-phosphor = "0.14"
 # Watches the project's and the preferences' folders. On macOS through

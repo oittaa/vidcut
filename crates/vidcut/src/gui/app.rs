@@ -127,7 +127,6 @@ pub struct App {
     session: Option<std::thread::JoinHandle<()>>,
     window: super::window::Window,
     captures: Arc<AtomicUsize>,
-    keypad: super::keypad::Keypad,
 }
 
 struct Capturing(Arc<AtomicUsize>);
@@ -160,7 +159,6 @@ impl App {
         cc: &eframe::CreationContext<'_>,
         project: Option<PathBuf>,
         window: super::window::Window,
-        keypad: super::keypad::Keypad,
     ) -> std::result::Result<Self, String> {
         let render = cc
             .wgpu_render_state
@@ -219,7 +217,6 @@ impl App {
         ws.screens = Some(super::cells::Screens::new(&render));
         let info = render.adapter.get_info();
         ws.display = Some(format!("{} ({:?})", info.name, info.backend));
-        keypad.start(cc.egui_ctx.clone());
         Ok(Self {
             ws,
             port,
@@ -229,7 +226,6 @@ impl App {
             session: Some(session),
             window,
             captures: Arc::new(AtomicUsize::new(0)),
-            keypad,
         })
     }
 
@@ -327,10 +323,7 @@ impl eframe::App for App {
         }
         self.window.watch(&ctx, frame);
         self.ws.main_window = frame.window_handle().ok().map(|h| h.as_raw());
-        self.ws.pads = self.keypad.take();
         self.ws.ui(ui);
-        let root = frame.winit_window().map(|w| w.id());
-        self.keypad.watch(self.ws.keypad_watch(root, &ctx));
         *self.port.two_up.lock().unwrap_or_else(|e| e.into_inner()) = self.ws.two_up_stats();
         self.publish();
     }

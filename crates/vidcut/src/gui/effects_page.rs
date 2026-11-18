@@ -2092,7 +2092,7 @@ impl Workspace {
 
     pub(super) fn effects_keys(&mut self, fired: &Fired, input: &egui::InputState) {
         let bindings = self.snap.bindings.clone();
-        let mine = Fired::of_panel(&bindings, input, &self.pads, Panel::Effects);
+        let mine = Fired::of_panel(&bindings, input, Panel::Effects);
         if mine.pressed(Action::PreviousNodeKeyframe) {
             self.node_key_step(-1);
         }
@@ -2120,7 +2120,7 @@ impl Workspace {
         if fired.struck(Action::Stop) {
             asks.push(json!({ "speed": 0.0 }));
         }
-        for jkl in self.shuttle.input(&bindings, input, &self.pads) {
+        for jkl in self.shuttle.input(&bindings, input) {
             asks.push(match jkl {
                 Jkl::Play(dir) => {
                     json!({ "speed": crate::gui::timeline::tools::faster(speed, dir) })

@@ -2811,11 +2811,9 @@ Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, 
     - A held key of the numeric keypad repeats. Ten repeats of Num+7 moved the Red Offset by 10 points.
     - With Num Lock off, the 7 of the numeric keypad gives Home. It did not move a printer point.
   - vidcut: the Plus and Minus buttons, and the Color page of the preferences with Step Size and Density Increment.
-  - vidcut: the Color menu and the keys of the table. Each item and key sends `grade.printer` for the current node of the grade that the palette shows.
-  - vidcut: the preference `color.printer_keys` keeps the state of Printer Light Hotkeys.
-  - vidcut: on the other pages, the item Printer Light Hotkeys, its key and the printer items do nothing.
-  - vidcut: a key of the numeric keypad moves printer points only while it gives its digit or sign. Thus with Num Lock off, the key does what it did before.
-  - vidcut: the main keys and the main Enter key do not move printer points. Keyboard Customization can give each item other keys.
+  - vidcut: the Color menu has the three submenus, with the 14 items each. Each item sends `grade.printer` for the current node of the grade that the palette shows.
+  - vidcut: on the other pages, the three submenus are grey.
+  - vidcut: the Color menu has no Printer Light Hotkeys item, and the printer items have no keys. The keys of the numeric keypad wait for egui ([todo](todo/egui-keypad-keys.md)).
 - **Grades in timeline files**, measured by script in Resolve Studio 21.2 with a CDL on a clip:
   - The OTIO export has no grade. The `Resolve_OTIO` metadata of the clip is empty.
   - The EDL export with CDL gives each event an `*ASC_SOP` line and an `*ASC_SAT` line, with six decimals.
@@ -2849,7 +2847,6 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
 - `grade.set`, `grade.clear` and `grade.printer` take `node`, the number of a corrector. Without it, they change node 1.
 - `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
 - `gui.page` with `grade` selects Clip or Timeline on the Color page.
-- `preferences.set` with `color.printer_keys` turns the printer light hotkeys on or off.
 
 ### 8.21 Color page nodes (pp. 3385–3399, 3409–3415)
 

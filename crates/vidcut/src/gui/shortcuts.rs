@@ -108,43 +108,19 @@ pub(super) fn owner(b: &Bindings, panel: Panel, event: &Event) -> Option<(Action
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Pads {
-    pub(crate) struck: Vec<(Combo, bool)>,
-    pub(crate) down: Vec<&'static str>,
-}
-
-impl Pads {
-    pub(super) fn owners<'a>(
-        &'a self,
-        b: &'a Bindings,
-        panel: Panel,
-    ) -> impl Iterator<Item = (Action, bool)> + 'a {
-        self.struck
-            .iter()
-            .filter_map(move |(c, repeat)| b.owner(panel, *c).map(|a| (a, *repeat)))
-    }
-}
-
 pub(crate) struct Fired(Vec<(Action, bool)>);
 
 impl Fired {
-    pub(crate) fn of(b: &Bindings, input: &egui::InputState, pads: &Pads) -> Self {
-        Self::of_panel(b, input, pads, Panel::App)
+    pub(crate) fn of(b: &Bindings, input: &egui::InputState) -> Self {
+        Self::of_panel(b, input, Panel::App)
     }
 
-    pub(crate) fn of_panel(
-        b: &Bindings,
-        input: &egui::InputState,
-        pads: &Pads,
-        panel: Panel,
-    ) -> Self {
+    pub(crate) fn of_panel(b: &Bindings, input: &egui::InputState, panel: Panel) -> Self {
         Self(
             input
                 .events
                 .iter()
                 .filter_map(|e| owner(b, panel, e))
-                .chain(pads.owners(b, panel))
                 .collect(),
         )
     }
@@ -158,35 +134,21 @@ impl Fired {
     }
 }
 
-pub(super) fn take(
-    b: &Bindings,
-    input: &mut egui::InputState,
-    pads: &mut Pads,
-    action: Action,
-) -> bool {
+pub(super) fn take(b: &Bindings, input: &mut egui::InputState, action: Action) -> bool {
     let found = input
         .events
         .iter()
         .position(|e| owner(b, action.panel(), e).is_some_and(|(a, _)| a == action));
     if let Some(at) = found {
         input.events.remove(at);
-        return true;
     }
-    let pad = pads
-        .struck
-        .iter()
-        .position(|(c, _)| b.owner(action.panel(), *c) == Some(action));
-    if let Some(at) = pad {
-        pads.struck.remove(at);
-    }
-    pad.is_some()
+    found.is_some()
 }
 
-pub(super) fn held(b: &Bindings, input: &egui::InputState, pads: &Pads, action: Action) -> bool {
+pub(super) fn held(b: &Bindings, input: &egui::InputState, action: Action) -> bool {
     b.keys(action).iter().any(|c| {
         c.held == held_of(input.modifiers)
-            && (pads.down.contains(&c.key)
-                || Key::from_name(c.key).is_some_and(|k| input.key_down(k)))
+            && Key::from_name(c.key).is_some_and(|k| input.key_down(k))
     })
 }
 

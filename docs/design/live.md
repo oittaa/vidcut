@@ -71,11 +71,6 @@ flowchart LR
 ## The UI thread
 
 - `gui::run` runs eframe with `App` on the main thread.
-  - It makes the winit event loop itself. `eframe::create_native` makes the eframe application in that loop.
-  - `keypad::Loop` gives each event of the loop to the eframe application. It first takes some presses of the numeric keypad ([Themes and keys](#themes-and-keys)).
-  - `keypad::Loop` keeps the first error record of eframe in the event that ends the loop. `gui::run` returns its text, and the process exits with an error.
-  - Why: eframe only logs the error that ends its loop. `eframe::create_native` gives it to no caller. A start failure and a failure during the run both come this way.
-  - Other error records of eframe do not end the run, so the loop drops them.
 - `App::new` starts the viewer thread, the core (`live::start`) with `Port` as its `Renderer`, and the IPC server.
 - In each frame, `App::logic` runs the `UiTask`s that the core queued in `Port`: captures, window and GUI changes, trims, quit.
 - `App::ui` takes the viewer's target (`Viewer::sync`) and calls `Workspace::ui`, which reads `Handle::snapshot` once and draws from it.
@@ -454,9 +449,8 @@ The bar and the Jobs button:
   - With Ctrl (Cmd on macOS), the drag moves the master values, as the dial does.
 - The dial under a wheel adds the same amount to each value of the wheel (p. 3145).
 - A double-click on a name resets its value. A drag on a name changes its value (pp. 3146, 3148).
-- A Plus or Minus button of the bars sends `grade.printer` with the current node (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) and a printer key do the same.
+- A Plus or Minus button of the bars sends `grade.printer` with the current node (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) does the same.
   - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.
-- Printer Light Hotkeys sends `preferences.set` with `color.printer_keys`. The snapshot gives the value (`Snapshot::printer_keys`). It works only on the Color page.
 - The Keyframes panel is at the left of the palette (`Workspace::grade_keys_panel`). `GradeKeys` holds its mode, the selected keyframe and a drag.
   - It has a ruler, a Master track and a track for each corrector. A click or a drag in the ruler moves the playhead.
   - A Dynamic keyframe is a diamond, and a Static keyframe is a dot. On the Master track, a frame is a diamond when one of its keyframes is Dynamic.
@@ -786,28 +780,11 @@ From an event to an action (`crates/vidcut/src/gui/shortcuts.rs`):
 - The other signs fire from `Event::Text`. Why: a dead key on a Nordic layout reports `Equals` and types nothing.
 - Ctrl+C, Ctrl+X and Ctrl+V reach egui as `Event::Copy`, `Event::Cut` and `Event::Paste`. `owner` reads them as those three keys. On Windows, Ctrl+Insert, Shift+Delete and Shift+Insert make the same events.
 
-The numeric keypad (`crates/vidcut/src/gui/keypad.rs`):
-
-- The keys of the numeric keypad are keys of their own (`on_keypad`). Their names are Num+ and the key, for example Num+7, Num++ and Num+Enter.
-- The parse of a key (`Combo`) reads a whole keypad name before it splits the modifiers at each +.
-- egui gives them the keys of the main keyboard and drops their place. Thus `keypad::Loop` reads the physical key of each winit `KeyboardInput` itself.
-- It takes only a press that gives its digit or sign, or Enter (`Key::Character`, `NamedKey::Enter`). Why: with Num Lock off, the keys give Home, End and the arrows, and they do what they did before.
-- It takes such a press away from eframe when one of these is true:
-  - The Keyboard Customization window waits for a key.
-  - The press is in the main window, no text field has the keyboard, and an action that works now owns the key.
-- Each frame, `Workspace::keypad_watch` gives the keys that work now, and `App::ui` sends them to `Keypad`.
-  - An action of `Panel::Color` works only while the Color page shows.
-  - A printer action also needs the printer light hotkeys on.
-- The loop also takes the repeats and the release of a key that it took. It puts each press in `Pads` and asks for a redraw.
-- `App::ui` gives the presses of the frame to `Workspace::pads`. `Fired`, `take`, `held` and `Shuttle` read them with the egui events.
-- Other keypad presses go to egui as before. Thus a keypad key without an action types its digit or sign.
-
 Order:
 
 - The windows and panels take their keys first: `TranscriptionUi::take_keys`, `Workspace::sync_clips_keys`, `Workspace::history_keys`, `Workspace::sync_numbers` and `Workspace::multi_numbers`.
 - `TranscriptionUi::take_keys` also reads `Panel::Transcription`. Thus a key can have one action in that window and another action in the main window.
-- `Workspace::printer_keys` takes the printer keys of `Panel::Color` before the other keys of the main window. It sends `grade.printer` for each.
-- Then `Workspace::color_keys` takes the other keys of `Panel::Color` on the Color page. Thus a key can act on the nodes there and do another action on the other pages.
+- Then `Workspace::color_keys` takes the keys of `Panel::Color` on the Color page. Thus a key can act on the nodes there and do another action on the other pages.
 - `Workspace::viewer_keys` takes the viewer frame keys with `take`, after the windows that ask for an answer. Why: Esc closes the question first.
 - `Shuttle` and the skim use `held`, because they need a key that stays down.
 
@@ -815,7 +792,6 @@ The Keyboard Customization window:
 
 - It is a system window of its own (`dialog::separate_window`). Its keys go to the main window in the next frame, as for the other separate windows.
 - `Workspace::capture_key` runs at the start of `Workspace::keys`. While the window waits for a key, it removes every key event of the frame. Thus the key fires no action.
-- A keypad press comes first from `Pads`, because the loop takes all keypad presses while the window waits.
 - `caught` gives the `Combo` of the event and its owner. A key that another action uses stays unset, and the window names that action.
 - The window sends `keys.set` and `keys.reset`, as the CLI does.
 
@@ -852,7 +828,7 @@ sequenceDiagram
 ## Code
 
 - `crates/vidcut/src/gui/app.rs`, `crates/vidcut/src/gui/workspace.rs`, `crates/vidcut/src/gui/export.rs`
-- `crates/vidcut/src/gui/shortcuts.rs`, `crates/vidcut/src/gui/keypad.rs`
+- `crates/vidcut/src/gui/shortcuts.rs`
 - `crates/vidcut/src/gui/video.rs`, `crates/vidcut-av/src/screen/gate.rs`, `crates/vidcut/src/gui/cells.rs`, `crates/vidcut/src/gui/tiles.rs`
 - `crates/vidcut/src/gui/trim_strips.rs`, `crates/vidcut/src/gui/timeline/`
 - `crates/vidcut/src/gui/subtitles.rs`, `crates/vidcut/src/gui/titles.rs`

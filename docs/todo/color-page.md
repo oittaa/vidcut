@@ -22,7 +22,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - On the Color page, the keys of the nodes (`Panel::Color`) go before the keys of the other pages. Thus Shift+S, Ctrl+D, Alt+D and Delete act on the nodes there.
 - A Clip and Timeline switch at the top right selects the grade that the palette shows (pp. 3404–3405). It sends `gui.page` with `grade`.
 - In the bars, each Offset bar has a Plus and a Minus button. Each button moves its channel by one printer point (pp. 3157, 3159).
-- The Color menu has the Printer Light Hotkeys and the Full, Half and Quarter printer points. The keys of the numeric keypad move printer points (p. 3158).
 - The page puts the palette at the bottom and the timeline above it, at its smallest height. The viewer gets the rest.
 - A grade is a tree of correctors and mixers (`model::Grade`, [spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
 

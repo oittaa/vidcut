@@ -25,7 +25,6 @@ shadcn-egui-font-geist-mono.workspace = true
 shadcn-egui-font-space-grotesk.workspace = true
 skrifa.workspace = true
 winit.workspace = true
-log.workspace = true
 wgpu.workspace = true
 ash.workspace = true
 pollster.workspace = true
