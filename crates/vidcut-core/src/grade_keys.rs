@@ -183,15 +183,26 @@ impl GradeNode {
         }
     }
 
-    pub fn held_at(&self, frame: i64) -> Option<&Corrector> {
-        let own = self.own()?;
-        let i = self.keys.partition_point(|k| k.frame <= frame);
-        Some(i.checked_sub(1).map_or(own, |i| &self.keys[i].values))
+    fn changed_key(&self, frame: i64) -> Option<usize> {
+        match self.keys.iter().position(|k| !k.is_static()) {
+            Some(i) if frame <= self.keys[i].frame => Some(i),
+            _ => self
+                .keys
+                .partition_point(|k| k.frame <= frame)
+                .checked_sub(1),
+        }
     }
 
-    pub fn held_at_mut(&mut self, frame: i64) -> Option<&mut Corrector> {
-        let i = self.keys.partition_point(|k| k.frame <= frame);
-        match (i.checked_sub(1), &mut self.tool) {
+    pub fn changed_at(&self, frame: i64) -> Option<&Corrector> {
+        let own = self.own()?;
+        Some(
+            self.changed_key(frame)
+                .map_or(own, |i| &self.keys[i].values),
+        )
+    }
+
+    pub fn changed_at_mut(&mut self, frame: i64) -> Option<&mut Corrector> {
+        match (self.changed_key(frame), &mut self.tool) {
             (Some(i), GradeTool::Corrector(_)) => Some(&mut self.keys[i].values),
             (None, GradeTool::Corrector(c)) => Some(&mut **c),
             _ => None,

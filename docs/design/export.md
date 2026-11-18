@@ -859,7 +859,9 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
 - `ops::grade_keys` changes the keyframes for `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`.
   - `at` is a timeline time. On a clip, `Clip::content_at` gives its source frame (`ops::grade::frame_of`).
   - A new keyframe takes the values of `corrector_at` on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
-- `grade.set` and `grade.printer` change the keyframe on or before `at` (`GradeNode::held_at_mut`). Before the first keyframe, that is the corrector itself.
+- `grade.set` and `grade.printer` change the keyframe that `GradeNode::changed_at_mut` gives for `at`:
+  - At or before the first Dynamic keyframe, that keyframe.
+  - Else the keyframe on or before `at`. With no Dynamic keyframe and `at` before the first keyframe, the corrector itself.
 - `Picture::retimed_to`, `Picture::scale_times` and `Picture::retarget` move the keyframes of a clip grade with the keyframes of its effects.
 
 A made frame of a speed change ([which source frame](#which-source-frame)):

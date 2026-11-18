@@ -2784,10 +2784,11 @@ pub enum Request {
     /// replaces its own. The values of the Primaries palette go to a
     /// corrector, and `mode` and `mixer` go to a mixer.
     ///
-    /// On a corrector with keyframes, the values go to the keyframe at `at`
-    /// or the last one before it. Before its first keyframe, they go to the
-    /// corrector's own values. Without `at`, or a playhead, that is an
-    /// error.
+    /// On a corrector with keyframes, the values go to one keyframe. At or
+    /// before the first dynamic keyframe, that keyframe changes. Else the
+    /// keyframe at `at`, or the last one before it, changes. With no dynamic
+    /// keyframe and `at` before the first keyframe, the corrector's own
+    /// values change. Without `at`, or a playhead, that is an error.
     #[serde(rename = "grade.set")]
     GradeSet {
         #[serde(default, skip_serializing_if = "Option::is_none")]

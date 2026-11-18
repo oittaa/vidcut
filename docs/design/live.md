@@ -442,7 +442,7 @@ The bar and the Jobs button:
 - The dragged grade goes to the core with `Handle::preview_pictures`, through `Workspace::graded_wanted`. Thus the viewer follows each frame of the drag.
   - A dragged timeline grade goes with `Handle::preview_grade`, through `Workspace::timeline_grade_wanted`. The player draws it in place of the grade of the plan.
 - When the pointer is up, the palette sends one `grade.set` with the changed values, the `node` and the playhead as `at`. Thus a drag is one undo step.
-  - On a corrector with keyframes, the palette shows the keyframe on or before the playhead (`GradeNode::held_at`). A move of the playhead drops the dragged grade (`Graded`).
+  - On a corrector with keyframes, the palette shows the keyframe that a change at the playhead goes to (`GradeNode::changed_at`). A move of the playhead drops the dragged grade (`Graded`).
 - After that, the palette shows the sent grade until the project has it. If the request fails, the palette shows the project again after a short time.
 - A drag in a wheel moves the puck by the move of the pointer (manual p. 3144):
   - With Shift, the puck jumps to the pointer.

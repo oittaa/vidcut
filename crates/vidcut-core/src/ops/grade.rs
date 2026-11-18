@@ -278,8 +278,8 @@ fn held(g: &mut Grade, n: u32, frame: Option<i64>) -> Result<&mut Corrector> {
         return Err(Error::invalid(format!("node {n} is a mixer")));
     }
     match frame {
-        Some(f) => d.held_at_mut(f).ok_or_else(|| no_node(n)),
-        None if d.keys.is_empty() => d.held_at_mut(i64::MIN).ok_or_else(|| no_node(n)),
+        Some(f) => d.changed_at_mut(f).ok_or_else(|| no_node(n)),
+        None if d.keys.is_empty() => d.changed_at_mut(i64::MIN).ok_or_else(|| no_node(n)),
         None => Err(Error::usage(format!(
             "node {n} has keyframes: give `at` for the keyframe"
         ))),

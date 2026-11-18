@@ -119,14 +119,14 @@ fn changed_corrector(g: &Corrector, field: &str, value: Value) -> Corrector {
 
 fn with_corrector(g: &Grade, n: u32, frame: i64, c: Corrector) -> Grade {
     let mut out = g.clone();
-    if let Some(old) = out.node_mut(n).and_then(|d| d.held_at_mut(frame)) {
+    if let Some(old) = out.node_mut(n).and_then(|d| d.changed_at_mut(frame)) {
         *old = c;
     }
     out
 }
 
 fn held(g: &Grade, n: u32, frame: i64) -> Option<&Corrector> {
-    g.node(n)?.held_at(frame)
+    g.node(n)?.changed_at(frame)
 }
 
 fn differences(from: &Corrector, to: &Corrector) -> Map<String, Value> {

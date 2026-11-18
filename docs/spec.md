@@ -3014,14 +3014,14 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
   - vidcut: `project.set` with `dynamics_profile`, and the Dynamics Profile row of the Project Settings window.
 - **Change, move and delete** (pp. 3456–3457, 3462–3463):
   - The controls do not show the blend. They show the values of a keyframe until the playhead reaches the next keyframe (p. 3456).
-  - The manual: a change goes to a keyframe that depends on the playhead (p. 3462):
-    - On or before the first Dynamic keyframe: the keyframe at or after the playhead changes.
+  - A change goes to a keyframe that depends on the playhead (p. 3462):
+    - On or before the first Dynamic keyframe: that Dynamic keyframe changes. It is the Dynamic keyframe at or after the playhead.
     - On or after the last Dynamic keyframe: the keyframe at or before the playhead changes.
     - Between two Dynamic keyframes: the keyframe before the playhead changes.
     - Between two Static keyframes: the keyframe before the playhead changes. Its whole segment changes equally.
   - With the playhead on a Static keyframe, a change goes to the part after it (p. 3457).
-  - vidcut: a change goes to the keyframe on or before the playhead. Before the first keyframe, it goes to the values of the corrector itself.
-  - vidcut: this is the default keyframe of p. 3454. It is not the first rule of p. 3462. Resolve is not measured here.
+  - vidcut: the four rules of p. 3462. Before the first Dynamic keyframe, a change goes to it, also with a Static keyframe before the playhead.
+  - vidcut: with no Dynamic keyframe, a change before the first keyframe goes to the values of the corrector itself.
   - vidcut: the palette shows the values that a change goes to. `grade.set` and `grade.printer` take `at`. Without `at`, the playhead gives it.
   - vidcut: `grade.get` with `at` gives the blended values at that time.
   - A drag moves a keyframe with its values. A drag in a top-level track moves the keyframes of the corrector on that frame (p. 3462).
