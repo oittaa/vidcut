@@ -22,7 +22,7 @@ use vidcut_core::export::{
     AlphaOut, Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Numbering, Rounded,
     VideoSettings, validate,
 };
-use vidcut_core::model::{Hdr, SubtitleStyle};
+use vidcut_core::model::{Grade, Hdr, SubtitleStyle};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -1812,7 +1812,7 @@ fn plan_copies(
     }
     let why_not = if plan.output_lut.is_some() {
         Some("the timeline has an output LUT")
-    } else if plan.timeline_grade.is_some() {
+    } else if (plan.timeline_grade.as_ref()).is_some_and(Grade::is_active) {
         Some("the timeline has a grade")
     } else if enc.dynamic.hdr10plus || enc.dynamic.dolby_vision {
         Some("the output gets HDR10+ or Dolby Vision metadata")

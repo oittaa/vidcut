@@ -611,6 +611,12 @@ impl Registers {
     }
 }
 
+impl Grade {
+    pub fn is_active(&self) -> bool {
+        self.is_keyed() || Graded::of(self).is_some()
+    }
+}
+
 impl Graded {
     pub fn of(g: &Grade) -> Option<Self> {
         if !complete(g) {

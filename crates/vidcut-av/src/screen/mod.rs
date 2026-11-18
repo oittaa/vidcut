@@ -1604,7 +1604,7 @@ impl Screen {
     }
 
     pub fn set_timeline_grade(&mut self, grade: Option<&Grade>) {
-        self.timeline_grade = grade.filter(|g| !g.is_usual()).cloned();
+        self.timeline_grade = grade.filter(|g| g.is_active()).cloned();
     }
 
     pub fn set_frame_size(&mut self, frame: Option<(u32, u32)>) {

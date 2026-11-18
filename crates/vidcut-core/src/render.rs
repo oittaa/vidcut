@@ -1798,12 +1798,13 @@ impl RenderPlan {
     }
 
     pub fn changes_light(&self) -> bool {
-        let graded = |g: &Option<Grade>| g.as_ref().is_some_and(|g| !g.is_usual());
+        let graded = |g: &Option<Grade>| g.as_ref().is_some_and(Grade::is_active);
         self.output_lut.is_some()
             || graded(&self.timeline_grade)
             || self
                 .video
                 .iter()
+                .flat_map(VideoPiece::with_flat_pieces)
                 .flat_map(VideoPiece::layers)
                 .any(|(p, _)| {
                     matches!(

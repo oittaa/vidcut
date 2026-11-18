@@ -77,6 +77,7 @@ Colors:
   - DNxHR HQ in 10 bits becomes HQX (`ColorChoice::apply`).
 - `export::choose_metadata` picks the HDR metadata, by the rules of `vidcut_core::export` (spec D46). With an SDR timeline, each picture counts as SDR.
 - With a grade or a LUT in the plan (`RenderPlan::changes_light`), `metadata::choose_graded` takes nothing from the sources. Why: a grade or a LUT changes the light of the picture.
+  - A grade counts only when it has keyframes or `Graded::of` gives passes (`Grade::is_active`). The grades inside compound clips count too.
   - It keeps the mastering display and the light that the user gives. The report says this.
   - Without given light, the choice says that the output frames give it (`metadata::FROM_OUTPUT`). The plan shows this.
 - Before the export, `export::choose_colors` measures the light of those output frames (`export::output_light`).
@@ -834,7 +835,7 @@ The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline
 - The viewer gets the grade from the player (`Shown`). `Player::preview_grade` shows a dragged grade before the project has it.
 - An export gets it with `VideoFrames::with_timeline_grade`. `frame.render`, the storyboard and `FrameReader` get it in `Finish`.
 - The render cache holds no timeline grade. Thus a change of the timeline grade renders nothing again.
-- An export with a timeline grade copies no frame ([bypass re-encode](#bypass-re-encode)).
+- An export with a timeline grade copies no frame ([bypass re-encode](#bypass-re-encode)). A grade that draws nothing does not count (`Grade::is_active`).
 - An OTIO file of vidcut keeps the grade in the vidcut metadata of the timeline (`otio::Imported`).
 
 The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes panel of the Color page):
