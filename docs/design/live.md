@@ -460,7 +460,7 @@ The bar and the Jobs button:
   - It has a ruler, a Master track and a track for each corrector. A click or a drag in the ruler moves the playhead.
   - A Dynamic keyframe is a diamond, and a Static keyframe is a dot. On the Master track, a frame is a diamond when one of its keyframes is Dynamic.
   - The All and Color switch (`KeyMode`) sets the correctors that get a new keyframe: each one, or the current node. A bar at the left marks that track.
-  - A drag of a keyframe sends `grade.keys.move` with `by`. The menus of a track and of a keyframe send `grade.keys.add`, `grade.keys.set` and `grade.keys.remove`.
+  - A drag of a keyframe sends `grade.keys.move` with `by`. The drag picks the keyframe at the press, and `by` is the move of the pointer from the press. The menus of a track and of a keyframe send `grade.keys.add`, `grade.keys.set` and `grade.keys.remove`.
   - Change Dynamic Attributes opens a window with the Start and End sliders and the curve of `Dissolve`.
   - Another clip or another grade mode clears the selection (`GradeKeys::forget`).
 - On the Color page, Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the grade (`Workspace::grade_key_cmd`). `Workspace::grade_key_cmd_why` gives the next step.

@@ -65,7 +65,7 @@ struct Dynamics {
 pub(super) struct GradeKeys {
     mode: KeyMode,
     picked: Option<Picked>,
-    dragging: Option<Picked>,
+    dragging: Option<(Picked, f32)>,
     aim: Option<Aim>,
     dynamics: Option<Dynamics>,
 }
@@ -469,24 +469,29 @@ impl Workspace {
             );
             let pointer = r.interact_pointer_pos().or(r.hover_pos());
             let keys_state = &mut self.effects_page.grade_keys;
-            if r.drag_started()
-                && let Some(f) = pointer.and_then(hit)
+            let origin = match r.drag_started() {
+                true => ui.input(|i| i.pointer.press_origin()).or(pointer),
+                false => None,
+            };
+            if let Some(o) = origin
+                && let Some(f) = hit(o)
             {
                 let picked = Picked {
                     node: track,
                     frame: f,
                 };
                 keys_state.picked = Some(picked);
-                keys_state.dragging = Some(picked);
+                keys_state.dragging = Some((picked, o.x));
             }
-            if let Some(d) = keys_state.dragging.filter(|d| d.node == track)
+            if let Some((d, from)) = keys_state.dragging.filter(|(d, _)| d.node == track)
                 && let Some(p) = pointer
             {
-                let ghost = pos2(p.x.clamp(lane.left(), lane.right()), row.center().y);
+                let x = x_of(d.frame) + p.x - from;
+                let ghost = pos2(x.clamp(lane.left(), lane.right()), row.center().y);
                 diamond(&painter, ghost, 4.0, c.accent.gamma_multiply(0.5));
                 if r.drag_stopped() {
                     keys_state.dragging = None;
-                    let by = (map.t(p.x) - span.time(d.frame)).round() as i64;
+                    let by = (map.t(p.x) - map.t(from)).round() as i64;
                     if by != 0 {
                         let more = with_node(d.node, json!({ "frames": [d.frame], "by": by }));
                         self.send("grade.keys.move", target(of, more));
