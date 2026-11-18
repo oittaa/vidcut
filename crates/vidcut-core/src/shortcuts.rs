@@ -164,6 +164,7 @@ actions! {
     ResetNodeGrade "reset_node_grade",
     ResetGradesKeepNodes "reset_grades_keep_nodes",
     ResetAllGrades "reset_all_grades",
+    AddStaticKeyframe "add_static_keyframe",
     SourceStart "source_start",
     SourceEnd "source_end",
     ClipIn "clip_in",
@@ -243,7 +244,8 @@ impl Action {
             | Action::SwitchAllNodes
             | Action::ResetNodeGrade
             | Action::ResetGradesKeepNodes
-            | Action::ResetAllGrades => Panel::Color,
+            | Action::ResetAllGrades
+            | Action::AddStaticKeyframe => Panel::Color,
             a if a.printer().is_some() => Panel::Color,
             _ => Panel::App,
         }
@@ -1868,6 +1870,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Ctrl+Home"],
         "Reset all grades and nodes",
         Some("One node at its usual values stays."),
+    ),
+    own(
+        Color,
+        Action::AddStaticKeyframe,
+        &["Ctrl+]"],
+        "Add a static keyframe",
+        Some("On each corrector in All mode, or on the current node in Color mode."),
     ),
     own(App, Action::NewBin, &["Ctrl+Shift+N"], "New bin", None),
     own(App, Action::NewTimeline, &["Ctrl+N"], "New timeline", None),

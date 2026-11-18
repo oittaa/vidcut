@@ -1580,6 +1580,7 @@ pub fn frame(
     };
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     let size = (w.max(2), h.max(2));
+    let grade = grade.map(|g| g.at(frame as f64).into_owned());
     let colors = (colors, lut.as_deref(), grade.as_ref());
     let sizes = (size, frame_size);
     vidcut_av::export::still::write_png(&piece, fps, sizes, colors, out, decoder.as_ref())

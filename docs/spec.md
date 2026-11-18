@@ -2963,6 +2963,86 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
 
 Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `grade.set` with `on`, `place`, `mixer` and `mode` changes a node. `grade.get` gives the nodes and the `output`.
 
+### 8.22 Color page keyframes (pp. 3453–3465)
+
+- **The Keyframe Editor** (pp. 3453–3455):
+  - Each node of the grade has a keyframe track. A master keyframe track at the top shows every keyframe (p. 3454).
+  - A drag in the timeline ruler moves the playhead. A timecode at its left shows the current frame (p. 3454).
+  - A Dynamic keyframe is a diamond, and a Static keyframe is a circle (p. 3454).
+  - The grade links to the keyframe before the playhead. That can be a default keyframe on the first frame of the clip (p. 3454).
+  - The Keyframe Timeline mode sets the tracks that get a new keyframe: All, Color or Sizing (p. 3455).
+  - All is the default. It adds a keyframe to every track. An orange bar marks the master track.
+  - Color adds a keyframe to the current node only. A green bar marks its track.
+  - vidcut: the Keyframes panel is at the left of the palette. It has a ruler, a Master track and a track for each corrector.
+  - vidcut: a mixer has no track, and it takes no keyframes.
+  - vidcut: an All and Color switch at the top of the panel sets the mode. All is the default.
+- **Dynamic and Static keyframes** (pp. 3456–3459):
+  - Mark > Add Keyframe (Command-[) adds a Dynamic keyframe at the playhead (p. 3456).
+  - Mark > Make Static Keyframe (Command-]) adds a Static keyframe (p. 3457).
+  - A right-click in a track gives Add Static Keyframe and Add Dynamic Keyframe (p. 3459).
+  - A Dynamic keyframe blends into the next keyframe. A Static keyframe makes a change on one frame (pp. 3456–3457).
+  - After a Static keyframe, the values do not blend into a Dynamic keyframe. After a Dynamic keyframe, they blend into a Static keyframe (p. 3457).
+  - A right-click on a selected keyframe gives Change to Dynamic Keyframe and Change to Static Keyframe (p. 3458).
+  - Measured in Resolve Studio 21.2: the grade file of a still keeps the keyframes of each corrector. Each keyframe holds every value of the corrector.
+  - Measured: the first keyframe has no frame. It is at the start of the clip, and it is Static.
+  - Measured: a Static keyframe holds its values up to the frame of the next keyframe.
+  - Measured: the values blend in the units that the grade stores. The result equals a grade with no keyframes at the blended values, to 0.
+  - Measured: the menu items are "Add Static Keyframe" and "Add Dynamic Keyframe".
+  - vidcut: `grade.keys.add` with `kind`. Without `node`, each corrector gets a keyframe, as in All mode.
+  - vidcut: Ctrl+[ adds a Dynamic keyframe, and Ctrl+] adds a Static keyframe, in the mode of the panel. Mark > Make Static Keyframe is on the Color page only.
+  - vidcut: the values of the corrector itself are the first keyframe. They hold up to the first keyframe in the list.
+  - vidcut: a new keyframe holds the values that the picture has on its frame, as a keyframe of an effect does (§2).
+  - vidcut: a keyframe that is already on that frame takes the new kind. These two rules are not measured in Resolve.
+  - When a grade with keyframes goes to another clip, its keyframes go on the same source timecode (p. 3464).
+  - vidcut: a keyframe of a clip grade is on a source frame, as a keyframe of an effect is (§8.16).
+- **Dynamic Attributes** (pp. 3462–3463):
+  - By default, the blend from one Dynamic keyframe to the next is linear (p. 3462).
+  - Change Dynamic Attributes in the menu of a keyframe opens a window. It has a Start slider, an End slider and the curve (pp. 3462–3463).
+  - The manual: Start sets the blend at the right of the keyframe, and End sets the blend at its left (p. 3462).
+  - The Dynamics Profile in the General Options of the Project Settings gives the Start and End of each new keyframe (p. 3463).
+  - Measured in Resolve Studio 21.2: the Start and the End of the keyframe at the start of a segment shape that segment.
+  - Measured: the End of the keyframe at the end of a segment does not change that segment. Thus the manual is wrong about End.
+  - Measured: Start and End go from 0 to 11. The default is 1. 0, in Start or in End, holds the values up to the next keyframe.
+  - Measured: 1 gives no ease. u goes from 0 to 1 over the segment.
+  - Measured: Start n gives the start curve s(u). 2: 4u³, 3: 6u³, 4: 2u², 5: 3u², 6: 5u², 7: (u/5)^½, 8: (u/3)^½, 9: (u/2)^½, 10: (u/6)^⅓.
+  - Measured: End n gives the same curve, turned: 1 − s(1 − u).
+  - Measured: between the two curves, a straight line touches both. With 1 at one side, the line goes through 0 or 1 at that side.
+  - Measured: all 18 sweeps fit this rule within 2.5/1024 of the blend.
+  - Measured: Resolve reads the curve from a table. vidcut uses the curve itself ([gotchas](gotchas.md#resolves-renders)).
+  - Measured: the window offers 11, but a keyframe does not keep it. vidcut offers 0 to 10 ([gotchas](gotchas.md#resolves-renders)).
+  - Measured: with a Dynamics Profile of Start 5 and End 7, a new keyframe got Start 5 and End 7.
+  - vidcut: the same curves. Where no straight line touches both curves, the start curve changes to the end curve where they cross.
+  - vidcut: the pairs (2, 4), (4, 2) and (9, 9) cross. These pairs are not measured in Resolve.
+  - vidcut: `grade.keys.set` with `start` and `end`. The Dynamic Attributes window has the two sliders and the curve.
+  - vidcut: `project.set` with `dynamics_profile`, and the Dynamics Profile row of the Project Settings window.
+- **Change, move and delete** (pp. 3456–3457, 3462–3463):
+  - The controls do not show the blend. They show the values of a keyframe until the playhead reaches the next keyframe (p. 3456).
+  - The manual: a change goes to a keyframe that depends on the playhead (p. 3462):
+    - On or before the first Dynamic keyframe: the keyframe at or after the playhead changes.
+    - On or after the last Dynamic keyframe: the keyframe at or before the playhead changes.
+    - Between two Dynamic keyframes: the keyframe before the playhead changes.
+    - Between two Static keyframes: the keyframe before the playhead changes. Its whole segment changes equally.
+  - With the playhead on a Static keyframe, a change goes to the part after it (p. 3457).
+  - vidcut: a change goes to the keyframe on or before the playhead. Before the first keyframe, it goes to the values of the corrector itself.
+  - vidcut: this is the default keyframe of p. 3454. It is not the first rule of p. 3462. Resolve is not measured here.
+  - vidcut: the palette shows the values that a change goes to. `grade.set` and `grade.printer` take `at`. Without `at`, the playhead gives it.
+  - vidcut: `grade.get` with `at` gives the blended values at that time.
+  - A drag moves a keyframe with its values. A drag in a top-level track moves the keyframes of the corrector on that frame (p. 3462).
+  - vidcut: a drag in the Master track moves the keyframe of each corrector on that frame. A drag in a node track moves the keyframe of that node.
+  - vidcut: a drag sends `grade.keys.move`. A corrector has one keyframe on a frame at most. Thus a move onto another keyframe of that corrector fails.
+  - Mark > Delete Keyframe (Option-]) deletes every keyframe at the playhead (p. 3463).
+  - Delete Selected Keyframe in the menu of a keyframe deletes only that keyframe (p. 3463).
+  - Mark > Delete All Keyframes deletes every keyframe of the clip (p. 3463).
+  - vidcut: the same, with `grade.keys.remove`. Alt+] deletes the keyframes at the playhead. Delete All Keyframes does not ask first on the Color page.
+  - vidcut: a reset of a corrector also deletes its keyframes. This is not measured in Resolve.
+- **The timeline grade** (p. 3465):
+  - The keyframes of the timeline grade work as the keyframes of a clip grade (p. 3465).
+  - vidcut: `timeline` in each `grade.keys` request. The keyframes are on timeline frames.
+  - vidcut: an edit of the timeline does not move them. This is not measured in Resolve.
+- vidcut: the viewer, the export, `frame.render` and the storyboard give each frame the grade of its own frame.
+
+Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`. `grade.set`, `grade.printer` and `grade.get` take `at`. `project.set` takes `dynamics_profile`.
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
@@ -3383,6 +3463,7 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
   - The Color page has its own level too. There, its keys go first. Thus Shift+S, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
   - On the other pages, these four keys keep the actions of the table.
+  - On the Color page, Ctrl+[, Alt+] and the Mark menu act on the keyframes of the grade ([§8.22](#822-color-page-keyframes-pp-34533465)).
   - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
 - These keys and gestures do not change:
   - The wheel, click and drag gestures. They have no key.
@@ -3421,6 +3502,7 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
 | Alt+Delete | Lift the selection (D9) |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste; after a click in the Keyframes tab or the keyframe tray, the keyframes (§2) |
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
+| Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | Shift+V† | Select one clip under the playhead (§8.1) |

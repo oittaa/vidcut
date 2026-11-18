@@ -100,6 +100,10 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.add", &["add", "clip"]),
     ("grade.remove", &["node", "clip"]),
     ("grade.connect", &["node", "clip"]),
+    ("grade.keys.add", &["clip"]),
+    ("grade.keys.set", &["clip"]),
+    ("grade.keys.move", &["clip"]),
+    ("grade.keys.remove", &["clip"]),
     ("effects.add", &["clips", "kind"]),
     ("comp.add", &["clip", "tool"]),
     ("comp.set", &["clip", "node"]),
@@ -218,6 +222,7 @@ const GROUPS: &[(&str, &str)] = &[
         "grade",
         "The grades of clips and of the timeline: nodes of primary corrections and mixers",
     ),
+    ("grade.keys", "Keyframes of the correctors of a grade"),
     (
         "gui",
         "The running GUI: its window, command log, screenshots, panels, target track and timeline view",
@@ -520,6 +525,11 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "effects.key",
         "vidcut effects key c3 0 --at 2s\n  vidcut effects key c3 0 --at 2s --ease ease_in_out",
+    ),
+    (
+        "grade.keys.add",
+        "vidcut grade keys add c3 --at 1s\n  vidcut grade keys add c3 --at 3s --node 2 --kind static\n  \
+         vidcut grade set c3 --at 3s --contrast 1.4",
     ),
     (
         "motion.list",

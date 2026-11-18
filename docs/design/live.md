@@ -446,7 +446,8 @@ The bar and the Jobs button:
   - The switch sends `gui.page` with `grade`. `gui.state` gives the `grade`, and gives no `clip` in Timeline mode.
 - The dragged grade goes to the core with `Handle::preview_pictures`, through `Workspace::graded_wanted`. Thus the viewer follows each frame of the drag.
   - A dragged timeline grade goes with `Handle::preview_grade`, through `Workspace::timeline_grade_wanted`. The player draws it in place of the grade of the plan.
-- When the pointer is up, the palette sends one `grade.set` with the changed values and the `node`. Thus a drag is one undo step.
+- When the pointer is up, the palette sends one `grade.set` with the changed values, the `node` and the playhead as `at`. Thus a drag is one undo step.
+  - On a corrector with keyframes, the palette shows the keyframe on or before the playhead (`GradeNode::held_at`). A move of the playhead drops the dragged grade (`Graded`).
 - After that, the palette shows the sent grade until the project has it. If the request fails, the palette shows the project again after a short time.
 - A drag in a wheel moves the puck by the move of the pointer (manual p. 3144):
   - With Shift, the puck jumps to the pointer.
@@ -456,6 +457,16 @@ The bar and the Jobs button:
 - A Plus or Minus button of the bars sends `grade.printer` with the current node (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) and a printer key do the same.
   - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.
 - Printer Light Hotkeys sends `preferences.set` with `color.printer_keys`. The snapshot gives the value (`Snapshot::printer_keys`). It works only on the Color page.
+- The Keyframes panel is at the left of the palette (`Workspace::grade_keys_panel`). `GradeKeys` holds its mode, the selected keyframe and a drag.
+  - It has a ruler, a Master track and a track for each corrector. A click or a drag in the ruler moves the playhead.
+  - A Dynamic keyframe is a diamond, and a Static keyframe is a dot. On the Master track, a frame is a diamond when one of its keyframes is Dynamic.
+  - The All and Color switch (`KeyMode`) sets the correctors that get a new keyframe: each one, or the current node. A bar at the left marks that track.
+  - A drag of a keyframe sends `grade.keys.move` with `by`. The menus of a track and of a keyframe send `grade.keys.add`, `grade.keys.set` and `grade.keys.remove`.
+  - Change Dynamic Attributes opens a window with the Start and End sliders and the curve of `Dissolve`.
+  - Another clip or another grade mode clears the selection (`GradeKeys::forget`).
+- On the Color page, Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the grade (`Workspace::grade_key_cmd`). `Workspace::grade_key_cmd_why` gives the next step.
+  - Mark > Make Static Keyframe is on the Color page only (`Workspace::static_key_item`). Its key is `Action::AddStaticKeyframe`.
+- The Dynamics Profile row of the Project Settings window sends `project.set` with `dynamics_profile`.
 
 **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`).
 

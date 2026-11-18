@@ -1140,7 +1140,9 @@ impl Placing {
             .iter()
             .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
             .collect();
-        effects.extend(p.picture.grade.as_ref().and_then(Working::graded));
+        let graded =
+            (p.picture.grade.as_ref()).and_then(|g| Working::graded(&g.at(p.source as f64)));
+        effects.extend(graded);
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&own.back, c));
         if own.soft == Soft::default() && no_bars(quad, frame) {

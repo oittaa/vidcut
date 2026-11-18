@@ -1126,6 +1126,7 @@ impl Workspace {
                         ui.close();
                     }
                 }
+                self.static_key_item(ui);
                 if let Some(why) = shared {
                     super::dialog::why(ui, why);
                 }

@@ -712,6 +712,7 @@ fn first_run(
         .with_timeline(plan.colors)?
         .with_output_lut(plan.output_lut.as_deref())?
         .with_timeline_grade(plan.timeline_grade.as_ref())
+        .grading_from(plan.range.0)
         .with_dynamic(enc.dynamic)
         .with_burn(burn.0, burn.1, plan.height);
     if let Some(d) = decoder {
@@ -1371,6 +1372,7 @@ fn encode(
                     .with_timeline(plan.colors)?
                     .with_output_lut(plan.output_lut.as_deref())?
                     .with_timeline_grade(plan.timeline_grade.as_ref())
+                    .grading_from(plan.range.0)
                     .with_dynamic(enc.dynamic)
                     .with_light(light)
                     .with_burn(burned.0, burned.1, plan.height)

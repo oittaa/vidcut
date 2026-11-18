@@ -614,6 +614,15 @@ These facts come from float renders in Resolve Studio 21.2, without color manage
   - With Shadows 100, the ratio of the curve to the smoothed luma enlarges this move near black. Dark colored pixels then move by up to 0.061.
   - The table of the Log wheels is read 1/2048 off. This moves each channel by about 0.0005, also a channel with no Log value.
   - vidcut does not copy this fault. `Tone` reads its table with no shift. `LogCurve` gives the curve with no table.
+- **Resolve reads the blend of a color keyframe from a table.**
+  - A linear blend renders w = (floor(1024 t) − 1) / 1023. Thus it is below t by up to 2/1024.
+  - One frame before the end of a 100-frame blend, w is 1012.99/1024.
+  - The start curves read the curve at u = floor(1024 t) / 1024.
+  - vidcut does not copy this fault. `Dissolve::at` gives the curve itself ([spec §8.22](spec.md#822-color-page-keyframes-pp-34533465)).
+- **The Dynamic Attributes window of Resolve offers 11, but a keyframe does not keep it.**
+  - The window draws Start 11 as a steep start. After OK, the keyframe has Start 1 and End 1. Start 11 also resets End.
+  - A grade file with 11 renders as 1.
+  - vidcut does not copy this fault. Start and End go from 0 to 10 (`LAST_PROFILE`).
 
 ## transcribe.cpp and its models
 

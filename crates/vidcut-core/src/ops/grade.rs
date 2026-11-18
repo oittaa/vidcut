@@ -107,6 +107,32 @@ pub fn corrector_checked(g: &Corrector) -> Result<()> {
     Ok(())
 }
 
+fn keys_checked(d: &GradeNode, k: u32) -> Result<()> {
+    if d.keys.is_empty() {
+        return Ok(());
+    }
+    if d.tool.is_mixer() {
+        return Err(Error::invalid(format!(
+            "node {k} is a mixer, which takes no keyframes"
+        )));
+    }
+    if d.keys.windows(2).any(|w| w[0].frame >= w[1].frame) {
+        return Err(Error::invalid(format!(
+            "the keyframes of node {k} must be in the order of their frames, one on a frame"
+        )));
+    }
+    let last = crate::grade_keys::LAST_PROFILE;
+    for key in &d.keys {
+        if key.start > last || key.end > last {
+            return Err(Error::invalid(format!(
+                "start and end must be from 0 to {last}"
+            )));
+        }
+        corrector_checked(&key.values)?;
+    }
+    Ok(())
+}
+
 pub fn checked(g: &Grade) -> Result<Option<Grade>> {
     let last = g.last();
     if let Some(o) = g.output.filter(|o| *o > last) {
@@ -129,6 +155,7 @@ pub fn checked(g: &Grade) -> Result<Option<Grade>> {
             }
             _ => {}
         }
+        keys_checked(n, k)?;
     }
     if crate::grade::order(g).is_none() {
         return Err(Error::invalid("the links of the grade make a loop"));
@@ -182,6 +209,16 @@ fn no_timeline() -> Error {
     Error::invalid("the project has no timeline: make one with timeline.new")
 }
 
+pub fn frame_of(p: &Project, of: &GradeOf, at: i64) -> Result<i64> {
+    match of {
+        GradeOf::Timeline => Ok(at),
+        GradeOf::Clip(id) => {
+            let (ti, ci) = locate(p, id)?;
+            Ok(p.tracks[ti].clips[ci].content_at(at))
+        }
+    }
+}
+
 pub fn stored(p: &Project, of: &GradeOf) -> Result<Grade> {
     let grade = match of {
         GradeOf::Timeline => p.timeline().ok_or_else(no_timeline)?.grade.as_ref(),
@@ -210,7 +247,7 @@ fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
     Ok(())
 }
 
-fn edited(
+pub(super) fn edited(
     p: &mut Project,
     of: &GradeOf,
     edit: impl FnOnce(&mut Grade) -> Result<()>,
@@ -220,11 +257,11 @@ fn edited(
     store(p, of, &g)
 }
 
-fn no_node(n: u32) -> Error {
+pub(super) fn no_node(n: u32) -> Error {
     Error::not_found(format!("the grade has no node {n}"))
 }
 
-fn node(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
+pub(super) fn node(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
     g.node_mut(n).ok_or_else(|| no_node(n))
 }
 
@@ -235,6 +272,20 @@ fn corrector(g: &mut Grade, n: u32) -> Result<&mut Corrector> {
     }
 }
 
+fn held(g: &mut Grade, n: u32, frame: Option<i64>) -> Result<&mut Corrector> {
+    let d = node(g, n)?;
+    if d.tool.is_mixer() {
+        return Err(Error::invalid(format!("node {n} is a mixer")));
+    }
+    match frame {
+        Some(f) => d.held_at_mut(f).ok_or_else(|| no_node(n)),
+        None if d.keys.is_empty() => d.held_at_mut(i64::MIN).ok_or_else(|| no_node(n)),
+        None => Err(Error::usage(format!(
+            "node {n} has keyframes: give `at` for the keyframe"
+        ))),
+    }
+}
+
 const NEEDS: &str = "grade.set needs a value to change";
 
 pub fn set(
@@ -242,14 +293,16 @@ pub fn set(
     of: &[GradeOf],
     n: u32,
     (change, node_change): (&GradeChange, &GradeNodeChange),
+    at: Option<i64>,
 ) -> Result<()> {
     if change.is_empty() && node_change.is_empty() {
         return Err(Error::usage(NEEDS));
     }
     for one in of {
+        let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
         edited(p, one, |g| {
             if !change.is_empty() {
-                let c = corrector(g, n)?;
+                let c = held(g, n, frame)?;
                 *c = change.changed(c);
             }
             node_changed(g, n, node_change)
@@ -295,12 +348,16 @@ pub fn clear(p: &mut Project, of: &[GradeOf], n: Option<u32>, keep_nodes: bool) 
     for one in of {
         edited(p, one, |g| {
             match (n, keep_nodes) {
-                (Some(n), _) => *corrector(g, n)? = Corrector::default(),
+                (Some(n), _) => {
+                    *corrector(g, n)? = Corrector::default();
+                    node(g, n)?.keys.clear();
+                }
                 (None, true) => {
                     for d in &mut g.nodes {
                         if let GradeTool::Corrector(c) = &mut d.tool {
                             **c = Corrector::default();
                         }
+                        d.keys.clear();
                     }
                 }
                 (None, false) => *g = Grade::default(),
@@ -314,7 +371,7 @@ pub fn clear(p: &mut Project, of: &[GradeOf], n: Option<u32>, keep_nodes: bool) 
 pub fn printer(
     p: &mut Project,
     of: &[GradeOf],
-    n: u32,
+    (n, at): (u32, Option<i64>),
     point: (PrinterColor, f64),
     lights: &ColorPrefs,
 ) -> Result<()> {
@@ -322,8 +379,9 @@ pub fn printer(
         return Err(Error::invalid("points must be a number"));
     }
     for one in of {
+        let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
         edited(p, one, |g| {
-            let c = corrector(g, n)?;
+            let c = held(g, n, frame)?;
             c.offset = printed(c.offset, point, lights);
             Ok(())
         })?;
@@ -331,8 +389,13 @@ pub fn printer(
     Ok(())
 }
 
-pub fn get(p: &Project, of: &GradeOf) -> Result<Value> {
-    serde_json::to_value(stored(p, of)?).map_err(|e| Error::invalid(e.to_string()))
+pub fn get(p: &Project, of: &GradeOf, at: Option<i64>) -> Result<Value> {
+    let g = stored(p, of)?;
+    let g = match at {
+        Some(t) => g.at(frame_of(p, of, t)? as f64).into_owned(),
+        None => g,
+    };
+    serde_json::to_value(g).map_err(|e| Error::invalid(e.to_string()))
 }
 
 fn takers(g: &Grade, n: u32) -> Vec<(u32, usize)> {
@@ -426,6 +489,7 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd) -> Result<u32> {
                 inputs: vec![Some(n), Some(added)],
                 on: true,
                 place: [at[0] + 1.0, at[1]],
+                keys: Vec::new(),
             });
         }
     }

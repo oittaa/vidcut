@@ -359,6 +359,10 @@ pub struct Settings {
     /// subtitles, before each output's colors. Left out when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_lut: Option<PathBuf>,
+    /// The `start` and `end` that each new keyframe of a grade gets. Left
+    /// out at 1 and 1.
+    #[serde(default, skip_serializing_if = "DynamicsProfile::is_usual")]
+    pub dynamics_profile: DynamicsProfile,
 }
 
 impl Default for Settings {
@@ -379,6 +383,7 @@ impl Default for Settings {
             upscaler: ProjectUpscaler::Auto,
             render_cache: RenderCache::Off,
             output_lut: None,
+            dynamics_profile: DynamicsProfile::default(),
         }
     }
 }
@@ -3830,6 +3835,12 @@ pub struct GradeNode {
     /// Its place in the node editor, `[x, y]` in node widths across and
     /// node heights down.
     pub place: [f64; 2],
+    /// The keyframes of a corrector, in the order of their frames, one at
+    /// most on a frame. Each holds every value of the corrector. Before the
+    /// first keyframe, the corrector has its own values. Left out when it
+    /// has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<GradeKey>,
 }
 
 impl GradeNode {
@@ -3839,7 +3850,60 @@ impl GradeNode {
             inputs: vec![input],
             on: true,
             place,
+            keys: Vec::new(),
         }
+    }
+}
+
+/// A keyframe of a corrector: every value of the corrector on one frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GradeKey {
+    /// On a clip, the source frame, counted as the `frame` of a `Keyframe`
+    /// is. On the timeline grade, the frame of the timeline.
+    pub frame: i64,
+    pub kind: GradeKeyKind,
+    /// How the blend to the next keyframe starts, from 0 to 10. 0 holds
+    /// the values up to the next keyframe. 1 starts at one speed. 2 to 6
+    /// start slowly, and 7 to 10 start fast.
+    pub start: u8,
+    /// How the blend to the next keyframe ends, from 0 to 10. 0 holds the
+    /// values up to the next keyframe. 1 ends at one speed. 2 to 6 end
+    /// slowly, and 7 to 10 end fast.
+    pub end: u8,
+    /// The values of the corrector on this frame.
+    pub values: Corrector,
+}
+
+/// What a keyframe of a corrector does up to the next keyframe.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GradeKeyKind {
+    /// Its values stay. The next keyframe changes them on its frame.
+    Static,
+    /// Its values blend into the values of the next keyframe, as its
+    /// `start` and `end` shape the blend.
+    #[default]
+    Dynamic,
+}
+
+/// The `start` and `end` of each new keyframe of a grade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DynamicsProfile {
+    /// From 0 to 10, as a keyframe's `start`.
+    pub start: u8,
+    /// From 0 to 10, as a keyframe's `end`.
+    pub end: u8,
+}
+
+impl Default for DynamicsProfile {
+    fn default() -> Self {
+        Self { start: 1, end: 1 }
+    }
+}
+
+impl DynamicsProfile {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
     }
 }
 

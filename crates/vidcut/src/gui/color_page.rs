@@ -88,6 +88,7 @@ enum FieldAct {
 pub(super) struct Graded {
     of: GradeOf,
     node: u32,
+    frame: i64,
     grade: Grade,
     sent: Option<Instant>,
 }
@@ -116,16 +117,16 @@ fn changed_corrector(g: &Corrector, field: &str, value: Value) -> Corrector {
         .unwrap_or_else(|| g.clone())
 }
 
-fn with_corrector(g: &Grade, n: u32, c: Corrector) -> Grade {
+fn with_corrector(g: &Grade, n: u32, frame: i64, c: Corrector) -> Grade {
     let mut out = g.clone();
-    if let Some(GradeNode {
-        tool: GradeTool::Corrector(old),
-        ..
-    }) = out.node_mut(n)
-    {
-        **old = c;
+    if let Some(old) = out.node_mut(n).and_then(|d| d.held_at_mut(frame)) {
+        *old = c;
     }
     out
+}
+
+fn held(g: &Grade, n: u32, frame: i64) -> Option<&Corrector> {
+    g.node(n)?.held_at(frame)
 }
 
 fn differences(from: &Corrector, to: &Corrector) -> Map<String, Value> {
@@ -833,7 +834,7 @@ impl Workspace {
         }
     }
 
-    fn grade_shown(&self) -> Option<(GradeOf, String, Grade)> {
+    pub(super) fn grade_shown(&self) -> Option<(GradeOf, String, Grade)> {
         let p = self.project()?;
         match self.effects_page.grading {
             GradeLevel::Clip => {
@@ -852,8 +853,24 @@ impl Workspace {
     }
 
     pub(super) fn primaries_panel(&mut self, ui: &mut Ui) {
+        egui::Panel::right("color-keys")
+            .resizable(true)
+            .default_size(380.0)
+            .min_size(220.0)
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| self.grade_keys_panel(ui));
         self.palette(ui);
         self.sync_picture_preview();
+    }
+
+    pub(super) fn grade_frame(&self, of: &GradeOf) -> i64 {
+        let at = self.snap.timeline.position;
+        match of {
+            GradeOf::Clip(id) => (self.project())
+                .and_then(|p| p.clip(id))
+                .map_or(at, |c| c.content_at(at)),
+            GradeOf::Timeline => at,
+        }
     }
 
     pub(super) fn color_clip(&self) -> Option<String> {
@@ -880,9 +897,11 @@ impl Workspace {
         };
         self.settle_grade(&of);
         let node = self.current_grade_node(&stored);
+        let frame = self.grade_frame(&of);
         if let Some(h) = &self.effects_page.graded
             && (h.of != of
                 || Some(h.node) != node
+                || h.frame != frame
                 || h.sent
                     .is_some_and(|t| h.grade == stored || t.elapsed() > LANDING))
         {
@@ -892,7 +911,7 @@ impl Workspace {
             Some(h) => h.grade.clone(),
             None => stored.clone(),
         };
-        let Some((n, g)) = node.and_then(|n| Some((n, grade.corrector(n)?.clone()))) else {
+        let Some((n, g)) = node.and_then(|n| Some((n, held(&grade, n, frame)?.clone()))) else {
             let what = node
                 .and_then(|n| stored.node(n))
                 .map_or("No Node Selected", |d| kind(&d.tool));
@@ -1052,7 +1071,8 @@ impl Workspace {
             self.effects_page.graded = Some(Graded {
                 of: of.clone(),
                 node: n,
-                grade: with_corrector(&grade, n, c),
+                frame,
+                grade: with_corrector(&grade, n, frame, c),
                 sent: None,
             });
         }
@@ -1060,7 +1080,7 @@ impl Workspace {
         let ready = match &mut self.effects_page.graded {
             Some(h) if h.sent.is_none() && !down => {
                 h.sent = Some(Instant::now());
-                Some(match (stored.corrector(n), h.grade.corrector(n)) {
+                Some(match (held(&stored, n, frame), held(&h.grade, n, frame)) {
                     (Some(a), Some(b)) => differences(a, b),
                     _ => Map::new(),
                 })
@@ -1072,6 +1092,7 @@ impl Workspace {
             Some(mut params) => {
                 params.insert(field, target);
                 params.insert("node".into(), json!(n));
+                params.insert("at".into(), json!(self.snap.timeline.position));
                 self.send("grade.set", Value::Object(params));
             }
             None => {}
@@ -1092,21 +1113,24 @@ impl Workspace {
         else {
             return;
         };
+        let frame = self.grade_frame(&of);
         if let Some(h) = &mut self.effects_page.graded
             && h.of == of
             && h.node == n
-            && let Some(c) = h.grade.corrector(n)
+            && h.frame == frame
+            && let Some(c) = held(&h.grade, n, frame)
         {
             let lights = crate::preferences::load()
                 .map(|p| p.color)
                 .unwrap_or_default();
             let mut c = c.clone();
             c.offset = printed(c.offset, point, &lights);
-            h.grade = with_corrector(&h.grade, n, c);
+            h.grade = with_corrector(&h.grade, n, frame, c);
         }
         let (field, target) = named(&of);
         let mut params = Map::from_iter([(field, target)]);
         params.insert("node".into(), json!(n));
+        params.insert("at".into(), json!(self.snap.timeline.position));
         params.insert("color".into(), json!(point.0));
         params.insert("points".into(), json!(point.1));
         self.send("grade.printer", Value::Object(params));
@@ -1190,16 +1214,17 @@ impl Workspace {
         }
     }
 
-    fn settle_grade(&mut self, of: &GradeOf) {
+    pub(super) fn settle_grade(&mut self, of: &GradeOf) {
         if self.effects_page.grade_seen.as_ref() != Some(of) {
             self.effects_page.grade_seen = Some(of.clone());
             self.effects_page.grade_nodes = vec![1];
             self.effects_page.grade_view.stop();
             self.effects_page.grade_spot = None;
+            self.effects_page.grade_keys.forget();
         }
     }
 
-    fn current_grade_node(&self, g: &Grade) -> Option<u32> {
+    pub(super) fn current_grade_node(&self, g: &Grade) -> Option<u32> {
         let n = *self.effects_page.grade_nodes.last()?;
         g.node(n).map(|_| n)
     }
@@ -1249,6 +1274,9 @@ impl Workspace {
             if struck(action) {
                 self.add_grade_node(add);
             }
+        }
+        if struck(Action::AddStaticKeyframe) {
+            self.add_grade_key(vidcut_core::model::GradeKeyKind::Static);
         }
         let Some((of, _, g)) = self.grade_shown() else {
             return;

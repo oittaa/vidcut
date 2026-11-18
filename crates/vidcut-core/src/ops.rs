@@ -6,6 +6,7 @@ pub mod filmstrip;
 mod follow;
 pub mod generators;
 pub mod grade;
+pub mod grade_keys;
 pub mod keyframes;
 pub mod linked;
 pub mod motion;

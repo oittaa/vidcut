@@ -829,6 +829,31 @@ The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline
 - An export with a timeline grade copies no frame ([bypass re-encode](#bypass-re-encode)).
 - An OTIO file of vidcut keeps the grade in the vidcut metadata of the timeline (`otio::Imported`).
 
+The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes panel of the Color page):
+
+- `GradeNode::keys` holds the keyframes of a corrector, in the order of their frames. A mixer has none.
+  - Each `GradeKey` holds every value of the corrector, its `GradeKeyKind`, and its `start` and `end`.
+  - A keyframe of a clip grade is on a source frame, as a `Keyframe` of an effect is. A keyframe of the timeline grade is on a timeline frame.
+  - `ops::grade::checked` refuses keyframes on a mixer, frames out of order, two keyframes on one frame, and a `start` or `end` past `LAST_PROFILE`.
+- `GradeNode::corrector_at` gives the values on a frame:
+  - Before the first keyframe, they are the values of the corrector itself.
+  - After a Static keyframe, or after the last keyframe, the values of that keyframe hold.
+  - After a Dynamic keyframe, `Dissolve::at` gives the weight of the next keyframe. `Corrector::blended` then mixes each value linearly.
+  - Why linear: the renders of the spec equal a grade with no keyframes at the blended values (spec §8.22).
+- `Dissolve::of` finds the joints of the curve once: where the straight line touches the start curve and the end curve.
+  - `root` scans `STEPS` points for a change of sign, and then halves the step `HALVINGS` times.
+  - Where no line touches both curves, the joint is where the two curves cross.
+- `Grade::at` gives the grade of one frame, with no keyframes. Each path that draws a frame takes it:
+  - `Placing::new` gives `Working::graded` the clip grade at the source frame of the placement. `Picture::sampled` does the same.
+  - The player gives the viewer the timeline grade at the playhead (`Shown`).
+  - `VideoFrames::grading_from` gives an export the timeline frame of its first frame. Each drawn frame then sets the timeline grade of its own frame.
+  - `frame.render` and the storyboard give `Finish` the timeline grade of their frame.
+- `ops::grade_keys` changes the keyframes for `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`.
+  - `at` is a timeline time. On a clip, `Clip::content_at` gives its source frame (`ops::grade::frame_of`).
+  - A new keyframe takes the values of `corrector_at` on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
+- `grade.set` and `grade.printer` change the keyframe on or before `at` (`GradeNode::held_at_mut`). Before the first keyframe, that is the corrector itself.
+- `Picture::retimed_to`, `Picture::scale_times` and `Picture::retarget` move the keyframes of a clip grade with the keyframes of its effects.
+
 A made frame of a speed change ([which source frame](#which-source-frame)):
 
 - The effects of the clip work on each source picture before the frame between them is made, as in the spec (§13).

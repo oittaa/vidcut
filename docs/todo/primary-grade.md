@@ -20,7 +20,6 @@ Each clip has a grade of nodes, on the Color page ([color-page.md](color-page.md
 **To do:**
 
 - With a grade, the export measures light on the graded frames ([X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)).
-- The values take keyframes once effect keyframes exist ([effects-library.md](effects-library.md)).
 
 **Not this item:**
 

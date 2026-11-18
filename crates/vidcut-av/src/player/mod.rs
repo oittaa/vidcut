@@ -1102,7 +1102,11 @@ impl Player {
         };
         let timeline_grade = lock(&self.shared.grading)
             .clone()
-            .or_else(|| plan.plan.timeline_grade.clone());
+            .or_else(|| plan.plan.timeline_grade.clone())
+            .map(|g| match g.is_keyed() {
+                true => g.at(pos as f64).into_owned(),
+                false => g,
+            });
         let (mut titles, titled) = self.shared.titles.shown(&plan, pos, &placing);
         let (cues, cued) = self.shared.subtitles.shown(&plan, pos);
         titles.extend(cues);

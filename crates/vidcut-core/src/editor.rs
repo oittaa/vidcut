@@ -2421,6 +2421,17 @@ fn grades_of(
     }
 }
 
+fn time_or_playhead(
+    p: &Project,
+    at: Option<&TimeSpec>,
+    playhead: Option<i64>,
+) -> Result<Option<i64>> {
+    match at {
+        Some(t) => resolve(p, t, playhead).map(Some),
+        None => Ok(playhead),
+    }
+}
+
 fn grade_of(
     p: &Project,
     clip: &Option<ClipRef>,
@@ -4562,11 +4573,13 @@ fn mutate(
             clips,
             timeline,
             node,
+            at,
             node_change,
             change,
         } => {
             let of = grades_of(p, clips, *timeline, playhead)?;
-            ops::grade::set(p, &of, node.unwrap_or(1), (change, node_change))?;
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
+            ops::grade::set(p, &of, node.unwrap_or(1), (change, node_change), at)?;
             Value::Null
         }
         Request::GradeClear {
@@ -4583,12 +4596,15 @@ fn mutate(
             clips,
             timeline,
             node,
+            at,
             color,
             points,
         } => {
             let of = grades_of(p, clips, *timeline, playhead)?;
             let lights = env.printer_lights();
-            ops::grade::printer(p, &of, node.unwrap_or(1), (*color, *points), &lights)?;
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
+            let n = (node.unwrap_or(1), at);
+            ops::grade::printer(p, &of, n, (*color, *points), &lights)?;
             Value::Null
         }
         Request::GradeAdd {
@@ -4620,6 +4636,65 @@ fn mutate(
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
             ops::grade::connect(p, &of, *node, *input, *from)?;
+            Value::Null
+        }
+        Request::GradeKeysAdd {
+            clip,
+            timeline,
+            node,
+            at,
+            kind,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let at = time_or_playhead(p, at.as_ref(), playhead)?
+                .ok_or_else(|| Error::usage("give `at`: there is no playhead"))?;
+            ops::grade_keys::add(p, &of, *node, at, *kind)?
+        }
+        Request::GradeKeysSet {
+            clip,
+            timeline,
+            node,
+            frames,
+            at,
+            kind,
+            start,
+            end,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let pick = key_pick(p, frames, at, playhead)?;
+            let change = ops::grade_keys::KindChange {
+                kind: *kind,
+                start: *start,
+                end: *end,
+            };
+            ops::grade_keys::set(p, &of, *node, &pick, &change)?;
+            Value::Null
+        }
+        Request::GradeKeysMove {
+            clip,
+            timeline,
+            node,
+            frames,
+            at,
+            by,
+            to,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let pick = key_pick(p, frames, at, playhead)?;
+            let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            ops::grade_keys::shift(p, &of, *node, &pick, (*by, to))?;
+            Value::Null
+        }
+        Request::GradeKeysRemove {
+            clip,
+            timeline,
+            node,
+            frames,
+            at,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let pick = key_pick(p, frames, at, playhead)?;
+            ops::grade_keys::remove(p, &of, *node, &pick)?;
             Value::Null
         }
         Request::EffectsAdd { clips, kind } => {
@@ -7695,6 +7770,15 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     if let Some(path) = &set.output_lut {
         p.settings.output_lut = checked_lut(env, path)?;
     }
+    if let Some(profile) = set.dynamics_profile {
+        let last = crate::grade_keys::LAST_PROFILE;
+        if profile.start > last || profile.end > last {
+            return Err(Error::invalid(format!(
+                "the dynamics profile's start and end must be from 0 to {last}"
+            )));
+        }
+        p.settings.dynamics_profile = profile;
+    }
     if let Some(fillers) = &set.fillers {
         crate::preferences::set_fillers(&mut p.settings.fillers, fillers)?;
     }
@@ -8049,9 +8133,10 @@ pub fn query(
         ),
         Request::BinsList {} => json!(p.bins),
         Request::TimelineList {} => ops::timelines::list(p),
-        Request::GradeGet { clip, timeline } => {
+        Request::GradeGet { clip, timeline, at } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
-            ops::grade::get(p, &of)?
+            let at = at.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
+            ops::grade::get(p, &of, at)?
         }
         Request::PictureGet { clip } => {
             let id = resolve_clip(p, clip, playhead)?;

@@ -165,6 +165,8 @@ fn pictures(
                     };
                     part.iter()
                         .map(|c| {
+                            let grade = colors.2.map(|g| g.at(c.frame as f64));
+                            let colors = (colors.0, colors.1, grade.as_deref());
                             reader
                                 .rgba(&c.piece, fps, (w as u32, h as u32), colors)
                                 .map(|image| image.rgba)

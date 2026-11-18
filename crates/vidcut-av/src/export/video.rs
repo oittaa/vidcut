@@ -1899,6 +1899,7 @@ pub struct VideoFrames {
     written: Option<(u32, u32)>,
     output_lut: Option<crate::screen::Lut>,
     timeline_grade: Option<Grade>,
+    graded_from: i64,
     frame_size: Option<(u32, u32)>,
     input_luts: vidcut_core::lru::Lru<String, crate::screen::Lut, INPUT_LUTS_KEPT>,
 }
@@ -2242,6 +2243,7 @@ impl VideoFrames {
             written: None,
             output_lut: None,
             timeline_grade: None,
+            graded_from: 0,
             frame_size: None,
             input_luts: Default::default(),
         }
@@ -2283,6 +2285,11 @@ impl VideoFrames {
         if let Some(drawer) = &mut self.drawer {
             drawer.screen.set_timeline_grade(grade);
         }
+    }
+
+    pub fn grading_from(mut self, frame: i64) -> Self {
+        self.graded_from = frame;
+        self
     }
 
     pub fn in_frame(mut self, size: (u32, u32)) -> Self {
@@ -2498,6 +2505,12 @@ impl VideoFrames {
         let (w, h, _) = self.maker.out();
         let j = self.drawn;
         self.drawn += 1;
+        if let Some(g) = self.timeline_grade.as_ref().filter(|g| g.is_keyed())
+            && let Some(drawer) = &mut self.drawer
+        {
+            let now = g.at((self.graded_from + j) as f64);
+            drawer.screen.set_timeline_grade(Some(&now));
+        }
         let at = piece
             .as_ref()
             .map(|p| crate::player::titles_of(p, k))

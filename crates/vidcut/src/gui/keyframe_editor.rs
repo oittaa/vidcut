@@ -1397,7 +1397,7 @@ fn closest<T>(items: &[T], pos: Pos2, at: impl Fn(&T) -> Pos2) -> Option<&T> {
         .min_by(|a, b| at(a).distance(pos).total_cmp(&at(b).distance(pos)))
 }
 
-fn diamond(painter: &egui::Painter, at: Pos2, r: f32, color: Color32) {
+pub(super) fn diamond(painter: &egui::Painter, at: Pos2, r: f32, color: Color32) {
     painter.add(Shape::convex_polygon(
         vec![
             pos2(at.x, at.y - r),
@@ -1410,7 +1410,7 @@ fn diamond(painter: &egui::Painter, at: Pos2, r: f32, color: Color32) {
     ));
 }
 
-fn dot(painter: &egui::Painter, at: Pos2, r: f32, color: Color32) {
+pub(super) fn dot(painter: &egui::Painter, at: Pos2, r: f32, color: Color32) {
     painter.circle_filled(at, r, color);
 }
 
@@ -1961,6 +1961,9 @@ impl Workspace {
     }
 
     pub(super) fn key_menu_why(&self) -> Option<&'static str> {
+        if self.effects_page.page == vidcut_core::request::Page::Color {
+            return None;
+        }
         if self.keys_in_view() {
             self.key_target().err()
         } else {
@@ -2048,6 +2051,9 @@ impl Workspace {
     }
 
     pub(super) fn key_cmd_why(&self, cmd: KeyCmd) -> Option<&'static str> {
+        if self.effects_page.page == vidcut_core::request::Page::Color {
+            return self.grade_key_cmd_why(cmd);
+        }
         if !self.keys_in_view() {
             return self.speed_cmd_why(cmd);
         }
@@ -2092,6 +2098,10 @@ impl Workspace {
     }
 
     pub(super) fn key_cmd(&mut self, cmd: KeyCmd) {
+        if self.effects_page.page == vidcut_core::request::Page::Color {
+            self.grade_key_cmd(cmd);
+            return;
+        }
         if self.key_cmd_why(cmd).is_some() {
             return;
         }
