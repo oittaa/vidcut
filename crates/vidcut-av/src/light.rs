@@ -89,17 +89,23 @@ impl LightAnalysis {
 }
 
 fn level_of<'a>(lights: impl IntoIterator<Item = &'a FrameLight>) -> Option<LightLevel> {
-    let (m, a) = lights
+    lights
         .into_iter()
-        .fold(None, |out: Option<(f32, f32)>, l| {
-            let (m, a) = out.unwrap_or((0.0, 0.0));
-            Some((m.max(l.max), a.max(l.average)))
-        })?;
+        .fold(None, |out, l| Some(brightest(out, l)))
+        .map(level)
+}
+
+fn brightest(out: Option<(f32, f32)>, l: &FrameLight) -> (f32, f32) {
+    let (m, a) = out.unwrap_or((0.0, 0.0));
+    (m.max(l.max), a.max(l.average))
+}
+
+fn level((m, a): (f32, f32)) -> LightLevel {
     let max_cll = (m.ceil() as u32).max(1);
-    Some(LightLevel {
+    LightLevel {
         max_cll,
         max_fall: (a.ceil() as u32).clamp(1, max_cll),
-    })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -850,11 +856,15 @@ fn threads() -> usize {
 pub(crate) fn made_level(
     feed: impl FnOnce(&mut dyn FnMut(frame::Video) -> bool) -> Result<bool>,
 ) -> Result<Option<LightLevel>> {
-    let (lights, _) = on_threads(threads(), Meter::new, feed, |meter, f: frame::Video| {
-        Ok(meter.measure(&f).ok())
+    let most = Mutex::new(Some(None));
+    on_threads(threads(), Meter::new, feed, |meter, f: frame::Video| {
+        let light = meter.measure(&f).ok();
+        let mut most = most.lock().unwrap_or_else(|e| e.into_inner());
+        *most = most.zip(light).map(|(m, l)| Some(brightest(m, &l)));
+        Ok(())
     })?;
-    let lights: Option<Vec<FrameLight>> = lights.into_iter().collect();
-    Ok(lights.and_then(|l| level_of(&l)))
+    let most = most.into_inner().unwrap_or_else(|e| e.into_inner());
+    Ok(most.flatten().map(level))
 }
 
 fn on_threads<T: Send, R: Send, S>(

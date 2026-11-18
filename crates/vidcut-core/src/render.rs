@@ -44,8 +44,9 @@ pub struct RenderPlan {
     /// subtitles, before the output's colors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_lut: Option<PathBuf>,
-    /// The timeline grade: one primary correction of the whole frame after
-    /// the tracks mix, before its subtitles. Left out when there is none.
+    /// The timeline grade: a tree of correctors and mixers on the whole
+    /// frame after the tracks mix, before its subtitles. Left out when
+    /// there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeline_grade: Option<Grade>,
 }

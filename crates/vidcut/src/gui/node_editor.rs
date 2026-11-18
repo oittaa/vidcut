@@ -333,14 +333,16 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         })
         .collect();
     let index_of = |key: &K| graph.tiles.iter().position(|t| t.key == *key);
-    let mut knots: Vec<(End<K>, Pos2, &str)> = Vec::new();
+    let mut knots: Vec<(End<K>, Pos2, Option<&str>)> = Vec::new();
     for (t, r) in graph.tiles.iter().zip(&boxes) {
         if let Some(o) = &t.outlet {
-            knots.push((End::Output(t.key.clone()), outlet_at(*r, t), &o.name));
+            let name = (o.name != t.label).then_some(o.name.as_str());
+            knots.push((End::Output(t.key.clone()), outlet_at(*r, t), name));
         }
         for i in &t.inlets {
             if let Some((at, _)) = inlet_at(*r, t, i.slot) {
-                knots.push((End::Input(t.key.clone(), i.slot), at, &i.name));
+                let name = (i.name != t.label).then_some(i.name.as_str());
+                knots.push((End::Input(t.key.clone(), i.slot), at, name));
             }
         }
     }
@@ -524,9 +526,11 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     let mut started: Option<Linking<K>> = None;
     for (k, (end, at, name)) in knots.iter().enumerate() {
         let id = ui.scope_id().with((&graph.salt, "knot", k));
-        let knot_resp = ui
-            .interact(knot_rect(*at), id, Sense::drag())
-            .on_hover_text(*name);
+        let knot_resp = ui.interact(knot_rect(*at), id, Sense::drag());
+        let knot_resp = match name {
+            Some(name) => knot_resp.on_hover_text(*name),
+            None => knot_resp,
+        };
         if !knot_resp.drag_started_by(PointerButton::Primary) {
             continue;
         }

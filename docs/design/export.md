@@ -85,7 +85,7 @@ Colors:
 - Before the export, `export::choose_colors` measures the light of those output frames (`export::output_light`).
   - `output_light` draws each frame as the encode does (`frames_of`). It uses the same decoder, draw, grades, LUTs and burned subtitles.
   - It uses the sizes of the export and the pixel format of the first encoder (`encode::resolve_video`).
-  - The frames come back to memory. `light::made_level` measures them with `light::Meter` on up to four threads.
+  - The frames come back to memory. `light::made_level` measures them with `light::Meter` on up to four threads. It keeps only the highest light and the highest frame average so far.
   - The source files use the same math (`measure_with`). `light::level_of` gives MaxCLL and MaxFALL for both.
   - `MetadataChoice::measured` puts the values into the choice. The report says that they come from the output frames.
   - `export::run_decoding_on` does the same when it chooses the metadata itself.

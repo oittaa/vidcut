@@ -3913,9 +3913,9 @@ impl DynamicsProfile {
 pub enum GradeTool {
     /// A primary correction of the picture on its input.
     Corrector(Box<Corrector>),
-    /// It adds the change of each corrector on its inputs to the picture
-    /// that comes into these correctors. Each input is such a corrector, or
-    /// that picture itself. Else the grade does nothing.
+    /// It adds the change of each input to the picture that all inputs come
+    /// from: the nearest node on the path of each input, or the source. An
+    /// input that is that picture itself adds nothing.
     ParallelMixer,
     /// Each input goes over the mix of the inputs before it with `mode`, as
     /// a clip goes over the tracks below it. With `normal`, the last input
