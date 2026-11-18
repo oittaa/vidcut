@@ -20,6 +20,7 @@ use crate::live::PoolView;
 const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
 const TILE_FULL: egui::Vec2 = egui::Vec2::new(TILE.x, TILE.y + 30.0);
 const TILE_GAP: f32 = 8.0;
+const LIST_LEAST: f32 = 60.0;
 const POSTER_PART: i64 = 48;
 const LIST_COLUMNS: [&str; 9] = [
     "Name",
@@ -639,7 +640,9 @@ impl Workspace {
             None => Default::default(),
         };
         self.bins.order = media.iter().map(|m| m.id.clone()).collect();
-        let height = (ui.available_height() - self.pool_buttons).max(60.0);
+        let above = ui.cursor().min.y - ui.max_rect().min.y;
+        self.pool_least = above + LIST_LEAST + self.pool_buttons;
+        let height = (ui.available_height() - self.pool_buttons).max(0.0);
         let scroll = match snap.pool.view {
             PoolMode::List => egui::ScrollArea::both(),
             _ => egui::ScrollArea::vertical().horizontal_scroll_offset(0.0),
