@@ -141,6 +141,10 @@ fn mixed<const N: usize>(a: &[f64; N], b: &[f64; N], w: f64) -> [f64; N] {
     std::array::from_fn(|i| a[i] + (b[i] - a[i]) * w)
 }
 
+fn moved<const N: usize>(own: &[f64; N], was: &[f64; N], now: &[f64; N]) -> [f64; N] {
+    std::array::from_fn(|i| if was[i] == now[i] { own[i] } else { now[i] })
+}
+
 impl Corrector {
     pub fn blended(&self, to: &Corrector, w: f64) -> Corrector {
         let one = |a: f64, b: f64| a + (b - a) * w;
@@ -169,6 +173,34 @@ impl Corrector {
     }
 }
 
+impl Corrector {
+    pub fn carried(&self, was: &Corrector, now: &Corrector) -> Corrector {
+        let one = |own: f64, was: f64, now: f64| if was == now { own } else { now };
+        Corrector {
+            lift: moved(&self.lift, &was.lift, &now.lift),
+            gamma: moved(&self.gamma, &was.gamma, &now.gamma),
+            gain: moved(&self.gain, &was.gain, &now.gain),
+            offset: moved(&self.offset, &was.offset, &now.offset),
+            contrast: one(self.contrast, was.contrast, now.contrast),
+            pivot: one(self.pivot, was.pivot, now.pivot),
+            saturation: one(self.saturation, was.saturation, now.saturation),
+            hue: one(self.hue, was.hue, now.hue),
+            lum_mix: one(self.lum_mix, was.lum_mix, now.lum_mix),
+            temp: one(self.temp, was.temp, now.temp),
+            tint: one(self.tint, was.tint, now.tint),
+            color_boost: one(self.color_boost, was.color_boost, now.color_boost),
+            shadows: one(self.shadows, was.shadows, now.shadows),
+            highlights: one(self.highlights, was.highlights, now.highlights),
+            midtone_detail: one(self.midtone_detail, was.midtone_detail, now.midtone_detail),
+            log_shadow: moved(&self.log_shadow, &was.log_shadow, &now.log_shadow),
+            log_midtone: moved(&self.log_midtone, &was.log_midtone, &now.log_midtone),
+            log_highlight: moved(&self.log_highlight, &was.log_highlight, &now.log_highlight),
+            low_range: one(self.low_range, was.low_range, now.low_range),
+            high_range: one(self.high_range, was.high_range, now.high_range),
+        }
+    }
+}
+
 impl GradeKey {
     pub fn is_static(&self) -> bool {
         self.kind == GradeKeyKind::Static
@@ -184,12 +216,30 @@ impl GradeNode {
     }
 
     pub fn changed_key(&self, frame: i64) -> Option<usize> {
-        match self.keys.iter().position(|k| !k.is_static()) {
-            Some(i) if frame <= self.keys[i].frame => Some(i),
-            _ => self
-                .keys
-                .partition_point(|k| k.frame <= frame)
-                .checked_sub(1),
+        self.keys
+            .partition_point(|k| k.frame <= frame)
+            .checked_sub(1)
+    }
+
+    fn paired_key(&self, key: Option<usize>) -> Option<Option<usize>> {
+        match key {
+            Some(i) if !self.keys[i].is_static() => match i.checked_sub(1) {
+                None => Some(None),
+                Some(j) => self.keys[j].is_static().then_some(Some(j)),
+            },
+            _ => {
+                let next = key.map_or(0, |i| i + 1);
+                let dynamic = self.keys.get(next).is_some_and(|k| !k.is_static());
+                dynamic.then_some(Some(next))
+            }
+        }
+    }
+
+    fn values_mut(&mut self, key: Option<usize>) -> Option<&mut Corrector> {
+        match (key, &mut self.tool) {
+            (Some(i), GradeTool::Corrector(_)) => Some(&mut self.keys[i].values),
+            (None, GradeTool::Corrector(c)) => Some(&mut **c),
+            _ => None,
         }
     }
 
@@ -201,12 +251,19 @@ impl GradeNode {
         )
     }
 
-    pub fn changed_at_mut(&mut self, frame: i64) -> Option<&mut Corrector> {
-        match (self.changed_key(frame), &mut self.tool) {
-            (Some(i), GradeTool::Corrector(_)) => Some(&mut self.keys[i].values),
-            (None, GradeTool::Corrector(c)) => Some(&mut **c),
-            _ => None,
+    pub fn change_at(
+        &mut self,
+        frame: i64,
+        change: impl FnOnce(&Corrector) -> Corrector,
+    ) -> Option<()> {
+        let key = self.changed_key(frame);
+        let was = self.changed_at(frame)?.clone();
+        let now = change(&was);
+        if let Some(other) = self.paired_key(key).and_then(|k| self.values_mut(k)) {
+            *other = other.carried(&was, &now);
         }
+        *self.values_mut(key)? = now;
+        Some(())
     }
 
     pub fn corrector_at(&self, frame: f64) -> Option<Cow<'_, Corrector>> {

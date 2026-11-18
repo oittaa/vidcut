@@ -3020,8 +3020,15 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
     - Between two Dynamic keyframes: the keyframe before the playhead changes.
     - Between two Static keyframes: the keyframe before the playhead changes. Its whole segment changes equally.
   - With the playhead on a Static keyframe, a change goes to the part after it (p. 3457).
-  - vidcut: the four rules of p. 3462. Before the first Dynamic keyframe, a change goes to it, also with a Static keyframe before the playhead.
-  - vidcut: with no Dynamic keyframe, a change before the first keyframe goes to the values of the corrector itself.
+  - Measured in Resolve Studio 21.2: a change goes to the keyframe at or before the playhead.
+  - Measured: before the first keyframe, a change goes to the values of the corrector itself. They act as a Static keyframe at the start of the clip.
+  - Measured: a Static keyframe and the Dynamic keyframe right after it take the same change. Only the changed values go to the other one.
+  - Measured: thus, when the first keyframe is Dynamic, a change before it shows on the frames before it.
+  - Measured: Static start, Dynamic 20 and Dynamic 120. A change at 5, at 20 or at 70 goes to the start and to 20.
+  - Measured: all keyframes Static. A change at 5 goes to the start only.
+  - Measured: Static 70, then Dynamic 120. A change at 70 goes to 70 and to 120. 120 keeps its other values.
+  - Measured: Dynamic 20, then Static 120. A change at 70 goes to the start and to 20, not to 120.
+  - vidcut: the same. Each channel of a wheel counts as one value. This is not measured in Resolve.
   - vidcut: the palette shows the values that a change goes to. `grade.set` and `grade.printer` take `at`. Without `at`, the playhead gives it.
   - vidcut: `grade.get` with `at` gives the blended values at that time.
   - A drag moves a keyframe with its values. A drag in a top-level track moves the keyframes of the corrector on that frame (p. 3462).

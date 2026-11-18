@@ -272,18 +272,26 @@ fn corrector(g: &mut Grade, n: u32) -> Result<&mut Corrector> {
     }
 }
 
-fn held(g: &mut Grade, n: u32, frame: Option<i64>) -> Result<&mut Corrector> {
+fn changed(
+    g: &mut Grade,
+    n: u32,
+    frame: Option<i64>,
+    change: impl FnOnce(&Corrector) -> Corrector,
+) -> Result<()> {
     let d = node(g, n)?;
     if d.tool.is_mixer() {
         return Err(Error::invalid(format!("node {n} is a mixer")));
     }
-    match frame {
-        Some(f) => d.changed_at_mut(f).ok_or_else(|| no_node(n)),
-        None if d.keys.is_empty() => d.changed_at_mut(i64::MIN).ok_or_else(|| no_node(n)),
-        None => Err(Error::usage(format!(
-            "node {n} has keyframes: give `at` for the keyframe"
-        ))),
-    }
+    let frame = match frame {
+        Some(f) => f,
+        None if d.keys.is_empty() => i64::MIN,
+        None => {
+            return Err(Error::usage(format!(
+                "node {n} has keyframes: give `at` for the keyframe"
+            )));
+        }
+    };
+    d.change_at(frame, change).ok_or_else(|| no_node(n))
 }
 
 const NEEDS: &str = "grade.set needs a value to change";
@@ -302,8 +310,7 @@ pub fn set(
         let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
         edited(p, one, |g| {
             if !change.is_empty() {
-                let c = held(g, n, frame)?;
-                *c = change.changed(c);
+                changed(g, n, frame, |c| change.changed(c))?;
             }
             node_changed(g, n, node_change)
         })?;
@@ -381,9 +388,10 @@ pub fn printer(
     for one in of {
         let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
         edited(p, one, |g| {
-            let c = held(g, n, frame)?;
-            c.offset = printed(c.offset, point, lights);
-            Ok(())
+            changed(g, n, frame, |c| Corrector {
+                offset: printed(c.offset, point, lights),
+                ..c.clone()
+            })
         })?;
     }
     Ok(())
