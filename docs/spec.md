@@ -3029,7 +3029,9 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
   - Measured: Static 70, then Dynamic 120. A change at 70 goes to 70 and to 120. 120 keeps its other values.
   - Measured: Dynamic 20, then Static 120. A change at 70 goes to the start and to 20, not to 120.
   - vidcut: the same. Each channel of a wheel counts as one value. This is not measured in Resolve.
-  - vidcut: the palette shows the values that a change goes to. `grade.set` and `grade.printer` take `at`. Without `at`, the playhead gives it.
+  - Measured: the palette shows the values of the keyframe that a change goes to, not the blend.
+  - Measured: at 70, between Contrast 1.2 at 20 and 2.0 at 120, the palette shows 1.200.
+  - vidcut: the same. `grade.set` and `grade.printer` take `at`. Without `at`, the playhead gives it.
   - vidcut: `grade.get` with `at` gives the blended values at that time.
   - A drag moves a keyframe with its values. A drag in a top-level track moves the keyframes of the corrector on that frame (p. 3462).
   - vidcut: a drag in the Master track moves the keyframe of each corrector on that frame. A drag in a node track moves the keyframe of that node.
