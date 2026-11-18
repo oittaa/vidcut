@@ -862,14 +862,38 @@ impl Workspace {
         }
     }
 
-    pub(super) fn primaries_panel(&mut self, ui: &mut Ui) {
-        egui::Panel::right("color-keys")
+    pub(super) fn primaries_panel(&mut self, ui: &mut Ui, inner: f32) {
+        let id = ui.scope_id().with("palette-height");
+        let room = ui.available_rect_before_wrap();
+        let tall = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or(room.height());
+        let mut side = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("color-keys-side")
+                .max_rect(Rect::from_min_size(room.min, Vec2::new(room.width(), tall))),
+        );
+        let keys = egui::Panel::right("color-keys")
             .resizable(true)
             .default_size(380.0)
             .min_size(220.0)
             .frame(egui::Frame::NONE)
-            .show(ui, |ui| self.grade_keys_panel(ui));
-        self.palette(ui);
+            .show(&mut side, |ui| self.grade_keys_panel(ui))
+            .response
+            .rect;
+        let mut left = ui.new_child(egui::UiBuilder::new().id_salt("color-palette").max_rect(
+            Rect::from_min_max(room.min, egui::pos2(keys.left(), room.bottom())),
+        ));
+        egui::ScrollArea::vertical()
+            .id_salt("primaries-scroll")
+            .max_height(inner)
+            .min_scrolled_height(inner)
+            .auto_shrink([false, true])
+            .show(&mut left, |ui| self.palette(ui));
+        let palette = left.min_rect();
+        if (palette.height() - tall).abs() > 0.5 {
+            ui.data_mut(|d| d.insert_temp(id, palette.height()));
+            ui.ctx().request_repaint();
+        }
+        ui.advance_cursor_after_rect(palette);
         self.sync_picture_preview();
     }
 

@@ -2970,7 +2970,7 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
   - The Keyframe Timeline mode sets the tracks that get a new keyframe: All, Color or Sizing (p. 3455).
   - All is the default. It adds a keyframe to every track. An orange bar marks the master track.
   - Color adds a keyframe to the current node only. A green bar marks its track.
-  - vidcut: the Keyframes panel is at the left of the palette. It has a ruler, a Master track and a track for each corrector.
+  - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector.
   - vidcut: a mixer has no track, and it takes no keyframes.
   - vidcut: an All and Color switch at the top of the panel sets the mode. All is the default.
 - **Dynamic and Static keyframes** (pp. 3456–3459):

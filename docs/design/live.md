@@ -451,7 +451,7 @@ The bar and the Jobs button:
 - A double-click on a name resets its value. A drag on a name changes its value (pp. 3146, 3148).
 - A Plus or Minus button of the bars sends `grade.printer` with the current node (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) does the same.
   - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.
-- The Keyframes panel is at the left of the palette (`Workspace::grade_keys_panel`). `GradeKeys` holds its mode, the selected keyframe and a drag.
+- The Keyframes panel is at the right of the palette (`Workspace::grade_keys_panel`). Its height follows the palette, and it scrolls by itself. `GradeKeys` holds its mode, the selected keyframe and a drag.
   - It has a ruler, a Master track and a track for each corrector. A click or a drag in the ruler moves the playhead.
   - A Dynamic keyframe is a diamond, and a Static keyframe is a dot. On the Master track, a frame is a diamond when one of its keyframes is Dynamic.
   - The All and Color switch (`KeyMode`) sets the correctors that get a new keyframe: each one, or the current node. A bar at the left marks that track.

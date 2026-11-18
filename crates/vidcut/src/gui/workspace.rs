@@ -2183,14 +2183,7 @@ impl Workspace {
                 .max_size(cap)
                 .frame(theme::card(panel))
                 .show(ui, |ui| {
-                    theme::decorated(ui, Deco::Card, |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("primaries-scroll")
-                            .max_height(inner)
-                            .min_scrolled_height(inner)
-                            .auto_shrink([false, true])
-                            .show(ui, |ui| self.primaries_panel(ui));
-                    })
+                    theme::decorated(ui, Deco::Card, |ui| self.primaries_panel(ui, inner))
                 })
                 .response
                 .rect
