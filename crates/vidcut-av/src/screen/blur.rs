@@ -45,7 +45,7 @@ const FLAG_SECOND: i32 = 4;
 
 const FLAG_NOISE: i32 = 8;
 
-const SPARE_TEXTURES: usize = 8;
+const SPARE_TEXTURES: usize = 16;
 
 const GRAIN_TILES: usize = 2;
 
@@ -56,8 +56,6 @@ const GRAIN_DETAIL: i32 = 2;
 const DETAIL_SLOTS: [u32; 2] = [4, 5];
 
 const GRADE_SLOTS: [u32; 2] = [6, 7];
-
-const GRADE_HELD: usize = 4;
 
 const MIX_PARALLEL: f64 = 0.0;
 
@@ -746,8 +744,6 @@ type Spare = Lru<(u32, u32, u32), Texture, SPARE_TEXTURES>;
 
 type Tiles = Lru<[u64; 8], Texture, GRAIN_TILES>;
 
-type Held = Lru<(u32, u32, usize), Texture, GRADE_HELD>;
-
 fn spare_ready(gpu: &Gpu, spare: &mut Spare, (w, h): (u32, u32), slots: [u32; 2]) {
     for slot in slots {
         let key = (w, h, slot);
@@ -763,7 +759,6 @@ struct Worked {
     planes: Option<sharpen::Planes>,
     spare: Spare,
     tiles: Tiles,
-    held: Held,
     shrink: [f64; 2],
     masks: Option<[Texture; 2]>,
 }
@@ -1229,14 +1224,15 @@ fn mix_into(
 fn graded_into(
     gpu: &Gpu,
     own: &Texture,
-    (scratch, spare, held): (&[Texture; 2], &mut Spare, &mut Held),
+    (scratch, spare): (&[Texture; 2], &mut Spare),
     (graded, effect): (&Graded, &Working),
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let size = own.texture.size();
     let (w, h) = (size.width, size.height);
+    let slot = |i: usize| GRADE_SLOTS[1] + i as u32;
     let taken: Vec<Texture> = (1..graded.registers)
-        .map(|i| match held.remove(&(w, h, i)) {
+        .map(|i| match spare.remove(&(w, h, slot(i))) {
             Some((_, t)) => t,
             None => Texture::new(gpu, (w, h)),
         })
@@ -1273,7 +1269,7 @@ fn graded_into(
         }
     }
     for (i, t) in taken.into_iter().enumerate() {
-        held.insert((w, h, i + 1), t);
+        spare.insert((w, h, slot(i + 1)), t);
     }
 }
 
@@ -1443,7 +1439,7 @@ fn effects_into(
                 continue;
             }
             Work::Grade(graded) => {
-                let room = (scratch, &mut worked.spare, &mut worked.held);
+                let room = (scratch, &mut worked.spare);
                 graded_into(gpu, own, room, (graded.as_ref(), effect), encoder);
                 continue;
             }
