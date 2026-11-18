@@ -325,10 +325,7 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
                     p.picture.opacity_keys.clear();
                     p.picture.composite_mode = None;
                 }
-                own_effects(placed);
-                if !retimed {
-                    baked(placed);
-                }
+                held(placed, retimed);
             }
         }
         *cache = ClipCache::Auto;
@@ -337,7 +334,7 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
     out
 }
 
-pub fn own_effects(placed: &mut [Placed]) {
+fn own_effects(placed: &mut [Placed]) {
     for p in placed.iter_mut().skip(1) {
         p.picture.effects.clear();
         p.picture.composition = None;
@@ -345,8 +342,11 @@ pub fn own_effects(placed: &mut [Placed]) {
     }
 }
 
-pub fn baked(placed: &mut [Placed]) {
+pub fn held(placed: &mut [Placed], whole: bool) {
     own_effects(placed);
+    if whole {
+        return;
+    }
     if let Some(own) = placed.first_mut()
         && let Some(j) = own
             .picture

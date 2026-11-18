@@ -2738,7 +2738,7 @@ impl VideoFrames {
                     self.reversed_frame(i, s, (&piece, layer), k, colors)?
                 } else if retimed {
                     let mut own = at.to_vec();
-                    vidcut_core::render_cache::own_effects(&mut own);
+                    vidcut_core::render_cache::held(&mut own, retimed);
                     self.retimed_frame(i, s, layer, k, &own)?
                 } else if colors {
                     self.colors_source_frame(i, s, layer, k, at)?
@@ -2757,10 +2757,7 @@ impl VideoFrames {
                         part: [0.0, 0.0, 1.0, 1.0],
                         placed: {
                             let mut held = placed.get(i).cloned().unwrap_or_default();
-                            match cached.whole {
-                                true => vidcut_core::render_cache::own_effects(&mut held),
-                                false => vidcut_core::render_cache::baked(&mut held),
-                            }
+                            vidcut_core::render_cache::held(&mut held, cached.whole);
                             held.into()
                         },
                     },
