@@ -1105,10 +1105,11 @@ impl Workspace {
         let (field, target) = named(&of);
         if reset {
             self.effects_page.graded = None;
-            let at = ("node".to_string(), json!(n));
+            let node = ("node".to_string(), json!(n));
+            let at = ("at".to_string(), json!(self.snap.timeline.position));
             self.send(
                 "grade.clear",
-                Value::Object(Map::from_iter([(field, target), at])),
+                Value::Object(Map::from_iter([(field, target), node, at])),
             );
             return;
         }
@@ -1421,7 +1422,10 @@ impl Workspace {
         };
         let (method, p) = match act {
             NodeAct::Add(_) | NodeAct::Delete => return,
-            NodeAct::Reset => ("grade.clear", params(of, "clips", json!({ "node": n }))),
+            NodeAct::Reset => {
+                let more = json!({ "node": n, "at": self.snap.timeline.position });
+                ("grade.clear", params(of, "clips", more))
+            }
             NodeAct::Toggle => set(json!({ "on": !d.on })),
             NodeAct::Morph(to) => set(json!({ "mixer": to })),
             NodeAct::Mode(mode) => set(json!({ "mode": mode })),
@@ -1445,7 +1449,10 @@ impl Workspace {
                     json!({ "add": GradeAdd::Corrector, "place": at }),
                 )
             }
-            FieldAct::KeepNodes => ("grade.clear", json!({ "keep_nodes": true })),
+            FieldAct::KeepNodes => {
+                let at = self.snap.timeline.position;
+                ("grade.clear", json!({ "keep_nodes": true, "at": at }))
+            }
             FieldAct::ResetAll => {
                 self.effects_page.grade_nodes = vec![1];
                 ("grade.clear", json!({}))

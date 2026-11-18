@@ -3041,7 +3041,10 @@ Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `g
   - Delete Selected Keyframe in the menu of a keyframe deletes only that keyframe (p. 3463).
   - Mark > Delete All Keyframes deletes every keyframe of the clip (p. 3463).
   - vidcut: the same, with `grade.keys.remove`. Alt+] deletes the keyframes at the playhead. Delete All Keyframes does not ask first on the Color page.
-  - vidcut: a reset of a corrector also deletes its keyframes. This is not measured in Resolve.
+  - Measured in Resolve Studio 21.2: a reset keeps the keyframes. It resets the keyframe that a change goes to, with the same pairs.
+  - Measured: Reset in the Primaries palette, Reset Node Grade and Reset Grades and Keep Nodes work so.
+  - Measured: Reset All Grades and Nodes leaves no keyframes.
+  - vidcut: the same. `grade.clear` with `node` or `keep_nodes` takes `at`. Without `at`, the playhead gives it.
 - **The timeline grade** (p. 3465):
   - The keyframes of the timeline grade work as the keyframes of a clip grade (p. 3465).
   - vidcut: `timeline` in each `grade.keys` request. The keyframes are on timeline frames.

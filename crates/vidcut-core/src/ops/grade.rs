@@ -265,13 +265,6 @@ pub(super) fn node(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
     g.node_mut(n).ok_or_else(|| no_node(n))
 }
 
-fn corrector(g: &mut Grade, n: u32) -> Result<&mut Corrector> {
-    match &mut node(g, n)?.tool {
-        GradeTool::Corrector(c) => Ok(&mut **c),
-        _ => Err(Error::invalid(format!("node {n} is a mixer"))),
-    }
-}
-
 fn changed(
     g: &mut Grade,
     n: u32,
@@ -351,25 +344,31 @@ fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
     Ok(())
 }
 
-pub fn clear(p: &mut Project, of: &[GradeOf], n: Option<u32>, keep_nodes: bool) -> Result<()> {
+pub fn clear(
+    p: &mut Project,
+    of: &[GradeOf],
+    (n, keep_nodes): (Option<u32>, bool),
+    at: Option<i64>,
+) -> Result<()> {
+    let usual = |_: &Corrector| Corrector::default();
     for one in of {
-        edited(p, one, |g| {
-            match (n, keep_nodes) {
-                (Some(n), _) => {
-                    *corrector(g, n)? = Corrector::default();
-                    node(g, n)?.keys.clear();
+        let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
+        edited(p, one, |g| match (n, keep_nodes) {
+            (Some(n), _) => changed(g, n, frame, usual),
+            (None, true) => {
+                let correctors: Vec<u32> = (g.nodes.iter().zip(1..))
+                    .filter(|(d, _)| !d.tool.is_mixer())
+                    .map(|(_, k)| k)
+                    .collect();
+                for k in correctors {
+                    changed(g, k, frame, usual)?;
                 }
-                (None, true) => {
-                    for d in &mut g.nodes {
-                        if let GradeTool::Corrector(c) = &mut d.tool {
-                            **c = Corrector::default();
-                        }
-                        d.keys.clear();
-                    }
-                }
-                (None, false) => *g = Grade::default(),
+                Ok(())
             }
-            Ok(())
+            (None, false) => {
+                *g = Grade::default();
+                Ok(())
+            }
         })?;
     }
     Ok(())

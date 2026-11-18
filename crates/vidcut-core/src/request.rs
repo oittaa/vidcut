@@ -2809,10 +2809,11 @@ pub enum Request {
         change: Box<GradeChange>,
     },
     /// Put the grade of clips, or with `timeline` the timeline grade, back
-    /// at its usual value: one corrector at its usual values. With `node`,
-    /// only that corrector goes back to its usual values. With
-    /// `keep_nodes`, each corrector does, and the nodes and their links
-    /// stay. A corrector that goes back loses its keyframes.
+    /// at its usual value: one corrector at its usual values, with no
+    /// keyframes. With `node`, only that corrector goes back to its usual
+    /// values. With `keep_nodes`, each corrector does, and the nodes and
+    /// their links stay. With `node` or `keep_nodes`, the keyframes stay,
+    /// and the values go back where `grade.set` changes them.
     #[serde(rename = "grade.clear")]
     GradeClear {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2824,6 +2825,9 @@ pub enum Request {
         node: Option<u32>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         keep_nodes: bool,
+        /// The time whose keyframe goes back. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
     },
     /// Move the Offset of a corrector of clips, or with `timeline` of the
     /// timeline grade, by printer points. One point moves each channel by
