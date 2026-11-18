@@ -14,7 +14,6 @@ The timeline color space ([spec D50](../spec.md#12-decisions-on-gaps-and-contrad
 ## Why later
 
 - The grade works on the code values of the timeline. Thus a timeline color space changes the mixes and the grade.
-- The primary grade is separate ([primary-grade.md](primary-grade.md)). These spaces stay the work of this file.
 - A P3 or Rec.2020 SDR timeline is useful with an output in the same colors. Exports have no such output.
 - Each new color space needs its math in the one draw: `crates/vidcut-av/src/screen/picture.wgsl`, with `color::shader_colors` and `color::output_gamut`.
 - Each new output also needs its tags (`color::tag`).
