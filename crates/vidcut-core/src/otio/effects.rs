@@ -1,11 +1,13 @@
 use serde_json::{Value, json};
 
 use super::{EDITOR, schema};
-use crate::model::{ClipAudio, Effects, Handle, Kept, Keyframe};
+use crate::model::{ClipAudio, Effects, EqKind, Equalizer, Handle, Kept, Keyframe};
 use crate::validate::GAIN;
 
 const VOLUME: &str = "Fairlight Clip Volume and Fades";
 const PAN: &str = "Fairlight Clip Pan";
+const EQUALIZER: &str = "Fairlight Clip Equaliser";
+const EQ_BAND: &str = "Fairlight Equaliser Band";
 
 const FADES: [(&str, bool); 4] = [
     ("videoFaderIn", true),
@@ -118,6 +120,134 @@ pub(super) fn drop_pan(list: &mut Vec<Value>) {
     list.retain(|e| !is_pan(e) || pan_keyed(e));
 }
 
+fn eq_kind_code(kind: EqKind) -> i64 {
+    match kind {
+        EqKind::LoShelf => 1,
+        EqKind::Bell => 2,
+        EqKind::HiShelf => 3,
+        EqKind::Notch => 4,
+        EqKind::LoPass => 5,
+        EqKind::HiPass => 6,
+    }
+}
+
+fn eq_kind_of(code: i64) -> Option<EqKind> {
+    match code {
+        1 => Some(EqKind::LoShelf),
+        2 => Some(EqKind::Bell),
+        3 => Some(EqKind::HiShelf),
+        4 => Some(EqKind::Notch),
+        5 => Some(EqKind::LoPass),
+        6 => Some(EqKind::HiPass),
+        _ => None,
+    }
+}
+
+fn is_equalizer(e: &Value) -> bool {
+    e["metadata"][EDITOR]["Effect Name"] == EQUALIZER
+}
+
+fn is_eq_band(e: &Value) -> bool {
+    e["metadata"][EDITOR]["Effect Name"] == EQ_BAND
+}
+
+fn has_keys(e: &Value) -> bool {
+    params(e).any(|p| {
+        p["Key Frames"]
+            .as_object()
+            .is_some_and(|keys| !keys.is_empty())
+    })
+}
+
+fn int_param(id: &str, value: i64, default: i64, low: f64, high: f64) -> Value {
+    ranged(keyed(id, json!(value), json!(default), "Int"), low, high)
+}
+
+fn equalizer_effects(eq: &Equalizer) -> Vec<Value> {
+    let mut out = vec![effect(json!({
+        "Display Type": 3,
+        "Effect Name": EQUALIZER,
+        "Enabled": eq.on,
+        "Name": "Equalizer",
+        "Parameters": [],
+        "Type": 64,
+    }))];
+    let defaults = crate::equalizer::first();
+    let default_q = (crate::equalizer::FIRST_Q * 1000.0).round() as i64;
+    for (i, (band, usual)) in eq.bands.iter().zip(&defaults.bands).enumerate() {
+        let mut ps = Vec::new();
+        if band.kind != usual.kind {
+            ps.push(int_param("eq type", eq_kind_code(band.kind), 0, 0.0, 0.0));
+        }
+        let freq = band.freq.round() as i64;
+        if freq != usual.freq.round() as i64 {
+            ps.push(int_param("eq frequency", freq, 0, 0.0, 19000.0));
+        }
+        let gain = (band.gain * 10.0).round() as i64;
+        if gain != 0 {
+            ps.push(int_param("eq dB gain", gain, 0, -700.0, 240.0));
+        }
+        let q = (band.q * 1000.0).round() as i64;
+        if q != default_q {
+            ps.push(int_param("eq qFactor", q, 0, 0.0, 100000.0));
+        }
+        ps.push(int_param("eq band index", i as i64, i as i64, -1.0, 5.0));
+        out.push(effect(json!({
+            "Display Type": 3,
+            "Effect Name": EQ_BAND,
+            "Enabled": band.on,
+            "Name": "Equalizer Band",
+            "Parameters": ps,
+            "Type": 63,
+        })));
+    }
+    out
+}
+
+pub(super) fn equalizer(item: &Value) -> Option<Equalizer> {
+    let list = item["effects"].as_array()?;
+    let main = list.iter().find(|e| is_equalizer(e))?;
+    let bands: Vec<&Value> = list.iter().filter(|e| is_eq_band(e)).collect();
+    if has_keys(main) || bands.iter().any(|e| has_keys(e)) {
+        return None;
+    }
+    let mut eq = Equalizer {
+        on: main["metadata"][EDITOR]["Enabled"] != false,
+        ..crate::equalizer::first()
+    };
+    let mut seen = [false; crate::equalizer::BANDS];
+    for e in bands {
+        let idx = params(e)
+            .find(|p| p["Parameter ID"] == "eq band index")
+            .and_then(|p| p["Parameter Value"].as_i64())
+            .and_then(|i| usize::try_from(i).ok())
+            .filter(|&i| i < crate::equalizer::BANDS)?;
+        if std::mem::replace(&mut seen[idx], true) {
+            return None;
+        }
+        let band = &mut eq.bands[idx];
+        band.on = e["metadata"][EDITOR]["Enabled"] != false;
+        for p in params(e) {
+            let v = &p["Parameter Value"];
+            match p["Parameter ID"].as_str()? {
+                "eq band index" => {}
+                "eq type" => band.kind = eq_kind_of(v.as_i64()?)?,
+                "eq frequency" => band.freq = v.as_f64()?,
+                "eq dB gain" => band.gain = v.as_f64()? / 10.0,
+                "eq qFactor" => band.q = v.as_f64()? / 1000.0,
+                _ => return None,
+            }
+        }
+    }
+    crate::equalizer::problem(&eq).is_none().then_some(eq)
+}
+
+pub(super) fn drop_equalizer(list: &mut Vec<Value>, taken: bool) {
+    if taken {
+        list.retain(|e| !is_equalizer(e) && !is_eq_band(e));
+    }
+}
+
 pub(super) fn gain(item: &Value) -> Option<f64> {
     let level = volume_param(item)?;
     level["Parameter Value"]
@@ -208,14 +338,19 @@ pub(super) fn relative(keys: &[Keyframe], source: i64) -> Vec<Keyframe> {
 
 pub(super) fn read(item: &Value) -> (Vec<Value>, Option<Value>) {
     let (mut kept, mut speed) = (Vec::new(), None);
-    for e in item["effects"].as_array().into_iter().flatten() {
+    let all = item["effects"].as_array();
+    let eq_on = all
+        .into_iter()
+        .flatten()
+        .any(|e| is_equalizer(e) && e["metadata"][EDITOR]["Enabled"] != false);
+    for e in all.into_iter().flatten() {
         let s = schema(e);
         if s.starts_with("LinearTimeWarp")
             || s.starts_with("FreezeFrame")
             || s.starts_with("TimeEffect")
         {
             speed.get_or_insert_with(|| e.clone());
-        } else if in_use(e) {
+        } else if in_use(e) || (eq_on && is_eq_band(e)) {
             kept.push(e.clone());
         }
     }
@@ -237,11 +372,12 @@ fn in_use(e: &Value) -> bool {
     let Some(effect) = r["Effect Name"].as_str() else {
         return !name(e).is_empty();
     };
-    if r["Enabled"] == false {
+    if r["Enabled"] == false || effect == EQ_BAND {
         return false;
     }
     let off = |v: &Value, default: &Value| !same_value(v, default);
     effect == "Dynamic Zoom"
+        || effect == EQUALIZER
         || params(e).any(|p| {
             let default = &p["Default Parameter Value"];
             let value = &p["Parameter Value"];
@@ -389,7 +525,11 @@ impl Effects {
                 p["Parameter Value"] = json!(0.0);
             }
         }
-        self.list.retain(|k| in_use(k));
+        let eq_on = self
+            .list
+            .iter()
+            .any(|k| is_equalizer(k) && k["metadata"][EDITOR]["Enabled"] != false);
+        self.list.retain(|k| in_use(k) || (eq_on && is_eq_band(k)));
     }
 
     pub fn scale_handles(&mut self, ratio: f64) {
@@ -474,6 +614,12 @@ pub(super) fn sound(
     }
     if au.heard_pan() != 0.0 {
         list.push(pan_effect(au.heard_pan()));
+    }
+    if let Some(eq) = &au.equalizer
+        && (eq.on || *eq != crate::equalizer::usual())
+    {
+        drop_equalizer(&mut list, true);
+        list.extend(equalizer_effects(eq));
     }
     list
 }

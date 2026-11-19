@@ -398,6 +398,379 @@ fn a_keyed_pan_of_a_file_sets_no_pan() {
     );
 }
 
+fn eq_effects(item: &Value) -> Vec<Value> {
+    item["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| {
+            matches!(
+                e["metadata"][EDITOR]["Effect Name"].as_str(),
+                Some("Fairlight Clip Equaliser" | "Fairlight Equaliser Band")
+            )
+        })
+        .cloned()
+        .collect()
+}
+
+fn eq_effect(enabled: bool) -> Value {
+    json!({
+        "OTIO_SCHEMA": "Effect.1",
+        "effect_name": "Resolve Effect",
+        "name": "",
+        "metadata": {EDITOR: {
+            "Display Type": 3,
+            "Effect Name": "Fairlight Clip Equaliser",
+            "Enabled": enabled,
+            "Name": "Equalizer",
+            "Parameters": [],
+            "Type": 64,
+        }},
+    })
+}
+
+fn eq_band_effect(enabled: bool, parameters: Vec<Value>) -> Value {
+    json!({
+        "OTIO_SCHEMA": "Effect.1",
+        "effect_name": "Resolve Effect",
+        "name": "",
+        "metadata": {EDITOR: {
+            "Display Type": 3,
+            "Effect Name": "Fairlight Equaliser Band",
+            "Enabled": enabled,
+            "Name": "Equalizer Band",
+            "Parameters": parameters,
+            "Type": 63,
+        }},
+    })
+}
+
+fn eq_param(id: &str, value: i64, default: i64, low: f64, high: f64, keys: Value) -> Value {
+    json!({
+        "Default Parameter Value": default,
+        "Key Frames": keys,
+        "Parameter ID": id,
+        "Parameter Value": value,
+        "Variant Type": "Int",
+        "maxValue": high,
+        "minValue": low,
+    })
+}
+
+fn eq_doc(effects: Vec<Value>) -> Value {
+    let t = |v: f64| json!({"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": v});
+    let r = |s: f64, d: f64| json!({"OTIO_SCHEMA": "TimeRange.1", "start_time": t(s), "duration": t(d)});
+    json!({
+        "OTIO_SCHEMA": "Timeline.1",
+        "tracks": {
+            "OTIO_SCHEMA": "Stack.1",
+            "children": [{
+                "OTIO_SCHEMA": "Track.1",
+                "kind": "Audio",
+                "name": "Audio 1",
+                "children": [{
+                    "OTIO_SCHEMA": "Clip.2",
+                    "name": "1.mp4",
+                    "source_range": r(0.0, 50.0),
+                    "effects": effects,
+                    "media_references": {
+                        "DEFAULT_MEDIA": {
+                            "OTIO_SCHEMA": "ExternalReference.1",
+                            "target_url": "/media/1.mp4",
+                            "available_range": r(0.0, 250.0),
+                        }
+                    },
+                    "active_media_reference_key": "DEFAULT_MEDIA",
+                }],
+            }],
+        },
+    })
+}
+
+fn strip_vidcut(v: &mut Value) {
+    match v {
+        Value::Object(map) => {
+            if let Some(Value::Object(meta)) = map.get_mut("metadata") {
+                meta.remove(VIDCUT);
+            }
+            for child in map.values_mut() {
+                strip_vidcut(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                strip_vidcut(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn a_clips_equalizer_is_written_as_the_equalizer_effects() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req(
+        "clip.set",
+        json!({
+            "clips": "c1",
+            "equalizer": {
+                "on": true,
+                "bands": [
+                    {"band": 1, "on": true, "freq": 150.0},
+                    {"band": 3, "freq": 1000.0, "gain": -6.0, "q": 2.5},
+                ],
+            },
+        }),
+    ));
+    let doc = written(&f);
+    let found = eq_effects(&doc["tracks"]["children"][1]["children"][0]);
+    let expected = vec![
+        eq_effect(true),
+        eq_band_effect(
+            true,
+            vec![
+                eq_param("eq frequency", 150, 0, 0.0, 19000.0, json!({})),
+                eq_param("eq band index", 0, 0, -1.0, 5.0, json!({})),
+            ],
+        ),
+        eq_band_effect(
+            true,
+            vec![eq_param("eq band index", 1, 1, -1.0, 5.0, json!({}))],
+        ),
+        eq_band_effect(
+            true,
+            vec![
+                eq_param("eq frequency", 1000, 0, 0.0, 19000.0, json!({})),
+                eq_param("eq dB gain", -60, 0, -700.0, 240.0, json!({})),
+                eq_param("eq qFactor", 2500, 0, 0.0, 100000.0, json!({})),
+                eq_param("eq band index", 2, 2, -1.0, 5.0, json!({})),
+            ],
+        ),
+        eq_band_effect(
+            true,
+            vec![eq_param("eq band index", 3, 3, -1.0, 5.0, json!({}))],
+        ),
+        eq_band_effect(
+            true,
+            vec![eq_param("eq band index", 4, 4, -1.0, 5.0, json!({}))],
+        ),
+        eq_band_effect(
+            false,
+            vec![eq_param("eq band index", 5, 5, -1.0, 5.0, json!({}))],
+        ),
+    ];
+    assert_eq!(found, expected);
+}
+
+#[test]
+fn a_usual_off_equalizer_is_not_written() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req(
+        "clip.set",
+        json!({"clips": "c2", "equalizer": {"on": false}}),
+    ));
+    let doc = written(&f);
+    let children = doc["tracks"]["children"][1]["children"].as_array().unwrap();
+    assert!(eq_effects(&children[0]).is_empty());
+    assert!(eq_effects(&children[1]).is_empty());
+}
+
+#[test]
+fn an_equalizer_effect_of_a_file_sets_the_equalizer() {
+    use crate::model::{EqBand, EqKind, Equalizer};
+    let p = |id, v| eq_param(id, v, 0, 0.0, 1000.0, json!({}));
+    let idx = |i| eq_param("eq band index", i, i, -1.0, 5.0, json!({}));
+    let b = |on, kind, freq, gain, q| EqBand {
+        on,
+        kind,
+        freq,
+        gain,
+        q,
+    };
+    let doc = eq_doc(vec![
+        eq_effect(true),
+        eq_band_effect(
+            true,
+            vec![
+                p("eq type", 2),
+                p("eq frequency", 120),
+                p("eq dB gain", 35),
+                p("eq qFactor", 2000),
+                idx(0),
+            ],
+        ),
+        eq_band_effect(false, vec![idx(1)]),
+        eq_band_effect(true, vec![p("eq type", 4), p("eq frequency", 1000), idx(2)]),
+        eq_band_effect(
+            true,
+            vec![
+                p("eq frequency", 2500),
+                p("eq dB gain", -45),
+                p("eq qFactor", 3200),
+                idx(3),
+            ],
+        ),
+        eq_band_effect(
+            false,
+            vec![
+                p("eq type", 1),
+                p("eq frequency", 5000),
+                p("eq dB gain", 60),
+                idx(4),
+            ],
+        ),
+        eq_band_effect(true, vec![p("eq frequency", 14000), idx(5)]),
+    ]);
+    let mut f = Fixture::new(&[(10.0, true)]);
+    let ans = f.ok(req("timeline.import", json!({"otio": doc})));
+    let audio = f.editor.project().tracks[1].clips[0]
+        .audio
+        .as_ref()
+        .unwrap();
+    let expected = Equalizer {
+        on: true,
+        bands: [
+            b(true, EqKind::Bell, 120.0, 3.5, 2.0),
+            b(false, EqKind::LoShelf, 117.0, 0.0, 1.0),
+            b(true, EqKind::Notch, 1000.0, 0.0, 1.0),
+            b(true, EqKind::Bell, 2500.0, -4.5, 3.2),
+            b(false, EqKind::LoShelf, 5000.0, 6.0, 1.0),
+            b(true, EqKind::LoPass, 14000.0, 0.0, 1.0),
+        ],
+    };
+    assert_eq!(
+        (
+            ans.result["warnings"].clone(),
+            audio.effects.clone(),
+            audio.equalizer.clone()
+        ),
+        (json!([]), None, Some(expected))
+    );
+}
+
+#[test]
+fn a_disabled_equalizer_of_a_file_imports_off() {
+    let doc = eq_doc(vec![
+        eq_effect(false),
+        eq_band_effect(
+            true,
+            vec![
+                eq_param("eq dB gain", -60, 0, -700.0, 240.0, json!({})),
+                eq_param("eq band index", 2, 2, -1.0, 5.0, json!({})),
+            ],
+        ),
+    ]);
+    let mut f = Fixture::new(&[(10.0, true)]);
+    let ans = f.ok(req("timeline.import", json!({"otio": doc})));
+    let audio = f.editor.project().tracks[1].clips[0]
+        .audio
+        .as_ref()
+        .unwrap();
+    let eq = audio.equalizer.as_ref().unwrap();
+    assert_eq!(
+        (
+            ans.result["warnings"].clone(),
+            audio.effects.is_none(),
+            eq.on,
+            eq.bands[2].gain
+        ),
+        (json!([]), true, false, -6.0)
+    );
+}
+
+#[test]
+fn a_keyed_equalizer_of_a_file_stays_carried() {
+    let doc = eq_doc(vec![
+        eq_effect(true),
+        eq_band_effect(
+            false,
+            vec![eq_param("eq band index", 0, 0, -1.0, 5.0, json!({}))],
+        ),
+        eq_band_effect(
+            true,
+            vec![
+                eq_param(
+                    "eq dB gain",
+                    60,
+                    0,
+                    -700.0,
+                    240.0,
+                    json!({"0": {"Value": 60, "Variant Type": "Int"}}),
+                ),
+                eq_param("eq band index", 2, 2, -1.0, 5.0, json!({})),
+            ],
+        ),
+    ]);
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req("timeline.import", json!({"otio": doc})));
+    let audio = f.editor.project().tracks[1].clips[0]
+        .audio
+        .as_ref()
+        .unwrap();
+    let kept = audio.effects.as_ref().unwrap().list.len();
+    let out = written(&f);
+    let back = eq_effects(&out["tracks"]["children"][1]["children"][0]).len();
+    assert_eq!((audio.equalizer.is_none(), kept, back), (true, 3, 3));
+}
+
+#[test]
+fn an_equalizer_survives_a_stripped_otio_round_trip() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req(
+        "clip.set",
+        json!({
+            "clips": "c1",
+            "equalizer": {
+                "on": true,
+                "bands": [
+                    {"band": 1, "on": true, "kind": "hi_pass", "freq": 120.0},
+                    {"band": 2, "on": true, "kind": "lo_shelf", "freq": 200.0, "gain": -3.5},
+                    {"band": 3, "on": true, "kind": "notch", "freq": 1000.0},
+                    {"band": 4, "on": false, "kind": "bell", "freq": 3000.0, "gain": 4.0, "q": 2.2},
+                    {"band": 5, "on": true, "kind": "hi_shelf", "freq": 8000.0, "gain": 2.5},
+                    {"band": 6, "on": true, "kind": "lo_pass", "freq": 15000.0},
+                ],
+            },
+        }),
+    ));
+    let original = f.editor.project().tracks[0].clips[0]
+        .audio
+        .as_ref()
+        .unwrap()
+        .equalizer
+        .clone();
+    let mut doc = written(&f);
+    strip_vidcut(&mut doc);
+    let mut other = Fixture::new(&[(10.0, true)]);
+    let ans = other.ok(req("timeline.import", json!({"otio": doc})));
+    let imported = other.editor.project().tracks[0].clips[0]
+        .audio
+        .as_ref()
+        .unwrap()
+        .equalizer
+        .clone();
+    assert_eq!(
+        (ans.result["warnings"].clone(), imported),
+        (json!([]), original)
+    );
+}
+
 fn written(f: &Fixture) -> Value {
     export(f.editor.project(), "t", None, Locations::Absolute).unwrap()
 }

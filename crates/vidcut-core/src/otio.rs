@@ -2338,7 +2338,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         compressor: serde_json::from_value(meta["compressor"].clone()).ok(),
                         noise_reduction: serde_json::from_value(meta["noise_reduction"].clone())
                             .ok(),
-                        equalizer: serde_json::from_value(meta["equalizer"].clone()).ok(),
+                        equalizer: serde_json::from_value(meta["equalizer"].clone())
+                            .ok()
+                            .filter(|e| crate::equalizer::problem(e).is_none()),
                         dialogue_leveler: serde_json::from_value(meta["dialogue_leveler"].clone())
                             .ok(),
                         voice_isolation: serde_json::from_value(meta["voice_isolation"].clone())
@@ -2441,11 +2443,15 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             effects::drop_gain_keys(&mut effects);
             let voice_isolation = serde_json::from_value(meta["voice_isolation"].clone()).ok();
             let pan = meta["pan"].as_f64().or_else(|| effects::pan(item));
-            let equalizer = serde_json::from_value(meta["equalizer"].clone()).ok();
+            let equalizer = serde_json::from_value(meta["equalizer"].clone())
+                .ok()
+                .filter(|e| crate::equalizer::problem(e).is_none())
+                .or_else(|| effects::equalizer(item));
             let dialogue_leveler = serde_json::from_value(meta["dialogue_leveler"].clone()).ok();
             let compressor = serde_json::from_value(meta["compressor"].clone()).ok();
             let noise_reduction = serde_json::from_value(meta["noise_reduction"].clone()).ok();
             effects::drop_pan(&mut effects);
+            effects::drop_equalizer(&mut effects, equalizer.is_some());
             let stream = meta["stream"]
                 .as_u64()
                 .map(|s| s as u32)
@@ -2836,12 +2842,6 @@ fn kept_in_metadata(
             "{what} stays in vidcut's own metadata, so other editors won't hear it: {}",
             named.join(", ")
         )
-    })
-}
-
-pub fn unheard_equalizer(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
-    kept_in_metadata(p, span, "The equalizer", |au| {
-        au.equalizer.as_ref().is_some_and(|e| e.heard())
     })
 }
 
