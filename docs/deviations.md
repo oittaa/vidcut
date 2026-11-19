@@ -1576,9 +1576,9 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - One setting does the work of a tracker node and a connection.
   - A title with keyframes, and a title that stops following, wait for a measurement in Resolve ([todo](todo/motion-tracking.md)).
 
-## X170. The Equalizer: Notch, Bell width and OTIO export
+## X170. The Equalizer: Notch and Bell width
 
-The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the controls of the Equalizer. vidcut is different in three things.
+The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the controls of the Equalizer. vidcut is different in two things.
 
 - **Notch band:**
   - Resolve: the graph shows a cut at the frequency of the band. The exported sound has no cut. This is a fault in Resolve.
@@ -1588,7 +1588,3 @@ The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the contro
   - Resolve: above 8000 Hz, the band is wider than its Q value. At 8000 Hz, Q 1 gives the width of Q 0.94. At 16000 Hz, Q 1 gives the width of Q 0.75, and Q 4 gives the width of Q 2.
   - vidcut: the width agrees with the Q value at all frequencies.
   - Why: the measurements do not show the rule of Resolve. Below 8000 Hz, the difference is small.
-- **OTIO export:**
-  - Resolve: the Equalizer is the effect `Fairlight Clip Equaliser`, with one more effect for each band.
-  - vidcut: the Equalizer is in fields that only vidcut reads. The export report shows the note `equalizer_kept`.
-  - Why: vidcut cannot write the Equalizer effects of Resolve yet ([todo](todo/effects-library.md)).

@@ -3192,6 +3192,9 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - `eq frequency` is in Hz.
     - `eq dB gain` is in tenths of a dB.
     - `eq qFactor` is in thousandths of the Q.
+    - Parameters use `Variant Type` `Int`.
+    - A `Fairlight Equaliser Band` without `Fairlight Clip Equaliser` does nothing.
+    - Resolve drops a `Fairlight Clip Equaliser` with `Enabled` false on import.
   - vidcut: the Equalizer section follows the Audio section of the Inspector (X70). It has the switch, Reset, the graph and a row for each band.
   - vidcut: a change applies at once. A drag on a handle or on a field makes one change when it stops.
   - vidcut: with several clips with sound selected, the section shows the first clip.
@@ -3201,10 +3204,10 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut: `clip.set` sets `equalizer`. Its `on` is the switch.
     - On a clip with no equalizer, a change makes a flat one. It is on, unless `on` is false.
     - null makes the equalizer off again, with the usual values. Reset sends it.
-  - vidcut: a Notch band makes a cut in the sound. A Bell band keeps the width of its Q value ([X170](deviations.md#x170-the-equalizer-notch-bell-width-and-otio-export)).
-  - vidcut: an OTIO export keeps the equalizer in fields that only vidcut reads ([X170](deviations.md#x170-the-equalizer-notch-bell-width-and-otio-export)).
-    - An equalizer that changes the sound gives the note `equalizer_kept`.
-    - An equalizer that is off does not change the sound, also after an import.
+  - vidcut: a Notch band makes a cut in the sound. A Bell band keeps the width of its Q value ([X170](deviations.md#x170-the-equalizer-notch-and-bell-width)).
+  - vidcut: an OTIO export writes `Fairlight Clip Equaliser` and its six `Fairlight Equaliser Band` effects when the equalizer is on or off its usual values.
+  - vidcut: an import reads those effects when they have no keyframes, and keeps keyed or unsupported ones carried.
+  - vidcut: an equalizer that is off does not change the sound, also after an import.
 - **Dialogue Leveler** (pp. 743, 774–775):
   - The Dialogue Leveler has a switch, a preset, three processes and an Output Gain (p. 775).
   - The presets are Allow Wider Dynamics, More Lift For Low Levels, Lift Soft Whispery Sources and Optimize Moderate Levels (p. 775).
