@@ -1842,7 +1842,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Composite** (p. 769):
   - Opacity goes from 0 to 100. The tracks below show through the rest.
   - The composite modes mix the clip with the tracks below in other ways (pp. 1199–1203).
-  - vidcut: Foreground and the mask modes come later ([todo](todo/composite-masks.md)).
   - A clip with an alpha channel composites over the tracks below it (p. 769).
   - Its Alpha Mode (§3) tells how to read that channel.
   - Measured in Resolve Studio 21.1.2, with a Straight PNG of color c and alpha α over a picture b:
@@ -1888,7 +1887,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Thus a picture narrower than the frame moves less than its number. On the 4:3 chart in the 16:9 timeline, Position X 200 moves it 150 pixels.
   - Crop is in pixels of the picture as it is fitted in the timeline. Crop Left 100 on the 4:3 chart is a `cropLeft` of 100/1440 in the OTIO file.
   - Zoom is a factor (1.000). Rotation is in degrees.
-- **Later:** Foreground and the mask modes of Composite (pp. 769, 1202).
 
 ### 8.16 Effects (pp. 765, 3526, 3536)
 
@@ -4898,6 +4896,17 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Resolve goes back from Y, Cb and Cr by a matrix a little off BT.601. vidcut uses the matrix fitted to the renders.
     - The manual's words do not match the renders for some modes, for example Subtract and Hard Mix (pp. 1200–1202). vidcut follows the renders.
     - vidcut also keeps these values between the layers, in 32-bit floats.
+    - Mask modes (measured in Resolve Studio 21.2 with 32-bit float renders):
+      - Foreground, Alpha, Inverted Alpha, Lum and Inverted Lum pair across tracks.
+      - One or more contiguous mask clips directly below a Foreground clip pair with it. Empty tracks do not break the run.
+      - A normal clip, a title or a transition on the clip breaks the pairing. The first Foreground clip consumes the mask run.
+      - An unpaired mask or Foreground clip draws as Normal and keeps its opacity. Paired mask and Foreground clips ignore clip opacity.
+      - Alpha and Inverted Alpha take signal `s` from the clip alpha, including soft crop edges. Outside the clip or at zero alpha, `s` is 0.
+      - Lum and Inverted Lum take `s` from the BT.709 luma of straight R'G'B' where pixel alpha is above 0, clamped to 0..1. Outside the clip or at zero alpha, `s` is 0.
+      - Let `smin(a, b) = max(min(a, b) − 0.5 × h², 0) × 8/7` with `h = max(0.5 − |a − b|, 0)`, and `c(x) = smin(x, 1)`.
+      - One mask clip gives `m = s` for Alpha or Lum, and `1 − c(s)` for Inverted Alpha or Inverted Lum.
+      - Each mask clip has hole `u = 1 − s`, or `s` when inverted. Stacking sets `u = smin(u_next, c(u))` and `m = 1 − u`.
+      - The Foreground clip composites premultiplied over the tracks below with alpha `a = smin(m, 1 − c(1 − fg_alpha))`.
     - In an export, a title between layers cuts them ([todo](todo/composite-masks.md)).
   - **Units** (vidcut's):
     - `position` is where the middle of the picture goes before the zoom and the turn: `[x, y]` in fractions of the frame from its top left.

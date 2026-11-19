@@ -311,6 +311,9 @@ fn rgb(s: vec3<f32>) -> vec3<f32> {
 }
 
 fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
+    if s.x >= s.z || s.y >= s.w {
+        return vec3<f32>(0.0);
+    }
     let w = dot(vec3<f32>(px, 1.0), vec3<f32>(a.w, b.w, 1.0));
     if abs(w) < 1e-6 {
         return vec3<f32>(0.0);
@@ -325,38 +328,49 @@ fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
     return vec3<f32>(uv, e.x * e.y * e.z * e.w);
 }
 
-fn faded(inner: vec4<f32>, reach: vec4<f32>, uv: vec2<f32>) -> f32 {
+fn faded_edge(inner: vec4<f32>, reach: vec4<f32>, uv: vec2<f32>) -> f32 {
     if reach.x <= 0.0 || reach.y <= 0.0 {
-        return reach.z;
+        return 1.0;
     }
     let a = max(max(inner.x - uv.x, uv.x - inner.z), 0.0) / reach.x;
     let b = max(max(inner.y - uv.y, uv.y - inner.w), 0.0) / reach.y;
     let h = max(0.5 - abs(a - b), 0.0) / 0.5;
     let m = max(a, b) + h * h * 0.125;
     let t = clamp((1.0 - m) * (8.0 / 7.0), 0.0, 1.0);
-    return t * t * (3.0 - 2.0 * t) * reach.z;
+    return t * t * (3.0 - 2.0 * t);
 }
 
-fn shown(px: vec2<f32>) -> vec4<f32> {
+var<private> shown_hit: bool = true;
+
+fn shown_scale() -> f32 {
+    let bare = (p.made.x > 2.5 && p.made.x < 3.5) || (p.made.x > 4.5 && p.made.x < 5.5);
+    return select(p.levels[4].z * p.placed.y, p.placed.y, bare);
+}
+
+fn sample_shown(px: vec2<f32>) -> vec4<f32> {
+    shown_hit = true;
     if p.made.x > 2.5 && p.made.x < 3.5 {
         let c = textureLoad(halved, vec2<i32>(px), 0);
         if c.a <= 0.0 {
-            discard;
+            shown_hit = false;
+            return vec4<f32>(0.0);
         }
-        return vec4<f32>(c.rgb / c.a, c.a * p.placed.y);
+        return vec4<f32>(c.rgb / c.a, c.a);
     }
     if p.made.x > 4.5 && p.made.x < 5.5 {
         let a = textureLoad(halved, vec2<i32>(px), 0).a;
         if a <= 0.0 {
-            discard;
+            shown_hit = false;
+            return vec4<f32>(0.0);
         }
-        return vec4<f32>(textureLoad(luma, vec2<i32>(px), 0).rgb, a * p.placed.y);
+        return vec4<f32>(textureLoad(luma, vec2<i32>(px), 0).rgb, a);
     }
     let row0 = p.levels[0];
     let row1 = p.levels[1];
     let edge = cut(row0, row1, p.levels[2], px);
     let uv = edge.xy;
-    let cover = edge.z * faded(p.levels[3], p.levels[4], edge.xy);
+    let soft = faded_edge(p.levels[3], p.levels[4], edge.xy);
+    let cover = edge.z * soft;
     let tilt = dot(vec3<f32>(px, 1.0), vec3<f32>(row0.w, row1.w, 1.0));
     var across = vec2<f32>(0.0);
     var down = vec2<f32>(0.0);
@@ -365,7 +379,8 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
         down = vec2<f32>(row0.y - uv.x * row1.w, row1.y - uv.y * row1.w) / tilt;
     }
     if cover <= 0.0 {
-        discard;
+        shown_hit = false;
+        return vec4<f32>(0.0);
     }
     if p.made.x > 5.5 {
         let spans = vec2<f32>(length(across * p.upright.xy), length(down * p.upright.xy));
@@ -374,23 +389,24 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
             c = resized(uv, spans);
         }
         if c.a <= 0.0 {
-            discard;
+            shown_hit = false;
+            return vec4<f32>(0.0);
         }
-        return vec4<f32>(c.rgb / c.a, c.a * cover * p.placed.y);
+        return vec4<f32>(c.rgb / c.a, c.a * cover);
     }
     if p.made.x > 3.5 {
-        return vec4<f32>(1.0, 1.0, 1.0, cover * p.placed.y);
+        return vec4<f32>(1.0, 1.0, 1.0, cover);
     }
     if p.made.x > 1.5 {
         let q = (px / p.made.yz - p.part.xy) / p.part.zw;
         file_alpha = opacity(q);
-        placed_share = cover * p.placed.y;
+        placed_share = cover;
         return vec4<f32>(pixel(q), placed_share * file_alpha);
     }
     let size = p.upright.xy;
     let spans = vec2<f32>(length(across * size), length(down * size));
     file_alpha = opacity(uv);
-    placed_share = cover * p.placed.y;
+    placed_share = cover;
     let a = placed_share * file_alpha;
     if resamples(uv, spans) {
         return vec4<f32>(sharp(uv, spans), a);
@@ -406,6 +422,16 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
         }
     }
     return vec4<f32>(sum / f32(taps.x * taps.y), a);
+}
+
+fn shown(px: vec2<f32>) -> vec4<f32> {
+    let s = sample_shown(px);
+    if !shown_hit {
+        discard;
+    }
+    let scale = shown_scale();
+    placed_share *= scale;
+    return vec4<f32>(s.rgb, s.a * scale);
 }
 
 fn yuv_woven(px: vec2<f32>) -> vec3<f32> {
@@ -743,6 +769,62 @@ fn fs_mode(in: Out) -> @location(0) vec4<f32> {
         return vec4<f32>(m * top.a, top.a);
     }
     return vec4<f32>(m * top.a + under.rgb * (1.0 - top.a), top.a + under.a * (1.0 - top.a));
+}
+
+fn smin_norm(a: f32, b: f32) -> f32 {
+    let h = max(0.5 - abs(a - b), 0.0);
+    return max(min(a, b) - 0.5 * h * h, 0.0) * (8.0 / 7.0);
+}
+
+fn matte_clamp(x: f32) -> f32 {
+    return smin_norm(clamp(x, 0.0, 1.0), 1.0);
+}
+
+fn mask_signal(px: vec2<f32>, mode: u32) -> f32 {
+    let top = sample_shown(px);
+    if !shown_hit || top.a <= 0.0 {
+        return 0.0;
+    }
+    if mode >= 30u {
+        let c = own_color(top.rgb);
+        return clamp(dot(c, BT709), 0.0, 1.0);
+    }
+    return clamp(top.a, 0.0, 1.0);
+}
+
+@fragment
+fn fs_matte_first(in: Out) -> @location(0) vec4<f32> {
+    let mode = u32(p.placed.z + 0.5);
+    let s = mask_signal(in.position.xy, mode);
+    let inverted = mode == 29u || mode == 31u;
+    let matte = select(s, 1.0 - matte_clamp(s), inverted);
+    let hole = select(1.0 - s, s, inverted);
+    return vec4<f32>(matte, hole, 0.0, 1.0);
+}
+
+@fragment
+fn fs_matte_more(in: Out) -> @location(0) vec4<f32> {
+    let px = in.position.xy;
+    let mode = u32(p.placed.z + 0.5);
+    let s = mask_signal(px, mode);
+    let inverted = mode == 29u || mode == 31u;
+    let raw_hole = select(1.0 - s, s, inverted);
+    let prev_hole = textureLoad(below, vec2<i32>(px), 0).g;
+    let hole = smin_norm(raw_hole, matte_clamp(prev_hole));
+    return vec4<f32>(1.0 - hole, hole, 0.0, 1.0);
+}
+
+@fragment
+fn fs_matte_fg(in: Out) -> @location(0) vec4<f32> {
+    let px = in.position.xy;
+    let top = sample_shown(px);
+    if !shown_hit || top.a <= 0.0 {
+        return vec4<f32>(0.0);
+    }
+    let c = own_color(top.rgb);
+    let m = textureLoad(below, vec2<i32>(px), 0).r;
+    let a = smin_norm(m, 1.0 - matte_clamp(1.0 - clamp(top.a, 0.0, 1.0)));
+    return vec4<f32>(c * a, a);
 }
 
 @fragment

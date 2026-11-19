@@ -8,12 +8,12 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom,
-    Ease, EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha,
-    GlowFraming, GlowOutput, GradeKeyKind, GrainComposite, GrainPreset, Handle, LowerThirdLine,
-    Node, PathSample, PictureTool, PictureTransition, Place, Subject, SubtitleStyle, TitleAlign,
-    TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape,
-    ZoomBox,
+    BlendMode, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect, DuckDetect,
+    DynamicZoom, Ease, EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind,
+    GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind, GrainComposite, GrainPreset, Handle,
+    LowerThirdLine, Node, PathSample, PictureTool, PictureTransition, Place, Subject,
+    SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay,
+    VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -4344,7 +4344,7 @@ pub struct GradeNodeChange {
     pub place: Option<[f64; 2]>,
     /// The composite mode of a layer mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode: Option<CompositeMode>,
+    pub mode: Option<BlendMode>,
     /// A mixer becomes this kind of mixer. A layer mixer starts at `normal`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mixer: Option<GradeMixer>,
@@ -5925,7 +5925,7 @@ pub struct KindChange {
     /// How a Glow goes over the picture, or how a Vignette's color mixes
     /// with the picture in `advanced`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub composite_type: Option<CompositeMode>,
+    pub composite_type: Option<BlendMode>,
     /// How much of a Glow's composite shows, or how much of a Film Grain
     /// shows, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]

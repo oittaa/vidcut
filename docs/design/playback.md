@@ -299,6 +299,7 @@ The audio device:
   - The layers of a dissolve are more draws in the pass.
   - A placed layer maps each pixel back through its `place::Placing` level, with its soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
   - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).
+  - Contiguous mask layers directly below a Foreground layer pair (`mask_run`). `fs_matte_first` and `fs_matte_more` build `mattes`, and `fs_matte_fg` composites the Foreground layer. Unpaired matte layers draw as Normal.
   - A compound clip mixes its tracks first, in a picture of its own ([export](export.md#placed-pictures)).
   - The two sides of a transition add into a picture of their own (`place::Mix`). Thus a mix below 0 is not clipped before it goes over.
   - A title on a side of a transition adds in the same way (`lettering_adding`).

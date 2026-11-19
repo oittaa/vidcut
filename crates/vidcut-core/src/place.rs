@@ -1,8 +1,9 @@
 use crate::effect_keys::Keyed;
 use crate::model::{
-    Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Composition, Effect,
-    EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, Mask,
-    Media, MosaicBlur, Pattern, Picture, Sharpen, Tool, Vignette, VignetteMode, VignetteShape,
+    BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Composition,
+    Effect, EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha, GlowFraming,
+    GlowOutput, Mask, Media, MosaicBlur, Pattern, Picture, Sharpen, Tool, Vignette, VignetteMode,
+    VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -445,7 +446,7 @@ pub struct Glowing {
     pub saturation: f64,
     pub noise: Option<GlowNoise>,
     pub seen_only: bool,
-    pub mode: CompositeMode,
+    pub mode: BlendMode,
     pub opacity: f64,
     pub invert: bool,
     pub recovery: f64,
@@ -506,7 +507,7 @@ pub struct Graining {
     pub detail: f64,
     pub tones: [f64; 3],
     pub opacity: f64,
-    pub mode: CompositeMode,
+    pub mode: BlendMode,
     pub only: bool,
 }
 
@@ -649,7 +650,7 @@ pub struct Shading {
     pub first: [f64; 2],
     pub color: [f64; 3],
     pub strength: f64,
-    pub mode: CompositeMode,
+    pub mode: BlendMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -783,7 +784,7 @@ impl Shading {
             mode: if advanced {
                 v.mixing()
             } else {
-                CompositeMode::Normal
+                BlendMode::Normal
             },
         }
     }
@@ -981,7 +982,10 @@ pub(crate) fn level(
         1.0 - whole_pixels(c0.bottom, ph),
     ];
     let gone = p.scale().contains(&0.0) || crop[0] >= crop[2] || crop[1] >= crop[3];
-    let (edge, soft) = Soft::of(crop, p.softness(), [fw, fh]);
+    let (mut edge, soft) = Soft::of(crop, p.softness(), [fw, fh]);
+    if gone {
+        edge = [1.0, 1.0, 0.0, 0.0];
+    }
     let affine = [
         a,
         b,
@@ -1145,7 +1149,7 @@ impl Placing {
         effects.extend(graded);
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&own.back, c));
-        if own.soft == Soft::default() && no_bars(quad, frame) {
+        if u0 < u1 && v0 < v1 && own.soft == Soft::default() && no_bars(quad, frame) {
             own.edge = [-1.0, -1.0, 2.0, 2.0];
         }
         let composed = p.picture.composition.as_ref().map_or(Vec::new(), |c| {
@@ -1160,7 +1164,7 @@ impl Placing {
         });
         Self {
             level: own,
-            mode: p.picture.mode(),
+            mode: placing_mode(p),
             effects,
             composed,
         }
@@ -1264,7 +1268,6 @@ pub struct Mixes {
     pub outer: Vec<OuterMix>,
     pub follows: Vec<Option<usize>>,
     pub deepest: usize,
-    pub moded: bool,
     pub blurs: bool,
     pub moved: usize,
     layers: Vec<bool>,
@@ -1335,6 +1338,15 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixP
     parts
 }
 
+fn placing_mode(p: &Placed) -> CompositeMode {
+    let mode = p.picture.mode();
+    if (p.ramp.is_some() || p.crossing) && mode.is_matte() {
+        CompositeMode::Normal
+    } else {
+        mode
+    }
+}
+
 fn run_mode(part: &MixPart, run: &[Member<'_>]) -> CompositeMode {
     match part {
         MixPart::Mix(m) if !m.added => m.placing.mode,
@@ -1342,7 +1354,7 @@ fn run_mode(part: &MixPart, run: &[Member<'_>]) -> CompositeMode {
         MixPart::Layer(i) => run
             .iter()
             .find(|m| !m.title && m.index == *i)
-            .map_or(CompositeMode::Normal, |m| m.placed[0].picture.mode()),
+            .map_or(CompositeMode::Normal, |m| placing_mode(&m.placed[0])),
     }
 }
 
@@ -1419,7 +1431,6 @@ impl Mixes {
 
     fn mark(&mut self, mix: &Mix, depth: usize) {
         self.deepest = self.deepest.max(depth);
-        self.moded |= mix.placing.mode != CompositeMode::Normal;
         self.blurs |= !mix.placing.effects.is_empty();
         self.moved += usize::from(mix.moving.is_some());
         for part in &mix.parts {

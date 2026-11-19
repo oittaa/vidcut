@@ -8,7 +8,7 @@ use crate::cuda::{CudaDevice, PlaneCopy};
 use crate::hw::Kind;
 use crate::player::{AlphaUse, Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
-use vidcut_core::model::{AlphaMode, Grade, Hdr};
+use vidcut_core::model::{AlphaMode, CompositeMode, Grade, Hdr};
 use vidcut_core::place::{Level, Mix, MixPart, Mixes, Placing, Working, chain, lettered};
 use vidcut_core::preferences::{Scope, ScopeScale};
 use vidcut_core::render::{Moving, Placed, Shift};
@@ -46,6 +46,9 @@ pub struct Gpu {
     adding: wgpu::RenderPipeline,
     lettering_adding: wgpu::RenderPipeline,
     placed_mode: wgpu::RenderPipeline,
+    matte_first: wgpu::RenderPipeline,
+    matte_more: wgpu::RenderPipeline,
+    matte_fg: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     below_layout: wgpu::BindGroupLayout,
     lettering: wgpu::RenderPipeline,
@@ -97,6 +100,8 @@ static IDS: AtomicU64 = AtomicU64::new(1);
 const TARGET: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 const MIXING: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+
+const MATTE: wgpu::TextureFormat = wgpu::TextureFormat::Rg32Float;
 
 const MIXING_NEEDS: wgpu::Features =
     wgpu::Features::FLOAT32_FILTERABLE.union(wgpu::Features::FLOAT32_BLENDABLE);
@@ -471,6 +476,17 @@ impl Gpu {
             }),
             MIXING,
         );
+        let matte_first = made(&pipeline_layout, "fs_matte_first", None, MATTE);
+        let matte_more = made(&mode_layout, "fs_matte_more", None, MATTE);
+        let matte_fg = made(
+            &mode_layout,
+            "fs_matte_fg",
+            Some(wgpu::BlendState {
+                color: premultiplied,
+                alpha: premultiplied,
+            }),
+            MIXING,
+        );
         let lettering_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut title"),
             entries: &[
@@ -658,6 +674,9 @@ impl Gpu {
             adding,
             lettering_adding,
             placed_mode,
+            matte_first,
+            matte_more,
+            matte_fg,
             layout,
             below_layout,
             lettering,
@@ -954,6 +973,7 @@ struct Below {
     size: (u32, u32),
     format: wgpu::TextureFormat,
     texture: wgpu::Texture,
+    view: wgpu::TextureView,
     bind: wgpu::BindGroup,
 }
 
@@ -989,6 +1009,7 @@ impl Below {
             size,
             format,
             texture,
+            view,
             bind,
         }
     }
@@ -1009,6 +1030,7 @@ pub struct Screen {
     drawn_colors: Option<Hdr>,
     moves: Vec<Moves>,
     below: Option<Below>,
+    mattes: Vec<[Below; 2]>,
     canvases: Vec<blur::Texture>,
     drawn_kernels: Vec<u32>,
     drawn: Option<Option<Arc<Picture>>>,
@@ -1175,21 +1197,6 @@ fn begin<'a>(
     })
 }
 
-fn letter(
-    pass: &mut wgpu::RenderPass<'_>,
-    lettering: &wgpu::RenderPipeline,
-    letters: &[Letters],
-    titles: &[TitleOver],
-    (after, layers): (usize, usize),
-) {
-    for t in titles
-        .iter()
-        .filter(|t| t.above == after || (after == layers && t.above > after))
-    {
-        lettered_over(pass, lettering, letters, t);
-    }
-}
-
 fn lettered_over(
     pass: &mut wgpu::RenderPass<'_>,
     lettering: &wgpu::RenderPipeline,
@@ -1211,12 +1218,122 @@ type Bound = (wgpu::BindGroup, Option<f64>, bool, u32);
 const OVER_ALL: f64 = 0.0;
 const IN_MIX: f64 = 2.0;
 
+fn is_mask_code(mode: u32) -> bool {
+    CompositeMode::of_code(mode).is_some_and(CompositeMode::is_mask)
+}
+
+fn is_matte_code(mode: u32) -> bool {
+    CompositeMode::of_code(mode).is_some_and(CompositeMode::is_matte)
+}
+
+fn resolve_modes(modes: &mut [u32]) -> bool {
+    let mut has_matte = false;
+    let mut idx = 0;
+    while idx < modes.len() {
+        if let Some(fg) = mask_run(modes, idx) {
+            has_matte = true;
+            idx = fg + 1;
+            continue;
+        }
+        if is_matte_code(modes[idx]) {
+            modes[idx] = 0;
+        }
+        idx += 1;
+    }
+    has_matte
+}
+
+fn resolved_mix_modes(mix: &Mix, binds: &[Bound]) -> (Vec<u32>, bool) {
+    let mut modes: Vec<u32> = mix
+        .parts
+        .iter()
+        .map(|p| match p {
+            MixPart::Layer(i) => binds[*i].3,
+            MixPart::Title(_) => 0,
+            MixPart::Mix(inner) => inner.placing.mode.code(),
+        })
+        .collect();
+    let has_matte = resolve_modes(&mut modes);
+    (modes, has_matte)
+}
+
+fn mix_uses(mix: &Mix, binds: &[Bound], depth: usize) -> (bool, usize) {
+    let (mut blend, mut mattes) = if mix.added {
+        (false, 0)
+    } else {
+        let (modes, has_matte) = resolved_mix_modes(mix, binds);
+        (
+            modes.iter().any(|&m| m != 0 && !is_matte_code(m)),
+            if has_matte { depth + 1 } else { 0 },
+        )
+    };
+    for part in &mix.parts {
+        if let MixPart::Mix(inner) = part {
+            let (b, m) = mix_uses(inner, binds, depth + 1);
+            blend |= b;
+            mattes = mattes.max(m);
+        }
+    }
+    (blend, mattes)
+}
+
+fn mask_run(modes: &[u32], at: usize) -> Option<usize> {
+    let mut end = at;
+    while modes.get(end).is_some_and(|&m| is_mask_code(m)) {
+        end += 1;
+    }
+    (end > at && modes.get(end) == Some(&CompositeMode::FOREGROUND)).then_some(end)
+}
+
+fn draw_matte_step(
+    gpu: &Gpu,
+    encoder: &mut wgpu::CommandEncoder,
+    pair: &[Below; 2],
+    bind: &wgpu::BindGroup,
+    step: usize,
+) {
+    let dst = &pair[step % 2];
+    let mut pass = begin(encoder, &dst.view, Some(wgpu::Color::TRANSPARENT));
+    if step == 0 {
+        pass.set_pipeline(&gpu.matte_first);
+    } else {
+        pass.set_pipeline(&gpu.matte_more);
+        pass.set_bind_group(1, &pair[1 - step % 2].bind, &[]);
+    }
+    pass.set_bind_group(0, bind, &[]);
+    pass.draw(0..3, 0..1);
+}
+
+fn draw_matte_fg(
+    gpu: &Gpu,
+    encoder: &mut wgpu::CommandEncoder,
+    target: &wgpu::TextureView,
+    pair: &[Below; 2],
+    steps: usize,
+    bind: &wgpu::BindGroup,
+) {
+    let src = &pair[(steps - 1) % 2];
+    let mut pass = begin(encoder, target, None);
+    pass.set_pipeline(&gpu.matte_fg);
+    pass.set_bind_group(0, bind, &[]);
+    pass.set_bind_group(1, &src.bind, &[]);
+    pass.draw(0..3, 0..1);
+}
+
+enum TopItem {
+    Layer(usize),
+    Mix(usize),
+    FreeTitle(usize),
+    MixedTitle(usize),
+}
+
 struct MixDraw<'a, 'm> {
     gpu: &'a Gpu,
     binds: &'a [Bound],
     canvases: &'a [blur::Texture],
     blurred: &'a mut blur::Blurred,
     below: Option<&'a Below>,
+    mattes: &'a [[Below; 2]],
     letters: &'a [Letters],
     titles: &'a [TitleOver],
     size: (u32, u32),
@@ -1265,6 +1382,22 @@ impl MixDraw<'_, '_> {
         pass.draw(0..3, 0..1);
     }
 
+    fn part_bind(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        part: &MixPart,
+        depth: usize,
+    ) -> wgpu::BindGroup {
+        match part {
+            MixPart::Layer(i) => self.binds[*i].0.clone(),
+            MixPart::Mix(inner) => {
+                self.mix(encoder, inner, depth + 1);
+                self.finished(encoder, inner, depth + 1, IN_MIX)
+            }
+            MixPart::Title(_) => unreachable!("titles never appear inside a mask run"),
+        }
+    }
+
     fn mix(&mut self, encoder: &mut wgpu::CommandEncoder, mix: &Mix, depth: usize) {
         if let Some(moving) = &mix.moving {
             self.moved(encoder, mix, moving, depth);
@@ -1273,27 +1406,69 @@ impl MixDraw<'_, '_> {
         let canvases = self.canvases;
         let canvas = &canvases[depth].view;
         drop(begin(encoder, canvas, Some(wgpu::Color::TRANSPARENT)));
-        for part in &mix.parts {
-            match part {
+        if mix.added {
+            for part in &mix.parts {
+                match part {
+                    MixPart::Layer(i) => {
+                        let (bind, _, _, mode) = &self.binds[*i];
+                        self.lay(encoder, depth, bind, (*mode, true));
+                    }
+                    MixPart::Title(j) => {
+                        let mut pass = begin(encoder, canvas, None);
+                        lettered_over(
+                            &mut pass,
+                            &self.gpu.lettering_adding,
+                            self.letters,
+                            &self.titles[*j],
+                        );
+                    }
+                    MixPart::Mix(inner) => {
+                        self.mix(encoder, inner, depth + 1);
+                        let bind = self.finished(encoder, inner, depth + 1, IN_MIX);
+                        let how = (inner.placing.mode.code(), true);
+                        self.lay(encoder, depth, &bind, how);
+                    }
+                }
+            }
+            return;
+        }
+        let (modes, _) = resolved_mix_modes(mix, self.binds);
+        let mut idx = 0;
+        while idx < mix.parts.len() {
+            if let Some(fg) = mask_run(&modes, idx) {
+                let pair = &self.mattes[depth];
+                for (offset, part) in mix.parts[idx..fg].iter().enumerate() {
+                    let bind = self.part_bind(encoder, part, depth);
+                    draw_matte_step(self.gpu, encoder, pair, &bind, offset);
+                }
+                let fg_bind = self.part_bind(encoder, &mix.parts[fg], depth);
+                let target = &self.canvases[depth].view;
+                draw_matte_fg(self.gpu, encoder, target, pair, fg - idx, &fg_bind);
+                idx = fg + 1;
+                continue;
+            }
+            let mode = modes[idx];
+            match &mix.parts[idx] {
                 MixPart::Layer(i) => {
-                    let (bind, _, _, mode) = &self.binds[*i];
-                    self.lay(encoder, depth, bind, (*mode, mix.added));
+                    let bind = &self.binds[*i].0;
+                    self.lay(encoder, depth, bind, (mode, false));
                 }
                 MixPart::Title(j) => {
                     let mut pass = begin(encoder, canvas, None);
-                    let lettering = match mix.added {
-                        true => &self.gpu.lettering_adding,
-                        false => &self.gpu.lettering_wide,
-                    };
-                    lettered_over(&mut pass, lettering, self.letters, &self.titles[*j]);
+                    lettered_over(
+                        &mut pass,
+                        &self.gpu.lettering_wide,
+                        self.letters,
+                        &self.titles[*j],
+                    );
                 }
                 MixPart::Mix(inner) => {
                     self.mix(encoder, inner, depth + 1);
                     let bind = self.finished(encoder, inner, depth + 1, IN_MIX);
-                    let how = (inner.placing.mode.code(), mix.added);
-                    self.lay(encoder, depth, &bind, how);
+                    self.lay(encoder, depth, &bind, (mode, false));
                 }
             }
+            idx += 1;
         }
     }
 
@@ -1333,10 +1508,7 @@ impl MixDraw<'_, '_> {
         bind: &wgpu::BindGroup,
         (mode, added): (u32, bool),
     ) {
-        let mode = match added {
-            true => 0,
-            false => mode,
-        };
+        let mode = if added { 0 } else { mode };
         let canvas = &self.canvases[depth];
         if mode != 0 {
             let below = self.below.expect("made for a composite mode");
@@ -1804,7 +1976,47 @@ impl Screen {
             self.moves.push(Moves::new(gpu, size));
         }
         let mut moves = self.moves.iter();
-        let blending = nests.moded || binds.iter().any(|b| b.3 != 0);
+        let mut items = Vec::with_capacity(n + mixed.len());
+        let mut item_modes = Vec::with_capacity(n + mixed.len());
+        let mut i = 0;
+        let mut next_mix = 0;
+        loop {
+            while let Some(outer) = nests.outer.get(next_mix).filter(|m| m.layers.0 <= i) {
+                items.push(TopItem::Mix(next_mix));
+                item_modes.push(outer.mix.placing.mode.code());
+                for (j, follows) in nests.follows.iter().enumerate() {
+                    if *follows == Some(next_mix) {
+                        items.push(TopItem::MixedTitle(j));
+                        item_modes.push(0);
+                    }
+                }
+                i = i.max(outer.layers.1);
+                next_mix += 1;
+            }
+            if i >= n {
+                break;
+            }
+            items.push(TopItem::Layer(i));
+            item_modes.push(binds[i].3);
+            let after = i + 1;
+            for (j, t) in free.iter().enumerate() {
+                if t.above == after || (after == n && t.above > after) {
+                    items.push(TopItem::FreeTitle(j));
+                    item_modes.push(0);
+                }
+            }
+            i += 1;
+        }
+        let has_top_matte = resolve_modes(&mut item_modes);
+        let mut blending = item_modes.iter().any(|&m| m != 0 && !is_matte_code(m));
+        let mut mix_mattes_need = 0usize;
+        for outer in &nests.outer {
+            let (b, m) = mix_uses(&outer.mix, &binds, 0);
+            blending |= b;
+            mix_mattes_need = mix_mattes_need.max(m);
+        }
+        let top_matte_base = usize::from(has_top_matte);
+        let need_mattes = top_matte_base + mix_mattes_need;
         let floats = self.exported
             || self.scoping
             || colors.is_some()
@@ -1831,6 +2043,17 @@ impl Screen {
         {
             self.below = Some(Below::new(gpu, size, format));
         }
+        if need_mattes == 0 {
+            self.mattes.clear();
+        } else {
+            self.mattes
+                .retain(|p| p[0].size == size && p[0].format == MATTE);
+            self.mattes.truncate(need_mattes);
+            while self.mattes.len() < need_mattes {
+                self.mattes
+                    .push([Below::new(gpu, size, MATTE), Below::new(gpu, size, MATTE)]);
+            }
+        }
         self.canvases
             .retain(|c| (c.texture.width(), c.texture.height()) == size);
         self.canvases.truncate(nests.deepest);
@@ -1849,7 +2072,6 @@ impl Screen {
         let wide = self.wide.as_ref();
         let canvas = wide.map_or(&target.view, |w| &w.view);
         let canvas_texture = wide.map_or(&target.texture, |w| &w.texture);
-        let blends = |i: usize| binds.get(i).is_some_and(|b| b.3 != 0);
         let (drawing, lettering) = match wide {
             Some(_) => (&gpu.wide_drawing, &gpu.lettering_wide),
             None => (&gpu.screen_drawing, &gpu.lettering),
@@ -1873,31 +2095,74 @@ impl Screen {
             height: size.1,
             depth_or_array_layers: 1,
         };
-        let starts = |i: usize| blends(i) || nests.starts_at(i);
-        let mut i = 0;
-        let mut next_mix = 0;
-        loop {
-            while let Some(outer) = nests.outer.get(next_mix).filter(|m| m.layers.0 <= i) {
+        let kernel = if exported { RESIZE | WIDENS } else { 0 };
+        let mix_mattes = self.mattes.get(top_matte_base..).unwrap_or(&[]);
+        let top_matte = self.mattes.first().filter(|_| has_top_matte);
+        let breaks = |k: usize| matches!(items[k], TopItem::Mix(_)) || item_modes[k] != 0;
+        let mut idx = 0;
+        while idx < items.len() {
+            if let Some(fg) = mask_run(&item_modes, idx) {
                 if clear.is_some() {
                     drop(begin(&mut encoder, canvas, clear.take()));
                 }
-                let below = self.below.as_ref();
+                let pair = top_matte.expect("made for a matte mode");
+                let mut item_bind = |k: usize, encoder: &mut wgpu::CommandEncoder| match items[k] {
+                    TopItem::Layer(li) => binds[li].0.clone(),
+                    TopItem::Mix(mi) => {
+                        let outer = &nests.outer[mi];
+                        let mut mixing = MixDraw {
+                            gpu,
+                            binds: &binds,
+                            canvases: &self.canvases,
+                            blurred: &mut self.blurred,
+                            below: self.below.as_ref(),
+                            mattes: mix_mattes,
+                            letters: &self.letters,
+                            titles: &mixed,
+                            size,
+                            moves: &mut moves,
+                            colors,
+                            kernel,
+                        };
+                        mixing.mix(encoder, &outer.mix, 0);
+                        mixing.finished(encoder, &outer.mix, 0, OVER_ALL)
+                    }
+                    TopItem::FreeTitle(_) | TopItem::MixedTitle(_) => {
+                        unreachable!("titles never appear inside a mask run")
+                    }
+                };
+                for k in idx..fg {
+                    let bind = item_bind(k, &mut encoder);
+                    draw_matte_step(gpu, &mut encoder, pair, &bind, k - idx);
+                }
+                let fg_bind = item_bind(fg, &mut encoder);
+                draw_matte_fg(gpu, &mut encoder, canvas, pair, fg - idx, &fg_bind);
+                idx = fg + 1;
+                continue;
+            }
+            if let TopItem::Mix(mi) = items[idx] {
+                if clear.is_some() {
+                    drop(begin(&mut encoder, canvas, clear.take()));
+                }
+                let outer = &nests.outer[mi];
                 let mut mixing = MixDraw {
                     gpu,
                     binds: &binds,
                     canvases: &self.canvases,
                     blurred: &mut self.blurred,
-                    below,
+                    below: self.below.as_ref(),
+                    mattes: mix_mattes,
                     letters: &self.letters,
                     titles: &mixed,
                     size,
                     moves: &mut moves,
                     colors,
-                    kernel: if exported { RESIZE | WIDENS } else { 0 },
+                    kernel,
                 };
                 mixing.mix(&mut encoder, &outer.mix, 0);
                 let bind = mixing.finished(&mut encoder, &outer.mix, 0, OVER_ALL);
-                let moded = below.filter(|_| outer.mix.placing.mode.code() != 0);
+                let mode = item_modes[idx];
+                let moded = self.below.as_ref().filter(|_| mode != 0);
                 if let Some(below) = moded {
                     encoder.copy_texture_to_texture(
                         canvas_texture.as_image_copy(),
@@ -1915,20 +2180,11 @@ impl Screen {
                 }
                 pass.set_bind_group(0, &bind, &[]);
                 pass.draw(0..3, 0..1);
-                for (t, _) in mixed
-                    .iter()
-                    .zip(&nests.follows)
-                    .filter(|(_, follows)| **follows == Some(next_mix))
-                {
-                    lettered_over(&mut pass, lettering, &self.letters, t);
-                }
-                i = i.max(outer.layers.1);
-                next_mix += 1;
+                idx += 1;
+                continue;
             }
-            if i >= n {
-                break;
-            }
-            if blends(i) {
+            let mode = item_modes[idx];
+            if mode != 0 {
                 if clear.is_some() {
                     drop(begin(&mut encoder, canvas, clear.take()));
                 }
@@ -1936,34 +2192,41 @@ impl Screen {
                 encoder.copy_texture_to_texture(
                     canvas_texture.as_image_copy(),
                     below.texture.as_image_copy(),
-                    wgpu::Extent3d {
-                        width: size.0,
-                        height: size.1,
-                        depth_or_array_layers: 1,
-                    },
+                    whole,
                 );
             }
             let mut pass = begin(&mut encoder, canvas, clear.take());
-            let first = i;
-            while i < n && (i == first || !starts(i)) {
-                let (bind, level, placed, mode) = &binds[i];
-                match level {
-                    _ if *mode != 0 => {
-                        let below = self.below.as_ref().expect("made for a composite mode");
-                        pass.set_pipeline(&drawing.mode);
-                        pass.set_bind_group(1, &below.bind, &[]);
+            let first = idx;
+            while idx < items.len() && (idx == first || !breaks(idx)) {
+                match items[idx] {
+                    TopItem::Layer(li) => {
+                        let (bind, level, placed, _) = &binds[li];
+                        let mode = item_modes[idx];
+                        match level {
+                            _ if mode != 0 => {
+                                let below = self.below.as_ref().expect("made for a composite mode");
+                                pass.set_pipeline(&drawing.mode);
+                                pass.set_bind_group(1, &below.bind, &[]);
+                            }
+                            _ if *placed => pass.set_pipeline(&drawing.placed),
+                            None => pass.set_pipeline(&drawing.pipeline),
+                            Some(l) => {
+                                pass.set_pipeline(&drawing.blended);
+                                pass.set_blend_constant(level_of(*l));
+                            }
+                        }
+                        pass.set_bind_group(0, bind, &[]);
+                        pass.draw(0..3, 0..1);
                     }
-                    _ if *placed => pass.set_pipeline(&drawing.placed),
-                    None => pass.set_pipeline(&drawing.pipeline),
-                    Some(l) => {
-                        pass.set_pipeline(&drawing.blended);
-                        pass.set_blend_constant(level_of(*l));
+                    TopItem::FreeTitle(ti) => {
+                        lettered_over(&mut pass, lettering, &self.letters, &free[ti]);
                     }
+                    TopItem::MixedTitle(ti) => {
+                        lettered_over(&mut pass, lettering, &self.letters, &mixed[ti]);
+                    }
+                    TopItem::Mix(_) => unreachable!(),
                 }
-                pass.set_bind_group(0, bind, &[]);
-                pass.draw(0..3, 0..1);
-                letter(&mut pass, lettering, &self.letters, &free, (i + 1, n));
-                i += 1;
+                idx += 1;
             }
         }
         if let (Some(w), Some(work)) = (wide, &graded) {
@@ -4090,5 +4353,33 @@ mod tests {
         )
         .validate(&module)
         .unwrap();
+    }
+
+    #[test]
+    fn mask_run_pairs_stacked_masks_with_foreground() {
+        let fg = super::CompositeMode::Foreground.code();
+        let alpha = super::CompositeMode::Alpha.code();
+        let lum = super::CompositeMode::Lum.code();
+        assert_eq!(super::mask_run(&[0, alpha, lum, fg], 1), Some(3));
+    }
+
+    #[test]
+    fn mask_run_breaks_on_normal_layer() {
+        let fg = super::CompositeMode::Foreground.code();
+        let lum = super::CompositeMode::Lum.code();
+        assert_eq!(super::mask_run(&[lum, 0, fg], 0), None);
+    }
+
+    #[test]
+    fn mask_run_stops_at_first_foreground() {
+        let fg = super::CompositeMode::Foreground.code();
+        let lum = super::CompositeMode::Lum.code();
+        assert_eq!(super::mask_run(&[lum, fg, fg], 0), Some(1));
+    }
+
+    #[test]
+    fn mask_run_ignores_unpaired_foreground() {
+        let fg = super::CompositeMode::Foreground.code();
+        assert_eq!(super::mask_run(&[fg], 0), None);
     }
 }

@@ -551,7 +551,7 @@ impl Smooth {
         let composite = d
             .before
             .map(|c| mode_at(p, c, c.end() - 1))
-            .filter(|m| *m != CompositeMode::Normal);
+            .filter(|m| *m != CompositeMode::Normal && !m.is_matte());
         let smooth = Self {
             retime,
             keys,
@@ -2311,7 +2311,7 @@ impl Edge {
         c.picture.composite_mode = modes
             .get((self.frames.0 + ramp.at - from) as usize)
             .copied()
-            .filter(|m| *m != CompositeMode::Normal);
+            .filter(|m| *m != CompositeMode::Normal && !m.is_matte());
         Some(Placed {
             ramp: ramp.moved.then_some(Ramp {
                 falling: false,
@@ -3849,7 +3849,8 @@ impl<'a> Span<'a> {
             };
             let (ramp, chain) = self.sided(d, falling);
             moded |= chain.iter().any(|c| c.picture.composite_mode.is_some());
-            let bare = without_mode(c).filter(|_| !chain.is_empty());
+            let matte = c.picture.as_ref().is_some_and(|p| p.mode().is_matte());
+            let bare = without_mode(c).filter(|_| !chain.is_empty() || matte);
             let drawn = bare.as_ref().unwrap_or(c);
             layers.push(Layer::Picture(
                 self.laid(drawn, self.nest_of(c), &chain)?,

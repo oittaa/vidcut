@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use egui::{Color32, CursorIcon, DragValue, Label, Rect, Response, Sense, Stroke, Ui, Vec2};
 use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
-use vidcut_core::model::{CompositeMode, Corrector, Grade, GradeNode, GradeTool, Picture};
+use vidcut_core::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, Picture};
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed};
 use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::request::{GradeAdd, GradeLevel, GradeMixer, Page, PrinterColor};
@@ -75,7 +75,7 @@ enum NodeAct {
     Delete,
     AddInput,
     Morph(GradeMixer),
-    Mode(CompositeMode),
+    Mode(BlendMode),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -421,8 +421,8 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, delete_key: &str, act: &mut Option<Node
     pick(ui, true, egui::Button::new(morph), NodeAct::Morph(to));
     if let GradeTool::LayerMixer { mode } = &d.tool {
         ui.menu_button("Composite Mode", |ui| {
-            for m in CompositeMode::ALL {
-                let text = super::placing::mode_label(m);
+            for m in BlendMode::ALL {
+                let text = super::placing::mode_label(m.into());
                 let item = egui::Button::selectable(m == *mode, text);
                 pick(ui, true, item, NodeAct::Mode(m));
             }
