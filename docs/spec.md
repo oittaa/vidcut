@@ -3193,6 +3193,9 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - `eq dB gain` is in tenths of a dB.
     - `eq qFactor` is in thousandths of the Q.
     - Parameters use `Variant Type` `Int`.
+    - Resolve writes `Default Parameter Value` 0 for these four, and the band index for `eq band index`.
+    - Its `minValue` and `maxValue` are 0..0 (`eq type`), 0..19000 (`eq frequency`), −700..240 (`eq dB gain`), 0..100000 (`eq qFactor`) and −1..5 (`eq band index`).
+    - Resolve does not clamp `eq frequency` above 19000 Hz to `maxValue` on import (measured at 21000 and 22000 Hz in Resolve Studio 21.2).
     - A `Fairlight Equaliser Band` without `Fairlight Clip Equaliser` does nothing.
     - Resolve drops a `Fairlight Clip Equaliser` with `Enabled` false on import.
   - vidcut: the Equalizer section follows the Audio section of the Inspector (X70). It has the switch, Reset, the graph and a row for each band.
