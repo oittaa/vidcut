@@ -628,13 +628,13 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X74. Eases are Bezier handles that drag on the volume line
 
 - **Resolve:**
-  - In Resolve Studio 21.1.1:
+  - In Resolve Studio 21.1.1 and 21.2:
     - An ease is a Bezier handle on its keyframe.
-    - With Ease Out on one keyframe and Ease In on the next one, the volume holds the first value. It jumps at the second keyframe.
+    - With Ease Out then Ease In, the volume and clip pan hold the first value. They jump at the second keyframe.
   - The manual says that an ease starts or stops a change slowly (p. 1112).
   - The handles drag in the Curve Editor (p. 1261), not on the volume overlay.
 - **vidcut:**
-  - The curve between two keyframes is always the Bezier curve of the keyframes and their handles ([D81](spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The curve between two volume or pan keyframes is always their Bezier curve ([D81](spec.md#12-decisions-on-gaps-and-contradictions)).
   - Thus Ease Out followed by Ease In gives a smooth S-curve.
   - A selected keyframe with a handle shows the handle on the volume line. A drag on the handle changes its time and its value.
 - **Why:**

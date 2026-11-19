@@ -122,7 +122,7 @@ classDiagram
   Track *-- "*" Clip : clips
   Track *-- "*" Transition : transitions
   Clip *-- "0..1" ClipAudio : audio
-  ClipAudio *-- "*" Keyframe : gain_keys
+  ClipAudio *-- "*" Keyframe : gain_keys, pan_keys
   Clip *-- "0..1" Title : title
   Clip *-- "0..1" Picture : picture
   Clip *-- "*" MotionPath : motion
@@ -178,10 +178,12 @@ Timelines (spec §3):
   - `multicam::timeline_frames` converts a frame of a group to the open timeline's rate by time, for the strips of the rows.
 - Source Tape (`render::tape`) and Multi Source (`multicam::source_grid`, `render::camera_tape`) count frames at the open timeline's rate. The source viewer of one clip (`render::clip_tape`) counts frames at the clip's own rate.
 
-Volume keyframes ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)):
+Volume and Pan keyframes ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)):
 
-- `ClipAudio::gain_keys` holds the volume keyframes of a clip, in order, on whole source frames. On a clip with a speed, they are on its retimed source.
-- With keyframes, the volume is their curve (`keyframes::value_at`), and `gain_db` is not heard.
+- `ClipAudio::gain_keys` holds the volume keyframes, and `ClipAudio::pan_keys` holds the pan keyframes, in order on whole source frames.
+- On a clip with a speed, they are on its retimed source.
+- With volume keyframes, the volume is their curve (`keyframes::value_at`), and `gain_db` is not heard.
+- With pan keyframes and `pan_on`, the pan is their curve (`ClipAudio::pan_at`), and `pan` is not heard.
 - `keyframes::reshape` makes each change. It keeps the order, one keyframe on a frame, and the ease of each keyframe.
 - `ops::keyframes` holds the requests. `ops::change_speed` moves the keyframes with `keyframes::retimed`.
 
@@ -761,10 +763,10 @@ The metadata:
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips, for the sound | `stream`, `gain_db`, `muted`, `pan`, `equalizer`, `dialogue_leveler`, `compressor`, `noise_reduction`; `gain_keys` from the item's first source frame |
+| `vidcut` on clips, for the sound | `stream`, `gain_db`, `muted`, `pan`, `pan_on`, `equalizer`, `dialogue_leveler`, `compressor`, `noise_reduction`; `gain_keys` and `pan_keys` from the item's first source frame |
 | `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `phase`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects; the `motion` paths of a clip |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
-| `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames`, pan and equalizer (`effects::sound`); `Media In` on reversed clips |
+| `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames`, pan with `Enabled` and `Key Frames`, and equalizer (`effects::sound`); `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling, and Dynamic Zoom (`otio::picture`), fitted, in place of carried ones |
 | `Resolve_OTIO` on compound clips | a `Sequence ID`, kept or made from the compound's content; a `Link Group ID` that joins the picture and sound of one compound at the same place (`compound_links`) |
 | `Resolve_OTIO` on tracks | `Locked`, `SoloOn` and `Audio Type` |
@@ -839,6 +841,7 @@ Kept data:
 |---|---|
 | clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`. Keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`), and fades stay at the clip's ends through splits; the clip volume's level is the gain |
 | the `Key Frames` of the clip volume (`effects::gain_keys`) | `ClipAudio::gain_keys`, taken out of the kept effect (`effects::drop_gain_keys`) |
+| the clip pan (`effects::pan`, `effects::pan_on`, `effects::pan_keys`) | `pan`, `pan_on` and `ClipAudio::pan_keys`, taken out of carried effects (`effects::drop_pan`) |
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). A `Generator` when it is a kind that vidcut draws (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |

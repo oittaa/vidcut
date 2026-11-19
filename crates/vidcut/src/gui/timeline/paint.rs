@@ -451,7 +451,10 @@ fn clip(
         };
         speed_marks(&painter, tr, scale, c, strip, bottom);
     }
-    let keyed = c.audio.as_ref().is_some_and(|a| a.is_keyed())
+    let keyed = c
+        .audio
+        .as_ref()
+        .is_some_and(|a| a.is_keyed() || a.is_pan_keyed())
         || c.picture.as_ref().is_some_and(|p| p.is_keyed())
         || c.title.as_ref().is_some_and(|t| t.is_keyed());
     if keyed {

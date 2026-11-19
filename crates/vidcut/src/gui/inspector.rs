@@ -2253,6 +2253,7 @@ struct Sound {
     keyed: bool,
     pan: f64,
     pan_on: bool,
+    pan_keyed: bool,
 }
 
 type Lists<'a> = (&'a [Chosen], &'a [Sound], &'a [Paced]);
@@ -2448,7 +2449,7 @@ enum Act {
     Swap,
     Clear(PictureTool),
     Switch(PictureTool, bool),
-    Unkey,
+    Unkey(Key),
     Step(Key, i64),
     Toggle(Key),
     KeyEase(Key, Ease),
@@ -2470,6 +2471,7 @@ enum Act {
 fn param_name(key: Key) -> Option<&'static str> {
     match key {
         Key::Volume => Some("volume"),
+        Key::Pan => Some("pan"),
         Key::Picture(f) => f.channel().map(PictureValue::name),
         Key::Speed => Some("speed"),
         Key::Center(Axis::X) => Some("center_x"),
@@ -2480,7 +2482,7 @@ fn param_name(key: Key) -> Option<&'static str> {
 
 fn key_clips(key: Key, (chosen, sounds, paced): Lists<'_>) -> Vec<String> {
     match key {
-        Key::Volume => sounds.iter().map(|s| s.id.clone()).collect(),
+        Key::Volume | Key::Pan => sounds.iter().map(|s| s.id.clone()).collect(),
         Key::Picture(_) => chosen.iter().map(|c| c.id.clone()).collect(),
         Key::Center(_) => chosen.iter().take(1).map(|c| c.id.clone()).collect(),
         Key::Speed => paced.iter().map(|c| c.id.clone()).collect(),
@@ -2512,6 +2514,7 @@ fn ebu_level_label(level: EbuLevel) -> &'static str {
 fn key_times(c: &Clip, key: Key) -> Vec<i64> {
     let keys = match key {
         Key::Volume => c.audio.as_ref().map(|a| a.gain_keys.clone()),
+        Key::Pan => c.audio.as_ref().map(|a| a.pan_keys.clone()),
         Key::Picture(f) => f
             .channel()
             .and_then(|v| c.picture.as_ref().map(|pic| pic.keys_of(v).to_vec())),
@@ -2844,7 +2847,7 @@ fn field_rest(
     });
     if reset(ui, set || look.dead_reset) && !look.dead_reset {
         acts.push(match f {
-            Key::Volume => Act::Unkey,
+            Key::Volume | Key::Pan => Act::Unkey(f),
             Key::Picture(field) if field.channel().is_some() => Act::ResetChannel(field),
             Key::Center(axis) => Act::ResetCenter(axis),
             f => Act::Put(f, f.usual()),
@@ -4149,8 +4152,9 @@ impl Workspace {
                     gain,
                     muted: a.muted,
                     keyed: a.is_keyed(),
-                    pan: a.pan,
+                    pan: c.pan_at(at).unwrap_or(a.pan),
                     pan_on: a.pan_on,
+                    pan_keyed: a.is_pan_keyed(),
                 })
             })
             .collect()
@@ -4586,7 +4590,8 @@ impl Workspace {
             .map(|s| s.id.as_str())
             .collect();
         if !ids.is_empty() {
-            self.send("clip.set", json!({ "clips": ids, "pan": to }));
+            let at = self.snap.timeline.position;
+            self.send("clip.set", json!({ "clips": ids, "pan": to, "at": at }));
         }
     }
 
@@ -4646,7 +4651,7 @@ impl Workspace {
             return;
         };
         let ids: Vec<&str> = match key {
-            Key::Volume => sounds.iter().map(|s| s.id.as_str()).collect(),
+            Key::Volume | Key::Pan => sounds.iter().map(|s| s.id.as_str()).collect(),
             Key::Picture(_) => chosen.iter().map(|c| c.id.as_str()).collect(),
             Key::Center(_) => chosen.iter().take(1).map(|c| c.id.as_str()).collect(),
             _ => return,
@@ -5148,7 +5153,11 @@ impl Workspace {
                 keys,
                 acts,
             );
-            let panned = sounds.iter().any(|s| s.pan != Key::Pan.usual());
+            let pan_off = count > 1 && sounds.iter().any(|s| s.pan_keyed);
+            let panned = !pan_off
+                && sounds
+                    .iter()
+                    .any(|s| s.pan_keyed || s.pan != Key::Pan.usual());
             let pan = (panned, first.pan, *PAN.start()..=*PAN.end());
             ui.horizontal(|ui| {
                 let mut on = first.pan_on;
@@ -5157,13 +5166,18 @@ impl Workspace {
                 }
                 label(ui, Key::Pan.label(), panned);
             });
+            let pan_keys = p.clip(&first.id).filter(|_| count == 1).and_then(|c| {
+                c.audio
+                    .as_ref()
+                    .map(|a| mark(c, &a.pan_keys, self.snap.timeline.position))
+            });
             field_rest(
                 ui,
                 Key::Pan,
                 &self.inspector,
                 pan,
-                keyed_look(false),
-                None,
+                keyed_look(pan_off),
+                pan_keys,
                 acts,
             );
             label(ui, "Mute", sounds.iter().any(|s| s.muted));
@@ -5448,21 +5462,32 @@ impl Workspace {
                     });
                 }
             }
-            Act::Unkey => {
+            Act::Unkey(key) => {
+                let is_pan = key == Key::Pan;
                 let keyed: Vec<&str> = sounds
                     .iter()
-                    .filter(|s| s.keyed)
+                    .filter(|s| if is_pan { s.pan_keyed } else { s.keyed })
                     .map(|s| s.id.as_str())
                     .collect();
                 if keyed.is_empty() {
-                    self.send_volume(sounds, Key::Volume.usual());
+                    match key {
+                        Key::Pan => self.send_pan(sounds, Key::Pan.usual()),
+                        _ => self.send_volume(sounds, Key::Volume.usual()),
+                    }
                     return;
                 }
                 let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
-                let commands = json!([
-                    { "method": "keyframes.remove", "params": { "clips": keyed } },
-                    { "method": "clip.set", "params": { "clips": ids, "gain_db": 0.0 } },
-                ]);
+                let commands = if is_pan {
+                    json!([
+                        { "method": "keyframes.remove", "params": { "clips": keyed, "param": "pan" } },
+                        { "method": "clip.set", "params": { "clips": ids, "pan": 0.0 } },
+                    ])
+                } else {
+                    json!([
+                        { "method": "keyframes.remove", "params": { "clips": keyed } },
+                        { "method": "clip.set", "params": { "clips": ids, "gain_db": 0.0 } },
+                    ])
+                };
                 self.send("apply", json!({ "commands": commands }));
             }
         }

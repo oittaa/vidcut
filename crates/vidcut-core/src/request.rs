@@ -1723,7 +1723,8 @@ pub enum Request {
         #[serde(default)]
         gain_db: Option<f64>,
         /// The pan, from -100 (all the way left) to 100 (all the way right).
-        /// 0 is the middle.
+        /// 0 is the middle. A clip with pan keyframes gets it as a keyframe
+        /// at `at`, also outside the clip.
         #[serde(default)]
         pan: Option<f64>,
         /// The switch of the pan. Off keeps the pan, and the sound plays as
@@ -1764,8 +1765,8 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         noise_reduction: Option<Option<NoiseReductionSet>>,
-        /// Where `gain_db` goes as a keyframe on clips with volume
-        /// keyframes: the playhead by default.
+        /// Where `gain_db` or `pan` goes as a keyframe on clips with volume or
+        /// pan keyframes: the playhead by default.
         #[serde(default)]
         at: Option<TimeSpec>,
         /// Empty string clears the name.
@@ -4757,6 +4758,8 @@ pub enum KeyParam {
     /// The volume of a clip's sound, in dB.
     #[default]
     Volume,
+    /// The pan of a clip's sound, from -100 to 100.
+    Pan,
     /// Position X and Y, one keyframe for both, as fractions of the frame.
     /// On a lower third: both lines together, or the lower line when the
     /// lines are apart.
@@ -4823,8 +4826,9 @@ pub enum KeyParam {
 }
 
 impl KeyParam {
-    pub const ALL: [KeyParam; 22] = [
+    pub const ALL: [KeyParam; 23] = [
         KeyParam::Volume,
+        KeyParam::Pan,
         KeyParam::Position,
         KeyParam::Zoom,
         KeyParam::Rotation,

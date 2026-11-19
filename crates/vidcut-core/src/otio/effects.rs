@@ -88,9 +88,20 @@ pub(super) fn volume(db: f64) -> Value {
     })
 }
 
-fn pan_effect(pan: f64) -> Value {
-    let p = plain("pan", json!(pan), json!(0.0), "Double");
-    effect(group(PAN, 72, 1, vec![ranged(p, -100.0, 100.0)]))
+fn pan_effect(au: &ClipAudio, origin: i64) -> Value {
+    let value = au.pan_keys.first().map_or(au.pan, |k| k.value);
+    let mut p = ranged(
+        keyed("pan", json!(value), json!(0.0), "Double"),
+        *crate::validate::PAN.start(),
+        *crate::validate::PAN.end(),
+    );
+    if au.is_pan_keyed() {
+        p["Key Frames"] = key_frames(&au.pan_keys, origin);
+    }
+    let mut g = group(PAN, 72, 1, vec![p]);
+    g["Name"] = json!("Pan");
+    g["Enabled"] = json!(au.pan_on);
+    effect(g)
 }
 
 fn is_pan(e: &Value) -> bool {
@@ -101,23 +112,24 @@ fn pan_param(e: &Value) -> Option<&Value> {
     params(e).find(|p| p["Parameter ID"] == "pan")
 }
 
-fn pan_keyed(e: &Value) -> bool {
-    pan_param(e)
-        .and_then(|p| p["Key Frames"].as_object())
-        .is_some_and(|keys| !keys.is_empty())
+fn pan_node(item: &Value) -> Option<&Value> {
+    item["effects"].as_array()?.iter().find(|e| is_pan(e))
+}
+
+pub(super) fn pan_on(item: &Value) -> Option<bool> {
+    Some(pan_node(item)?["metadata"][EDITOR]["Enabled"] != false)
 }
 
 pub(super) fn pan(item: &Value) -> Option<f64> {
-    item["effects"]
-        .as_array()?
-        .iter()
-        .find(|e| is_pan(e) && e["metadata"][EDITOR]["Enabled"] != false && !pan_keyed(e))
-        .and_then(pan_param)?["Parameter Value"]
-        .as_f64()
+    pan_param(pan_node(item)?)?["Parameter Value"].as_f64()
+}
+
+pub(super) fn pan_keys(item: &Value) -> Vec<Keyframe> {
+    read_keys(pan_node(item).and_then(pan_param), crate::validate::PAN)
 }
 
 pub(super) fn drop_pan(list: &mut Vec<Value>) {
-    list.retain(|e| !is_pan(e) || pan_keyed(e));
+    list.retain(|e| !is_pan(e));
 }
 
 fn eq_kind_code(kind: EqKind) -> i64 {
@@ -268,8 +280,8 @@ fn is_volume(e: &Value) -> bool {
     e["metadata"][EDITOR]["Effect Name"] == VOLUME
 }
 
-pub(super) fn gain_keys(item: &Value) -> Vec<Keyframe> {
-    let Some(keys) = volume_param(item).and_then(|p| p["Key Frames"].as_object()) else {
+fn read_keys(param: Option<&Value>, range: std::ops::RangeInclusive<f64>) -> Vec<Keyframe> {
+    let Some(keys) = param.and_then(|p| p["Key Frames"].as_object()) else {
         return Vec::new();
     };
     let handle = |k: &Value, name: &str, before: bool| {
@@ -286,7 +298,7 @@ pub(super) fn gain_keys(item: &Value) -> Vec<Keyframe> {
         .filter_map(|(t, k)| {
             Some(Keyframe {
                 frame: t.parse::<f64>().ok()?.round() as i64,
-                value: k["Value"].as_f64()?.clamp(*GAIN.start(), *GAIN.end()),
+                value: k["Value"].as_f64()?.clamp(*range.start(), *range.end()),
                 in_handle: handle(k, before, true),
                 out_handle: handle(k, after, false),
             })
@@ -295,6 +307,10 @@ pub(super) fn gain_keys(item: &Value) -> Vec<Keyframe> {
     out.sort_by_key(|k| k.frame);
     out.dedup_by_key(|k| k.frame);
     out
+}
+
+pub(super) fn gain_keys(item: &Value) -> Vec<Keyframe> {
+    read_keys(volume_param(item), GAIN)
 }
 
 pub(super) fn drop_gain_keys(list: &mut Vec<Value>) {
@@ -612,8 +628,8 @@ pub(super) fn sound(
         }
         None => {}
     }
-    if au.heard_pan() != 0.0 {
-        list.push(pan_effect(au.heard_pan()));
+    if au.pan != 0.0 || au.is_pan_keyed() || !au.pan_on {
+        list.push(pan_effect(au, origin));
     }
     if let Some(eq) = &au.equalizer
         && (eq.on || *eq != crate::equalizer::usual())

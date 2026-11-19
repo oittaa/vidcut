@@ -3141,7 +3141,11 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - An OTIO import sets the Pan from it.
   - vidcut: the Pan row of the Audio section (X70) and `clip.set` set `pan`.
   - vidcut: the switch at the left of the Pan row, and `pan_on` in `clip.set`, turn the Pan off and keep its value.
-  - vidcut: an OpenTimelineIO export writes a Pan that is off as 0.
+  - vidcut: Pan takes keyframes in the Inspector, in the Keyframe Editor and in `keyframes.*` (`KeyParam::Pan`).
+    - `clip.set` with `pan` and `at` adds a pan keyframe on a keyed clip.
+    - The curve between pan keyframes is the volume Bezier curve ([X74](deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
+  - vidcut: an OpenTimelineIO export writes `Fairlight Clip Pan` with `Enabled` from `pan_on` and `Key Frames` from `pan_keys`.
+    - An OpenTimelineIO import reads `Enabled`, `pan` and `Key Frames` back.
   - vidcut: a clip pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
   - vidcut: a source of one channel plays at its full level on each side of a stereo mix.
   - vidcut: `clip.set` refuses a Pan outside the range ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
@@ -5297,6 +5301,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A keyframe that is already on that frame takes the new value.
   - `clip.set` with several clips gives each clip with keyframes a keyframe at its own frame under `at`, also outside the clip (D75). Each clip without keyframes takes the plain value.
   - With several clips selected, the Inspector's Volume is off if one of them has volume keyframes (D75).
+  - The Inspector's Pan is off too when several clips are selected and one has pan keyframes.
   - Without `at` and a playhead, a clip with keyframes keeps its volume. If no clip takes the value, the request fails.
   - The Inspector shows the volume of the curve at the playhead. The Reset of Volume removes the keyframes and sets 0 dB.
   - A drag on the flat volume line of a selected clip also moves all the keyframes of the other selected clips by the same dB.

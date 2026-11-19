@@ -366,6 +366,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             muted: false,
             pan: 0.0,
             pan_on: true,
+            pan_keys: Vec::new(),
             equalizer: None,
             dialogue_leveler: None,
             compressor: None,
@@ -2035,12 +2036,15 @@ fn repaced(p: &mut Project, c: &Clip, mut n: Clip, want: i64, how: &str) -> Resu
             hi = mid;
         }
     }
-    let keys = n
-        .audio
-        .as_ref()
-        .map(|a| crate::keyframes::retimed(&a.gain_keys, c, &n));
-    if let (Some(a), Some(keys)) = (n.audio.as_mut(), keys) {
-        a.gain_keys = keys;
+    let keys = n.audio.as_ref().map(|a| {
+        (
+            crate::keyframes::retimed(&a.gain_keys, c, &n),
+            crate::keyframes::retimed(&a.pan_keys, c, &n),
+        )
+    });
+    if let (Some(a), Some((gain, pan))) = (n.audio.as_mut(), keys) {
+        a.gain_keys = gain;
+        a.pan_keys = pan;
     }
     if n.picture.as_ref().is_some_and(|pic| pic.is_keyed()) {
         let mut pic = n.picture.take().expect("keyed");
@@ -2156,10 +2160,13 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
     if props.gain_db.is_some() {
         keyframes::check_keyed_gain(p, ids, props.at)?;
     }
+    if props.pan.is_some() {
+        keyframes::check_keyed_pan(p, ids, props.at)?;
+    }
     for id in ids {
         let (ti, ci) = locate(p, id)?;
         let c = &mut p.tracks[ti].clips[ci];
-        let at = props.at.map(|t| c.source_at(t));
+        let at = props.at.map(|t| c.content_at(t));
         if let Some(e) = props.enabled {
             c.enabled = e;
         }
@@ -2199,8 +2206,13 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
             if let Some(m) = props.muted {
                 a.muted = m;
             }
-            if let Some(pan) = props.pan {
-                a.pan = pan;
+            match (props.pan, at) {
+                (Some(pan), Some(frame)) if a.is_pan_keyed() => {
+                    keyframes::put_value(&mut a.pan_keys, frame, pan);
+                }
+                (Some(_), None) if a.is_pan_keyed() => {}
+                (Some(pan), _) => a.pan = pan,
+                (None, _) => {}
             }
             if let Some(on) = props.pan_on {
                 a.pan_on = on;
@@ -2792,6 +2804,9 @@ fn shift_source(c: &mut Clip, (per, file_by): (crate::time::Rational, i64)) {
         for k in &mut a.gain_keys {
             k.frame += by;
         }
+        for k in &mut a.pan_keys {
+            k.frame += by;
+        }
         if let Some(e) = a.effects.as_mut() {
             e.from += by;
         }
@@ -3214,6 +3229,8 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
                 a.stream as usize >= media.info.audio.len()
                     || !crate::validate::GAIN.contains(&a.gain_db)
                     || crate::keyframes::problem(&a.gain_keys).is_some()
+                    || !crate::validate::PAN.contains(&a.pan)
+                    || crate::keyframes::pan_problem(&a.pan_keys).is_some()
             }) {
                 return Err(Error::invalid(format!(
                     "pasted clip {} has invalid audio settings",

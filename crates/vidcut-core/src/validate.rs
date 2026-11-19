@@ -171,6 +171,9 @@ pub fn violations(p: &Project) -> Vec<String> {
                         if let Some(why) = crate::keyframes::problem(&a.gain_keys) {
                             v.push(format!("{}: {why}", c.id));
                         }
+                        if let Some(why) = crate::keyframes::pan_problem(&a.pan_keys) {
+                            v.push(format!("{}: {why}", c.id));
+                        }
                         if a.stream as usize >= m.info.audio.len() {
                             v.push(format!(
                                 "{}: no audio stream {} in {}",

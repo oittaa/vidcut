@@ -430,7 +430,8 @@ The size of the file ([spec §10](../spec.md#10-quick-export-ch-39-pp-788790-409
   - Thus the player and the export play the same curve ([spec D81](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - `Resampler::new` converts each source to the layout of the mix. The export and the player get this conversion through `AudioMix`.
   - A source of one channel goes to each side of a mix of two channels at its full level (`swr_set_matrix`).
-- A piece has the Pan of its clip (`pan` of an `AudioPiece`). `render::pan_gains` gives the gain of each side.
+- A piece has the Pan of its clip (`pan` of an `AudioPiece`), or its pan keyframes (`pan_keyed`). `render::pan_gains` gives the gain of each side.
+  - When `pan_keyed` is present, `AudioMix` reads `Keyed::pan_at` at each sample.
   - `AudioMix` multiplies the first two channels of a mix of two channels or more by those gains.
 - A piece has the `noise_reduction` of its clip when it changes the sound.
   - `Denoiser` is a spectral gate with its own short-time Fourier transforms. It reads ahead of the piece, as `Isolator` does.

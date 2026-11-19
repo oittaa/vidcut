@@ -1294,7 +1294,7 @@ pub enum AudioPiece {
         /// A cross fade over it (decision D50): its gain on top of
         /// `gain_db`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        fade: Option<Fade>,
+        fade: Option<Box<Fade>>,
         /// The fades at the edges of the compound clips around it: their
         /// gains on top of `gain_db`.
         #[serde(default, skip_serializing_if = "<[Fade]>::is_empty")]
@@ -1312,6 +1312,10 @@ pub enum AudioPiece {
         /// Its clip's pan, from -100 to 100. Left out at 0.
         #[serde(default, skip_serializing_if = "is_centered")]
         pan: f64,
+        /// Its clip's pan keyframes: their pan at each sample heard, in place
+        /// of `pan`. Left out when unkeyed or when pan is off.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pan_keyed: Option<Box<Keyed>>,
         /// Its clip's equalizer, left out when it changes nothing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         equalizer: Option<Box<crate::model::Equalizer>>,
@@ -1330,7 +1334,7 @@ pub enum AudioPiece {
     },
 }
 
-/// A clip's volume keyframes over a piece of its sound.
+/// A clip's audio keyframes over a piece of its sound.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Keyed {
     /// The keyframes, their frames on `at`'s axis in project frames.
@@ -1352,6 +1356,12 @@ impl Keyed {
 
     pub fn gain(&self, sample: f64) -> f32 {
         10f64.powf(self.db_at(sample) / 20.0) as f32
+    }
+
+    pub fn pan_at(&self, sample: f64) -> f64 {
+        crate::keyframes::value_at(&self.keys, sample / self.per_frame).map_or(0.0, |v| {
+            v.clamp(*crate::validate::PAN.start(), *crate::validate::PAN.end())
+        })
     }
 }
 
@@ -2130,6 +2140,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 isolation,
                 keyed,
                 pan,
+                pan_keyed,
                 equalizer,
                 leveler,
                 compressor,
@@ -2148,6 +2159,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 isolation: i2,
                 keyed: k2,
                 pan: p2,
+                pan_keyed: pk2,
                 equalizer: e2,
                 leveler: l2,
                 compressor: c2,
@@ -2167,6 +2179,10 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 .as_ref()
                 .map(|k| (&k.keys, k.per_frame, k.at + *samples as f64))
                 == k2.as_ref().map(|k| (&k.keys, k.per_frame, k.at))
+            && pan_keyed
+                .as_ref()
+                .map(|k| (&k.keys, k.per_frame, k.at + *samples as f64))
+                == pk2.as_ref().map(|k| (&k.keys, k.per_frame, k.at))
             && *speed == 1.0
             && *sp2 == 1.0
             && fade.is_none()
@@ -3105,12 +3121,14 @@ fn paced_keys(y: &mut Clip, c: &Clip, k0: i64, first_key: i64) {
         });
     }
     if let Some(a) = y.audio.as_mut() {
-        for &k in &splits {
-            crate::keyframes::split_inside(&mut a.gain_keys, k);
-        }
-        a.gain_keys = crate::keyframes::scaled_by(&a.gain_keys, conv, &ratio);
-        for &(at, until) in &holds {
-            crate::keyframes::hold(&mut a.gain_keys, at, until);
+        for keys in [&mut a.gain_keys, &mut a.pan_keys] {
+            for &k in &splits {
+                crate::keyframes::split_inside(keys, k);
+            }
+            *keys = crate::keyframes::scaled_by(keys, conv, &ratio);
+            for &(at, until) in &holds {
+                crate::keyframes::hold(keys, at, until);
+            }
         }
     }
 }
@@ -4025,7 +4043,7 @@ fn planned_audio(
                             *silent = crate::validate::fader_silent(track.volume_db);
                             *joined =
                                 x > start.max(a) && c.pace().steady(x - 1 - c.start) == Some(1);
-                            *f2 = fade(f, x, falling);
+                            *f2 = fade(f, x, falling).map(Box::new);
                             *edges = around
                                 .iter()
                                 .filter(|f| f.frames.0 <= x && x < f.frames.1)
@@ -4089,11 +4107,19 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         let at = c.phase + c.pace().sound_in(k, since as f64 / per_frame);
         fps.frame_to_sample(c.source_in, rate) + (at * per_frame).round() as i64
     };
+    let keyed_at = fps.frame_to_sample(c.content_at(c.start), rate) as f64 + since as f64;
     let keyed = audio.is_keyed().then(|| {
         Box::new(Keyed {
             keys: audio.gain_keys.clone(),
             per_frame,
-            at: fps.frame_to_sample(c.content_at(c.start), rate) as f64 + since as f64,
+            at: keyed_at,
+        })
+    });
+    let pan_keyed = (audio.pan_on && audio.is_pan_keyed()).then(|| {
+        Box::new(Keyed {
+            keys: audio.pan_keys.clone(),
+            per_frame,
+            at: keyed_at,
         })
     });
     AudioPiece::Source {
@@ -4111,7 +4137,12 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         edges: Box::default(),
         isolation: None,
         keyed,
-        pan: audio.heard_pan(),
+        pan: if pan_keyed.is_some() {
+            0.0
+        } else {
+            audio.heard_pan()
+        },
+        pan_keyed,
         equalizer: audio
             .equalizer
             .clone()
@@ -4283,6 +4314,8 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
                 s.gain_keys.clear();
                 s.muted = false;
                 s.pan = 0.0;
+                s.pan_on = true;
+                s.pan_keys.clear();
                 s.equalizer = None;
                 s.dialogue_leveler = None;
                 s.compressor = None;
@@ -4538,6 +4571,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, fps: Rational, samples: i64) -> A
         isolation: None,
         keyed: None,
         pan: 0.0,
+        pan_keyed: None,
         equalizer: None,
         leveler: None,
         compressor: None,
@@ -4888,7 +4922,78 @@ mod tests {
         req(&mut f, "clip.set", json!({"clips": "c1", "pan": -40.0}));
         assert!(matches!(
             audio_pieces(&f)[0],
-            AudioPiece::Source { pan, .. } if pan == -40.0
+            AudioPiece::Source {
+                pan,
+                pan_keyed: None,
+                ..
+            } if pan == -40.0
+        ));
+    }
+
+    #[test]
+    fn keyed_pan_reaches_its_piece() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        req(
+            &mut f,
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 0, "value": -100.0}),
+        );
+        req(
+            &mut f,
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 20, "value": 100.0}),
+        );
+        let pieces = audio_pieces(&f);
+        let AudioPiece::Source {
+            pan,
+            pan_keyed: Some(k),
+            ..
+        } = &pieces[0]
+        else {
+            panic!("expected pan_keyed piece");
+        };
+        assert_eq!((*pan, k.pan_at(k.at + 10.0 * k.per_frame)), (0.0, 0.0));
+        assert_eq!(k.pan_at(k.at + 20.0 * k.per_frame), 100.0);
+    }
+
+    #[test]
+    fn pan_on_false_turns_off_keyed_pan() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        req(
+            &mut f,
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 0, "value": -100.0}),
+        );
+        req(&mut f, "clip.set", json!({"clips": "c1", "pan_on": false}));
+        assert!(matches!(
+            audio_pieces(&f)[0],
+            AudioPiece::Source {
+                pan: 0.0,
+                pan_keyed: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn sound_alone_clears_pan_keys() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        req(
+            &mut f,
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 0, "value": -80.0}),
+        );
+        let plan = sound_alone(f.editor.project(), "c1").unwrap();
+        assert!(matches!(
+            plan.audio[0][0],
+            AudioPiece::Source {
+                pan: 0.0,
+                pan_keyed: None,
+                ..
+            }
         ));
     }
 
