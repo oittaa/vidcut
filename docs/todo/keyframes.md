@@ -198,7 +198,7 @@ The picture uses the `Keyframe` of the volume ([D81](../spec.md#12-decisions-on-
 - vidcut writes the keyframes of each keyed value in the `Key Frames` of its parameter. It writes the other picture parameters with an empty `Key Frames`.
   - It writes the anchor point keys without Bezier handles. Resolve's anchor point keys are linear too ([D92](../spec.md#12-decisions-on-gaps-and-contradictions)).
   - Resolve Studio 21.1.2 imports its own file with anchor point, Pitch and Yaw keys and gives the same keys.
-  - Resolve's import of a file that vidcut writes with these keys is not measured.
+  - Resolve Studio 21.2 imports a file that vidcut writes with these keys, and renders and exports the same keys.
 
 **The one test file:** `$VIDCUT_TEST_DATA/fixtures/resolve-titles/titles.otio` has Resolve's metadata, 24 fps and g = 86400.
 

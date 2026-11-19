@@ -386,6 +386,16 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - vidcut writes `scale` 2. Thus Resolve fits a clip, whatever its project says.
   - vidcut reads crop, fill and stretch as a zoom.
   - The picture of a compound clip is the frame.
+- **Retime and Scaling also holds `retime process` and `motion estimation mode`.**
+  - `retime process` (`UInt`, default 0): 0 Project Settings, 1 Nearest, 2 Frame Blend, 3 Optical Flow.
+  - `motion estimation mode` (`UInt`, default 0): 0 Project Settings, 1 Standard Faster, 2 Standard Better, 3 Enhanced Faster, 4 Enhanced Better.
+  - Mode 5 is Speed Warp Better, 6 is Speed Warp Faster, and 7 is Metal. Both are `UInt` parameters with `"Key Frames": {}`.
+  - `otio::picture::take_retime` extracts these parameters before picture parsing, so unmodeled `Transform` effects do not block retime import.
+  - `otio::picture` writes `ClipRetime::Nearest` as 1 and `FrameBlend` as 2.
+  - It writes `AiFast` as 3 and 6, `AiSlow` as 3 and 5, and `Macos` as 3 and 7.
+  - On import, 3 with 0 to 4 becomes local AI (`Macos` on macOS, `AiFast` elsewhere; deviation X93).
+  - A non-zero `motion estimation mode` with `retime process` 0, 1 or 2 stays carried and unplayed.
+  - Measured in Resolve Studio 21.2.
 - **Resolve zooms and turns about the anchor point,** `transformationAnchorPoint`.
   - The anchor point is from the middle of the picture, in fractions of the picture, y up.
   - Resolve flips about the middle.
@@ -483,7 +493,7 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - `border` is a `Double` from 0 to 0.25, as for a Push. The Inspector shows it times the width of the timeline. `feather` is a `Bool`.
   - Resolve's export also writes `transitionCustomCurvesKeyframes`, as for a Push. With Ease None, it is a straight curve from 0 to 1.
   - Resolve leaves out each value at its default: an angle of 0, no border and no feather.
-  - The parameters of the color and the ease of an Edge Wipe are not measured. vidcut writes them as for a Push: `color` and `ease`.
+  - `color` (`Color`, default `#ffffff`) and `ease` (`UInt`, 0 to 4) match Push, measured in Resolve Studio 21.2.
   - Without `Transition Type`, or with the name alone, Resolve makes a cross dissolve. It also does so for a transition with metadata it does not know.
   - Resolve refuses the whole timeline when an `Int` has a decimal point, for example `90.0`.
   - Measured with renders of 24-frame wipes at 0, 90, 180 and −90 degrees, and with an export of Resolve Studio 21.2.
