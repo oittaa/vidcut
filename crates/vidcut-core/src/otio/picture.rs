@@ -1357,4 +1357,81 @@ mod tests {
             json!([keyed(SCALE, json!(FIT), json!(0), "UInt")])
         );
     }
+
+    #[test]
+    fn matte_composite_modes_write_codes_27_to_31() {
+        let shape = Shape::whole((1920, 1080));
+        let modes = [
+            CompositeMode::Foreground,
+            CompositeMode::Alpha,
+            CompositeMode::InvertedAlpha,
+            CompositeMode::Lum,
+            CompositeMode::InvertedLum,
+        ];
+        let codes: Vec<Option<u64>> = modes
+            .into_iter()
+            .map(|mode| {
+                let p = Picture {
+                    composite_mode: Some(mode),
+                    ..Picture::default()
+                };
+                effects(&p, &shape, 0, 0)
+                    .iter()
+                    .find(|e| e["metadata"][EDITOR]["Effect Name"] == COMPOSITE)
+                    .and_then(|e| e["metadata"][EDITOR]["Parameters"].as_array())
+                    .and_then(|ps| ps.iter().find(|q| q["Parameter ID"] == MODE))
+                    .and_then(|q| q["Parameter Value"].as_u64())
+            })
+            .collect();
+        assert_eq!(codes, [Some(27), Some(28), Some(29), Some(30), Some(31)]);
+    }
+
+    #[test]
+    fn written_matte_composite_modes_read_back_without_carried_effects() {
+        let shape = Shape::whole((1920, 1080));
+        let modes = [
+            CompositeMode::Foreground,
+            CompositeMode::Alpha,
+            CompositeMode::InvertedAlpha,
+            CompositeMode::Lum,
+            CompositeMode::InvertedLum,
+        ];
+        let got: Vec<(bool, Option<Picture>)> = modes
+            .into_iter()
+            .map(|mode| {
+                let p = Picture {
+                    composite_mode: Some(mode),
+                    ..Picture::default()
+                };
+                let written = effects(&p, &shape, 0, 0);
+                (written.iter().all(is_placing), read(&written, &shape))
+            })
+            .collect();
+        let want: Vec<(bool, Option<Picture>)> = modes
+            .into_iter()
+            .map(|mode| {
+                (
+                    true,
+                    Some(Picture {
+                        composite_mode: Some(mode),
+                        ..Picture::default()
+                    }),
+                )
+            })
+            .collect();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn unknown_composite_mode_code_stays_carried() {
+        let effect = json!({
+            "OTIO_SCHEMA": "Effect.1",
+            "metadata": { EDITOR: {
+                "Effect Name": COMPOSITE, "Enabled": true, "Name": COMPOSITE,
+                "Parameters": [{ "Parameter ID": MODE, "Parameter Value": 32 }],
+                "Type": 1,
+            } },
+        });
+        assert!(!is_placing(&effect));
+    }
 }

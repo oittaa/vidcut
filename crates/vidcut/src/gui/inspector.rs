@@ -13,7 +13,7 @@ use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, ClipRetime, CompositeMode,
+    BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, ClipRetime, CompositeMode,
     Composition, Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue,
     FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
     GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, Node, Pattern,
@@ -3465,14 +3465,18 @@ fn glow_rows(
         choice_row(
             ui,
             (n, "Composite Type", "composite_type"),
-            (g.over(), CompositeMode::Add),
-            (&CompositeMode::ALL, mode_label),
+            (g.over(), BlendMode::Add),
+            (&BlendMode::ALL, blend_label),
             acts,
         );
         glow(ui, GlowKnob::Opacity, acts);
         check(ui, (n, "Invert Effect", g.invert, false), "invert", acts);
         glow(ui, GlowKnob::Recovery, acts);
     });
+}
+
+fn blend_label(m: BlendMode) -> &'static str {
+    mode_label(m.into())
 }
 
 fn grain_preset_label(p: GrainPreset) -> &'static str {
@@ -3501,7 +3505,7 @@ fn grain_preset_label(p: GrainPreset) -> &'static str {
 fn grain_composite_label(c: GrainComposite) -> &'static str {
     match c {
         GrainComposite::Custom => "Custom",
-        _ => mode_label(c.mode()),
+        _ => blend_label(c.mode()),
     }
 }
 
@@ -3669,10 +3673,10 @@ fn vignette_rows(
             let now = v.mixing();
             label(ui, "Composite Type", now != Vignette::MIXING);
             egui::ComboBox::from_id_salt(("inspector-vignette-mode", n))
-                .selected_text(mode_label(now))
+                .selected_text(blend_label(now))
                 .show_ui(ui, |ui| {
-                    for m in CompositeMode::ALL {
-                        if ui.selectable_label(m == now, mode_label(m)).clicked() && m != now {
+                    for m in BlendMode::ALL {
+                        if ui.selectable_label(m == now, blend_label(m)).clicked() && m != now {
                             acts.push(Act::EffectSet(n, json!({ "composite_type": m })));
                         }
                     }

@@ -1,4 +1,4 @@
-use crate::model::{CompositeMode, Corrector, Grade, GradeTool};
+use crate::model::{BlendMode, Corrector, Grade, GradeTool};
 use crate::tone_tables::{HIGHLIGHTS, SHADOWS, TONE_AMOUNTS};
 
 pub const OFFSET_STEP: f64 = 187.5 / 1023.0;
@@ -495,7 +495,7 @@ pub enum Pass {
     Layer {
         on: usize,
         top: usize,
-        mode: CompositeMode,
+        mode: BlendMode,
     },
 }
 
@@ -670,11 +670,7 @@ impl Graded {
                     r.hold(k, on, uses[k]);
                 }
                 GradeTool::LayerMixer { mode } => {
-                    let mode = if node.on {
-                        *mode
-                    } else {
-                        CompositeMode::Normal
-                    };
+                    let mode = if node.on { *mode } else { BlendMode::Normal };
                     let on = r.take(ins[0], &mut passes);
                     for &v in &ins[1..] {
                         let top = r.holder[v];

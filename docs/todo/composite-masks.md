@@ -1,18 +1,9 @@
-# Composite: masks and the rest
+# Composite: titles between layers
 
 **When:** not decided.
 
-vidcut has the composite modes from Normal to Darker Color (spec D75). These parts are open.
+vidcut has the composite modes from Normal to Inverted Lum ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)). This part is open.
 
-- **Foreground and the mask modes** (p. 1202):
-  - The transparency of a clip at Foreground comes from the clip below it.
-  - The lower clip is at Alpha, Inverted Alpha, Lum or Inverted Lum.
-  - Measured in Resolve Studio 21.1.1: Lum is the luma of BT.709.
-  - The mask m goes through a soft clamp c(m): 8m / 7 below 0.5, and (12m − 4m² − 1) / 7 above 0.5.
-  - The inverted mask is c(1 − c(m)).
-  - The measurements of these modes are not complete.
-  - Why: a pair of clips mixes in a way that a plan of one layer at a time cannot give. The plan needs the lower clip's mask when it draws the upper clip.
-  - A Composite with these modes in an OTIO file stays a clip effect that does not play.
 - **A title between layers, checked by hand:**
   - Measured in Resolve Studio 21.1.2: V2 is at Add over V1, V3 has a title, and V4 is 50% gray at Multiply.
   - Outside the title, the frame is (V1 + V2) × 0.5. The sum is not cut at 1.

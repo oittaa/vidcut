@@ -601,6 +601,7 @@ The pictures:
 - `place::Placing` maps each pixel of its frame back to the picture (`Placing::level`).
 - The coverage of a pixel is the product of the smoothed edges, the soft crop edges and the opacity (`place::Placing::at`).
 - A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
+- Contiguous mask layers directly below a Foreground layer pair on the main stack and inside `MixDraw` (`mask_run`, `Screen::mattes`). Unpaired matte layers fall back to Normal and keep their opacity.
 - A transition with two sides is one `place::Mix`. `crossing` makes one `Placed` that both sides share.
   - The two sides add up. Neither side has its own composite mode.
   - The `Placed` holds the mode of the outgoing side on that frame, or of the incoming side if there is no outgoing clip (`mode_at`). That mode mixes the `place::Mix` with the layers below.

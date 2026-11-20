@@ -5,11 +5,11 @@ use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode, Composition, Crop,
-    DynamicZoom, Effect, EffectKeys, EffectKind, EffectValue, FillMethod, FilmGrain, GaussianBlur,
-    Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, MosaicBlur, Node, Pattern,
-    Picture, PictureTool, Project, Sharpen, Tool, TrackKind, Tracker, Vignette, VignetteMode,
-    VignetteShape, ZoomBox,
+    BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode, Composition,
+    Crop, DynamicZoom, Effect, EffectKeys, EffectKind, EffectValue, FillMethod, FilmGrain,
+    GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, MosaicBlur, Node,
+    Pattern, Picture, PictureTool, Project, Sharpen, Tool, TrackKind, Tracker, Vignette,
+    VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -260,7 +260,7 @@ fn glow_checked(g: &Glow) -> Result<Glow> {
         atmosphere_evolution: off(g.atmosphere_evolution, 0.0),
         atmosphere_seethe: off(g.atmosphere_seethe, Glow::SEETHE),
         framing: g.framing.filter(|v| *v != GlowFraming::default()),
-        composite_type: g.composite_type.filter(|v| *v != CompositeMode::Add),
+        composite_type: g.composite_type.filter(|v| *v != BlendMode::Add),
         opacity: off(g.opacity, 1.0),
         recovery: off(g.recovery, 0.0),
         ..g.clone()

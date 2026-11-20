@@ -571,7 +571,7 @@ Writing:
   - its flips
   - a `Crop` of each side, and the softness of its edges (`crop_softness`)
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
-  - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`)
+  - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`). Effects (`Glow`, `Vignette`, `GrainComposite`) and `GradeTool::LayerMixer` take `BlendMode`, which has only the 27 blend modes.
   - its `effects`, in their order: each an `Effect` with an `EffectKind`, a `GaussianBlur`, a `MosaicBlur`, a `Glow`, a `FilmGrain`, a `Vignette` or a `Sharpen` ([export](export.md#effects))
   - its `composition`: the nodes that work on its own picture before all of the above ([compositions](#compositions))
 - Each value is left out at its usual value. A picture that `Picture::is_usual` accepts is only fitted into the frame.

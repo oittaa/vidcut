@@ -3922,8 +3922,8 @@ pub enum GradeTool {
     /// shows.
     LayerMixer {
         /// How each input mixes with the inputs before it. Usual: `normal`.
-        #[serde(default, skip_serializing_if = "CompositeMode::is_normal")]
-        mode: CompositeMode,
+        #[serde(default, skip_serializing_if = "BlendMode::is_normal")]
+        mode: BlendMode,
     },
 }
 
@@ -4686,7 +4686,7 @@ pub struct Vignette {
     /// takes a color below 0 as 0, and `hue` with black or white takes the
     /// hue of red and with another gray one fixed hue. Usual: `multiply`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub composite_type: Option<CompositeMode>,
+    pub composite_type: Option<BlendMode>,
 }
 
 /// A sharpen: it makes three bands of detail stronger, from fine to large. A
@@ -4909,7 +4909,7 @@ pub struct Glow {
     pub framing: Option<GlowFraming>,
     /// How the glow goes over the picture. Usual: `add`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub composite_type: Option<CompositeMode>,
+    pub composite_type: Option<BlendMode>,
     /// How much of the composite shows, from 0 to 1. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
@@ -5097,19 +5097,19 @@ impl GrainComposite {
         Self::Custom,
     ];
 
-    pub fn mode(self) -> CompositeMode {
+    pub fn mode(self) -> BlendMode {
         match self {
-            Self::Overlay => CompositeMode::Overlay,
-            Self::Multiply => CompositeMode::Multiply,
-            Self::Darken => CompositeMode::Darken,
-            Self::Lighten => CompositeMode::Lighten,
-            Self::Screen => CompositeMode::Screen,
-            Self::Subtract => CompositeMode::Subtract,
-            Self::Hardlight => CompositeMode::Hardlight,
-            Self::Softlight => CompositeMode::Softlight,
-            Self::LinearLight | Self::Custom => CompositeMode::LinearLight,
-            Self::VividLight => CompositeMode::VividLight,
-            Self::PinLight => CompositeMode::PinLight,
+            Self::Overlay => BlendMode::Overlay,
+            Self::Multiply => BlendMode::Multiply,
+            Self::Darken => BlendMode::Darken,
+            Self::Lighten => BlendMode::Lighten,
+            Self::Screen => BlendMode::Screen,
+            Self::Subtract => BlendMode::Subtract,
+            Self::Hardlight => BlendMode::Hardlight,
+            Self::Softlight => BlendMode::Softlight,
+            Self::LinearLight | Self::Custom => BlendMode::LinearLight,
+            Self::VividLight => BlendMode::VividLight,
+            Self::PinLight => BlendMode::PinLight,
         }
     }
 }
@@ -5584,8 +5584,8 @@ impl Glow {
         self.framing.unwrap_or_default()
     }
 
-    pub fn over(&self) -> CompositeMode {
-        self.composite_type.unwrap_or(CompositeMode::Add)
+    pub fn over(&self) -> BlendMode {
+        self.composite_type.unwrap_or(BlendMode::Add)
     }
 
     pub fn shown(&self) -> f64 {
@@ -5728,7 +5728,7 @@ impl Vignette {
     pub const SOFTNESS: f64 = 0.5;
     pub const SHARES: (f64, f64) = (0.0, 1.0);
     pub const BLACK: [f64; 3] = [0.0; 3];
-    pub const MIXING: CompositeMode = CompositeMode::Multiply;
+    pub const MIXING: BlendMode = BlendMode::Multiply;
 
     pub fn mode(&self) -> VignetteMode {
         self.operating_mode.unwrap_or_default()
@@ -5766,7 +5766,7 @@ impl Vignette {
         self.color.unwrap_or(Self::BLACK)
     }
 
-    pub fn mixing(&self) -> CompositeMode {
+    pub fn mixing(&self) -> BlendMode {
         self.composite_type.unwrap_or(Self::MIXING)
     }
 }
@@ -5935,6 +5935,146 @@ impl Crop {
     }
 }
 
+/// How a layer or effect blends with what lies beneath it, in R'G'B',
+/// with `a` the source color and `b` the color below. Usual: `normal`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BlendMode {
+    /// `a`.
+    #[default]
+    Normal,
+    /// `a + b`.
+    Add,
+    /// `b − a`.
+    Subtract,
+    /// `|a − b|`.
+    Difference,
+    /// `a × b`.
+    Multiply,
+    /// `1 − (1 − a)(1 − b)`.
+    Screen,
+    /// `2ab` where `b` is up to 0.5, else `1 − 2(1 − a)(1 − b)`.
+    Overlay,
+    /// `2ab` where `a` is up to 0.5, else `1 − 2(1 − a)(1 − b)`.
+    Hardlight,
+    /// `b − (1 − 2a)b(1 − b)` where `a` is up to 0.5, else `b + (2a − 1)(d
+    /// − b)`, with `d` = `√b`, or `((16b − 12)b + 4)b` where `b` is up to
+    /// 0.25.
+    Softlight,
+    /// The lower of `a` and `b`.
+    Darken,
+    /// The higher of `a` and `b`.
+    Lighten,
+    /// `b / (1 − a)`; 1 where `a` is 1 or more.
+    ColorDodge,
+    /// `1 − (1 − b) / a`; 0 where `a` is 0 or less.
+    ColorBurn,
+    /// `a + b − 2ab`.
+    Exclusion,
+    /// The hue of `a`, with the colorfulness and the luma (BT.709) of `b`.
+    Hue,
+    /// The colorfulness of `a`, with the hue and the luma (BT.709) of `b`.
+    Saturation,
+    /// The chroma of `a`, with the luma (BT.601) of `b`.
+    Color,
+    /// The luma (BT.601) of `a`, with the chroma of `b`.
+    Luminosity,
+    /// `b / (a + 0.000001)`.
+    Divide,
+    /// `a + b`, as `add`.
+    LinearDodge,
+    /// `a + b − 1`, from 0.
+    LinearBurn,
+    /// `b + 2a − 1`.
+    LinearLight,
+    /// `color_burn` by `2a` where `a` is up to 0.5, else `color_dodge` by
+    /// `2a − 1`.
+    VividLight,
+    /// The lower of `b` and `2a` where `a` is below 0.5, else the higher of
+    /// `b` and `2a − 1`.
+    PinLight,
+    /// 1 where `a + b` is 1 or more, else 0.
+    HardMix,
+    /// `a` where the sum of its channels is at least that of `b`, else `b`.
+    LighterColor,
+    /// `a` where the sum of its channels is at most that of `b`, else `b`.
+    DarkerColor,
+}
+
+impl BlendMode {
+    pub const ALL: [BlendMode; 27] = [
+        Self::Normal,
+        Self::Add,
+        Self::Subtract,
+        Self::Difference,
+        Self::Multiply,
+        Self::Screen,
+        Self::Overlay,
+        Self::Hardlight,
+        Self::Softlight,
+        Self::Darken,
+        Self::Lighten,
+        Self::ColorDodge,
+        Self::ColorBurn,
+        Self::Exclusion,
+        Self::Hue,
+        Self::Saturation,
+        Self::Color,
+        Self::Luminosity,
+        Self::Divide,
+        Self::LinearDodge,
+        Self::LinearBurn,
+        Self::LinearLight,
+        Self::VividLight,
+        Self::PinLight,
+        Self::HardMix,
+        Self::LighterColor,
+        Self::DarkerColor,
+    ];
+
+    pub fn code(self) -> u32 {
+        Self::ALL.iter().position(|m| *m == self).unwrap_or(0) as u32
+    }
+
+    pub fn is_normal(&self) -> bool {
+        *self == Self::Normal
+    }
+}
+
+impl From<BlendMode> for CompositeMode {
+    fn from(mode: BlendMode) -> Self {
+        match mode {
+            BlendMode::Normal => Self::Normal,
+            BlendMode::Add => Self::Add,
+            BlendMode::Subtract => Self::Subtract,
+            BlendMode::Difference => Self::Difference,
+            BlendMode::Multiply => Self::Multiply,
+            BlendMode::Screen => Self::Screen,
+            BlendMode::Overlay => Self::Overlay,
+            BlendMode::Hardlight => Self::Hardlight,
+            BlendMode::Softlight => Self::Softlight,
+            BlendMode::Darken => Self::Darken,
+            BlendMode::Lighten => Self::Lighten,
+            BlendMode::ColorDodge => Self::ColorDodge,
+            BlendMode::ColorBurn => Self::ColorBurn,
+            BlendMode::Exclusion => Self::Exclusion,
+            BlendMode::Hue => Self::Hue,
+            BlendMode::Saturation => Self::Saturation,
+            BlendMode::Color => Self::Color,
+            BlendMode::Luminosity => Self::Luminosity,
+            BlendMode::Divide => Self::Divide,
+            BlendMode::LinearDodge => Self::LinearDodge,
+            BlendMode::LinearBurn => Self::LinearBurn,
+            BlendMode::LinearLight => Self::LinearLight,
+            BlendMode::VividLight => Self::VividLight,
+            BlendMode::PinLight => Self::PinLight,
+            BlendMode::HardMix => Self::HardMix,
+            BlendMode::LighterColor => Self::LighterColor,
+            BlendMode::DarkerColor => Self::DarkerColor,
+        }
+    }
+}
+
 /// How a picture mixes with the tracks below it, on each channel of their
 /// code values from 0 (black) to 1 (white): `a` is the picture, `b` is
 /// what is below it. Results above 1 and below 0 are kept for the opacity.
@@ -6000,10 +6140,22 @@ pub enum CompositeMode {
     LighterColor,
     /// `a` where the sum of its channels is at most that of `b`, else `b`.
     DarkerColor,
+    /// Takes its transparency from the mask clip or clips directly below it.
+    Foreground,
+    /// Supplies its alpha channel as a mask to a `foreground` clip above it.
+    Alpha,
+    /// Supplies its inverted alpha channel as a mask to a `foreground` clip
+    /// above it.
+    InvertedAlpha,
+    /// Supplies its BT.709 luma as a mask to a `foreground` clip above it.
+    Lum,
+    /// Supplies its inverted BT.709 luma as a mask to a `foreground` clip above
+    /// it.
+    InvertedLum,
 }
 
 impl CompositeMode {
-    pub const ALL: [CompositeMode; 27] = [
+    pub const ALL: [CompositeMode; 32] = [
         Self::Normal,
         Self::Add,
         Self::Subtract,
@@ -6031,7 +6183,14 @@ impl CompositeMode {
         Self::HardMix,
         Self::LighterColor,
         Self::DarkerColor,
+        Self::Foreground,
+        Self::Alpha,
+        Self::InvertedAlpha,
+        Self::Lum,
+        Self::InvertedLum,
     ];
+
+    pub const FOREGROUND: u32 = 27;
 
     pub fn code(self) -> u32 {
         Self::ALL.iter().position(|m| *m == self).unwrap_or(0) as u32
@@ -6043,6 +6202,17 @@ impl CompositeMode {
 
     pub fn is_normal(&self) -> bool {
         *self == Self::Normal
+    }
+
+    pub fn is_mask(self) -> bool {
+        matches!(
+            self,
+            Self::Alpha | Self::InvertedAlpha | Self::Lum | Self::InvertedLum
+        )
+    }
+
+    pub fn is_matte(self) -> bool {
+        self == Self::Foreground || self.is_mask()
     }
 }
 
@@ -8269,5 +8439,10 @@ mod tests {
         let mut now = was.clone();
         now.set_drop_frame(false).unwrap();
         assert_eq!(now.relabel(start, &was), 108_000);
+    }
+
+    #[test]
+    fn blend_mode_rejects_foreground() {
+        assert!(serde_json::from_str::<super::BlendMode>("\"foreground\"").is_err());
     }
 }

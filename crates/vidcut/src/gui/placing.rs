@@ -447,6 +447,11 @@ pub(super) fn mode_label(m: CompositeMode) -> &'static str {
         M::HardMix => "Hard Mix",
         M::LighterColor => "Lighter Color",
         M::DarkerColor => "Darker Color",
+        M::Foreground => "Foreground",
+        M::Alpha => "Alpha",
+        M::InvertedAlpha => "Inverted Alpha",
+        M::Lum => "Lum",
+        M::InvertedLum => "Inverted Lum",
     }
 }
 

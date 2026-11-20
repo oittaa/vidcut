@@ -7,7 +7,7 @@ vidcut has no matte of a person, and no matte of a subject the user points at.
 **Why:**
 
 - The Cut page has no matte of a person. Record a deviation if this item is built.
-- A composite mask mode takes its matte from the clip below ([composite-masks.md](composite-masks.md)).
+- A composite mask mode takes its matte from the clip below ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)).
 - A subject mask is a matte of the clip itself.
 
 **In the code:**
