@@ -2857,6 +2857,9 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             (p.timelines.iter()).find_map(|t| clip_outside(&t.tracks, media, part(fps_of(t))))
         })
         .or_else(|| {
+            (p.compound_path.iter()).find_map(|c| clip_outside(&c.tracks, media, part(c.fps)))
+        })
+        .or_else(|| {
             p.compounds.iter().find_map(|k| {
                 k.blocks()
                     .find_map(|block| compound_outside(block, media, part(k.fps)))
@@ -2893,6 +2896,10 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
     for t in &mut p.timelines {
         let per = t.own.map_or(project, |o| o.fps).over(rate);
         shift_clips(&mut t.tracks, media, (per, by));
+    }
+    for c in &mut p.compound_path {
+        let per = c.fps.over(rate);
+        shift_clips(&mut c.tracks, media, (per, by));
     }
     for k in &mut p.compounds {
         let per = k.fps.over(rate);
@@ -3169,6 +3176,7 @@ pub fn cut_to(clips: &[TrackClip], len: i64) -> Vec<TrackClip> {
 }
 
 pub fn paste_insert(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String>> {
+    compound::check_no_cycle(p, clips)?;
     let first = clips.iter().map(|c| c.clip.start).min();
     let end = clips.iter().map(|c| c.clip.end()).max();
     let (Some(first), Some(end)) = (first, end) else {
@@ -3198,6 +3206,7 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
     if at < 0 {
         return Err(Error::invalid("paste position before 0"));
     }
+    compound::check_no_cycle(p, clips)?;
     let mut clips = clips.to_vec();
     clips.sort_by_key(|c| c.clip.start);
     let first = clips[0].clip.start;
@@ -3316,6 +3325,12 @@ pub fn add_bin(p: &mut Project, path: &str) -> Result<()> {
 pub fn remove_bin(p: &mut Project, path: &str) -> Result<()> {
     if !has_bin(p, path) || path.is_empty() {
         return Err(Error::not_found(format!("no bin {path:?}")));
+    }
+    if p.compound_path.first().is_some_and(|c| {
+        matches!(&c.target, crate::model::CompoundTarget::Pooled { compound }
+            if p.compounds.iter().any(|k| &k.id == compound && within(&k.bin, path)))
+    }) {
+        compound::close_all(p)?;
     }
     let timelines: Vec<String> = (p.timelines.iter())
         .filter(|t| within(&t.bin, path))

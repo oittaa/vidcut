@@ -1275,3 +1275,41 @@ fn transition_ids_come_back_from_an_otio_file() {
     f.ok(req("timeline.import", json!({"otio": dissolve()})));
     assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
 }
+
+#[test]
+fn imported_otio_compound_opens_edits_closes_and_keeps_sequence_id() {
+    let mut src = Fixture::new(&[(4.0, true)]);
+    let a = src.append("m1", 0, 50);
+    src.ok(req("edit.compound", json!({"clips": [a]})));
+    let mut f = Fixture::new(&[]);
+    f.env = FakeEnv::default().with(
+        "/media/1.mp4",
+        media_info(4.0, Rational::new(25, 1).unwrap(), true),
+    );
+    f.ok(req("timeline.import", json!({"otio": written(&src)})));
+    let id = f.editor.project().tracks[0].clips[0].id.clone();
+    let seq_id = {
+        let k = f
+            .editor
+            .project()
+            .clip(&id)
+            .unwrap()
+            .compound
+            .as_ref()
+            .unwrap();
+        assert!(k.made_from.is_empty());
+        sequence_id(k).unwrap().to_string()
+    };
+    f.ok(req("compound.open", json!({"clip": id})));
+    f.append("m1", 50, 80);
+    f.ok(req("compound.close", json!({})));
+    let p = f.editor.project();
+    let k = p.clip(&id).unwrap().compound.as_ref().unwrap();
+    assert_eq!(sequence_id(k), Some(seq_id.as_str()));
+    assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    let doc = written(&f);
+    let inner = doc["tracks"]["children"][0]["children"][0]["children"][0]["children"]
+        .as_array()
+        .unwrap();
+    assert_eq!(inner.len(), 2);
+}

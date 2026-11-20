@@ -76,8 +76,11 @@ fn transition(x: &mut Transition, r: Rates) {
     crate::otio::transitions::scale_curve(x.otio.make_mut(), |f| r.frame(f), r.ratio());
 }
 
-fn compound(p: &Project, k: &mut Compound, r: Rates) {
+pub(crate) fn compound(p: &Project, k: &mut Compound, r: Rates) {
     k.frames = r.frame(k.frames);
+    for m in &mut k.markers {
+        marker(m, r);
+    }
     for t in k.tracks.iter_mut().chain(&mut k.made_from) {
         track(p, t, r);
     }

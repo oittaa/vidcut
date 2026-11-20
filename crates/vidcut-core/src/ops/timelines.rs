@@ -58,7 +58,11 @@ pub fn list(p: &Project) -> Value {
             v
         })
         .collect();
-    json!({ "timelines": rows, "open": p.open_id(), "recent": p.recent })
+    let mut out = json!({ "timelines": rows, "open": p.open_id(), "recent": p.recent });
+    if !p.compound_path.is_empty() {
+        out["compound_path"] = json!(super::compound::breadcrumbs(p));
+    }
+    out
 }
 
 fn own_of(base: TimelineSettings, f: &TimelineFormat) -> Result<TimelineSettings> {
@@ -131,6 +135,7 @@ pub fn new(p: &mut Project, n: &TimelineNew) -> Result<String> {
         Some(tc) => format.start_frames(tc)?,
         None => format.first_hour(),
     };
+    super::compound::close_all(p)?;
     let mut t = p.new_timeline(name, bin);
     (t.own, t.start_tc) = (own, start);
     let id = t.id.clone();
@@ -146,6 +151,7 @@ pub fn new(p: &mut Project, n: &TimelineNew) -> Result<String> {
 
 pub fn open(p: &mut Project, timeline: &str) -> Result<String> {
     let id = find(p, timeline)?;
+    super::compound::close_all(p)?;
     p.open_timeline(&id)?;
     Ok(id)
 }
@@ -172,6 +178,7 @@ pub fn copy_name(p: &Project, name: &str) -> String {
 
 pub fn duplicate(p: &mut Project, timeline: Option<&str>) -> Result<String> {
     let id = chosen(p, timeline)?;
+    super::compound::close_all(p)?;
     let source = p.whole_timeline(&id).expect("found");
     let fresh = p.new_timeline(copy_name(p, &source.name), source.bin.clone());
     let new_id = fresh.id.clone();
@@ -221,6 +228,9 @@ pub fn delete(p: &mut Project, timelines: &[String]) -> Result<Vec<String>> {
         .iter()
         .map(|t| find(p, t))
         .collect::<Result<_>>()?;
+    if !ids.is_empty() {
+        super::compound::close_all(p)?;
+    }
     let open = p.open_id().map(str::to_string);
     let next = open.as_ref().filter(|o| ids.contains(o)).and_then(|o| {
         let at = p.timelines.iter().position(|t| &t.id == o)?;

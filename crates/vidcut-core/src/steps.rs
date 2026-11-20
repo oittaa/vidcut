@@ -327,7 +327,9 @@ pub fn category(kind: &str) -> &'static str {
             || k == "edit.compound"
             || k == "edit.compound_range"
             || k == "edit.place_compound"
-            || k == "edit.decompose" =>
+            || k == "edit.decompose"
+            || k == "compound.open"
+            || k == "compound.close" =>
         {
             "Tracks and clips"
         }
@@ -379,7 +381,7 @@ pub fn groups(line: &[Step]) -> Vec<Group> {
 }
 
 pub fn places(before: &Project, after: &Project) -> (Vec<String>, Vec<Span>) {
-    if before.open_id() != after.open_id() {
+    if before.sheet_key() != after.sheet_key() {
         return (Vec::new(), Vec::new());
     }
     let mut clips = Vec::new();

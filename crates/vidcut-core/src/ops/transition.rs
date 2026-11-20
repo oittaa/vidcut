@@ -970,6 +970,7 @@ mod tests {
             frames: 100,
             tracks: vec![inner],
             made_from: Vec::new(),
+            markers: Vec::new(),
         });
         p
     }

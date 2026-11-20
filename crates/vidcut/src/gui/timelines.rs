@@ -127,7 +127,7 @@ impl Workspace {
         let open = p.open_id().map(str::to_string);
         ui.horizontal_wrapped(|ui| {
             for (id, name) in shown {
-                let on = open.as_deref() == Some(id.as_str());
+                let on = open.as_deref() == Some(id.as_str()) && p.compound_path.is_empty();
                 let text = format!(
                     "{}  {name}  {}",
                     egui_phosphor::regular::FILM_STRIP,
@@ -153,9 +153,10 @@ impl Workspace {
             .take(vidcut_core::ops::timelines::RECENT_SHOWN)
             .filter_map(|id| Some((id.clone(), name_of(p, id)?)))
             .collect();
-        let title = open
-            .as_deref()
-            .and_then(|id| name_of(p, id))
+        let title = p
+            .open_compound()
+            .map(|c| c.name.clone())
+            .or_else(|| open.as_deref().and_then(|id| name_of(p, id)))
             .unwrap_or_else(|| "No Timeline".into());
         ui.menu_button(RichText::new(title).strong(), |ui| {
             for (id, name) in recent {

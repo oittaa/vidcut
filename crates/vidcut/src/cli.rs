@@ -56,6 +56,8 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("timeline.rename", &["timeline", "name"]),
     ("timeline.duplicate", &["timeline"]),
     ("timeline.delete", &["timeline"]),
+    ("compound.open", &["clip"]),
+    ("compound.close", &["to"]),
     ("track.add", &["kind"]),
     ("track.remove", &["track"]),
     ("track.set", &["track"]),
@@ -302,6 +304,7 @@ const GROUPS: &[(&str, &str)] = &[
         "timeline",
         "The timeline: clips and gaps, edit points, the Boring Detector, OTIO import",
     ),
+    ("compound", "Open and close compound clips in the timeline"),
     ("track", "Tracks: their header and mixer settings"),
     (
         "viewer",
@@ -594,6 +597,16 @@ const EXAMPLES: &[(&str, &str)] = &[
         "timeline.set",
         "vidcut timeline set --start-tc 00:00:00:00\n  \
          vidcut timeline set --timeline t2 --own '{\"fps\": \"25\"}'",
+    ),
+    (
+        "compound.open",
+        "vidcut compound open c1\n  \
+         vidcut compound open --compound k1",
+    ),
+    (
+        "compound.close",
+        "vidcut compound close\n  \
+         vidcut compound close 0",
     ),
     (
         "storyboard.render",

@@ -3920,7 +3920,7 @@ impl Live {
         let Some(open) = &self.project else { return };
         let p = open.project();
         let path = open.store.path().to_path_buf();
-        let now = p.open_id().map(|id| (path.clone(), id.to_string()));
+        let now = p.sheet_key().map(|id| (path.clone(), id));
         if self
             .open_timeline
             .as_ref()
@@ -3928,8 +3928,12 @@ impl Live {
         {
             self.playheads.clear();
         }
-        self.playheads
-            .retain(|id, _| p.timelines.iter().any(|t| t.id == *id));
+        let active_key = p.sheet_key();
+        self.playheads.retain(|id, _| {
+            p.timelines.iter().any(|t| t.id == *id)
+                || active_key.as_deref() == Some(id.as_str())
+                || id.contains("::")
+        });
         if now == self.open_timeline {
             return;
         }
@@ -3937,6 +3941,10 @@ impl Live {
         let same_project = was.as_ref().is_some_and(|(at, _)| *at == path);
         if let Some((_, old)) = was.filter(|_| same_project) {
             self.playheads.insert(old, self.player.position(TIMELINE));
+        }
+        if same_project {
+            self.selection.clips.clear();
+            self.selection.cues.clear();
         }
         let Some((_, id)) = now else { return };
         if same_project {

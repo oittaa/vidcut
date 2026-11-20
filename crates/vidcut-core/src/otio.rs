@@ -1162,7 +1162,7 @@ pub fn export_drawn(
     if let Some(grade) = p.timeline_grade() {
         ours["grade"] = json!(grade);
     }
-    if span.is_none() {
+    if span.is_none() && p.compound_path.is_empty() {
         ours["project"] = json!(ProjectMeta {
             settings: p.settings.clone(),
             media: p.media.iter().map(|m| written(m, locations)).collect(),
@@ -1212,7 +1212,7 @@ pub fn export_drawn(
 }
 
 fn compound_of(item: &Value, fps: Rational) -> Compound {
-    let frames = item["children"]
+    let inner = item["children"]
         .as_array()
         .into_iter()
         .flatten()
@@ -1227,6 +1227,14 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         })
         .max()
         .unwrap_or(0);
+    let source_end = match (
+        time(&item["source_range"]["start_time"]),
+        time(&item["source_range"]["duration"]),
+    ) {
+        (Some((sv, sr)), Some((dv, dr))) => frames(sv, sr, fps) + frames(dv, dr, fps),
+        _ => 0,
+    };
+    let frames = inner.max(source_end);
     let mut stack = item.clone();
     if let Some(o) = stack.as_object_mut() {
         for key in ["source_range", "effects", "markers"] {
@@ -1244,12 +1252,27 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         frames,
         tracks: Vec::new(),
         made_from: Vec::new(),
+        markers: Vec::new(),
     }
 }
 
-pub(crate) fn made_stack(inner: &Project, name: &str, frames: i64) -> Result<Value> {
-    let doc = export(inner, name, Some((0, frames)), Locations::Absolute)?;
-    let mut stack = doc["tracks"].clone();
+pub(crate) fn made_stack(
+    inner: &Project,
+    name: &str,
+    frames: i64,
+    seq_id: Option<&str>,
+) -> Result<Value> {
+    let mut stack = if frames > 0 {
+        export(inner, name, Some((0, frames)), Locations::Absolute)?["tracks"].clone()
+    } else {
+        json!({
+            "OTIO_SCHEMA": "Stack.1",
+            "name": name,
+            "children": [],
+            "markers": [],
+            "enabled": true,
+        })
+    };
     stack["name"] = json!(name);
     stack["metadata"] = json!({ EDITOR: {
         "Sequence Type": "Compound Clip",
@@ -1260,7 +1283,10 @@ pub(crate) fn made_stack(inner: &Project, name: &str, frames: i64) -> Result<Val
             o.remove(key);
         }
     }
-    stack["metadata"][EDITOR]["Sequence ID"] = json!(stack_id(&stack));
+    let id = seq_id
+        .map(str::to_string)
+        .unwrap_or_else(|| stack_id(&stack));
+    stack["metadata"][EDITOR]["Sequence ID"] = json!(id);
     Ok(stack)
 }
 
@@ -1327,8 +1353,15 @@ fn no_media_ties(p: &Project, a: i64, b: i64) -> HashMap<NoMediaTie, usize> {
     ties
 }
 
-fn sequence_id(k: &Compound) -> Option<&str> {
+pub(crate) fn sequence_id(k: &Compound) -> Option<&str> {
     k.stack["metadata"][EDITOR]["Sequence ID"].as_str()
+}
+
+pub(crate) fn is_compound_stack(v: &Value) -> bool {
+    v["OTIO_SCHEMA"]
+        .as_str()
+        .is_some_and(|s| s.starts_with("Stack."))
+        && v["metadata"][EDITOR]["Sequence Type"].is_string()
 }
 
 fn stack_id(stack: &Value) -> String {

@@ -6,7 +6,7 @@ use eframe::egui::{
     pos2, vec2,
 };
 use serde_json::json;
-use vidcut_core::model::{Media, Project};
+use vidcut_core::model::{CompoundTarget, Media, Project};
 use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
 use vidcut_core::shortcuts::Action;
 
@@ -739,18 +739,31 @@ impl Workspace {
         if shown.is_empty() {
             return false;
         }
+        let open_id = match p.compound_path.first().map(|c| &c.target) {
+            Some(CompoundTarget::Pooled { compound }) => Some(compound.as_str()),
+            _ => None,
+        };
         ui.horizontal_wrapped(|ui| {
             for k in shown {
+                let on = open_id == Some(k.id.as_str());
                 let length = p.length_timecode(k.frames());
                 let r = ui
-                    .button(format!("{}  {length}", k.name))
-                    .interact(Sense::drag());
+                    .selectable_label(on, format!("{}  {length}", k.name))
+                    .interact(Sense::click_and_drag());
+                if r.double_clicked() {
+                    self.send("compound.open", json!({ "compound": k.id }));
+                }
                 if r.drag_started()
                     && let Some(press) = r.ctx.input(|i| i.pointer.press_origin())
                 {
                     self.start_compound_drag(&k.id, &k.name, k.frames(), press);
                 }
                 r.context_menu(|ui| {
+                    if ui.button("Open in Timeline").clicked() {
+                        self.send("compound.open", json!({ "compound": k.id }));
+                        ui.close();
+                    }
+                    ui.separator();
                     if ui.button("Append to Timeline").clicked() {
                         self.send("edit.place_compound", json!({ "compound": k.id }));
                         ui.close();

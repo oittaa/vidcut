@@ -2593,6 +2593,7 @@ fn hollow(p: &Project, c: &Clip) -> Clip {
         frames: k.frames,
         tracks: Vec::new(),
         made_from: Vec::new(),
+        markers: Vec::new(),
     });
     let mode = mode_at(p, c, c.end() - 1);
     if mode != CompositeMode::Normal {
@@ -2756,7 +2757,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     v.duck = None;
                     v.muted |= t.muted;
                     v.solo = t.solo;
-                    v.volume_db = t.volume_db;
+                    v.volume_db += t.volume_db;
                     v.video_enabled &= t.video_enabled;
                     v.render_cache &= t.render_cache;
                     let laid = inner_layout(p, n, part);

@@ -186,6 +186,9 @@ pub fn is_otio(output: &Path) -> bool {
 }
 
 pub fn timeline_name(p: &Project, project_path: &Path) -> String {
+    if let Some(c) = p.open_compound() {
+        return c.name.clone();
+    }
     match p.timeline() {
         Some(t) => t.name.clone(),
         None => project_path

@@ -2490,6 +2490,15 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - An append gives a linked picture on V1 and sound on A1.
   - A range of it trims these two, as a clip of a file.
   - A drag follows [§7.3](#73-drag-and-drop-from-the-pool-or-viewer-pp-648-679-694695), as a drag of a file does.
+- **Open in Timeline** (p. 1054), on a compound clip's context menu or in the Media Pool:
+  - Opening shows its tracks and markers in the timeline panel, with a path bar below.
+  - Opening a nested compound clip adds one more level to that path.
+  - Clicking an ancestor or close in the path bar writes edits back and steps up to that level.
+  - Edits update all instances that share that compound clip across timelines, nested clips and the Media tab.
+  - Growing inner tracks unlocks tail trims on placed clips.
+  - Shrinking inner tracks keeps placed clip durations intact and plays black or silence past the new end.
+  - Placing or pasting a compound clip inside itself or an open parent is refused.
+  - The Effects page and the Color page edit clips inside an open compound clip, with no Timeline grade.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.

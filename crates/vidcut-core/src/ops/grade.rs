@@ -221,7 +221,12 @@ pub fn frame_of(p: &Project, of: &GradeOf, at: i64) -> Result<i64> {
 
 pub fn stored(p: &Project, of: &GradeOf) -> Result<Grade> {
     let grade = match of {
-        GradeOf::Timeline => p.timeline().ok_or_else(no_timeline)?.grade.as_ref(),
+        GradeOf::Timeline => {
+            if !p.compound_path.is_empty() {
+                return Err(Error::invalid("a compound clip has no timeline grade"));
+            }
+            p.timeline().ok_or_else(no_timeline)?.grade.as_ref()
+        }
         GradeOf::Clip(id) => {
             let (ti, ci) = locate(p, id)?;
             let c = &p.tracks[ti].clips[ci];
@@ -235,7 +240,12 @@ pub fn stored(p: &Project, of: &GradeOf) -> Result<Grade> {
 fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
     let grade = checked(grade)?;
     match of {
-        GradeOf::Timeline => p.timeline_mut().ok_or_else(no_timeline)?.grade = grade,
+        GradeOf::Timeline => {
+            if !p.compound_path.is_empty() {
+                return Err(Error::invalid("a compound clip has no timeline grade"));
+            }
+            p.timeline_mut().ok_or_else(no_timeline)?.grade = grade;
+        }
         GradeOf::Clip(id) => {
             let (ti, ci) = locate(p, id)?;
             let c = &mut p.tracks[ti].clips[ci];

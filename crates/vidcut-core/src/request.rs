@@ -973,6 +973,22 @@ pub enum Request {
     /// Change a timeline's settings. Default: the open timeline.
     #[serde(rename = "timeline.set")]
     TimelineSet(TimelineSet),
+    /// Open a compound clip into the timeline: pass `clip` (on the timeline)
+    /// or `compound` (from the Media tab).
+    #[serde(rename = "compound.open")]
+    CompoundOpen {
+        #[serde(default)]
+        clip: Option<ClipRef>,
+        #[serde(default)]
+        compound: Option<String>,
+    },
+    /// Write the open compound clip's edits back and close it. `to` picks the
+    /// path level to return to (0 for the enclosing timeline). Default: one level.
+    #[serde(rename = "compound.close")]
+    CompoundClose {
+        #[serde(default)]
+        to: Option<usize>,
+    },
 
     /// Append after the last clip (Shift+F12).
     #[serde(rename = "edit.append")]
