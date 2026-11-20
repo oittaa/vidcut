@@ -16,8 +16,8 @@ use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
     Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marker, Marks,
-    Media, MediaInfo, Picture, Project, Proxy, Subject, Timeline, Title, Track, TrackKind,
-    Transition, VideoInfo, WordsChange,
+    Media, MediaInfo, OpenCompound, Picture, Project, Proxy, Subject, Timeline, Title, Track,
+    TrackKind, Transition, VideoInfo, WordsChange,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
 use crate::otio;
@@ -1342,7 +1342,8 @@ fn changed(before: &mut Project, after: &mut Project) -> Option<Change> {
 fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
     use std::mem::take;
     let mut media = (take(&mut a.media), take(&mut b.media));
-    let mut timelines = (a.take_timelines(), b.take_timelines());
+    let (mut tl_a, mut cp_a) = a.take_sheets();
+    let (mut tl_b, mut cp_b) = b.take_sheets();
     let rest = Change::between(&to_json(a), &to_json(b));
     let lists = [
         (
@@ -1351,14 +1352,20 @@ fn project_change(a: &mut Project, b: &mut Project) -> Option<Change> {
         ),
         (
             "timelines",
-            listed(&mut timelines.0, &mut timelines.1, |a, b| {
+            listed(&mut tl_a, &mut tl_b, |a, b| {
                 Change::of_items(a, b, |t| &t.id, timeline_change)
+            }),
+        ),
+        (
+            "compound_path",
+            listed(&mut cp_a, &mut cp_b, |a, b| {
+                Change::of_items(a, b, |c| &c.id, open_compound_change)
             }),
         ),
     ];
     (a.media, b.media) = media;
-    a.put_timelines(timelines.0);
-    b.put_timelines(timelines.1);
+    a.put_sheets(tl_a, cp_a);
+    b.put_sheets(tl_b, cp_b);
     joined(rest, lists)
 }
 
@@ -1381,17 +1388,12 @@ fn listed<T: serde::Serialize>(
     }
 }
 
-fn timeline_change(a: &mut Timeline, b: &mut Timeline) -> Option<Change> {
-    use std::mem::take;
-    if a == b {
-        return None;
-    }
-    let (mut tracks, mut markers) = (
-        (take(&mut a.tracks), take(&mut b.tracks)),
-        (take(&mut a.markers), take(&mut b.markers)),
-    );
-    let rest = Change::between(&to_value(&*a), &to_value(&*b));
-    let markers_change = listed(&mut markers.0, &mut markers.1, |a, b| {
+fn tracks_markers_change(
+    tracks: (&mut Vec<Track>, &mut Vec<Track>),
+    markers: (&mut Vec<Marker>, &mut Vec<Marker>),
+    rest: Option<Change>,
+) -> Option<Change> {
+    let markers_change = listed(markers.0, markers.1, |a, b| {
         Change::of_items(
             a,
             b,
@@ -1402,13 +1404,51 @@ fn timeline_change(a: &mut Timeline, b: &mut Timeline) -> Option<Change> {
     let lists = [
         (
             "tracks",
-            Change::of_items(&mut tracks.0, &mut tracks.1, |t| &t.id, track_change),
+            Change::of_items(tracks.0, tracks.1, |t| &t.id, track_change),
         ),
         ("markers", markers_change),
     ];
+    joined(rest, lists)
+}
+
+fn timeline_change(a: &mut Timeline, b: &mut Timeline) -> Option<Change> {
+    use std::mem::take;
+    if a == b {
+        return None;
+    }
+    let (mut tracks, mut markers) = (
+        (take(&mut a.tracks), take(&mut b.tracks)),
+        (take(&mut a.markers), take(&mut b.markers)),
+    );
+    let rest = Change::between(&to_value(&*a), &to_value(&*b));
+    let out = tracks_markers_change(
+        (&mut tracks.0, &mut tracks.1),
+        (&mut markers.0, &mut markers.1),
+        rest,
+    );
     (a.tracks, b.tracks) = tracks;
     (a.markers, b.markers) = markers;
-    joined(rest, lists)
+    out
+}
+
+fn open_compound_change(a: &mut OpenCompound, b: &mut OpenCompound) -> Option<Change> {
+    use std::mem::take;
+    if a == b {
+        return None;
+    }
+    let (mut tracks, mut markers) = (
+        (take(&mut a.tracks), take(&mut b.tracks)),
+        (take(&mut a.markers), take(&mut b.markers)),
+    );
+    let rest = Change::between(&to_value(&*a), &to_value(&*b));
+    let out = tracks_markers_change(
+        (&mut tracks.0, &mut tracks.1),
+        (&mut markers.0, &mut markers.1),
+        rest,
+    );
+    (a.tracks, b.tracks) = tracks;
+    (a.markers, b.markers) = markers;
+    out
 }
 
 fn track_change(a: &mut Track, b: &mut Track) -> Option<Change> {
@@ -1493,8 +1533,8 @@ fn undo_step(p: &mut Project, change: &Change, forward: bool) -> std::result::Re
     let Change::Fields(fields) = change else {
         return apply_json(p, change, forward);
     };
-    let (lists, rest) = split_fields(fields, &["media", "timelines"]);
-    let mut timelines = p.take_timelines();
+    let (lists, rest) = split_fields(fields, &["media", "timelines", "compound_path"]);
+    let (mut timelines, mut compound_path) = p.take_sheets();
     let mut stepped = Ok(());
     if !rest.is_empty() {
         let kept = std::mem::take(&mut p.media);
@@ -1507,42 +1547,38 @@ fn undo_step(p: &mut Project, change: &Change, forward: bool) -> std::result::Re
         }
         stepped = match name {
             "media" => c.apply_to_items(&mut p.media, forward, |m| &m.id, apply_json, shift_json),
-            _ => c.apply_to_items(
+            "timelines" => c.apply_to_items(
                 &mut timelines,
                 forward,
                 |t| &t.id,
                 timeline_step,
                 shift_json,
             ),
+            _ => c.apply_to_items(
+                &mut compound_path,
+                forward,
+                |o| &o.id,
+                open_compound_step,
+                shift_json,
+            ),
         };
     }
-    p.put_timelines(timelines);
+    p.put_sheets(timelines, compound_path);
     stepped
 }
 
-fn timeline_step(
-    t: &mut Timeline,
-    change: &Change,
+fn tracks_markers_step(
+    tracks: &mut Vec<Track>,
+    markers: &mut Vec<Marker>,
+    lists: &[(&str, &Change)],
     forward: bool,
 ) -> std::result::Result<(), String> {
     use crate::change::{apply_json, shift_json};
-    let Change::Fields(fields) = change else {
-        return apply_json(t, change, forward);
-    };
-    let (lists, rest) = split_fields(fields, &["tracks", "markers"]);
-    if !rest.is_empty() {
-        use std::mem::take;
-        let kept = (take(&mut t.tracks), take(&mut t.markers));
-        apply_json(t, &Change::Fields(rest), forward)?;
-        (t.tracks, t.markers) = kept;
-    }
-    for (name, c) in lists {
+    for &(name, c) in lists {
         match name {
-            "tracks" => {
-                c.apply_to_items(&mut t.tracks, forward, |t| &t.id, track_step, shift_json)?
-            }
+            "tracks" => c.apply_to_items(tracks, forward, |t| &t.id, track_step, shift_json)?,
             _ => c.apply_to_items(
-                &mut t.markers,
+                markers,
                 forward,
                 |k| &k.id,
                 apply_json,
@@ -1557,6 +1593,44 @@ fn timeline_step(
         }
     }
     Ok(())
+}
+
+fn timeline_step(
+    t: &mut Timeline,
+    change: &Change,
+    forward: bool,
+) -> std::result::Result<(), String> {
+    use crate::change::apply_json;
+    let Change::Fields(fields) = change else {
+        return apply_json(t, change, forward);
+    };
+    let (lists, rest) = split_fields(fields, &["tracks", "markers"]);
+    if !rest.is_empty() {
+        use std::mem::take;
+        let kept = (take(&mut t.tracks), take(&mut t.markers));
+        apply_json(t, &Change::Fields(rest), forward)?;
+        (t.tracks, t.markers) = kept;
+    }
+    tracks_markers_step(&mut t.tracks, &mut t.markers, &lists, forward)
+}
+
+fn open_compound_step(
+    o: &mut OpenCompound,
+    change: &Change,
+    forward: bool,
+) -> std::result::Result<(), String> {
+    use crate::change::apply_json;
+    let Change::Fields(fields) = change else {
+        return apply_json(o, change, forward);
+    };
+    let (lists, rest) = split_fields(fields, &["tracks", "markers"]);
+    if !rest.is_empty() {
+        use std::mem::take;
+        let kept = (take(&mut o.tracks), take(&mut o.markers));
+        apply_json(o, &Change::Fields(rest), forward)?;
+        (o.tracks, o.markers) = kept;
+    }
+    tracks_markers_step(&mut o.tracks, &mut o.markers, &lists, forward)
 }
 
 fn track_step(t: &mut Track, change: &Change, forward: bool) -> std::result::Result<(), String> {
@@ -1724,7 +1798,7 @@ fn diff(before: &Project, after: &Project) -> Changes {
         }
         m
     }
-    let same = before.open_id() == after.open_id();
+    let same = before.sheet_key() == after.sheet_key();
     let (a, b) = (index(before, same), index(after, same));
     let mut c = Changes::default();
     for (id, v) in &b {
@@ -2632,11 +2706,37 @@ fn touches_timelines(request: &Request) -> bool {
             | Request::TimelineDelete { .. }
             | Request::TimelineSet(_)
             | Request::TimelineImport { .. }
+            | Request::CompoundOpen { .. }
+            | Request::CompoundClose { .. }
             | Request::BinsRemove { .. }
             | Request::BinsRename { .. }
             | Request::MediaMove { .. }
             | Request::ProjectSet(_)
     )
+}
+
+fn subtitle_mutation(request: &Request) -> bool {
+    match request {
+        Request::TrackAdd {
+            kind: NewTrack::Subtitle,
+            ..
+        }
+        | Request::EditPaste { cues: Some(_), .. }
+        | Request::SubtitlesAdd { .. }
+        | Request::SubtitlesSet { .. }
+        | Request::SubtitlesSetWord { .. }
+        | Request::SubtitlesMatchSpeaker { .. }
+        | Request::SubtitlesMove { .. }
+        | Request::SubtitlesRemove { .. }
+        | Request::SubtitlesSplit { .. }
+        | Request::SubtitlesJoin { .. }
+        | Request::SubtitlesImport { .. }
+        | Request::SubtitlesTranscribe { .. }
+        | Request::SubtitlesTimeWords { .. }
+        | Request::SubtitlesRetime { .. } => true,
+        Request::TrackRemove { track, .. } => track.starts_with('S'),
+        _ => false,
+    }
 }
 
 fn drop_unused_removed(p: &mut Project) {
@@ -2753,7 +2853,7 @@ fn need(at: Option<i64>, what: &str) -> Result<i64> {
 }
 
 fn need_timeline(p: &mut Project) -> Result<()> {
-    if p.timelines.is_empty() && !p.is_fresh_sheet() {
+    if p.timelines.is_empty() && p.compound_path.is_empty() && !p.is_fresh_sheet() {
         if !p.has_sheet() {
             return Err(Error::invalid(
                 "the project has no timeline: make one with timeline.new",
@@ -2816,6 +2916,9 @@ fn mutate(
     playhead: Option<i64>,
     dry_run: bool,
 ) -> Result<Value> {
+    if !p.compound_path.is_empty() && subtitle_mutation(request) {
+        return Err(Error::invalid("compound clips do not hold subtitles"));
+    }
     Ok(match request {
         Request::ProjectSet(set) => {
             project_set(p, set, env)?;
@@ -2929,6 +3032,17 @@ fn mutate(
             ops::timelines::set(p, set)?;
             Value::Null
         }
+        Request::CompoundOpen { clip, compound } => match (clip, compound) {
+            (Some(clip), None) => {
+                let id = resolve_clip(p, clip, playhead)?;
+                let imported = compound_whole_contents(p, &id, env)?;
+                ops::compound::open_clip(p, &id, imported)?
+            }
+            (None, Some(compound)) => ops::compound::open_pooled(p, compound)?,
+            (None, None) => return Err(Error::usage("give `clip` or `compound`")),
+            (Some(_), Some(_)) => return Err(Error::usage("give `clip` or `compound`, not both")),
+        },
+        Request::CompoundClose { to } => ops::compound::close(p, *to)?,
         Request::BinsAdd { path } => {
             ops::add_bin(p, path)?;
             Value::Null
@@ -5623,7 +5737,7 @@ fn first_video_sets_format(p: &mut Project, info: &MediaInfo) {
     if p.settings.auto_format
         && let Some(v) = info.video.as_ref().filter(|v| !v.still)
     {
-        if p.timelines.is_empty() {
+        if p.timelines.is_empty() && p.compound_path.is_empty() {
             p.settings.set_fps(v.fps);
             let drop = v.fps.has_drop_frame() && info.timecode.is_some_and(|t| t.drop_frame);
             p.settings
@@ -6436,6 +6550,7 @@ fn place_imported(
                 frames: k.frames,
                 tracks: Vec::new(),
                 made_from: Vec::new(),
+                markers: k.markers.clone(),
             });
             let title = c
                 .title_from
@@ -6450,8 +6565,7 @@ fn place_imported(
             let id = clip_id(p, &c.id);
             clips.push(id.clone());
             made.insert(c.key, (id.clone(), track_of(&c.track)));
-            let track = p.track_mut(&track_of(&c.track)).expect("made above");
-            track.clips.push(Clip {
+            let mut clip = Clip {
                 id,
                 media: String::new(),
                 start,
@@ -6478,7 +6592,15 @@ fn place_imported(
                 color: color(c),
                 render_cache: crate::model::ClipCache::Auto,
                 motion: Vec::new(),
-            });
+            };
+            let hi = clip.shown().1;
+            if let Some(k) = clip.compound.as_mut() {
+                k.frames = k.frames.max(hi);
+            }
+            p.track_mut(&track_of(&c.track))
+                .expect("made above")
+                .clips
+                .push(clip);
             placed.insert(track_of(&c.track));
             continue;
         }
@@ -6813,6 +6935,78 @@ fn compound_contents(
         .into_iter()
         .filter(|t| !t.clips.is_empty())
         .collect())
+}
+
+fn compound_whole_contents(
+    p: &mut Project,
+    id: &str,
+    env: &dyn Env,
+) -> Result<Option<(Vec<Track>, Vec<Marker>)>> {
+    let Some(c) = p.clip(id).cloned() else {
+        return Ok(None);
+    };
+    let Some(k) = &c.compound else {
+        return Ok(None);
+    };
+    if !k.made_from.is_empty() {
+        return Ok(None);
+    }
+    let mut played = otio::played_by(k);
+    for pid in otio::tied(p, id) {
+        if let Some(pk) = p.clip(&pid).and_then(|x| x.compound.as_ref()) {
+            played.extend(otio::played_by(pk));
+        }
+    }
+    let doc = json!({
+        "OTIO_SCHEMA": "Timeline.1",
+        "name": k.stack["name"],
+        "tracks": {
+            "OTIO_SCHEMA": "Stack.1",
+            "children": k.stack["children"],
+            "markers": k.stack["markers"],
+        },
+    });
+    let mut t = otio::import(&doc, None)?;
+    if t.clips.is_empty() {
+        return Ok(None);
+    }
+    let at = Lookup {
+        played: &played,
+        ..Lookup::default()
+    };
+    let ids = nested_media(p, &t.clips, env, at)?;
+    at_project_rate(p, &mut t, &ids);
+    let mut inner = Project::new(p.flat_settings());
+    add_tracks(&mut inner, &t, true)?;
+    inner.media = std::mem::take(&mut p.media);
+    let placed = place_imported(
+        &mut inner,
+        &t,
+        &ids,
+        0,
+        &HashMap::new(),
+        &mut Vec::new(),
+        false,
+    );
+    let mut warnings = Vec::new();
+    if let Ok((made, _)) = &placed {
+        fill_contents(&mut inner, made, env, at, &mut warnings);
+    }
+    p.media = std::mem::take(&mut inner.media);
+    placed?;
+    for m in &k.markers {
+        let same = inner.markers.iter().any(|x| {
+            x.at == m.at
+                && x.duration == m.duration
+                && x.name == m.name
+                && x.color == m.color
+                && x.note == m.note
+        });
+        if !same {
+            inner.markers.push(m.clone());
+        }
+    }
+    Ok(Some((inner.tracks, inner.markers)))
 }
 
 fn fill_contents(
@@ -7176,7 +7370,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         }));
     }
 
-    let kept = p.timelines.is_empty() && mode != ImportMode::New;
+    let kept = p.timelines.is_empty() && p.compound_path.is_empty() && mode != ImportMode::New;
     if kept {
         p.keep_sheet();
     }
@@ -7189,6 +7383,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     }
     let made = mode == ImportMode::New;
     if made {
+        ops::compound::close_all(p)?;
         let new = p.new_timeline(new_name, timeline_bin.to_string());
         p.add_timeline(new);
     }
@@ -7203,34 +7398,36 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         {
             adopt_size(p, &v);
         }
-        let drop = t.clips.iter().filter(|c| !c.is_block()).any(|c| {
-            p.media(&ids[&media_key(c)])
-                .and_then(|m| m.info.timecode)
-                .is_some_and(|tc| tc.drop_frame)
-        });
-        let alone = p.timelines.len() <= usize::from(made) + usize::from(kept);
-        let drop = drop && t.fps.has_drop_frame();
-        match p.timeline_mut().and_then(|t| t.own.as_mut()) {
-            Some(own) if adopt_rate => {
-                own.fps = t.fps;
-                own.drop_frame |= drop;
+        if p.compound_path.is_empty() {
+            let drop = t.clips.iter().filter(|c| !c.is_block()).any(|c| {
+                p.media(&ids[&media_key(c)])
+                    .and_then(|m| m.info.timecode)
+                    .is_some_and(|tc| tc.drop_frame)
+            });
+            let alone = p.timelines.len() <= usize::from(made) + usize::from(kept);
+            let drop = drop && t.fps.has_drop_frame();
+            match p.timeline_mut().and_then(|t| t.own.as_mut()) {
+                Some(own) if adopt_rate => {
+                    own.fps = t.fps;
+                    own.drop_frame |= drop;
+                }
+                Some(_) => {}
+                None if adopt_rate && alone => {
+                    let rate = p.settings.fps;
+                    p.settings.set_fps(t.fps);
+                    p.settings.drop_frame |= drop;
+                    groups_to_rate(p, rate);
+                }
+                None => {}
             }
-            Some(_) => {}
-            None if adopt_rate && alone => {
-                let rate = p.settings.fps;
-                p.settings.set_fps(t.fps);
-                p.settings.drop_frame |= drop;
-                groups_to_rate(p, rate);
+            p.set_start_tc(t.start_tc);
+            if let Some(grade) = t.grade.clone()
+                && let Some(open) = p.timeline_mut()
+            {
+                open.grade = Some(grade);
             }
-            None => {}
+            p.settings.auto_format = false;
         }
-        p.set_start_tc(t.start_tc);
-        if let Some(grade) = t.grade.clone()
-            && let Some(open) = p.timeline_mut()
-        {
-            open.grade = Some(grade);
-        }
-        p.settings.auto_format = false;
     }
     if t.fps != p.fps() {
         warnings.push(kept_frames_note(t.fps, p.fps()));
@@ -7254,6 +7451,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     if mode == ImportMode::Compound || flatten && compounds_among(p, &clips).is_empty() {
         warnings.retain(|w| !w.starts_with(otio::COMPOUNDS_KEPT));
     }
+    ops::compound::check_clips_no_cycle(p, &clips)?;
     fill_contents(p, &clips, env, at, &mut warnings);
     if empty {
         let (i, o) = (t.marks.mark_in, t.marks.mark_out);
@@ -7722,6 +7920,11 @@ fn set_drop_frame(p: &mut Project, on: bool) -> Result<()> {
 
 fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     if let Some(fps) = set.fps.filter(|&f| f != p.settings.fps) {
+        if !p.compound_path.is_empty() {
+            return Err(Error::invalid(
+                "close the open compound clip before changing the project frame rate",
+            ));
+        }
         if !p.timelines.is_empty() {
             return Err(Error::invalid(
                 "the project frame rate can only change while the project has no timelines",
@@ -7756,6 +7959,11 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
         p.settings.ripple_on = r;
     }
     if let Some(d) = set.drop_frame.filter(|&d| d != p.settings.drop_frame) {
+        if !p.compound_path.is_empty() {
+            return Err(Error::invalid(
+                "close the open compound clip before changing the project drop-frame",
+            ));
+        }
         if !p.timelines.is_empty() {
             return Err(Error::invalid(
                 "the project drop-frame can only change while the project has no timelines",
@@ -9836,6 +10044,9 @@ fn timeline_json(p: &Project, a: i64, b: i64) -> Value {
         "markers": p.markers,
     });
     v["tracks"] = Value::Array(tracks);
+    if !p.compound_path.is_empty() {
+        v["compound_path"] = json!(ops::compound::breadcrumbs(p));
+    }
     v
 }
 

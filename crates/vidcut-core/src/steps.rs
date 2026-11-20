@@ -327,7 +327,9 @@ pub fn category(kind: &str) -> &'static str {
             || k == "edit.compound"
             || k == "edit.compound_range"
             || k == "edit.place_compound"
-            || k == "edit.decompose" =>
+            || k == "edit.decompose"
+            || k == "compound.open"
+            || k == "compound.close" =>
         {
             "Tracks and clips"
         }
@@ -379,7 +381,7 @@ pub fn groups(line: &[Step]) -> Vec<Group> {
 }
 
 pub fn places(before: &Project, after: &Project) -> (Vec<String>, Vec<Span>) {
-    if before.open_id() != after.open_id() {
+    if before.sheet_key() != after.sheet_key() {
         return (Vec::new(), Vec::new());
     }
     let mut clips = Vec::new();
@@ -759,10 +761,20 @@ fn sheet_in<'a>(list: &[(String, Sheet<'a>)], id: &str) -> Option<Sheet<'a>> {
 }
 
 fn sheets_of(p: &Project) -> Vec<(String, Sheet<'_>)> {
-    match p.timelines.is_empty() {
-        true => vec![(String::new(), p.sheet())],
+    let mut out: Vec<(String, Sheet<'_>)> = match p.timelines.is_empty() {
+        true if p.compound_path.is_empty() => vec![(String::new(), p.sheet())],
+        true => Vec::new(),
         false => p.sheets().map(|(t, s)| (t.id.clone(), s)).collect(),
+    };
+    let depth = p.compound_path.len();
+    for (i, c) in p.compound_path.iter().enumerate() {
+        let sheet = match i + 1 == depth {
+            true => p.sheet(),
+            false => c.sheet(),
+        };
+        out.push((format!("compound:{}", c.id), sheet));
     }
+    out
 }
 
 fn sheet_since(before: Sheet<'_>, after: Sheet<'_>) -> Since {

@@ -1450,9 +1450,13 @@ impl Workspace {
     pub(super) fn export_timeline(&mut self, ctx: &egui::Context, bundle: bool) {
         let (dialogs, folder) = (self.dialogs.clone(), self.export_folder());
         let ext = if bundle { "otioz" } else { "otio" };
-        let stem = match self.project().and_then(|p| p.timeline()) {
-            Some(t) => t.name.replace(['/', '\\'], "-"),
-            None => self.project_stem(),
+        let stem = if let Some(c) = self.project().and_then(|p| p.open_compound()) {
+            c.name.replace(['/', '\\'], "-")
+        } else {
+            match self.project().and_then(|p| p.timeline()) {
+                Some(t) => t.name.replace(['/', '\\'], "-"),
+                None => self.project_stem(),
+            }
         };
         let file = format!("{stem}.{ext}");
         let title = if bundle {

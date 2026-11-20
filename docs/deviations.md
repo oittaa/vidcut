@@ -1477,7 +1477,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Decompose in Place has a submenu: Using Clips Only and Preserving Audio Data…
 - **vidcut:**
   - The window has only a name.
-  - A compound clip in the Media tab does not open. Its menu has Append to Timeline, Place at Playhead and Delete.
   - A clip goes in with its picture and its sound.
   - A clip on a locked track refuses the request. In Convert In and Out to Compound Clip, a clip in the range on a locked track refuses it too.
   - A range with no clips refuses the request, with a message.
@@ -1487,7 +1486,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - After a decompose beside a J or L cut, the cut stays. A sound that comes back starts after that cut.
     - A clip whose sound the cuts cover, alone or together, has no sound.
 - **Why:**
-  - Open in Timeline of a compound clip is not built yet (p. 1054, [gaps](todo/gaps.md)).
   - A clip holds its picture and sound as one. Half of a clip is not a thing that vidcut can select.
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
   - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.

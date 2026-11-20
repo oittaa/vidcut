@@ -869,6 +869,9 @@ impl Workspace {
                 Some((GradeOf::Clip(id), name, stored.unwrap_or_default()))
             }
             GradeLevel::Timeline => {
+                if !p.compound_path.is_empty() {
+                    return None;
+                }
                 let t = p.timeline()?;
                 let stored = t.grade.clone().unwrap_or_default();
                 Some((GradeOf::Timeline, t.name.clone(), stored))
@@ -1212,9 +1215,7 @@ impl Workspace {
     }
 
     pub(super) fn settle_grade(&mut self, of: &GradeOf, g: &Grade) {
-        let open = (self.project().and_then(|p| p.open_id()))
-            .unwrap_or_default()
-            .to_string();
+        let open = (self.project().and_then(|p| p.sheet_key())).unwrap_or_default();
         let page = &mut self.effects_page;
         if page
             .grade_seen

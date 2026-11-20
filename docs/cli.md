@@ -244,6 +244,10 @@ The schema describes the parameters, not the results. This list gives the result
   - `matched`: the words heard where they are.
   - `unmatched`: the ids of the cues with no word heard. vidcut spreads their words.
   - `heard`, `hear`, `media`, `model`, `device`, `language` and `warnings`.
+- `compound open`, `compound close`:
+  - `name` and `path[]`: open levels from the enclosing timeline (if any) down to the active compound clip.
+  - `compound open` also gives `fps`. `compound close` also gives `open`.
+  - Exporting while a compound clip is open exports that compound clip under its name.
 - `media list`, `media get`:
   - `missing`: the file is gone.
   - `proxy`: `file`, `path` (in the proxy folder of this computer), `width`, `height`, `codec`.

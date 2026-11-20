@@ -487,6 +487,7 @@ const LOWER_SUBTITLE: f32 = 40.0;
 const LOWER_SUBTITLE_MINIMIZED: f32 = 22.0;
 const LOWER_RULER: f32 = 30.0;
 const TRAY_GAP: f32 = 4.0;
+const PATH_BAR: f32 = 24.0;
 const HEADER: f32 = 200.0;
 const BOX_CONTROL: f32 = 18.0;
 const SWATCH: f32 = 20.0;
@@ -694,7 +695,12 @@ impl Workspace {
     pub(crate) fn timeline_least(&mut self, spacing: &egui::style::Spacing) -> Option<f32> {
         let p = self.shown_project()?;
         let tray = self.tray_height(spacing);
-        Some(tracks_least(&p) + if tray > 0.0 { tray + TRAY_GAP } else { 0.0 })
+        let bar = if p.compound_path.is_empty() {
+            0.0
+        } else {
+            PATH_BAR + 2.0
+        };
+        Some(tracks_least(&p) + bar + if tray > 0.0 { tray + TRAY_GAP } else { 0.0 })
     }
 
     pub(crate) fn timeline_wanted(&mut self) -> Option<f32> {
@@ -716,6 +722,11 @@ impl Workspace {
             })
             .sum::<f32>()
             + subtitle * p.subtitles.len() as f32;
+        let bar = if p.compound_path.is_empty() {
+            0.0
+        } else {
+            PATH_BAR + 2.0
+        };
         Some(
             UPPER_RULER
                 + UPPER_TRACK
@@ -724,7 +735,8 @@ impl Workspace {
                 + LOWER_RULER
                 + 2.0
                 + rows
-                + NEW_TRACK_STRIP,
+                + NEW_TRACK_STRIP
+                + bar,
         )
     }
 
@@ -742,6 +754,12 @@ impl Workspace {
         };
         let shape: &Project = before.as_deref().unwrap_or(&p);
         let full = ui.available_rect_before_wrap();
+        let path_bar = (!p.compound_path.is_empty())
+            .then(|| Rect::from_min_max(pos2(full.left(), full.bottom() - PATH_BAR), full.max));
+        let full = match path_bar {
+            Some(b) => Rect::from_min_max(full.min, pos2(full.right(), b.top() - 2.0)),
+            None => full,
+        };
         let room = full.height() - tracks_least(shape) - TRAY_GAP;
         let tray_h = self.tray_height(ui.spacing()).min(room);
         let tray = (tray_h > 0.0)
@@ -1335,6 +1353,9 @@ impl Workspace {
             let span = (scale.frame(content.left()), scale.frame(content.right()));
             self.keyframe_tray(ui, rect, HEADER, span);
         }
+        if let Some(rect) = path_bar {
+            self.compound_path_bar(ui, rect, &p);
+        }
         self.marker_window(ui.ctx());
         self.subclip_windows_tick(ui.ctx());
         self.compound_window_tick(ui.ctx());
@@ -1351,6 +1372,39 @@ impl Workspace {
         self.subtitle_windows(ui.ctx());
         self.title_tick();
         self.dynamic_tick(ui.ctx());
+    }
+
+    fn compound_path_bar(&mut self, ui: &mut egui::Ui, rect: Rect, p: &Project) {
+        let c = theme::colors();
+        ui.painter().rect_filled(rect, 0.0, c.panel_dark);
+        ui.painter()
+            .hline(rect.x_range(), rect.top(), egui::Stroke::new(1.0, c.line));
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(rect.shrink2(vec2(6.0, 2.0))),
+            |ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    let root = p.timeline().map_or("Close", |t| t.name.as_str());
+                    if ui
+                        .add(egui::Button::new(root).frame(false))
+                        .double_clicked()
+                    {
+                        self.send("compound.close", json!({ "to": 0 }));
+                    }
+                    for (i, oc) in p.compound_path.iter().enumerate() {
+                        ui.label(dim("›"));
+                        if i + 1 == p.compound_path.len() {
+                            ui.label(RichText::new(&oc.name).strong());
+                        } else if ui
+                            .add(egui::Button::new(&oc.name).frame(false))
+                            .double_clicked()
+                        {
+                            self.send("compound.close", json!({ "to": i + 1 }));
+                        }
+                    }
+                });
+            },
+        );
     }
 
     fn playhead_color(&self) -> Color32 {
@@ -2986,6 +3040,12 @@ impl Workspace {
         );
         if c.compound.is_some() {
             ui.separator();
+            item(
+                ui,
+                "Open in Timeline",
+                "compound.open",
+                json!({ "clip": c.id }),
+            );
             item(
                 ui,
                 "Decompose in Place",

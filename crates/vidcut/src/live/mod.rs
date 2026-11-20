@@ -721,7 +721,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         duck_measuring: HashSet::new(),
         duck_failed: HashSet::new(),
         duck_kept: HashMap::new(),
-        playheads: HashMap::new(),
+        playheads: vidcut_core::lru::Lru::new(),
         open_timeline: None,
     };
     live.watch_omarchy();
@@ -994,12 +994,13 @@ struct Live {
     duck_measuring: HashSet<Unmeasured>,
     duck_failed: HashSet<Unmeasured>,
     duck_kept: HashMap<crate::env::MeasureKey, vidcut_core::duck::Measured>,
-    playheads: HashMap<String, i64>,
+    playheads: vidcut_core::lru::Lru<String, i64, PLAYHEADS_KEPT>,
     open_timeline: Option<(PathBuf, String)>,
     render: render_cache::Background,
     drops: drops::Drops,
 }
 
+const PLAYHEADS_KEPT: usize = 64;
 const SOURCE: PlayerId = PlayerId::Source;
 const TIMELINE: PlayerId = PlayerId::Timeline;
 
@@ -3920,7 +3921,7 @@ impl Live {
         let Some(open) = &self.project else { return };
         let p = open.project();
         let path = open.store.path().to_path_buf();
-        let now = p.open_id().map(|id| (path.clone(), id.to_string()));
+        let now = p.sheet_key().map(|id| (path.clone(), id));
         if self
             .open_timeline
             .as_ref()
@@ -3928,8 +3929,20 @@ impl Live {
         {
             self.playheads.clear();
         }
-        self.playheads
-            .retain(|id, _| p.timelines.iter().any(|t| t.id == *id));
+        let active_key = p.sheet_key();
+        let stale: Vec<String> = self
+            .playheads
+            .iter()
+            .filter_map(|(id, _)| {
+                let keep = p.timelines.iter().any(|t| t.id == *id)
+                    || active_key.as_deref() == Some(id.as_str())
+                    || id.contains("::");
+                (!keep).then(|| id.clone())
+            })
+            .collect();
+        for id in stale {
+            self.playheads.remove(&id);
+        }
         if now == self.open_timeline {
             return;
         }
@@ -3937,6 +3950,10 @@ impl Live {
         let same_project = was.as_ref().is_some_and(|(at, _)| *at == path);
         if let Some((_, old)) = was.filter(|_| same_project) {
             self.playheads.insert(old, self.player.position(TIMELINE));
+        }
+        if same_project {
+            self.selection.clips.clear();
+            self.selection.cues.clear();
         }
         let Some((_, id)) = now else { return };
         if same_project {

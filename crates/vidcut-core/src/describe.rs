@@ -181,6 +181,11 @@ pub fn describe_at(
         "media.compound_remove" => "Delete Compound Clip".to_string(),
         "edit.place_compound" => "Place Compound Clip".to_string(),
         "edit.decompose" => format!("Decompose {}", d.clips("clips")),
+        "compound.open" => match d.text("compound").as_str() {
+            "" => format!("Open Compound Clip {}", d.clips("clip")),
+            id => format!("Open Compound Clip {id}"),
+        },
+        "compound.close" => "Close Compound Clip".to_string(),
         "edit.slide" => format!(
             "Slide {} {}{}",
             d.clips("clip"),

@@ -243,6 +243,20 @@ pub fn print(method: &str, r: &Response, json: bool) {
         "timeline.open" | "timeline.rename" | "timeline.set" => {
             println!("ok {method} (rev {})", r.rev);
         }
+        "compound.open" | "compound.close" => {
+            let names: Vec<&str> = r.result["path"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v["name"].as_str())
+                .collect();
+            let trail = if names.is_empty() {
+                r.result["name"].as_str().unwrap_or("none").to_string()
+            } else {
+                names.join(" > ")
+            };
+            println!("ok {method}: {trail} (rev {})", r.rev);
+        }
         "timeline.delete" => {
             let deleted: Vec<&str> = (r.result["deleted"].as_array().into_iter().flatten())
                 .filter_map(Value::as_str)

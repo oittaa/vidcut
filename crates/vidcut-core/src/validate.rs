@@ -382,21 +382,85 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
     if recent != all {
         v.push("the recent timelines are not the timelines".into());
     }
-    if let Some(t) = p.timeline()
-        && !(t.tracks.is_empty()
-            && t.marks.is_empty()
-            && t.markers.is_empty()
-            && t.subtitles.is_empty())
+    if !p.compound_path.is_empty() && !p.subtitles.is_empty() {
+        v.push("an open compound clip holds subtitles".into());
+    }
+    if p.compound_path.is_empty() {
+        if let Some(t) = p.timeline()
+            && !(t.tracks.is_empty()
+                && t.marks.is_empty()
+                && t.markers.is_empty()
+                && t.subtitles.is_empty())
+        {
+            v.push(format!("open timeline {} holds its own tracks", t.id));
+        }
+        return;
+    }
+    for t in &p.timelines {
+        if !t.tracks.iter().any(|x| x.id == crate::ops::MAIN) {
+            v.push(format!("timeline {} has no V1 track", t.id));
+        }
+    }
+    if let Some(c) = p.compound_path.last()
+        && !(c.tracks.is_empty() && c.marks.is_empty() && c.markers.is_empty())
     {
-        v.push(format!("open timeline {} holds its own tracks", t.id));
+        v.push(format!("open compound {} holds its own tracks", c.name));
+    }
+    for (i, c) in p.compound_path.iter().enumerate() {
+        if c.name.trim().is_empty() {
+            v.push(format!("open compound {i} has no name"));
+        }
+        if c.id != c.target.key() {
+            v.push(format!("open compound {} has id {}", c.name, c.id));
+        }
+        match &c.target {
+            crate::model::CompoundTarget::Pooled { compound } => {
+                if i != 0 || !p.compounds.iter().any(|k| &k.id == compound) {
+                    v.push(format!("open compound targets missing pooled {compound}"));
+                }
+            }
+            crate::model::CompoundTarget::Clip { clip } => {
+                let tracks: Option<&[crate::model::Track]> = if i == 0 {
+                    p.timeline().map(|t| t.tracks.as_slice())
+                } else {
+                    Some(p.compound_path[i - 1].tracks.as_slice())
+                };
+                let ok = tracks.is_some_and(|ts| {
+                    ts.iter()
+                        .flat_map(|t| &t.clips)
+                        .any(|x| &x.id == clip && x.compound.is_some())
+                });
+                if !ok {
+                    v.push(format!("open compound targets missing clip {clip}"));
+                }
+            }
+        }
     }
 }
 
 pub fn everywhere(p: &Project) -> Vec<String> {
     let mut v = violations(p);
-    let open = p.open_id();
-    for t in p.timelines.iter().filter(|t| Some(t.id.as_str()) != open) {
-        let mut q = p.clone();
+    let mut base = p.clone();
+    if !base.compound_path.is_empty() {
+        match crate::ops::compound::close_all(&mut base) {
+            Ok(()) => v.extend(
+                violations(&base)
+                    .into_iter()
+                    .map(|e| format!("closed: {e}")),
+            ),
+            Err(e) => {
+                v.push(format!("close: {}", e.message));
+                return v;
+            }
+        }
+    }
+    let open = base.open_id();
+    for t in base
+        .timelines
+        .iter()
+        .filter(|t| Some(t.id.as_str()) != open)
+    {
+        let mut q = base.clone();
         if q.open_timeline(&t.id).is_ok() {
             v.extend(violations(&q).into_iter().map(|e| format!("{}: {e}", t.id)));
         }

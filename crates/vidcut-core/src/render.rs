@@ -2593,6 +2593,7 @@ fn hollow(p: &Project, c: &Clip) -> Clip {
         frames: k.frames,
         tracks: Vec::new(),
         made_from: Vec::new(),
+        markers: Vec::new(),
     });
     let mode = mode_at(p, c, c.end() - 1);
     if mode != CompositeMode::Normal {
@@ -2747,6 +2748,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     cut.as_slice()
                 };
                 let inner_tracks = k.tracks.iter().filter(|n| n.kind == t.kind);
+                let inner_solo = k.tracks.iter().any(|n| n.kind == t.kind && n.solo);
                 let playing = parts
                     .iter()
                     .flat_map(|part| inner_tracks.clone().map(move |n| (part, n)));
@@ -2754,9 +2756,15 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     let mut v = n.clone();
                     v.id = t.id.clone();
                     v.duck = None;
-                    v.muted |= t.muted;
+                    v.muted |= t.muted || (inner_solo && !n.solo);
                     v.solo = t.solo;
-                    v.volume_db = t.volume_db;
+                    v.volume_db = if crate::validate::fader_silent(v.volume_db)
+                        || crate::validate::fader_silent(t.volume_db)
+                    {
+                        -100.0
+                    } else {
+                        v.volume_db + t.volume_db
+                    };
                     v.video_enabled &= t.video_enabled;
                     v.render_cache &= t.render_cache;
                     let laid = inner_layout(p, n, part);
