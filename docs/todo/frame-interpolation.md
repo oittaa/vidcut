@@ -12,4 +12,3 @@ Retime Process makes the frames between source frames ([deviation X93](../deviat
 - **The viewer:** it shows the frames that an export makes. With AI Slow, a frame can take seconds.
 - **Backward clips:** a clip played backward shows the nearest frames.
 - **Upscale:** with an AI upscaler, a made frame is enlarged as with Classic.
-- **OpenTimelineIO:** an OTIO file does not keep the Retime Process of a clip. How Resolve writes it in its files is not measured.

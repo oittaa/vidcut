@@ -745,10 +745,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - Their weights download at their first use: 25 MB and 264 MB. vidcut does not ship them.
     - Before a change that makes the timeline use a model that this computer does not have, the GUI asks to download it.
   - Between two source frames with a shot change, the frame is the nearer source frame.
+  - On OTIO import, Optical Flow with modes 0 to 4 reads as local AI: AI on macOS and AI Fast elsewhere.
 - **Why:**
   - The AI of vidcut needs no paid version. Thus slow motion gets it by default.
   - Other speeds and frame rates gain less from made frames. Thus Auto keeps the speed of Nearest for them.
   - A morph from one shot into the next looks wrong. Thus a shot change keeps the nearer source frame, as Nearest does.
+  - Optical Flow is paid-only in Resolve, and vidcut's AI gives cleaner frames without carrying unmodeled parameters.
   - The owner approved the Auto default as better than the Nearest default of Resolve.
 
 ## X94. Speed keyframes and the Mark menu's keyframe items

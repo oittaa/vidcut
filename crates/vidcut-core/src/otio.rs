@@ -290,15 +290,18 @@ fn with_picture(
     g: i64,
     source: i64,
 ) -> Vec<Value> {
-    let Some(x) = &c.picture else {
-        return effects;
+    let out = match &c.picture {
+        None => effects,
+        Some(x) => {
+            let x = crate::ops::picture::working(x.clone());
+            let kept = effects
+                .into_iter()
+                .filter(|e| !picture::is_placing(e))
+                .collect();
+            picture::joined(kept, picture::effects(&x, shape, g, source))
+        }
     };
-    let x = crate::ops::picture::working(x.clone());
-    let kept = effects
-        .into_iter()
-        .filter(|e| !picture::is_placing(e))
-        .collect();
-    picture::joined(kept, picture::effects(&x, shape, g, source))
+    picture::with_retime(out, c.retime)
 }
 
 pub fn out_of_reach(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
@@ -1482,6 +1485,7 @@ pub struct ImportedClip {
     pub motion: Vec<MotionPath>,
     pub compound: Option<Compound>,
     pub speed: Option<Speed>,
+    pub retime: crate::model::ClipRetime,
     pub color: Option<String>,
     pub own_color: Option<Option<String>>,
 }
@@ -1574,6 +1578,7 @@ impl ImportedClip {
             motion: Vec::new(),
             compound: None,
             speed: None,
+            retime: crate::model::ClipRetime::Project,
             color: clip_color(item),
             own_color: kept_color(item),
         }
@@ -2266,7 +2271,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             if !(is_clip(item) || stack || plain.is_some()) || len <= 0 {
                 continue;
             }
-            let (effects, speed) = effects::read(item);
+            let (mut effects, speed) = effects::read(item);
             let reference = media_reference_of(item);
             let block =
                 stack || plain.is_some() || schema(reference).starts_with("GeneratorReference");
@@ -2325,6 +2330,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     }
                     let (source_in, source_rest, counted) =
                         source_start(meta, (at, counted), first, speed.as_ref());
+                    let retime = picture::take_retime(&mut effects);
                     clip_markers(item, start, len, fps, &mut markers);
                     keys[i] = Some(clips.len());
                     clips.push(ImportedClip {
@@ -2369,6 +2375,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         motion: our_motion(item),
                         compound: None,
                         speed,
+                        retime,
                         color: clip_color(item),
                         own_color: kept_color(item),
                     });
@@ -2600,6 +2607,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 motion: Vec::new(),
                 compound: None,
                 speed,
+                retime: crate::model::ClipRetime::Project,
                 color: clip_color(item),
                 own_color: kept_color(item),
             });

@@ -3,7 +3,8 @@ use serde_json::{Map, Value, json};
 use super::EDITOR;
 use super::effects::{effect, group, handle_point, handle_value, keyed, plain, ranged, rounded};
 use crate::model::{
-    CompositeMode, Crop, DynamicZoom, Ease, Handle, Keyframe, Picture, VideoInfo, ZoomBox,
+    ClipRetime, CompositeMode, Crop, DynamicZoom, Ease, Handle, Keyframe, Picture, Retime,
+    VideoInfo, ZoomBox,
 };
 
 const TRANSFORM: &str = "Transform";
@@ -30,11 +31,19 @@ const CROPPED: [&str; 5] = [CROPS[0], CROPS[1], CROPS[2], CROPS[3], SOFTNESS];
 const OPACITY: &str = "opacity";
 const MODE: &str = "composite mode";
 const SCALE: &str = "scale";
+const RETIME: &str = "retime process";
+const MOTION: &str = "motion estimation mode";
 const EASE: &str = "dynamicZoomEase";
 const CENTER: &str = "dynamicZoomCenter";
 const SIZE: &str = "dynamicZoomScale";
 
 const FIT: u8 = 2;
+const RETIME_NEAREST: u8 = 1;
+const RETIME_BLEND: u8 = 2;
+const RETIME_FLOW: u8 = 3;
+const MOTION_BETTER: u8 = 5;
+const MOTION_FASTER: u8 = 6;
+const MOTION_METAL: u8 = 7;
 const REACH: f64 = Picture::REACH;
 const TURNS: f64 = Picture::TURNS;
 const LEAN: f64 = Picture::LEAN;
@@ -279,6 +288,108 @@ fn zoom_of(ease: Option<&Value>, center: &Value, size: &Value) -> Option<Dynamic
     })
 }
 
+fn uint_in(v: &Value, max: u8) -> Option<u8> {
+    v.as_f64()
+        .filter(|n| n.fract() == 0.0 && (0.0..=f64::from(max)).contains(n))
+        .map(|n| n as u8)
+}
+
+fn retime_of(process: u8, motion: u8) -> Option<ClipRetime> {
+    match (process, motion) {
+        (0, 0) => Some(ClipRetime::Project),
+        (RETIME_NEAREST, 0) => Some(ClipRetime::Nearest),
+        (RETIME_BLEND, 0) => Some(ClipRetime::FrameBlend),
+        (RETIME_FLOW, MOTION_BETTER) => Some(ClipRetime::AiSlow),
+        (RETIME_FLOW, MOTION_FASTER) => Some(ClipRetime::AiFast),
+        (RETIME_FLOW, MOTION_METAL) => Some(ClipRetime::Macos),
+        (RETIME_FLOW, 0..=4) => Some(match Retime::ai_here() {
+            Retime::Macos => ClipRetime::Macos,
+            _ => ClipRetime::AiFast,
+        }),
+        _ => None,
+    }
+}
+
+fn retime_params(retime: ClipRetime) -> Vec<Value> {
+    let u = |id: &str, v: u8| keyed(id, json!(v), json!(0), "UInt");
+    match retime {
+        ClipRetime::Project => Vec::new(),
+        ClipRetime::Nearest => vec![u(RETIME, RETIME_NEAREST)],
+        ClipRetime::FrameBlend => vec![u(RETIME, RETIME_BLEND)],
+        ClipRetime::AiFast => vec![u(RETIME, RETIME_FLOW), u(MOTION, MOTION_FASTER)],
+        ClipRetime::AiSlow => vec![u(RETIME, RETIME_FLOW), u(MOTION, MOTION_BETTER)],
+        ClipRetime::Macos => vec![u(RETIME, RETIME_FLOW), u(MOTION, MOTION_METAL)],
+    }
+}
+
+pub(crate) fn take_retime(effects: &mut Vec<Value>) -> ClipRetime {
+    let mut of = effects
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| kind(e) == Some(SCALING) && e["metadata"][EDITOR]["Enabled"] != false);
+    let Some((idx, e)) = of.next() else {
+        return ClipRetime::Project;
+    };
+    if of.next().is_some() {
+        return ClipRetime::Project;
+    }
+    let Some(params) = e["metadata"][EDITOR]["Parameters"].as_array() else {
+        return ClipRetime::Project;
+    };
+    let read = |id: &str, max: u8| {
+        let mut found = params.iter().filter(|p| p["Parameter ID"] == id);
+        let first = found.next();
+        if found.next().is_some() {
+            return None;
+        }
+        match first {
+            None => Some((false, 0)),
+            Some(p) if !keyframed(p) => Some((true, uint_in(&p["Parameter Value"], max)?)),
+            Some(_) => None,
+        }
+    };
+    let (Some((has_p, process)), Some((has_m, motion))) =
+        (read(RETIME, RETIME_FLOW), read(MOTION, MOTION_METAL))
+    else {
+        return ClipRetime::Project;
+    };
+    if !has_p && !has_m {
+        return ClipRetime::Project;
+    }
+    let Some(retime) = retime_of(process, motion) else {
+        return ClipRetime::Project;
+    };
+    let empty = {
+        let Some(ps) = effects[idx]["metadata"][EDITOR]["Parameters"].as_array_mut() else {
+            return ClipRetime::Project;
+        };
+        ps.retain(|p| p["Parameter ID"] != RETIME && p["Parameter ID"] != MOTION);
+        ps.is_empty()
+    };
+    if empty {
+        effects.remove(idx);
+    }
+    retime
+}
+
+pub(crate) fn with_retime(mut effects: Vec<Value>, retime: ClipRetime) -> Vec<Value> {
+    let params = retime_params(retime);
+    if params.is_empty() {
+        return effects;
+    }
+    if let Some(ps) = effects
+        .iter_mut()
+        .find(|e| kind(e) == Some(SCALING) && e["metadata"][EDITOR]["Enabled"] != false)
+        .and_then(|e| e["metadata"][EDITOR]["Parameters"].as_array_mut())
+    {
+        ps.retain(|p| p["Parameter ID"] != RETIME && p["Parameter ID"] != MOTION);
+        ps.extend(params);
+    } else {
+        effects.push(effect(group(SCALING, 22, 1, params)));
+    }
+    effects
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Placement {
     zoom: [f64; 2],
@@ -318,12 +429,7 @@ fn placement(effects: &[Value]) -> Option<Placement> {
     };
     let scale = match given(SCALE) {
         None => 0,
-        Some(v) => {
-            let s = v
-                .as_f64()
-                .filter(|s| s.fract() == 0.0 && (0.0..=4.0).contains(s))?;
-            s as u8
-        }
+        Some(v) => uint_in(v, 4)?,
     };
     let crop = [
         number(CROPS[0], 0.0)?,
@@ -1142,5 +1248,113 @@ mod tests {
         assert_eq!(out(PAN), 8.0);
         assert_eq!(out(TILT), 0.0);
         assert_eq!((out(ZOOM_X), out(ZOOM_Y)), (4.0, 0.0));
+    }
+
+    #[test]
+    fn with_retime_writes_keyed_retime_and_motion_parameters() {
+        let got: Vec<(u64, Option<u64>, bool)> = [
+            ClipRetime::Nearest,
+            ClipRetime::FrameBlend,
+            ClipRetime::AiFast,
+            ClipRetime::AiSlow,
+            ClipRetime::Macos,
+        ]
+        .into_iter()
+        .map(|retime| {
+            let written = with_retime(Vec::new(), retime);
+            let ps = written[0]["metadata"][EDITOR]["Parameters"]
+                .as_array()
+                .expect("params");
+            let process = ps
+                .iter()
+                .find(|q| q["Parameter ID"] == RETIME)
+                .expect("retime");
+            let motion = ps.iter().find(|q| q["Parameter ID"] == MOTION);
+            (
+                process["Parameter Value"].as_u64().expect("value"),
+                motion.and_then(|q| q["Parameter Value"].as_u64()),
+                ps.iter().all(|q| q["Key Frames"] == json!({})),
+            )
+        })
+        .collect();
+        assert_eq!(
+            got,
+            [
+                (1, None, true),
+                (2, None, true),
+                (3, Some(6), true),
+                (3, Some(5), true),
+                (3, Some(7), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn take_retime_extracts_modeled_retime_and_drops_empty_scaling() {
+        let mut effects = with_retime(Vec::new(), ClipRetime::AiSlow);
+        assert_eq!(take_retime(&mut effects), ClipRetime::AiSlow);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn take_retime_imports_optical_flow_without_speed_warp_as_local_ai() {
+        let mut effects = vec![effect(group(
+            SCALING,
+            22,
+            1,
+            vec![
+                keyed(RETIME, json!(3), json!(0), "UInt"),
+                keyed(MOTION, json!(2), json!(0), "UInt"),
+            ],
+        ))];
+        #[cfg(target_os = "macos")]
+        let want = ClipRetime::Macos;
+        #[cfg(not(target_os = "macos"))]
+        let want = ClipRetime::AiFast;
+        assert_eq!(take_retime(&mut effects), want);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn take_retime_leaves_nonzero_motion_with_nearest_carried() {
+        let orig = vec![effect(group(
+            SCALING,
+            22,
+            1,
+            vec![
+                keyed(RETIME, json!(1), json!(0), "UInt"),
+                keyed(MOTION, json!(5), json!(0), "UInt"),
+            ],
+        ))];
+        let mut effects = orig.clone();
+        assert_eq!(take_retime(&mut effects), ClipRetime::Project);
+        assert_eq!(effects, orig);
+    }
+
+    #[test]
+    fn take_retime_succeeds_alongside_unmodeled_transform_parameter() {
+        let mut effects = vec![
+            effect(group(
+                TRANSFORM,
+                2,
+                1,
+                vec![plain("customParam", json!(1), json!(0), "Int")],
+            )),
+            effect(group(
+                SCALING,
+                22,
+                1,
+                vec![
+                    keyed(SCALE, json!(FIT), json!(0), "UInt"),
+                    keyed(RETIME, json!(1), json!(0), "UInt"),
+                ],
+            )),
+        ];
+        assert_eq!(take_retime(&mut effects), ClipRetime::Nearest);
+        assert_eq!(effects.len(), 2);
+        assert_eq!(
+            effects[1]["metadata"][EDITOR]["Parameters"],
+            json!([keyed(SCALE, json!(FIT), json!(0), "UInt")])
+        );
     }
 }

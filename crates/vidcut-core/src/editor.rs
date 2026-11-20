@@ -6474,7 +6474,7 @@ fn place_imported(
                 picture,
                 compound,
                 speed: c.speed.clone(),
-                retime: crate::model::ClipRetime::Project,
+                retime: c.retime,
                 color: color(c),
                 render_cache: crate::model::ClipCache::Auto,
                 motion: Vec::new(),
@@ -6636,7 +6636,7 @@ fn place_imported(
             picture,
             compound: None,
             speed: c.speed.clone(),
-            retime: crate::model::ClipRetime::Project,
+            retime: c.retime,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
             motion: if c.video {
