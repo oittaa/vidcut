@@ -2490,15 +2490,24 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - An append gives a linked picture on V1 and sound on A1.
   - A range of it trims these two, as a clip of a file.
   - A drag follows [§7.3](#73-drag-and-drop-from-the-pool-or-viewer-pp-648-679-694695), as a drag of a file does.
-- **Open in Timeline** (p. 1054), on a compound clip's context menu or in the Media Pool:
-  - Opening shows its tracks and markers in the timeline panel, with a path bar below.
-  - Opening a nested compound clip adds one more level to that path.
-  - Clicking an ancestor or close in the path bar writes edits back and steps up to that level.
-  - Edits update all instances that share that compound clip across timelines, nested clips and the Media tab.
-  - Growing inner tracks unlocks tail trims on placed clips.
-  - Shrinking inner tracks keeps placed clip durations intact and plays black or silence past the new end.
-  - Placing or pasting a compound clip inside itself or an open parent is refused.
-  - The Effects page and the Color page edit clips inside an open compound clip, with no Timeline grade.
+- **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
+  - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
+  - Double-click the parent name in the bottom-left path bar to close the compound clip (p. 1054).
+  - The Color and Fusion pages edit the individual clips inside while it is open (p. 1055).
+  - Audio compound clips also open in Timeline with breadcrumbs below the timeline (p. 1126).
+  - Measured: a new compound clip starts at `00:00:00:00`.
+  - Measured: in an OTIO file, outer clip markers sit on `Stack.markers`, and Media Pool compound markers do not export.
+  - **vidcut:**
+    - A compound clip in the Media tab also opens by double-click or its context menu.
+    - Opening a nested compound clip adds one more level to the path bar. Double-clicking any parent steps back to that level.
+    - Closing writes edits back to the opened target. It also updates all copies with that `Sequence ID` across timelines, nested clips and the Media tab.
+    - Growing inner tracks unlocks tail trims on placed clips.
+    - Shrinking inner tracks keeps existing placed lengths and edge dissolves intact. Past the new end, playback gives black and silence.
+    - Placing, pasting or importing a compound clip inside itself or an open parent is refused. Reopening an already open copy is refused too.
+    - Switching, making or duplicating a timeline closes open compound clips first. Removing an open compound from the Media tab closes it too.
+    - A `.vidcut` file saves `compound_path`. Thus reopening resumes inside the open compound clip at `00:00:00:00`.
+    - Exporting while a compound clip is open writes that compound clip with its name and no project data.
+    - Subtitles, a Timeline Color grade and custom compound start timecodes wait in [the gaps](todo/gaps.md).
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.

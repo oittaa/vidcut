@@ -3039,7 +3039,8 @@ fn mutate(
                 ops::compound::open_clip(p, &id, imported)?
             }
             (None, Some(compound)) => ops::compound::open_pooled(p, compound)?,
-            _ => return Err(Error::usage("give `clip` or `compound`, not both")),
+            (None, None) => return Err(Error::usage("give `clip` or `compound`")),
+            (Some(_), Some(_)) => return Err(Error::usage("give `clip` or `compound`, not both")),
         },
         Request::CompoundClose { to } => ops::compound::close(p, *to)?,
         Request::BinsAdd { path } => {
@@ -6549,7 +6550,7 @@ fn place_imported(
                 frames: k.frames,
                 tracks: Vec::new(),
                 made_from: Vec::new(),
-                markers: Vec::new(),
+                markers: k.markers.clone(),
             });
             let title = c
                 .title_from
@@ -6993,6 +6994,18 @@ fn compound_whole_contents(
     }
     p.media = std::mem::take(&mut inner.media);
     placed?;
+    for m in &k.markers {
+        let same = inner.markers.iter().any(|x| {
+            x.at == m.at
+                && x.duration == m.duration
+                && x.name == m.name
+                && x.color == m.color
+                && x.note == m.note
+        });
+        if !same {
+            inner.markers.push(m.clone());
+        }
+    }
     Ok(Some((inner.tracks, inner.markers)))
 }
 
@@ -7438,6 +7451,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     if mode == ImportMode::Compound || flatten && compounds_among(p, &clips).is_empty() {
         warnings.retain(|w| !w.starts_with(otio::COMPOUNDS_KEPT));
     }
+    ops::compound::check_clips_no_cycle(p, &clips)?;
     fill_contents(p, &clips, env, at, &mut warnings);
     if empty {
         let (i, o) = (t.marks.mark_in, t.marks.mark_out);
@@ -7906,7 +7920,12 @@ fn set_drop_frame(p: &mut Project, on: bool) -> Result<()> {
 
 fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     if let Some(fps) = set.fps.filter(|&f| f != p.settings.fps) {
-        if !p.timelines.is_empty() || !p.compound_path.is_empty() {
+        if !p.compound_path.is_empty() {
+            return Err(Error::invalid(
+                "close the open compound clip before changing the project frame rate",
+            ));
+        }
+        if !p.timelines.is_empty() {
             return Err(Error::invalid(
                 "the project frame rate can only change while the project has no timelines",
             ));
@@ -7940,7 +7959,12 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
         p.settings.ripple_on = r;
     }
     if let Some(d) = set.drop_frame.filter(|&d| d != p.settings.drop_frame) {
-        if !p.timelines.is_empty() || !p.compound_path.is_empty() {
+        if !p.compound_path.is_empty() {
+            return Err(Error::invalid(
+                "close the open compound clip before changing the project drop-frame",
+            ));
+        }
+        if !p.timelines.is_empty() {
             return Err(Error::invalid(
                 "the project drop-frame can only change while the project has no timelines",
             ));

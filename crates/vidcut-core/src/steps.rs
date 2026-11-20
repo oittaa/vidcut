@@ -761,10 +761,20 @@ fn sheet_in<'a>(list: &[(String, Sheet<'a>)], id: &str) -> Option<Sheet<'a>> {
 }
 
 fn sheets_of(p: &Project) -> Vec<(String, Sheet<'_>)> {
-    match p.timelines.is_empty() {
-        true => vec![(String::new(), p.sheet())],
+    let mut out: Vec<(String, Sheet<'_>)> = match p.timelines.is_empty() {
+        true if p.compound_path.is_empty() => vec![(String::new(), p.sheet())],
+        true => Vec::new(),
         false => p.sheets().map(|(t, s)| (t.id.clone(), s)).collect(),
+    };
+    let depth = p.compound_path.len();
+    for (i, c) in p.compound_path.iter().enumerate() {
+        let sheet = match i + 1 == depth {
+            true => p.sheet(),
+            false => c.sheet(),
+        };
+        out.push((format!("compound:{}", c.id), sheet));
     }
+    out
 }
 
 fn sheet_since(before: Sheet<'_>, after: Sheet<'_>) -> Since {

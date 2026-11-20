@@ -1313,3 +1313,47 @@ fn imported_otio_compound_opens_edits_closes_and_keeps_sequence_id() {
         .unwrap();
     assert_eq!(inner.len(), 2);
 }
+
+#[test]
+fn compound_markers_roundtrip_through_otio_without_becoming_outer_markers() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    let a = f.append("m1", 0, 50);
+    let r = f.ok(req("edit.compound", json!({"clips": [a]})));
+    let id = r.result["clips"][0].as_str().unwrap().to_string();
+    f.ok(req("compound.open", json!({"clip": id})));
+    f.ok(req(
+        "markers.add",
+        json!({"at": "10f", "name": "inner", "color": "blue"}),
+    ));
+    f.ok(req("compound.close", json!({})));
+    let doc = written(&f);
+    assert_eq!(
+        doc["tracks"]["children"][0]["children"][0]["markers"],
+        json!([])
+    );
+    let mut f2 = Fixture::new(&[]);
+    f2.env = FakeEnv::default().with(
+        "/media/1.mp4",
+        media_info(4.0, Rational::new(25, 1).unwrap(), true),
+    );
+    f2.ok(req("timeline.import", json!({"otio": doc})));
+    assert!(f2.editor.project().markers.is_empty());
+    let imported_id = f2.editor.project().tracks[0].clips[0].id.clone();
+    let k = f2
+        .editor
+        .project()
+        .clip(&imported_id)
+        .unwrap()
+        .compound
+        .as_ref()
+        .unwrap();
+    assert_eq!(k.markers.len(), 1);
+    assert_eq!((k.markers[0].name.as_str(), k.markers[0].at), ("inner", 10));
+    f2.ok(req("compound.open", json!({"clip": imported_id})));
+    assert_eq!(f2.editor.project().markers.len(), 1);
+    assert_eq!(f2.editor.project().markers[0].name, "inner");
+    assert_eq!(
+        crate::validate::everywhere(f2.editor.project()),
+        Vec::<String>::new()
+    );
+}

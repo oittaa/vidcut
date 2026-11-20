@@ -159,7 +159,8 @@ Timelines (spec §3):
 - In memory, the open timeline is checked out: its `tracks`, `marks`, `markers` and `subtitles` are the fields of `Project` with these names. Its entry in `timelines` has empty lists.
   - Why: the code that edits, plays and exports a timeline reads these fields. It does not change for many timelines.
   - `Project::check_in` puts them back into the entry, and `Project::check_out` takes them out. `Project::open_timeline` does both.
-  - `Project::compound_path` holds open compound clips (`OpenCompound`, outermost first) with their `CompoundTarget`. `Project::checked_out_timeline` and `Project::sheet_key` name what is checked out.
+  - `Project::compound_path` holds open compound clips (`OpenCompound`, outermost first) with their `CompoundTarget`. An `OpenCompound` holds `tracks`, `marks` and `markers`, with no subtitles, and `Project::start_tc` gives `0` while one is open.
+  - `Project::checked_out_timeline` and `Project::sheet_key` name what is checked out. Exports while open export that compound clip with no `project` metadata, and `steps::since` reads `sheets_of` including open compounds.
   - The file and the history hold each timeline and open compound with its contents (`Project::whole_timeline`, `Project::sheets`). Thus a diff names the sheet that changed.
 - `TimelineSettings` (`own`) gives a timeline its own frame rate, size, drop-frame and color space. Without it, the timeline uses the project's.
   - `Project::fps`, `width`, `height`, `start_tc` and `counts_drop_frame` give the values of the open timeline. `Settings` holds the project's own values.
@@ -817,11 +818,13 @@ Import:
   - `place_pooled` puts a copy on a video track and on the audio track of its number. `Place` tells how. `compound_preview` gives the requests of a drag.
   - `ops::compound::unnest` restores `made_from` when the two blocks are still tied. A block without the other brings only its own `tracks`, so that nothing is there twice.
   - `ops::compound::target` gives the track of each inner track, for a compound clip made here and for an imported one.
-  - `ops::compound::open_clip` and `ops::compound::open_pooled` open a compound clip's inner tracks and `Compound::markers` into the editor sheet.
+  - `ops::compound::open_clip` and `ops::compound::open_pooled` open a compound clip's inner tracks and `Compound::markers` into the editor sheet, refusing an already open sequence id.
     - Inner clips, transitions and markers get unique ids against active sheets. An audio-only compound gets an empty V1 track while open.
   - `ops::compound::close` and `ops::compound::close_all` normalize tracks and write edits back to the opened `CompoundTarget`.
-    - Shared instances propagate across timelines, nested compounds and `PooledCompound` by their sequence id, without shrinking existing placement durations below `Clip::shown`.
-    - `holds_any` and `check_no_cycle` refuse placing or pasting a compound inside itself or an open parent.
+    - `propagate_in_compound` and `propagate_in_tracks` update copies by sequence id across timelines, nested compounds and `PooledCompound`, keeping each copy's prior `frames` and `Clip::shown` end as a floor.
+    - `holds_any`, `check_no_cycle`, `check_clips_no_cycle` and `otio::stack_holds_any` refuse placing, pasting or importing a compound inside itself or an open parent.
+    - `Compound::markers` round-trips in OTIO under `metadata.vidcut.markers` so outer clip `Stack.markers` stay separate.
+    - `render::expanded` adds each inner track's `volume_db` onto the outer track's `volume_db` (keeping `-100` silent via `validate::fader_silent`) and applies inner `solo`.
 
 Modes:
 

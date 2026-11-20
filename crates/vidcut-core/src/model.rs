@@ -6346,14 +6346,11 @@ pub struct OpenCompound {
     pub fps: Rational,
     #[serde(default)]
     pub sequence_id: Option<String>,
-    #[serde(default)]
     pub tracks: Vec<Track>,
     #[serde(default)]
     pub marks: Marks,
     #[serde(default)]
     pub markers: Vec<Marker>,
-    #[serde(default)]
-    pub subtitles: Vec<SubtitleTrack>,
 }
 
 #[derive(Serialize)]
@@ -6369,8 +6366,6 @@ struct OpenCompoundOut<'a> {
     marks: &'a Marks,
     #[serde(skip_serializing_if = "<[Marker]>::is_empty")]
     markers: &'a [Marker],
-    #[serde(skip_serializing_if = "<[SubtitleTrack]>::is_empty")]
-    subtitles: &'a [SubtitleTrack],
 }
 
 impl<'a> OpenCompoundOut<'a> {
@@ -6384,7 +6379,6 @@ impl<'a> OpenCompoundOut<'a> {
             tracks: s.tracks,
             marks: s.marks,
             markers: s.markers,
-            subtitles: s.subtitles,
         }
     }
 }
@@ -6401,7 +6395,7 @@ impl OpenCompound {
             tracks: &self.tracks,
             marks: &self.marks,
             markers: &self.markers,
-            subtitles: &self.subtitles,
+            subtitles: &[],
         }
     }
 }
@@ -7757,7 +7751,7 @@ impl Project {
             take(&mut self.subtitles),
         );
         if let Some(c) = self.compound_path.last_mut() {
-            (c.tracks, c.marks, c.markers, c.subtitles) = (tracks, marks, markers, subtitles);
+            (c.tracks, c.marks, c.markers) = (tracks, marks, markers);
         } else if let Some(t) = self.timeline_mut() {
             (t.tracks, t.marks, t.markers, t.subtitles) = (tracks, marks, markers, subtitles);
         }
@@ -7770,7 +7764,7 @@ impl Project {
                 take(&mut c.tracks),
                 take(&mut c.marks),
                 take(&mut c.markers),
-                take(&mut c.subtitles),
+                Vec::new(),
             ))
         } else {
             self.timeline_mut().map(|t| {

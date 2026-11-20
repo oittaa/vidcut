@@ -1235,6 +1235,8 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         _ => 0,
     };
     let frames = inner.max(source_end);
+    let markers: Vec<crate::model::Marker> =
+        serde_json::from_value(item["metadata"][VIDCUT]["markers"].clone()).unwrap_or_default();
     let mut stack = item.clone();
     if let Some(o) = stack.as_object_mut() {
         for key in ["source_range", "effects", "markers"] {
@@ -1247,12 +1249,18 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
     {
         m.remove("Link Group ID");
     }
+    if let Some(m) = stack
+        .pointer_mut(&format!("/metadata/{VIDCUT}"))
+        .and_then(Value::as_object_mut)
+    {
+        m.remove("markers");
+    }
     Compound {
         stack: stack.into(),
         frames,
         tracks: Vec::new(),
         made_from: Vec::new(),
-        markers: Vec::new(),
+        markers,
     }
 }
 
@@ -1309,6 +1317,9 @@ fn compound_item(
     if let Some(x) = &c.picture {
         v["metadata"][VIDCUT]["picture"] = json!(x);
     }
+    if !k.markers.is_empty() {
+        v["metadata"][VIDCUT]["markers"] = json!(k.markers);
+    }
     v
 }
 
@@ -1362,6 +1373,20 @@ pub(crate) fn is_compound_stack(v: &Value) -> bool {
         .as_str()
         .is_some_and(|s| s.starts_with("Stack."))
         && v["metadata"][EDITOR]["Sequence Type"].is_string()
+}
+
+pub(crate) fn stack_holds_any(v: &Value, ids: &std::collections::HashSet<String>) -> bool {
+    if v["metadata"][EDITOR]["Sequence ID"]
+        .as_str()
+        .is_some_and(|s| ids.contains(s))
+    {
+        return true;
+    }
+    v["children"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|ch| stack_holds_any(ch, ids))
 }
 
 fn stack_id(stack: &Value) -> String {

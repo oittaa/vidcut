@@ -721,7 +721,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         duck_measuring: HashSet::new(),
         duck_failed: HashSet::new(),
         duck_kept: HashMap::new(),
-        playheads: HashMap::new(),
+        playheads: vidcut_core::lru::Lru::new(),
         open_timeline: None,
     };
     live.watch_omarchy();
@@ -994,12 +994,13 @@ struct Live {
     duck_measuring: HashSet<Unmeasured>,
     duck_failed: HashSet<Unmeasured>,
     duck_kept: HashMap<crate::env::MeasureKey, vidcut_core::duck::Measured>,
-    playheads: HashMap<String, i64>,
+    playheads: vidcut_core::lru::Lru<String, i64, PLAYHEADS_KEPT>,
     open_timeline: Option<(PathBuf, String)>,
     render: render_cache::Background,
     drops: drops::Drops,
 }
 
+const PLAYHEADS_KEPT: usize = 64;
 const SOURCE: PlayerId = PlayerId::Source;
 const TIMELINE: PlayerId = PlayerId::Timeline;
 
@@ -3929,11 +3930,19 @@ impl Live {
             self.playheads.clear();
         }
         let active_key = p.sheet_key();
-        self.playheads.retain(|id, _| {
-            p.timelines.iter().any(|t| t.id == *id)
-                || active_key.as_deref() == Some(id.as_str())
-                || id.contains("::")
-        });
+        let stale: Vec<String> = self
+            .playheads
+            .iter()
+            .filter_map(|(id, _)| {
+                let keep = p.timelines.iter().any(|t| t.id == *id)
+                    || active_key.as_deref() == Some(id.as_str())
+                    || id.contains("::");
+                (!keep).then(|| id.clone())
+            })
+            .collect();
+        for id in stale {
+            self.playheads.remove(&id);
+        }
         if now == self.open_timeline {
             return;
         }

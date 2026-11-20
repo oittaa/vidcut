@@ -402,10 +402,7 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
         }
     }
     if let Some(c) = p.compound_path.last()
-        && !(c.tracks.is_empty()
-            && c.marks.is_empty()
-            && c.markers.is_empty()
-            && c.subtitles.is_empty())
+        && !(c.tracks.is_empty() && c.marks.is_empty() && c.markers.is_empty())
     {
         v.push(format!("open compound {} holds its own tracks", c.name));
     }
@@ -415,9 +412,6 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
         }
         if c.id != c.target.key() {
             v.push(format!("open compound {} has id {}", c.name, c.id));
-        }
-        if !c.subtitles.is_empty() {
-            v.push(format!("open compound {} holds subtitles", c.name));
         }
         match &c.target {
             crate::model::CompoundTarget::Pooled { compound } => {

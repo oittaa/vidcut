@@ -1385,14 +1385,20 @@ impl Workspace {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 3.0;
                     let root = p.timeline().map_or("Close", |t| t.name.as_str());
-                    if ui.add(egui::Button::new(root).frame(false)).clicked() {
+                    if ui
+                        .add(egui::Button::new(root).frame(false))
+                        .double_clicked()
+                    {
                         self.send("compound.close", json!({ "to": 0 }));
                     }
                     for (i, oc) in p.compound_path.iter().enumerate() {
                         ui.label(dim("›"));
                         if i + 1 == p.compound_path.len() {
                             ui.label(RichText::new(&oc.name).strong());
-                        } else if ui.add(egui::Button::new(&oc.name).frame(false)).clicked() {
+                        } else if ui
+                            .add(egui::Button::new(&oc.name).frame(false))
+                            .double_clicked()
+                        {
                             self.send("compound.close", json!({ "to": i + 1 }));
                         }
                     }
