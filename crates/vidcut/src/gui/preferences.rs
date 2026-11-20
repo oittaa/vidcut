@@ -902,6 +902,30 @@ fn editing(
 fn color(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>) {
     let p = &state["preferences"]["color"];
     page(ui, "Color", "", |ui| {
+        grid(ui, "preferences-color", |ui| {
+            let current = p["switching_clips"].as_str().unwrap_or("last_adjusted");
+            let choices = [
+                ("last_adjusted", "Last Adjusted Node"),
+                ("first", "First Node"),
+                ("last", "Last Node"),
+                ("same", "Same Node"),
+            ];
+            let shown = choices.iter().find(|(v, _)| *v == current);
+            label(ui, "Switching Clips Selects");
+            ui.add_enabled_ui(!busy, |ui| {
+                egui::ComboBox::from_id_salt("preferences-switching-clips")
+                    .selected_text(shown.map_or(current, |(_, name)| *name))
+                    .show_ui(ui, |ui| {
+                        for (value, name) in choices {
+                            if ui.selectable_label(value == current, name).clicked() {
+                                *patch = Some(json!({ "color": { "switching_clips": value } }));
+                            }
+                        }
+                    });
+            });
+            ui.end_row();
+        });
+        ui.add_space(10.0);
         ui.label(RichText::new("Printer Light Step Calibration").strong());
         egui::Grid::new("preferences-printer")
             .num_columns(4)

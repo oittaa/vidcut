@@ -30,9 +30,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 **To do:**
 
-- A click on the number of a node turns the node off or on (p. 3392).
-- The current node of each clip stays when the clip changes, with the setting "Switching clips" (p. 3391).
-- Previous Node and Next Node (Option-Shift-Semicolon, Option-Shift-Apostrophe, p. 3391).
 - Change Label, the thumbnails and the badges (p. 3390).
 - Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3394). They need windows.
 - Insert a node with no connection by a drop on a connection (pp. 3396–3397).

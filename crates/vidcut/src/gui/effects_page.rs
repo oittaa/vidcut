@@ -8,6 +8,7 @@ use eframe::egui::{
 use serde_json::{Value, json};
 use vidcut_core::composition::Frames;
 use vidcut_core::effect_keys::Keyed;
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{
     Clip, Composition, EffectValue, Mask, Node, Pattern, Project, Tool, ToolType,
 };
@@ -73,6 +74,8 @@ const TOOL_ROW: [&[ToolType]; 2] = [
     &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
 ];
 
+const GRADES_LEFT_KEPT: usize = 4096;
+
 pub(super) struct EffectsPage {
     pub(super) page: Page,
     pub(super) nodes: Vec<String>,
@@ -84,6 +87,7 @@ pub(super) struct EffectsPage {
     pub(super) grading: GradeLevel,
     pub(super) grade_nodes: Vec<u32>,
     pub(super) grade_seen: Option<(String, GradeOf)>,
+    pub(super) grade_left: Lru<(String, GradeOf), u32, GRADES_LEFT_KEPT>,
     pub(super) grade_coming: Option<(u32, Instant)>,
     pub(super) grade_view: NodeView<Port>,
     pub(super) grade_spot: Option<[f64; 2]>,
@@ -114,6 +118,7 @@ impl Default for EffectsPage {
             grading: GradeLevel::Clip,
             grade_nodes: Vec::new(),
             grade_seen: None,
+            grade_left: Lru::new(),
             grade_coming: None,
             grade_view: NodeView::default(),
             grade_spot: None,
@@ -375,6 +380,7 @@ fn tile(n: &Node) -> Tile<String> {
         label: n.name.clone(),
         place: n.place,
         faded: n.pass_through,
+        switch: false,
         outlet,
         inlets,
         edge: None,

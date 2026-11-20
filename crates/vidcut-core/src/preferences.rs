@@ -53,8 +53,8 @@ impl Default for Editing {
     }
 }
 
-/// The printer points of the Color page on this computer. One point moves
-/// the Offset of a channel by its Step Size times its Density Increment.
+/// The Color page on this computer. One printer point moves the Offset of a
+/// channel by its Step Size times its Density Increment.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ColorPrefs {
@@ -62,6 +62,10 @@ pub struct ColorPrefs {
     pub printer_density: [f64; 3],
     /// Step Size of red, green and blue. Default 1.
     pub printer_step: [f64; 3],
+    /// The node that becomes the current node when the Color page shows
+    /// another grade: the grade of another clip, or the timeline grade.
+    /// Default `last_adjusted`.
+    pub switching_clips: SwitchingClips,
 }
 
 impl Default for ColorPrefs {
@@ -69,8 +73,27 @@ impl Default for ColorPrefs {
         Self {
             printer_density: [1.0; 3],
             printer_step: [1.0; 3],
+            switching_clips: SwitchingClips::LastAdjusted,
         }
     }
+}
+
+/// The node that becomes current in the grade that the Color page shows
+/// next (`color.switching_clips`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchingClips {
+    /// The node that was current when that grade was shown last. Node 1
+    /// in a grade that this run of the GUI did not show before.
+    #[default]
+    LastAdjusted,
+    /// The corrector with the lowest number.
+    First,
+    /// The corrector with the highest number.
+    Last,
+    /// The node with the number of the current node of the grade before.
+    /// When the grade has no such node, as `last_adjusted`.
+    Same,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -80,6 +103,8 @@ pub struct ColorPrefsPatch {
     pub printer_density: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub printer_step: Option<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switching_clips: Option<SwitchingClips>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1145,6 +1170,7 @@ impl Preferences {
             let c = &mut p.color;
             c.printer_density = x.printer_density.unwrap_or(c.printer_density);
             c.printer_step = x.printer_step.unwrap_or(c.printer_step);
+            c.switching_clips = x.switching_clips.unwrap_or(c.switching_clips);
         }
         p.check()?;
         Ok(p)
