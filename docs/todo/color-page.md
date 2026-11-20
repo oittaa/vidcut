@@ -30,7 +30,7 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 **To do:**
 
-- Change Label, the thumbnails and the badges (p. 3390).
+- The thumbnails (p. 3390).
 - Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3394). They need windows.
 - Insert a node with no connection by a drop on a connection (pp. 3396–3397).
 - Swap two nodes with a Command-drag, copy the settings with an Option-drag, and Copy and Paste of node settings (p. 3397).

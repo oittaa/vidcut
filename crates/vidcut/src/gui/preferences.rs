@@ -903,21 +903,19 @@ fn color(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>
     let p = &state["preferences"]["color"];
     page(ui, "Color", "", |ui| {
         grid(ui, "preferences-color", |ui| {
-            let current = p["switching_clips"].as_str().unwrap_or("last_adjusted");
-            let choices = [
-                ("last_adjusted", "Last Adjusted Node"),
-                ("first", "First Node"),
-                ("last", "Last Node"),
-                ("same", "Same Node"),
-            ];
-            let shown = choices.iter().find(|(v, _)| *v == current);
+            let current = &p["switching_clips"];
+            let choices = super::color_page::SWITCHING;
+            let shown = choices.iter().find(|(v, _)| json!(v) == *current);
             label(ui, "Switching Clips Selects");
             ui.add_enabled_ui(!busy, |ui| {
                 egui::ComboBox::from_id_salt("preferences-switching-clips")
-                    .selected_text(shown.map_or(current, |(_, name)| *name))
+                    .selected_text(shown.map_or("", |(_, name)| *name))
                     .show_ui(ui, |ui| {
                         for (value, name) in choices {
-                            if ui.selectable_label(value == current, name).clicked() {
+                            if ui
+                                .selectable_label(json!(value) == *current, name)
+                                .clicked()
+                            {
                                 *patch = Some(json!({ "color": { "switching_clips": value } }));
                             }
                         }

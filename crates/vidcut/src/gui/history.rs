@@ -169,13 +169,13 @@ fn kind_color(kind: ClientKind) -> Color32 {
     }
 }
 
-fn full_on_hover(r: &egui::Response, shown: &egui::Galley, full: &str) {
+pub(super) fn full_on_hover(r: &egui::Response, shown: &egui::Galley, full: &str) {
     if shown.elided {
         r.clone().on_hover_text(full.to_owned());
     }
 }
 
-fn one_line(
+pub(super) fn one_line(
     ui: &egui::Ui,
     text: &str,
     width: f32,

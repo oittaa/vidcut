@@ -18,6 +18,7 @@ const ROUND: f64 = 100.0;
 const WIRE_HIT: f32 = 6.0;
 const STEPS: usize = 24;
 const FADED: f32 = 0.45;
+const NOTE: Vec2 = vec2(140.0, 18.0);
 const LIT: Color32 = Color32::from_rgb(110, 170, 255);
 pub(super) const PICTURE_KNOT: Color32 = Color32::from_rgb(230, 200, 60);
 pub(super) const MASK_KNOT: Color32 = Color32::from_rgb(90, 140, 230);
@@ -43,6 +44,11 @@ pub(super) struct Inlet {
     pub(super) name: String,
 }
 
+pub(super) struct Badge {
+    pub(super) icon: &'static str,
+    pub(super) tip: &'static str,
+}
+
 pub(super) struct Outlet {
     pub(super) name: String,
     pub(super) color: Color32,
@@ -54,6 +60,8 @@ pub(super) struct Tile<K> {
     pub(super) place: [f64; 2],
     pub(super) faded: bool,
     pub(super) switch: bool,
+    pub(super) note: String,
+    pub(super) badges: Vec<Badge>,
     pub(super) outlet: Option<Outlet>,
     pub(super) inlets: Vec<Inlet>,
     pub(super) edge: Option<Edge>,
@@ -101,6 +109,7 @@ pub(super) enum Pick {
 pub(super) struct Done<K> {
     pub(super) picked: Option<(K, Pick)>,
     pub(super) switched: Option<K>,
+    pub(super) named: Option<(K, String)>,
     pub(super) pointed: Option<K>,
     pub(super) moved: Vec<(K, [f64; 2])>,
     pub(super) link: Option<Link<K>>,
@@ -108,6 +117,12 @@ pub(super) struct Done<K> {
     pub(super) clicked: bool,
     pub(super) unlink: Option<(K, usize)>,
     pub(super) spot: Option<[f64; 2]>,
+}
+
+struct Naming<K> {
+    key: K,
+    text: String,
+    started: bool,
 }
 
 struct Moving<K> {
@@ -133,6 +148,7 @@ pub(super) struct NodeView<K> {
     moving: Option<Moving<K>>,
     linking: Option<Linking<K>>,
     band: Option<(Pos2, bool)>,
+    naming: Option<Naming<K>>,
 }
 
 impl<K> Default for NodeView<K> {
@@ -143,6 +159,7 @@ impl<K> Default for NodeView<K> {
             moving: None,
             linking: None,
             band: None,
+            naming: None,
         }
     }
 }
@@ -155,7 +172,16 @@ impl<K> NodeView<K> {
 
     pub(super) fn stop(&mut self) {
         self.moving = None;
+        self.naming = None;
         self.calm();
+    }
+
+    pub(super) fn name(&mut self, key: K, text: String) {
+        self.naming = Some(Naming {
+            key,
+            text,
+            started: false,
+        });
     }
 }
 
@@ -417,6 +443,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     let mut done = Done {
         picked: None,
         switched: None,
+        named: None,
         pointed: None,
         moved: Vec::new(),
         link: None,
@@ -425,6 +452,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         unlink: None,
         spot: None,
     };
+    let mut naming = view.naming.take();
     for (t, r) in graph.tiles.iter().zip(&boxes) {
         let r = *r;
         let used = wires.iter().any(|w| w.from == t.key);
@@ -446,7 +474,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             continue;
         }
         let id = ui.scope_id().with((&graph.salt, &t.key));
-        let node_resp = ui.interact(r, id, Sense::click_and_drag());
+        let mut node_resp = ui.interact(r, id, Sense::click_and_drag());
         let selected = graph.selected.contains(&t.key);
         let active = graph.selected.last() == Some(&t.key);
         let fade = if t.faded { FADED } else { 1.0 };
@@ -464,6 +492,57 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             FontId::proportional(12.0 * z.clamp(0.6, 1.4)),
             c.text.gamma_multiply(fade),
         );
+        let mark = FontId::proportional(10.0 * z.clamp(0.6, 1.4));
+        let mut right = r.right() - 2.0 * KNOT * z;
+        let hover = node_resp.hover_pos();
+        for b in t.badges.iter().rev() {
+            let at = pos2(right, r.center().y);
+            let color = c.text_dim.gamma_multiply(fade);
+            let shown = painter.text(at, Align2::RIGHT_CENTER, b.icon, mark.clone(), color);
+            right = shown.left() - 3.0 * z;
+            if hover.is_some_and(|p| shown.contains(p)) {
+                node_resp = node_resp.on_hover_text(b.tip);
+            }
+        }
+        let font = FontId::proportional(11.0 * z.clamp(0.6, 1.4));
+        let field = Rect::from_min_size(
+            r.left_top() - vec2(0.0, NOTE.y * z + 2.0),
+            vec2(r.width().max(NOTE.x * z), NOTE.y * z),
+        );
+        match naming.as_mut().filter(|n| n.key == t.key) {
+            Some(n) => {
+                let edit = egui::TextEdit::singleline(&mut n.text)
+                    .font(font)
+                    .margin(vec2(2.0, 0.0));
+                let edit = ui.put(field, edit);
+                if !n.started {
+                    edit.request_focus();
+                    n.started = true;
+                } else if edit.lost_focus() {
+                    if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        done.named = Some((t.key.clone(), n.text.clone()));
+                    }
+                    naming = None;
+                }
+            }
+            None if !t.note.is_empty() => {
+                let color = c.text.gamma_multiply(fade);
+                let shown = super::history::one_line(ui, &t.note, r.width(), font, color);
+                let at = r.left_top() - vec2(0.0, shown.size().y + 2.0);
+                let place = Rect::from_min_size(at, shown.size());
+                painter.galley(at, shown.clone(), color);
+                let note = ui.interact(place, id.with("note"), Sense::click());
+                super::history::full_on_hover(&note, &shown, &t.note);
+                if note.double_clicked() {
+                    naming = Some(Naming {
+                        key: t.key.clone(),
+                        text: t.note.clone(),
+                        started: false,
+                    });
+                }
+            }
+            None => {}
+        }
         if let Some(o) = &t.outlet {
             let out = if used { o.color } else { c.text_dim };
             painter.rect_filled(
@@ -531,6 +610,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             }
         }
     }
+    view.naming = naming.filter(|n| graph.tiles.iter().any(|t| t.key == n.key));
     let mut started: Option<Linking<K>> = None;
     for (k, (end, at, name)) in knots.iter().enumerate() {
         let id = ui.scope_id().with((&graph.salt, "knot", k));

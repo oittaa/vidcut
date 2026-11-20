@@ -381,6 +381,8 @@ fn tile(n: &Node) -> Tile<String> {
         place: n.place,
         faded: n.pass_through,
         switch: false,
+        note: String::new(),
+        badges: Vec::new(),
         outlet,
         inlets,
         edge: None,

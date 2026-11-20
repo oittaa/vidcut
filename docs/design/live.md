@@ -433,6 +433,9 @@ The bar and the Jobs button:
   - Another clip, another grade mode or another timeline selects a node by `color.switching_clips` (`Workspace::settle_grade`).
   - `EffectsPage::grade_left` keeps the current node of each grade that the page showed. `Snapshot::switching_clips` holds the preference.
   - A click on the number of a corrector gives `Done::switched`. The page then sends `grade.set` with `on`, and the selection stays.
+  - The label of a node is the `Tile::note` above it. Node Label and a double-click start an edit in place (`NodeView::name`). Enter gives `Done::named`, and the page sends `grade.set` with `label`.
+  - The badges of a corrector (`Badge`) come from the values that differ from the usual values (`badges`).
+  - The option menu at the top right of the Node Editor sets `color.switching_clips` with `preferences.set`.
   - Previous Node and Next Node step through the correctors in number order and wrap. They send `gui.grade_nodes`.
   - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.
   - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
