@@ -743,6 +743,7 @@ impl Lane {
                 isolation,
                 keyed,
                 pan,
+                pan_keyed,
                 equalizer,
                 leveler,
                 compressor,
@@ -886,15 +887,18 @@ impl Lane {
                 } else {
                     10f32.powf(*gain_db as f32 / 20.0) * self.trim
                 };
-                let sides = (ch >= 2).then(|| vidcut_core::render::pan_gains(*pan));
+                const PAN_STEP: usize = 64;
+                let flat_sides =
+                    (ch >= 2 && pan_keyed.is_none()).then(|| vidcut_core::render::pan_gains(*pan));
+                let mut block_sides = flat_sides;
                 let fade = self.declick.min(len / 2).max(1);
                 let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
                 let after = self.pieces.get(self.piece + 1);
                 let fade_in = before.is_some_and(|b| !plays_on(b, &piece) && !ramps_on(b, &piece))
-                    && !cross.is_some_and(|f| f.starts_silent())
+                    && !cross.as_ref().is_some_and(|f| f.starts_silent())
                     && !edges.iter().any(Fade::starts_silent);
                 let fade_out = after.is_some_and(|n| !plays_on(&piece, n) && !ramps_on(&piece, n))
-                    && !cross.is_some_and(|f| f.ends_silent(len))
+                    && !cross.as_ref().is_some_and(|f| f.ends_silent(len))
                     && !edges.iter().any(|f| f.ends_silent(len));
                 for i in 0..take {
                     let p = self.pos + i as i64;
@@ -917,8 +921,15 @@ impl Lane {
                     if let Some(dip) = &self.dip {
                         g *= dip.gain(base + (done + i) as i64);
                     }
+                    if ch >= 2
+                        && let Some(k) = pan_keyed
+                        && i.is_multiple_of(PAN_STEP)
+                    {
+                        block_sides =
+                            Some(vidcut_core::render::pan_gains(k.pan_at(k.at + p as f64)));
+                    }
                     for c in 0..ch {
-                        let side = match (sides, c) {
+                        let side = match (block_sides, c) {
                             (Some((left, _)), 0) => left,
                             (Some((_, right)), 1) => right,
                             _ => 1.0,

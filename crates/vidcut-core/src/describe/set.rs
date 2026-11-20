@@ -755,7 +755,10 @@ impl Words<'_> {
             (Some(a), Some(t)) if a.is_keyed() => json!(c.gain_at(t as f64)),
             _ => audio(c, |a| json!(a.gain_db)),
         });
-        s.put("pan", "Pan", &number, |c| audio(c, |a| json!(a.pan)));
+        s.put("pan", "Pan", &number, |c| match (&c.audio, at) {
+            (Some(a), Some(t)) if a.is_pan_keyed() => json!(c.pan_at(t as f64)),
+            _ => audio(c, |a| json!(a.pan)),
+        });
         s.put("pan_on", "Pan On", &raw, |c| audio(c, |a| json!(a.pan_on)));
         s.put("equalizer", "Equalizer", &raw, |c| {
             audio(c, |a| json!(a.equalizer))

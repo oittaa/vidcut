@@ -7,14 +7,14 @@ use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::generators::{Axis, CENTER, checked_center};
 use crate::keyframes::{
-    PictureValue, checked, checked_handle, ease_mark, ease_of, put_pair, reshape,
+    PictureValue, checked, checked_handle, checked_pan, ease_mark, ease_of, put_pair, reshape,
 };
 use crate::model::{
     Clip, ClipAudio, Ease, Effect, Generator, Gradient, Handle, Keyframe, LowerThirdLine, Picture,
     Project, Title, TitleKind,
 };
 use crate::request::{CopiedKey, EffectParam, KeyParam, KeyPicks, KeyValue};
-use crate::validate::GAIN;
+use crate::validate::{GAIN, PAN};
 
 const ANCHOR_LINEAR: &str = "the anchor point's keyframes are linear: they take no ease or handles";
 const SPEED_SET: &str =
@@ -37,23 +37,33 @@ pub struct KeyChange {
     pub out_handle: Option<Option<Handle>>,
 }
 
-fn keyed(a: &ClipAudio) -> bool {
-    a.is_keyed()
-}
-
-pub fn check_keyed_gain(p: &Project, ids: &[String], at: Option<i64>) -> Result<()> {
+fn check_keyed_audio(
+    p: &Project,
+    ids: &[String],
+    at: Option<i64>,
+    name: &str,
+    has: impl Fn(&ClipAudio) -> bool,
+) -> Result<()> {
     let clips: Vec<&Clip> = ids.iter().filter_map(|id| p.clip(id)).collect();
-    let all_keyed = clips.iter().all(|c| c.audio.as_ref().is_some_and(keyed));
+    let all_keyed = clips.iter().all(|c| c.audio.as_ref().is_some_and(&has));
     if clips.is_empty() || !all_keyed {
         return Ok(());
     }
     match at {
         None => Err(Error::usage(format!(
-            "{} has volume keyframes: give `at` for the keyframe",
+            "{} has {name} keyframes: give `at` for the keyframe",
             clips[0].id
         ))),
         Some(_) => Ok(()),
     }
+}
+
+pub fn check_keyed_gain(p: &Project, ids: &[String], at: Option<i64>) -> Result<()> {
+    check_keyed_audio(p, ids, at, "volume", ClipAudio::is_keyed)
+}
+
+pub fn check_keyed_pan(p: &Project, ids: &[String], at: Option<i64>) -> Result<()> {
+    check_keyed_audio(p, ids, at, "pan", ClipAudio::is_pan_keyed)
 }
 
 pub fn put_value(keys: &mut Vec<Keyframe>, frame: i64, value: f64) {
@@ -76,6 +86,7 @@ pub fn put_value(keys: &mut Vec<Keyframe>, frame: i64, value: f64) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Number {
     Volume,
+    Pan,
     Center(Axis),
     Effect(EffectParam),
 }
@@ -83,6 +94,7 @@ enum Number {
 impl Number {
     fn of(param: KeyParam) -> Self {
         match param {
+            KeyParam::Pan => Self::Pan,
             KeyParam::CenterX => Self::Center(Axis::X),
             KeyParam::CenterY => Self::Center(Axis::Y),
             KeyParam::Effect(q) => Self::Effect(q),
@@ -93,6 +105,7 @@ impl Number {
     fn name(self) -> String {
         match self {
             Self::Volume => "volume".to_string(),
+            Self::Pan => "pan".to_string(),
             Self::Center(Axis::X) => "center x".to_string(),
             Self::Center(Axis::Y) => "center y".to_string(),
             Self::Effect(q) => q.value.name().replace('_', " "),
@@ -101,7 +114,7 @@ impl Number {
 
     fn takes(self, c: &Clip) -> bool {
         match self {
-            Self::Volume => c.audio_range().is_some(),
+            Self::Volume | Self::Pan => c.audio_range().is_some(),
             Self::Center(_) => gradient(c).is_some(),
             Self::Effect(q) => effect_of(c, q).is_some_and(|e| e.takes(q.value)),
         }
@@ -109,7 +122,7 @@ impl Number {
 
     fn missing(self) -> &'static str {
         match self {
-            Self::Volume => "has no sound",
+            Self::Volume | Self::Pan => "has no sound",
             Self::Center(_) => "is not a Four Color Gradient",
             Self::Effect(_) => "has no effect with that value",
         }
@@ -141,6 +154,7 @@ impl Number {
     fn keys(self, c: &Clip) -> &[Keyframe] {
         match self {
             Self::Volume => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
+            Self::Pan => c.audio.as_ref().map_or(&[], |a| a.pan_keys.as_slice()),
             Self::Center(axis) => gradient(c).map_or(&[], |g| g.keys(axis)),
             Self::Effect(q) => effect_of(c, q).map_or(&[], |e| e.keys_of(q.value)),
         }
@@ -149,6 +163,7 @@ impl Number {
     fn channel_mut(self, c: &mut Clip) -> Option<Channel<'_>> {
         match self {
             Self::Volume => c.audio.as_mut().map(|a| (&mut a.gain_keys, None)),
+            Self::Pan => c.audio.as_mut().map(|a| (&mut a.pan_keys, None)),
             Self::Center(axis) => match &mut c.generator {
                 Some(Generator::FourColorGradient(g)) => Some((g.keys_mut(axis), None)),
                 _ => None,
@@ -165,6 +180,7 @@ impl Number {
     fn value_at(self, c: &Clip, frame: f64) -> f64 {
         match self {
             Self::Volume => c.audio.as_ref().map_or(0.0, |a| a.db_at(frame)),
+            Self::Pan => c.audio.as_ref().map_or(0.0, |a| a.pan_at(frame)),
             Self::Center(axis) => gradient(c).map_or(0.0, |g| g.center_at(axis, frame)),
             Self::Effect(q) => effect_of(c, q).map_or(0.0, |e| e.value_at(q.value, frame)),
         }
@@ -173,6 +189,7 @@ impl Number {
     fn checked(self, value: f64) -> Result<f64> {
         match self {
             Self::Volume => checked(value),
+            Self::Pan => checked_pan(value),
             Self::Center(_) => checked_center(value),
             Self::Effect(_) if value.is_finite() => Ok(value),
             Self::Effect(_) => Err(Error::invalid("a keyframe's value is a finite number")),
@@ -182,6 +199,7 @@ impl Number {
     fn limited(self, c: &Clip, value: f64) -> f64 {
         let (low, high) = match self {
             Self::Volume => (*GAIN.start(), *GAIN.end()),
+            Self::Pan => (*PAN.start(), *PAN.end()),
             Self::Center(_) => (*CENTER.start(), *CENTER.end()),
             Self::Effect(q) => effect_of(c, q)
                 .and_then(|e| e.range_of(q.value))
@@ -306,7 +324,7 @@ fn add_number(
             "no clip of {} {}",
             ids.join(", "),
             match number {
-                Number::Volume => "has sound",
+                Number::Volume | Number::Pan => "has sound",
                 Number::Center(_) => "is a Four Color Gradient",
                 Number::Effect(_) => "has an effect with that value",
             }
@@ -433,7 +451,7 @@ pub fn set(
     if by.is_some_and(|b| !b[0].is_finite() || !b[1].is_finite()) {
         return Err(Error::invalid(match number {
             Number::Volume => "`by` needs a number of dB",
-            Number::Center(_) | Number::Effect(_) => "`by` needs a number",
+            Number::Pan | Number::Center(_) | Number::Effect(_) => "`by` needs a number",
         }));
     }
     if value.is_some() && by.is_some() {
@@ -614,6 +632,7 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
             }
             let mut numbers = vec![
                 (json!("volume"), Number::Volume),
+                (json!("pan"), Number::Pan),
                 (json!("center_x"), Number::Center(Axis::X)),
                 (json!("center_y"), Number::Center(Axis::Y)),
             ];
@@ -780,6 +799,7 @@ fn keys_of(c: &Clip, param: KeyParam) -> &[Keyframe] {
 
 fn param_name(param: KeyParam) -> String {
     match param {
+        KeyParam::Pan => "pan".to_string(),
         KeyParam::Speed => "speed".to_string(),
         KeyParam::CenterX => "center_x".to_string(),
         KeyParam::CenterY => "center_y".to_string(),
@@ -1005,7 +1025,7 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
 
 fn picture_param(param: KeyParam) -> Option<PictureValue> {
     match param {
-        KeyParam::Volume | KeyParam::CenterX | KeyParam::CenterY => None,
+        KeyParam::Volume | KeyParam::Pan | KeyParam::CenterX | KeyParam::CenterY => None,
         KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition => {
             Some(PictureValue::Position)
         }
@@ -1603,5 +1623,195 @@ mod tests {
         ));
         f.ok(req("effects.reset", json!({"clip": "c1", "effect": 0})));
         assert_eq!(effect(&f).keys, vec![]);
+    }
+
+    #[test]
+    fn pan_keyframes_add_and_interpolate() {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 0, "value": -50.0}),
+        ));
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 20, "value": 50.0}),
+        ));
+        let clip = f.editor.project().clip("c1").expect("a clip");
+        assert_eq!(clip.pan_at(10.0), Some(0.0));
+    }
+
+    #[test]
+    fn pan_keyframes_set_changes_value() {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 20, "value": 50.0}),
+        ));
+        f.ok(req(
+            "keyframes.set",
+            json!({"clips": "c1", "param": "pan", "at": 20, "by": 25.0}),
+        ));
+        let listed = f.ok(req("keyframes.list", json!({"clips": "c1"}))).result;
+        assert_eq!(listed["clips"][0]["param"], "pan");
+        assert_eq!(listed["clips"][0]["keyframes"][0]["value"], 75.0);
+    }
+
+    #[test]
+    fn pan_keyframes_move_shifts_frame() {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 20, "value": 50.0}),
+        ));
+        f.ok(req(
+            "keyframes.move",
+            json!({"clips": "c1", "param": "pan", "frames": 20, "to": 30}),
+        ));
+        let listed = f.ok(req("keyframes.list", json!({"clips": "c1"}))).result;
+        assert_eq!(listed["clips"][0]["keyframes"][0]["at"], 30);
+    }
+
+    #[test]
+    fn pan_keyframes_copy_and_paste() {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 0, "value": -50.0}),
+        ));
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 20, "value": 50.0}),
+        ));
+        let copied = f.ok(req("keyframes.copy", json!({"clip": "c1"}))).result;
+        f.ok(req(
+            "keyframes.paste",
+            json!({"clips": "c1", "at": 40, "keyframes": copied["keyframes"]}),
+        ));
+        let clip = f.editor.project().clip("c1").expect("a clip");
+        assert_eq!(
+            (clip.pan_at(40.0), clip.pan_at(60.0)),
+            (Some(-50.0), Some(50.0))
+        );
+    }
+
+    #[test]
+    fn pan_keyframes_set_adds_ease_handle() {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 0, "value": -50.0}),
+        ));
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 20, "value": 50.0}),
+        ));
+        f.ok(req(
+            "keyframes.set",
+            json!({"clips": "c1", "param": "pan", "at": 0, "ease": "ease_out"}),
+        ));
+        let a = f
+            .editor
+            .project()
+            .clip("c1")
+            .unwrap()
+            .audio
+            .as_ref()
+            .unwrap();
+        assert!(a.pan_keys[0].out_handle.is_some());
+    }
+
+    #[test]
+    fn pan_keyframes_remove_clears_all_keys() {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 0, "value": -50.0}),
+        ));
+        f.ok(req(
+            "keyframes.remove",
+            json!({"clips": "c1", "param": "pan"}),
+        ));
+        assert!(
+            f.editor
+                .project()
+                .clip("c1")
+                .and_then(|c| c.audio.as_ref())
+                .is_some_and(|a| a.pan_keys.is_empty())
+        );
+    }
+
+    #[test]
+    fn pan_keyframes_refuse_values_outside_range() {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        let got = f.err(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 0, "value": 120.0}),
+        ));
+        assert!(got.message.contains("-100..100"), "{}", got.message);
+    }
+
+    #[test]
+    fn clip_set_pan_on_keyed_clip_needs_at() {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 0, "value": -100.0}),
+        ));
+        let err = f.err(req("clip.set", json!({"clips": "c1", "pan": 50.0})));
+        assert!(err.message.contains("give `at`"), "{}", err.message);
+    }
+
+    #[test]
+    fn clip_set_pan_with_at_adds_keyframe_without_overwriting_pan() {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(req("clip.set", json!({"clips": "c1", "pan": -20.0})));
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": "pan", "at": 0, "value": -100.0}),
+        ));
+        f.ok(req(
+            "clip.set",
+            json!({"clips": "c1", "pan": 100.0, "at": 20}),
+        ));
+        let c = f.editor.project().clip("c1").expect("a clip");
+        let a = c.audio.as_ref().expect("audio");
+        assert_eq!((a.pan, c.pan_at(10.0)), (-20.0, Some(0.0)));
+    }
+
+    #[test]
+    fn clip_set_gain_db_with_at_places_keyframe_on_content_frame() {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(req(
+            "edit.change_speed",
+            json!({"clips": "c1", "speed": 2.0}),
+        ));
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "at": 0, "value": 0.0}),
+        ));
+        f.ok(req(
+            "clip.set",
+            json!({"clips": "c1", "gain_db": -6.0, "at": 10}),
+        ));
+        let keys = &f
+            .editor
+            .project()
+            .clip("c1")
+            .unwrap()
+            .audio
+            .as_ref()
+            .unwrap()
+            .gain_keys;
+        assert_eq!((keys[1].frame, keys[1].value), (10, -6.0));
     }
 }

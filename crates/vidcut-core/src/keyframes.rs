@@ -4,7 +4,7 @@ use crate::model::{
     PositionHandles, Title, TitleKind,
 };
 use crate::otio::effects::rounded;
-use crate::validate::GAIN;
+use crate::validate::{GAIN, PAN};
 
 const FLAT: Handle = Handle {
     frames: 0.0,
@@ -344,6 +344,16 @@ pub fn checked(value: f64) -> crate::error::Result<f64> {
     }
 }
 
+pub fn checked_pan(value: f64) -> crate::error::Result<f64> {
+    if PAN.contains(&value) {
+        Ok(value)
+    } else {
+        Err(crate::error::Error::invalid(format!(
+            "pan {value} is outside -100..100"
+        )))
+    }
+}
+
 pub fn checked_handle(h: Handle, before: bool) -> crate::error::Result<Handle> {
     let side = if before {
         h.frames <= 0.0
@@ -360,21 +370,33 @@ pub fn checked_handle(h: Handle, before: bool) -> crate::error::Result<Handle> {
     Ok(h)
 }
 
-pub fn problem(keys: &[Keyframe]) -> Option<String> {
+fn keys_problem(
+    keys: &[Keyframe],
+    kind: &str,
+    check: impl Fn(f64) -> crate::error::Result<f64>,
+) -> Option<String> {
     if keys.windows(2).any(|w| w[0].frame >= w[1].frame) {
-        return Some("volume keyframes out of order or on one frame".into());
+        return Some(format!("{kind} keyframes out of order or on one frame"));
     }
     keys.iter().find_map(|k| {
         let handles = [(k.in_handle, true), (k.out_handle, false)];
-        checked(k.value)
+        check(k.value)
             .err()
             .or_else(|| {
                 handles
                     .into_iter()
                     .find_map(|(h, before)| checked_handle(h?, before).err())
             })
-            .map(|e| format!("volume keyframe at source frame {}: {}", k.frame, e.message))
+            .map(|e| format!("{kind} keyframe at source frame {}: {}", k.frame, e.message))
     })
+}
+
+pub fn problem(keys: &[Keyframe]) -> Option<String> {
+    keys_problem(keys, "volume", checked)
+}
+
+pub fn pan_problem(keys: &[Keyframe]) -> Option<String> {
+    keys_problem(keys, "pan", checked_pan)
 }
 
 impl ClipAudio {
@@ -386,9 +408,17 @@ impl ClipAudio {
         !self.gain_keys.is_empty()
     }
 
+    pub fn is_pan_keyed(&self) -> bool {
+        !self.pan_keys.is_empty()
+    }
+
     pub fn db_at(&self, frame: f64) -> f64 {
         value_at(&self.gain_keys, frame)
             .map_or(self.gain_db, |v| v.clamp(*GAIN.start(), *GAIN.end()))
+    }
+
+    pub fn pan_at(&self, frame: f64) -> f64 {
+        value_at(&self.pan_keys, frame).map_or(self.pan, |v| v.clamp(*PAN.start(), *PAN.end()))
     }
 
     pub fn top_db(&self) -> f64 {
@@ -426,6 +456,10 @@ impl Clip {
 
     pub fn gain_at(&self, t: f64) -> Option<f64> {
         self.audio.as_ref().map(|a| a.db_at(self.key_at(t)))
+    }
+
+    pub fn pan_at(&self, t: f64) -> Option<f64> {
+        self.audio.as_ref().map(|a| a.pan_at(self.key_at(t)))
     }
 
     pub fn sounds_at(&self, t: i64) -> bool {

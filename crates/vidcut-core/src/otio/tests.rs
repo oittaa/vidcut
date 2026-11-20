@@ -1,6 +1,6 @@
 use super::*;
 use crate::effect_keys::Keyed;
-use crate::model::{AudioInfo, EffectValue, Effects, MediaInfo};
+use crate::model::{AudioInfo, EffectValue, Effects, Handle, MediaInfo};
 use crate::test_support::{FakeEnv, Fixture, media_info, still_info};
 
 fn req(method: &str, params: Value) -> Value {
@@ -366,7 +366,7 @@ fn a_centered_pan_is_not_written() {
     assert!(pan_effects(&doc["tracks"]["children"][1]["children"][0]).is_empty());
 }
 
-fn with_pan(value: f64, keys: Value) -> Value {
+fn with_pan(value: f64, enabled: bool, keys: Value) -> Value {
     let parameter = json!({
         "Parameter ID": "pan",
         "Parameter Value": value,
@@ -377,7 +377,7 @@ fn with_pan(value: f64, keys: Value) -> Value {
         "OTIO_SCHEMA": "Effect.1",
         "metadata": {EDITOR: {
             "Effect Name": "Fairlight Clip Pan",
-            "Enabled": true,
+            "Enabled": enabled,
             "Name": "Pan",
             "Parameters": [parameter],
             "Type": 72,
@@ -387,15 +387,141 @@ fn with_pan(value: f64, keys: Value) -> Value {
 
 #[test]
 fn the_pan_effect_of_a_file_sets_the_pan() {
-    assert_eq!(effects::pan(&with_pan(-37.5, json!({}))), Some(-37.5));
+    assert_eq!(effects::pan(&with_pan(-37.5, true, json!({}))), Some(-37.5));
 }
 
 #[test]
-fn a_keyed_pan_of_a_file_sets_no_pan() {
-    assert_eq!(
-        effects::pan(&with_pan(-37.5, json!({"0": {"Value": 10.0}}))),
-        None
+fn pan_keyframes_and_handles_come_from_the_pan_effect() {
+    let item = with_pan(
+        0.0,
+        false,
+        json!({
+            "0": {"Value": -100.0, "OutBez": {"OutBez": [8.0, 0.0], "Variant Type": "POINTF"}},
+            "24": {"Value": 100.0, "InBez": {"InBez": [-8.0, 0.0], "Variant Type": "POINTF"}},
+        }),
     );
+    assert_eq!(effects::pan_on(&item), Some(false));
+    assert_eq!(
+        effects::pan_keys(&item),
+        vec![
+            Keyframe {
+                frame: 0,
+                value: -100.0,
+                in_handle: None,
+                out_handle: Some(Handle {
+                    frames: 8.0,
+                    value: 0.0,
+                }),
+            },
+            Keyframe {
+                frame: 24,
+                value: 100.0,
+                in_handle: Some(Handle {
+                    frames: -8.0,
+                    value: 0.0,
+                }),
+                out_handle: None,
+            },
+        ]
+    );
+}
+
+#[test]
+fn keyed_pan_round_trips_without_vidcut_metadata() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req(
+        "keyframes.add",
+        json!({"clips": "c1", "param": "pan", "at": 0, "value": -100.0}),
+    ));
+    f.ok(req(
+        "keyframes.add",
+        json!({"clips": "c1", "param": "pan", "at": 24, "value": 100.0}),
+    ));
+    f.ok(req(
+        "keyframes.set",
+        json!({"clips": "c1", "param": "pan", "at": 0, "ease": "ease_out"}),
+    ));
+    f.ok(req(
+        "keyframes.set",
+        json!({"clips": "c1", "param": "pan", "at": 24, "ease": "ease_in"}),
+    ));
+    let mut doc = written(&f);
+    strip_vidcut(&mut doc);
+    let mut other = Fixture::new(&[(10.0, true)]);
+    let res = other.ok(req("timeline.import", json!({"otio": doc})));
+    assert_eq!(res.result["warnings"], json!([]));
+    let a = other.editor.project().tracks[0].clips[0]
+        .audio
+        .as_ref()
+        .expect("audio");
+    assert_eq!((a.pan_on, a.effects.is_none()), (true, true));
+    assert_eq!(a.pan_keys.len(), 2);
+    assert_eq!(
+        (
+            a.pan_keys[0].frame,
+            a.pan_keys[0].value,
+            a.pan_keys[1].frame,
+            a.pan_keys[1].value
+        ),
+        (0, -100.0, 24, 100.0)
+    );
+    assert!(a.pan_keys[0].out_handle.is_some() && a.pan_keys[1].in_handle.is_some());
+}
+
+#[test]
+fn disabled_keyed_pan_round_trips_without_vidcut_metadata() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req(
+        "keyframes.add",
+        json!({"clips": "c1", "param": "pan", "at": 5, "value": -50.0}),
+    ));
+    f.ok(req("clip.set", json!({"clips": "c1", "pan_on": false})));
+    let mut doc = written(&f);
+    strip_vidcut(&mut doc);
+    let mut other = Fixture::new(&[(10.0, true)]);
+    let res = other.ok(req("timeline.import", json!({"otio": doc})));
+    assert_eq!(res.result["warnings"], json!([]));
+    let a = other.editor.project().tracks[0].clips[0]
+        .audio
+        .as_ref()
+        .expect("audio");
+    assert!(!a.pan_on && a.effects.is_none());
+    assert_eq!(a.pan_keys.len(), 1);
+    assert_eq!((a.pan_keys[0].frame, a.pan_keys[0].value), (5, -50.0));
+}
+
+#[test]
+fn keyed_centered_pan_round_trips_with_vidcut_metadata() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req(
+        "keyframes.add",
+        json!({"clips": "c1", "param": "pan", "at": 0, "value": -100.0}),
+    ));
+    f.ok(req(
+        "keyframes.add",
+        json!({"clips": "c1", "param": "pan", "at": 24, "value": 100.0}),
+    ));
+    let mut other = Fixture::new(&[(10.0, true)]);
+    let res = other.ok(req("timeline.import", json!({"otio": written(&f)})));
+    assert_eq!(res.result["warnings"], json!([]));
+    let a = other.editor.project().tracks[0].clips[0]
+        .audio
+        .as_ref()
+        .expect("audio");
+    assert_eq!(a.pan, 0.0);
+    assert_eq!((a.pan_keys[0].value, a.pan_keys[1].value), (-100.0, 100.0));
 }
 
 fn eq_effects(item: &Value) -> Vec<Value> {

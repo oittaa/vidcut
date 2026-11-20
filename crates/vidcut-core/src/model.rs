@@ -6259,14 +6259,19 @@ pub struct ClipAudio {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gain_keys: Vec<Keyframe>,
     pub muted: bool,
-    /// The pan, from -100 (all the way left) to 100 (all the way right).
-    /// Left out at 0, the middle.
+    /// The pan, from -100 (all the way left) to 100 (all the way right),
+    /// while the clip has no pan keyframes. Left out at 0, the middle.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub pan: f64,
     /// The switch of the pan. Off keeps the pan, and the sound plays as at
     /// 0. Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub pan_on: bool,
+    /// The pan keyframes, in the order of their frames, one at most on a
+    /// frame. With them, the pan is their curve. Left out when the clip has
+    /// none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pan_keys: Vec<Keyframe>,
     /// The equalizer. Left out when the clip has none, as a new clip:
     /// then it is off, with the usual bands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6281,7 +6286,8 @@ pub struct ClipAudio {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noise_reduction: Option<NoiseReduction>,
     /// Effects on its sound, carried from another editor. The clip volume
-    /// is `gain_db` and `gain_keys`.
+    /// is `gain_db` and `gain_keys`, and the pan is `pan`, `pan_on` and
+    /// `pan_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
     /// Voice Isolation of the clip. A clip that has it off stays off, also

@@ -101,6 +101,7 @@ pub fn clip(p: &Project, c: &mut Clip, r: Rates) {
             conv(was_end + a.tail) - end,
         );
         a.gain_keys = crate::keyframes::scaled(&a.gain_keys, conv, ratio);
+        a.pan_keys = crate::keyframes::scaled(&a.pan_keys, conv, ratio);
         if let Some(e) = a.effects.as_mut() {
             effects(e, r);
         }

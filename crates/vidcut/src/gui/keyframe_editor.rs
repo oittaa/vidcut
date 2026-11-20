@@ -20,7 +20,7 @@ use vidcut_core::model::{
 };
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::request::{EffectParam, KeyParam};
-use vidcut_core::validate::GAIN;
+use vidcut_core::validate::{GAIN, PAN};
 
 use super::inspector::{Shape as Frame, key_diamond, shape};
 use super::placing::ease_label;
@@ -378,7 +378,7 @@ struct Target {
 impl Target {
     fn takes(&self, param: KeyParam) -> bool {
         match param {
-            KeyParam::Volume => self.clip.audio.is_some(),
+            KeyParam::Volume | KeyParam::Pan => self.clip.audio.is_some(),
             KeyParam::Speed => self.clip.start < self.play && self.play < self.clip.end(),
             _ => true,
         }
@@ -472,7 +472,7 @@ fn group_of(param: KeyParam) -> Group {
         | KeyParam::Anchor
         | KeyParam::Pitch
         | KeyParam::Yaw => Group::Transform,
-        KeyParam::Volume => Group::Audio,
+        KeyParam::Volume | KeyParam::Pan => Group::Audio,
         KeyParam::CropLeft
         | KeyParam::CropRight
         | KeyParam::CropTop
@@ -549,6 +549,7 @@ fn plain_lane_name(param: KeyParam) -> &'static str {
     match param {
         KeyParam::Effect(_) => "",
         KeyParam::Volume => "Volume",
+        KeyParam::Pan => "Pan",
         KeyParam::Position => "Position",
         KeyParam::Zoom => "Zoom",
         KeyParam::Rotation => "Rotation",
@@ -576,6 +577,7 @@ fn plain_lane_name(param: KeyParam) -> &'static str {
 fn limits(param: KeyParam) -> (f64, f64) {
     match param {
         KeyParam::Volume => (*GAIN.start(), *GAIN.end()),
+        KeyParam::Pan => (*PAN.start(), *PAN.end()),
         KeyParam::Position
         | KeyParam::UpperPosition
         | KeyParam::LowerPosition
@@ -598,7 +600,7 @@ fn limits(param: KeyParam) -> (f64, f64) {
 
 fn quantize(param: KeyParam, d: f64) -> f64 {
     let places = match param {
-        KeyParam::Volume => 1,
+        KeyParam::Volume | KeyParam::Pan => 1,
         KeyParam::Rotation
         | KeyParam::UpperRotation
         | KeyParam::LowerRotation
@@ -612,6 +614,7 @@ fn quantize(param: KeyParam, d: f64) -> f64 {
 fn least_span(param: KeyParam) -> f64 {
     match param {
         KeyParam::Volume => 6.0,
+        KeyParam::Pan => 20.0,
         KeyParam::Zoom | KeyParam::UpperZoom | KeyParam::LowerZoom => 0.1,
         KeyParam::Rotation
         | KeyParam::UpperRotation
@@ -639,6 +642,7 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         KeyParam::CropLeft | KeyParam::CropRight => v * fw,
         KeyParam::CropTop | KeyParam::CropBottom => v * fh,
         KeyParam::Volume
+        | KeyParam::Pan
         | KeyParam::Rotation
         | KeyParam::UpperRotation
         | KeyParam::LowerRotation
@@ -666,6 +670,7 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         KeyParam::CropLeft | KeyParam::CropRight => v / fw,
         KeyParam::CropTop | KeyParam::CropBottom => v / fh,
         KeyParam::Volume
+        | KeyParam::Pan
         | KeyParam::Rotation
         | KeyParam::UpperRotation
         | KeyParam::LowerRotation
@@ -694,6 +699,7 @@ fn unit(param: KeyParam) -> &'static str {
 fn places(param: KeyParam) -> usize {
     match param {
         KeyParam::Volume
+        | KeyParam::Pan
         | KeyParam::Zoom
         | KeyParam::UpperZoom
         | KeyParam::LowerZoom
@@ -786,6 +792,7 @@ fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
         | KeyParam::UpperZoom
         | KeyParam::LowerZoom
         | KeyParam::Volume
+        | KeyParam::Pan
         | KeyParam::CropSoftness => 0.2,
         KeyParam::Rotation | KeyParam::UpperRotation | KeyParam::LowerRotation => 0.02,
         KeyParam::Opacity => 0.002,
@@ -1282,6 +1289,17 @@ fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
         out.push(Lane {
             param: KeyParam::Volume,
             keys: audio.gain_keys.clone(),
+            extra: Vec::new(),
+        });
+    }
+    if let Some(audio) = clip
+        .audio
+        .as_ref()
+        .filter(|a| !keyed_only || a.is_pan_keyed())
+    {
+        out.push(Lane {
+            param: KeyParam::Pan,
+            keys: audio.pan_keys.clone(),
             extra: Vec::new(),
         });
     }
@@ -3422,7 +3440,8 @@ impl Workspace {
         let mut v = held.map_or(shown, |h| h.value);
         let speed = match param {
             KeyParam::Volume => 0.1,
-            KeyParam::Zoom
+            KeyParam::Pan
+            | KeyParam::Zoom
             | KeyParam::UpperZoom
             | KeyParam::LowerZoom
             | KeyParam::Rotation

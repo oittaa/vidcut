@@ -6,7 +6,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
 
 - **In vidcut:**
   - A clip has volume keyframes on its volume line ([spec §9](../spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
-  - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
+  - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` and `ClipAudio::pan_keys` hold the volume and pan keyframes.
   - Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../spec.md#815-transform-and-crop-pp-766768), D75).
   - The values of the effects of a clip have keyframes on `Effect` ([§8.16](../spec.md#816-effects-pp-765-3526-3536), [X152](../deviations.md#x152-film-grain-freeze-has-no-keyframes)).
   - The Keyframes tab shows each value of the item selected first that can have keyframes.
@@ -17,7 +17,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** keyframes of the Pan of a clip, and of the other values of a [title](#titles).
+- **To do:** keyframes of the other values of a [title](#titles).
 
 ## What Resolve has
 
@@ -132,7 +132,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - Shift and a drag on a curve point change only the time or only the value.
 - With Enable Snapping on, a dragged keyframe goes to the playhead and to the keyframes of other values.
 - A drag on a group track moves that group's keyframes at that time.
-- Volume is a track in the Audio group.
+- Volume and Pan are tracks in the Audio group.
 - The curve of a value shows under its track. A drag on an In or Out handle changes that handle and lines up the other one. With Alt, the handle moves alone.
 - A drag on the line between two keyframes moves the values of the two keyframes. Alt and a press on the line adds a keyframe.
 - The Graph button shows the curves together in one large graph in the place of the tracks.

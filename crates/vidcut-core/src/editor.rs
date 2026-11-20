@@ -6303,6 +6303,7 @@ fn to_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds, keep: bool) {
         retime(&mut c.audio_effects);
         if scaled {
             c.gain_keys = crate::keyframes::scaled(&c.gain_keys, conv, ratio);
+            c.pan_keys = crate::keyframes::scaled(&c.pan_keys, conv, ratio);
             if let Some(picture) = c.picture.as_mut() {
                 picture.scale_times(&conv, &|_| ratio);
             }
@@ -6564,7 +6565,15 @@ fn place_imported(
                         .collect(),
                     muted: c.muted,
                     pan: c.pan.clamp(*PAN.start(), *PAN.end()),
-                    pan_on: true,
+                    pan_on: c.pan_on,
+                    pan_keys: c
+                        .pan_keys
+                        .iter()
+                        .map(|k| crate::model::Keyframe {
+                            frame: k.frame + keys_from,
+                            ..*k
+                        })
+                        .collect(),
                     equalizer: c
                         .equalizer
                         .clone()
@@ -9741,6 +9750,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
     let mut keyed: Vec<&str> = Vec::new();
     if c.audio.as_ref().is_some_and(|a| a.is_keyed()) {
         keyed.push("volume");
+    }
+    if c.audio.as_ref().is_some_and(|a| a.is_pan_keyed()) {
+        keyed.push("pan");
     }
     if let Some(picture) = &c.picture {
         keyed.extend(picture.keyed_names());

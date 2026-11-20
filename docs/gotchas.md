@@ -463,7 +463,10 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - The first number is the time from the keyframe in frames. The second is a value in the units of the parameter.
   - Resolve refuses the whole timeline when a handle is a bare array. This is so for the volume and for Transform.
   - Resolve also refuses it when a number of a `POINTF` has no decimal point, for example `0` in place of `0.0`.
-  - `otio::effects` reads and writes the handles of the volume and the picture in Resolve's form.
+  - `otio::effects` reads and writes the handles of the volume, the pan and the picture in Resolve's form.
+- **Resolve keeps `Enabled` and the `Key Frames` of `Fairlight Clip Pan`.**
+  - Resolve Studio 21.2 keeps `Enabled` when false and reads and writes `Key Frames` with `InBez` and `OutBez` handles.
+  - A disabled pan plays centered, and an enabled eased pan holds before jumping at the second keyframe, as for volume ([X74](deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
 - **Resolve's eases of the picture are Bezier handles, as on the volume.**
   - In the Inspector, Ease Out and Ease In put a flat handle at a third of the gap. Thus the two together play an S-curve.
   - Renders of an eased zoom fit the cubic Bezier curve within 0.0004 of the zoom.

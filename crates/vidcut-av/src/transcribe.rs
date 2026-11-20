@@ -673,6 +673,7 @@ pub fn voice_activity(
         isolation: None,
         keyed: None,
         pan: 0.0,
+        pan_keyed: None,
         equalizer: None,
         leveler: None,
         compressor: None,

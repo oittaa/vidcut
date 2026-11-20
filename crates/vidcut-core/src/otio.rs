@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Compound, Grade, ImageSequence, Keyframe, Marks, Media, MotionPath, Picture, Project,
-    Section, Speed, Title, TrackKind,
+    Clip, ClipAudio, Compound, Grade, ImageSequence, Keyframe, Marks, Media, MotionPath, Picture,
+    Project, Section, Speed, Title, TrackKind,
 };
 use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
@@ -658,8 +658,27 @@ fn our_skip(speed: &mut Option<Speed>, item: &Value) {
     }
 }
 
-fn our_keys(meta: &Value) -> Option<Vec<Keyframe>> {
-    serde_json::from_value(meta.get("gain_keys")?.clone()).ok()
+fn our_keys(meta: &Value, key: &str) -> Option<Vec<Keyframe>> {
+    serde_json::from_value(meta.get(key)?.clone()).ok()
+}
+
+fn our_pan_keys(meta: &Value) -> Option<Vec<Keyframe>> {
+    our_keys(meta, "pan_keys").filter(|keys| crate::keyframes::pan_problem(keys).is_none())
+}
+
+fn write_sound_meta(meta: &mut Value, au: &ClipAudio, origin: i64) {
+    if au.is_keyed() {
+        meta["gain_keys"] = json!(effects::relative(&au.gain_keys, origin));
+    }
+    if au.pan != 0.0 || au.is_pan_keyed() {
+        meta["pan"] = json!(au.pan);
+    }
+    if !au.pan_on {
+        meta["pan_on"] = json!(false);
+    }
+    if au.is_pan_keyed() {
+        meta["pan_keys"] = json!(effects::relative(&au.pan_keys, origin));
+    }
 }
 
 fn with_speed(c: &Clip, end: Option<i64>, fps: f64, mut effects: Vec<Value>) -> Vec<Value> {
@@ -853,14 +872,8 @@ pub fn export_drawn(
                 if let Some(au) = &c.audio {
                     meta["stream"] = json!(au.stream);
                     meta["gain_db"] = json!(au.gain_db);
-                    if au.is_keyed() {
-                        meta["gain_keys"] =
-                            json!(effects::relative(&au.gain_keys, c.content_at(s)));
-                    }
                     meta["muted"] = json!(au.muted);
-                    if au.heard_pan() != 0.0 {
-                        meta["pan"] = json!(au.heard_pan());
-                    }
+                    write_sound_meta(&mut meta, au, c.content_at(s));
                     if let Some(eq) = &au.equalizer {
                         meta["equalizer"] = json!(eq);
                     }
@@ -976,9 +989,7 @@ pub fn export_drawn(
                     "clip": c.id, "media": c.media, "color": c.color, "stream": au.stream,
                     "gain_db": au.gain_db,
                 });
-                if au.heard_pan() != 0.0 {
-                    meta["pan"] = json!(au.heard_pan());
-                }
+                write_sound_meta(&mut meta, au, c.content_at(s));
                 if let Some(eq) = &au.equalizer {
                     meta["equalizer"] = json!(eq);
                 }
@@ -993,9 +1004,6 @@ pub fn export_drawn(
                 }
                 if let Some(v) = au.voice_isolation {
                     meta["voice_isolation"] = json!(v);
-                }
-                if au.is_keyed() {
-                    meta["gain_keys"] = json!(effects::relative(&au.gain_keys, c.content_at(s)));
                 }
                 own_pace(&mut meta, c, s);
                 let n = m
@@ -1457,6 +1465,8 @@ pub struct ImportedClip {
     pub gain_keys: Vec<Keyframe>,
     pub muted: bool,
     pub pan: f64,
+    pub pan_on: bool,
+    pub pan_keys: Vec<Keyframe>,
     pub equalizer: Option<crate::model::Equalizer>,
     pub dialogue_leveler: Option<crate::model::DialogueLeveler>,
     pub compressor: Option<crate::model::Compressor>,
@@ -1547,6 +1557,8 @@ impl ImportedClip {
             gain_keys: Vec::new(),
             muted: false,
             pan: 0.0,
+            pan_on: true,
+            pan_keys: Vec::new(),
             equalizer: None,
             dialogue_leveler: None,
             compressor: None,
@@ -2332,9 +2344,11 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         audio: None,
                         stream: meta["stream"].as_u64().unwrap_or(0) as u32,
                         gain_db: meta["gain_db"].as_f64().unwrap_or(0.0),
-                        gain_keys: our_keys(meta).unwrap_or_default(),
+                        gain_keys: our_keys(meta, "gain_keys").unwrap_or_default(),
                         muted: meta["muted"].as_bool().unwrap_or(false),
                         pan: meta["pan"].as_f64().unwrap_or(0.0),
+                        pan_on: meta["pan_on"].as_bool().unwrap_or(true),
+                        pan_keys: our_pan_keys(meta).unwrap_or_default(),
                         compressor: serde_json::from_value(meta["compressor"].clone()).ok(),
                         noise_reduction: serde_json::from_value(meta["noise_reduction"].clone())
                             .ok(),
@@ -2439,10 +2453,12 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let muted = item["enabled"].as_bool() == Some(false);
             let link = link_group(item);
             let gain = meta["gain_db"].as_f64().or_else(|| effects::gain(item));
-            let gain_keys = our_keys(meta).unwrap_or_else(|| effects::gain_keys(item));
+            let gain_keys = our_keys(meta, "gain_keys").unwrap_or_else(|| effects::gain_keys(item));
             effects::drop_gain_keys(&mut effects);
             let voice_isolation = serde_json::from_value(meta["voice_isolation"].clone()).ok();
             let pan = meta["pan"].as_f64().or_else(|| effects::pan(item));
+            let pan_on = meta["pan_on"].as_bool().or_else(|| effects::pan_on(item));
+            let pan_keys = our_pan_keys(meta).unwrap_or_else(|| effects::pan_keys(item));
             let equalizer = serde_json::from_value(meta["equalizer"].clone())
                 .ok()
                 .filter(|e| crate::equalizer::problem(e).is_none())
@@ -2512,6 +2528,12 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if let Some(pan) = pan {
                     c.pan = pan;
                 }
+                if let Some(pan_on) = pan_on {
+                    c.pan_on = pan_on;
+                }
+                if !pan_keys.is_empty() {
+                    c.pan_keys = pan_keys;
+                }
                 if equalizer.is_some() {
                     c.equalizer = equalizer;
                 }
@@ -2561,6 +2583,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 gain_keys,
                 muted,
                 pan: pan.unwrap_or(0.0),
+                pan_on: pan_on.unwrap_or(true),
+                pan_keys,
                 equalizer,
                 dialogue_leveler,
                 compressor,
