@@ -6,6 +6,7 @@ use serde_json::{Map, Value, json};
 use vidcut_core::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, Picture};
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed};
 use vidcut_core::ops::picture::takes_effects;
+use vidcut_core::preferences::SwitchingClips;
 use vidcut_core::request::{GradeAdd, GradeLevel, GradeMixer, Page, PrinterColor};
 use vidcut_core::shortcuts::{Action, Panel};
 
@@ -134,6 +135,34 @@ fn key_at(g: &Grade, n: u32, frame: i64) -> Option<usize> {
     g.node(n)?.changed_key(frame)
 }
 
+fn correctors(g: &Grade) -> impl DoubleEndedIterator<Item = u32> + '_ {
+    (g.nodes.iter().enumerate())
+        .filter(|(_, d)| !d.tool.is_mixer())
+        .map(|(i, _)| i as u32 + 1)
+}
+
+fn stepped(g: &Grade, from: Option<u32>, forward: bool) -> Option<u32> {
+    match (from, forward) {
+        (Some(at), true) => correctors(g).find(|n| *n > at).or(correctors(g).next()),
+        (Some(at), false) => (correctors(g).rev())
+            .find(|n| *n < at)
+            .or(correctors(g).next_back()),
+        (None, true) => correctors(g).next(),
+        (None, false) => correctors(g).next_back(),
+    }
+}
+
+fn switched_to(g: &Grade, how: SwitchingClips, kept: Option<u32>, was: Option<u32>) -> u32 {
+    let kept = kept.filter(|n| g.node(*n).is_some());
+    match how {
+        SwitchingClips::LastAdjusted => kept,
+        SwitchingClips::First => correctors(g).next(),
+        SwitchingClips::Last => correctors(g).next_back(),
+        SwitchingClips::Same => was.filter(|n| g.node(*n).is_some()).or(kept),
+    }
+    .unwrap_or(1)
+}
+
 fn last_corrector(g: &Grade, kept: impl Fn(u32) -> bool) -> Option<u32> {
     let correctors = (g.nodes.iter().zip(1u32..))
         .filter(|(d, k)| !d.tool.is_mixer() && kept(*k))
@@ -251,6 +280,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         label: "Source".into(),
         place: [0.0; 2],
         faded: false,
+        switch: false,
         outlet: Some(Outlet {
             name: "Source".into(),
             color: RGB_KNOT,
@@ -273,6 +303,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
             label,
             place: d.place,
             faded: !d.on,
+            switch: !d.tool.is_mixer(),
             outlet: Some(Outlet {
                 name: "RGB Output".into(),
                 color: RGB_KNOT,
@@ -286,6 +317,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         label: "Output".into(),
         place: [0.0; 2],
         faded: false,
+        switch: false,
         outlet: None,
         inlets: vec![input(0, "Output".into())],
         edge: Some(Edge::Right),
@@ -1216,14 +1248,21 @@ impl Workspace {
 
     pub(super) fn settle_grade(&mut self, of: &GradeOf, g: &Grade) {
         let open = (self.project().and_then(|p| p.sheet_key())).unwrap_or_default();
+        let switching = self.snap.switching_clips;
         let page = &mut self.effects_page;
         if page
             .grade_seen
             .as_ref()
             .is_none_or(|(t, o)| *t != open || o != of)
         {
-            page.grade_seen = Some((open, of.clone()));
-            page.grade_nodes = vec![1];
+            let was = page.grade_nodes.last().copied();
+            if let (Some(left), Some(n)) = (page.grade_seen.take(), was) {
+                page.grade_left.insert(left, n);
+            }
+            let seen = (open, of.clone());
+            let kept = page.grade_left.get(&seen).copied();
+            page.grade_nodes = vec![switched_to(g, switching, kept, was)];
+            page.grade_seen = Some(seen);
             page.grade_coming = None;
             page.grade_view.stop();
             page.grade_spot = None;
@@ -1328,6 +1367,13 @@ impl Workspace {
         }
         if struck(Action::SwitchAllNodes) {
             self.switch_grade_nodes(&of, &g, None, "Enable/Disable All Nodes");
+        }
+        for (action, forward) in [(Action::PreviousNode, false), (Action::NextNode, true)] {
+            if struck(action)
+                && let Some(n) = stepped(&g, self.current_grade_node(&g), forward)
+            {
+                self.send("gui.grade_nodes", json!({ "nodes": [n] }));
+            }
         }
         for (action, act) in [
             (Action::ResetGradesKeepNodes, FieldAct::KeepNodes),
@@ -1560,6 +1606,9 @@ impl Workspace {
         self.send_all(moves, "Move Nodes");
         if let Some(Port::Node(n)) = done.pointed {
             self.effects_page.grade_nodes = vec![n];
+        }
+        if let Some(Port::Node(n)) = done.switched {
+            node_act = Some((NodeAct::Toggle, n));
         }
         if let Some(act) = node_act {
             self.grade_node_act(&of, &stored, act);

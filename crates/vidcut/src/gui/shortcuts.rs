@@ -37,7 +37,13 @@ fn sign(key: Key) -> bool {
 fn by_place(key: Key) -> bool {
     matches!(
         key,
-        Key::Comma | Key::Period | Key::Backslash | Key::OpenBracket | Key::CloseBracket
+        Key::Comma
+            | Key::Period
+            | Key::Backslash
+            | Key::OpenBracket
+            | Key::CloseBracket
+            | Key::Semicolon
+            | Key::Quote
     )
 }
 

@@ -2884,12 +2884,21 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
 - **The current node** (p. 3391):
   - The current node has an orange outline. The palettes change the current node.
   - A Command-click or a drag box selects more nodes. They have a white outline. The current node stays orange.
-  - Resolve keeps the last current node of each clip. The setting "Switching clips" changes this.
+  - Previous Node (Option-Shift-Semicolon) and Next Node (Option-Shift-Apostrophe) select another node. The last node loops around to the first one, and the first to the last.
+  - Measured in Resolve Studio 21.2: Previous Node and Next Node go in number order and skip the mixers. From a mixer, Next Node goes to the next corrector.
+  - vidcut: Alt+Shift+; and Alt+Shift+' do the same. They match by the place of the key.
+  - The setting "Switching clips" sets the node that another clip selects. The option menu of the Node Editor and the Color panel of the User Preferences have it.
+    - Selects last adjusted node, the default: each clip keeps its own current node (p. 118).
+    - Selects first node and Selects last node: the first or the last node (p. 118).
+    - Selects same node: the node with the same number. In a clip with fewer nodes, the next highest node (p. 118).
+  - Measured in Resolve Studio 21.2: Last Adjusted Node gives back the node that was current when the clip was left. That node need not be the node with the last change.
+  - Measured: with Same Node, a clip with fewer nodes gave its own last current node, not its highest node.
+  - vidcut: the preference `color.switching_clips`, with `last_adjusted`, `first`, `last` and `same`, as measured. Preferences > Color has it.
+  - vidcut: First and Last give the corrector with the lowest or the highest number. A grade that this run of the GUI did not show selects node 1. The timeline grade counts as a clip.
   - Measured in Resolve Studio 21.2: a drag box from the empty Node Editor selects the nodes in the box.
   - Measured: a click on the empty Node Editor keeps the current node.
   - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
   - vidcut: a Ctrl-click adds a node to the selection, and a drag box adds the nodes in the box. The current node stays.
-  - vidcut: a new clip or a new grade mode selects node 1 ([todo](todo/color-page.md)).
   - vidcut: a click on the empty Node Editor keeps the current node. The other selected nodes are no longer selected. This part is not measured in Resolve.
 - **Add nodes** (pp. 3394–3395, 3410–3413):
   - The menu of a node has an Add Node submenu. The menu of the empty Node Editor has Add Node > Corrector. That corrector has no connection.
@@ -2931,6 +2940,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.connect`. The Color page and the Effects page share one Node Editor, with the same drags and clicks.
 - **Turn off and reset** (pp. 3392–3393):
   - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.
+  - Measured in Resolve Studio 21.2: a click on the number turns that node off or on. The current node stays.
+  - vidcut: a click on the number of a corrector does the same. The selection stays.
   - With more than one selected node, Command-D turns the selected nodes off or on. The current node is always one of them (p. 3392).
   - Option-D turns all nodes off, and then all on. After that, each node is on, also a node that was off before (p. 3392).
   - Measured in Resolve Studio 21.2: Command-D gives each selected node the opposite of the state of the current node.

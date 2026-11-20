@@ -53,6 +53,7 @@ pub(super) struct Tile<K> {
     pub(super) label: String,
     pub(super) place: [f64; 2],
     pub(super) faded: bool,
+    pub(super) switch: bool,
     pub(super) outlet: Option<Outlet>,
     pub(super) inlets: Vec<Inlet>,
     pub(super) edge: Option<Edge>,
@@ -99,6 +100,7 @@ pub(super) enum Pick {
 
 pub(super) struct Done<K> {
     pub(super) picked: Option<(K, Pick)>,
+    pub(super) switched: Option<K>,
     pub(super) pointed: Option<K>,
     pub(super) moved: Vec<(K, [f64; 2])>,
     pub(super) link: Option<Link<K>>,
@@ -414,6 +416,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     }
     let mut done = Done {
         picked: None,
+        switched: None,
         pointed: None,
         moved: Vec::new(),
         link: None,
@@ -454,7 +457,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             _ => Stroke::new(1.0, c.text_dim.gamma_multiply(0.6)),
         };
         painter.rect_stroke(r, CornerRadius::same(4), edge, StrokeKind::Inside);
-        painter.text(
+        let label = painter.text(
             r.center(),
             Align2::CENTER_CENTER,
             &t.label,
@@ -474,7 +477,12 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
                 knot(&painter, at, along(side), i.knot);
             }
         }
-        if node_resp.clicked() {
+        let on_label = node_resp
+            .interact_pointer_pos()
+            .is_some_and(|at| label.expand(2.0 * z).contains(at));
+        if node_resp.clicked() && t.switch && on_label {
+            done.switched = Some(t.key.clone());
+        } else if node_resp.clicked() {
             let (add, alt) = ui.input(|i| (i.modifiers.command, i.modifiers.alt));
             let how = match (alt && selected, add) {
                 (true, _) => Pick::Active,

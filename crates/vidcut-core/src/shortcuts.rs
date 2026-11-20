@@ -160,6 +160,8 @@ actions! {
     DeleteNode "delete_node",
     SwitchSelectedNodes "switch_selected_nodes",
     SwitchAllNodes "switch_all_nodes",
+    PreviousNode "previous_node",
+    NextNode "next_node",
     ResetNodeGrade "reset_node_grade",
     ResetGradesKeepNodes "reset_grades_keep_nodes",
     ResetAllGrades "reset_all_grades",
@@ -198,6 +200,8 @@ impl Action {
             | Action::DeleteNode
             | Action::SwitchSelectedNodes
             | Action::SwitchAllNodes
+            | Action::PreviousNode
+            | Action::NextNode
             | Action::ResetNodeGrade
             | Action::ResetGradesKeepNodes
             | Action::ResetAllGrades
@@ -1514,6 +1518,20 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Alt+D"],
         "Turn all nodes off or on",
         Some("With any node on, all go off. Else all go on."),
+    ),
+    own(
+        Color,
+        Action::PreviousNode,
+        &["Alt+Shift+;"],
+        "Previous node",
+        Some("The corrector before the current node. The first goes to the last."),
+    ),
+    own(
+        Color,
+        Action::NextNode,
+        &["Alt+Shift+'"],
+        "Next node",
+        Some("The corrector after the current node. The last goes to the first."),
     ),
     own(
         Color,

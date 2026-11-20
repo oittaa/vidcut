@@ -430,13 +430,16 @@ The bar and the Jobs button:
   - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.
   - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
   - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.
-  - Another clip, another grade mode or another timeline selects node 1 (`Workspace::settle_grade`).
+  - Another clip, another grade mode or another timeline selects a node by `color.switching_clips` (`Workspace::settle_grade`).
+  - `EffectsPage::grade_left` keeps the current node of each grade that the page showed. `Snapshot::switching_clips` holds the preference.
+  - A click on the number of a corrector gives `Done::switched`. The page then sends `grade.set` with `on`, and the selection stays.
+  - Previous Node and Next Node step through the correctors in number order and wrap. They send `gui.grade_nodes`.
   - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.
   - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
   - On a mixer, the keys add only a serial node or an appended node, as the menu does.
   - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
   - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.set` and `grade.clear`.
-  - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, and reset.
+  - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, reset, and the previous and the next node.
   - Ctrl+D and Alt+D send one `grade.set` with `on` for each node that changes (`Workspace::switch_grade_nodes`).
   - A delete sends one `grade.remove` for each node, from the highest number down (`Workspace::delete_grade_nodes`). Thus each number stays right until its turn.
   - After a delete, the last corrector becomes the current node.
@@ -782,7 +785,7 @@ From an event to an action (`crates/vidcut/src/gui/shortcuts.rs`):
 - `owner` gives the action of one event. `Fired` holds the actions of the events of one frame, and `Workspace::keys` reads it.
 - The modifiers must be equal to the modifiers of the `Combo`.
 - A modifier that a sign needs on the layout does not count. Why: Shift+0 makes the equals sign on a Nordic layout, and the binding is that sign.
-- The two brackets, the comma, the period and the backslash also match by the place of the key. Why: on a Nordic layout these places make other signs, and the keys stay at the same place.
+- The two brackets, the comma, the period, the backslash, the semicolon and the quote also match by the place of the key. Why: on a Nordic layout these places make other signs, and the keys stay at the same place.
 - The other signs fire from `Event::Text`. Why: a dead key on a Nordic layout reports `Equals` and types nothing.
 - Ctrl+C, Ctrl+X and Ctrl+V reach egui as `Event::Copy`, `Event::Cut` and `Event::Paste`. `owner` reads them as those three keys. On Windows, Ctrl+Insert, Shift+Delete and Shift+Insert make the same events.
 
