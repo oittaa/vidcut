@@ -113,6 +113,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.window.add", &["shape", "clip"]),
     ("grade.window.set", &["window", "clip"]),
     ("grade.window.remove", &["window", "clip"]),
+    ("grade.window.convert", &["window", "clip"]),
     ("effects.add", &["clips", "kind"]),
     ("comp.add", &["clip", "tool"]),
     ("comp.set", &["clip", "node"]),

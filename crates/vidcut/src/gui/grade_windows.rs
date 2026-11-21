@@ -5,10 +5,11 @@ use vidcut_core::model::{GradeWindow, WindowKind, WindowShape};
 
 use super::theme;
 
-const ADDS: [(WindowKind, &str); 4] = [
+const ADDS: [(WindowKind, &str); 5] = [
     (WindowKind::Linear, "Linear"),
     (WindowKind::Circle, "Circle"),
     (WindowKind::Polygon, "Polygon"),
+    (WindowKind::Curve, "Curve"),
     (WindowKind::Gradient, "Gradient"),
 ];
 
@@ -71,6 +72,7 @@ pub(super) enum WindowAct {
     Mask(usize, bool),
     Rename(usize, String),
     ResetWindow,
+    Convert,
     Value(usize, Field, f64),
 }
 
@@ -86,6 +88,7 @@ fn glyph(kind: WindowKind) -> &'static str {
         WindowKind::Linear => icon::SQUARE,
         WindowKind::Circle => icon::CIRCLE,
         WindowKind::Polygon => icon::POLYGON,
+        WindowKind::Curve => icon::BEZIER_CURVE,
         WindowKind::Gradient => icon::GRADIENT,
     }
 }
@@ -93,7 +96,10 @@ fn glyph(kind: WindowKind) -> &'static str {
 fn value(w: &GradeWindow, f: Field) -> Option<f64> {
     match (f, &w.shape) {
         (Field::Size, WindowShape::Gradient { .. })
-        | (Field::Aspect, WindowShape::Gradient { .. } | WindowShape::Polygon { .. }) => None,
+        | (
+            Field::Aspect,
+            WindowShape::Gradient { .. } | WindowShape::Polygon { .. } | WindowShape::Curve { .. },
+        ) => None,
         (Field::Size, _) => Some(w.size),
         (Field::Aspect, _) => Some(w.aspect),
         (Field::Pan, _) => Some(w.pan),
@@ -101,11 +107,20 @@ fn value(w: &GradeWindow, f: Field) -> Option<f64> {
         (Field::Rotate, _) => Some(w.rotate),
         (Field::Opacity, _) => Some(w.opacity),
         (Field::Soft(i), WindowShape::Linear { soft, .. }) => soft.get(i).copied(),
-        (Field::Soft(0), WindowShape::Circle { soft } | WindowShape::Gradient { soft }) => {
-            Some(*soft)
-        }
-        (Field::Inside, WindowShape::Polygon { inside, .. }) => Some(*inside),
-        (Field::Outside, WindowShape::Polygon { outside, .. }) => Some(*outside),
+        (
+            Field::Soft(0),
+            WindowShape::Circle { soft }
+            | WindowShape::Curve { soft, .. }
+            | WindowShape::Gradient { soft },
+        ) => Some(*soft),
+        (
+            Field::Inside,
+            WindowShape::Polygon { inside, .. } | WindowShape::Curve { inside, .. },
+        ) => Some(*inside),
+        (
+            Field::Outside,
+            WindowShape::Polygon { outside, .. } | WindowShape::Curve { outside, .. },
+        ) => Some(*outside),
         _ => None,
     }
 }
@@ -121,11 +136,20 @@ pub(super) fn with_value(w: &GradeWindow, f: Field, v: f64) -> GradeWindow {
         Field::Opacity => w.opacity = v,
         Field::Soft(_) | Field::Inside | Field::Outside => match (f, &mut w.shape) {
             (Field::Soft(i), WindowShape::Linear { soft, .. }) if i < soft.len() => soft[i] = v,
-            (Field::Soft(_), WindowShape::Circle { soft } | WindowShape::Gradient { soft }) => {
-                *soft = v;
-            }
-            (Field::Inside, WindowShape::Polygon { inside, .. }) => *inside = v,
-            (Field::Outside, WindowShape::Polygon { outside, .. }) => *outside = v,
+            (
+                Field::Soft(_),
+                WindowShape::Circle { soft }
+                | WindowShape::Curve { soft, .. }
+                | WindowShape::Gradient { soft },
+            ) => *soft = v,
+            (
+                Field::Inside,
+                WindowShape::Polygon { inside, .. } | WindowShape::Curve { inside, .. },
+            ) => *inside = v,
+            (
+                Field::Outside,
+                WindowShape::Polygon { outside, .. } | WindowShape::Curve { outside, .. },
+            ) => *outside = v,
             _ => {}
         },
     }
@@ -204,6 +228,33 @@ pub(super) fn window_changes(from: &GradeWindow, to: &GradeWindow) -> Map<String
                 m.insert("points".into(), json!(bp));
             }
         }
+        (
+            WindowShape::Curve {
+                points: ap,
+                soft: a,
+                inside: ai,
+                outside: ao,
+            },
+            WindowShape::Curve {
+                points: bp,
+                soft: b,
+                inside: bi,
+                outside: bo,
+            },
+        ) => {
+            for (name, x, y) in [("inside", ai, bi), ("outside", ao, bo)] {
+                if x != y {
+                    m.insert(name.into(), json!(y));
+                }
+            }
+            if a != b {
+                m.insert("soft".into(), json!([b]));
+            }
+            if ap != bp {
+                let flat: Vec<[f64; 2]> = bp.iter().flatten().copied().collect();
+                m.insert("points".into(), json!(flat));
+            }
+        }
         _ => {}
     }
     m
@@ -228,6 +279,19 @@ pub(super) fn window_palette(
         ui.menu_button(icon::DOTS_THREE, |ui| {
             if ui.button("Reset Selected Window").clicked() {
                 acts.push(WindowAct::ResetWindow);
+                ui.close();
+            }
+            let convertible = windows.get(current).is_some_and(|w| {
+                matches!(
+                    w.shape,
+                    WindowShape::Circle { .. }
+                        | WindowShape::Linear { .. }
+                        | WindowShape::Polygon { .. }
+                )
+            });
+            let convert = egui::Button::new("Convert to Bezier");
+            if ui.add_enabled(convertible, convert).clicked() {
+                acts.push(WindowAct::Convert);
                 ui.close();
             }
         });

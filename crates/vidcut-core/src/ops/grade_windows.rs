@@ -1,5 +1,8 @@
 use crate::error::{Error, Result};
-use crate::model::{Grade, GradeNode, GradeWindow, Project, WindowKind, WindowShape};
+use crate::model::{CurvePoint, Grade, GradeNode, GradeWindow, Project, WindowKind, WindowShape};
+use crate::window_key::{
+    CIRCLE_RADIUS, CURVE_HANDLE, PAN_STEP, aspect_shrink, circle_scale, linear_scale, linear_scales,
+};
 
 use super::grade::{GradeOf, edited, unlocked};
 
@@ -101,7 +104,12 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
                 soft[i] = in_range("soft", v, soft_range)?;
             }
         }
-        (WindowShape::Circle { soft } | WindowShape::Gradient { soft }, Some(given)) => {
+        (
+            WindowShape::Circle { soft }
+            | WindowShape::Curve { soft, .. }
+            | WindowShape::Gradient { soft },
+            Some(given),
+        ) => {
             let [v] = given.as_slice() else {
                 return Err(Error::invalid("this window takes one `soft` value"));
             };
@@ -131,6 +139,27 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
                     )));
                 }
                 points.clone_from(given);
+            }
+        }
+        WindowShape::Curve {
+            points,
+            inside,
+            outside,
+            ..
+        } => {
+            if let Some(v) = c.inside {
+                *inside = in_range("inside", v, soft_range)?;
+            }
+            if let Some(v) = c.outside {
+                *outside = in_range("outside", v, soft_range)?;
+            }
+            if let Some(given) = &c.points {
+                if given.len() % 3 != 0 {
+                    return Err(Error::invalid(
+                        "a curve takes three `points` for each point: the in handle, the point, the out handle",
+                    ));
+                }
+                *points = given.as_chunks::<3>().0.to_vec();
             }
         }
         WindowShape::Linear { points, .. } => {
@@ -176,6 +205,17 @@ pub(super) fn checked(w: &GradeWindow) -> Result<()> {
             inside,
             outside,
         } => (None, Some(*inside), Some(*outside), Some(points.clone())),
+        WindowShape::Curve {
+            points,
+            soft,
+            inside,
+            outside,
+        } => (
+            Some(vec![*soft]),
+            Some(*inside),
+            Some(*outside),
+            Some(points.iter().flatten().copied().collect()),
+        ),
     };
     let all = WindowChange {
         size: Some(w.size),
@@ -212,4 +252,79 @@ pub fn remove(p: &mut Project, of: &GradeOf, n: u32, i: usize) -> Result<()> {
         d.windows.remove(i);
         Ok(())
     })
+}
+
+fn curve_points(w: &GradeWindow, [fw, fh]: [f64; 2]) -> Result<(Vec<CurvePoint>, [f64; 2])> {
+    let k = linear_scale(w.size);
+    let sharp = |p: [f64; 2]| [p, p, p];
+    match &w.shape {
+        WindowShape::Circle { .. } => {
+            let shrink = aspect_shrink(w.aspect);
+            if shrink.contains(&0.0) {
+                return Err(Error::invalid(
+                    "a circle at aspect 0 or 100 is a band, which has no outline",
+                ));
+            }
+            let r = CIRCLE_RADIUS * fw * circle_scale(w.size) / k;
+            let [a, b] = [r / shrink[0] / fw, r / shrink[1] / fh];
+            let [ka, kb] = [CURVE_HANDLE * a, CURVE_HANDLE * b];
+            let points = vec![
+                [[-ka, b], [0.0, b], [ka, b]],
+                [[a, kb], [a, 0.0], [a, -kb]],
+                [[ka, -b], [0.0, -b], [-ka, -b]],
+                [[-a, -kb], [-a, 0.0], [-a, kb]],
+            ];
+            Ok((points, [0.0, 0.0]))
+        }
+        WindowShape::Linear { points, .. } => {
+            let n = points.len() as f64;
+            let [mx, my] =
+                (points.iter()).fold([0.0, 0.0], |[x, y], [px, py]| [x + px / n, y + py / n]);
+            let [sx, sy] = linear_scales(w.size, w.aspect);
+            let corners = points
+                .iter()
+                .map(|[px, py]| sharp([(px - mx) * sx / k, (py - my) * sy / k]));
+            Ok((corners.collect(), [mx * fw, my * fh]))
+        }
+        WindowShape::Polygon { points, .. } => {
+            Ok((points.iter().map(|p| sharp(*p)).collect(), [0.0, 0.0]))
+        }
+        WindowShape::Curve { .. } | WindowShape::Gradient { .. } => Err(Error::invalid(
+            "only a circle, a linear window or a polygon turns into a curve",
+        )),
+    }
+}
+
+pub fn convert(p: &mut Project, of: &GradeOf, n: u32, i: usize) -> Result<usize> {
+    let frame = p.frame_size();
+    let mut made = 0;
+    edited(p, of, |g| {
+        let d = corrector(g, n)?;
+        let w = window(d, n, i)?.clone();
+        let (points, [dx, dy]) = curve_points(&w, frame)?;
+        let curve = GradeWindow {
+            shape: WindowShape::Curve {
+                points,
+                soft: 0.0,
+                inside: 0.0,
+                outside: 0.0,
+            },
+            on: true,
+            name: String::new(),
+            aspect: GradeWindow::new(WindowKind::Curve, frame).aspect,
+            pan: w.pan + dx / PAN_STEP,
+            tilt: w.tilt + dy / PAN_STEP,
+            ..w
+        };
+        match i < WindowKind::ALL.len() {
+            true => d.windows[i].on = false,
+            false => {
+                d.windows.remove(i);
+            }
+        }
+        d.windows.push(curve);
+        made = d.windows.len() - 1;
+        Ok(())
+    })?;
+    Ok(made)
 }

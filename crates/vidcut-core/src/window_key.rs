@@ -1,4 +1,4 @@
-use crate::model::{GradeNode, GradeWindow, KeyOutput, WindowShape};
+use crate::model::{CurvePoint, GradeNode, GradeWindow, KeyOutput, WindowShape};
 
 pub const PAN_STEP: f64 = 81.92;
 pub const SOFT_STEP: f64 = 16.0;
@@ -11,6 +11,15 @@ pub const LINEAR_MOST: f64 = 4.0;
 pub const FAR_OUTSIDE: f64 = 1000.0;
 pub const EVEN: f64 = 1e-6;
 pub const TRIG_ZERO: f64 = 1e-12;
+pub const CURVE_INSIDE_STEP: f64 = std::f64::consts::SQRT_2 / 1000.0;
+pub const CURVE_OUTSIDE_STEP: f64 = 3.0 * CURVE_INSIDE_STEP;
+pub const CURVE_BLUR_STEP: f64 = 0.005;
+pub const CURVE_SAMPLE: f64 = 0.5;
+pub const CURVE_HANDLE: f64 = 0.5519;
+pub const FLAT_ERROR: f64 = 0.05;
+pub const FLAT_DEPTH: u32 = 8;
+pub const MITER_MOST: f64 = 4.0;
+pub const SAME_POINT: f64 = 1e-9;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outline {
@@ -28,6 +37,13 @@ pub enum Outline {
         points: Vec<[f64; 2]>,
         inside: f64,
         outside: f64,
+    },
+    Curve {
+        controls: Vec<CurvePoint>,
+        path: Vec<[f64; 2]>,
+        inner: Vec<[f64; 2]>,
+        outer: Vec<[f64; 2]>,
+        blur: f64,
     },
     Gradient {
         soft: f64,
@@ -57,7 +73,8 @@ fn joined_first(w: &GradeWindow) -> (bool, u8) {
         WindowShape::Circle { .. } => 0,
         WindowShape::Linear { .. } => 1,
         WindowShape::Polygon { .. } => 2,
-        WindowShape::Gradient { .. } => 3,
+        WindowShape::Curve { .. } => 3,
+        WindowShape::Gradient { .. } => 4,
     };
     (w.mask, order)
 }
@@ -125,7 +142,7 @@ impl Keying {
     }
 }
 
-fn linear_scales(size: f64, aspect: f64) -> [f64; 2] {
+pub fn linear_scales(size: f64, aspect: f64) -> [f64; 2] {
     let k = linear_scale(size);
     aspect_shrink(aspect).map(|s| match s * LINEAR_MOST > k {
         true => k / s,
@@ -181,6 +198,28 @@ pub fn shaped(window: &GradeWindow, [w, h]: [f64; 2]) -> Shaped {
                 outside: outside * POLYGON_SOFT_STEP * diagonal,
             }
         }
+        WindowShape::Curve {
+            points,
+            soft,
+            inside,
+            outside,
+        } => {
+            let k = linear_scale(window.size);
+            let placed = |[px, py]: [f64; 2]| {
+                let (u, v) = (px * w * k, py * h * k);
+                let (x, y) = (u * cos + v * sin, v * cos - u * sin);
+                [middle[0] + x, middle[1] - y]
+            };
+            let controls: Vec<CurvePoint> = points.iter().map(|p| p.map(placed)).collect();
+            let path = flattened(&controls);
+            Outline::Curve {
+                inner: mitred(&path, -inside * CURVE_INSIDE_STEP * w),
+                outer: mitred(&path, outside * CURVE_OUTSIDE_STEP * w),
+                path,
+                controls,
+                blur: soft * CURVE_BLUR_STEP * h,
+            }
+        }
         WindowShape::Gradient { soft } => Outline::Gradient {
             soft: GRADIENT_SOFT_STEP * soft,
         },
@@ -195,6 +234,93 @@ pub fn shaped(window: &GradeWindow, [w, h]: [f64; 2]) -> Shaped {
         starts: true,
         ends: true,
     }
+}
+
+fn split(c: [[f64; 2]; 4]) -> ([[f64; 2]; 4], [[f64; 2]; 4]) {
+    let mid = |a: [f64; 2], b: [f64; 2]| [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+    let (ab, bc, cd) = (mid(c[0], c[1]), mid(c[1], c[2]), mid(c[2], c[3]));
+    let (abc, bcd) = (mid(ab, bc), mid(bc, cd));
+    let m = mid(abc, bcd);
+    ([c[0], ab, abc, m], [m, bcd, cd, c[3]])
+}
+
+fn off_chord(p: [f64; 2], a: [f64; 2], d: [f64; 2]) -> f64 {
+    let (ex, ey) = (d[0] - a[0], d[1] - a[1]);
+    let (px, py) = (p[0] - a[0], p[1] - a[1]);
+    let long = ex.hypot(ey);
+    match long < SAME_POINT {
+        true => px.hypot(py),
+        false => (px * ey - py * ex).abs() / long,
+    }
+}
+
+fn flatten_into(c: [[f64; 2]; 4], depth: u32, out: &mut Vec<[f64; 2]>) {
+    let flat = off_chord(c[1], c[0], c[3]).max(off_chord(c[2], c[0], c[3])) <= FLAT_ERROR;
+    if flat || depth == 0 {
+        out.push(c[3]);
+        return;
+    }
+    let (a, b) = split(c);
+    flatten_into(a, depth - 1, out);
+    flatten_into(b, depth - 1, out);
+}
+
+pub fn traced(controls: &[CurvePoint], segments: usize) -> Vec<[f64; 2]> {
+    let mut out: Vec<[f64; 2]> = controls.first().map(|c| vec![c[1]]).unwrap_or_default();
+    for (i, [_, p, after]) in controls.iter().enumerate().take(segments) {
+        let [before, q, _] = controls[(i + 1) % controls.len()];
+        flatten_into([*p, *after, before, q], FLAT_DEPTH, &mut out);
+    }
+    out.dedup_by(|a, b| (a[0] - b[0]).hypot(a[1] - b[1]) < SAME_POINT);
+    out
+}
+
+pub fn flattened(controls: &[CurvePoint]) -> Vec<[f64; 2]> {
+    let mut out = traced(controls, controls.len());
+    while out.len() > 1 && {
+        let (a, b) = (out[0], out[out.len() - 1]);
+        (a[0] - b[0]).hypot(a[1] - b[1]) < SAME_POINT
+    } {
+        out.pop();
+    }
+    out
+}
+
+fn area(path: &[[f64; 2]]) -> f64 {
+    (0..path.len())
+        .map(|i| {
+            let (a, b) = (path[i], path[(i + 1) % path.len()]);
+            a[0] * b[1] - b[0] * a[1]
+        })
+        .sum::<f64>()
+        / 2.0
+}
+
+pub fn mitred(path: &[[f64; 2]], by: f64) -> Vec<[f64; 2]> {
+    let n = path.len();
+    if n < 3 || by == 0.0 {
+        return path.to_vec();
+    }
+    let turn = if area(path) < 0.0 { -1.0 } else { 1.0 };
+    let normal = |a: [f64; 2], b: [f64; 2]| {
+        let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+        let long = ex.hypot(ey);
+        [turn * ey / long, -turn * ex / long]
+    };
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let (before, at, after) = (path[(i + n - 1) % n], path[i], path[(i + 1) % n]);
+        let (a, b) = (normal(before, at), normal(at, after));
+        let along = 1.0 + a[0] * b[0] + a[1] * b[1];
+        match along > 2.0 / (MITER_MOST * MITER_MOST) {
+            true => out.push([
+                at[0] + by * (a[0] + b[0]) / along,
+                at[1] + by * (a[1] + b[1]) / along,
+            ]),
+            false => out.extend([a, b].map(|m| [at[0] + by * m[0], at[1] + by * m[1]])),
+        }
+    }
+    out
 }
 
 pub fn texel_map(back: &[f64; 8], [w, h]: [f64; 2]) -> [f64; 9] {

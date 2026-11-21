@@ -436,6 +436,11 @@ The bar and the Jobs button:
   - A drag of a handle changes a copy of the grade (`WindowGrab`). The palette then sends `grade.window.set` when the mouse button comes up, as for a field.
   - The viewer draws after the palette. Thus a change in the viewer updates the preview at once, and asks for one more frame. In that frame the palette sends it.
   - A click on a polygon edge adds a corner, and a middle-click removes one. Both go through the same copy.
+  - A curve has a handle at each point (`Grip::Point`) and at each Bezier handle (`Grip::Tangent`).
+  - A click on a curve adds a point with `curve_split`. `curve_inserted` cuts the Bezier segment there, so the shape stays.
+  - While the current curve is on and has no points, a click adds a point. `Drawing` then keeps the curve open until a click on its first point.
+  - A drag from a new point pulls its handles out (`Grip::Pull`). Alt and a drag on a corner do the same.
+  - A drag of a Bezier handle turns the opposite handle with it (`turned_with`). With Alt, the opposite handle stays.
 - The Node Editor of the grade is at the right of the viewer (`Workspace::grade_nodes_panel`).
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
   - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.

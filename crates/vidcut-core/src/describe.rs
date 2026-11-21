@@ -441,7 +441,8 @@ pub fn describe_at(
         | "grade.keys.remove"
         | "grade.window.add"
         | "grade.window.set"
-        | "grade.window.remove" => format!(
+        | "grade.window.remove"
+        | "grade.window.convert" => format!(
             "{} {}",
             match method {
                 "grade.add" => "Add a node to",
@@ -455,6 +456,7 @@ pub fn describe_at(
                 "grade.window.add" => "Add a window to",
                 "grade.window.set" => "Change a window of",
                 "grade.window.remove" => "Remove a window from",
+                "grade.window.convert" => "Turn a window into a curve in",
                 _ => "Link the nodes of",
             },
             match d.flag("timeline") {

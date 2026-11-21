@@ -636,6 +636,11 @@ These facts come from float renders in Resolve Studio 21.2, without color manage
   - The window draws Start 11 as a steep start. After OK, the keyframe has Start 1 and End 1. Start 11 also resets End.
   - A grade file with 11 renders as 1.
   - vidcut does not copy this fault. Start and End go from 0 to 10 (`LAST_PROFILE`).
+- **Resolve reads a curve window at two places in a pixel.**
+  - The hard edge reads each pixel at (x, y + 0.5), with y down.
+  - The ramp of Inside and Outside fits best at (x − 0.5, y − 0.5).
+  - Thus the edge and the ramp are half a pixel apart in x, and one pixel apart in y.
+  - vidcut reads both at (x, y + 0.5) (`CURVE_SAMPLE`, `window_curve`).
 - **A circle window that Resolve makes with Toggle Display Mode on has no radius.**
   - With the viewer hidden, the grade of a new circle has no base radius.
   - The circle then renders about 30 pixels wide. The viewer draws the usual oval.

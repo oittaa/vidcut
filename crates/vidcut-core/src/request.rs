@@ -3172,20 +3172,38 @@ pub enum Request {
         rotate: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         opacity: Option<f64>,
-        /// One value for a circle or a gradient. Four for a linear window:
-        /// left, top, right and bottom.
+        /// One value for a circle, a curve or a gradient. Four for a linear
+        /// window: left, top, right and bottom.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         soft: Option<Vec<f64>>,
-        /// A polygon only.
+        /// A polygon or a curve only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         inside: Option<f64>,
-        /// A polygon only.
+        /// A polygon or a curve only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         outside: Option<f64>,
         /// The corners of a polygon, 3 to 128. The four corners of a
         /// linear window: bottom left, top left, top right, bottom right.
+        /// Three for each point of a curve: the in handle, the point and
+        /// the out handle.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         points: Option<Vec<[f64; 2]>>,
+    },
+    /// Turn a circle, a linear window or a polygon of a corrector into a
+    /// curve of the same shape, with no softness. The curve goes last in
+    /// the window list, on. An added window goes away, and one of the
+    /// first windows turns off. Returns the `window` number of the curve.
+    #[serde(rename = "grade.window.convert")]
+    GradeWindowConvert {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// The number of the corrector, from 1.
+        node: u32,
+        /// The number of the window in the window list, from 0.
+        window: usize,
     },
     /// Remove a window that `grade.window.add` added to a corrector of the
     /// grade of a clip, or with `timeline` of the timeline grade. The

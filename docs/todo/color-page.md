@@ -35,13 +35,13 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 **To do:**
 
 - The windows ([spec §8.23](../spec.md#823-windows-pp-32653279)):
-  - Curve windows: the curve row of each corrector, + Curve and Convert to Bezier.
   - Window keyframes.
+  - The magenta softness points of a curve (p. 3273). Each point then has its own inside and outside softness.
+  - Shift and a drag box select points of a curve, to move, delete or scale them together (p. 3274).
   - Copy Window, Paste Window and Paste Append Window in the option menu of the Window palette.
 - Measured in Resolve Studio 21.2 for these items:
   - Paste Window with a window of the same shape current gives it the copied values. It adds no row.
   - Paste Window with a window of another shape current adds a copy at the end, on and current. Paste Append Window does this always.
-  - Convert to Bezier on an added polygon removes the polygon. It adds a curve window at the end, on and current, with Soft 1, Inside and Outside at 0.
 - Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3395). They need windows.
 - Switch to Node Layer in the Nodes submenu, with the Node Stack Layers (pp. 3400–3401). Add Splitter Combiner Node (Option-Y, p. 3441).
 - The key input and output of each node, and the Key Mixer. Measured in Resolve Studio 21.2 with float renders:

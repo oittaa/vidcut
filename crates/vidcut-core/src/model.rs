@@ -3911,7 +3911,7 @@ impl GradeNode {
 
 /// A window of a corrector. The windows that are on make the key of the
 /// corrector: the windows of one shape join first, then the shapes, in
-/// the order circle, linear, polygon, gradient. A mask takes its key away
+/// the order circle, linear, polygon, curve, gradient. A mask takes its key away
 /// from the key of the others. The place of a window is in pixels of the
 /// timeline frame, from its middle.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -3948,6 +3948,8 @@ pub struct GradeWindow {
     pub opacity: f64,
 }
 
+pub type CurvePoint = [[f64; 2]; 3];
+
 /// The shape of a window, with its softness.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "shape", rename_all = "snake_case")]
@@ -3983,6 +3985,23 @@ pub enum WindowShape {
         /// step. Usual: 0.
         outside: f64,
     },
+    /// A shape with curved sides: a closed path of cubic Bezier segments.
+    Curve {
+        /// The points, each `[in handle, point, out handle]`, each `[x, y]`
+        /// in frame widths and frame heights from the middle of the window,
+        /// y up. A segment goes from a point by its out handle and the in
+        /// handle of the next point. The last point joins the first. A new
+        /// curve has no points.
+        points: Vec<CurvePoint>,
+        /// A blur of the edge: 0.005 of the frame height a step. Usual: 0.
+        soft: f64,
+        /// The softness inside the edge: 0.001414 of the frame width a
+        /// step. Usual: 0.
+        inside: f64,
+        /// The softness outside the edge: 0.004243 of the frame width a
+        /// step. Usual: 0.
+        outside: f64,
+    },
     /// A line through the middle of the window. The key is 1 above it and
     /// goes to 0 below it.
     Gradient {
@@ -3999,11 +4018,18 @@ pub enum WindowKind {
     Linear,
     Circle,
     Polygon,
+    Curve,
     Gradient,
 }
 
 impl WindowKind {
-    pub const ALL: [Self; 4] = [Self::Linear, Self::Circle, Self::Polygon, Self::Gradient];
+    pub const ALL: [Self; 5] = [
+        Self::Linear,
+        Self::Circle,
+        Self::Polygon,
+        Self::Curve,
+        Self::Gradient,
+    ];
 }
 
 impl WindowShape {
@@ -4012,6 +4038,7 @@ impl WindowShape {
             Self::Linear { .. } => WindowKind::Linear,
             Self::Circle { .. } => WindowKind::Circle,
             Self::Polygon { .. } => WindowKind::Polygon,
+            Self::Curve { .. } => WindowKind::Curve,
             Self::Gradient { .. } => WindowKind::Gradient,
         }
     }
@@ -4029,6 +4056,12 @@ impl GradeWindow {
             },
             WindowKind::Polygon => WindowShape::Polygon {
                 points: vec![[-0.25, -0.25], [-0.25, 0.25], [0.25, 0.25], [0.25, -0.25]],
+                inside: 0.0,
+                outside: 0.0,
+            },
+            WindowKind::Curve => WindowShape::Curve {
+                points: Vec::new(),
+                soft: 0.0,
                 inside: 0.0,
                 outside: 0.0,
             },

@@ -174,7 +174,7 @@ pub fn checked(g: &Grade) -> Result<()> {
                 let kinds = n.windows.iter().map(|w| w.shape.kind());
                 if !kinds.take(WindowKind::ALL.len()).eq(WindowKind::ALL) {
                     return Err(Error::invalid(format!(
-                        "corrector {k} starts its windows with a linear, a circle, a polygon and a gradient window"
+                        "corrector {k} starts its windows with a linear, a circle, a polygon, a curve and a gradient window"
                     )));
                 }
                 corrector_checked(c)?;

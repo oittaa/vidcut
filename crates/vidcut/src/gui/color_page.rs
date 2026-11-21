@@ -1291,6 +1291,10 @@ impl Workspace {
             .map(|h| &h.grade)
     }
 
+    pub(super) fn grade_unsent(&self) -> bool {
+        (self.effects_page.graded.as_ref()).is_some_and(|h| h.sent.is_none())
+    }
+
     pub(super) fn hold_grade(&mut self, of: &GradeOf, n: u32, grade: Grade) {
         self.effects_page.graded = Some(Graded {
             of: of.clone(),
@@ -1647,6 +1651,14 @@ impl Workspace {
                         send(self, "grade.window.set", params);
                     }
                 }
+            }
+            WindowAct::Convert => {
+                self.effects_page.window = match current < WindowKind::ALL.len() {
+                    true => windows.len(),
+                    false => windows.len() - 1,
+                };
+                let params = Map::from_iter([("window".to_string(), json!(current))]);
+                send(self, "grade.window.convert", params);
             }
             WindowAct::Value(i, f, v) => {
                 let mut next = grade.clone();
