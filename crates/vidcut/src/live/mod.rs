@@ -25,9 +25,9 @@ use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GradeLevel, GuiPanel,
-    OneOrMany, Page, PoolMode, ScreenshotTarget, TimecodeDisplay, TimelineOptions, TrimSide,
-    ViewerFrame, ViewerMode,
+    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GradeLevel, GradePalette,
+    GuiPanel, OneOrMany, Page, PoolMode, PrimariesView, ScreenshotTarget, TimecodeDisplay,
+    TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
 };
 use vidcut_core::time::{DurationSpec, Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -94,6 +94,8 @@ pub enum GuiChange {
     Close(GuiPanel),
     Page(Page),
     Grade(GradeLevel),
+    Palette(GradePalette),
+    Primaries(PrimariesView),
     Nodes(Vec<String>),
     GradeNodes(Vec<u32>),
     NodeView {
@@ -154,6 +156,8 @@ pub struct TimelineState {
 pub struct GuiState {
     pub page: Page,
     pub grade: GradeLevel,
+    pub palette: GradePalette,
+    pub primaries: PrimariesView,
     pub clip: Option<String>,
     pub nodes: Vec<String>,
     pub grade_nodes: Vec<u32>,
@@ -609,6 +613,14 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         switching_clips: crate::preferences::load()
             .map(|p| p.color.switching_clips)
             .unwrap_or_default(),
+        show_thumbnails: crate::preferences::load()
+            .map(|p| p.color)
+            .unwrap_or_default()
+            .show_thumbnails,
+        disable_thumbnail_refresh: crate::preferences::load()
+            .map(|p| p.color)
+            .unwrap_or_default()
+            .disable_thumbnail_refresh,
         bindings: Arc::new(crate::preferences::bindings()),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
@@ -717,6 +729,14 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         switching_clips: crate::preferences::load()
             .map(|p| p.color.switching_clips)
             .unwrap_or_default(),
+        show_thumbnails: crate::preferences::load()
+            .map(|p| p.color)
+            .unwrap_or_default()
+            .show_thumbnails,
+        disable_thumbnail_refresh: crate::preferences::load()
+            .map(|p| p.color)
+            .unwrap_or_default()
+            .disable_thumbnail_refresh,
         bindings: Arc::new(crate::preferences::bindings()),
         audio_noticed: None,
         playing: false,
@@ -992,6 +1012,8 @@ struct Live {
     scopes: vidcut_core::preferences::Scopes,
     show_upscale: bool,
     switching_clips: vidcut_core::preferences::SwitchingClips,
+    show_thumbnails: bool,
+    disable_thumbnail_refresh: bool,
     bindings: Arc<vidcut_core::shortcuts::Bindings>,
     audio_noticed: Option<String>,
     playing: bool,
@@ -1278,6 +1300,17 @@ impl Live {
                     .unwrap_or_default();
                 if self.switching_clips != switching_clips {
                     self.switching_clips = switching_clips;
+                    changed = true;
+                }
+                let color = crate::preferences::load()
+                    .map(|p| p.color)
+                    .unwrap_or_default();
+                if self.show_thumbnails != color.show_thumbnails {
+                    self.show_thumbnails = color.show_thumbnails;
+                    changed = true;
+                }
+                if self.disable_thumbnail_refresh != color.disable_thumbnail_refresh {
+                    self.disable_thumbnail_refresh = color.disable_thumbnail_refresh;
                     changed = true;
                 }
                 let bindings = crate::preferences::bindings();
@@ -1645,6 +1678,8 @@ impl Live {
             scopes: self.scopes,
             show_upscale: self.show_upscale,
             switching_clips: self.switching_clips,
+            show_thumbnails: self.show_thumbnails,
+            disable_thumbnail_refresh: self.disable_thumbnail_refresh,
             bindings: self.bindings.clone(),
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
@@ -3231,8 +3266,16 @@ impl Live {
             Request::GuiClose { panel } => {
                 self.gui_change(vec![GuiChange::Close(panel)], |s| json!(s))
             }
-            Request::GuiPage { page, grade } => {
-                let mut changes: Vec<GuiChange> = grade.map(GuiChange::Grade).into_iter().collect();
+            Request::GuiPage {
+                page,
+                grade,
+                palette,
+                primaries,
+            } => {
+                let mut changes: Vec<GuiChange> = (grade.map(GuiChange::Grade).into_iter())
+                    .chain(palette.map(GuiChange::Palette))
+                    .chain(primaries.map(GuiChange::Primaries))
+                    .collect();
                 changes.push(GuiChange::Page(page));
                 self.gui_change(changes, |s| json!(s))
             }
