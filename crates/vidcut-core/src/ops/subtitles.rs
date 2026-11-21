@@ -763,6 +763,21 @@ pub fn remove_cues(p: &mut Project, ids: &[String]) -> Result<()> {
     take(p, ids).map(drop)
 }
 
+pub fn cut_all(p: &mut Project, at: i64) {
+    let across: Vec<String> = p
+        .subtitles
+        .iter()
+        .flat_map(|t| &t.cues)
+        .filter(|c| c.start < at && at < c.end())
+        .map(|c| c.id.clone())
+        .collect();
+    for id in across {
+        if let Some((ti, ci)) = p.find_cue(&id) {
+            split(p, ti, ci, at);
+        }
+    }
+}
+
 pub fn split_cue(p: &mut Project, id: &str, at: i64) -> Result<String> {
     let (ti, ci) = find(p, id)?;
     unlocked(p, ti)?;
@@ -774,6 +789,11 @@ pub fn split_cue(p: &mut Project, id: &str, at: i64) -> Result<String> {
             c.end()
         )));
     }
+    Ok(split(p, ti, ci, at))
+}
+
+fn split(p: &mut Project, ti: usize, ci: usize, at: i64) -> String {
+    let c = &p.subtitles[ti].cues[ci];
     let mut right = c.clone();
     right.duration = right.end() - at;
     right.words = store_times(&clamped(&c.times(), at - c.start, right.duration), &c.words);
@@ -788,7 +808,7 @@ pub fn split_cue(p: &mut Project, id: &str, at: i64) -> Result<String> {
     let shifted = clamped(&left.times(), 0, left.duration);
     left.words = store_times(&shifted, &previous);
     place_cue(t, right);
-    Ok(new_id)
+    new_id
 }
 
 pub fn join_cues(p: &mut Project, ids: &[String]) -> Result<String> {

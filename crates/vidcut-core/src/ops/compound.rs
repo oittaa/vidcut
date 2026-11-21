@@ -481,6 +481,9 @@ pub fn nest_range(
     if ids.is_empty() {
         return Err(Error::invalid("no clips between In and Out"));
     }
+    for at in [a, b] {
+        super::subtitles::cut_all(p, at);
+    }
     build(p, &ids, (a, b), name, bin, start_tc)
 }
 

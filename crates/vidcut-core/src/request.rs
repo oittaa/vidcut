@@ -1275,8 +1275,9 @@ pub enum Request {
         #[serde(default)]
         start_tc: Option<TimeSpec>,
     },
-    /// Convert In and Out to Compound Clip: cuts the clips of every track at
-    /// the In mark and the Out mark, and makes a compound clip of what is
+    /// Convert In and Out to Compound Clip: cuts the clips and the subtitle
+    /// cues of every track at the In mark and the Out mark. The cues stay on
+    /// their tracks. It makes a compound clip of what is
     /// between them. It goes on the lowest picture track and the lowest
     /// sound track with clips in the range, and the clips outside the range
     /// stay. A J or L cut that reaches a mark is undone. A clip in the range on a
