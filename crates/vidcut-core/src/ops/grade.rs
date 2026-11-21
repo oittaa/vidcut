@@ -688,6 +688,88 @@ pub fn paste(p: &mut Project, of: &[GradeOf], n: u32, copied: &CopiedNode) -> Re
     Ok(())
 }
 
+fn spread(g: &Grade, k: u32, spans: &mut [Option<f64>]) -> f64 {
+    if let Some(s) = spans[k as usize] {
+        return s;
+    }
+    let Some(d) = g.node(k) else {
+        return 1.0;
+    };
+    let mut each = d.inputs.iter().map(|v| match v {
+        Some(v) if *v > 0 => spread(g, *v, spans),
+        _ => 1.0,
+    });
+    let s = match d.tool.is_mixer() {
+        true => each.sum::<f64>().max(1.0),
+        false => each.next().unwrap_or(1.0),
+    };
+    spans[k as usize] = Some(s);
+    s
+}
+
+pub fn cleanup(p: &mut Project, of: &GradeOf) -> Result<()> {
+    edited(p, of, |g| {
+        let order = crate::grade::order(g)
+            .ok_or_else(|| Error::invalid("the links of the grade make a loop"))?;
+        let count = g.nodes.len() + 1;
+        let mut depth = vec![0.0; count];
+        for &k in &order {
+            let ins = node(g, k)?
+                .inputs
+                .iter()
+                .flatten()
+                .map(|v| depth[*v as usize]);
+            depth[k as usize] = ins.fold(0.0, f64::max) + 1.0;
+        }
+        let mut spans = vec![None; count];
+        let mut wants: Vec<Vec<f64>> = vec![Vec::new(); count];
+        if let Some(o) = g.output.filter(|o| *o > 0) {
+            wants[o as usize].push(0.0);
+        }
+        let mut rows = vec![None; count];
+        for &k in order.iter().rev() {
+            let w = &wants[k as usize];
+            if w.is_empty() {
+                continue;
+            }
+            let row = w.iter().sum::<f64>() / w.len() as f64;
+            rows[k as usize] = Some(row);
+            let inputs = node(g, k)?.inputs.clone();
+            let mixer = node(g, k)?.tool.is_mixer();
+            let sizes: Vec<f64> = (inputs.iter())
+                .map(|v| match v {
+                    Some(v) if *v > 0 && mixer => spread(g, *v, &mut spans),
+                    _ => 1.0,
+                })
+                .collect();
+            let mut at = row - sizes.iter().sum::<f64>() / 2.0;
+            for (v, size) in inputs.iter().zip(&sizes) {
+                if let Some(v) = v.filter(|v| *v > 0) {
+                    wants[v as usize].push(if mixer { at + size / 2.0 } else { row });
+                }
+                at += size;
+            }
+        }
+        let below = rows
+            .iter()
+            .flatten()
+            .fold(0.0, |a: f64, b| a.max(*b))
+            .floor()
+            + 1.0;
+        let mut loose = 0.0;
+        for (d, k) in g.nodes.iter_mut().zip(1..) {
+            d.place = match rows[k] {
+                Some(row) => [depth[k] - 1.0, row],
+                None => {
+                    loose += 1.0;
+                    [loose - 1.0, below]
+                }
+            };
+        }
+        Ok(())
+    })
+}
+
 pub fn swap(p: &mut Project, of: &GradeOf, n: u32, with: u32) -> Result<()> {
     edited(p, of, |g| {
         let a = node(g, n)?.clone();

@@ -6,6 +6,8 @@ use eframe::egui::{
     StrokeKind, Ui, Vec2, pos2, vec2,
 };
 
+use vidcut_core::request::NodeZoom;
+
 use super::theme;
 
 const CELL: Vec2 = vec2(132.0, 64.0);
@@ -14,6 +16,8 @@ const MARGIN: Vec2 = vec2(40.0, 40.0);
 const KNOT: f32 = 5.0;
 const PORT: f32 = KNOT * 3.0;
 const ZOOMS: (f32, f32) = (0.3, 3.0);
+const ZOOM_STEP: f32 = 1.25;
+const ROW: f32 = 26.0;
 const ROUND: f64 = 100.0;
 const WIRE_HIT: f32 = 6.0;
 const STEPS: usize = 24;
@@ -161,6 +165,7 @@ pub(super) struct NodeView<K> {
     linking: Option<Linking<K>>,
     band: Option<(Pos2, bool)>,
     naming: Option<Naming<K>>,
+    asked: Option<NodeZoom>,
 }
 
 impl<K> Default for NodeView<K> {
@@ -172,11 +177,50 @@ impl<K> Default for NodeView<K> {
             linking: None,
             band: None,
             naming: None,
+            asked: None,
         }
     }
 }
 
 impl<K> NodeView<K> {
+    pub(super) fn ask(&mut self, zoom: NodeZoom) {
+        self.asked = Some(zoom);
+    }
+
+    pub(super) fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    fn zoomed(&mut self, rect: Rect, tiles: &[Tile<K>]) {
+        let Some(asked) = self.asked.take() else {
+            return;
+        };
+        let about = |view: &mut Self, to: f32| {
+            let to = to.clamp(ZOOMS.0, ZOOMS.1);
+            let at = (rect.center() - rect.min - MARGIN * view.zoom - view.pan) / view.zoom;
+            view.pan = rect.center() - rect.min - MARGIN * to - at * to;
+            view.zoom = to;
+        };
+        match asked {
+            NodeZoom::In => about(self, self.zoom * ZOOM_STEP),
+            NodeZoom::Out => about(self, self.zoom / ZOOM_STEP),
+            NodeZoom::Original => about(self, 1.0),
+            NodeZoom::Fit => {
+                let boxes = (tiles.iter().filter(|t| t.edge.is_none())).map(|t| {
+                    let at = vec2(t.place[0] as f32 * CELL.x, t.place[1] as f32 * CELL.y);
+                    Rect::from_min_size(at.to_pos2(), size(t))
+                });
+                let Some(all) = boxes.reduce(|a, b| a.union(b)) else {
+                    return;
+                };
+                let room = rect.size() - MARGIN * 2.0;
+                let fit = (room.x / all.width()).min(room.y / all.height());
+                let to = fit.clamp(ZOOMS.0, ZOOMS.1);
+                self.pan = rect.center() - rect.min - MARGIN * to - all.center().to_vec2() * to;
+                self.zoom = to;
+            }
+        }
+    }
     pub(super) fn calm(&mut self) {
         self.linking = None;
         self.band = None;
@@ -317,6 +361,103 @@ pub(super) fn empty(ui: &mut Ui, text: &str) {
     );
 }
 
+impl<K> Done<K> {
+    fn none() -> Self {
+        Self {
+            picked: None,
+            switched: None,
+            named: None,
+            pointed: None,
+            moved: Vec::new(),
+            link: None,
+            band: None,
+            clicked: false,
+            unlink: None,
+            spot: None,
+            dropped: None,
+        }
+    }
+}
+
+pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
+    ui: &mut Ui,
+    graph: &Graph<'_, K>,
+    mut node_menu: impl FnMut(&mut Ui, &K),
+) -> Done<K> {
+    let mut done = Done::none();
+    let c = theme::colors();
+    let rect = ui.available_rect_before_wrap();
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(2), c.panel_dark);
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for t in graph.tiles.iter().rev().filter(|t| t.edge.is_none()) {
+            let width = ui.available_width();
+            let (r, resp) = ui.allocate_exact_size(vec2(width, ROW), Sense::click());
+            let painter = ui.painter_at(r);
+            let fade = if t.faded { FADED } else { 1.0 };
+            painter.rect_filled(r.shrink(1.0), CornerRadius::same(3), c.panel);
+            let edge = match (
+                graph.selected.last() == Some(&t.key),
+                graph.selected.contains(&t.key),
+            ) {
+                (true, _) => Stroke::new(2.0, graph.active),
+                (false, true) => Stroke::new(1.5, Color32::WHITE),
+                _ => Stroke::NONE,
+            };
+            painter.rect_stroke(
+                r.shrink(1.0),
+                CornerRadius::same(3),
+                edge,
+                StrokeKind::Inside,
+            );
+            let font = FontId::proportional(12.0);
+            let dim = c.text_dim.gamma_multiply(fade);
+            let mut left = r.left() + 6.0;
+            let eye = Rect::from_min_size(pos2(left, r.top()), vec2(ROW, ROW));
+            if t.switch {
+                let icon = match t.faded {
+                    true => egui_phosphor::regular::EYE_SLASH,
+                    false => egui_phosphor::regular::EYE,
+                };
+                painter.text(eye.center(), Align2::CENTER_CENTER, icon, font.clone(), dim);
+            }
+            left = eye.right() + 4.0;
+            let number = painter.text(
+                pos2(left, r.center().y),
+                Align2::LEFT_CENTER,
+                &t.label,
+                font.clone(),
+                c.text.gamma_multiply(fade),
+            );
+            left = number.right() + 10.0;
+            let mut right = r.right() - 8.0;
+            for b in t.badges.iter().rev() {
+                let at = pos2(right, r.center().y);
+                let shown = painter.text(at, Align2::RIGHT_CENTER, b.icon, font.clone(), dim);
+                right = shown.left() - 4.0;
+            }
+            if !t.note.is_empty() {
+                let color = c.text.gamma_multiply(fade);
+                let shown = super::history::one_line(ui, &t.note, right - left, font, color);
+                painter.galley(
+                    pos2(left, r.center().y - shown.size().y / 2.0),
+                    shown,
+                    color,
+                );
+            }
+            let on_eye = resp.interact_pointer_pos().is_some_and(|p| eye.contains(p));
+            if resp.clicked() && t.switch && on_eye {
+                done.switched = Some(t.key.clone());
+            } else if resp.clicked() {
+                let add = ui.input(|i| i.modifiers.command);
+                done.picked = Some((t.key.clone(), if add { Pick::Toggle } else { Pick::Only }));
+            }
+            resp.context_menu(|ui| node_menu(ui, &t.key));
+        }
+    });
+    done
+}
+
 pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     ui: &mut Ui,
     view: &mut NodeView<K>,
@@ -325,6 +466,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     field_menu: impl FnOnce(&mut Ui),
 ) -> Done<K> {
     let rect = ui.available_rect_before_wrap();
+    view.zoomed(rect, &graph.tiles);
     let resp = ui.allocate_rect(rect, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     let c = theme::colors();
@@ -461,19 +603,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             painter.add(egui::Shape::line(sampled_curve(&b, span), lit));
         }
     }
-    let mut done = Done {
-        picked: None,
-        switched: None,
-        named: None,
-        pointed: None,
-        moved: Vec::new(),
-        link: None,
-        band: None,
-        clicked: false,
-        unlink: None,
-        spot: None,
-        dropped: None,
-    };
+    let mut done = Done::none();
     let mut naming = view.naming.take();
     for (t, r) in graph.tiles.iter().zip(&boxes) {
         let r = *r;

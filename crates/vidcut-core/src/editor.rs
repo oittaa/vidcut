@@ -4767,6 +4767,11 @@ fn mutate(
             ops::grade::paste(p, &of, *node, settings)?;
             Value::Null
         }
+        Request::GradeCleanup { clip, timeline } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade::cleanup(p, &of)?;
+            Value::Null
+        }
         Request::GradeSwap {
             clip,
             timeline,
