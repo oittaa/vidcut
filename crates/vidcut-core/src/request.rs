@@ -4197,6 +4197,12 @@ pub enum Request {
         /// The grade that the `color` page shows. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         grade: Option<GradeLevel>,
+        /// The palette that the `color` page shows. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        palette: Option<GradePalette>,
+        /// How the Primaries palette shows the values. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        primaries: Option<PrimariesView>,
     },
     /// Select nodes in the node editor of the effects page, by name. The
     /// Inspector and the viewer then show the last one. An empty list
@@ -4461,14 +4467,28 @@ pub struct GradeNodeChange {
     pub key_invert: Option<bool>,
 }
 
-/// A palette of a corrector, as `grade.clear` resets it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// A palette of a corrector on the Color page.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GradePalette {
     /// The values of the corrector: Primaries and Log.
+    #[default]
     Primaries,
     /// The Key Output.
     Key,
+}
+
+/// How the Primaries palette shows the values of a corrector.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PrimariesView {
+    /// Lift, Gamma, Gain and Offset as color wheels.
+    #[default]
+    Wheels,
+    /// Lift, Gamma, Gain and Offset as bars.
+    Bars,
+    /// Shadow, Midtone, Highlight and Offset as color wheels.
+    Log,
 }
 
 /// A kind of mixer of a grade.

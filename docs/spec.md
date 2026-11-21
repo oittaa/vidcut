@@ -2863,6 +2863,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
 - `grade.set`, `grade.clear` and `grade.printer` take `node`, the number of a corrector. Without it, they change node 1.
 - `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
 - `gui.page` with `grade` selects Clip or Timeline on the Color page.
+- `gui.page` with `palette` selects the Primaries or the Key palette. With `primaries`, it selects Wheels, Bars or Log.
+- `gui.state` gives the `grade`, the `palette` and the `primaries` mode.
 
 ### 8.21 Color page nodes (pp. 3385–3399, 3409–3415)
 

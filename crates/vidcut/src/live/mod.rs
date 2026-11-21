@@ -25,9 +25,9 @@ use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GradeLevel, GuiPanel,
-    OneOrMany, Page, PoolMode, ScreenshotTarget, TimecodeDisplay, TimelineOptions, TrimSide,
-    ViewerFrame, ViewerMode,
+    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GradeLevel, GradePalette,
+    GuiPanel, OneOrMany, Page, PoolMode, PrimariesView, ScreenshotTarget, TimecodeDisplay,
+    TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
 };
 use vidcut_core::time::{DurationSpec, Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -94,6 +94,8 @@ pub enum GuiChange {
     Close(GuiPanel),
     Page(Page),
     Grade(GradeLevel),
+    Palette(GradePalette),
+    Primaries(PrimariesView),
     Nodes(Vec<String>),
     GradeNodes(Vec<u32>),
     NodeView {
@@ -154,6 +156,8 @@ pub struct TimelineState {
 pub struct GuiState {
     pub page: Page,
     pub grade: GradeLevel,
+    pub palette: GradePalette,
+    pub primaries: PrimariesView,
     pub clip: Option<String>,
     pub nodes: Vec<String>,
     pub grade_nodes: Vec<u32>,
@@ -3231,8 +3235,16 @@ impl Live {
             Request::GuiClose { panel } => {
                 self.gui_change(vec![GuiChange::Close(panel)], |s| json!(s))
             }
-            Request::GuiPage { page, grade } => {
-                let mut changes: Vec<GuiChange> = grade.map(GuiChange::Grade).into_iter().collect();
+            Request::GuiPage {
+                page,
+                grade,
+                palette,
+                primaries,
+            } => {
+                let mut changes: Vec<GuiChange> = (grade.map(GuiChange::Grade).into_iter())
+                    .chain(palette.map(GuiChange::Palette))
+                    .chain(primaries.map(GuiChange::Primaries))
+                    .collect();
                 changes.push(GuiChange::Page(page));
                 self.gui_change(changes, |s| json!(s))
             }
