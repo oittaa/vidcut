@@ -43,7 +43,7 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
   - A corrector key input with no window gives clamp(Q(x)), with x = ig k + io. With a window w in the node, a = Q(w): Matte gives clamp(1 − U(1 − a, 1 − x)), Mask gives clamp(U(a, x)).
   - Key Output Gain kg and Key Output Offset ko of a node act last on its key E: clamp(kg E + ko).
   - The errors are below 8.2e-7. The record is in `fixtures/color/NOTES.md` of the test data.
-- Remove One Input in the menu of a mixer, and the lock column of List View.
+- Remove One Input in the menu of a mixer.
 - Measure in Resolve, then match:
   - Remove One Input: which empty input goes when there are several, and whether it takes the empty input of two. Measured: it removes an empty input, also one in the middle, and does nothing when each input is linked.
   - The menu of a Parallel Mixer.

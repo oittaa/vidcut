@@ -59,6 +59,11 @@ pub(super) struct Badge {
     pub(super) tip: &'static str,
 }
 
+const LOCKED: Badge = Badge {
+    icon: egui_phosphor::regular::LOCK_SIMPLE,
+    tip: "Locked",
+};
+
 pub(super) struct Outlet {
     pub(super) name: String,
     pub(super) color: Color32,
@@ -77,6 +82,7 @@ pub(super) struct Tile<K> {
     pub(super) drops: bool,
     pub(super) note: String,
     pub(super) badges: Vec<Badge>,
+    pub(super) locked: Option<bool>,
     pub(super) outlet: Option<Outlet>,
     pub(super) inlets: Vec<Inlet>,
     pub(super) edge: Option<Edge>,
@@ -125,6 +131,7 @@ pub(super) enum Pick {
 pub(super) struct Done<K> {
     pub(super) picked: Option<(K, Pick)>,
     pub(super) switched: Option<K>,
+    pub(super) locked: Option<K>,
     pub(super) named: Option<(K, String)>,
     pub(super) pointed: Option<K>,
     pub(super) moved: Vec<(K, [f64; 2])>,
@@ -441,6 +448,7 @@ impl<K> Done<K> {
         Self {
             picked: None,
             switched: None,
+            locked: None,
             named: None,
             pointed: None,
             moved: Vec::new(),
@@ -494,10 +502,14 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
             );
             let dim = c.text_dim.gamma_multiply(fade);
             let start = r.left() + 6.0;
-            let number = painter.text(
+            let (number, text) = match t.switch {
+                true => (t.label.as_str(), t.note.clone()),
+                false => ("", format!("{} {}", t.label, t.note).trim_end().to_string()),
+            };
+            painter.text(
                 pos2(start, r.center().y),
                 Align2::LEFT_CENTER,
-                &t.label,
+                number,
                 font.clone(),
                 c.text.gamma_multiply(fade),
             );
@@ -509,7 +521,24 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
                 };
                 painter.text(eye.center(), Align2::CENTER_CENTER, icon, font.clone(), dim);
             }
-            let mut left = (eye.right() + 4.0).max(number.right() + 10.0);
+            let lock = Rect::from_min_size(pos2(eye.right(), r.top()), vec2(ROW, ROW));
+            if let Some(locked) = t.locked {
+                let (icon, color) = match locked {
+                    true => (
+                        egui_phosphor::regular::LOCK_SIMPLE,
+                        c.text.gamma_multiply(fade),
+                    ),
+                    false => (egui_phosphor::regular::LOCK_SIMPLE_OPEN, dim),
+                };
+                painter.text(
+                    lock.center(),
+                    Align2::CENTER_CENTER,
+                    icon,
+                    font.clone(),
+                    color,
+                );
+            }
+            let mut left = lock.right() + 4.0;
             if shots {
                 let at = pos2(left, r.center().y - ROW_SHOT.y / 2.0);
                 let area = Rect::from_min_size(at, ROW_SHOT);
@@ -533,19 +562,23 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
                 font.clone(),
                 &mut done.named,
             );
-            if !editing && !t.note.is_empty() {
+            if !editing && !text.is_empty() {
                 let color = c.text.gamma_multiply(fade);
                 let width = right - left;
-                let shown = super::history::one_line(ui, &t.note, width, font.clone(), color);
+                let shown = super::history::one_line(ui, &text, width, font.clone(), color);
                 painter.galley(
                     pos2(left, r.center().y - shown.size().y / 2.0),
                     shown,
                     color,
                 );
             }
-            let on_eye = resp.interact_pointer_pos().is_some_and(|p| eye.contains(p));
+            let at = resp.interact_pointer_pos();
+            let on_eye = at.is_some_and(|p| eye.contains(p));
+            let on_lock = at.is_some_and(|p| lock.contains(p));
             if resp.clicked() && t.switch && on_eye {
                 done.switched = Some(t.key.clone());
+            } else if resp.clicked() && t.locked.is_some() && on_lock {
+                done.locked = Some(t.key.clone());
             } else if resp.clicked() {
                 let add = ui.input(|i| i.modifiers.command);
                 done.picked = Some((t.key.clone(), if add { Pick::Toggle } else { Pick::Only }));
@@ -775,7 +808,8 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         let mark = FontId::proportional(10.0 * z.clamp(0.6, 1.4));
         let mut right = r.right() - 2.0 * KNOT * z;
         let hover = node_resp.hover_pos();
-        for b in t.badges.iter().rev() {
+        let lock = (t.locked == Some(true)).then_some(LOCKED);
+        for b in t.badges.iter().chain(lock.iter()).rev() {
             let at = pos2(right, line);
             let color = c.text_dim.gamma_multiply(fade);
             let shown = painter.text(at, Align2::RIGHT_CENTER, b.icon, mark.clone(), color);

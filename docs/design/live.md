@@ -443,8 +443,9 @@ The bar and the Jobs button:
   - The label of a node is the `Tile::note` above it. Node Label and a double-click start an edit in place (`NodeView::name`). Enter gives `Done::named`, and the page sends `grade.set` with `label`.
   - In List View, the label is in the row, and Node Label edits it there. The graph and the list use one edit field (`label_field`).
   - The badges of a corrector (`Badge`) come from the values that differ from the usual values (`badges`). The Keyframes badge comes from `GradeNode::is_animated`. Each grade edit keeps that state in `animated` (`edited`).
-  - The Key badge comes from the Key Output of the node (`KeyOutput::is_usual`). A locked node, a mixer too, has a lock badge last (`GradeNode::locked`).
-  - The palette of a locked node drops its changes. Lock Node in the menu sends `grade.set` with `locked`.
+  - The Key badge comes from the Key Output of the node (`KeyOutput::is_usual`).
+  - `Tile::locked` holds the lock of a node, a mixer too (`GradeNode::locked`). The graph shows a lock badge last. In List View, each row has a lock after the eye, and a click on it gives `Done::locked`.
+  - The palette of a locked node drops its changes. Lock Node in the menu and the lock of a row send `grade.set` with `locked`.
   - The option menu at the top right of the Node Editor sets `color.switching_clips` with `preferences.set`.
   - The same menu sets `color.show_thumbnails` and `color.disable_thumbnail_refresh`. `Snapshot::show_thumbnails` and `Snapshot::disable_thumbnail_refresh` hold them.
   - With thumbnails on, the page asks the viewer for them each frame (`Workspace::shots_want`, `ShotsWanted`). The height follows the zoom of the editor and the pixels per point.
@@ -460,7 +461,7 @@ The bar and the Jobs button:
   - `gui.node_view` asks a zoom of the shown Node Editor (`NodeView::ask`). The editor does it on its next frame, with its own size (`zoomed`).
   - Cleanup Node Graph sends `grade.cleanup` with the `area` that the editor shows, less a margin and the size of a node (`NodeView::area`). The zoom stays.
   - `NodeView` keeps the rectangle of its last frame for the area. Only the graph view has the menu with Cleanup Node Graph.
-  - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the thumbnail, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
+  - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the lock, the thumbnail, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
   - A tile with `Tile::drops` can land on another such tile or on a link (`Dropped`). `grade_dropped` sends `grade.swap`, `grade.paste`, or one `apply` that inserts the node.
   - An Alt-drag builds the settings with `ops::grade::copy` from the shown project. Ctrl+C sends `grade.copy`; the live core keeps its answer (`node_clipboard`) for `grade.paste`.
   - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.set` and `grade.clear`.
