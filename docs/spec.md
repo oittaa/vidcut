@@ -2895,6 +2895,9 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: with Same Node, a clip with fewer nodes gave its own last current node, not its highest node.
   - vidcut: the preference `color.switching_clips`, with `last_adjusted`, `first`, `last` and `same`, as measured. Preferences > Color and the option menu of the Node Editor have it.
   - vidcut: First and Last give the corrector with the lowest or the highest number. A grade that this run of the GUI did not show selects node 1. The timeline grade counts as a clip.
+  - Measured in Resolve Studio 21.2: with the Node Editor on Timeline, another clip keeps the timeline grade in the Node Editor.
+  - Measured: First Node and Last Node then select the first or the last node of the timeline grade. Last Adjusted Node keeps the current node.
+  - vidcut: does the same. Same Node also keeps the current node, because the timeline grade has that number. This part is not measured in Resolve.
   - Measured in Resolve Studio 21.2: a drag box from the empty Node Editor selects the nodes in the box.
   - Measured: a click on the empty Node Editor keeps the current node.
   - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.

@@ -431,7 +431,7 @@ The bar and the Jobs button:
   - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
   - In List View, the current row has a red outline (`CURRENT_ROW`). It is the red of the active angle (`ACTIVE_ANGLE`).
   - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.
-  - Another clip, another grade mode or another timeline selects a node by `color.switching_clips` (`Workspace::settle_grade`).
+  - Another clip, another grade mode or another timeline selects a node by `color.switching_clips` (`Workspace::settle_grade`). With the timeline grade shown, the clip at the playhead counts too (`EffectsPage::grade_seen`).
   - `EffectsPage::grade_left` keeps the current node of each grade that the page showed. `Snapshot::switching_clips` holds the preference.
   - A click on the number of a corrector gives `Done::switched`. The page then sends `grade.set` with `on`, and the selection stays.
   - The label of a node is the `Tile::note` above it. Node Label and a double-click start an edit in place (`NodeView::name`). Enter gives `Done::named`, and the page sends `grade.set` with `label`.

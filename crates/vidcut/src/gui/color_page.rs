@@ -1311,21 +1311,23 @@ impl Workspace {
 
     pub(super) fn settle_grade(&mut self, of: &GradeOf, g: &Grade) {
         let open = (self.project().and_then(|p| p.sheet_key())).unwrap_or_default();
+        let clip = matches!(of, GradeOf::Timeline)
+            .then(|| self.color_clip())
+            .flatten();
         let switching = self.snap.switching_clips;
         let page = &mut self.effects_page;
         if page
             .grade_seen
             .as_ref()
-            .is_none_or(|(t, o)| *t != open || o != of)
+            .is_none_or(|(t, o, c)| *t != open || o != of || *c != clip)
         {
             let was = page.grade_nodes.last().copied();
-            if let (Some(left), Some(n)) = (page.grade_seen.take(), was) {
-                page.grade_left.insert(left, n);
+            if let (Some((t, o, _)), Some(n)) = (page.grade_seen.take(), was) {
+                page.grade_left.insert((t, o), n);
             }
-            let seen = (open, of.clone());
-            let kept = page.grade_left.get(&seen).copied();
+            let kept = page.grade_left.get(&(open.clone(), of.clone())).copied();
             page.grade_nodes = vec![switched_to(g, switching, kept, was)];
-            page.grade_seen = Some(seen);
+            page.grade_seen = Some((open, of.clone(), clip));
             page.grade_coming = None;
             page.grade_view.stop();
             page.grade_spot = None;

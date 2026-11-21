@@ -319,6 +319,7 @@ impl Grade {
                 **c = now.into_owned();
             }
             d.keys.clear();
+            d.animated = false;
         }
         Cow::Owned(g)
     }
@@ -326,6 +327,7 @@ impl Grade {
     pub fn clear_keys(&mut self) {
         for d in &mut self.nodes {
             d.keys.clear();
+            d.animated = false;
         }
     }
 
