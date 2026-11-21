@@ -429,6 +429,9 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
         if t.start_tc < 0 {
             v.push(format!("timeline {} starts before 00:00:00:00", t.id));
         }
+        if let Some(Err(e)) = t.grade.as_ref().map(crate::ops::grade::checked) {
+            v.push(format!("timeline {}: {}", t.id, e.message));
+        }
         if let Some(o) = t.own {
             if o.drop_frame && !o.fps.has_drop_frame() {
                 v.push(format!("timeline {} counts drop-frame at {}", t.id, o.fps));
