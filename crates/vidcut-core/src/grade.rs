@@ -1,4 +1,4 @@
-use crate::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool};
+use crate::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, KeyOutput};
 use crate::tone_tables::{HIGHLIGHTS, SHADOWS, TONE_AMOUNTS};
 use crate::window_key::Keying;
 
@@ -97,6 +97,8 @@ const NEWTON_CLOSE: f64 = 1e-12;
 pub const TONE_SIZE: usize = 1024;
 
 pub const THUMBNAIL_GRAY: f64 = 0.5;
+
+pub const KEY_BLUR_STEP: f64 = 0.00844;
 
 pub const TONE_EPS: f64 = 0.01;
 
@@ -486,6 +488,119 @@ pub enum Key {
     Map(usize),
 }
 
+pub fn key_join(a: f64, b: f64) -> f64 {
+    let h = (0.5 - (a - b).abs()).max(0.0);
+    (8.0 * (a.max(b) + 0.5 * h * h) - 1.0) / 7.0
+}
+
+pub fn key_blur_spread((blur, ratio): (f64, f64), height: f64) -> [f64; 2] {
+    let s = KEY_BLUR_STEP * blur.max(0.0) * height;
+    [s * (1.0 + ratio).min(1.0), s * (1.0 - ratio).min(1.0)]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyFold {
+    pub gain: f64,
+    pub offset: f64,
+    pub invert: bool,
+    pub matte: bool,
+    pub finish: Option<(bool, KeyOutput)>,
+}
+
+impl KeyFold {
+    pub fn of(&self, acc: f64, key: f64) -> f64 {
+        let v = self.gain * key + self.offset;
+        let x = if self.invert { 1.0 - v } else { v };
+        let v = match self.matte {
+            true => 1.0 - key_join(1.0 - acc, 1.0 - x),
+            false => key_join(acc, x),
+        };
+        match self.finish {
+            Some((true, out)) => out.of(v.clamp(0.0, 1.0)),
+            Some((false, out)) => out.of(v),
+            None => v,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum KeySource {
+    Windows,
+    Node(u32),
+}
+
+fn key_steps(node: &GradeNode) -> Vec<(KeySource, KeyFold)> {
+    let fold = |(gain, offset, invert), matte| KeyFold {
+        gain,
+        offset,
+        invert,
+        matte,
+        finish: None,
+    };
+    let (mut steps, first) = match &node.tool {
+        GradeTool::Corrector(_) => {
+            let windows = node.windows.iter().any(|w| w.on);
+            let mut steps = Vec::new();
+            if windows {
+                steps.push((KeySource::Windows, fold((1.0, 0.0, false), false)));
+            }
+            if let Some(from) = node.key_from {
+                let i = node.key_input;
+                let how = fold((i.gain, i.offset, i.invert), windows && !i.mask);
+                steps.push((KeySource::Node(from), how));
+            }
+            (steps, true)
+        }
+        GradeTool::KeyMixer { mix } => {
+            let linked = (node.inputs.iter().zip(mix)).filter_map(|(v, m)| v.map(|v| (v, *m)));
+            let (mattes, masks): (Vec<_>, Vec<_>) = linked.partition(|(_, m)| m.matte);
+            let steps = (masks.into_iter().chain(mattes))
+                .map(|(v, m)| {
+                    (
+                        KeySource::Node(v),
+                        fold((m.gain, m.offset, m.invert), m.matte),
+                    )
+                })
+                .collect();
+            (steps, false)
+        }
+        _ => (Vec::new(), false),
+    };
+    if let Some(last) = steps.last_mut() {
+        last.1.finish = Some((first, node.key));
+    }
+    steps
+}
+
+fn key_sources(node: &GradeNode) -> impl Iterator<Item = u32> + '_ {
+    let mixed = node.inputs.iter().flatten().filter(|_| node.takes_keys());
+    mixed.copied().chain(node.key_from)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Shape {
+    Flat(f64),
+    Map,
+}
+
+fn shape_of(node: &GradeNode, shapes: &[Shape]) -> Shape {
+    let steps = key_steps(node);
+    if steps.is_empty() {
+        return Shape::Flat(node.key.of(1.0));
+    }
+    let mut acc = 0.0;
+    for (source, fold) in steps {
+        match source {
+            KeySource::Node(v) => match shapes[v as usize] {
+                Shape::Flat(x) => acc = fold.of(acc, x),
+                Shape::Map => return Shape::Map,
+            },
+            KeySource::Windows => return Shape::Map,
+        }
+    }
+    Shape::Flat(acc)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pass {
     Copy {
@@ -495,6 +610,16 @@ pub enum Pass {
     Key {
         to: usize,
         keying: Box<Keying>,
+    },
+    KeyFold {
+        to: usize,
+        acc: Key,
+        input: Key,
+        fold: KeyFold,
+    },
+    KeyBlur {
+        on: usize,
+        blur: (f64, f64),
     },
     Correct {
         on: usize,
@@ -537,7 +662,7 @@ pub fn order(g: &Grade) -> Option<Vec<u32>> {
             _ => {}
         }
         state[k as usize] = 1;
-        for &v in g.node(k)?.inputs.iter().flatten() {
+        for v in g.node(k)?.links() {
             if v > g.last() {
                 return None;
             }
@@ -558,7 +683,10 @@ pub fn order(g: &Grade) -> Option<Vec<u32>> {
 }
 
 pub fn complete(g: &Grade) -> bool {
-    let used = |k: u32| g.output == Some(k) || g.nodes.iter().any(|n| n.inputs.contains(&Some(k)));
+    let used = |k: u32| {
+        g.output == Some(k)
+            || (g.nodes.iter()).any(|n| n.inputs.contains(&Some(k)) || n.key_from == Some(k))
+    };
     g.output.is_some()
         && g.nodes.iter().zip(1..).all(|(n, k)| {
             let fed = match n.tool {
@@ -579,7 +707,11 @@ fn passed(g: &Grade) -> Option<Vec<Vec<u32>>> {
     let mut through = vec![Vec::new(); g.nodes.len() + 1];
     through[0] = vec![0];
     for k in order(g)? {
-        let ins = g.node(k)?.inputs.iter().flatten();
+        let node = g.node(k)?;
+        if node.takes_keys() {
+            continue;
+        }
+        let ins = node.inputs.iter().flatten();
         let mut path = shared(ins.map(|v| through[*v as usize].clone()))?;
         path.push(k);
         through[k as usize] = path;
@@ -664,12 +796,9 @@ struct Uses {
     over: Vec<usize>,
     whole: Vec<usize>,
     keys: Vec<Key>,
+    shapes: Vec<Shape>,
+    counts: Vec<usize>,
     tapped: bool,
-}
-
-fn partial(node: &GradeNode) -> bool {
-    let key = node.key.of(1.0);
-    node.windows.iter().any(|w| w.on) || (key > 0.0 && key < 1.0)
 }
 
 impl Uses {
@@ -677,33 +806,108 @@ impl Uses {
         self.all[k] - self.over[k]
     }
 
-    fn twice(&self, node: &GradeNode, c: &Corrector, k: usize) -> bool {
-        let seen = self.kept(k) > 0 || self.tapped;
-        node.on && !c.is_usual() && self.over[k] > 0 && seen && partial(node)
+    fn partial(&self, k: usize) -> bool {
+        match self.shapes[k] {
+            Shape::Map => true,
+            Shape::Flat(v) => v > 0.0 && v < 1.0,
+        }
     }
 
-    fn keyed(
-        &mut self,
-        (node, c, k): (&GradeNode, &Corrector, usize),
+    fn twice(&self, node: &GradeNode, c: &Corrector, k: usize) -> bool {
+        let seen = self.kept(k) > 0 || self.tapped;
+        node.on && !c.is_usual() && self.over[k] > 0 && seen && self.partial(k)
+    }
+
+    fn own(&self, node: &GradeNode, k: usize) -> usize {
+        match &node.tool {
+            GradeTool::Corrector(c) if node.on => {
+                let own = !c.is_usual() && (self.twice(node, c, k) || self.over[k] == 0);
+                usize::from(own) + self.over[k] + usize::from(self.tapped)
+            }
+            _ => 0,
+        }
+    }
+
+    fn source(
+        &self,
+        (node, v): (&GradeNode, u32),
         r: &mut Registers,
         passes: &mut Vec<Pass>,
     ) -> Key {
-        let flat = Key::Flat(node.key.of(1.0));
-        let Some(keying) = Keying::of(node) else {
-            return flat;
-        };
-        let own = !c.is_usual() && (self.twice(node, c, k) || self.over[k] == 0);
-        let count = usize::from(own) + self.over[k] + usize::from(self.tapped);
-        if count == 0 {
-            return flat;
+        let key = self.keys[v as usize].clone();
+        let blur = (node.key_input.blur, node.key_input.blur_ratio);
+        match key {
+            Key::Map(from) if !node.takes_keys() && blur.0 > 0.0 => {
+                let to = r.kept(1);
+                passes.push(Pass::Copy { from, to });
+                r.used(&key);
+                passes.push(Pass::KeyBlur { on: to, blur });
+                Key::Map(to)
+            }
+            _ => key,
         }
-        let to = r.kept(count);
-        passes.push(Pass::Key {
-            to,
-            keying: Box::new(keying),
-        });
-        self.keys[k] = Key::Map(to);
-        Key::Map(to)
+    }
+
+    fn folded(
+        &self,
+        (node, count): (&GradeNode, usize),
+        r: &mut Registers,
+        passes: &mut Vec<Pass>,
+    ) -> Option<Key> {
+        let steps = key_steps(node);
+        if let [(KeySource::Windows, _)] = steps[..] {
+            let to = r.kept(count);
+            let keying = Box::new(Keying::of(node)?);
+            passes.push(Pass::Key { to, keying });
+            return Some(Key::Map(to));
+        }
+        let mut acc = Key::Flat(0.0);
+        for (i, (source, fold)) in steps.iter().enumerate() {
+            let input = match *source {
+                KeySource::Windows => {
+                    let to = r.kept(1);
+                    let keying = Keying {
+                        output: KeyOutput::default(),
+                        ..Keying::of(node)?
+                    };
+                    let keying = Box::new(keying);
+                    passes.push(Pass::Key { to, keying });
+                    Key::Map(to)
+                }
+                KeySource::Node(v) => self.source((node, v), r, passes),
+            };
+            acc = match (&acc, &input) {
+                (Key::Flat(a), Key::Flat(x)) => Key::Flat(fold.of(*a, *x)),
+                _ => {
+                    let uses = if i + 1 == steps.len() { count } else { 1 };
+                    let to = r.kept(uses);
+                    passes.push(Pass::KeyFold {
+                        to,
+                        acc: acc.clone(),
+                        input: input.clone(),
+                        fold: *fold,
+                    });
+                    r.used(&acc);
+                    r.used(&input);
+                    Key::Map(to)
+                }
+            };
+        }
+        Some(acc)
+    }
+
+    fn keyed(
+        &self,
+        (node, k): (&GradeNode, usize),
+        r: &mut Registers,
+        passes: &mut Vec<Pass>,
+    ) -> Option<Key> {
+        let count = self.counts[k];
+        match self.shapes[k] {
+            Shape::Flat(v) => Some(Key::Flat(v)),
+            Shape::Map if count == 0 => Some(Key::Flat(1.0)),
+            Shape::Map => self.folded((node, count), r, passes),
+        }
     }
 }
 
@@ -718,7 +922,7 @@ fn corrected(
         r.alias(k, x, uses.kept(k));
         return Some(r.holder[k]);
     }
-    let key = uses.keyed((node, c, k), r, passes);
+    let key = uses.keys[k].clone();
     let none = key == Key::Flat(0.0);
     if c.is_usual() || none {
         r.alias(k, x, uses.all[k]);
@@ -795,16 +999,76 @@ fn layered(
     on
 }
 
+fn keys_only(p: &Pass) -> bool {
+    matches!(
+        p,
+        Pass::Copy { .. } | Pass::Key { .. } | Pass::KeyFold { .. } | Pass::KeyBlur { .. }
+    )
+}
+
 impl Graded {
     pub fn of(g: &Grade) -> Option<Self> {
         let made = Self::made(g, false)?;
-        let only_copies =
-            (made.passes.iter()).all(|p| matches!(p, Pass::Copy { .. } | Pass::Key { .. }));
-        (!only_copies).then_some(made)
+        (!made.passes.iter().all(keys_only)).then_some(made)
     }
 
     pub fn tapped(g: &Grade) -> Option<Self> {
         Self::made(g, true)
+    }
+
+    fn uses(g: &Grade, (order, through): (&[u32], &[Vec<u32>]), tapped: bool) -> Option<Uses> {
+        let count = g.nodes.len() + 1;
+        let mut shapes = vec![Shape::Flat(1.0); count];
+        for &k in order {
+            shapes[k as usize] = shape_of(g.node(k)?, &shapes);
+        }
+        let mut uses = Uses {
+            all: vec![0; count],
+            over: vec![0; count],
+            whole: (0..count).collect(),
+            keys: vec![Key::Flat(1.0); count],
+            shapes,
+            counts: vec![0; count],
+            tapped,
+        };
+        for &k in order {
+            let node = g.node(k)?;
+            match &node.tool {
+                GradeTool::ParallelMixer => {
+                    let x = base(through, g, k)?;
+                    uses.all[x as usize] += 1;
+                }
+                GradeTool::LayerMixer { .. } => {
+                    for v in node.inputs.iter().flatten().skip(1) {
+                        uses.over[*v as usize] += 1;
+                    }
+                }
+                GradeTool::Corrector(_) | GradeTool::KeyMixer { .. } => {}
+            }
+        }
+        let pictures = g.nodes.iter().filter(|n| !n.takes_keys());
+        for v in pictures.flat_map(|n| n.inputs.iter().flatten()) {
+            uses.all[*v as usize] += 1;
+        }
+        uses.all[g.output? as usize] += 1;
+        for (node, k) in g.nodes.iter().zip(1..) {
+            if let (GradeTool::Corrector(c), Some(Some(x))) = (&node.tool, node.inputs.first())
+                && uses.twice(node, c, k)
+            {
+                uses.all[*x as usize] += 1;
+            }
+        }
+        for &k in order.iter().rev() {
+            let node = g.node(k)?;
+            let k = k as usize;
+            uses.counts[k] += uses.own(node, k);
+            if uses.counts[k] > 0 {
+                for v in key_sources(node) {
+                    uses.counts[v as usize] += 1;
+                }
+            }
+        }
+        Some(uses)
     }
 
     fn made(g: &Grade, tapped: bool) -> Option<Self> {
@@ -814,46 +1078,9 @@ impl Graded {
         let order = order(g)?;
         let out = g.output? as usize;
         let through = passed(g)?;
-        let count = g.nodes.len() + 1;
-        let mut bases = vec![None; count];
-        let mut uses = Uses {
-            all: vec![0; count],
-            over: vec![0; count],
-            whole: (0..count).collect(),
-            keys: std::iter::once(Key::Flat(1.0))
-                .chain(g.nodes.iter().map(|n| Key::Flat(n.key.of(1.0))))
-                .collect(),
-            tapped,
-        };
-        for &k in &order {
-            let node = g.node(k)?;
-            match &node.tool {
-                GradeTool::ParallelMixer => {
-                    let x = base(&through, g, k)?;
-                    bases[k as usize] = Some(x as usize);
-                    uses.all[x as usize] += 1;
-                }
-                GradeTool::LayerMixer { .. } => {
-                    for v in node.inputs.iter().flatten().skip(1) {
-                        uses.over[*v as usize] += 1;
-                    }
-                }
-                GradeTool::Corrector(_) => {}
-            }
-        }
-        for v in g.nodes.iter().flat_map(|n| n.inputs.iter().flatten()) {
-            uses.all[*v as usize] += 1;
-        }
-        uses.all[out] += 1;
-        for (node, k) in g.nodes.iter().zip(1..) {
-            if let (GradeTool::Corrector(c), Some(Some(x))) = (&node.tool, node.inputs.first())
-                && uses.twice(node, c, k)
-            {
-                uses.all[*x as usize] += 1;
-            }
-        }
+        let mut uses = Self::uses(g, (&order, &through), tapped)?;
         let mut r = Registers {
-            holder: vec![0; 2 * count],
+            holder: vec![0; 2 * uses.all.len()],
             left: vec![uses.all[0]],
             free: Vec::new(),
         };
@@ -864,6 +1091,7 @@ impl Graded {
             let ins: Vec<usize> = node.inputs.iter().flatten().map(|v| *v as usize).collect();
             let number = k;
             let k = k as usize;
+            uses.keys[k] = uses.keyed((node, k), &mut r, &mut passes)?;
             match &node.tool {
                 GradeTool::Corrector(c) => {
                     let from = corrected((node, c, k, ins[0]), &mut uses, &mut r, &mut passes);
@@ -882,7 +1110,7 @@ impl Graded {
                     }
                 }
                 GradeTool::ParallelMixer => {
-                    let x = bases[k]?;
+                    let x = base(&through, g, number)? as usize;
                     let on = r.take(ins[0], &mut passes);
                     for &v in &ins[1..] {
                         let (change, base) = (r.holder[v], r.holder[x]);
@@ -899,6 +1127,7 @@ impl Graded {
                     let on = layered((g, &ins, mode), &uses, &mut r, &mut passes);
                     r.hold(k, on, uses.all[k]);
                 }
+                GradeTool::KeyMixer { .. } => {}
             }
         }
         if r.holder[out] != 0 {

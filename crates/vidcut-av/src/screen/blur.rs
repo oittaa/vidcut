@@ -1,6 +1,6 @@
 use vidcut_core::grade::{
-    Graded, Grading, HALF_KNOTS, Key, LOG_KNOTS, LogCurve, Pass as GradePass, THUMBNAIL_GRAY,
-    TONE_EPS, TONE_SIZE, Tap, tone_filter,
+    Graded, Grading, HALF_KNOTS, Key, KeyFold, LOG_KNOTS, LogCurve, Pass as GradePass,
+    THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
 };
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
@@ -105,6 +105,7 @@ pub(super) struct Pipes {
     grade_mix: wgpu::RenderPipeline,
     window_key: wgpu::RenderPipeline,
     window_curves: wgpu::RenderPipeline,
+    key_fold: wgpu::RenderPipeline,
     shot: wgpu::RenderPipeline,
 }
 
@@ -204,6 +205,7 @@ impl Pipes {
             grade_mix: pipeline(&plain, "fs_grade_mix"),
             window_key: pipeline(&of(&reading), "fs_window_key"),
             window_curves: pipeline(&of(&reading), "fs_window_curves"),
+            key_fold: pipeline(&plain, "fs_key_fold"),
             shot: pipeline(&plain, "fs_shot"),
             layout,
             reading,
@@ -1517,6 +1519,76 @@ fn key_into(
     }
 }
 
+fn key_fold_into(
+    gpu: &Gpu,
+    to: &Texture,
+    (acc, input, fold): (&Key, &Key, &KeyFold),
+    (at, dummy): (&[&Texture], &Texture),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let part = |key: &Key| match *key {
+        Key::Flat(v) => (v, false, &dummy.view),
+        Key::Map(r) => (0.0, true, &at[r].view),
+    };
+    let ((a, a_map, start), (k, k_map, source)) = (part(acc), part(input));
+    let (finish, (first, out)) = match fold.finish {
+        Some(f) => (true, f),
+        None => (false, (false, KeyOutput::default())),
+    };
+    let bytes = float_bytes(&[
+        fold.gain,
+        fold.offset,
+        flag(fold.invert),
+        flag(fold.matte),
+        a,
+        flag(a_map),
+        k,
+        flag(k_map),
+        flag(finish),
+        flag(first),
+        out.gain,
+        out.offset,
+        flag(out.invert),
+        0.0,
+        0.0,
+        0.0,
+    ]);
+    let views = Views::with(source, start);
+    draw_step(
+        gpu,
+        (&gpu.blur.key_fold, &bytes[..]),
+        views,
+        &to.view,
+        encoder,
+    );
+}
+
+fn key_blur_into(
+    gpu: &Gpu,
+    on: &Texture,
+    (blur, spot): ((f64, f64), &Spot),
+    scratch: &Texture,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let size = on.texture.size();
+    let size = (size.width, size.height);
+    let [sx, sy] = key_blur_spread(blur, spot.frame[1]);
+    let across = texel_spread(spot, size, sx)[0];
+    let down = texel_spread(spot, size, sy)[1];
+    let ways: Vec<(Pass, bool)> = (passes([across; 4]).into_iter().map(|p| (p, false)))
+        .chain(passes([down; 4]).into_iter().map(|p| (p, true)))
+        .collect();
+    let zero = ([0.0; 4], [0.0; 4]);
+    let out = blurred_between(gpu, (&ways, BORDER_CLAMP), zero, (on, scratch), encoder);
+    if !std::ptr::eq(out, on) {
+        encoder.copy_texture_to_texture(
+            out.texture.as_image_copy(),
+            on.texture.as_image_copy(),
+            on.texture.size(),
+        );
+    }
+}
+
 fn pass_into(
     gpu: &Gpu,
     pass: &GradePass,
@@ -1528,6 +1600,15 @@ fn pass_into(
     match pass {
         GradePass::Key { to, keying } => {
             key_into(gpu, at[*to], (keying, spot), (scratch, spare), encoder);
+        }
+        GradePass::KeyFold {
+            to,
+            acc,
+            input,
+            fold,
+        } => key_fold_into(gpu, at[*to], (acc, input, fold), (at, &scratch[0]), encoder),
+        GradePass::KeyBlur { on, blur } => {
+            key_blur_into(gpu, at[*on], (*blur, spot), &scratch[0], encoder);
         }
         GradePass::Copy { from, to } => encoder.copy_texture_to_texture(
             at[*from].texture.as_image_copy(),

@@ -2940,8 +2940,9 @@ pub enum Request {
     /// Join the picture of node `from` (0: the picture that comes into the
     /// grade) to an input of `node` (0: the output of the grade), in place of
     /// what was there. Without `from`, the input takes nothing. On a mixer,
-    /// an `input` one past the last, or no `input`, adds an input. A link
-    /// that makes a loop is an error.
+    /// an `input` one past the last, or no `input`, adds an input. With
+    /// `key`, the key of `from` joins the key input of a corrector or an
+    /// input of a key mixer. A link that makes a loop is an error.
     #[serde(rename = "grade.connect")]
     GradeConnect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2955,6 +2956,9 @@ pub enum Request {
         input: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<u32>,
+        /// Join a key, not a picture.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        key: bool,
     },
     /// Copy the settings of a corrector of the grade of a clip, or with
     /// `timeline` of the timeline grade (Ctrl+C on the Color page): its
@@ -4623,15 +4627,54 @@ pub struct GradeNodeChange {
     /// The label above it in the node editor. An empty text removes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    /// The gain of the key that a corrector gives out, from 0 to 2.
+    /// The gain of the key that a corrector or a key mixer gives out, from
+    /// 0 to 2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_gain: Option<f64>,
-    /// The offset of the key that a corrector gives out, from -1 to 1.
+    /// The offset of the key that a corrector or a key mixer gives out,
+    /// from -1 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_offset: Option<f64>,
-    /// The key that a corrector gives out is turned over: 1 minus it.
+    /// The key that a corrector or a key mixer gives out is turned over: 1
+    /// minus it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_invert: Option<bool>,
+    /// The key that comes into a corrector is turned over: 1 minus it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_invert: Option<bool>,
+    /// The key that comes into a corrector adds to the key of its windows.
+    /// Off, it is Matte: the key is where both keys are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_mask: Option<bool>,
+    /// The gain of the key that comes into a corrector, from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_gain: Option<f64>,
+    /// The offset of the key that comes into a corrector, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_offset: Option<f64>,
+    /// The blur of the key that comes into a corrector, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_blur: Option<f64>,
+    /// The ratio of the blur of the key that comes into a corrector, from
+    /// -1 to 1. Above 0 the blur is less high, and below 0 less wide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_blur_ratio: Option<f64>,
+    /// The input of a key mixer, from 0, that the `mix_` values change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<u32>,
+    /// The key of `input` is turned over: 1 minus it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mix_invert: Option<bool>,
+    /// The key of `input` limits the mix to where it is. Off, it is Mask:
+    /// the key adds to the mix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mix_matte: Option<bool>,
+    /// The gain of the key of `input`, from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mix_gain: Option<f64>,
+    /// The offset of the key of `input`, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mix_offset: Option<f64>,
     /// Locked, the node keeps its grade: the values, the keyframes and the
     /// Key Output of a corrector, and the kind and mode of a mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4647,7 +4690,7 @@ pub enum GradePalette {
     Primaries,
     /// The windows of the corrector.
     Window,
-    /// The Key Output.
+    /// The Key Input and the Key Output, or the values of a key mixer.
     Key,
 }
 
@@ -4695,6 +4738,11 @@ pub enum GradeAdd {
     Append,
     /// A corrector that joins nothing, at `place`.
     Corrector,
+    /// As `serial` after the corrector `node`. Its key input takes the key
+    /// of `node`, turned over.
+    Outside,
+    /// A key mixer with two inputs that take nothing, at `place`.
+    KeyMixer,
 }
 
 /// The channels of a printer point.
@@ -5221,6 +5269,9 @@ pub struct CopiedNode {
     /// As `key` of a grade node. Left out at its usual value.
     #[serde(default, skip_serializing_if = "crate::model::KeyOutput::is_usual")]
     pub key: crate::model::KeyOutput,
+    /// As `key_input` of a grade node. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "crate::model::KeyInput::is_usual")]
+    pub key_input: crate::model::KeyInput,
     /// As `windows` of a grade node. Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<crate::model::GradeWindow>,

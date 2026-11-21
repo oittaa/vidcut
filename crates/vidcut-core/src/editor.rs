@@ -4772,9 +4772,10 @@ fn mutate(
             node,
             input,
             from,
+            key,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
-            ops::grade::connect(p, &of, *node, *input, *from)?;
+            ops::grade::connect(p, &of, (*node, *input), *from, *key)?;
             Value::Null
         }
         Request::GradePaste {

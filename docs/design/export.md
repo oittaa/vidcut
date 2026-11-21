@@ -768,7 +768,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
 - `Graded::of` makes the tree into a list of passes on numbered textures (`grade::Pass`). A grade with only copies is no grade.
   - `grade::complete` tells if the grade works. Else the grade does nothing, as in the spec (§8.21).
-  - It works when something goes out, each input of a corrector has a link, each mixer has a link, and each node goes somewhere.
+  - It works when something goes out, each input of a corrector has a link, each mixer has a link, and each node goes somewhere. A node that gives only its key goes somewhere.
   - `grade::order` puts each node after the nodes on its inputs.
   - Texture 0 is the picture of the clip. A node writes on the texture of its first input when no other node reads it later. Else a `Copy` pass first gives it a new texture (`Registers`).
   - Why: most trees then need no texture more than the picture.
@@ -777,6 +777,16 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A corrector with no window that is on has one key for all pixels (`Key::Flat`, `KeyOutput::of`). It is from 0 to 1.
   - A corrector with a window that is on gets a `Key` pass first. It draws the key of the windows into a texture (`Key::Map`). The `Correct`, `Layer` and tap passes of the corrector read it.
   - The key texture comes from the same `Registers` as the pictures. It is free again after its last use (`Registers::used`).
+  - A corrector takes the key of another node on its key input (`GradeNode::key_from`). A key mixer takes keys on its inputs. `GradeNode::links` gives both kinds of link to `grade::order`.
+  - `key_steps` gives the steps of the key of a node. Each step folds one key into the key so far (`KeyFold`, `key_join`), in the order of the spec ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
+    - A corrector folds the key of its windows first, then the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
+    - The last step clamps the key and applies the Key Output.
+  - `shape_of` tells if the key of a node is one value for all pixels (`Shape::Flat`) or a texture (`Shape::Map`). Flat keys fold on the CPU and cost no pass.
+  - A `KeyFold` pass folds a texture key with `fs_key_fold`. A node with windows and no key input keeps its one `Key` pass.
+  - A key on a key input with a Blur Radius above 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
+  - `Uses::counts` counts the readers of each key, from the last node back. A node counts its own key only when it is on and needs it. Only then do the keys on its links count.
+  - Why: each key texture is then free after its last reader, and a key that nothing reads costs no pass.
+  - A key mixer makes no picture. `grade::passed` and the counts of the pictures skip it.
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
   - A curve goes to the GPU as two closed paths of lines: the inner and the outer path (`flattened`, `mitred`).
     - `flatten_into` halves each Bezier segment until its handles are within `FLAT_ERROR` pixel of the chord, `FLAT_DEPTH` times at most.
