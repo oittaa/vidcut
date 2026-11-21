@@ -2982,6 +2982,21 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
+- **The Nodes submenu** (pp. 3392, 3395):
+  - The Color menu has a Nodes submenu. Its items add, select, turn off and remove nodes.
+  - Measured in Resolve Studio 21.2: the submenu has six groups of items:
+    - Switch to Node Layer, Previous Node and Next Node.
+    - Add Serial Node, Add Serial Before Current, Add Parallel Node, Add Layer Node, Append a Node, Add Outside Node and Add Splitter Combiner Node.
+    - Add Serial Node + CPW, + LPW, + PPW and + PCW.
+    - Enable/Disable Selected Nodes and Enable/Disable All Nodes.
+    - Extract Current Node and Delete Current Node.
+    - Label Selected Node.
+  - Measured: Add Outside Node, Delete Current Node and Label Selected Node show no key. The other items show their keys.
+  - Measured: the manual has other names for three items: Add Serial, Add Before Current and Append Node (p. 3395).
+  - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. Each item shows its key.
+  - vidcut: Delete Current Node deletes the current node. Label Selected Node edits the label of the current corrector in place.
+  - vidcut: the submenu comes after the printer submenus. Its place in the Color menu of Resolve is not measured.
+  - vidcut: Switch to Node Layer, Add Outside Node, Add Splitter Combiner Node and the window items are not in the submenu ([todo](todo/color-page.md)).
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.

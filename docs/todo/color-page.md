@@ -32,8 +32,8 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 **To do:**
 
-- Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3394). They need windows.
-- The Nodes submenu of the Color menu (pp. 3392, 3394). The order of its items needs a measurement.
+- Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3395). They need windows.
+- Switch to Node Layer in the Nodes submenu, with the Node Stack Layers (pp. 3400–3401). Add Splitter Combiner Node (Option-Y, p. 3441).
 - The key input and output of each node, and the Key Mixer. Measured in Resolve Studio 21.2 with float renders:
   - smax(a, b) = max(a, b) + 0.5 max(0, 0.5 − |a − b|)². L(x) = (8x − 1) / 7. U(a, b) = L(smax(a, b)). Q(x) = U(0, x).
   - Key Mixer input i with key kᵢ: xᵢ = gᵢ kᵢ + oᵢ (Gain and Offset of the input). Invert gives 1 − xᵢ.
