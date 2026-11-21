@@ -218,11 +218,21 @@ pub(super) fn window_palette(
             }
         });
     });
+    let shown_id = ui.scope_id().with("window-shown");
+    let reveal = ui.data(|d| d.get_temp::<usize>(shown_id)) != Some(current);
+    ui.data_mut(|d| d.insert_temp(shown_id, current));
     ui.horizontal_top(|ui| {
+        let room = ui.available_height();
         let list = ui.vertical(|ui| {
-            for (i, w) in windows.iter().enumerate() {
-                row(ui, (i, w, i == current), editing, &mut acts);
-            }
+            egui::ScrollArea::vertical()
+                .id_salt("window-list")
+                .max_height(room)
+                .show(ui, |ui| {
+                    for (i, w) in windows.iter().enumerate() {
+                        let now = i == current;
+                        row(ui, (i, w, now, now && reveal), editing, &mut acts);
+                    }
+                });
         });
         let list = list.response.rect;
         ui.add_space(DIVIDER);
@@ -241,7 +251,7 @@ pub(super) fn window_palette(
 
 fn row(
     ui: &mut Ui,
-    (i, w, current): (usize, &GradeWindow, bool),
+    (i, w, current, reveal): (usize, &GradeWindow, bool, bool),
     editing: &mut Option<(usize, String)>,
     acts: &mut Vec<WindowAct>,
 ) {
@@ -249,7 +259,7 @@ fn row(
         true => ui.visuals().widgets.hovered.weak_bg_fill,
         false => ui.visuals().extreme_bg_color,
     };
-    egui::Frame::new()
+    let framed = egui::Frame::new()
         .fill(fill)
         .inner_margin(Vec2::new(6.0, 3.0))
         .show(ui, |ui| {
@@ -278,6 +288,9 @@ fn row(
                 });
             });
         });
+    if reveal {
+        framed.response.scroll_to_me(None);
+    }
 }
 
 fn name_field(
