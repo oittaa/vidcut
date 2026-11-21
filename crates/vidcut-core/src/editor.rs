@@ -4701,11 +4701,12 @@ fn mutate(
             timeline,
             node,
             keep_nodes,
+            palette,
             at,
         } => {
             let of = grades_of(p, clips, *timeline, playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
-            ops::grade::clear(p, &of, (*node, *keep_nodes), at)?;
+            ops::grade::clear(p, &of, (*node, *keep_nodes, *palette), at)?;
             Value::Null
         }
         Request::GradePrinter {

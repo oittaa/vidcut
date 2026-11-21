@@ -773,11 +773,16 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - Texture 0 is the picture of the clip. A node writes on the texture of its first input when no other node reads it later. Else a `Copy` pass first gives it a new texture (`Registers`).
   - Why: most trees then need no texture more than the picture.
   - A corrector that is off or at its defaults takes the texture of its input. It costs no pass.
-  - A `Correct` pass runs `grade_into` with the `Grading` of the corrector.
+  - A `Correct` pass runs `grade_into` with the `Grading` of the corrector and its key. The key is the share of the change that the pass keeps (`KeyOutput::of`). It is from 0 to 1.
+  - A corrector with the key 0 also takes the texture of its input. A Layer Mixer that reads it gives it no `Layer` pass.
   - A `Parallel` pass adds the change of one input: mix + input − base.
   - `grade::base` finds the base: the nearest node that each path to each input goes through. An input counts for its own path.
   - `grade::passed` gives these nodes for each node, from the source, in the order of `grade::order`.
   - A `Layer` pass puts one input over the mix of the inputs before it, with the composite mode of the mixer. The passes go in input order.
+  - The `Layer` pass mixes by the key of that input. Thus the input past the first needs the whole change of its corrector (`Uses::over`).
+  - When other nodes also read that corrector and its key is above 0 and below 1, the corrector gets two textures (`Uses::twice`).
+  - One texture holds the whole change for the Layer Mixers (`Uses::whole`). A `Layer` pass in Normal with the key gives the other texture, for the other nodes.
+  - A corrector that is off gives no `Layer` pass. The mix of the inputs before it stays.
   - A Layer Mixer that is off mixes in Normal. A Parallel Mixer that is off mixes as when on.
   - An input with no link gives no pass.
   - The last pass copies the output to texture 0.
@@ -873,6 +878,7 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - A Static keyframe, or the corrector itself, and the Dynamic keyframe right after it are a pair.
   - The other keyframe of the pair takes only the values that changed (`Corrector::carried`). Each channel of a wheel is one value.
 - `grade.clear` with `node` or `keep_nodes` puts these values back to the usual values in the same way. The keyframes stay.
+  - It also puts back `KeyOutput::default`. With `palette`, only the values of that palette go back (`GradePalette`).
   - `grade.clear` alone gives `Grade::default`, with no keyframes.
 - `Picture::retimed_to`, `Picture::scale_times` and `Picture::retarget` move the keyframes of a clip grade with the keyframes of its effects.
 

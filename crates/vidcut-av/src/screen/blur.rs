@@ -211,9 +211,9 @@ fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
     }
 }
 
-fn grade_bytes(g: &Grading, effect: &Working) -> Vec<u8> {
+fn grade_bytes(g: &Grading, blend: f64) -> Vec<u8> {
     let row = |r: [f64; 3]| [r[0], r[1], r[2], 0.0];
-    let mut floats = vec![g.boost, effect.blend, 0.0, 0.0];
+    let mut floats = vec![g.boost, blend, 0.0, 0.0];
     for r in g.temp {
         floats.extend(row(r));
     }
@@ -1153,7 +1153,7 @@ fn grade_into(
     gpu: &Gpu,
     own: &Texture,
     (scratch, spare): (&[Texture; 2], &mut Spare),
-    (g, effect, on): (&Grading, &Working, Option<&wgpu::TextureView>),
+    (g, blend, on): (&Grading, f64, Option<&wgpu::TextureView>),
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let size = own.texture.size();
@@ -1182,7 +1182,7 @@ fn grade_into(
         source = &stepped_between(gpu, &steps, (a, b), encoder).view;
     }
     let [made, free] = scratch;
-    let bytes = grade_bytes(g, effect);
+    let bytes = grade_bytes(g, blend);
     let grade = (&gpu.blur.grade, &bytes[..]);
     draw_step(
         gpu,
@@ -1198,10 +1198,10 @@ fn mix_into(
     gpu: &Gpu,
     on: &Texture,
     (top, base): (&Texture, &Texture),
-    (scratch, how): (&Texture, [f64; 2]),
+    (scratch, how): (&Texture, [f64; 3]),
     encoder: &mut wgpu::CommandEncoder,
 ) {
-    let bytes = float_bytes(&[how[0], how[1], 0.0, 0.0]);
+    let bytes = float_bytes(&[how[0], how[1], how[2], 0.0]);
     let views = Views {
         source: &top.view,
         second: &base.view,
@@ -1245,25 +1245,25 @@ fn graded_into(
                 at(*to).texture.as_image_copy(),
                 size,
             ),
-            GradePass::Correct { on, grading } => grade_into(
+            GradePass::Correct { on, grading, key } => grade_into(
                 gpu,
                 at(*on),
                 (scratch, &mut *spare),
-                (grading.as_ref(), effect, None),
+                (grading.as_ref(), effect.blend * key, None),
                 encoder,
             ),
             GradePass::Parallel { on, change, base } => mix_into(
                 gpu,
                 at(*on),
                 (at(*change), at(*base)),
-                (&scratch[0], [MIX_PARALLEL, 0.0]),
+                (&scratch[0], [MIX_PARALLEL, 0.0, 1.0]),
                 encoder,
             ),
-            GradePass::Layer { on, top, mode } => mix_into(
+            GradePass::Layer { on, top, mode, key } => mix_into(
                 gpu,
                 at(*on),
                 (at(*top), at(*on)),
-                (&scratch[0], [MIX_LAYER, f64::from(mode.code())]),
+                (&scratch[0], [MIX_LAYER, f64::from(mode.code()), *key]),
                 encoder,
             ),
         }
