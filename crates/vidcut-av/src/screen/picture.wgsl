@@ -1845,7 +1845,153 @@ fn fs_grade_mix(in: Out) -> @location(0) vec4<f32> {
         return under;
     }
     let m = mixed(u32(grade_mixing.how.y + 0.5), top.rgb / a, under.rgb / a);
-    return mix(under, vec4<f32>(m * a, a), grade_mixing.how.z);
+    let key = select(1.0, textureLoad(tool_mask, px, 0).r, grade_mixing.how.w > 0.5);
+    return mix(under, vec4<f32>(m * a, a), grade_mixing.how.z * key);
+}
+
+struct WindowKeying {
+    map0: vec4<f32>,
+    map1: vec4<f32>,
+    map2: vec4<f32>,
+    output: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> window_keying: WindowKeying;
+@group(0) @binding(3) var<storage, read> window_cells: array<f32>;
+
+const WINDOW_CELLS: u32 = 16u;
+const WINDOW_INVERT: u32 = 1u;
+const WINDOW_MASK: u32 = 2u;
+const WINDOW_STARTS: u32 = 4u;
+const WINDOW_ENDS: u32 = 8u;
+
+fn window_join(a: f32, b: f32) -> f32 {
+    let h = max(0.5 - abs(a - b), 0.0);
+    return (8.0 * (max(a, b) + 0.5 * h * h) - 1.0) / 7.0;
+}
+
+fn window_cell(b: u32, k: u32) -> f32 {
+    return window_cells[b + k];
+}
+
+fn window_point(i: u32) -> vec2<f32> {
+    return vec2<f32>(window_cells[2u * i], window_cells[2u * i + 1u]);
+}
+
+fn window_polygon(q: vec2<f32>, first: u32, n: u32) -> f32 {
+    var near = 1e18;
+    var inside = false;
+    var b = window_point(first + n - 1u);
+    for (var i = 0u; i < n; i++) {
+        let a = window_point(first + i);
+        let e = a - b;
+        let w = q - b;
+        let z = q - a;
+        let long = max(dot(e, e), 1e-12);
+        let t = dot(w, e);
+        let cross = e.x * w.y - e.y * w.x;
+        let across = select(select(cross * cross / long, dot(z, z), t >= long), dot(w, w), t <= 0.0);
+        near = min(near, across);
+        if (b.y <= q.y) != (a.y <= q.y) && (cross > 0.0) == (a.y > b.y) {
+            inside = !inside;
+        }
+        b = a;
+    }
+    return select(-1.0, 1.0, inside) * sqrt(near);
+}
+
+fn window_side(d: f32, s: f32) -> vec2<f32> {
+    let soft = select(s, 1.0, s <= 0.0);
+    let cut = select(1.0, 0.0, s <= 0.0 && d <= 0.0);
+    return vec2<f32>(1.0 - (d + soft) / (2.0 * soft), cut);
+}
+
+fn window_one(b: u32, q: vec2<f32>) -> f32 {
+    let kind = u32(window_cell(b, 0u));
+    let c = window_cell(b, 3u);
+    let s = window_cell(b, 4u);
+    let x = q.x - window_cell(b, 5u);
+    let y = window_cell(b, 6u) - q.y;
+    let u = x * c - y * s;
+    let v = x * s + y * c;
+    let p = vec4<f32>(window_cell(b, 7u), window_cell(b, 8u), window_cell(b, 9u), window_cell(b, 10u));
+    switch kind {
+        case 0u: {
+            let d = length(vec2<f32>(u / p.z, v / p.w));
+            if p.y <= 0.0 {
+                return select(0.0, 1.0, d <= p.x);
+            }
+            return smoothstep(0.0, 1.0, (p.x + p.y - d) / (2.0 * p.y));
+        }
+        case 1u: {
+            let l = window_side(u + p.x, p.z);
+            let t = window_side(p.y - v, p.w);
+            let r = window_side(p.x - u, window_cell(b, 11u));
+            let o = window_side(v + p.y, window_cell(b, 12u));
+            let j = window_join(window_join(window_join(l.x, t.x), r.x), o.x);
+            return smoothstep(0.0, 1.0, 1.0 - j) * l.y * t.y * r.y * o.y;
+        }
+        case 2u: {
+            let d = max(window_polygon(q, u32(p.z), u32(p.w)), -window_cell(b, 11u));
+            let wide = select(p.y, p.x, d >= 0.0);
+            if wide <= 0.0 {
+                return 0.5 + 0.5 * sign(d);
+            }
+            return smoothstep(0.0, 1.0, 0.5 + d / (2.0 * wide));
+        }
+        default: {
+            if p.x <= 0.0 {
+                return select(0.0, 1.0, v >= 0.0);
+            }
+            return smoothstep(0.0, 1.0, (p.x + v) / p.x);
+        }
+    }
+}
+
+@fragment
+fn fs_window_key(in: Out) -> @location(0) vec4<f32> {
+    let f = vec3<f32>(in.position.xy, 1.0);
+    let h = vec3<f32>(dot(window_keying.map0.xyz, f), dot(window_keying.map1.xyz, f), dot(window_keying.map2.xyz, f));
+    let q = h.xy / h.z;
+    let count = u32(window_keying.map0.w);
+    let start = u32(window_keying.map1.w);
+    var g = 0.0;
+    var first = 0.0;
+    var p = 0.0;
+    var m = 0.0;
+    var adds = 0u;
+    var masks = 0u;
+    for (var i = 0u; i < count; i++) {
+        let b = start + i * WINDOW_CELLS;
+        let flags = u32(window_cell(b, 1u));
+        var w = window_one(b, q);
+        if (flags & WINDOW_INVERT) != 0u {
+            w = 1.0 - w;
+        }
+        w *= window_cell(b, 2u);
+        g = select(window_join(g, w), w, (flags & WINDOW_STARTS) != 0u);
+        if (flags & WINDOW_ENDS) == 0u {
+            continue;
+        }
+        if (flags & WINDOW_MASK) != 0u {
+            m = select(window_join(m, g), g, masks == 0u);
+            masks += 1u;
+        } else {
+            first = select(first, g, adds == 0u);
+            p = window_join(p, g);
+            adds += 1u;
+        }
+    }
+    var key = p;
+    if masks == 0u && adds == 1u {
+        key = first;
+    }
+    if masks > 0u {
+        key = select(1.0 - window_join(1.0 - p, m), 1.0 - m, adds == 0u);
+    }
+    let o = window_keying.output;
+    let out = o.x * clamp(key, 0.0, 1.0) + o.y;
+    return vec4<f32>(clamp(select(out, 1.0 - out, o.z > 0.5), 0.0, 1.0));
 }
 
 struct Shot {

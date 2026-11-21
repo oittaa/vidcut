@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::model::{Grade, GradeNode, GradeWindow, Project, WindowKind, WindowShape};
 
-use super::grade::{GradeOf, edited, node};
+use super::grade::{GradeOf, edited, unlocked};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WindowChange {
@@ -22,7 +22,7 @@ pub struct WindowChange {
 }
 
 fn corrector(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
-    let d = node(g, n)?;
+    let d = unlocked(g, n)?;
     if d.tool.is_mixer() {
         return Err(Error::invalid(format!(
             "node {n} is a mixer, which has no windows"

@@ -9,7 +9,9 @@ use crate::hw::Kind;
 use crate::player::{AlphaUse, Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
 use vidcut_core::model::{AlphaMode, CompositeMode, Grade, Hdr};
-use vidcut_core::place::{Level, Mix, MixPart, Mixes, Placing, Working, chain, lettered};
+use vidcut_core::place::{
+    Level, Mix, MixPart, Mixes, Placing, Working, chain, frame_back, lettered,
+};
 use vidcut_core::preferences::{Scope, ScopeScale};
 use vidcut_core::render::{Moving, Placed, Shift};
 
@@ -1872,7 +1874,7 @@ impl Screen {
         let n = layers.len();
         let graded = (self.timeline_grade.as_ref())
             .filter(|_| n > 0)
-            .and_then(Working::graded);
+            .and_then(|g| Working::graded(g, frame_back((f64::from(size.0), f64::from(size.1)))));
         let (mixed, late): (Vec<TitleOver>, Vec<TitleOver>) = titles
             .iter()
             .cloned()
@@ -2247,14 +2249,17 @@ impl Screen {
         }
         if let Some(wanted) = self.shots.takes() {
             let height = wanted.height;
+            let (fw, fh) = self.frame.unwrap_or(size);
+            let frame = [f64::from(fw), f64::from(fh)];
             let source = match &wanted.of {
-                ShotsOf::Clip(id) => clip_shot(&self.slots, &layers, placed, id, height),
+                ShotsOf::Clip(id) => clip_shot(&self.slots, &layers, placed, id, (height, frame)),
                 ShotsOf::Timeline => Some(shots::Source {
                     view: canvas.clone(),
                     size,
                     turn: 0,
                     aspect: f64::from(size.0) / f64::from(size.1),
                     height,
+                    frame,
                     grade: self.shots.timeline.clone().unwrap_or_default(),
                 }),
             };
@@ -2344,7 +2349,7 @@ fn clip_shot(
     layers: &[(&Arc<Picture>, Option<f64>)],
     placed: &[Vec<Placed>],
     id: &str,
-    height: u32,
+    (height, frame): (u32, [f64; 2]),
 ) -> Option<shots::Source> {
     let ours = |i: &usize| {
         placed
@@ -2368,6 +2373,7 @@ fn clip_shot(
         turn: picture.rotation(),
         aspect: w / h.max(1.0),
         height,
+        frame,
         grade,
     })
 }

@@ -636,6 +636,10 @@ These facts come from float renders in Resolve Studio 21.2, without color manage
   - The window draws Start 11 as a steep start. After OK, the keyframe has Start 1 and End 1. Start 11 also resets End.
   - A grade file with 11 renders as 1.
   - vidcut does not copy this fault. Start and End go from 0 to 10 (`LAST_PROFILE`).
+- **A circle window that Resolve makes with Toggle Display Mode on has no radius.**
+  - With the viewer hidden, the grade of a new circle has no base radius.
+  - The circle then renders about 30 pixels wide. The viewer draws the usual oval.
+  - vidcut does not copy this fault. At Size 50, the radius of a circle is 0.15 of the frame width (`CIRCLE_RADIUS`, [spec §8.23](spec.md#823-windows-pp-32653279)).
 
 ## transcribe.cpp and its models
 

@@ -52,6 +52,7 @@ mod tone_tables;
 pub mod transcript;
 pub mod transcripts;
 pub mod validate;
+pub mod window_key;
 
 pub use editor::{Editor, Env, History, ProbedMedia};
 pub use error::{Error, ErrorCode, Result};

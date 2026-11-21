@@ -3230,6 +3230,57 @@ Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.cop
 
 Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`. `grade.set`, `grade.printer` and `grade.get` take `at`. `project.set` takes `dynamics_profile`.
 
+### 8.23 Windows (pp. 3265–3279)
+
+- The manual:
+  - A window limits the grade of its node to a part of the picture. All windows of a node work together (p. 3267).
+  - There are five shapes: Linear, Circular, Polygonal, Curve and Gradient (pp. 3268–3269).
+  - Each row of the window list has an On/Off button with the shape, a name field, Invert and Mask (p. 3268).
+  - Mask off adds the window to the other windows. Mask on takes it away from them (p. 3268).
+  - p. 3275 names the two states of Mask the other way round. The measurements agree with p. 3268.
+  - Transform: Size, Aspect, Pan, Tilt, Rotate and Opacity. Size, Aspect, Pan and Tilt are 50 at first. Rotate is 0 (p. 3270).
+  - A larger Aspect makes the window wider. A larger Tilt moves it up. A larger Rotate turns it clockwise (p. 3270).
+  - Opacity sets the share of the window in the key of the node (p. 3270).
+  - Softness: Soft 1 for a circle and a gradient, Soft 1 to 4 for a linear window, Inside and Outside for a polygon and a curve (p. 3272).
+- Measured in Resolve Studio 21.2 with float renders at 1920×1080, 3840×2160 and 1080×1920:
+  - S(t) is smoothstep of t, clamped to 0..1. U(a, b) = (8m − 1) / 7, with m = max(a, b) + 0.5 max(0, 0.5 − |a − b|)². U is not clamped.
+  - The place of a window is in pixels of the timeline frame, from its middle, with y up. Each pixel is at its index.
+  - Pan and Tilt move the window by 81.92 pixels a step from 50. This is the same at each frame size.
+  - Rotate R turns the window clockwise: u = x cos R − y sin R and v = x sin R + y cos R.
+  - Size scales a linear window and a polygon by 0.025 + 0.975 S/50 up to 50, and by 1 + 0.06 (S − 50) above.
+  - Size scales a circle by 0.002 + 0.998 S/50 up to 50, and by 1 + 0.08 (S − 50) above.
+  - Aspect A above 50 multiplies the width by 50/(100 − A). Below 50, it multiplies the height by 50/A. A polygon has no Aspect.
+  - A linear window clamps the scale of each axis to 4.
+  - Circle: the radius r is 0.15 of the frame width, times the scale. Soft 1 gives s = 16 pixels a step, times the scale.
+  - Circle: key = S((r + s − d) / (2s)), with d the distance from the middle in the axes of the Aspect. With Soft 0, a pixel at d = r is in.
+  - Linear: the half sizes are 0.2 of the frame width and height, times the scale. Soft i gives 16 pixels a step, times the scale of its axis.
+  - Linear: each side i gives o = 1 − (d + s) / (2s), with d the distance inside the side. key = S(1 − U(U(U(o₁, o₂), o₃), o₄)).
+  - Linear: the sides go left, top, right, bottom. A side with Soft 0 uses s = 1, and the key is 0 where d ≤ 0.
+  - Polygon: the corners go to whole pixels. Inside and Outside give w = 0.04 of the frame diagonal a step. Size does not scale w.
+  - Polygon: d is the distance from the outline, above 0 inside, clamped at −1000 pixels. key = S(0.5 + d / (2w)), with the w of that side.
+  - Polygon: Inside 0 or Outside 0 gives a hard edge on that side of the outline. A pixel on the outline gets 0.5.
+  - Gradient: Soft 1 gives s = 100 pixels a step. key = S((s + v) / s), with v the distance above the line.
+  - A new circle has Soft 1 = 0.015 of the frame diagonal / 16. A new linear window has Soft 1.25 on each side, and a new gradient Soft 2.
+  - A new polygon has its corners at 0.25 of the frame width and height, and no softness.
+  - Each window key first takes its Invert, 1 − w. Then Opacity multiplies it.
+  - The windows of one shape join with U, in list order. The shapes then join in the order circle, linear, polygon, curve, gradient.
+  - With one shape and no mask, the key is its join G. Else the adds give P = U(…U(U(0, G₁), G₂)…), over the shapes.
+  - With no mask, the key is P.
+  - The masks join in the same way into M. With masks, key = 1 − U(1 − P, M). With masks only, key = 1 − M.
+  - The key is clamped to 0..1 at the end. Then the Key Output acts on it ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
+  - Not measured: the masks of two shapes, and three windows of one shape. vidcut joins them with U, as above.
+- vidcut:
+  - `grade.window.add` adds a window at its usual values, at the end of the window list. `grade.window.set` changes a window, and `grade.window.remove` removes it.
+  - `grade.get` gives the windows of each corrector. The values are those of the palette.
+  - The windows work as measured, in the viewer, the export and the node thumbnails. vidcut renders the 81 measured cases within 3.5e-5.
+  - The grade of a clip works after Edit Sizing ([§13](#13-order-of-operations-pp-287296-3407)). Thus a window keeps its place in the frame when the clip moves.
+  - A circle made in Resolve with Toggle Display Mode on has no radius ([gotchas](gotchas.md#resolves-renders)). vidcut does not copy this fault.
+  - A locked node refuses a change of its windows ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
+  - Not measured in Resolve: whether Reset Node Grade, copy, paste and swap take the windows. vidcut keeps the windows of each node in them.
+  - The Window palette, the outlines in the viewer, curve windows and window keyframes come later.
+
+Requests: `grade.window.add`, `grade.window.set` and `grade.window.remove`.
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
