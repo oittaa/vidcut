@@ -86,7 +86,7 @@ pub(super) struct EffectsPage {
     pub(super) graded: Option<super::color_page::Graded>,
     pub(super) grading: GradeLevel,
     pub(super) grade_nodes: Vec<u32>,
-    pub(super) grade_seen: Option<(String, GradeOf)>,
+    pub(super) grade_seen: Option<(String, GradeOf, Option<String>)>,
     pub(super) grade_left: Lru<(String, GradeOf), u32, GRADES_LEFT_KEPT>,
     pub(super) grade_coming: Option<(u32, Instant)>,
     pub(super) grade_view: NodeView<Port>,
