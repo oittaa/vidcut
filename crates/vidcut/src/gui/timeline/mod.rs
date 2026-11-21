@@ -1393,11 +1393,14 @@ impl Workspace {
                         self.send("compound.close", json!({ "to": 0 }));
                     }
                     for (i, oc) in p.compound_path.iter().enumerate() {
+                        let name = p
+                            .compound(&oc.compound)
+                            .map_or("Compound Clip", |k| k.name.as_str());
                         ui.label(dim("›"));
                         if i + 1 == p.compound_path.len() {
-                            ui.label(RichText::new(&oc.name).strong());
+                            ui.label(RichText::new(name).strong());
                         } else if ui
-                            .add(egui::Button::new(&oc.name).frame(false))
+                            .add(egui::Button::new(name).frame(false))
                             .double_clicked()
                         {
                             self.send("compound.close", json!({ "to": i + 1 }));

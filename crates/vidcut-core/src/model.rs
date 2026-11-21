@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, label_frames};
+use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, label_frames, rescale};
 
 pub const STILL_LIMIT_SECS: f64 = 63_600.0;
 
@@ -22,7 +22,7 @@ pub struct Project {
     pub settings: Settings,
     pub media: Vec<Media>,
     pub tracks: Vec<Track>,
-    pub compounds: Vec<PooledCompound>,
+    pub compounds: Vec<Compound>,
     pub compound_path: Vec<OpenCompound>,
     pub marks: Marks,
     pub tape_marks: TapeMarks,
@@ -58,9 +58,9 @@ pub struct ProjectFile {
     /// the one open most recently. Left out when there are no timelines.
     #[serde(default)]
     pub recent: Vec<String>,
-    /// The compound clips in the Media tab. Left out when there are none.
+    /// Compound clip definitions, in pool order. Left out when there are none.
     #[serde(default)]
-    pub compounds: Vec<PooledCompound>,
+    pub compounds: Vec<Compound>,
     /// Open compound clips from outermost to innermost. Left out when a
     /// top-level timeline is open.
     #[serde(default)]
@@ -96,10 +96,10 @@ struct ProjectOut<'a> {
     timelines: Vec<TimelineOut<'a>>,
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     recent: &'a [String],
-    #[serde(skip_serializing_if = "<[PooledCompound]>::is_empty")]
-    compounds: &'a [PooledCompound],
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    compound_path: Vec<OpenCompoundOut<'a>>,
+    compounds: Vec<CompoundOut<'a>>,
+    #[serde(skip_serializing_if = "<[OpenCompound]>::is_empty")]
+    compound_path: &'a [OpenCompound],
     #[serde(skip_serializing_if = "TapeMarks::is_empty")]
     tape_marks: &'a TapeMarks,
     next_id: &'a NextIds,
@@ -114,7 +114,7 @@ struct ProjectOut<'a> {
 impl Serialize for Project {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let open = self.checked_out_timeline();
-        let depth = self.compound_path.len();
+        let open_compound = self.checked_out_compound();
         ProjectOut {
             rev: self.rev,
             edited: self.edited,
@@ -127,13 +127,13 @@ impl Serialize for Project {
                 })
                 .collect(),
             recent: &self.recent,
-            compounds: &self.compounds,
-            compound_path: (self.compound_path.iter().enumerate())
-                .map(|(i, c)| match i + 1 == depth {
-                    true => OpenCompoundOut::of(c, self.sheet()),
-                    false => OpenCompoundOut::of(c, c.sheet()),
+            compounds: (self.compounds.iter())
+                .map(|k| match Some(k.id.as_str()) == open_compound {
+                    true => CompoundOut::of(k, self.sheet()),
+                    false => CompoundOut::of(k, k.sheet()),
                 })
                 .collect(),
+            compound_path: &self.compound_path,
             tape_marks: &self.tape_marks,
             next_id: &self.next_id,
             bins: &self.bins,
@@ -2119,12 +2119,11 @@ pub struct Clip {
     /// flipped and cropped. Left out, it fills the frame as it always has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture: Option<Picture>,
-    /// A compound clip: made from timeline clips (`edit.compound`), or a
-    /// compound clip or nested timeline from another editor's file (deviation
-    /// X9). It is a block with no media and no audio of its own. On an audio
+    /// The id of a compound clip definition in [`Project::compounds`].
+    /// It is a block with no media and no audio of its own. On an audio
     /// track it stands for the sound of what it holds (`video` false).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compound: Option<Compound>,
+    pub compound: Option<String>,
     /// Its speed, when not 100% forward: one speed, or sections between
     /// speed keyframes (decision D48). The clip plays and edits at it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6528,33 +6527,128 @@ impl Picture {
     }
 }
 
-/// A compound clip or nested timeline from another editor's file
-/// (deviation X9).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// A compound clip definition: its tracks, markers and format live here once,
+/// and clips on timelines refer to it by `id` (`Clip::compound`).
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 pub struct Compound {
-    /// The nested OTIO `Stack` as read, without its source range and clip
-    /// effects (the clip's own).
-    pub stack: Kept,
-    /// Its length in project frames: the clip's source range stays within.
-    pub frames: i64,
-    /// The clips it holds as vidcut plays them, on tracks of their own,
-    /// frames from its first: its stack's video tracks for a picture block,
-    /// audio tracks for a sound block. None when their media weren't found:
-    /// it plays as a gap.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tracks: Vec<Track>,
-    /// The clips it was made from, whole, on the tracks they came from,
-    /// frames from its first: what `edit.decompose` puts back. Left out on
-    /// a compound clip from another editor's file.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub made_from: Vec<Track>,
-    /// Timeline markers inside the compound clip. Left out when empty.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub markers: Vec<Marker>,
-    /// Starting timecode of the compound clip, as frames from 00:00:00:00.
+    /// `k<N>`, never reused.
+    pub id: String,
+    pub name: String,
+    /// The bin it is in (a path from [`Project::bins`]); empty: the top level.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub bin: String,
+    /// Removed from the Media tab while clips still refer to it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removed: bool,
+    /// OTIO `Sequence ID` for interchange with other editors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence_id: Option<String>,
+    /// The frame rate that its tracks count at: the rate of the timeline
+    /// where it was made.
+    pub fps: Rational,
+    /// Count drop-frame timecode (`01:00:00;00`) at 29.97, 59.94 and 119.88.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drop_frame: bool,
+    /// Starting timecode, as frames from 00:00:00:00 at `fps` / `drop_frame`.
     /// Left out at 0.
     #[serde(default, skip_serializing_if = "is_zero_i64")]
     pub start_tc: i64,
+    /// Its length in frames at `fps`.
+    pub frames: i64,
+    /// The tracks inside it (video and audio, frames from 0 at `fps`).
+    /// Empty while checked out as the active open sheet, or while offline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracks: Vec<Track>,
+    #[serde(default, skip_serializing_if = "Marks::is_empty")]
+    pub marks: Marks,
+    /// Timeline markers inside the compound clip. Left out when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<Marker>,
+    /// Preserved OTIO `Stack` from an imported file (foreign metadata, or
+    /// full contents while media are offline).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_otio: Option<Kept>,
+}
+
+#[derive(Serialize)]
+struct CompoundOut<'a> {
+    id: &'a str,
+    name: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    bin: &'a str,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    removed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sequence_id: Option<&'a str>,
+    fps: Rational,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    drop_frame: bool,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    start_tc: i64,
+    frames: i64,
+    #[serde(skip_serializing_if = "<[Track]>::is_empty")]
+    tracks: &'a [Track],
+    #[serde(skip_serializing_if = "Marks::is_empty")]
+    marks: &'a Marks,
+    #[serde(skip_serializing_if = "<[Marker]>::is_empty")]
+    markers: &'a [Marker],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kept_otio: Option<&'a Kept>,
+}
+
+impl<'a> CompoundOut<'a> {
+    fn of(k: &'a Compound, s: Sheet<'a>) -> Self {
+        Self {
+            id: &k.id,
+            name: &k.name,
+            bin: &k.bin,
+            removed: k.removed,
+            sequence_id: k.sequence_id.as_deref(),
+            fps: k.fps,
+            drop_frame: k.drop_frame,
+            start_tc: k.start_tc,
+            frames: k.frames,
+            tracks: s.tracks,
+            marks: s.marks,
+            markers: s.markers,
+            kept_otio: k.kept_otio.as_ref(),
+        }
+    }
+}
+
+impl Serialize for Compound {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        CompoundOut::of(self, self.sheet()).serialize(s)
+    }
+}
+
+impl Compound {
+    pub fn counts_drop_frame(&self) -> bool {
+        self.drop_frame && self.fps.has_drop_frame()
+    }
+
+    pub fn sheet(&self) -> Sheet<'_> {
+        Sheet {
+            tracks: &self.tracks,
+            marks: &self.marks,
+            markers: &self.markers,
+            subtitles: &[],
+        }
+    }
+
+    pub fn has_picture(&self) -> bool {
+        self.tracks
+            .iter()
+            .any(|t| t.kind == TrackKind::Video && t.clips.iter().any(|c| c.video))
+    }
+
+    pub fn has_sound(&self) -> bool {
+        self.tracks.iter().any(|t| {
+            t.clips
+                .iter()
+                .any(|c| c.audio.is_some() || c.is_sound_block())
+        })
+    }
 }
 
 /// Where an open compound clip writes its edits back when closed.
@@ -6575,152 +6669,11 @@ impl CompoundTarget {
 }
 
 /// One open compound clip, outermost first.
-#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
-pub struct OpenCompound {
-    /// Unique key within the open path.
-    pub id: String,
-    pub name: String,
-    pub target: CompoundTarget,
-    pub fps: Rational,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub drop_frame: bool,
-    #[serde(default)]
-    pub sequence_id: Option<String>,
-    pub tracks: Vec<Track>,
-    #[serde(default)]
-    pub marks: Marks,
-    #[serde(default)]
-    pub markers: Vec<Marker>,
-    #[serde(default, skip_serializing_if = "is_zero_i64")]
-    pub start_tc: i64,
-}
-
-#[derive(Serialize)]
-struct OpenCompoundOut<'a> {
-    id: &'a str,
-    name: &'a str,
-    target: &'a CompoundTarget,
-    fps: Rational,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    drop_frame: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sequence_id: Option<&'a str>,
-    tracks: &'a [Track],
-    #[serde(skip_serializing_if = "Marks::is_empty")]
-    marks: &'a Marks,
-    #[serde(skip_serializing_if = "<[Marker]>::is_empty")]
-    markers: &'a [Marker],
-    #[serde(skip_serializing_if = "is_zero_i64")]
-    start_tc: i64,
-}
-
-impl<'a> OpenCompoundOut<'a> {
-    fn of(c: &'a OpenCompound, s: Sheet<'a>) -> Self {
-        Self {
-            id: &c.id,
-            name: &c.name,
-            target: &c.target,
-            fps: c.fps,
-            drop_frame: c.drop_frame,
-            sequence_id: c.sequence_id.as_deref(),
-            tracks: s.tracks,
-            marks: s.marks,
-            markers: s.markers,
-            start_tc: c.start_tc,
-        }
-    }
-}
-
-impl Serialize for OpenCompound {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        OpenCompoundOut::of(self, self.sheet()).serialize(s)
-    }
-}
-
-impl OpenCompound {
-    pub fn counts_drop_frame(&self) -> bool {
-        self.drop_frame && self.fps.has_drop_frame()
-    }
-
-    pub fn sheet(&self) -> Sheet<'_> {
-        Sheet {
-            tracks: &self.tracks,
-            marks: &self.marks,
-            markers: &self.markers,
-            subtitles: &[],
-        }
-    }
-}
-
-/// A compound clip in the Media tab: a copy that can go on the timeline
-/// again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct PooledCompound {
-    /// `k<N>`, never reused.
-    pub id: String,
-    pub name: String,
-    /// The bin it is in (a path from [`Project::bins`]); empty: the top level.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub bin: String,
-    /// The frame rate that its frames count at: the rate of the timeline
-    /// it was made in. In a timeline at another rate, it plays at the same
-    /// speed, and its frames are counted again by time.
-    pub fps: Rational,
-    /// Count drop-frame timecode (`01:00:00;00`) at 29.97, 59.94 and 119.88.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub drop_frame: bool,
-    /// The picture block. Left out when it holds only sound.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub picture: Option<Compound>,
-    /// The sound block. Left out when it holds only pictures.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sound: Option<Compound>,
-}
-
-impl Compound {
-    pub fn holds(&self, media: &str) -> bool {
-        self.tracks
-            .iter()
-            .chain(&self.made_from)
-            .flat_map(|t| &t.clips)
-            .any(|c| c.uses(media))
-    }
-}
-
-impl PooledCompound {
-    pub fn counts_drop_frame(&self) -> bool {
-        self.drop_frame && self.fps.has_drop_frame()
-    }
-
-    pub fn frames(&self) -> i64 {
-        self.picture
-            .as_ref()
-            .or(self.sound.as_ref())
-            .map_or(0, |k| k.frames)
-    }
-
-    pub fn blocks(&self) -> impl Iterator<Item = &Compound> {
-        self.picture.iter().chain(&self.sound)
-    }
-
-    pub fn blocks_mut(&mut self) -> impl Iterator<Item = &mut Compound> {
-        self.picture.iter_mut().chain(&mut self.sound)
-    }
-
-    pub fn holds(&self, media: &str) -> bool {
-        self.blocks().any(|k| k.holds(media))
-    }
-
-    pub fn sequence_id(&self) -> Option<&str> {
-        self.blocks().find_map(crate::otio::sequence_id)
-    }
-
-    pub fn start_tc(&self) -> i64 {
-        self.picture
-            .as_ref()
-            .or(self.sound.as_ref())
-            .map_or(0, |k| k.start_tc)
-    }
+pub struct OpenCompound {
+    /// The compound definition in [`Project::compounds`].
+    pub compound: String,
+    pub target: CompoundTarget,
 }
 
 /// Clip effects another editor applied, which vidcut keeps without showing
@@ -6988,7 +6941,7 @@ impl Clip {
     }
 
     pub fn uses(&self, media: &str) -> bool {
-        self.media == media || self.compound.as_ref().is_some_and(|k| k.holds(media))
+        self.media == media
     }
 
     pub fn draws(&self) -> bool {
@@ -7926,8 +7879,51 @@ impl Project {
             .flatten()
     }
 
-    pub fn open_compound(&self) -> Option<&OpenCompound> {
-        self.compound_path.last()
+    pub fn checked_out_compound(&self) -> Option<&str> {
+        self.compound_path.last().map(|c| c.compound.as_str())
+    }
+
+    pub fn open_compound(&self) -> Option<&Compound> {
+        self.checked_out_compound().and_then(|id| self.compound(id))
+    }
+
+    pub fn compound(&self, id: &str) -> Option<&Compound> {
+        self.compounds.iter().find(|k| k.id == id)
+    }
+
+    pub fn compound_mut(&mut self, id: &str) -> Option<&mut Compound> {
+        self.compounds.iter_mut().find(|k| k.id == id)
+    }
+
+    pub fn pool_compounds(&self) -> impl Iterator<Item = &Compound> {
+        self.compounds.iter().filter(|k| !k.removed)
+    }
+
+    pub fn pooled_compound(&self, id: &str) -> Option<&Compound> {
+        self.compound(id).filter(|k| !k.removed)
+    }
+
+    pub fn clip_compound(&self, c: &Clip) -> Option<&Compound> {
+        c.compound.as_deref().and_then(|id| self.compound(id))
+    }
+
+    pub fn compound_frames(&self, k: &Compound) -> i64 {
+        if k.fps == self.fps() {
+            k.frames
+        } else {
+            rescale(k.frames, k.fps, self.fps())
+        }
+    }
+
+    pub fn compound_sheet<'a>(&'a self, k: &'a Compound) -> Sheet<'a> {
+        match self.checked_out_compound() == Some(k.id.as_str()) {
+            true => self.sheet(),
+            false => k.sheet(),
+        }
+    }
+
+    pub fn compound_tracks<'a>(&'a self, k: &'a Compound) -> &'a [Track] {
+        self.compound_sheet(k).tracks
     }
 
     pub fn sheet_key(&self) -> Option<String> {
@@ -7940,7 +7936,7 @@ impl Project {
             if i > 0 {
                 key.push('/');
             }
-            key.push_str(&c.id);
+            key.push_str(&c.target.key());
         }
         Some(key)
     }
@@ -8016,8 +8012,10 @@ impl Project {
             take(&mut self.markers),
             take(&mut self.subtitles),
         );
-        if let Some(c) = self.compound_path.last_mut() {
-            (c.tracks, c.marks, c.markers) = (tracks, marks, markers);
+        if let Some(cid) = self.checked_out_compound().map(str::to_string)
+            && let Some(k) = self.compound_mut(&cid)
+        {
+            (k.tracks, k.marks, k.markers) = (tracks, marks, markers);
         } else if let Some(t) = self.timeline_mut() {
             (t.tracks, t.marks, t.markers, t.subtitles) = (tracks, marks, markers, subtitles);
         }
@@ -8025,11 +8023,12 @@ impl Project {
 
     pub fn check_out(&mut self) {
         use std::mem::take;
-        let body = if let Some(c) = self.compound_path.last_mut() {
+        let cid = self.checked_out_compound().map(str::to_string);
+        let body = if let Some(k) = cid.as_deref().and_then(|id| self.compound_mut(id)) {
             Some((
-                take(&mut c.tracks),
-                take(&mut c.marks),
-                take(&mut c.markers),
+                take(&mut k.tracks),
+                take(&mut k.marks),
+                take(&mut k.markers),
                 Vec::new(),
             ))
         } else {
@@ -8083,17 +8082,17 @@ impl Project {
         self.check_out();
     }
 
-    pub fn take_sheets(&mut self) -> (Vec<Timeline>, Vec<OpenCompound>) {
+    pub fn take_sheets(&mut self) -> (Vec<Timeline>, Vec<Compound>) {
         self.check_in();
         (
             std::mem::take(&mut self.timelines),
-            std::mem::take(&mut self.compound_path),
+            std::mem::take(&mut self.compounds),
         )
     }
 
-    pub fn put_sheets(&mut self, timelines: Vec<Timeline>, compound_path: Vec<OpenCompound>) {
+    pub fn put_sheets(&mut self, timelines: Vec<Timeline>, compounds: Vec<Compound>) {
         self.timelines = timelines;
-        self.compound_path = compound_path;
+        self.compounds = compounds;
         self.check_out();
     }
 
@@ -8151,9 +8150,9 @@ impl Project {
             .timeline()
             .and_then(|t| t.own)
             .unwrap_or_else(|| TimelineSettings::of(&self.settings));
-        if let Some(c) = self.compound_path.last() {
-            f.fps = c.fps;
-            f.drop_frame = c.counts_drop_frame();
+        if let Some(k) = self.open_compound() {
+            f.fps = k.fps;
+            f.drop_frame = k.counts_drop_frame();
         }
         f
     }
@@ -8183,8 +8182,8 @@ impl Project {
     }
 
     pub fn start_tc(&self) -> i64 {
-        if let Some(c) = self.open_compound() {
-            return c.start_tc;
+        if let Some(k) = self.open_compound() {
+            return k.start_tc;
         }
         self.timeline()
             .map_or_else(|| self.settings.first_hour(), |t| t.start_tc)
@@ -8198,8 +8197,10 @@ impl Project {
     }
 
     pub fn set_start_tc(&mut self, frames: i64) {
-        if let Some(c) = self.compound_path.last_mut() {
-            c.start_tc = frames;
+        if let Some(cid) = self.checked_out_compound().map(str::to_string) {
+            if let Some(k) = self.compound_mut(&cid) {
+                k.start_tc = frames;
+            }
             return;
         }
         if let Some(t) = self.timeline_mut() {
@@ -8283,7 +8284,7 @@ impl Project {
         let gone: Vec<&Media> = self.media.iter().filter(|m| m.removed).collect();
         let mut out: Vec<&Media> = Vec::new();
         for c in clips {
-            for m in gone.iter().filter(|m| c.uses(&m.id)) {
+            for m in gone.iter().filter(|m| self.clip_uses(c, &m.id)) {
                 if !out.iter().any(|o| o.id == m.id) {
                     out.push(m);
                 }
@@ -8292,21 +8293,86 @@ impl Project {
         out
     }
 
+    fn clip_uses_inner<'a>(
+        &'a self,
+        c: &'a Clip,
+        media: &str,
+        seen: &mut HashSet<&'a str>,
+    ) -> bool {
+        if c.media == media {
+            return true;
+        }
+        c.compound
+            .as_deref()
+            .is_some_and(|id| self.compound_holds_inner(id, media, seen))
+    }
+
+    fn compound_holds_inner<'a>(
+        &'a self,
+        id: &'a str,
+        media: &str,
+        seen: &mut HashSet<&'a str>,
+    ) -> bool {
+        if !seen.insert(id) {
+            return false;
+        }
+        let Some(k) = self.compound(id) else {
+            return false;
+        };
+        self.compound_tracks(k)
+            .iter()
+            .flat_map(|t| &t.clips)
+            .any(|c| self.clip_uses_inner(c, media, seen))
+    }
+
+    pub fn clip_uses(&self, c: &Clip, media: &str) -> bool {
+        self.clip_uses_inner(c, media, &mut HashSet::new())
+    }
+
+    pub fn compound_holds_media(&self, compound_id: &str, media: &str) -> bool {
+        self.compound_holds_inner(compound_id, media, &mut HashSet::new())
+    }
+
+    pub fn is_compound_used(&self, compound_id: &str) -> bool {
+        let open_tl = self.checked_out_timeline();
+        let open_k = self.checked_out_compound();
+        let holds = |ts: &[Track]| {
+            ts.iter()
+                .flat_map(|t| &t.clips)
+                .any(|c| c.compound.as_deref() == Some(compound_id))
+        };
+        self.compound_path
+            .iter()
+            .any(|oc| oc.compound == compound_id)
+            || holds(&self.tracks)
+            || self
+                .timelines
+                .iter()
+                .filter(|t| Some(t.id.as_str()) != open_tl)
+                .any(|t| holds(&t.tracks))
+            || self
+                .compounds
+                .iter()
+                .filter(|k| k.id != compound_id && Some(k.id.as_str()) != open_k)
+                .any(|k| holds(&k.tracks))
+    }
+
     pub fn is_used(&self, media: &str) -> bool {
         self.clips_using(media).next().is_some()
-            || self.compounds.iter().any(|k| k.holds(media))
+            || self
+                .compounds
+                .iter()
+                .any(|k| self.compound_holds_media(&k.id, media))
             || self.timelines_using(media).next().is_some()
-            || (self.compound_path.iter())
-                .flat_map(|c| &c.tracks)
-                .flat_map(|t| &t.clips)
-                .any(|c| c.uses(media))
     }
 
     pub fn timelines_using<'a>(&'a self, media: &'a str) -> impl Iterator<Item = &'a Timeline> {
         let open = self.checked_out_timeline();
         (self.timelines.iter())
             .filter(move |t| Some(t.id.as_str()) != open)
-            .filter(move |t| (t.tracks.iter().flat_map(|t| &t.clips)).any(|c| c.uses(media)))
+            .filter(move |t| {
+                (t.tracks.iter().flat_map(|t| &t.clips)).any(|c| self.clip_uses(c, media))
+            })
     }
 
     pub fn pool(&self) -> HashMap<&str, &Media> {
@@ -8317,7 +8383,7 @@ impl Project {
         self.tracks
             .iter()
             .flat_map(|t| &t.clips)
-            .filter(move |c| c.uses(media))
+            .filter(move |c| self.clip_uses(c, media))
     }
 
     pub fn find_clip(&self, id: &str) -> Option<(usize, usize)> {
@@ -8488,11 +8554,13 @@ impl Project {
     }
 
     pub fn source_range(&self, c: &Clip) -> Option<Range<i64>> {
-        match &c.compound {
-            Some(k) => Some(0..k.frames),
-            None if c.is_generator() => None,
-            None => self.media(&c.media).map(|m| self.media_range(m, c)),
+        if let Some(cid) = &c.compound {
+            return self.compound(cid).map(|k| 0..self.compound_frames(k));
         }
+        if c.is_generator() {
+            return None;
+        }
+        self.media(&c.media).map(|m| self.media_range(m, c))
     }
 
     pub fn handles(&self, c: &Clip) -> (i64, i64) {
@@ -8522,7 +8590,7 @@ impl Project {
         }
     }
 
-    pub fn alloc_pooled_compound_id(&mut self) -> String {
+    pub fn alloc_compound_id(&mut self) -> String {
         let id = format!("k{}", self.next_id.clip);
         self.next_id.clip += 1;
         id

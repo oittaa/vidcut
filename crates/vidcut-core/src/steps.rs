@@ -767,12 +767,15 @@ fn sheets_of(p: &Project) -> Vec<(String, Sheet<'_>)> {
         false => p.sheets().map(|(t, s)| (t.id.clone(), s)).collect(),
     };
     let depth = p.compound_path.len();
-    for (i, c) in p.compound_path.iter().enumerate() {
-        let sheet = match i + 1 == depth {
-            true => p.sheet(),
-            false => c.sheet(),
+    for (i, oc) in p.compound_path.iter().enumerate() {
+        let sheet = if i + 1 == depth {
+            p.sheet()
+        } else if let Some(k) = p.compound(&oc.compound) {
+            p.compound_sheet(k)
+        } else {
+            continue;
         };
-        out.push((format!("compound:{}", c.id), sheet));
+        out.push((format!("compound:{}", oc.target.key()), sheet));
     }
     out
 }
