@@ -4791,9 +4791,10 @@ fn mutate(
             add,
             node,
             place,
+            window,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
-            ops::grade::add(p, &of, *add, *node, *place)?
+            ops::grade::add(p, &of, *add, (*node, *place), *window)?
         }
         Request::GradeRemove {
             clip,

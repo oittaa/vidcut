@@ -2921,6 +2921,9 @@ pub enum Request {
         /// Its place in the node editor, for `corrector`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         place: Option<[f64; 2]>,
+        /// The first window of this kind of the new corrector is on.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<WindowKind>,
     },
     /// Take a node out of the grade of a clip, or with `timeline` of the
     /// timeline grade. A corrector or the output that took the picture of
