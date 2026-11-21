@@ -2982,7 +2982,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
-- **The Nodes submenu** (pp. 3392, 3394):
+- **The Nodes submenu** (pp. 3392, 3395):
   - The Color menu has a Nodes submenu. Its items add, select, turn off and remove nodes.
   - Measured in Resolve Studio 21.2: the submenu has six groups of items:
     - Switch to Node Layer, Previous Node and Next Node.
@@ -2992,7 +2992,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Extract Current Node and Delete Current Node.
     - Label Selected Node.
   - Measured: Add Outside Node, Delete Current Node and Label Selected Node show no key. The other items show their keys.
-  - Measured: the manual has other names for three items: Add Serial, Add Before Current and Append Node (p. 3394).
+  - Measured: the manual has other names for three items: Add Serial, Add Before Current and Append Node (p. 3395).
   - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. Each item shows its key.
   - vidcut: Delete Current Node deletes the current node. Label Selected Node edits the label of the current corrector in place.
   - vidcut: the submenu comes after the printer submenus. Its place in the Color menu of Resolve is not measured.
