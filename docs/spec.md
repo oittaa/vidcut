@@ -2461,6 +2461,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A compound clip can hold a compound clip.
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. Else it is removed.
   - A dissolve to a clip that is not selected is removed.
+  - Subtitle items stay out. Passing a subtitle item with other items leaves it on its subtitle track, and a subtitle alone makes no compound clip.
 - **Locked tracks:** a selected item on a locked track stays out, and the other items go in.
 - **In and Out marks:** the scripting call does not use them. It takes whole items.
 - **The window:**
@@ -5250,7 +5251,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A picture at an opacity of 0 counts as a picture.
       - An upper soft edge over a partly clear picture gives the premultiplied sum of the same formula.
       - A Gaussian Blur on the compound clip works on a title alone.
-      - A Mosaic Blur and a Glow on the compound clip follow the rule of the Gaussian Blur, at their default values.
+      - Mosaic Blur, Glow, Vignette and Sharpen on the compound clip follow the rule of the Gaussian Blur, at their default values.
       - A Film Grain on the compound clip counts its frames from the first frame of the compound clip.
       - A trim or a move of the compound clip does not change the pattern of the grain.
       - Float values stay exact inside a compound clip. A value above 1 is not clipped, and a value between 8-bit steps is not rounded.

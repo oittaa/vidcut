@@ -44,7 +44,6 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
    - Measure on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color. vidcut plays them as on a still.
 3. **Later:**
    - Measure the Gaussian Blur with Dynamic Zoom. vidcut does not change the sigma by the Dynamic Zoom box.
-   - Measure effects other than Gaussian Blur, Mosaic Blur, Glow and Film Grain on a compound clip ([todo](compound-opacity.md)).
    - Measure the Gaussian Blur with Use Alpha off on a clip that is partly clear, for example with Crop Softness. vidcut blurs its colors without their alpha.
    - Audio effects: reverb.
    - Hover Scrub Preview of transitions, effects and generators (pp. 759, 765, 766).
