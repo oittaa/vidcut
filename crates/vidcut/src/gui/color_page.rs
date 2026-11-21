@@ -1285,6 +1285,23 @@ impl Workspace {
         self.sync_picture_preview();
     }
 
+    pub(super) fn held_grade(&self, of: &GradeOf, n: u32) -> Option<&Grade> {
+        (self.effects_page.graded.as_ref())
+            .filter(|h| h.of == *of && h.node == n)
+            .map(|h| &h.grade)
+    }
+
+    pub(super) fn hold_grade(&mut self, of: &GradeOf, n: u32, grade: Grade) {
+        self.effects_page.graded = Some(Graded {
+            of: of.clone(),
+            node: n,
+            frame: self.grade_frame(of),
+            at: self.snap.timeline.position,
+            grade,
+            sent: None,
+        });
+    }
+
     pub(super) fn grade_frame(&self, of: &GradeOf) -> i64 {
         let at = self.snap.timeline.position;
         match of {

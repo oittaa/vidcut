@@ -1070,6 +1070,10 @@ pub fn chain(first: &[f64; 8], next: &[f64; 8]) -> [f64; 8] {
     ])
 }
 
+pub fn window_back(back: &[f64; 8], [fx, fy, fw, fh]: [f64; 4], (w, h): (f64, f64)) -> [f64; 8] {
+    chain(back, &[fw / w, 0.0, fx / w, 0.0, fh / h, fy / h, 0.0, 0.0])
+}
+
 pub fn frame_back((w, h): (f64, f64)) -> [f64; 8] {
     [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0]
 }
@@ -1154,10 +1158,7 @@ impl Placing {
             .iter()
             .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
             .collect();
-        let [fx, fy, fw, fh] = fitted;
-        let (cw, ch) = frame;
-        let fitted_frame = [fw / cw, 0.0, fx / cw, 0.0, fh / ch, fy / ch, 0.0, 0.0];
-        let windows = chain(&own.back, &fitted_frame);
+        let windows = window_back(&own.back, fitted, frame);
         let graded = (p.picture.grade.as_ref())
             .and_then(|g| Working::graded(&g.at(p.source as f64), windows));
         effects.extend(graded);

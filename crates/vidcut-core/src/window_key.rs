@@ -5,6 +5,8 @@ pub const SOFT_STEP: f64 = 16.0;
 pub const GRADIENT_SOFT_STEP: f64 = 100.0;
 pub const POLYGON_SOFT_STEP: f64 = 1.0 / 25.0;
 pub const CIRCLE_RADIUS: f64 = 0.15;
+pub const CIRCLE_LEAST: f64 = 0.002;
+pub const CIRCLE_GROWTH: f64 = 0.08;
 pub const LINEAR_MOST: f64 = 4.0;
 pub const FAR_OUTSIDE: f64 = 1000.0;
 pub const EVEN: f64 = 1e-6;
@@ -69,12 +71,19 @@ pub fn linear_scale(size: f64) -> f64 {
 
 pub fn circle_scale(size: f64) -> f64 {
     match size <= 50.0 {
-        true => 0.002 + 0.998 * size / 50.0,
-        false => 1.0 + 0.08 * (size - 50.0),
+        true => CIRCLE_LEAST + (1.0 - CIRCLE_LEAST) * size / 50.0,
+        false => 1.0 + CIRCLE_GROWTH * (size - 50.0),
     }
 }
 
-fn origin(window: &GradeWindow, [w, h]: [f64; 2]) -> [f64; 2] {
+pub fn circle_size(scale: f64) -> f64 {
+    match scale <= 1.0 {
+        true => (scale - CIRCLE_LEAST) / (1.0 - CIRCLE_LEAST) * 50.0,
+        false => 50.0 + (scale - 1.0) / CIRCLE_GROWTH,
+    }
+}
+
+pub fn origin(window: &GradeWindow, [w, h]: [f64; 2]) -> [f64; 2] {
     [
         w / 2.0 + (window.pan - 50.0) * PAN_STEP,
         h / 2.0 - (window.tilt - 50.0) * PAN_STEP,
@@ -130,7 +139,7 @@ fn pivot(points: &[[f64; 2]; 4], [w, h]: [f64; 2]) -> [f64; 2] {
     [sx * w / n, sy * h / n]
 }
 
-fn shaped(window: &GradeWindow, [w, h]: [f64; 2]) -> Shaped {
+pub fn shaped(window: &GradeWindow, [w, h]: [f64; 2]) -> Shaped {
     let origin = origin(window, [w, h]);
     let turned = match &window.shape {
         WindowShape::Linear { points, .. } => pivot(points, [w, h]),

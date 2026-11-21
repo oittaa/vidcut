@@ -3182,7 +3182,7 @@ pub enum Request {
         /// A polygon only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         outside: Option<f64>,
-        /// The corners of a polygon, three or more. The four corners of a
+        /// The corners of a polygon, 3 to 128. The four corners of a
         /// linear window: bottom left, top left, top right, bottom right.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         points: Option<Vec<[f64; 2]>>,

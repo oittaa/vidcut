@@ -26,9 +26,9 @@ const STEP: f64 = 0.1;
 
 const ROTATE_STEP: f64 = 0.5;
 
-const PERCENT: (f64, f64) = (0.0, 100.0);
+pub(super) const PERCENT: (f64, f64) = (0.0, 100.0);
 
-const TURN: (f64, f64) = (-180.0, 180.0);
+pub(super) const TURN: (f64, f64) = (-180.0, 180.0);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Field {

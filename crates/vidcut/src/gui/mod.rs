@@ -62,6 +62,7 @@ mod upscale;
 mod video;
 mod viewer;
 mod window;
+mod window_overlay;
 pub mod workspace;
 
 use std::path::PathBuf;

@@ -5,11 +5,13 @@ use serde_json::{Value, json};
 use vidcut_core::model::{
     Clip, CompositeMode, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
 };
+use vidcut_core::ops::grade::GradeOf;
 use vidcut_core::ops::picture::{has_picture, zoom_shown};
-use vidcut_core::place::{Level, Placing, anchored, apply, flipped};
+use vidcut_core::place::{Level, Placing, anchored, apply, flipped, frame_back, window_back};
 use vidcut_core::render::{Placed, Run};
 
 use super::timeline::tools::landing;
+use super::window_overlay::Framing;
 use super::workspace::Workspace;
 
 const GRAB: f32 = 6.0;
@@ -842,6 +844,39 @@ impl Workspace {
                 json!({ "clips": id, "dynamic_zoom": zoom_shown(&z) }),
             );
         }
+    }
+
+    pub(super) fn window_framing(&self, of: &GradeOf, picture: Rect) -> Option<Framing> {
+        let p = self.project_shared()?;
+        let (w, h) = (f64::from(p.width()), f64::from(p.height()));
+        let windows = match of {
+            GradeOf::Timeline => frame_back((w, h)),
+            GradeOf::Clip(id) => {
+                let c = p.clip(id)?;
+                let at = self.snap.timeline.position;
+                let run = Run {
+                    at: at - c.start,
+                    of: c.duration,
+                    held: false,
+                };
+                let fit = content(&p, c, (w, h));
+                let pixels = pixels_of(&p, c, (w, h));
+                let placed = [Placed::at(
+                    c,
+                    c.picture.clone().unwrap_or_default(),
+                    run,
+                    at,
+                )];
+                let level = Placing::new(&placed, (w, h), fit, pixels).level;
+                window_back(&level.back, fit, (w, h))
+            }
+        };
+        Some(Framing {
+            windows,
+            frame: [w, h],
+            origin: picture.min,
+            scale: vec2(picture.width() / w as f32, picture.height() / h as f32),
+        })
     }
 
     fn picture_shape(&self, picture: Rect) -> Option<Shown> {

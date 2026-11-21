@@ -3,6 +3,9 @@ use crate::model::{Grade, GradeNode, GradeWindow, Project, WindowKind, WindowSha
 
 use super::grade::{GradeOf, edited, unlocked};
 
+pub const POLYGON_LEAST: usize = 3;
+pub const POLYGON_MOST: usize = 128;
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WindowChange {
     pub on: Option<bool>,
@@ -122,8 +125,10 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
                 *outside = in_range("outside", v, soft_range)?;
             }
             if let Some(given) = &c.points {
-                if given.len() < 3 {
-                    return Err(Error::invalid("a polygon takes three `points` or more"));
+                if !(POLYGON_LEAST..=POLYGON_MOST).contains(&given.len()) {
+                    return Err(Error::invalid(format!(
+                        "a polygon takes {POLYGON_LEAST} to {POLYGON_MOST} `points`"
+                    )));
                 }
                 points.clone_from(given);
             }
