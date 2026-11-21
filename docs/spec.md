@@ -3313,12 +3313,11 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - A circle and a linear window use all six Transform fields. A polygon uses all but Aspect. A gradient uses Pan, Tilt, Rotate and Opacity.
     - A typed value goes to the nearest end. Rotate takes −180 to 180. The other fields take 0 to 100.
     - An added window is current. After a Delete, the first window of the same shape is current.
-    - Reset Selected Window gives the current window the values of a new window. It keeps the name, and the window stays on.
+    - Reset Selected Window gives the current window the values of a new window, with Invert off. It keeps the name and Mask, and the window stays on.
     - The reset button of the palette turns each window off, at the values of a new window. The added windows and the names stay.
   - vidcut: the Window palette works so. Window at the top of the palette selects it.
     - The reset button sends `grade.clear` with `palette` `window`. Reset Selected Window sends `grade.window.set`.
     - A change of a field goes to the grade when the mouse button comes up, as in the Primaries palette.
-    - Not measured: whether Reset Selected Window resets Invert and Mask. vidcut keeps them.
     - Not measured: whether each node keeps its own current window. vidcut keeps one current window for the palette.
   - The outlines in the viewer, curve windows, window keyframes, and Copy and Paste Window come later ([todo](todo/color-page.md)).
 

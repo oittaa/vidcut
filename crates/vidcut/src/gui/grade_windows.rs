@@ -18,6 +18,8 @@ const NAME_WIDTH: f32 = 150.0;
 
 const LABEL_WIDTH: f32 = 54.0;
 
+const DIVIDER: f32 = 6.0;
+
 const UNUSED: f64 = 50.0;
 
 const STEP: f64 = 0.1;
@@ -134,7 +136,6 @@ pub(super) fn reset(w: &GradeWindow, frame: [f64; 2]) -> GradeWindow {
     GradeWindow {
         on: w.on,
         name: w.name.clone(),
-        invert: w.invert,
         mask: w.mask,
         ..GradeWindow::new(w.shape.kind(), frame)
     }
@@ -153,6 +154,9 @@ pub(super) fn window_changes(from: &GradeWindow, to: &GradeWindow) -> Map<String
         if a != b {
             m.insert(name.into(), json!(b));
         }
+    }
+    if from.invert != to.invert {
+        m.insert("invert".into(), json!(to.invert));
     }
     match (&from.shape, &to.shape) {
         (WindowShape::Linear { soft: a }, WindowShape::Linear { soft: b }) if a != b => {
@@ -215,15 +219,22 @@ pub(super) fn window_palette(
         });
     });
     ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
+        let list = ui.vertical(|ui| {
             for (i, w) in windows.iter().enumerate() {
                 row(ui, (i, w, i == current), editing, &mut acts);
             }
         });
-        ui.separator();
-        if let Some(w) = windows.get(current) {
-            ui.vertical(|ui| fields(ui, (current, w, usual), &mut acts));
-        }
+        let list = list.response.rect;
+        ui.add_space(DIVIDER);
+        let Some(w) = windows.get(current) else {
+            return;
+        };
+        let shown = ui.vertical(|ui| fields(ui, (current, w, usual), &mut acts));
+        let shown = shown.response.rect;
+        let x = (list.right() + shown.left()) / 2.0;
+        let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+        let bottom = list.bottom().max(shown.bottom());
+        ui.painter().vline(x, list.top()..=bottom, stroke);
     });
     acts
 }

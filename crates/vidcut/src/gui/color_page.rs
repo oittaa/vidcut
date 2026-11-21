@@ -1240,10 +1240,14 @@ impl Workspace {
         let mut left = ui.new_child(egui::UiBuilder::new().id_salt("color-palette").max_rect(
             Rect::from_min_max(room.min, egui::pos2(keys.left(), room.bottom())),
         ));
+        let cap = match (self.effects_page.palette, full) {
+            (GradePalette::Primaries, _) | (_, None) => inner,
+            (_, Some(h)) => h.min(inner),
+        };
         egui::ScrollArea::vertical()
             .id_salt("primaries-scroll")
-            .max_height(inner)
-            .min_scrolled_height(inner)
+            .max_height(cap)
+            .min_scrolled_height(cap)
             .auto_shrink([false, true])
             .show(&mut left, |ui| {
                 let primaries = self.palette(ui);
