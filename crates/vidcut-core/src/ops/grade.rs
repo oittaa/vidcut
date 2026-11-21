@@ -1,9 +1,11 @@
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Corrector, Grade, GradeNode, GradeTool, Project};
+use crate::model::{Clip, Corrector, Grade, GradeKey, GradeNode, GradeTool, Project};
 use crate::preferences::ColorPrefs;
-use crate::request::{GradeAdd, GradeChange, GradeMixer, GradeNodeChange, PrinterColor};
+use crate::request::{
+    CopiedNode, GradeAdd, GradeChange, GradeMixer, GradeNodeChange, PrinterColor,
+};
 
 use super::locate;
 use super::picture::takes;
@@ -626,6 +628,80 @@ pub fn remove(p: &mut Project, of: &GradeOf, n: u32, extract: bool) -> Result<()
         }
         g.nodes.remove(n as usize - 1);
         renumbered(g, n);
+        Ok(())
+    })
+}
+
+fn start_of(p: &Project, of: &GradeOf) -> Result<i64> {
+    match of {
+        GradeOf::Timeline => Ok(0),
+        GradeOf::Clip(id) => {
+            let (ti, ci) = locate(p, id)?;
+            let c = &p.tracks[ti].clips[ci];
+            Ok(c.content_at(c.start))
+        }
+    }
+}
+
+fn values(d: &GradeNode, n: u32) -> Result<&Corrector> {
+    match &d.tool {
+        GradeTool::Corrector(c) => Ok(c),
+        _ => Err(Error::invalid(format!("node {n} is a mixer"))),
+    }
+}
+
+fn shifted_keys(keys: &[GradeKey], by: i64) -> Vec<GradeKey> {
+    keys.iter()
+        .map(|k| GradeKey {
+            frame: k.frame + by,
+            ..k.clone()
+        })
+        .collect()
+}
+
+pub fn copy(p: &Project, of: &GradeOf, n: u32) -> Result<CopiedNode> {
+    let g = stored(p, of)?;
+    let d = g.node(n).ok_or_else(|| no_node(n))?;
+    Ok(CopiedNode {
+        values: values(d, n)?.clone(),
+        keys: shifted_keys(&d.keys, -start_of(p, of)?),
+        label: d.label.clone(),
+        on: d.on,
+        animated: d.is_animated(),
+    })
+}
+
+pub fn paste(p: &mut Project, of: &[GradeOf], n: u32, copied: &CopiedNode) -> Result<()> {
+    for one in of {
+        let start = start_of(p, one)?;
+        edited(p, one, |g| {
+            let d = node(g, n)?;
+            values(d, n)?;
+            d.tool = GradeTool::Corrector(Box::new(copied.values.clone()));
+            d.keys = shifted_keys(&copied.keys, start);
+            d.label = copied.label.clone();
+            d.on = copied.on;
+            d.animated = copied.animated;
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
+
+pub fn swap(p: &mut Project, of: &GradeOf, n: u32, with: u32) -> Result<()> {
+    edited(p, of, |g| {
+        let a = node(g, n)?.clone();
+        let b = node(g, with)?.clone();
+        values(&a, n)?;
+        values(&b, with)?;
+        for (k, from) in [(n, b), (with, a)] {
+            let d = node(g, k)?;
+            d.tool = from.tool;
+            d.keys = from.keys;
+            d.label = from.label;
+            d.on = from.on;
+            d.animated = from.animated;
+        }
         Ok(())
     })
 }

@@ -56,6 +56,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
             | "markers.list"
             | "picture.get"
             | "grade.get"
+            | "grade.copy"
             | "motion.list"
     );
     if mutation {

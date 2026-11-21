@@ -60,6 +60,7 @@ pub(super) struct Tile<K> {
     pub(super) place: [f64; 2],
     pub(super) faded: bool,
     pub(super) switch: bool,
+    pub(super) drops: bool,
     pub(super) note: String,
     pub(super) badges: Vec<Badge>,
     pub(super) outlet: Option<Outlet>,
@@ -117,6 +118,17 @@ pub(super) struct Done<K> {
     pub(super) clicked: bool,
     pub(super) unlink: Option<(K, usize)>,
     pub(super) spot: Option<[f64; 2]>,
+    pub(super) dropped: Option<Dropped<K>>,
+}
+
+pub(super) enum Dropped<K> {
+    Swap(K, K),
+    Copy(K, K),
+    Insert {
+        node: K,
+        wire: (K, K, usize),
+        place: [f64; 2],
+    },
 }
 
 struct Naming<K> {
@@ -399,8 +411,9 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         let (to, side, _) = end_of(w)?;
         Some(bezier((from, to), along(side)))
     };
-    let wire_at = |at: Pos2| -> Option<(usize, Half)> {
-        if boxes.iter().any(|r| r.expand(KNOT * 2.0).contains(at)) {
+    let wire_near = |at: Pos2, skip: Option<usize>| -> Option<(usize, Half)> {
+        let over = |(i, r): (usize, &Rect)| Some(i) != skip && r.expand(KNOT * 2.0).contains(at);
+        if boxes.iter().enumerate().any(over) {
             return None;
         }
         wires
@@ -417,7 +430,15 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     let pointer = ui
         .input(|i| i.pointer.hover_pos())
         .filter(|at| rect.contains(*at));
+    let wire_at = |at: Pos2| wire_near(at, None);
     let near = pointer.filter(|_| !busy).and_then(wire_at);
+    let loose = |key: &K| !wires.iter().any(|w| w.from == *key || w.to == *key);
+    let inserting = (view.moving.as_ref())
+        .filter(|m| m.from.len() == 1)
+        .and_then(|m| index_of(&m.node))
+        .filter(|i| graph.tiles[*i].drops && loose(&graph.tiles[*i].key))
+        .and_then(|i| pointer.and_then(|p| wire_near(p, Some(i))))
+        .map(|(k, _)| k);
     let lit = Stroke::new(2.5, LIT);
     for (k, w) in wires.iter().enumerate() {
         if pulled.as_ref() == Some(&(w.to.clone(), w.slot)) {
@@ -451,6 +472,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         clicked: false,
         unlink: None,
         spot: None,
+        dropped: None,
     };
     let mut naming = view.naming.take();
     for (t, r) in graph.tiles.iter().zip(&boxes) {
@@ -574,10 +596,21 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             done.pointed = Some(t.key.clone());
         }
         node_resp.context_menu(|ui| node_menu(ui, &t.key));
+        if inserting.is_some() && view.moving.as_ref().is_some_and(|m| m.node == t.key) {
+            let plus = FontId::proportional(18.0 * z.clamp(0.6, 1.4));
+            painter.text(r.center_top(), Align2::CENTER_BOTTOM, "+", plus, LIT);
+        }
         if node_resp.drag_started_by(PointerButton::Primary) {
-            let group = match selected {
-                true => graph.selected.to_vec(),
-                false => vec![t.key.clone()],
+            let adds = t.drops && ui.input(|i| i.modifiers.command);
+            let group = match (selected, adds) {
+                (true, _) => graph.selected.to_vec(),
+                (false, true) => {
+                    done.picked = Some((t.key.clone(), Pick::Toggle));
+                    let mut all = graph.selected.to_vec();
+                    all.push(t.key.clone());
+                    all
+                }
+                (false, false) => vec![t.key.clone()],
             };
             let from = graph
                 .tiles
@@ -599,14 +632,38 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         if node_resp.drag_stopped()
             && let Some(m) = view.moving.take_if(|m| m.node == t.key)
         {
-            for (key, from) in &m.from {
-                let to = [
-                    rounded(from[0] + f64::from(m.by.x / (CELL.x * z))),
-                    rounded(from[1] + f64::from(m.by.y / (CELL.y * z))),
-                ];
-                if to != *from {
-                    done.moved.push((key.clone(), to));
+            let (mods, at) = ui.input(|i| (i.modifiers, i.pointer.latest_pos()));
+            let onto = at
+                .filter(|_| m.from.len() == 1 && t.drops)
+                .and_then(|p| {
+                    let mut all = graph.tiles.iter().zip(&boxes);
+                    all.find(|(o, b)| o.key != t.key && o.drops && b.contains(p))
+                })
+                .map(|(o, _)| o.key.clone());
+            done.dropped = match onto {
+                Some(o) if mods.command => Some(Dropped::Swap(t.key.clone(), o)),
+                Some(o) if mods.alt => Some(Dropped::Copy(t.key.clone(), o)),
+                _ => None,
+            };
+            let moved = (m.from.iter())
+                .map(|(key, from)| {
+                    let to = [
+                        rounded(from[0] + f64::from(m.by.x / (CELL.x * z))),
+                        rounded(from[1] + f64::from(m.by.y / (CELL.y * z))),
+                    ];
+                    (key.clone(), *from, to)
+                })
+                .filter(|(_, from, to)| to != from);
+            match (done.dropped.is_some(), inserting.map(|k| &wires[k])) {
+                (true, _) => {}
+                (false, Some(w)) => {
+                    done.dropped = moved.last().map(|(node, _, place)| Dropped::Insert {
+                        node,
+                        wire: (w.from.clone(), w.to.clone(), w.slot),
+                        place,
+                    });
                 }
+                (false, None) => done.moved.extend(moved.map(|(key, _, to)| (key, to))),
             }
         }
     }

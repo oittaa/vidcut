@@ -759,6 +759,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
   - It also refuses a corrector without one input and a mixer without an input.
   - `ops::grade` changes the tree for `grade.add`, `grade.remove` and `grade.connect`. A removed node gives each node after it one number less (`renumbered`).
+  - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
   - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
 - `Placing::new` adds the grade after the effects of the clip, as the last `place::Working` (`Work::Grade`).
   - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).

@@ -1519,6 +1519,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Turn all nodes off or on",
         Some("With any node on, all go off. Else all go on."),
     ),
+    same(
+        Color,
+        Action::Copy,
+        "Copy the settings of the current node",
+        None,
+    ),
+    same(
+        Color,
+        Action::Paste,
+        "Paste node settings",
+        Some("The current node takes the copied settings."),
+    ),
     own(
         Color,
         Action::PreviousNode,

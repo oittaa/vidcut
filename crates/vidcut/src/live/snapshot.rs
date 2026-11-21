@@ -262,6 +262,7 @@ pub struct Snapshot {
     pub pool: PoolView,
     pub clipboard: usize,
     pub key_clipboard: usize,
+    pub node_clipboard: bool,
     pub notices: Arc<VecDeque<Notice>>,
     pub thumbs: Arc<HashSet<String>>,
     pub missing: Arc<HashSet<String>>,

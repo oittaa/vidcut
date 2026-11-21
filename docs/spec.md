@@ -2954,7 +2954,20 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - The Parallel Mixer, the Layer Mixer and the Key Mixer take many inputs.
   - A drag from an output to a Parallel Mixer or a Layer Mixer adds an input (pp. 3410, 3413).
   - Add One Input in the menu of a mixer adds an input with no connection (p. 3411).
-  - vidcut: `grade.connect`. The Color page and the Effects page share one Node Editor, with the same drags and clicks.
+  - vidcut: `grade.connect`. The Color page and the Effects page share one Node Editor, with the same drags and clicks. The drops of the next group are on the Color page only.
+- **Insert, swap and copy** (pp. 3396–3397):
+  - A drop of a node with no connection onto a connection puts the node into that connection. A plus icon shows first.
+  - A Command-drag of a node onto another node swaps the operations of the two nodes. The nodes do not move.
+  - An Option-drag of a node onto another node gives the second node the settings of the first.
+  - Copy (Command-C) and Paste (Command-V) give a node the settings of a node of this grade or of another clip.
+  - Measured in Resolve Studio 21.2: the inserted node stays at the drop point. A drag of a linked node onto a connection only moves the node.
+  - Measured: a Ctrl-drag of the only selected node swaps the values, the keyframes, the label and the on/off state. The places, the numbers and the links stay. The current node stays at its place.
+  - Measured: Ctrl on a node that is not selected adds it to the selection. The drag then moves the selection.
+  - Measured: an Alt-drag gives the target all the values, the keyframes, the label and the on/off state of the dragged node.
+  - Measured: Copy and Paste do the same as an Alt-drag, also into the grade of another clip. The keyframes keep their distance from the start of the clip.
+  - vidcut: `grade.swap`, `grade.copy` and `grade.paste`. The drops act on correctors. A drop of a mixer only moves it.
+  - vidcut: a drop onto a connection is one undo step. A "+" shows above the node while it is over a connection.
+  - vidcut: Ctrl+C and Ctrl+V on the Color page copy and paste the settings of the current node.
 - **Turn off and reset** (pp. 3392–3393):
   - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.
   - Measured in Resolve Studio 21.2: a click on the number turns that node off or on. The current node stays.
@@ -3002,7 +3015,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - A Layer Mixer that is off mixes in Normal, with the Key Output Gain of each input. Subtract with a gain of 0.5 on the last input, off, equals Normal with that gain, on.
   - vidcut: keys, Key Output Gain and the Key Mixer come later ([todo](todo/color-page.md)).
 
-Requests: `grade.add`, `grade.remove`, `grade.connect` and `gui.grade_nodes`. `grade.set` with `on`, `place`, `mixer` and `mode` changes a node. `grade.get` gives the nodes and the `output`.
+Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste` and `gui.grade_nodes`. `grade.set` with `on`, `place`, `mixer` and `mode` changes a node. `grade.get` gives the nodes and the `output`.
 
 ### 8.22 Color page keyframes (pp. 3453–3465)
 
