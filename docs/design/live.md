@@ -434,6 +434,7 @@ The bar and the Jobs button:
   - `Workspace::window_framing` maps the pixels of the windows to the viewer. It takes the placing of the clip, as the render does (`place::window_back`).
   - Each shape comes from `window_key::shaped`. Thus the outline is where the key is.
   - A drag of a handle changes a copy of the grade (`WindowGrab`). The palette then sends `grade.window.set` when the mouse button comes up, as for a field.
+  - The viewer draws after the palette. Thus a change in the viewer updates the preview at once, and asks for one more frame. In that frame the palette sends it.
   - A click on a polygon edge adds a corner, and a middle-click removes one. Both go through the same copy.
 - The Node Editor of the grade is at the right of the viewer (`Workspace::grade_nodes_panel`).
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
