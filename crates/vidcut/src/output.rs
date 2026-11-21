@@ -1436,7 +1436,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
             println!("ok {method}")
         }
         "gui.state" | "gui.show" | "gui.close" | "gui.target" | "gui.timeline" | "gui.page"
-        | "gui.nodes" | "gui.grade_nodes" | "gui.page_time" => {
+        | "gui.nodes" | "gui.grade_nodes" | "gui.node_view" | "gui.page_time" => {
             let t = &v["timeline"];
             let nodes: Vec<&str> = v["nodes"]
                 .as_array()
