@@ -3595,6 +3595,14 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - x264, x265 and libvpx-vp9 make one pass. An export refuses `video.passes` 2 with the box on.
     - An image sequence refuses the box.
     - `export.plan` gives the frames that the export can copy. The report of the export gives the frames that it copied. Both tell why a file does not match.
+- **Use Proxy Media** (Deliver page, p. 214):
+  - Exports read the original media by default, also while the viewer plays proxies.
+  - With the box on, an export reads proxy files instead of the originals where proxies exist.
+  - **In vidcut:**
+    - `video.use_proxy_media` is the box. It is off by default. The Export dialog shows it under Advanced.
+    - For each video clip, the export reads its fresh proxy when that file is on disk, else the original.
+    - Sound stays on the originals.
+    - The plan and the export report emit a `proxy_media` note with the media that read proxies, or a fallback notice when none did.
 - **TIFF and OpenEXR** (Deliver page):
   - Both are image sequence formats (pp. 4115-4116).
   - OpenEXR has RGB Half and RGB Float settings, and RGB Half with DWAA or DWAB and a Compression level (p. 4115).
@@ -4080,7 +4088,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The proxy folder is `proxies` in the folder of playback files (deviation X26).
   - That folder is the project's folder, unless `playback_files.folder` sets another. A relative folder is in the project's folder. An absolute folder is shared by every project.
   - With `use_proxies` on, the preview plays fresh proxies, frame for frame as the originals. Thus heavy media play in real time.
-  - Sound, exports and analyses use the originals.
+  - Sound and analyses use the originals. Exports use the originals unless `video.use_proxy_media` is on.
 - **D42. Audio scrubbing** (§4.5; p. 876).
   - The manual says only that a drag of the playhead plays the sound.
   - A frame step, and every move of a paused playhead, plays that frame of the mix.

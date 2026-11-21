@@ -369,6 +369,7 @@ mod tests {
             first_frame: None,
             compression_level: None,
             bypass_reencode: false,
+            use_proxy_media: false,
         }
     }
 

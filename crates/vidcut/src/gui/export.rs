@@ -2451,6 +2451,10 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
                     );
                     continue;
                 }
+                if note["code"] == "proxy_media" {
+                    ui.label(dim(note["message"].as_str().unwrap_or_default()));
+                    continue;
+                }
                 if note["code"] != "hdr_tone_mapped" {
                     continue;
                 }
@@ -2835,6 +2839,7 @@ fn settings_form(
                                 first_frame: None,
                                 compression_level: None,
                                 bypass_reencode: false,
+                                use_proxy_media: false,
                             }),
                         );
                         fit_codecs(&mut d.settings);
@@ -3040,6 +3045,10 @@ fn settings_form(
                 } else {
                     v.bypass_reencode = false;
                 }
+
+                ui.label("");
+                ui.checkbox(&mut v.use_proxy_media, "Use Proxy Media");
+                ui.end_row();
 
                 if v.image_bits().is_some() {
                     ui.label("");

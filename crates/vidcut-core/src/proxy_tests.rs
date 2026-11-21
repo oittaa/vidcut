@@ -103,3 +103,98 @@ fn a_lost_proxy_is_made_again_at_its_own_size() {
     let r = f.ok(req("proxy.generate", json!({"auto": true})));
     assert_eq!(r.result["proxies"][0]["width"], json!(640));
 }
+
+#[test]
+fn use_proxies_replaces_video_even_when_project_use_proxies_is_off() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.ok(req("proxy.generate", json!({"media": "m1"})));
+    f.append("m1", 0, 25);
+    let mut plan = flatten(f.editor.project(), 0, 25).unwrap();
+    let used = crate::preview::use_proxies(
+        &mut plan,
+        f.editor.project(),
+        Path::new("/proxies"),
+        |_| true,
+        |_, _| false,
+    );
+    assert_eq!(used, vec!["m1".to_string()]);
+    match &plan.video[0] {
+        VideoPiece::Source {
+            path,
+            image,
+            color_space,
+            ..
+        } => {
+            assert_eq!(path, &proxy_path("m1"));
+            assert!(image.is_none());
+            assert_eq!(*color_space, crate::model::ColorSpace::Tagged);
+        }
+        other => panic!("video piece {other:?}"),
+    }
+    match &plan.audio[0][0] {
+        AudioPiece::Source { path, .. } => assert_eq!(path, &PathBuf::from("/media/1.mp4")),
+        other => panic!("audio piece {other:?}"),
+    }
+}
+
+#[test]
+fn use_proxies_keeps_original_when_proxy_file_is_missing() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.ok(req("proxy.generate", json!({"media": "m1"})));
+    f.append("m1", 0, 25);
+    let mut plan = flatten(f.editor.project(), 0, 25).unwrap();
+    let used = crate::preview::use_proxies(
+        &mut plan,
+        f.editor.project(),
+        Path::new("/proxies"),
+        |_| false,
+        |_, _| false,
+    );
+    assert!(used.is_empty());
+    match &plan.video[0] {
+        VideoPiece::Source { path, .. } => assert_eq!(path, &PathBuf::from("/media/1.mp4")),
+        other => panic!("video piece {other:?}"),
+    }
+}
+
+#[test]
+fn use_proxies_skips_stale_proxy() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.ok(req("proxy.generate", json!({"media": "m1"})));
+    f.append("m1", 0, 25);
+    let mut p = f.editor.project().clone();
+    p.media[0].size += 1;
+    let mut plan = flatten(&p, 0, 25).unwrap();
+    let used =
+        crate::preview::use_proxies(&mut plan, &p, Path::new("/proxies"), |_| true, |_, _| false);
+    assert!(used.is_empty());
+    match &plan.video[0] {
+        VideoPiece::Source { path, .. } => assert_eq!(path, &PathBuf::from("/media/1.mp4")),
+        other => panic!("video piece {other:?}"),
+    }
+}
+
+#[test]
+fn use_proxies_replaces_sources_inside_compound_clip() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.ok(req("proxy.generate", json!({"media": "m1"})));
+    let c = f.append("m1", 0, 25);
+    f.ok(req("edit.compound", json!({"clips": [c]})));
+    let mut plan = flatten(f.editor.project(), 0, 25).unwrap();
+    let used = crate::preview::use_proxies(
+        &mut plan,
+        f.editor.project(),
+        Path::new("/proxies"),
+        |_| true,
+        |_, _| false,
+    );
+    assert_eq!(used, vec!["m1".to_string()]);
+    assert!(
+        plan.video[0].layers().into_iter().any(
+            |(p, _)| matches!(p, VideoPiece::Source { path, .. } if path == &proxy_path("m1"))
+        )
+    );
+    assert!(!plan.video[0].layers().into_iter().any(
+        |(p, _)| matches!(p, VideoPiece::Source { path, .. } if path == Path::new("/media/1.mp4"))
+    ));
+}

@@ -8,7 +8,6 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - The switch of Dynamic Zoom, Composite, Speed and the other Audio groups, which turns a group off (p. 734; [§8.15](../spec.md#815-transform-and-crop-pp-766768))
 - Most of the System and User preferences (p. 94)
 - Deinterlace Quality for each clip in Retime and Scaling: Normal, High and DaVinci Neural Engine (pp. 739, 741)
-- The Use proxy media setting of an export (p. 214)
 - CEA-608 and EAS708 captions, and MXF files (pp. 1247–1248)
 - Export and import of a subtitle preset as a `.preset` file (pp. 1239–1240)
 - KeyKode in the timecode menu of the viewer (pp. 713–714)
