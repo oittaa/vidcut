@@ -447,6 +447,9 @@ fn enlarging<'a>(p: &'a Project, plans: &[&RenderPlan]) -> Vec<Enlarging<'a>> {
             else {
                 continue;
             };
+            if !upscale.ai() {
+                continue;
+            }
             let Some(m) = p.media(media) else {
                 continue;
             };
