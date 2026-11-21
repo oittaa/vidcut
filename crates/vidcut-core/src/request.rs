@@ -1338,10 +1338,9 @@ pub enum Request {
     /// track goes in, and that clip and the tracks above it move up. One made
     /// here brings its clips back whole. One from another editor (deviation
     /// X9) brings them from its file: a picture block its pictures, and a
-    /// sound block its sound. The picture of a placed compound clip goes to
-    /// each clip that has no picture of its own and fills the frame; with a
-    /// Dynamic Zoom, only to a clip that spans all of the compound clip. A
-    /// warning names the clips that don't take it.
+    /// sound block its sound. The picture settings and the effects of the
+    /// compound clip itself are dropped, and a warning says so. Its speed
+    /// goes to the clips it holds.
     #[serde(rename = "edit.decompose")]
     EditDecompose { clips: OneOrMany<ClipRef> },
     /// Slide a clip (Dynamic Trim's Slide mode): it keeps its media and moves,
