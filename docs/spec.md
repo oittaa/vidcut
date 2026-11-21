@@ -3327,7 +3327,21 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - The reset button sends `grade.clear` with `palette` `window`. Reset Selected Window sends `grade.window.set`.
     - A change of a field goes to the grade when the mouse button comes up, as in the Primaries palette.
     - Not measured: whether each node keeps its own current window. vidcut keeps one current window for the palette.
-  - The outlines in the viewer, curve windows, window keyframes, and Copy and Paste Window come later ([todo](todo/color-page.md)).
+  - The manual: a drag inside a window moves it, and a click on a window selects it. A polygon has 128 corners at most (p. 3272).
+  - Measured: with the Window palette open, the viewer shows the outline and the handles of each window that is on.
+    - Circle: an outline, thin circles at the softness inside and outside, and a box with eight handles. The corners change Size, and the sides change Aspect.
+    - Circle: four softness handles are on the axes, at the outer softness circle.
+    - Linear: an outline through the corners, and thin lines at the softness inside and outside each side. A softness handle is at the middle of each outer line.
+    - Linear: a corner handle moves that corner. A side handle moves that side.
+    - Polygon: an outline with a handle at each corner, a middle dot and a rotate handle. It has no softness handles.
+    - Polygon: a click on an edge adds a corner. A middle-click on a corner removes it.
+    - Gradient: a line through the middle, 1/3 of the frame width long. An arrow handle is at the softness below the middle.
+    - Circle and linear: a middle dot, and a rotate handle above it at 0.125 of the frame height, times the scale of the size.
+    - The current window has white handles and magenta softness handles. The other windows are grey.
+  - vidcut: the same. A drag of a corner or a side keeps the other corners where they are in the viewer. A polygon keeps three corners at least.
+    - Not measured: how far the rotate handle of a polygon is from its middle. vidcut uses the rule of a linear window.
+    - Not measured: what a drag of the arrow of a gradient changes. In vidcut it turns the gradient and changes Soft 1.
+  - Curve windows, window keyframes, and Copy and Paste Window come later ([todo](todo/color-page.md)).
 
 Requests: `grade.window.add`, `grade.window.set` and `grade.window.remove`.
 

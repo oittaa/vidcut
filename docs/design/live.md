@@ -430,6 +430,11 @@ The bar and the Jobs button:
   - A change in the Key palette changes the `key` of the node in the dragged grade. The sent `grade.set` has `key_gain`, `key_offset` or `key_invert`.
   - Reset in a palette sends `grade.clear` with the `palette` of that palette.
   - The other palettes, and the line for a mixer, keep the height of the last Primaries palette (`primaries_panel`). Thus the page does not move when the palette changes.
+- With the Window palette open, the viewer draws the windows of the current node (`Workspace::window_controls`).
+  - `Workspace::window_framing` maps the pixels of the windows to the viewer. It takes the placing of the clip, as the render does (`place::window_back`).
+  - Each shape comes from `window_key::shaped`. Thus the outline is where the key is.
+  - A drag of a handle changes a copy of the grade (`WindowGrab`). The palette then sends `grade.window.set` when the mouse button comes up, as for a field.
+  - A click on a polygon edge adds a corner, and a middle-click removes one. Both go through the same copy.
 - The Node Editor of the grade is at the right of the viewer (`Workspace::grade_nodes_panel`).
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
   - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.
