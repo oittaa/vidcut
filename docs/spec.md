@@ -4121,7 +4121,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `project create --from` and `timeline.import` with `new` or `replace` make an empty timeline. It takes the start timecode of the file.
     - `timeline.import` with `append`, `compound` or `media` refuses such a file. Resolve has no such modes for an OTIO file.
       - An import of an AAF, XML, OTIO or EDL file makes a new timeline (p. 505).
-      - Only an AAF file can go into the open timeline, with Import AAF to Current Timeline (pp. 513, 521).
+      - An AAF file can go into the open timeline, with Import AAF to Current Timeline (pp. 513, 521).
+      - An EDL can go to a new track of a timeline, with EDL to New Track (p. 526). An OTIO file cannot.
     - A file whose clips cannot be read also refuses, and the error names them.
   - Mapping: [deviation X9](deviations.md#x9-opentimelineio-interchange), [model](design/model.md#opentimelineio).
   - **A multicam clip in a file of Resolve** (measured in Resolve Studio 21.1.2):
