@@ -11,7 +11,7 @@ use vidcut_core::preferences::SwitchingClips;
 use vidcut_core::request::{
     GradeAdd, GradeLevel, GradeMixer, GradePalette, NodeZoom, Page, PrimariesView, PrinterColor,
 };
-use vidcut_core::shortcuts::{Action, Panel};
+use vidcut_core::shortcuts::{Action, Bindings, Panel};
 
 use super::node_editor::{
     self, Badge, Dropped, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, SHOT_HEIGHT, Shot,
@@ -105,6 +105,11 @@ const NODES_MENU: [&[(&str, NodesItem)]; 5] = [
         ("Delete Current Node", NodesItem::Act(NodeAct::Delete)),
     ],
     &[("Label Selected Node", NodesItem::Act(NodeAct::Label))],
+];
+
+const MIXER_ADD_MENU: [(GradeAdd, &str); 2] = [
+    (GradeAdd::Serial, "Add Serial"),
+    (GradeAdd::Before, "Add Serial Before"),
 ];
 
 const ADD_MENU: [(GradeAdd, &str); 5] = [
@@ -662,21 +667,27 @@ fn grade_links(g: &Grade, of: &GradeOf, l: &Link<Port>) -> Vec<Value> {
     out
 }
 
-fn node_menu(ui: &mut Ui, d: &GradeNode, delete_key: &str, act: &mut Option<NodeAct>) {
+fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeAct>) {
+    let key = |a: Action| keys.first(a).unwrap_or_default();
     let mut pick = |ui: &mut Ui, on: bool, button: egui::Button, a: NodeAct| {
         if ui.add_enabled(on, button).clicked() {
             *act = Some(a);
             ui.close();
         }
     };
-    let mixer = d.tool.is_mixer();
+    let adds: &[(GradeAdd, &str)] = match d.tool.is_mixer() {
+        true => &MIXER_ADD_MENU,
+        false => &ADD_MENU,
+    };
     ui.menu_button("Add Node", |ui| {
-        for (add, text) in ADD_MENU {
-            let can = !mixer || matches!(add, GradeAdd::Serial | GradeAdd::Append);
-            pick(ui, can, egui::Button::new(text), NodeAct::Add(add));
+        for &(add, text) in adds {
+            let action = ADDS.iter().find(|(_, a)| *a == add);
+            let shown = action.map(|(a, _)| key(*a)).unwrap_or_default();
+            let button = egui::Button::new(text).shortcut_text(shown);
+            pick(ui, true, button, NodeAct::Add(add));
         }
     });
-    let delete = || egui::Button::new("Delete Node").shortcut_text(delete_key);
+    let delete = || egui::Button::new("Delete Node").shortcut_text(key(Action::DeleteNode));
     let (morph, to) = match &d.tool {
         GradeTool::Corrector(_) => {
             pick(
@@ -1544,9 +1555,7 @@ impl Workspace {
                 g.is_some_and(|g| correctors(g).next().is_some())
             }
             NodesItem::Key(Action::AppendNode) => g.is_some(),
-            NodesItem::Key(
-                Action::AddNodeBefore | Action::AddParallelNode | Action::AddLayerNode,
-            ) => corrector.is_some(),
+            NodesItem::Key(Action::AddParallelNode | Action::AddLayerNode) => corrector.is_some(),
             NodesItem::Key(Action::SwitchAllNodes) => g.is_some_and(|g| !g.nodes.is_empty()),
             NodesItem::Key(Action::ExtractNode) => {
                 corrector.is_some_and(|d| d.inputs.iter().any(Option::is_some))
@@ -1806,7 +1815,7 @@ impl Workspace {
         let mixer = node
             .and_then(|n| g.node(n))
             .is_some_and(|d| d.tool.is_mixer());
-        if mixer && !matches!(add, GradeAdd::Serial | GradeAdd::Append) {
+        if mixer && !matches!(add, GradeAdd::Serial | GradeAdd::Before | GradeAdd::Append) {
             return;
         }
         let more = match (add, node) {
@@ -2035,11 +2044,6 @@ impl Workspace {
             selected: &selected,
             active: CURRENT,
         };
-        let delete_key = self
-            .snap
-            .bindings
-            .first(Action::DeleteNode)
-            .unwrap_or_default();
         let mut node_act: Option<(NodeAct, u32)> = None;
         let mut field_act: Option<FieldAct> = None;
         let menu = |ui: &mut Ui, p: &Port| {
@@ -2050,7 +2054,7 @@ impl Workspace {
                 return;
             };
             let mut act = None;
-            node_menu(ui, d, &delete_key, &mut act);
+            node_menu(ui, d, &self.snap.bindings, &mut act);
             if let Some(a) = act {
                 node_act = Some((a, n));
             }

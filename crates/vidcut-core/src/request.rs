@@ -4514,8 +4514,8 @@ pub enum GradeAdd {
     /// After `node`: it takes the picture of `node`, and what took that
     /// picture takes its picture.
     Serial,
-    /// Before the corrector `node`: it takes what came into `node`, and
-    /// `node` takes its picture.
+    /// Before `node`: it takes what came into `node`, and `node` takes its
+    /// picture. For a mixer, that is the first input of the mixer.
     Before,
     /// Beside the corrector `node`: it takes what comes into `node`. When
     /// `node` goes only into a mixer, of either kind, the mixer gets a new

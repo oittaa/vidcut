@@ -46,6 +46,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - Remove One Input in the menu of a mixer, and the lock column of List View.
 - Measure in Resolve, then match:
   - Remove One Input: which empty input goes when there are several, and whether it takes the empty input of two. Measured: it removes an empty input, also one in the middle, and does nothing when each input is linked.
-  - The items of the Add Node submenu of a mixer, and the menu of a Parallel Mixer.
+  - The menu of a Parallel Mixer.
   - Delete after a drag box that does not hold the current node: does the current node go too.
   - A Ctrl-click on a node that is selected already.
