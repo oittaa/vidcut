@@ -2914,8 +2914,8 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
         add: GradeAdd,
-        /// The node it goes beside: for `serial`, `before`, `parallel` and
-        /// `layer`.
+        /// The node it goes beside: for `serial`, `before`, `parallel`,
+        /// `layer` and `outside`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// Its place in the node editor, for `corrector`.
