@@ -5,7 +5,7 @@ use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
 use vidcut_av::screen::{ShotsOf, ShotsWanted};
 use vidcut_core::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, KeyOutput, Picture};
-use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed};
+use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed, taken_out};
 use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::preferences::SwitchingClips;
 use vidcut_core::request::{
@@ -1660,12 +1660,29 @@ impl Workspace {
         let mut order = gone.to_vec();
         order.sort_unstable_by(|a, b| b.cmp(a));
         order.dedup();
-        let commands = (order.iter())
-            .map(|n| command("grade.remove", params(of, "clip", json!({ "node": n }))))
-            .collect();
-        let renumbered = |k: u32| k - order.iter().filter(|n| **n < k).count() as u32;
-        let last = last_corrector(g, |k| !order.contains(&k));
-        self.effects_page.grade_nodes = last.map(renumbered).into_iter().collect();
+        let mut left = g.clone();
+        let mut now: Vec<Option<u32>> = (0..=g.last()).map(Some).collect();
+        let mut commands = Vec::new();
+        for n in order {
+            let Some(at) = now.get(n as usize).copied().flatten() else {
+                continue;
+            };
+            let Ok(out) = taken_out(&mut left, at) else {
+                continue;
+            };
+            commands.push(command(
+                "grade.remove",
+                params(of, "clip", json!({ "node": at })),
+            ));
+            for k in &mut now {
+                *k = k.filter(|c| !out.contains(c)).map(|c| {
+                    let below = out.iter().filter(|o| **o < c).count();
+                    c - below as u32
+                });
+            }
+        }
+        let last = last_corrector(&left, |_| true);
+        self.effects_page.grade_nodes = last.into_iter().collect();
         self.effects_page.graded = None;
         self.send_all(commands, "Delete Node");
     }

@@ -2904,7 +2904,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a click on the empty Node Editor keeps the current node.
   - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
   - vidcut: a Ctrl-click adds a node to the selection, and a drag box adds the nodes in the box. The current node stays.
-  - vidcut: a click on the empty Node Editor keeps the current node. The other selected nodes are no longer selected. This part is not measured in Resolve.
+  - Measured: a click on the empty Node Editor clears the other selected nodes. The current node stays.
+  - vidcut: does the same.
 - **Labels and badges** (pp. 3390–3391):
   - A label appears above the node. Change Label in the menu of a node sets it (p. 3390).
   - A double-click on the label changes it (p. 3391).
@@ -2960,8 +2961,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
   - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append` or `corrector`. The menus of the Node Editor have each one.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
-  - vidcut: the new corrector takes the input of the current node. In the measured tree, that input is the source.
-  - Not measured in Resolve: Alt+L at a corrector on a Parallel Mixer, and a current node that does not take the source.
+  - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
+  - vidcut: the new corrector takes the input of the current node, as measured.
   - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L and Alt+K. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
 - **Delete and extract** (pp. 3395–3396):
   - Delete Node removes a node. The nodes at its left and its right then connect.
@@ -2969,6 +2970,9 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - After a delete, each node after it gets one number less.
   - Measured in Resolve Studio 21.2: the Delete key deletes the current node. With two nodes selected by a drag box, it deletes both.
   - Measured: a mixer input that took a deleted corrector stays, with no connection. Thus the mixer keeps all its inputs.
+  - Measured: in node 1 to node 2 to a mixer input, the delete of node 2 leaves that input with no connection.
+  - Measured: a delete that leaves a mixer with one linked input removes the mixer too. The node on that input takes the place of the mixer at its output.
+  - Measured: this occurs with a Parallel Mixer and a Layer Mixer, with two inputs, and with three inputs of which one is empty.
   - Measured: after the delete of a mixer, its input nodes keep their inputs. Nothing connects to the Node Tree output. The result is the source picture.
   - Measured: after a delete, the last corrector is the current node.
   - Measured: the menu of a mixer shows Shift+Backspace at Delete Node.
@@ -2976,7 +2980,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
   - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. The last corrector then becomes the current node.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
-  - vidcut: what took the picture of a deleted mixer then takes nothing.
+  - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
+  - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.

@@ -2897,8 +2897,10 @@ pub enum Request {
     /// Take a node out of the grade of a clip, or with `timeline` of the
     /// timeline grade. A corrector or the output that took the picture of
     /// a corrector takes the picture that came into it. A mixer input that
-    /// took it takes nothing. What took the picture of a mixer takes
-    /// nothing. The nodes after it get one number less. With `extract`, a
+    /// took it takes nothing. A mixer that then has one linked input goes
+    /// too, and what took its picture takes the picture of that input.
+    /// What took the picture of a mixer takes nothing. The nodes after
+    /// each node that goes get one number less. With `extract`, a
     /// corrector stays, joined to nothing, and each node that took its
     /// picture takes the picture that came into it.
     #[serde(rename = "grade.remove")]

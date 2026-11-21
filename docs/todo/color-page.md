@@ -48,9 +48,5 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
   - Remove One Input: which input goes, and the least number of inputs.
   - Lock Node: what a locked node refuses.
   - The items of the Add Node submenu of a mixer, and the menu of a Parallel Mixer.
-  - Alt+L at a corrector on a Parallel Mixer.
-  - Alt+P and Alt+L at a corrector on a mixer when the corrector does not take the source: what the new corrector takes.
-  - Delete of node 2 in 1 to 2 to a mixer input: does the mixer input take node 1, or nothing.
   - Delete after a drag box that does not hold the current node: does the current node go too.
-  - A click on the empty Node Editor: do the other selected nodes stay selected.
   - A Ctrl-click on a node that is selected already.
