@@ -16,7 +16,7 @@ use vidcut_core::motion::Area;
 use vidcut_core::ops::grade::GradeOf;
 use vidcut_core::place::{Figure, MaskBase, Outline, Shaping, turned};
 use vidcut_core::render::RenderPlan;
-use vidcut_core::request::{GradeLevel, NodeInput, Page};
+use vidcut_core::request::{GradeLevel, GradePalette, NodeInput, Page, PrimariesView};
 use vidcut_core::shortcuts::{Action, Panel};
 
 use super::color_page::Port;
@@ -85,6 +85,8 @@ pub(super) struct EffectsPage {
     held: Option<Held>,
     pub(super) graded: Option<super::color_page::Graded>,
     pub(super) grading: GradeLevel,
+    pub(super) palette: GradePalette,
+    pub(super) primaries: PrimariesView,
     pub(super) grade_nodes: Vec<u32>,
     pub(super) grade_seen: Option<(String, GradeOf, Option<String>)>,
     pub(super) grade_left: Lru<(String, GradeOf), u32, GRADES_LEFT_KEPT>,
@@ -118,6 +120,8 @@ impl Default for EffectsPage {
             held: None,
             graded: None,
             grading: GradeLevel::Clip,
+            palette: GradePalette::default(),
+            primaries: PrimariesView::default(),
             grade_nodes: Vec::new(),
             grade_seen: None,
             grade_left: Lru::new(),
@@ -392,6 +396,7 @@ fn tile(n: &Node) -> Tile<String> {
         outlet,
         inlets,
         edge: None,
+        shot: None,
     }
 }
 

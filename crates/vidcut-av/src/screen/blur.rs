@@ -1,9 +1,9 @@
 use vidcut_core::grade::{
-    Graded, Grading, HALF_KNOTS, LOG_KNOTS, LogCurve, Pass as GradePass, TONE_EPS, TONE_SIZE,
-    tone_filter,
+    Graded, Grading, HALF_KNOTS, LOG_KNOTS, LogCurve, Pass as GradePass, THUMBNAIL_GRAY, TONE_EPS,
+    TONE_SIZE, Tap, tone_filter,
 };
 use vidcut_core::lru::Lru;
-use vidcut_core::model::GlowOutput;
+use vidcut_core::model::{BlendMode, GlowOutput};
 use vidcut_core::place::{
     Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Outline, Placing,
     Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
@@ -61,6 +61,8 @@ const MIX_PARALLEL: f64 = 0.0;
 
 const MIX_LAYER: f64 = 1.0;
 
+const SHOT_TAPS: u32 = 16;
+
 pub(super) struct Pipes {
     layout: wgpu::BindGroupLayout,
     reading: wgpu::BindGroupLayout,
@@ -82,6 +84,7 @@ pub(super) struct Pipes {
     grade_stats: wgpu::RenderPipeline,
     grade_coef: wgpu::RenderPipeline,
     grade_mix: wgpu::RenderPipeline,
+    shot: wgpu::RenderPipeline,
 }
 
 impl Pipes {
@@ -178,6 +181,7 @@ impl Pipes {
             grade_stats: pipeline(&plain, "fs_grade_stats"),
             grade_coef: pipeline(&plain, "fs_grade_coef"),
             grade_mix: pipeline(&plain, "fs_grade_mix"),
+            shot: pipeline(&plain, "fs_shot"),
             layout,
             reading,
         }
@@ -740,7 +744,7 @@ impl Texture {
     }
 }
 
-type Spare = Lru<(u32, u32, u32), Texture, SPARE_TEXTURES>;
+pub(super) type Spare = Lru<(u32, u32, u32), Texture, SPARE_TEXTURES>;
 
 type Tiles = Lru<[u64; 8], Texture, GRAIN_TILES>;
 
@@ -1221,6 +1225,63 @@ fn mix_into(
     );
 }
 
+fn registers_taken(gpu: &Gpu, spare: &mut Spare, (w, h): (u32, u32), count: usize) -> Vec<Texture> {
+    (1..count)
+        .map(|i| match spare.remove(&(w, h, register_slot(i))) {
+            Some((_, t)) => t,
+            None => Texture::new(gpu, (w, h)),
+        })
+        .collect()
+}
+
+fn register_slot(i: usize) -> u32 {
+    GRADE_SLOTS[1] + i as u32
+}
+
+fn registers_back(spare: &mut Spare, (w, h): (u32, u32), taken: Vec<Texture>) {
+    for (i, t) in taken.into_iter().enumerate() {
+        spare.insert((w, h, register_slot(i + 1)), t);
+    }
+}
+
+fn pass_into(
+    gpu: &Gpu,
+    pass: &GradePass,
+    at: &[&Texture],
+    (scratch, spare): (&[Texture; 2], &mut Spare),
+    blend: f64,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    match pass {
+        GradePass::Copy { from, to } => encoder.copy_texture_to_texture(
+            at[*from].texture.as_image_copy(),
+            at[*to].texture.as_image_copy(),
+            at[0].texture.size(),
+        ),
+        GradePass::Correct { on, grading, key } => grade_into(
+            gpu,
+            at[*on],
+            (scratch, spare),
+            (grading.as_ref(), blend * key, None),
+            encoder,
+        ),
+        GradePass::Parallel { on, change, base } => mix_into(
+            gpu,
+            at[*on],
+            (at[*change], at[*base]),
+            (&scratch[0], [MIX_PARALLEL, 0.0, 1.0]),
+            encoder,
+        ),
+        GradePass::Layer { on, top, mode, key } => mix_into(
+            gpu,
+            at[*on],
+            (at[*top], at[*on]),
+            (&scratch[0], [MIX_LAYER, f64::from(mode.code()), *key]),
+            encoder,
+        ),
+    }
+}
+
 fn graded_into(
     gpu: &Gpu,
     own: &Texture,
@@ -1229,48 +1290,107 @@ fn graded_into(
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let size = own.texture.size();
-    let (w, h) = (size.width, size.height);
-    let slot = |i: usize| GRADE_SLOTS[1] + i as u32;
-    let taken: Vec<Texture> = (1..graded.registers)
-        .map(|i| match spare.remove(&(w, h, slot(i))) {
-            Some((_, t)) => t,
-            None => Texture::new(gpu, (w, h)),
-        })
-        .collect();
-    let at = |r: usize| if r == 0 { own } else { &taken[r - 1] };
+    let size = (size.width, size.height);
+    let taken = registers_taken(gpu, spare, size, graded.registers);
+    let at: Vec<&Texture> = std::iter::once(own).chain(&taken).collect();
     for pass in &graded.passes {
-        match pass {
-            GradePass::Copy { from, to } => encoder.copy_texture_to_texture(
-                at(*from).texture.as_image_copy(),
-                at(*to).texture.as_image_copy(),
-                size,
-            ),
-            GradePass::Correct { on, grading, key } => grade_into(
-                gpu,
-                at(*on),
-                (scratch, &mut *spare),
-                (grading.as_ref(), effect.blend * key, None),
-                encoder,
-            ),
-            GradePass::Parallel { on, change, base } => mix_into(
-                gpu,
-                at(*on),
-                (at(*change), at(*base)),
-                (&scratch[0], [MIX_PARALLEL, 0.0, 1.0]),
-                encoder,
-            ),
-            GradePass::Layer { on, top, mode, key } => mix_into(
-                gpu,
-                at(*on),
-                (at(*top), at(*on)),
-                (&scratch[0], [MIX_LAYER, f64::from(mode.code()), *key]),
-                encoder,
-            ),
+        pass_into(
+            gpu,
+            pass,
+            &at,
+            (scratch, &mut *spare),
+            effect.blend,
+            encoder,
+        );
+    }
+    registers_back(spare, size, taken);
+}
+
+pub(super) fn shot_source(
+    gpu: &Gpu,
+    (from, size, turn): (&wgpu::TextureView, (u32, u32), u16),
+    [left, top, wide, tall]: [f64; 4],
+    own: &Texture,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let out = own.texture.size();
+    let upright = match turn / 90 % 2 {
+        1 => (size.1, size.0),
+        _ => size,
+    };
+    let reach = f64::max(
+        f64::from(upright.0) / wide.max(1.0),
+        f64::from(upright.1) / tall.max(1.0),
+    );
+    let taps = (reach.ceil() as u32).clamp(1, SHOT_TAPS);
+    let bytes = float_bytes(&[
+        f64::from(out.width),
+        f64::from(out.height),
+        f64::from(taps),
+        f64::from(turn / 90 % 4),
+        left,
+        top,
+        wide.max(1.0),
+        tall.max(1.0),
+    ]);
+    let step = (&gpu.blur.shot, &bytes[..]);
+    draw_step(gpu, step, Views::same(from), &own.view, encoder);
+}
+
+fn tap_into(
+    gpu: &Gpu,
+    (tap, from): (&Tap, Option<&Texture>),
+    scratch: &[Texture; 2],
+    (atlas, (x, y)): (&wgpu::Texture, (u32, u32)),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let [made, shot] = scratch;
+    let gray = wgpu::Color {
+        r: THUMBNAIL_GRAY,
+        g: THUMBNAIL_GRAY,
+        b: THUMBNAIL_GRAY,
+        a: 1.0,
+    };
+    drop(begin(encoder, &shot.view, Some(gray)));
+    if let Some(top) = from {
+        let how = [MIX_LAYER, f64::from(BlendMode::Normal.code()), tap.key];
+        mix_into(gpu, shot, (top, shot), (made, how), encoder);
+    }
+    encoder.copy_texture_to_texture(
+        shot.texture.as_image_copy(),
+        wgpu::TexelCopyTextureInfo {
+            texture: atlas,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x, y, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
+        shot.texture.size(),
+    );
+}
+
+pub(super) fn tapped_into(
+    gpu: &Gpu,
+    own: &Texture,
+    (scratch, spare): (&[Texture; 2], &mut Spare),
+    graded: &Graded,
+    (atlas, places): (&wgpu::Texture, &[(u32, u32)]),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let size = own.texture.size();
+    let size = (size.width, size.height);
+    let taken = registers_taken(gpu, spare, size, graded.registers);
+    let at: Vec<&Texture> = std::iter::once(own).chain(&taken).collect();
+    let mut taps = graded.taps.iter().zip(places).peekable();
+    for i in 0..=graded.passes.len() {
+        while let Some((tap, place)) = taps.next_if(|(t, _)| t.after == i) {
+            let from = tap.from.map(|r| at[r]);
+            tap_into(gpu, (tap, from), scratch, (atlas, *place), encoder);
+        }
+        if let Some(pass) = graded.passes.get(i) {
+            pass_into(gpu, pass, &at, (scratch, &mut *spare), 1.0, encoder);
         }
     }
-    for (i, t) in taken.into_iter().enumerate() {
-        spare.insert((w, h, slot(i + 1)), t);
-    }
+    registers_back(spare, size, taken);
 }
 
 fn gaussian_ways(sigma: f64) -> Vec<(Pass, bool)> {

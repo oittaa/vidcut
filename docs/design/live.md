@@ -425,7 +425,8 @@ The bar and the Jobs button:
 **The Color page** (`Workspace::primaries_panel`).
 
 - The palette shows the current node of the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
-  - Primaries and Key at the top select the palette (`Palette`). The Key palette draws the Key Output of the node (`key_output`).
+  - Primaries and Key at the top select the palette (`GradePalette`). The Key palette draws the Key Output of the node (`key_output`).
+  - The palette and the mode of the Primaries palette (`PrimariesView`) are in `EffectsPage`. A click sends `gui.page` with `palette` or `primaries`.
   - A change in the Key palette changes the `key` of the node in the dragged grade. The sent `grade.set` has `key_gain`, `key_offset` or `key_invert`.
   - Reset in a palette sends `grade.clear` with the `palette` of that palette.
   - The other palettes, and the line for a mixer, keep the height of the last Primaries palette (`primaries_panel`). Thus the page does not move when the palette changes.
@@ -446,6 +447,12 @@ The bar and the Jobs button:
   - `Tile::locked` holds the lock of a node, a mixer too (`GradeNode::locked`). The graph shows a lock badge last. In List View, each row has a lock after the eye, and a click on it gives `Done::locked`.
   - The palette of a locked node drops its changes. Lock Node in the menu and the lock of a row send `grade.set` with `locked`.
   - The option menu at the top right of the Node Editor sets `color.switching_clips` with `preferences.set`.
+  - The same menu sets `color.show_thumbnails` and `color.disable_thumbnail_refresh`. `Snapshot::show_thumbnails` and `Snapshot::disable_thumbnail_refresh` hold them.
+  - With thumbnails on, the page asks the viewer for them each frame (`Workspace::shots_want`, `ShotsWanted`). The height follows the zoom of the editor and the pixels per point.
+  - `Viewer::sync_shots` gives the wish to the viewer thread and takes back the atlas ([gpu](gpu.md#the-node-thumbnails)). It registers the atlas as a native texture, as for the scopes.
+  - `NodeShots` holds that texture and the cell of each node. Each corrector tile then has a `Shot`.
+  - A tile with a `Shot` is taller. The thumbnail is at its top (`paint_shot`), and the number and the badges are under it. An off corrector shows at 40 %, with its thumbnail too.
+  - With Disable Thumbnail Refresh During Playback on, `ShotsWanted::refresh` is false while the timeline plays. The viewer then keeps the last thumbnails.
   - Previous Node and Next Node step through the correctors in number order and wrap. They send `gui.grade_nodes`.
   - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.
   - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
@@ -454,7 +461,7 @@ The bar and the Jobs button:
   - `gui.node_view` asks a zoom of the shown Node Editor (`NodeView::ask`). The editor does it on its next frame, with its own size (`zoomed`).
   - Cleanup Node Graph sends `grade.cleanup` with the `area` that the editor shows, less a margin and the size of a node (`NodeView::area`). The zoom stays.
   - `NodeView` keeps the rectangle of its last frame for the area. Only the graph view has the menu with Cleanup Node Graph.
-  - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
+  - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the thumbnail, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
   - A tile with `Tile::drops` can land on another such tile or on a link (`Dropped`). `grade_dropped` sends `grade.swap`, `grade.paste`, or one `apply` that inserts the node.
   - An Alt-drag builds the settings with `ops::grade::copy` from the shown project. Ctrl+C sends `grade.copy`; the live core keeps its answer (`node_clipboard`) for `grade.paste`.
   - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.set` and `grade.clear`.

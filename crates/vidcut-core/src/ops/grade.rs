@@ -675,34 +675,66 @@ fn renumbered(g: &mut Grade, gone: u32) {
 
 pub fn remove(p: &mut Project, of: &GradeOf, n: u32, extract: bool) -> Result<()> {
     edited(p, of, |g| {
+        if !extract {
+            return taken_out(g, n).map(drop);
+        }
         let d = g.node(n).ok_or_else(|| no_node(n))?;
         let input = match &d.tool {
             GradeTool::Corrector(_) => d.inputs[0],
-            _ if extract => {
+            _ => {
                 return Err(Error::invalid(format!(
                     "node {n} is a mixer: only a corrector comes out"
                 )));
             }
-            _ => None,
         };
-        if extract {
-            retake(g, n, input, n);
-            node(g, n)?.inputs = vec![None];
-            return Ok(());
-        }
-        for (d, k) in g.nodes.iter_mut().zip(1..) {
-            let to = if d.tool.is_mixer() { None } else { input };
-            for v in d.inputs.iter_mut().filter(|v| **v == Some(n) && k != n) {
-                *v = to;
-            }
-        }
-        if g.output == Some(n) {
-            g.output = input;
-        }
-        g.nodes.remove(n as usize - 1);
-        renumbered(g, n);
+        retake(g, n, input, n);
+        node(g, n)?.inputs = vec![None];
         Ok(())
     })
+}
+
+pub fn taken_out(g: &mut Grade, n: u32) -> Result<Vec<u32>> {
+    let d = g.node(n).ok_or_else(|| no_node(n))?;
+    let (input, corrector) = match &d.tool {
+        GradeTool::Corrector(_) => (d.inputs[0], true),
+        _ => (None, false),
+    };
+    let mut fed = Vec::new();
+    for (d, k) in g.nodes.iter_mut().zip(1..) {
+        let mixer = d.tool.is_mixer();
+        let to = if mixer { None } else { input };
+        for v in d.inputs.iter_mut().filter(|v| **v == Some(n) && k != n) {
+            *v = to;
+            if mixer && corrector {
+                fed.push(k);
+            }
+        }
+    }
+    if g.output == Some(n) {
+        g.output = input;
+    }
+    let mut gone = vec![n];
+    for m in fed {
+        if let Some(v) = lone_input(g, m) {
+            retake(g, m, Some(v), m);
+            gone.push(m);
+        }
+    }
+    gone.sort_unstable_by(|a, b| b.cmp(a));
+    gone.dedup();
+    for &k in &gone {
+        g.nodes.remove(k as usize - 1);
+        renumbered(g, k);
+    }
+    Ok(gone)
+}
+
+fn lone_input(g: &Grade, m: u32) -> Option<u32> {
+    let mut linked = g.node(m)?.inputs.iter().flatten();
+    match (linked.next(), linked.next()) {
+        (Some(&v), None) => Some(v),
+        _ => None,
+    }
 }
 
 fn start_of(p: &Project, of: &GradeOf) -> Result<i64> {
