@@ -87,16 +87,7 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
     if let Some(name) = &c.name {
         w.name.clone_from(name);
     }
-    let kind = w.shape.kind();
-    let wrong = |field: &str| {
-        Error::invalid(format!(
-            "a {} window has no `{field}`",
-            serde_json::to_value(kind)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_string))
-                .unwrap_or_default()
-        ))
-    };
+    let wrong = |field: &str| Error::invalid(format!("this window has no `{field}`"));
     match (&mut w.shape, &c.soft) {
         (_, None) => {}
         (WindowShape::Linear { soft }, Some(given)) => {

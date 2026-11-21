@@ -3911,7 +3911,7 @@ impl GradeNode {
 
 /// A window of a corrector. The windows that are on make the key of the
 /// corrector: the windows of one shape join first, then the shapes, in
-/// the order linear, circle, polygon, gradient. A mask takes its key away
+/// the order circle, linear, polygon, gradient. A mask takes its key away
 /// from the key of the others. The place of a window is in pixels of the
 /// timeline frame, from its middle.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
