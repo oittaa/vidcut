@@ -198,7 +198,7 @@ pub(super) fn window_changes(from: &GradeWindow, to: &GradeWindow) -> Map<String
 pub(super) fn window_palette(
     ui: &mut Ui,
     (windows, current, usual): (&[GradeWindow], usize, Option<&GradeWindow>),
-    editing: &mut Option<(usize, String)>,
+    (editing, locked): (&mut Option<(usize, String)>, bool),
 ) -> Vec<WindowAct> {
     let mut acts = Vec::new();
     ui.horizontal(|ui| {
@@ -230,7 +230,7 @@ pub(super) fn window_palette(
                 .show(ui, |ui| {
                     for (i, w) in windows.iter().enumerate() {
                         let now = i == current;
-                        row(ui, (i, w, now, now && reveal), editing, &mut acts);
+                        row(ui, (i, w, now, now && reveal), (editing, locked), &mut acts);
                     }
                 });
         });
@@ -252,7 +252,7 @@ pub(super) fn window_palette(
 fn row(
     ui: &mut Ui,
     (i, w, current, reveal): (usize, &GradeWindow, bool, bool),
-    editing: &mut Option<(usize, String)>,
+    (editing, locked): (&mut Option<(usize, String)>, bool),
     acts: &mut Vec<WindowAct>,
 ) {
     let fill = match current {
@@ -275,7 +275,7 @@ fn row(
                 if shape.clicked() {
                     acts.push(WindowAct::Toggle(i));
                 }
-                name_field(ui, (i, &w.name), editing, acts);
+                name_field(ui, (i, &w.name), (editing, locked), acts);
                 ui.add_enabled_ui(w.on, |ui| {
                     let mut invert = w.invert;
                     if ui.toggle_value(&mut invert, "Invert").changed() {
@@ -296,7 +296,7 @@ fn row(
 fn name_field(
     ui: &mut Ui,
     (i, name): (usize, &str),
-    editing: &mut Option<(usize, String)>,
+    (editing, locked): (&mut Option<(usize, String)>, bool),
     acts: &mut Vec<WindowAct>,
 ) {
     let size = Vec2::new(NAME_WIDTH, ui.spacing().interact_size.y);
@@ -314,7 +314,7 @@ fn name_field(
         return;
     }
     let r = ui.add_sized(size, Label::new(name).truncate().sense(Sense::click()));
-    if r.double_clicked() {
+    if r.double_clicked() && !locked {
         *editing = Some((i, name.to_string()));
     } else if r.clicked() {
         acts.push(WindowAct::Pick(i));

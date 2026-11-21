@@ -490,7 +490,11 @@ fn cleared(
         key_changed(g, n, frame, |_| KeyOutput::default())?;
     }
     if resets(GradePalette::Window) {
-        for w in &mut unlocked(g, n)?.windows {
+        let d = unlocked(g, n)?;
+        if d.tool.is_mixer() {
+            return Err(Error::invalid(format!("node {n} is a mixer")));
+        }
+        for w in &mut d.windows {
             *w = GradeWindow {
                 on: false,
                 name: std::mem::take(&mut w.name),
