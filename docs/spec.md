@@ -5935,6 +5935,10 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 
 - A grid of values gives the same picture as the Output LUT of the project.
 - It applies to clips. A gap stays black.
+- It does not apply to a Solid Color generator, a Text title or a Text+ title.
+- On a compound clip, it applies once, to the clip inside. It does not apply again to the compound clip.
+  - A clip inside at Zoom 0.5 gets it. The uncovered part of the compound clip stays black, not `T(0)`.
+- In a timeline with its own settings, the Lookup Tables section of the settings shows a warning. The LUT still applies there.
 - A picture with alpha gives `T(clamp(C / A)) * A`, and each layer gets its own `T` before the mix.
 - The Input LUT of a clip replaces it on that clip.
 - vidcut has no Input LUT of the project yet ([todo](todo/luts.md)).
