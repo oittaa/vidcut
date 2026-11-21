@@ -571,6 +571,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         pool: PoolView::default(),
         clipboard: 0,
         key_clipboard: 0,
+        node_clipboard: false,
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashSet::new()),
         missing: Arc::new(HashSet::new()),
@@ -657,6 +658,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         pool: PoolView::default(),
         clipboard: Vec::new(),
         key_clipboard: Vec::new(),
+        node_clipboard: None,
         cue_clipboard: Vec::new(),
         clipboard_fps: None,
         log: VecDeque::new(),
@@ -942,6 +944,7 @@ struct Live {
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
     key_clipboard: Vec<vidcut_core::request::CopiedKey>,
+    node_clipboard: Option<vidcut_core::request::CopiedNode>,
     cue_clipboard: Vec<vidcut_core::model::TrackCue>,
     clipboard_fps: Option<vidcut_core::time::Rational>,
     log: VecDeque<LogEntry>,
@@ -1610,6 +1613,7 @@ impl Live {
             pool: self.pool.clone(),
             clipboard: self.clipboard.len(),
             key_clipboard: self.key_clipboard.len(),
+            node_clipboard: self.node_clipboard.is_some(),
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
@@ -3691,6 +3695,12 @@ impl Live {
                 }
                 *keyframes = Some(self.key_clipboard.clone());
             }
+            Request::GradePaste { settings, .. } if settings.is_none() => {
+                if self.node_clipboard.is_none() {
+                    return Err(Error::usage("the clipboard has no node"));
+                }
+                *settings = self.node_clipboard.clone();
+            }
             Request::MediaMarksSet {
                 media,
                 mark_in,
@@ -3787,6 +3797,11 @@ impl Live {
                         self.cue_clipboard = cues;
                         self.clipboard.clear();
                         self.key_clipboard.clear();
+                    }
+                }
+                Request::GradeCopy { .. } => {
+                    if let Ok(node) = serde_json::from_value(r.result["settings"].clone()) {
+                        self.node_clipboard = Some(node);
                     }
                 }
                 Request::KeyframesCopy { .. } | Request::KeyframesCut { .. } => {
@@ -5246,6 +5261,7 @@ impl Live {
             "two_up": self.renderer.two_up(),
             "clipboard": self.clipboard.len(),
             "keyframe_clipboard": self.key_clipboard.len(),
+            "node_clipboard": self.node_clipboard.is_some(),
             "cue_clipboard": self.cue_clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
         })

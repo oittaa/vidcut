@@ -2926,6 +2926,49 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<u32>,
     },
+    /// Copy the settings of a corrector of the grade of a clip, or with
+    /// `timeline` of the timeline grade (Ctrl+C on the Color page): its
+    /// values, its keyframes, its label and whether it is on. Returns them
+    /// as `settings`, ready for `grade.paste`. The GUI also keeps them on
+    /// its clipboard.
+    #[serde(rename = "grade.copy")]
+    GradeCopy {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        node: u32,
+    },
+    /// Give a corrector of the grade of clips, or with `timeline` of the
+    /// timeline grade, copied settings in place of its own (Ctrl+V on the
+    /// Color page). Each keyframe goes on its frame from the start of the
+    /// clip. Default: the GUI's clipboard.
+    #[serde(rename = "grade.paste")]
+    GradePaste {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+        /// The timeline grade of the open timeline, in place of clips.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        node: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        settings: Option<CopiedNode>,
+    },
+    /// Swap the settings of two correctors of the grade of a clip, or with
+    /// `timeline` of the timeline grade: their values, their keyframes,
+    /// their labels and whether each is on. Their places, numbers and
+    /// links stay.
+    #[serde(rename = "grade.swap")]
+    GradeSwap {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        node: u32,
+        with: u32,
+    },
     /// Add a keyframe at `at` to a corrector of the grade of a clip, or with
     /// `timeline` of the timeline grade. On a clip, it goes on the source
     /// frame of the clip at `at`. Without `node`, each corrector gets one.
@@ -4906,6 +4949,25 @@ pub struct KeyPicks {
     pub frames: Option<OneOrMany<i64>>,
 }
 
+/// The settings of a corrector: what `grade.copy` returns and
+/// `grade.paste` takes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CopiedNode {
+    /// Its values before its first keyframe.
+    pub values: crate::model::Corrector,
+    /// Its keyframes, each on its frame from the start of the clip. Left
+    /// out when it has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<crate::model::GradeKey>,
+    /// Left out when it has none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+    pub on: bool,
+    /// As `animated` of a grade node. Left out when not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub animated: bool,
+}
+
 /// A copied keyframe: what `keyframes.copy` returns and `keyframes.paste`
 /// takes.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -6618,6 +6680,7 @@ impl Request {
                     | Self::MarksGet {}
                     | Self::KeyframesList { .. }
                     | Self::KeyframesCopy { .. }
+                    | Self::GradeCopy { .. }
                     | Self::MarkersList { .. }
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }

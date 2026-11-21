@@ -11,7 +11,8 @@ use vidcut_core::request::{GradeAdd, GradeLevel, GradeMixer, Page, PrinterColor}
 use vidcut_core::shortcuts::{Action, Panel};
 
 use super::node_editor::{
-    self, Badge, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, Side, Spot, Tile, Wire,
+    self, Badge, Dropped, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, Side, Spot, Tile,
+    Wire,
 };
 use super::theme;
 use super::workspace::Workspace;
@@ -319,6 +320,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         place: [0.0; 2],
         faded: false,
         switch: false,
+        drops: false,
         note: String::new(),
         badges: Vec::new(),
         outlet: Some(Outlet {
@@ -344,6 +346,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
             place: d.place,
             faded: !d.on,
             switch: !d.tool.is_mixer(),
+            drops: !d.tool.is_mixer(),
             note: d.label.clone(),
             badges: badges(d),
             outlet: Some(Outlet {
@@ -360,6 +363,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         place: [0.0; 2],
         faded: false,
         switch: false,
+        drops: false,
         note: String::new(),
         badges: Vec::new(),
         outlet: None,
@@ -1368,9 +1372,13 @@ impl Workspace {
             }
             _ => true,
         };
+        let clipboard = |a: &(Action, bool)| matches!(a.0, Action::Copy | Action::Paste);
         ctx.input_mut(|i| {
-            i.events
-                .retain(|e| keep(super::shortcuts::owner(&bindings, Panel::Color, e)))
+            i.events.retain(|e| {
+                let own = super::shortcuts::owner(&bindings, Panel::Color, e);
+                let app = || super::shortcuts::owner(&bindings, Panel::App, e).filter(clipboard);
+                keep(own.or_else(app))
+            })
         });
         let struck = |a: Action| mine.contains(&a);
         for (action, add) in ADDS {
@@ -1396,6 +1404,14 @@ impl Workspace {
                 && struck(action)
             {
                 self.grade_node_act(&of, &g, (act, n));
+            }
+        }
+        if let Some(n) = corrector {
+            if struck(Action::Copy) {
+                self.send("grade.copy", params(&of, "clip", json!({ "node": n })));
+            }
+            if struck(Action::Paste) && self.snap.node_clipboard {
+                self.send("grade.paste", params(&of, "clips", json!({ "node": n })));
             }
         }
         if struck(Action::DeleteNode) {
@@ -1489,6 +1505,43 @@ impl Workspace {
         };
         self.select_coming(g.last() + 1);
         self.send("grade.add", params(&of, "clip", more));
+    }
+
+    fn grade_dropped(&mut self, of: &GradeOf, dropped: Dropped<Port>) {
+        match dropped {
+            Dropped::Swap(Port::Node(a), Port::Node(b)) => {
+                let more = json!({ "node": a, "with": b });
+                self.send("grade.swap", params(of, "clip", more));
+            }
+            Dropped::Copy(Port::Node(a), Port::Node(b)) => {
+                let copied = self
+                    .project()
+                    .map(|p| vidcut_core::ops::grade::copy(p, of, a));
+                if let Some(Ok(settings)) = copied {
+                    let more = json!({ "node": b, "settings": settings });
+                    self.send("grade.paste", params(of, "clips", more));
+                }
+            }
+            Dropped::Insert {
+                node: Port::Node(n),
+                wire: (from, to, slot),
+                place,
+            } => {
+                let (Some(from), Some(to)) = (from_number(from), to_number(to)) else {
+                    return;
+                };
+                let set = json!({ "node": n, "place": place });
+                let take = json!({ "node": n, "from": from });
+                let give = json!({ "node": to, "input": slot, "from": n });
+                let commands = vec![
+                    command("grade.set", params(of, "clips", set)),
+                    command("grade.connect", params(of, "clip", take)),
+                    command("grade.connect", params(of, "clip", give)),
+                ];
+                self.send_all(commands, "Insert Node");
+            }
+            _ => {}
+        }
     }
 
     fn grade_node_act(&mut self, of: &GradeOf, g: &Grade, (act, n): (NodeAct, u32)) {
@@ -1674,6 +1727,9 @@ impl Workspace {
             })
             .collect();
         self.send_all(moves, "Move Nodes");
+        if let Some(d) = done.dropped {
+            self.grade_dropped(&of, d);
+        }
         if let Some(Port::Node(n)) = done.pointed {
             self.effects_page.grade_nodes = vec![n];
         }

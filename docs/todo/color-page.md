@@ -32,8 +32,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 - The thumbnails (p. 3390).
 - Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3394). They need windows.
-- Insert a node with no connection by a drop on a connection (pp. 3396–3397).
-- Swap two nodes with a Command-drag, copy the settings with an Option-drag, and Copy and Paste of node settings (p. 3397).
 - Cleanup Node Graph, Toggle Display Mode, Zoom to Window and the Layer List view (pp. 3386–3387, 3398).
 - The Nodes submenu of the Color menu (pp. 3392, 3394). The order of its items needs a measurement.
 - The key input and output of each node, the Key Mixer, and Key Output Gain and Offset. Measured in Resolve Studio 21.2 with float renders:

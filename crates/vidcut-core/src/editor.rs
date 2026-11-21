@@ -4754,6 +4754,29 @@ fn mutate(
             ops::grade::connect(p, &of, *node, *input, *from)?;
             Value::Null
         }
+        Request::GradePaste {
+            clips,
+            timeline,
+            node,
+            settings,
+        } => {
+            let of = grades_of(p, clips, *timeline, playhead)?;
+            let settings = settings
+                .as_ref()
+                .ok_or_else(|| Error::usage("give `settings`: the clipboard has no node"))?;
+            ops::grade::paste(p, &of, *node, settings)?;
+            Value::Null
+        }
+        Request::GradeSwap {
+            clip,
+            timeline,
+            node,
+            with,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade::swap(p, &of, *node, *with)?;
+            Value::Null
+        }
         Request::GradeKeysAdd {
             clip,
             timeline,
@@ -8352,6 +8375,14 @@ pub fn query(
         ),
         Request::BinsList {} => json!(p.bins),
         Request::TimelineList {} => ops::timelines::list(p),
+        Request::GradeCopy {
+            clip,
+            timeline,
+            node,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            json!({ "settings": ops::grade::copy(p, &of, *node)? })
+        }
         Request::GradeGet { clip, timeline, at } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
             let at = at.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
