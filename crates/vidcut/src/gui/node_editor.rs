@@ -198,8 +198,9 @@ impl<K> NodeView<K> {
         let rect = self.shown?;
         let z = self.zoom;
         let origin = rect.min + MARGIN * z + self.pan;
-        let from = rect.min + MARGIN;
-        let to = (rect.max - MARGIN - BOX * z).max(from);
+        let inset = vec2(MARGIN.x * 2.0, MARGIN.y);
+        let from = rect.min + inset;
+        let to = (rect.max - inset - BOX * z).max(from);
         let place = |at: Pos2| {
             let d = (at - origin) / (CELL * z);
             [f64::from(d.x), f64::from(d.y)]
