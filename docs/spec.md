@@ -2531,6 +2531,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A new name shows on each placed copy that has no name of its own.
   - A placed copy can have a name of its own. Its picture and its sound show that name. The Media Pool name stays.
   - In OTIO export, each `Stack` has the name that its copy shows.
+  - OTIO import loses the own name of a copy: [Resolve's OTIO files](gotchas.md#resolves-otio-files).
   - **vidcut:** `compound.set` with `name` renames a compound clip. `clip.set` with `name` gives a copy its own name.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
