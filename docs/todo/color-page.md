@@ -20,6 +20,7 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - `crates/vidcut/src/gui/color_page.rs` draws the Primaries wheels, the Primaries bars and the Log wheels of the current node. It sends `grade.set`, `grade.clear` and `grade.printer` with `node`.
 - Its Key palette has the Key Output of the current node (`KeyOutput`).
 - It also draws the Node Editor of the grade, at the right of the viewer. `crates/vidcut/src/gui/node_editor.rs` is the editor of the Color page and of the Effects page.
+- Each corrector in the Node Editor and in List View shows its thumbnail (`Shot`, [live.md](../design/live.md)).
 - On the Color page, the keys of the nodes (`Panel::Color`) go before the keys of the other pages. Thus Shift+S, Ctrl+D, Alt+D and Delete act on the nodes there.
 - A Clip and Timeline switch at the top right selects the grade that the palette shows (pp. 3404–3405). It sends `gui.page` with `grade`.
 - In the bars, each Offset bar has a Plus and a Minus button. Each button moves its channel by one printer point (pp. 3157, 3159).
@@ -31,7 +32,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 **To do:**
 
-- The thumbnails (p. 3390), also in the rows of List View.
 - Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3394). They need windows.
 - The Nodes submenu of the Color menu (pp. 3392, 3394). The order of its items needs a measurement.
 - The key input and output of each node, and the Key Mixer. Measured in Resolve Studio 21.2 with float renders:
@@ -47,9 +47,5 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - Measure in Resolve, then match:
   - Remove One Input: which empty input goes when there are several, and whether it takes the empty input of two. Measured: it removes an empty input, also one in the middle, and does nothing when each input is linked.
   - The items of the Add Node submenu of a mixer, and the menu of a Parallel Mixer.
-  - Alt+L at a corrector on a Parallel Mixer.
-  - Alt+P and Alt+L at a corrector on a mixer when the corrector does not take the source: what the new corrector takes.
-  - Delete of node 2 in 1 to 2 to a mixer input: does the mixer input take node 1, or nothing.
   - Delete after a drag box that does not hold the current node: does the current node go too.
-  - A click on the empty Node Editor: do the other selected nodes stay selected.
   - A Ctrl-click on a node that is selected already.

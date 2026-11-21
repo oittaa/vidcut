@@ -62,6 +62,12 @@ pub struct ScopePictures {
     pub colors: Option<vidcut_core::model::Hdr>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NodeShots {
+    pub texture: Option<egui::TextureId>,
+    pub cells: Vec<(u32, egui::Rect, egui::Vec2)>,
+}
+
 pub struct Workspace {
     pub(super) live: live::Handle,
     pub(super) snap: Arc<Snapshot>,
@@ -69,6 +75,8 @@ pub struct Workspace {
     pub want: [i32; 2],
     pub scope_pictures: ScopePictures,
     pub scope_want: Vec<(Scope, [i32; 2])>,
+    pub node_shots: NodeShots,
+    pub shots_want: Option<vidcut_av::screen::ShotsWanted>,
     pub stats: Option<live::stats::PlayerStats>,
     pub display: Option<String>,
     pub levels: Option<vidcut_av::player::Levels>,
@@ -171,6 +179,8 @@ impl Workspace {
             want: [640, 360],
             scope_pictures: ScopePictures::default(),
             scope_want: Vec::new(),
+            node_shots: NodeShots::default(),
+            shots_want: None,
             display: None,
             levels: None,
             main_window: None,
@@ -334,6 +344,8 @@ impl Workspace {
                 }
                 live::GuiChange::Page(page) => self.set_page(page),
                 live::GuiChange::Grade(level) => self.set_grading(level),
+                live::GuiChange::Palette(palette) => self.effects_page.palette = palette,
+                live::GuiChange::Primaries(view) => self.effects_page.primaries = view,
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
                 live::GuiChange::GradeNodes(nodes) => self.pick_grade_nodes(nodes)?,
                 live::GuiChange::NodeView { zoom, list, wide } => {
@@ -451,6 +463,8 @@ impl Workspace {
         live::GuiState {
             page,
             grade: self.effects_page.grading,
+            palette: self.effects_page.palette,
+            primaries: self.effects_page.primaries,
             clip: match (page, self.effects_page.grading) {
                 (Page::Effects, _) => self.effects_clip(),
                 (Page::Color, GradeLevel::Clip) => self.color_clip(),
@@ -2053,6 +2067,7 @@ impl Workspace {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.snap = self.live.snapshot();
+        self.shots_want = None;
         if let Some(t) = &mut self.tiles {
             t.proxies = self.snap.proxy_dir.clone();
         }

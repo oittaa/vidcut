@@ -409,6 +409,35 @@ A scope that is off:
 - The pipelines (`Pipes`) are made at the first use. A viewer with no scope never makes them.
 - `Screen::scoping` turned off lets the next draw drop `Wide`, as before the scope was on.
 
+## The node thumbnails
+
+Each corrector in the Node Editor shows the picture at its output ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)). The viewer thread draws these thumbnails with the frame in the viewer.
+
+What they read:
+
+- `Screen::set_shots` takes the wish of the page (`ShotsWanted`): the clip or the timeline, the height and `refresh`.
+- For a clip, `clip_shot` takes the converted texture of its slot. That is the whole picture before the place in the frame, in its stored orientation.
+- For the timeline grade, the source is the canvas before the timeline grade and the output LUT.
+- The thumbnails thus get no Sizing and no output LUT, as the spec says.
+
+How the GPU makes them (`shots::Shots::draw`):
+
+- `fs_shot` shrinks the source into a box of `SHOT_ASPECT`. Each pixel is a mean of a grid of reads, up to `SHOT_TAPS` across.
+  - The picture fits inside the box, at the middle. The bars at its sides, or above and below it, are black.
+  - The height comes from the page, from `SMALLEST` to `LARGEST`.
+- `Graded::tapped` makes the passes of the grade with a `Tap` for each corrector. `tapped_into` runs them on the small picture.
+- At each tap, `tap_into` fills a scratch texture with `THUMBNAIL_GRAY`. A `Layer` pass in Normal with the key of the node puts the output of the node over it.
+  - The mix uses the float values. `fs_screen` clips them to 0..1 when it makes the shown texture.
+- Each tap copies its result to its cell of one atlas, with eight cells in a row. The atlas is `Wide` with no HDR, so that `fs_screen` adds no curve.
+- `ShotsShown` gives the atlas and the cell of each node to the GUI. A new atlas gets a new generation.
+
+When they draw:
+
+- A draw makes them again when the frame, the grade or the wish changes (`Shots::stale`).
+- With `refresh` false, the last thumbnails stay while the source and the height stay (`Shots::takes`).
+- With no wish, the draw drops the textures (`Shots::settle`).
+- The cost is about one small pass for each grade pass and three for each corrector, at the size of a thumbnail.
+
 ## Why
 
 - The GPU goes first wherever it gives correct results (AGENTS.md rule 9).

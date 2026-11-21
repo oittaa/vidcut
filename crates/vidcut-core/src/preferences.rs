@@ -66,6 +66,12 @@ pub struct ColorPrefs {
     /// another grade: the grade of another clip, or the timeline grade.
     /// Default `last_adjusted`.
     pub switching_clips: SwitchingClips,
+    /// Each corrector in the Node Editor shows the picture after it.
+    /// Default on.
+    pub show_thumbnails: bool,
+    /// The thumbnails keep their picture while the timeline plays, and
+    /// show the frame again when it stops. Default off.
+    pub disable_thumbnail_refresh: bool,
 }
 
 impl Default for ColorPrefs {
@@ -74,6 +80,8 @@ impl Default for ColorPrefs {
             printer_density: [1.0; 3],
             printer_step: [1.0; 3],
             switching_clips: SwitchingClips::LastAdjusted,
+            show_thumbnails: true,
+            disable_thumbnail_refresh: false,
         }
     }
 }
@@ -105,6 +113,10 @@ pub struct ColorPrefsPatch {
     pub printer_step: Option<[f64; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub switching_clips: Option<SwitchingClips>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_thumbnails: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_thumbnail_refresh: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1171,6 +1183,9 @@ impl Preferences {
             c.printer_density = x.printer_density.unwrap_or(c.printer_density);
             c.printer_step = x.printer_step.unwrap_or(c.printer_step);
             c.switching_clips = x.switching_clips.unwrap_or(c.switching_clips);
+            c.show_thumbnails = x.show_thumbnails.unwrap_or(c.show_thumbnails);
+            c.disable_thumbnail_refresh =
+                (x.disable_thumbnail_refresh).unwrap_or(c.disable_thumbnail_refresh);
         }
         p.check()?;
         Ok(p)
