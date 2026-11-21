@@ -96,6 +96,7 @@ pub enum GuiChange {
     Grade(GradeLevel),
     Palette(GradePalette),
     Primaries(PrimariesView),
+    Window(usize),
     Nodes(Vec<String>),
     GradeNodes(Vec<u32>),
     NodeView {
@@ -158,6 +159,7 @@ pub struct GuiState {
     pub grade: GradeLevel,
     pub palette: GradePalette,
     pub primaries: PrimariesView,
+    pub window: usize,
     pub clip: Option<String>,
     pub nodes: Vec<String>,
     pub grade_nodes: Vec<u32>,
@@ -3273,10 +3275,12 @@ impl Live {
                 grade,
                 palette,
                 primaries,
+                window,
             } => {
                 let mut changes: Vec<GuiChange> = (grade.map(GuiChange::Grade).into_iter())
                     .chain(palette.map(GuiChange::Palette))
                     .chain(primaries.map(GuiChange::Primaries))
+                    .chain(window.map(GuiChange::Window))
                     .collect();
                 changes.push(GuiChange::Page(page));
                 self.gui_change(changes, |s| json!(s))

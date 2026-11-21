@@ -19,6 +19,7 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 - `crates/vidcut/src/gui/color_page.rs` draws the Primaries wheels, the Primaries bars and the Log wheels of the current node. It sends `grade.set`, `grade.clear` and `grade.printer` with `node`.
 - Its Key palette has the Key Output of the current node (`KeyOutput`).
+- Its Window palette has the windows of the current node (`grade_windows.rs`). It sends the `grade.window` requests.
 - It also draws the Node Editor of the grade, at the right of the viewer. `crates/vidcut/src/gui/node_editor.rs` is the editor of the Color page and of the Effects page.
 - Each corrector in the Node Editor and in List View shows its thumbnail (`Shot`, [live.md](../design/live.md)).
 - On the Color page, the keys of the nodes (`Panel::Color`) go before the keys of the other pages. Thus Shift+S, Ctrl+D, Alt+D and Delete act on the nodes there.
@@ -32,6 +33,15 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 **To do:**
 
+- The windows ([spec §8.23](../spec.md#823-windows-pp-32653279)):
+  - The outlines and the handles of the windows in the viewer.
+  - Curve windows: the curve row of each corrector, + Curve and Convert to Bezier.
+  - Window keyframes.
+  - Copy Window, Paste Window and Paste Append Window in the option menu of the Window palette.
+- Measured in Resolve Studio 21.2 for these items:
+  - Paste Window with a window of the same shape current gives it the copied values. It adds no row.
+  - Paste Window with a window of another shape current adds a copy at the end, on and current. Paste Append Window does this always.
+  - Convert to Bezier on an added polygon removes the polygon. It adds a curve window at the end, on and current, with Soft 1, Inside and Outside at 0.
 - Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3395). They need windows.
 - Switch to Node Layer in the Nodes submenu, with the Node Stack Layers (pp. 3400–3401). Add Splitter Combiner Node (Option-Y, p. 3441).
 - The key input and output of each node, and the Key Mixer. Measured in Resolve Studio 21.2 with float renders:

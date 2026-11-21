@@ -2878,8 +2878,9 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
 - `grade.set`, `grade.clear` and `grade.printer` take `node`, the number of a corrector. Without it, they change node 1.
 - `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
 - `gui.page` with `grade` selects Clip or Timeline on the Color page.
-- `gui.page` with `palette` selects the Primaries or the Key palette. With `primaries`, it selects Wheels, Bars or Log.
-- `gui.state` gives the `grade`, the `palette` and the `primaries` mode.
+- `gui.page` with `palette` selects the Primaries, the Window or the Key palette. With `primaries`, it selects Wheels, Bars or Log.
+- `gui.page` with `window` selects the current window of the Window palette.
+- `gui.state` gives the `grade`, the `palette`, the `primaries` mode and the `window`.
 
 ### 8.21 Color page nodes (pp. 3385–3399, 3409–3415)
 
@@ -3133,7 +3134,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the Key palette keeps the height of the Primaries palette.
   - vidcut: a typed value outside the range goes to the nearest end.
   - vidcut: the resets work as measured. Reset in the Key palette resets only the Key Output.
-  - vidcut: `grade.clear` with `node` and `palette` resets one palette of the node: `primaries` or `key`.
+  - vidcut: `grade.clear` with `node` and `palette` resets one palette of the node: `primaries`, `window` or `key`.
   - vidcut: `grade.set` with `key_gain`, `key_offset` and `key_invert`. It refuses a value outside the range.
   - vidcut: the key out acts in serial nodes and in the mixers as measured.
   - vidcut: each keyframe of a corrector holds its Key Output. A change goes to a keyframe as the values do.
@@ -3295,6 +3296,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut: a corrector has a linear, a circle, a polygon and a gradient window first, off at first. Curve windows come later.
   - `grade.window.add` adds a window at its usual values, at the end of the window list. `grade.window.set` changes a window.
   - `grade.window.remove` removes an added window. It refuses the first windows: `on` turns them off.
+  - Delete in the Window palette on a first window shows a warning line in the status bar.
   - `grade.get` gives the windows of each corrector. The values are those of the palette.
   - The windows work as measured in the viewer and the export. vidcut renders the 133 measured cases within 1.6e-4.
   - Measured: the thumbnail of a node uses the window key of each pixel. vidcut uses it as k of the thumbnail.
@@ -3310,7 +3312,20 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Measured: Reset Node Grade turns each window off at its usual values, with Invert and Mask off. The rows and their names stay.
   - Measured: Reset Grades and Keep Nodes does the same to each node. Copy, paste and a swap of two nodes take the windows with the other values.
   - vidcut: the same.
-  - The Window palette, the outlines in the viewer, curve windows and window keyframes come later.
+  - Measured in the Window palette of Resolve Studio 21.2:
+    - The shape button of a row turns the window on or off. It also makes its row current. A click on the name makes the row current.
+    - A double-click on the name edits it. Enter sets the name.
+    - The fields show the values of the current window. They are dim when the window is off.
+    - A circle and a linear window use all six Transform fields. A polygon uses all but Aspect. A gradient uses Pan, Tilt, Rotate and Opacity.
+    - A typed value goes to the nearest end. Rotate takes −180 to 180. The other fields take 0 to 100.
+    - An added window is current. After a Delete, the first window of the same shape is current.
+    - Reset Selected Window gives the current window the values of a new window, with Invert off. It keeps the name and Mask, and the window stays on.
+    - The reset button of the palette turns each window off, at the values of a new window. The added windows and the names stay.
+  - vidcut: the Window palette works so. Window at the top of the palette selects it.
+    - The reset button sends `grade.clear` with `palette` `window`. Reset Selected Window sends `grade.window.set`.
+    - A change of a field goes to the grade when the mouse button comes up, as in the Primaries palette.
+    - Not measured: whether each node keeps its own current window. vidcut keeps one current window for the palette.
+  - The outlines in the viewer, curve windows, window keyframes, and Copy and Paste Window come later ([todo](todo/color-page.md)).
 
 Requests: `grade.window.add`, `grade.window.set` and `grade.window.remove`.
 

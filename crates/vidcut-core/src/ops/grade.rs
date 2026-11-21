@@ -482,14 +482,19 @@ fn cleared(
     frame: Option<i64>,
     (palette, size): (Option<GradePalette>, [f64; 2]),
 ) -> Result<()> {
-    if palette != Some(GradePalette::Key) {
+    let resets = |one: GradePalette| palette.is_none_or(|p| p == one);
+    if resets(GradePalette::Primaries) {
         changed(g, n, frame, |_| Corrector::default())?;
     }
-    if palette != Some(GradePalette::Primaries) {
+    if resets(GradePalette::Key) {
         key_changed(g, n, frame, |_| KeyOutput::default())?;
     }
-    if palette.is_none() {
-        for w in &mut unlocked(g, n)?.windows {
+    if resets(GradePalette::Window) {
+        let d = unlocked(g, n)?;
+        if d.tool.is_mixer() {
+            return Err(Error::invalid(format!("node {n} is a mixer")));
+        }
+        for w in &mut d.windows {
             *w = GradeWindow {
                 on: false,
                 name: std::mem::take(&mut w.name),

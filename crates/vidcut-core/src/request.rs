@@ -4310,6 +4310,10 @@ pub enum Request {
         /// How the Primaries palette shows the values. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         primaries: Option<PrimariesView>,
+        /// The window that the Window palette shows, from 0. Left out, it
+        /// stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<usize>,
     },
     /// Select nodes in the node editor of the effects page, by name. The
     /// Inspector and the viewer then show the last one. An empty list
@@ -4585,6 +4589,8 @@ pub enum GradePalette {
     /// The values of the corrector: Primaries and Log.
     #[default]
     Primaries,
+    /// The windows of the corrector.
+    Window,
     /// The Key Output.
     Key,
 }
