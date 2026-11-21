@@ -2900,8 +2900,9 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
   - vidcut: a Ctrl-click adds a node to the selection, and a drag box adds the nodes in the box. The current node stays.
   - vidcut: a click on the empty Node Editor keeps the current node. The other selected nodes are no longer selected. This part is not measured in Resolve.
-- **Labels and badges** (p. 3390):
-  - A label appears above the node. Change Label in the menu of a node sets it. A double-click on the label changes it.
+- **Labels and badges** (pp. 3390–3391):
+  - A label appears above the node. Change Label in the menu of a node sets it (p. 3390).
+  - A double-click on the label changes it (p. 3391).
   - At the usual size of a node, a label shows up to 12 characters. A larger node shows more.
   - Badges under the thumbnail show the palettes that changed the node. A node with animated parameters shows a keyframe badge.
   - Measured in Resolve Studio 21.2: the menu item is Node Label. The label sits above the node, at its left. A long label ends in "...", and the full text stays.
