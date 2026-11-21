@@ -4364,6 +4364,9 @@ pub struct GradeNodeChange {
     /// A mixer becomes this kind of mixer. A layer mixer starts at `normal`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mixer: Option<GradeMixer>,
+    /// The label above it in the node editor. An empty text removes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// A kind of mixer of a grade.

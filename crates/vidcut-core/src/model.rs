@@ -3850,12 +3850,21 @@ pub struct GradeNode {
     /// Its place in the node editor, `[x, y]` in node widths across and
     /// node heights down.
     pub place: [f64; 2],
+    /// The label above the node in the node editor. Left out when it has
+    /// none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
     /// The keyframes of a corrector, in the order of their frames, one at
     /// most on a frame. Each holds every value of the corrector. Before the
     /// first keyframe, the corrector has its own values. Left out when it
     /// has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<GradeKey>,
+    /// Its keyframes have held different values since its first keyframe
+    /// came. The node editor then shows a keyframe badge. Left out when
+    /// not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub animated: bool,
 }
 
 impl GradeNode {
@@ -3865,7 +3874,19 @@ impl GradeNode {
             inputs: vec![input],
             on: true,
             place,
+            label: String::new(),
             keys: Vec::new(),
+            animated: false,
+        }
+    }
+
+    pub fn is_animated(&self) -> bool {
+        match &self.tool {
+            GradeTool::Corrector(c) => {
+                !self.keys.is_empty()
+                    && (self.animated || self.keys.iter().any(|k| k.values != **c))
+            }
+            _ => false,
         }
     }
 }

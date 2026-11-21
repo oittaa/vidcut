@@ -263,7 +263,14 @@ pub(super) fn edited(
     edit: impl FnOnce(&mut Grade) -> Result<()>,
 ) -> Result<()> {
     let mut g = stored(p, of)?;
+    let marked = |g: &mut Grade| {
+        for d in &mut g.nodes {
+            d.animated = d.is_animated();
+        }
+    };
+    marked(&mut g);
     edit(&mut g)?;
+    marked(&mut g);
     store(p, of, &g)
 }
 
@@ -328,6 +335,9 @@ fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
     }
     if let Some(on) = change.on {
         d.on = on;
+    }
+    if let Some(label) = &change.label {
+        d.label = label.clone();
     }
     if let Some(to) = change.mixer {
         d.tool = match (&d.tool, to) {
@@ -506,7 +516,9 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd) -> Result<u32> {
                 inputs: vec![Some(n), Some(added)],
                 on: true,
                 place: [at[0] + 1.0, at[1]],
+                label: String::new(),
                 keys: Vec::new(),
+                animated: false,
             });
         }
     }

@@ -11,7 +11,7 @@ use vidcut_core::request::{GradeAdd, GradeLevel, GradeMixer, Page, PrinterColor}
 use vidcut_core::shortcuts::{Action, Panel};
 
 use super::node_editor::{
-    self, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, Side, Spot, Tile, Wire,
+    self, Badge, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, Side, Spot, Tile, Wire,
 };
 use super::theme;
 use super::workspace::Workspace;
@@ -35,6 +35,17 @@ const BLUE_AXIS: [f64; 3] = [0.0, -0.1873, 1.8556];
 const RED_AXIS: [f64; 3] = [1.5748, -0.4681, 0.0];
 
 const LANDING: Duration = Duration::from_secs(2);
+
+const LOG_BADGE: [&str; 4] = ["contrast", "log_shadow", "log_midtone", "log_highlight"];
+
+const NO_BADGE: [&str; 3] = ["pivot", "low_range", "high_range"];
+
+pub(super) const SWITCHING: [(SwitchingClips, &str); 4] = [
+    (SwitchingClips::LastAdjusted, "Last Adjusted Node"),
+    (SwitchingClips::First, "First Node"),
+    (SwitchingClips::Last, "Last Node"),
+    (SwitchingClips::Same, "Same Node"),
+];
 
 const PRINTED: [(PrinterColor, &str); 3] = [
     (PrinterColor::Red, "Red"),
@@ -71,6 +82,7 @@ pub(super) enum Port {
 enum NodeAct {
     Add(GradeAdd),
     Reset,
+    Label,
     Toggle,
     Extract,
     Delete,
@@ -161,6 +173,32 @@ fn switched_to(g: &Grade, how: SwitchingClips, kept: Option<u32>, was: Option<u3
         SwitchingClips::Same => was.filter(|n| g.node(*n).is_some()).or(kept),
     }
     .unwrap_or(1)
+}
+
+fn badges(d: &GradeNode) -> Vec<Badge> {
+    let GradeTool::Corrector(c) = &d.tool else {
+        return Vec::new();
+    };
+    let usual = Corrector::default();
+    let changed: Vec<String> = std::iter::once(c.as_ref())
+        .chain(d.keys.iter().map(|k| &k.values))
+        .flat_map(|v| differences(&usual, v).into_iter().map(|(k, _)| k))
+        .collect();
+    let log = |k: &String| LOG_BADGE.contains(&k.as_str());
+    let primary = |k: &String| !log(k) && !NO_BADGE.contains(&k.as_str());
+    [
+        (
+            changed.iter().any(primary),
+            icon::SLIDERS_HORIZONTAL,
+            "Primaries",
+        ),
+        (changed.iter().any(log), icon::CIRCLE_HALF, "Log"),
+        (d.is_animated(), icon::DIAMOND, "Keyframes"),
+    ]
+    .into_iter()
+    .filter(|(on, ..)| *on)
+    .map(|(_, icon, tip)| Badge { icon, tip })
+    .collect()
 }
 
 fn last_corrector(g: &Grade, kept: impl Fn(u32) -> bool) -> Option<u32> {
@@ -281,6 +319,8 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         place: [0.0; 2],
         faded: false,
         switch: false,
+        note: String::new(),
+        badges: Vec::new(),
         outlet: Some(Outlet {
             name: "Source".into(),
             color: RGB_KNOT,
@@ -304,6 +344,8 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
             place: d.place,
             faded: !d.on,
             switch: !d.tool.is_mixer(),
+            note: d.label.clone(),
+            badges: badges(d),
             outlet: Some(Outlet {
                 name: "RGB Output".into(),
                 color: RGB_KNOT,
@@ -318,6 +360,8 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         place: [0.0; 2],
         faded: false,
         switch: false,
+        note: String::new(),
+        badges: Vec::new(),
         outlet: None,
         inlets: vec![input(0, "Output".into())],
         edge: Some(Edge::Right),
@@ -428,6 +472,7 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, delete_key: &str, act: &mut Option<Node
                 egui::Button::new("Reset Node Grade"),
                 NodeAct::Reset,
             );
+            pick(ui, true, egui::Button::new("Node Label"), NodeAct::Label);
             let off = egui::Button::selectable(!d.on, "Disable Node");
             pick(ui, true, off, NodeAct::Toggle);
             let free = d.inputs.iter().all(Option::is_none);
@@ -1460,6 +1505,11 @@ impl Workspace {
                 self.delete_grade_nodes(of, g, &[n]);
                 return;
             }
+            NodeAct::Label => {
+                let page = &mut self.effects_page;
+                page.grade_view.name(Port::Node(n), d.label.clone());
+                return;
+            }
             _ => {}
         }
         let set = |more: Value| {
@@ -1468,7 +1518,7 @@ impl Workspace {
             ("grade.set", params(of, "clips", more))
         };
         let (method, p) = match act {
-            NodeAct::Add(_) | NodeAct::Delete => return,
+            NodeAct::Add(_) | NodeAct::Delete | NodeAct::Label => return,
             NodeAct::Reset => {
                 let more = json!({ "node": n, "at": self.snap.timeline.position });
                 ("grade.clear", params(of, "clips", more))
@@ -1526,6 +1576,26 @@ impl Workspace {
             return;
         };
         self.settle_grade(&of, &stored);
+        let switching = self.snap.switching_clips;
+        let mut switch_to = None;
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.menu_button(icon::DOTS_THREE, |ui| {
+                    ui.menu_button("Switching Clips Selects", |ui| {
+                        for (value, name) in SWITCHING {
+                            if ui.radio(value == switching, name).clicked() {
+                                switch_to = Some(value);
+                                ui.close();
+                            }
+                        }
+                    });
+                });
+            });
+        });
+        if let Some(value) = switch_to {
+            let more = json!({ "color": { "switching_clips": value } });
+            self.send("preferences.set", more);
+        }
         let salt = match &of {
             GradeOf::Clip(id) => format!("grade-node-{id}"),
             GradeOf::Timeline => "grade-node-timeline".to_string(),
@@ -1609,6 +1679,10 @@ impl Workspace {
         }
         if let Some(Port::Node(n)) = done.switched {
             node_act = Some((NodeAct::Toggle, n));
+        }
+        if let Some((Port::Node(n), label)) = done.named {
+            let more = json!({ "node": n, "label": label });
+            self.send("grade.set", params(&of, "clips", more));
         }
         if let Some(act) = node_act {
             self.grade_node_act(&of, &stored, act);

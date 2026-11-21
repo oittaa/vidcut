@@ -2893,13 +2893,27 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Selects same node: the node with the same number. In a clip with fewer nodes, the next highest node (p. 118).
   - Measured in Resolve Studio 21.2: Last Adjusted Node gives back the node that was current when the clip was left. That node need not be the node with the last change.
   - Measured: with Same Node, a clip with fewer nodes gave its own last current node, not its highest node.
-  - vidcut: the preference `color.switching_clips`, with `last_adjusted`, `first`, `last` and `same`, as measured. Preferences > Color has it.
+  - vidcut: the preference `color.switching_clips`, with `last_adjusted`, `first`, `last` and `same`, as measured. Preferences > Color and the option menu of the Node Editor have it.
   - vidcut: First and Last give the corrector with the lowest or the highest number. A grade that this run of the GUI did not show selects node 1. The timeline grade counts as a clip.
   - Measured in Resolve Studio 21.2: a drag box from the empty Node Editor selects the nodes in the box.
   - Measured: a click on the empty Node Editor keeps the current node.
   - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
   - vidcut: a Ctrl-click adds a node to the selection, and a drag box adds the nodes in the box. The current node stays.
   - vidcut: a click on the empty Node Editor keeps the current node. The other selected nodes are no longer selected. This part is not measured in Resolve.
+- **Labels and badges** (pp. 3390–3391):
+  - A label appears above the node. Change Label in the menu of a node sets it (p. 3390).
+  - A double-click on the label changes it (p. 3391).
+  - At the usual size of a node, a label shows up to 12 characters. A larger node shows more.
+  - Badges under the thumbnail show the palettes that changed the node. A node with animated parameters shows a keyframe badge.
+  - Measured in Resolve Studio 21.2: the menu item is Node Label. The label sits above the node, at its left. A long label ends in "...", and the full text stays.
+  - Measured: Primaries changes give one bars badge: balance, offset, saturation, hue and lum mix. Contrast and the Log wheels give a circle badge.
+  - Measured: the pivot and the Log ranges alone give no badge.
+  - Measured: one keyframe, or two keyframes with equal values, give no keyframe badge. A change at a keyframe gives it.
+  - Measured: the keyframe badge stays when the value goes back, so that the keyframes are equal again.
+  - vidcut: `grade.set` with `label`. Node Label in the menu of a corrector and a double-click on the label edit the label in place. Enter keeps the text, and Esc drops it.
+  - vidcut: a long label ends in "…". A pointer on it shows the full text.
+  - vidcut: the Primaries, Log and Keyframes badges are at the right of the node. The first two count the values of the node and of each keyframe.
+  - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node. It stays until the last keyframe goes (`animated` of the node).
 - **Add nodes** (pp. 3394–3395, 3410–3413):
   - The menu of a node has an Add Node submenu. The menu of the empty Node Editor has Add Node > Corrector. That corrector has no connection.
   - Alt+S adds a serial node after the current node. Alt+K appends a serial node at the end of the tree.
