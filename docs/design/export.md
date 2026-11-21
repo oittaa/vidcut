@@ -333,7 +333,7 @@ Seeks:
 - A reader that only looked for the keyframe (`VideoFrames::keyframe_time`) decodes on from it (`VideoReader::from_keyframe`).
 - A piece played backward decodes forward from the keyframe before its pictures, as many pictures at a time as a memory budget holds (`VideoFrames::reversed_frames`).
 - The player reads through the same `VideoFrames`, and both draw with the same `Screen`.
-- The viewer plan can leave Upscale off, and can read the render cache and a proxy (`preview_plan`, `Cache::apply`, `apply_proxies`). An export reads the timeline as stored.
+- The viewer plan can leave Upscale off, and can read the render cache and a proxy (`preview_plan`, `Cache::apply`, `apply_proxies`). Exports read the timeline as stored unless `VideoSettings::use_proxy_media` is on (`export::prepare`, `use_proxies`).
 
 Pictures:
 

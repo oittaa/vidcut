@@ -3,7 +3,8 @@ pub mod flashvsr;
 pub mod macos;
 pub mod nanovsr;
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -427,6 +428,7 @@ struct Enlarging<'a> {
 }
 
 fn enlarging<'a>(p: &'a Project, plans: &[&RenderPlan]) -> Vec<Enlarging<'a>> {
+    let mut probed: HashMap<PathBuf, Option<(Shape, Option<Hdr>)>> = HashMap::new();
     let mut work = Vec::new();
     for plan in plans {
         for (layer, _) in plan
@@ -437,6 +439,7 @@ fn enlarging<'a>(p: &'a Project, plans: &[&RenderPlan]) -> Vec<Enlarging<'a>> {
         {
             let VideoPiece::Source {
                 media,
+                path,
                 upscale,
                 placed,
                 ..
@@ -447,18 +450,56 @@ fn enlarging<'a>(p: &'a Project, plans: &[&RenderPlan]) -> Vec<Enlarging<'a>> {
             let Some(m) = p.media(media) else {
                 continue;
             };
-            let Some(v) = m.video_as_read() else {
-                continue;
+            let (shape, hdr) = if path == &m.path {
+                let Some(v) = m.video_as_read() else {
+                    continue;
+                };
+                (shape_of(&v), v.hdr)
+            } else {
+                let entry = probed.entry(path.clone()).or_insert_with(|| {
+                    crate::probe::probe(path, None)
+                        .ok()
+                        .and_then(|i| i.video)
+                        .map(|v| {
+                            let hdr = match v.transfer.as_str() {
+                                "smpte2084" => Some(Hdr::Pq),
+                                "arib-std-b67" => Some(Hdr::Hlg),
+                                _ => None,
+                            };
+                            (
+                                Shape {
+                                    size: (v.width, v.height),
+                                    sar: v.sar,
+                                    rotation: v.rotation,
+                                },
+                                hdr,
+                            )
+                        })
+                });
+                match *entry {
+                    Some(found) => found,
+                    None => match m.fresh_proxy() {
+                        Some(proxy) => (
+                            Shape {
+                                size: (proxy.width, proxy.height),
+                                sar: (1, 1),
+                                rotation: 0,
+                            },
+                            m.video_as_read().and_then(|v| v.hdr),
+                        ),
+                        None => continue,
+                    },
+                }
             };
             let out = (plan.width, plan.height);
-            let sizes = crate::export::video::ai_sizes(shape_of(&v), out, placed, *upscale);
+            let sizes = crate::export::video::ai_sizes(shape, out, placed, *upscale);
             if let Some((from, made)) = sizes {
                 work.push(Enlarging {
                     media: m,
                     upscaler: upscale.upscaler,
                     from,
                     made,
-                    hdr: v.hdr.is_some() && plan.colors.is_some(),
+                    hdr: hdr.is_some() && plan.colors.is_some(),
                 });
             }
         }

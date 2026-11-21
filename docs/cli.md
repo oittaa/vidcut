@@ -163,6 +163,7 @@ The schema describes the parameters, not the results. This list gives the result
       - `refused`: each file that does not match the output (`path`), and `why`.
   - `upscaled[]`: each file that Upscale enlarged (`path`), and `how`: the upscaler, with its model or its Sharpness. Examples: `AI Fast (NanoVSR 5.4M)`, `Classic, sharpness high`.
   - `notes[]`: `code`, `message`.
+    - With `video.use_proxy_media` on, `proxy_media` names the media whose proxy files the export reads, or reports a fallback to the originals.
 - `export plan`:
   - `settings`, `video_encoder` and `notes`.
   - `outputs[]`, with `color`, `metadata` and `rounded`.

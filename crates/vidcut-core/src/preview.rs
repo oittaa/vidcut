@@ -13,6 +13,17 @@ pub fn apply_proxies(
     if !project.settings.use_proxies {
         return;
     }
+    use_proxies(plan, project, proxies, exists, unfit);
+}
+
+pub fn use_proxies(
+    plan: &mut RenderPlan,
+    project: &Project,
+    proxies: &Path,
+    exists: impl Fn(&Path) -> bool,
+    unfit: impl Fn(&Media, Upscale) -> bool,
+) -> Vec<String> {
+    let mut used = Vec::new();
     for piece in plan.video.iter_mut().flat_map(VideoPiece::flat_layers_mut) {
         let VideoPiece::Source {
             media,
@@ -37,6 +48,10 @@ pub fn apply_proxies(
             *path = file;
             *image = None;
             *color_space = ColorSpace::Tagged;
+            if !used.contains(media) {
+                used.push(media.clone());
+            }
         }
     }
+    used
 }

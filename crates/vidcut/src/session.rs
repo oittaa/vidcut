@@ -7,7 +7,7 @@ use vidcut_av::export::Progress;
 use vidcut_core::looks;
 use vidcut_core::model::Format;
 use vidcut_core::store::{Store, state_dir};
-use vidcut_core::{Editor, Envelope, Error, ErrorCode, Project, Request, Response, Result};
+use vidcut_core::{Editor, Env, Envelope, Error, ErrorCode, Project, Request, Response, Result};
 
 use crate::env::AvEnv;
 use crate::threads::Work;
@@ -439,7 +439,8 @@ pub fn render(
             export_media(project, path, params, hooks, &mut |_| Ok(()))?
         }
         Request::ExportPlan(params) => {
-            let mut prepared = export::prepare(project, params, None)?;
+            let mut prepared =
+                export::prepare(project, params, None, &AvEnv::for_project(path).proxy_dir())?;
             let gpu = crate::preferences::gpu_acceleration();
             export::as_preferred(&mut prepared, gpu);
             let available = match gpu && prepared.settings.video.is_some() {
@@ -590,7 +591,7 @@ pub fn export_media(
         r.rev = p.rev;
         return Ok(r);
     }
-    let mut prepared = export::prepare(p, params, None)?;
+    let mut prepared = export::prepare(p, params, None, &AvEnv::for_project(path).proxy_dir())?;
     let subtitles = export::subtitles_beside(p, &prepared, params)?;
     export::refuse_existing(&subtitles, params.overwrite)?;
     if prepared.settings.audio.is_some()

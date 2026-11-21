@@ -628,6 +628,7 @@ pub struct Prepared {
     pub outputs: Vec<Output>,
     pub encoder_changed: Option<String>,
     pub offline: Vec<String>,
+    pub proxies_used: Vec<String>,
 }
 
 fn sanitize(name: &str) -> String {
@@ -664,7 +665,12 @@ fn file_name(template: &str, index: usize, name: &str, clip: &str, media: &str) 
     sanitize(&s)
 }
 
-pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Result<Prepared> {
+pub fn prepare(
+    p: &Project,
+    params: &ExportParams,
+    playhead: Option<i64>,
+    proxies: &Path,
+) -> Result<Prepared> {
     let (mut settings, preset_name) = match (&params.settings, &params.preset) {
         (Some(s), None) => (s.clone(), None),
         (None, Some(name)) => (preset(name)?.settings, Some(name.clone())),
@@ -788,6 +794,23 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         });
     }
     add_subtitles(p, params, &settings, &mut outputs)?;
+    let mut proxies_used = Vec::new();
+    if settings.video.as_ref().is_some_and(|v| v.use_proxy_media) {
+        for o in &mut outputs {
+            for id in vidcut_core::preview::use_proxies(
+                &mut o.plan,
+                &proj,
+                proxies,
+                Path::is_file,
+                |_, _| false,
+            ) {
+                let name = p.media(&id).map_or(id, |m| m.name.clone());
+                if !proxies_used.contains(&name) {
+                    proxies_used.push(name);
+                }
+            }
+        }
+    }
     for o in &outputs {
         if let Some(clip) = o.plan.broken_composition() {
             return Err(Error::invalid(format!(
@@ -810,6 +833,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         outputs,
         encoder_changed: None,
         offline: offline.iter().map(|m| m.name.clone()).collect(),
+        proxies_used,
     })
 }
 
@@ -937,8 +961,14 @@ fn filled_project(prepared: &Prepared, p: &Project) -> Project {
         .outputs
         .iter()
         .flat_map(|o| &o.plan.video)
-        .filter_map(|piece| match piece {
-            render::VideoPiece::Source { media, .. } => Some(media.clone()),
+        .flat_map(render::VideoPiece::with_flat_pieces)
+        .flat_map(render::VideoPiece::layers)
+        .filter_map(|(piece, _)| match piece {
+            render::VideoPiece::Source { media, path, .. }
+                if p.media(media).is_some_and(|m| m.path == *path) =>
+            {
+                Some(media.clone())
+            }
             _ => None,
         })
         .collect();
@@ -953,24 +983,58 @@ struct Chosen {
     metadata: Option<vidcut_core::export::metadata::MetadataChoice>,
 }
 
+fn choose_piece_kind(
+    p: &Project,
+    probed: &mut dyn FnMut(&render::VideoPiece) -> PictureKind,
+    piece: &render::VideoPiece,
+) -> PictureKind {
+    if let render::VideoPiece::Source { media, path, .. } = piece
+        && p.media(media).is_some_and(|m| m.path != *path)
+    {
+        return probed(piece);
+    }
+    picture_kind(p, piece)
+}
+
+fn choose_piece_meta(
+    p: &Project,
+    filled: &Project,
+    probed: &mut dyn FnMut(&render::VideoPiece) -> PieceMeta,
+    piece: &render::VideoPiece,
+) -> PieceMeta {
+    if let render::VideoPiece::Source { media, path, .. } = piece
+        && p.media(media).is_some_and(|m| m.path != *path)
+    {
+        return probed(piece);
+    }
+    piece_meta(filled, piece)
+}
+
+struct Probed<'a> {
+    kinds: &'a mut dyn FnMut(&render::VideoPiece) -> PictureKind,
+    files: &'a mut dyn FnMut(&render::VideoPiece) -> PieceMeta,
+}
+
 fn choose_output(
     plan: &RenderPlan,
     asked: &ExportSettings,
     (p, filled): (&Project, &Project),
     available: &Availability,
     (lights, measured): (&Lights, bool),
+    probed: &mut Probed<'_>,
     todo: &mut Vec<Span>,
 ) -> Chosen {
     let mut settings = asked.clone();
-    let color =
-        vidcut_av::export::choose_color(plan, &settings, available, |piece| picture_kind(p, piece));
+    let color = vidcut_av::export::choose_color(plan, &settings, available, |piece| {
+        choose_piece_kind(p, probed.kinds, piece)
+    });
     if let (Some(c), Some(v)) = (&color, settings.video.as_mut()) {
         c.apply(v);
     }
     let fps = plan.fps;
     let colored = settings.video.clone();
     let metadata = vidcut_av::export::choose_metadata(plan, &settings, |piece| {
-        let mut m = piece_meta(filled, piece);
+        let mut m = choose_piece_meta(p, filled, probed.files, piece);
         if let Some(v) = &colored {
             m.measured = engine::measured_light(lights, piece, fps, v, &m, false, None, None);
             if m.measured == Measured::Pending {
@@ -999,7 +1063,14 @@ pub fn auto_picks(prepared: &Prepared, p: &Project, available: &Availability, gp
     }
     let filled = filled_project(prepared, p);
     let lights = Lights::default();
-    let picks = |reset: &dyn Fn(&mut VideoSettings), read: &dyn Fn(&Chosen) -> Option<Value>| {
+    let mut kinds = engine::probed_kinds(None);
+    let mut files = engine::probed_files(None);
+    let mut probed = Probed {
+        kinds: &mut kinds,
+        files: &mut files,
+    };
+    let mut picks = |reset: &dyn Fn(&mut VideoSettings),
+                     read: &dyn Fn(&Chosen) -> Option<Value>| {
         let mut asked = prepared.settings.clone();
         if let Some(v) = asked.video.as_mut() {
             reset(v);
@@ -1013,6 +1084,7 @@ pub fn auto_picks(prepared: &Prepared, p: &Project, available: &Availability, gp
                 (p, &filled),
                 available,
                 (&lights, false),
+                &mut probed,
                 &mut Vec::new(),
             );
             if let Some(x) = read(&chosen)
@@ -1049,6 +1121,12 @@ fn choose_once(
     measured: bool,
 ) -> Vec<Span> {
     let filled = filled_project(prepared, p);
+    let mut kinds = engine::probed_kinds(None);
+    let mut files = engine::probed_files(None);
+    let mut probed = Probed {
+        kinds: &mut kinds,
+        files: &mut files,
+    };
     let mut todo: Vec<Span> = Vec::new();
     for o in &mut prepared.outputs {
         let chosen = choose_output(
@@ -1057,6 +1135,7 @@ fn choose_once(
             (p, &filled),
             available,
             (lights, measured),
+            &mut probed,
             &mut todo,
         );
         o.settings = chosen.settings;
@@ -1067,7 +1146,7 @@ fn choose_once(
             continue;
         };
         for (piece, _) in o.plan.video.iter().flat_map(render::VideoPiece::layers) {
-            if !engine::makes_hdr10plus(v, &piece_meta(&filled, piece)) {
+            if !engine::makes_hdr10plus(v, &choose_piece_meta(p, &filled, probed.files, piece)) {
                 continue;
             }
             if let Some(span) = Span::of(piece, fps)
@@ -1119,6 +1198,22 @@ pub fn notes(prepared: &Prepared, available: &Availability) -> Vec<Value> {
         .map(|why| json!({ "code": "encoder_changed", "message": why }))
         .collect();
     notes.extend(hdr_notes(prepared, available));
+    if prepared
+        .settings
+        .video
+        .as_ref()
+        .is_some_and(|v| v.use_proxy_media)
+    {
+        let message = if prepared.proxies_used.is_empty() {
+            "No fresh proxy media found; exporting original media".to_string()
+        } else {
+            format!(
+                "Using proxy media for: {}",
+                prepared.proxies_used.join(", ")
+            )
+        };
+        notes.push(json!({ "code": "proxy_media", "message": message }));
+    }
     if !prepared.offline.is_empty() {
         notes.push(json!({
             "code": "media_offline",
@@ -1643,6 +1738,98 @@ pub fn frame(
 mod tests {
     use super::*;
     use vidcut_av::export::encode::EncoderStatus;
+    use vidcut_core::model::{Clip, Media, Settings};
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir()
+                .join(format!("vidcut-export-test-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn proxy_project(use_proxies: bool, with_proxy: bool, hdr_original: bool) -> Project {
+        let mut p = Project::new(Settings::default());
+        p.settings.use_proxies = use_proxies;
+        let pix_fmt = if hdr_original {
+            "yuv420p10le"
+        } else {
+            "yuv420p"
+        };
+        let hdr = hdr_original.then_some("pq");
+        let proxy = with_proxy.then(|| {
+            json!({
+                "file": "m1-proxy.mkv",
+                "source_size": 100,
+                "source_mtime_ns": 0,
+                "width": 96,
+                "height": 54,
+                "codec": "h264",
+            })
+        });
+        let media: Media = serde_json::from_value(json!({
+            "id": "m1",
+            "path": "/media/orig.mp4",
+            "name": "Clip One",
+            "size": 100,
+            "mtime_ns": 0,
+            "info": {
+                "format": "mp4",
+                "duration": 2.0,
+                "start_time": 0.0,
+                "video": {
+                    "codec": "h264",
+                    "width": 1920,
+                    "height": 1080,
+                    "sar": [1, 1],
+                    "pix_fmt": pix_fmt,
+                    "fps": "24",
+                    "vfr": false,
+                    "first_pts": 0.0,
+                    "duration": 2.0,
+                    "rotation": 0,
+                    "hdr": hdr,
+                },
+                "audio": [],
+            },
+            "proxy": proxy,
+        }))
+        .unwrap();
+        let clip: Clip = serde_json::from_value(json!({
+            "id": "c1",
+            "media": "m1",
+            "start": 0,
+            "duration": 24,
+            "source_in": 0,
+            "video": true,
+            "enabled": true,
+        }))
+        .unwrap();
+        p.media.push(media);
+        p.tracks[0].clips.push(clip);
+        p
+    }
+
+    fn export_params(out: &Path, set: &[&str], per_clip: bool) -> ExportParams {
+        serde_json::from_value(json!({
+            "output": out,
+            "preset": "h264-master",
+            "set": set,
+            "per_clip": per_clip,
+            "overwrite": true,
+        }))
+        .unwrap()
+    }
 
     #[test]
     fn vp9_on_qsv_is_choosable_where_qsv_encodes_it() {
@@ -1657,5 +1844,117 @@ mod tests {
             }],
         };
         assert_eq!(encodable(&intel, true)["video"]["vp9"]["qsv"], Value::Null);
+    }
+
+    #[test]
+    fn prepare_keeps_original_by_default_even_with_use_proxies_on() {
+        let dir = TempDir::new("default-orig");
+        let proxy_file = dir.0.join("m1-proxy.mkv");
+        std::fs::write(&proxy_file, b"proxy").unwrap();
+        let p = proxy_project(true, true, false);
+        let params = export_params(&dir.0.join("out.mov"), &[], false);
+        let prepared = prepare(&p, &params, None, &dir.0).unwrap();
+        assert!(prepared.proxies_used.is_empty());
+        assert!(notes(&prepared, &Default::default()).is_empty());
+        match &prepared.outputs[0].plan.video[0] {
+            render::VideoPiece::Source { path, .. } => {
+                assert_eq!(path, Path::new("/media/orig.mp4"));
+            }
+            other => panic!("unexpected piece {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prepare_with_use_proxy_media_uses_fresh_proxy_and_notes_it() {
+        let dir = TempDir::new("with-proxy");
+        let proxy_file = dir.0.join("m1-proxy.mkv");
+        std::fs::write(&proxy_file, b"proxy").unwrap();
+        let p = proxy_project(false, true, false);
+        let params = export_params(
+            &dir.0.join("out.mov"),
+            &["video.use_proxy_media=true"],
+            false,
+        );
+        let prepared = prepare(&p, &params, None, &dir.0).unwrap();
+        assert_eq!(prepared.proxies_used, vec!["Clip One".to_string()]);
+        assert_eq!(
+            notes(&prepared, &Default::default()),
+            vec![json!({
+                "code": "proxy_media",
+                "message": "Using proxy media for: Clip One",
+            })]
+        );
+        match &prepared.outputs[0].plan.video[0] {
+            render::VideoPiece::Source { path, .. } => assert_eq!(path, &proxy_file),
+            other => panic!("unexpected piece {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prepare_with_use_proxy_media_falls_back_when_proxy_missing() {
+        let dir = TempDir::new("missing-proxy");
+        let p = proxy_project(false, true, false);
+        let params = export_params(
+            &dir.0.join("out.mov"),
+            &["video.use_proxy_media=true"],
+            false,
+        );
+        let prepared = prepare(&p, &params, None, &dir.0).unwrap();
+        assert!(prepared.proxies_used.is_empty());
+        assert_eq!(
+            notes(&prepared, &Default::default()),
+            vec![json!({
+                "code": "proxy_media",
+                "message": "No fresh proxy media found; exporting original media",
+            })]
+        );
+        match &prepared.outputs[0].plan.video[0] {
+            render::VideoPiece::Source { path, .. } => {
+                assert_eq!(path, Path::new("/media/orig.mp4"));
+            }
+            other => panic!("unexpected piece {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prepare_per_clip_with_use_proxy_media_substitutes_proxies() {
+        let dir = TempDir::new("per-clip");
+        let proxy_file = dir.0.join("m1-proxy.mkv");
+        std::fs::write(&proxy_file, b"proxy").unwrap();
+        let p = proxy_project(false, true, false);
+        let params = export_params(&dir.0, &["video.use_proxy_media=true"], true);
+        let prepared = prepare(&p, &params, None, &dir.0).unwrap();
+        assert_eq!(prepared.proxies_used, vec!["Clip One".to_string()]);
+        match &prepared.outputs[0].plan.video[0] {
+            render::VideoPiece::Source { path, .. } => assert_eq!(path, &proxy_file),
+            other => panic!("unexpected piece {other:?}"),
+        }
+    }
+
+    #[test]
+    fn choose_colors_uses_probed_proxy_color_not_original_hdr() {
+        use vidcut_av::fixture::{Container, FixtureSpec, VideoCodec, generate};
+        let dir = TempDir::new("probed-color");
+        let proxy_file = dir.0.join("m1-proxy.mkv");
+        let spec =
+            FixtureSpec::new(VideoCodec::Ffv1, Container::Mkv, 96, 54, (24, 1), 2).no_audio();
+        generate(&spec, &proxy_file).unwrap();
+        let p = proxy_project(false, true, true);
+        let params = export_params(
+            &dir.0.join("out.mov"),
+            &["video.use_proxy_media=true"],
+            false,
+        );
+        let mut prepared = prepare(&p, &params, None, &dir.0).unwrap();
+        choose_colors(&mut prepared, &p, &Default::default(), None).unwrap();
+        assert_eq!(
+            prepared.outputs[0].color.as_ref().unwrap().picture,
+            PictureShare {
+                frames: 24,
+                pq: 0,
+                hlg: 0,
+                deep: 0,
+            }
+        );
     }
 }

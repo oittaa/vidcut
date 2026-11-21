@@ -434,6 +434,11 @@ pub struct VideoSettings {
     /// encoded frames.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bypass_reencode: bool,
+    /// Use Proxy Media: export reads each clip's fresh proxy when one is on
+    /// disk, and falls back to the original when none is. Off, exports always
+    /// read the original media, even while the viewer plays proxies.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub use_proxy_media: bool,
 }
 
 impl VideoSettings {
@@ -462,6 +467,7 @@ impl VideoSettings {
             first_frame: None,
             compression_level: None,
             bypass_reencode: false,
+            use_proxy_media: false,
         }
     }
 
@@ -746,6 +752,7 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         first_frame: None,
         compression_level: None,
         bypass_reencode: false,
+        use_proxy_media: false,
     }
 }
 
@@ -1279,5 +1286,25 @@ mod tests {
             e.to_string(),
             "video.compression_level is for OpenEXR with profile _dwaa or _dwab"
         );
+    }
+
+    #[test]
+    fn use_proxy_media_defaults_to_false_and_skips_when_serializing() {
+        let v = VideoSettings::new(VideoCodec::H264, EncoderChoice::Auto);
+        assert!(!v.use_proxy_media);
+        let serialized = serde_json::to_value(&v).unwrap();
+        assert!(serialized.get("use_proxy_media").is_none());
+    }
+
+    #[test]
+    fn override_sets_use_proxy_media_and_allows_image_sequences() {
+        let mut s = builtin_presets()
+            .into_iter()
+            .find(|p| p.name == "tiff")
+            .unwrap()
+            .settings;
+        apply_overrides(&mut s, &["video.use_proxy_media=true".into()]).unwrap();
+        assert!(s.video.as_ref().unwrap().use_proxy_media);
+        assert!(validate(&s).is_ok());
     }
 }
