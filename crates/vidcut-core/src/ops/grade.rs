@@ -64,6 +64,18 @@ impl GradeNodeChange {
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
+
+    fn changes_key(&self) -> bool {
+        self.key_gain.is_some() || self.key_offset.is_some() || self.key_invert.is_some()
+    }
+
+    fn key_changed(&self, k: KeyOutput) -> KeyOutput {
+        KeyOutput {
+            gain: self.key_gain.unwrap_or(k.gain),
+            offset: self.key_offset.unwrap_or(k.offset),
+            invert: self.key_invert.unwrap_or(k.invert),
+        }
+    }
 }
 
 fn within(v: f64, (low, high): (f64, f64), what: &str) -> Result<()> {
@@ -131,8 +143,14 @@ fn keys_checked(d: &GradeNode, k: u32) -> Result<()> {
             )));
         }
         corrector_checked(&key.values)?;
+        key_checked(&key.key)?;
     }
     Ok(())
+}
+
+fn key_checked(k: &KeyOutput) -> Result<()> {
+    within(k.gain, (0.0, 2.0), "key_gain")?;
+    within(k.offset, (-1.0, 1.0), "key_offset")
 }
 
 pub fn checked(g: &Grade) -> Result<Option<Grade>> {
@@ -160,8 +178,7 @@ pub fn checked(g: &Grade) -> Result<Option<Grade>> {
         if n.tool.is_mixer() && !n.key.is_usual() {
             return Err(Error::invalid(format!("mixer {k} gives out no key")));
         }
-        within(n.key.gain, (0.0, 2.0), "key_gain")?;
-        within(n.key.offset, (-1.0, 1.0), "key_offset")?;
+        key_checked(&n.key)?;
         keys_checked(n, k)?;
     }
     if crate::grade::order(g).is_none() {
@@ -289,12 +306,7 @@ pub(super) fn node(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
     g.node_mut(n).ok_or_else(|| no_node(n))
 }
 
-fn changed(
-    g: &mut Grade,
-    n: u32,
-    frame: Option<i64>,
-    change: impl FnOnce(&Corrector) -> Corrector,
-) -> Result<()> {
+fn changed_node(g: &mut Grade, n: u32, frame: Option<i64>) -> Result<(&mut GradeNode, i64)> {
     let d = node(g, n)?;
     if d.tool.is_mixer() {
         return Err(Error::invalid(format!("node {n} is a mixer")));
@@ -308,7 +320,28 @@ fn changed(
             )));
         }
     };
+    Ok((d, frame))
+}
+
+fn changed(
+    g: &mut Grade,
+    n: u32,
+    frame: Option<i64>,
+    change: impl FnOnce(&Corrector) -> Corrector,
+) -> Result<()> {
+    let (d, frame) = changed_node(g, n, frame)?;
     d.change_at(frame, change).ok_or_else(|| no_node(n))
+}
+
+fn key_changed(
+    g: &mut Grade,
+    n: u32,
+    frame: Option<i64>,
+    change: impl FnOnce(KeyOutput) -> KeyOutput,
+) -> Result<()> {
+    let (d, frame) = changed_node(g, n, frame)?;
+    d.change_key_output_at(frame, change)
+        .ok_or_else(|| no_node(n))
 }
 
 const NEEDS: &str = "grade.set needs a value to change";
@@ -329,6 +362,9 @@ pub fn set(
             if !change.is_empty() {
                 changed(g, n, frame, |c| change.changed(c))?;
             }
+            if node_change.changes_key() {
+                key_changed(g, n, frame, |k| node_change.key_changed(k))?;
+            }
             node_changed(g, n, node_change)
         })?;
     }
@@ -345,15 +381,6 @@ fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
     }
     if let Some(label) = &change.label {
         d.label = label.clone();
-    }
-    if let Some(v) = change.key_gain {
-        d.key.gain = v;
-    }
-    if let Some(v) = change.key_offset {
-        d.key.offset = v;
-    }
-    if let Some(v) = change.key_invert {
-        d.key.invert = v;
     }
     if let Some(to) = change.mixer {
         d.tool = match (&d.tool, to) {
@@ -417,11 +444,7 @@ fn cleared(g: &mut Grade, n: u32, frame: Option<i64>, palette: Option<GradePalet
         changed(g, n, frame, |_| Corrector::default())?;
     }
     if palette != Some(GradePalette::Primaries) {
-        let d = node(g, n)?;
-        if d.tool.is_mixer() {
-            return Err(Error::invalid(format!("node {n} is a mixer")));
-        }
-        d.key = KeyOutput::default();
+        key_changed(g, n, frame, |_| KeyOutput::default())?;
     }
     Ok(())
 }

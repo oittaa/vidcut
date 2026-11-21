@@ -3855,9 +3855,9 @@ pub struct GradeNode {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub label: String,
     /// The keyframes of a corrector, in the order of their frames, one at
-    /// most on a frame. Each holds every value of the corrector. Before the
-    /// first keyframe, the corrector has its own values. Left out when it
-    /// has none.
+    /// most on a frame. Each holds every value of the corrector and its Key
+    /// Output. Before the first keyframe, the corrector has its own values
+    /// and `key`. Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<GradeKey>,
     /// Its keyframes have held different values since its first keyframe
@@ -3889,7 +3889,8 @@ impl GradeNode {
         match &self.tool {
             GradeTool::Corrector(c) => {
                 !self.keys.is_empty()
-                    && (self.animated || self.keys.iter().any(|k| k.values != **c))
+                    && (self.animated
+                        || (self.keys.iter()).any(|k| k.values != **c || k.key != self.key))
             }
             _ => false,
         }
@@ -3934,7 +3935,8 @@ impl KeyOutput {
     }
 }
 
-/// A keyframe of a corrector: every value of the corrector on one frame.
+/// A keyframe of a corrector: every value of the corrector and its Key
+/// Output on one frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GradeKey {
     /// On a clip, the source frame, counted as the `frame` of a `Keyframe`
@@ -3951,6 +3953,11 @@ pub struct GradeKey {
     pub end: u8,
     /// The values of the corrector on this frame.
     pub values: Corrector,
+    /// The Key Output of the corrector on this frame. Gain and offset blend
+    /// as the values do. Invert changes on the frame of the next keyframe.
+    /// Left out at its usual value.
+    #[serde(default, skip_serializing_if = "KeyOutput::is_usual")]
+    pub key: KeyOutput,
 }
 
 /// What a keyframe of a corrector does up to the next keyframe.
