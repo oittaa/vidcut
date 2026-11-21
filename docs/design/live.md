@@ -442,8 +442,9 @@ The bar and the Jobs button:
   - The label of a node is the `Tile::note` above it. Node Label and a double-click start an edit in place (`NodeView::name`). Enter gives `Done::named`, and the page sends `grade.set` with `label`.
   - In List View, the label is in the row, and Node Label edits it there. The graph and the list use one edit field (`label_field`).
   - The badges of a corrector (`Badge`) come from the values that differ from the usual values (`badges`). The Keyframes badge comes from `GradeNode::is_animated`. Each grade edit keeps that state in `animated` (`edited`).
-  - The Key badge comes from the Key Output of the node (`KeyOutput::is_usual`). A locked node, a mixer too, has a lock badge last (`GradeNode::locked`).
-  - The palette of a locked node drops its changes. Lock Node in the menu sends `grade.set` with `locked`.
+  - The Key badge comes from the Key Output of the node (`KeyOutput::is_usual`).
+  - `Tile::locked` holds the lock of a node, a mixer too (`GradeNode::locked`). The graph shows a lock badge last. In List View, each row has a lock after the eye, and a click on it gives `Done::locked`.
+  - The palette of a locked node drops its changes. Lock Node in the menu and the lock of a row send `grade.set` with `locked`.
   - The option menu at the top right of the Node Editor sets `color.switching_clips` with `preferences.set`.
   - Previous Node and Next Node step through the correctors in number order and wrap. They send `gui.grade_nodes`.
   - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.

@@ -388,6 +388,7 @@ fn tile(n: &Node) -> Tile<String> {
         drops: false,
         note: String::new(),
         badges: Vec::new(),
+        locked: None,
         outlet,
         inlets,
         edge: None,

@@ -2991,7 +2991,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.cleanup` and `gui.node_view` with `zoom`, `list` and `wide`.
   - vidcut: Cleanup Node Graph sends `grade.cleanup` with `area`, the visible part of the Node Editor. One column or one row goes to the middle.
   - vidcut: without `area`, the columns are one grid step apart. With `area`, the nodes never come closer than without it.
-  - vidcut: a mixer row shows the name of the mixer. The rows have no lock and no thumbnail yet ([todo](todo/color-page.md)).
+  - vidcut: a mixer row shows the name of the mixer. The rows have no thumbnail yet ([todo](todo/color-page.md)).
+  - vidcut: the lock of a row locks or unlocks its node. A row of a mixer has a lock too.
 - **Turn off and reset** (pp. 3392–3393):
   - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.
   - Measured in Resolve Studio 21.2: a click on the number turns that node off or on. The current node stays.
@@ -3019,7 +3020,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured in Resolve Studio 21.2: Lock Node has a check mark on a locked node. The lock icon is at the bottom right of the node.
   - Measured: a locked corrector refuses a typed Contrast, a typed Key Output Gain and Reset Node Grade. The field shows the typed value, then the stored value again.
   - Measured: a locked node can still be deleted, moved and turned off or on. Alt+S adds a node after it.
-  - vidcut: `grade.set` with `locked`. Lock Node in the menu of each node has a check mark. A locked node shows a lock badge at its right, also in List View.
+  - vidcut: `grade.set` with `locked`. Lock Node in the menu of each node has a check mark. A locked node shows a lock badge at its right. In List View, the lock of its row shows it.
   - vidcut: a locked node refuses `grade.set` of its values, its Key Output, and its mixer kind or mode. It also refuses `grade.clear` with `node`, `grade.printer`, `grade.paste`, `grade.swap` and the keyframe requests.
   - vidcut: the palette of a locked node drops each change. Thus its controls show the stored values again.
   - Not measured in Resolve: Reset Grades and Keep Nodes, and the keyframe requests for all nodes. vidcut skips a locked node in them.

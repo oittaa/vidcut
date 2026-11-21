@@ -187,12 +187,8 @@ fn switched_to(g: &Grade, how: SwitchingClips, kept: Option<u32>, was: Option<u3
 }
 
 fn badges(d: &GradeNode) -> Vec<Badge> {
-    let lock = (d.locked).then_some(Badge {
-        icon: icon::LOCK_SIMPLE,
-        tip: "Locked",
-    });
     let GradeTool::Corrector(c) = &d.tool else {
-        return lock.into_iter().collect();
+        return Vec::new();
     };
     let usual = Corrector::default();
     let changed: Vec<String> = std::iter::once(c.as_ref())
@@ -220,7 +216,6 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
     .into_iter()
     .filter(|(on, ..)| *on)
     .map(|(_, icon, tip)| Badge { icon, tip })
-    .chain(lock)
     .collect()
 }
 
@@ -489,6 +484,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         drops: false,
         note: String::new(),
         badges: Vec::new(),
+        locked: None,
         outlet: Some(Outlet {
             name: "Source".into(),
             color: RGB_KNOT,
@@ -515,6 +511,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
             drops: !d.tool.is_mixer(),
             note: d.label.clone(),
             badges: badges(d),
+            locked: Some(d.locked),
             outlet: Some(Outlet {
                 name: "RGB Output".into(),
                 color: RGB_KNOT,
@@ -532,6 +529,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         drops: false,
         note: String::new(),
         badges: Vec::new(),
+        locked: None,
         outlet: None,
         inlets: vec![input(0, "Output".into())],
         edge: Some(Edge::Right),
@@ -1950,6 +1948,9 @@ impl Workspace {
         }
         if let Some(Port::Node(n)) = done.switched {
             node_act = Some((NodeAct::Toggle, n));
+        }
+        if let Some(Port::Node(n)) = done.locked {
+            node_act = Some((NodeAct::Lock, n));
         }
         if let Some((Port::Node(n), label)) = done.named {
             let more = json!({ "node": n, "label": label });
