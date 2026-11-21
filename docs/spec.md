@@ -3301,6 +3301,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut keeps no separate center: it is always the mean of the corners. Resolve keeps it as a separate value, which a DRX file can set.
   - Not measured: whether a drag of a side of a linear window changes that center in Resolve.
   - `grade.window.set` with `points` sets the four corners of a linear window.
+  - Two equal corners give a side of no length. The key leaves that side out. Not measured: equal corners in Resolve.
   - Measured: the thumbnail of a node uses the window key of each pixel. vidcut uses it as k of the thumbnail.
   - Measured: a window moves with the Edit Sizing of its clip: position, zoom, rotation, flips, pitch, yaw and Dynamic Zoom.
   - Measured: its outline in the viewer moves with the position and the zoom.
