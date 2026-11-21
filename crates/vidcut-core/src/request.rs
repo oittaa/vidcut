@@ -4467,6 +4467,10 @@ pub struct GradeNodeChange {
     /// The key that a corrector gives out is turned over: 1 minus it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_invert: Option<bool>,
+    /// Locked, the node keeps its grade: the values, the keyframes and the
+    /// Key Output of a corrector, and the kind and mode of a mixer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
 }
 
 /// A palette of a corrector on the Color page.

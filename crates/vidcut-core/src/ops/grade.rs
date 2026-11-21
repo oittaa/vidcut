@@ -306,8 +306,20 @@ pub(super) fn node(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
     g.node_mut(n).ok_or_else(|| no_node(n))
 }
 
-fn changed_node(g: &mut Grade, n: u32, frame: Option<i64>) -> Result<(&mut GradeNode, i64)> {
+pub(super) fn locked(n: u32) -> Error {
+    Error::invalid(format!("node {n} is locked"))
+}
+
+pub(super) fn unlocked(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
     let d = node(g, n)?;
+    match d.locked {
+        true => Err(locked(n)),
+        false => Ok(d),
+    }
+}
+
+fn changed_node(g: &mut Grade, n: u32, frame: Option<i64>) -> Result<(&mut GradeNode, i64)> {
+    let d = unlocked(g, n)?;
     if d.tool.is_mixer() {
         return Err(Error::invalid(format!("node {n} is a mixer")));
     }
@@ -372,7 +384,13 @@ pub fn set(
 }
 
 fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
-    let d = node(g, n)?;
+    let d = match change.mixer.is_some() || change.mode.is_some() {
+        true => unlocked(g, n)?,
+        false => node(g, n)?,
+    };
+    if let Some(locked) = change.locked {
+        d.locked = locked;
+    }
     if let Some(at) = change.place {
         d.place = at;
     }
@@ -422,7 +440,7 @@ pub fn clear(
             (Some(n), _) => cleared(g, n, frame, palette),
             (None, true) => {
                 let correctors: Vec<u32> = (g.nodes.iter().zip(1..))
-                    .filter(|(d, _)| !d.tool.is_mixer())
+                    .filter(|(d, _)| !d.tool.is_mixer() && !d.locked)
                     .map(|(_, k)| k)
                     .collect();
                 for k in correctors {
@@ -575,6 +593,7 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd) -> Result<u32> {
                 keys: Vec::new(),
                 animated: false,
                 key: Default::default(),
+                locked: false,
             });
         }
     }
@@ -764,7 +783,7 @@ pub fn paste(p: &mut Project, of: &[GradeOf], n: u32, copied: &CopiedNode) -> Re
     for one in of {
         let start = start_of(p, one)?;
         edited(p, one, |g| {
-            let d = node(g, n)?;
+            let d = unlocked(g, n)?;
             values(d, n)?;
             d.tool = GradeTool::Corrector(Box::new(copied.values.clone()));
             d.keys = shifted_keys(&copied.keys, start);
@@ -891,8 +910,8 @@ pub fn cleanup(p: &mut Project, of: &GradeOf, area: Option<[[f64; 2]; 2]>) -> Re
 
 pub fn swap(p: &mut Project, of: &GradeOf, n: u32, with: u32) -> Result<()> {
     edited(p, of, |g| {
-        let a = node(g, n)?.clone();
-        let b = node(g, with)?.clone();
+        let a = unlocked(g, n)?.clone();
+        let b = unlocked(g, with)?.clone();
         values(&a, n)?;
         values(&b, with)?;
         for (k, from) in [(n, b), (with, a)] {

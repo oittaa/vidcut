@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::model::{Clip, Grade, GradeKey, GradeKeyKind, Project};
 
-use super::grade::{GradeOf, edited, no_node, node};
+use super::grade::{GradeOf, edited, locked, no_node, node};
 use super::keyframes::Pick;
 use super::locate;
 
@@ -60,16 +60,19 @@ fn targets(g: &Grade, n: Option<u32>) -> Result<Vec<u32>> {
             Some(d) if d.tool.is_mixer() => Err(Error::invalid(format!(
                 "node {n} is a mixer, which takes no keyframes"
             ))),
+            Some(d) if d.locked => Err(locked(n)),
             Some(_) => Ok(vec![n]),
             None => Err(no_node(n)),
         },
         None => {
             let all: Vec<u32> = (g.nodes.iter().zip(1..))
-                .filter(|(d, _)| !d.tool.is_mixer())
+                .filter(|(d, _)| !d.tool.is_mixer() && !d.locked)
                 .map(|(_, k)| k)
                 .collect();
             match all.is_empty() {
-                true => Err(Error::invalid("the grade has no corrector")),
+                true => Err(Error::invalid(
+                    "the grade has no corrector that is not locked",
+                )),
                 false => Ok(all),
             }
         }

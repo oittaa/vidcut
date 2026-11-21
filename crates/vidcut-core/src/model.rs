@@ -3869,6 +3869,12 @@ pub struct GradeNode {
     /// its usual value.
     #[serde(default, skip_serializing_if = "KeyOutput::is_usual")]
     pub key: KeyOutput,
+    /// A locked node keeps its grade: the values, the keyframes and the
+    /// Key Output of a corrector, and the kind and mode of a mixer. It can
+    /// still go, move, switch off and on, and take links. Left out when
+    /// not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 
 impl GradeNode {
@@ -3882,6 +3888,7 @@ impl GradeNode {
             keys: Vec::new(),
             animated: false,
             key: KeyOutput::default(),
+            locked: false,
         }
     }
 
