@@ -583,10 +583,12 @@ pub fn add(
             }
             GradeAdd::Before => {
                 let (n, [x, y]) = around(g)?;
-                let input = input_of(g, n)?;
+                let input = node(g, n)?.inputs.first().copied().flatten();
                 shifted(g, x);
                 g.nodes.push(GradeNode::corrector(input, [x, y]));
-                node(g, n)?.inputs[0] = Some(added);
+                if let Some(first) = node(g, n)?.inputs.first_mut() {
+                    *first = Some(added);
+                }
                 added
             }
             GradeAdd::Parallel | GradeAdd::Layer => {

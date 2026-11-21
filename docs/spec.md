@@ -2936,6 +2936,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the new corrector takes the input of the current node. In the measured tree, that input is the source.
   - Not measured in Resolve: Alt+L at a corrector on a Parallel Mixer, and a current node that does not take the source.
   - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L and Alt+K. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+  - Measured in Resolve Studio 21.2: Add Serial Before on a Parallel Mixer puts the new corrector on input 0 of the mixer. The node on that input feeds the new corrector.
+  - vidcut: `before` on a mixer does the same, also with Shift+S. With input 0 empty, the new corrector takes nothing. This part is not measured in Resolve.
 - **Delete and extract** (pp. 3395–3396):
   - Delete Node removes a node. The nodes at its left and its right then connect.
   - The Forward-Delete key deletes the selected node (p. 3395).
@@ -3027,7 +3029,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
   - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
   - vidcut: the menu of a mixer has these items in this order, but not Lock Node and Remove One Input ([todo](todo/color-page.md)).
-  - vidcut: in the Add Node submenu of a mixer, only Add Serial and Append Node work. The other items are grey. This is not measured in Resolve.
+  - Measured in Resolve Studio 21.2: the Add Node submenu of a mixer has Add Serial (Alt+S) and Add Serial Before (Shift+S).
+  - vidcut: the Add Node submenu of a mixer has these two items, with their keys.
 - **Mixers**, measured in Resolve Studio 21.2 with float renders:
   - Serial: node 2 works on the output of node 1. The error is 6.8e-6.
   - Parallel Mixer: out = x + Σ (nᵢ − x). The error is 8.4e-7.
