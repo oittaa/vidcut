@@ -2922,6 +2922,31 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the Primaries, Log and Keyframes badges are at the right of the node. The first two count the values of the node and of each keyframe.
   - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node. It stays until the last keyframe goes (`animated` of the node).
   - vidcut: the Key badge shows when the Key Output is not at its usual values.
+- **Thumbnails** (pp. 3385, 3390):
+  - Each corrector node has a thumbnail. The badges are under the thumbnail (p. 3390).
+  - Show Thumbnails in the option menu of the Node Editor turns the thumbnails off or on. Without thumbnails, the nodes are shorter (p. 3385).
+  - Measured in Resolve Studio 21.2: the thumbnail of a corrector shows the picture at the output of its node. Thus a later thumbnail shows the earlier nodes.
+  - Measured: the thumbnail is clamp(k·o + (1 − k)·0.5). k is the Key Output of the node at a key of 1.
+  - o is the output of the node: x + k (n − x), with its input x and its full change n. At k 0.5 and CDL Slope 0.5, the viewer shows (208, 18, 0) and the thumbnail (168, 73, 62).
+  - Measured: the mix uses the values before the clip to 0..1. At k 0.5, a ramp from −4 to 8 keeps 0 and 1 at its ends.
+  - Measured: the thumbnail shows the source picture of the clip, before Sizing and before its place in the timeline frame.
+  - Measured: the thumbnail box has its own aspect of about 2.07:1, 91 × 44 pixels at a UI scale of 175 %.
+  - Measured: the picture fits inside the box, at the middle. A 16:9 picture has bars at its sides, and a 2.4:1 picture above and below.
+  - Measured: the bars hold black. At k 0.5 they show 0.25. At k 0, all of the box is 0.5. A grade that lifts black was not measured on them.
+  - Measured: a value v shows as v × 255, with no curve. No output LUT and no display transform apply.
+  - Measured: a mixer shows its icon and no thumbnail.
+  - Measured: an off corrector shows at 40 % of its brightness: the border, the number and the thumbnail.
+  - Measured: the thumbnail of an off corrector shows its input with no mix to grey. The later thumbnails do not show its change.
+  - Measured: the thumbnails of the timeline grade show the picture after the clip grades.
+  - Measured: the option menu also has Disable Thumbnail Refresh during Playback. It is grey while Show Thumbnails is off.
+  - Measured: Show Thumbnails is on by default, and Disable Thumbnail Refresh during Playback is off.
+  - Measured: without thumbnails, a node is a short bar with its number and its badges.
+  - Measured: with Disable Thumbnail Refresh during Playback, the thumbnails keep their picture during playback. They show the frame again when playback stops.
+  - vidcut: the preferences `color.show_thumbnails` (on) and `color.disable_thumbnail_refresh` (off). The option menu of the Node Editor has both, as measured.
+  - vidcut: the thumbnail is clamp(k·o + (1 − k)·0.5) in a 91:44 box, as measured. The picture fits inside the box. The bars go through the grade as black pixels.
+  - vidcut: the thumbnails show the frame at the playhead. A clip grade has thumbnails only while the viewer shows that clip.
+  - vidcut: a clip picture that comes to the viewer already placed in the frame gives no thumbnails.
+  - vidcut: an off corrector shows at 40 %, with its input in the thumbnail. A mixer shows its name and no thumbnail.
 - **Add nodes** (pp. 3394–3395, 3410–3413):
   - The menu of a node has an Add Node submenu. The menu of the empty Node Editor has Add Node > Corrector. That corrector has no connection.
   - Alt+S adds a serial node after the current node. Alt+K appends a serial node at the end of the tree.
@@ -2993,7 +3018,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.cleanup` and `gui.node_view` with `zoom`, `list` and `wide`.
   - vidcut: Cleanup Node Graph sends `grade.cleanup` with `area`, the visible part of the Node Editor. One column or one row goes to the middle.
   - vidcut: without `area`, the columns are one grid step apart. With `area`, the nodes never come closer than without it.
-  - vidcut: a mixer row shows the name of the mixer. The rows have no lock and no thumbnail yet ([todo](todo/color-page.md)).
+  - vidcut: a mixer row shows the name of the mixer. With Show Thumbnails on, a corrector row has its thumbnail after the eye.
+  - vidcut: the rows have no lock yet ([todo](todo/color-page.md)).
 - **Turn off and reset** (pp. 3392–3393):
   - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.
   - Measured in Resolve Studio 21.2: a click on the number turns that node off or on. The current node stays.

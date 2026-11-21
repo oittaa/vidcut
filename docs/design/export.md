@@ -786,6 +786,9 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A Layer Mixer that is off mixes in Normal. A Parallel Mixer that is off mixes as when on.
   - An input with no link gives no pass.
   - The last pass copies the output to texture 0.
+- `Graded::tapped` makes the same passes for the node thumbnails ([gpu](gpu.md#the-node-thumbnails)). Each `Tap` names the texture with the output of a corrector, after its passes.
+  - A corrector that a Layer Mixer reads, with a key above 0 and below 1, then always gets two textures (`Uses::twice`). One holds its output for the thumbnail.
+  - A corrector that is off taps the texture of its input, with a key of 1. Thus the later thumbnails do not show its change.
 - `graded_into` runs the passes. Each texture past 0 has the size of the picture. They stay between draws in the spare textures, in the slots after `GRADE_SLOTS`. One limit holds all spare textures (`SPARE_TEXTURES`).
 - `fs_grade_mix` makes a `Parallel` or a `Layer` pass in a scratch texture. A copy then takes it back.
   - `Layer` uses `mixed`, the composite of the timeline, on the colors without their alpha. Thus a Layer Mixer and a track give the same mix.

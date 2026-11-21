@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use egui::{Color32, CursorIcon, DragValue, Label, Rect, Response, Sense, Stroke, Ui, Vec2};
 use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
+use vidcut_av::screen::{ShotsOf, ShotsWanted};
 use vidcut_core::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, KeyOutput, Picture};
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed};
 use vidcut_core::ops::picture::takes_effects;
@@ -13,11 +14,11 @@ use vidcut_core::request::{
 use vidcut_core::shortcuts::{Action, Panel};
 
 use super::node_editor::{
-    self, Badge, Dropped, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, Side, Spot, Tile,
-    Wire,
+    self, Badge, Dropped, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, SHOT_HEIGHT, Shot,
+    Side, Spot, Tile, Wire,
 };
 use super::theme;
-use super::workspace::Workspace;
+use super::workspace::{NodeShots, Workspace};
 
 const WHEEL: f32 = 132.0;
 
@@ -38,6 +39,8 @@ const BLUE_AXIS: [f64; 3] = [0.0, -0.1873, 1.8556];
 const RED_AXIS: [f64; 3] = [1.5748, -0.4681, 0.0];
 
 const LANDING: Duration = Duration::from_secs(2);
+
+const SHOT_STEP: u32 = 16;
 
 const LOG_BADGE: [&str; 4] = ["contrast", "log_shadow", "log_midtone", "log_highlight"];
 
@@ -452,7 +455,14 @@ fn kind(tool: &GradeTool) -> &'static str {
     }
 }
 
-fn tiles(g: &Grade) -> Vec<Tile<Port>> {
+fn shot_of(shots: &NodeShots, n: u32) -> Shot {
+    let cell = shots.cells.iter().find(|(k, ..)| *k == n);
+    Shot {
+        picture: cell.and_then(|&(_, uv, size)| Some((shots.texture?, uv, size))),
+    }
+}
+
+fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
     let line = Stroke::new(1.5, theme::colors().text_dim);
     let input = |slot: usize, name: String| Inlet {
         slot,
@@ -476,15 +486,21 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         }),
         inlets: Vec::new(),
         edge: Some(Edge::Left),
+        shot: None,
     }];
     for (d, n) in g.nodes.iter().zip(1u32..) {
-        let (label, inlets) = match &d.tool {
-            GradeTool::Corrector(_) => (format!("{n:02}"), vec![input(0, "RGB Input".into())]),
+        let (label, inlets, shot) = match &d.tool {
+            GradeTool::Corrector(_) => (
+                format!("{n:02}"),
+                vec![input(0, "RGB Input".into())],
+                shots.map(|s| shot_of(s, n)),
+            ),
             tool => (
                 kind(tool).to_string(),
                 (0..d.inputs.len())
                     .map(|i| input(i, format!("Input {}", i + 1)))
                     .collect(),
+                None,
             ),
         };
         out.push(Tile {
@@ -502,6 +518,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
             }),
             inlets,
             edge: None,
+            shot,
         });
     }
     out.push(Tile {
@@ -516,6 +533,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         outlet: None,
         inlets: vec![input(0, "Output".into())],
         edge: Some(Edge::Right),
+        shot: None,
     });
     out
 }
@@ -1811,6 +1829,9 @@ impl Workspace {
         let mut switch_to = None;
         let listed = self.effects_page.grade_list;
         let mut list_to = None;
+        let mut thumbnails = self.snap.show_thumbnails;
+        let mut held = self.snap.disable_thumbnail_refresh;
+        let mut color_to = None;
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button(icon::LIST_BULLETS, |ui| {
@@ -1830,12 +1851,41 @@ impl Workspace {
                             }
                         }
                     });
+                    if ui.checkbox(&mut thumbnails, "Show Thumbnails").clicked() {
+                        color_to = Some(json!({ "show_thumbnails": thumbnails }));
+                        ui.close();
+                    }
+                    let hold =
+                        egui::Checkbox::new(&mut held, "Disable Thumbnail Refresh During Playback");
+                    if ui.add_enabled(thumbnails, hold).clicked() {
+                        color_to = Some(json!({ "disable_thumbnail_refresh": held }));
+                        ui.close();
+                    }
                 });
             });
         });
         if let Some(value) = switch_to {
             let more = json!({ "color": { "switching_clips": value } });
             self.send("preferences.set", more);
+        }
+        if let Some(color) = color_to {
+            self.send("preferences.set", json!({ "color": color }));
+        }
+        if self.snap.show_thumbnails {
+            let zoom = match listed {
+                true => 1.0,
+                false => self.effects_page.grade_view.zoom().max(1.0),
+            };
+            let pixels = SHOT_HEIGHT * zoom * ui.ctx().pixels_per_point();
+            let playing = self.snap.timeline.playing;
+            self.shots_want = Some(ShotsWanted {
+                of: match &of {
+                    GradeOf::Clip(id) => ShotsOf::Clip(id.clone()),
+                    GradeOf::Timeline => ShotsOf::Timeline,
+                },
+                height: (pixels.ceil() as u32).next_multiple_of(SHOT_STEP),
+                refresh: !(self.snap.disable_thumbnail_refresh && playing),
+            });
         }
         if let Some(list) = list_to {
             self.send("gui.node_view", json!({ "list": list }));
@@ -1849,7 +1899,10 @@ impl Workspace {
             .collect();
         let graph = Graph {
             salt,
-            tiles: tiles(&stored),
+            tiles: tiles(
+                &stored,
+                self.snap.show_thumbnails.then_some(&self.node_shots),
+            ),
             wires: wires(&stored),
             selected: &selected,
             active: CURRENT,

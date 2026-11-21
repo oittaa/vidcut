@@ -395,6 +395,7 @@ fn tile(n: &Node) -> Tile<String> {
         outlet,
         inlets,
         edge: None,
+        shot: None,
     }
 }
 

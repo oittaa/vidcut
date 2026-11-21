@@ -62,6 +62,12 @@ pub struct ScopePictures {
     pub colors: Option<vidcut_core::model::Hdr>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NodeShots {
+    pub texture: Option<egui::TextureId>,
+    pub cells: Vec<(u32, egui::Rect, egui::Vec2)>,
+}
+
 pub struct Workspace {
     pub(super) live: live::Handle,
     pub(super) snap: Arc<Snapshot>,
@@ -69,6 +75,8 @@ pub struct Workspace {
     pub want: [i32; 2],
     pub scope_pictures: ScopePictures,
     pub scope_want: Vec<(Scope, [i32; 2])>,
+    pub node_shots: NodeShots,
+    pub shots_want: Option<vidcut_av::screen::ShotsWanted>,
     pub stats: Option<live::stats::PlayerStats>,
     pub display: Option<String>,
     pub levels: Option<vidcut_av::player::Levels>,
@@ -171,6 +179,8 @@ impl Workspace {
             want: [640, 360],
             scope_pictures: ScopePictures::default(),
             scope_want: Vec::new(),
+            node_shots: NodeShots::default(),
+            shots_want: None,
             display: None,
             levels: None,
             main_window: None,
@@ -2057,6 +2067,7 @@ impl Workspace {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.snap = self.live.snapshot();
+        self.shots_want = None;
         if let Some(t) = &mut self.tiles {
             t.proxies = self.snap.proxy_dir.clone();
         }

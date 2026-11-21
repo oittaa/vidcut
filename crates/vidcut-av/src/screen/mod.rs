@@ -26,6 +26,7 @@ mod out;
 pub mod scope;
 mod shared;
 mod sharpen;
+mod shots;
 mod vignette;
 #[cfg(any(target_os = "linux", windows))]
 mod vulkan;
@@ -34,6 +35,7 @@ pub use gate::Gate;
 pub use lut::{Lut, load as load_lut};
 pub use out::Sink;
 pub(crate) use out::filled;
+pub use shots::{ShotsOf, ShotsShown, ShotsWanted};
 
 pub struct Gpu {
     #[cfg(any(target_os = "linux", windows))]
@@ -1057,6 +1059,7 @@ pub struct Screen {
     drawn_scoping: bool,
     draws: u64,
     plots: scope::Plots,
+    shots: shots::Shots,
 }
 
 struct Letters {
@@ -1777,6 +1780,18 @@ impl Screen {
 
     pub fn set_timeline_grade(&mut self, grade: Option<&Grade>) {
         self.timeline_grade = grade.filter(|g| g.is_active()).cloned();
+        self.shots.timeline = grade.cloned();
+    }
+
+    pub fn set_shots(&mut self, wanted: Option<ShotsWanted>) {
+        self.shots.wanted = wanted.map(|w| ShotsWanted {
+            height: shots::sized(w.height),
+            ..w
+        });
+    }
+
+    pub fn shots(&self) -> Option<ShotsShown> {
+        self.shots.shown()
     }
 
     pub fn set_frame_size(&mut self, frame: Option<(u32, u32)>) {
@@ -1814,7 +1829,8 @@ impl Screen {
                 && self.drawn_colors == colors
                 && self.drawn_output_lut == self.output_lut
                 && self.drawn_timeline_grade == self.timeline_grade
-                && self.drawn_scoping == self.scoping;
+                && self.drawn_scoping == self.scoping
+                && !self.shots.stale();
             if same {
                 return Drawn::Same;
             }
@@ -2229,6 +2245,22 @@ impl Screen {
                 idx += 1;
             }
         }
+        if let Some(wanted) = self.shots.takes() {
+            let height = wanted.height;
+            let source = match &wanted.of {
+                ShotsOf::Clip(id) => clip_shot(&self.slots, &layers, placed, id, height),
+                ShotsOf::Timeline => Some(shots::Source {
+                    view: canvas.clone(),
+                    size,
+                    turn: 0,
+                    aspect: f64::from(size.0) / f64::from(size.1),
+                    height,
+                    grade: self.shots.timeline.clone().unwrap_or_default(),
+                }),
+            };
+            self.shots.draw(gpu, source, &mut encoder);
+        }
+        self.shots.settle();
         if let (Some(w), Some(work)) = (wide, &graded) {
             let canvas = blur::Texture {
                 texture: w.texture.clone(),
@@ -2305,6 +2337,39 @@ impl Screen {
         self.draws += 1;
         drawn
     }
+}
+
+fn clip_shot(
+    slots: &[Slot],
+    layers: &[(&Arc<Picture>, Option<f64>)],
+    placed: &[Vec<Placed>],
+    id: &str,
+    height: u32,
+) -> Option<shots::Source> {
+    let ours = |i: &usize| {
+        placed
+            .get(*i)
+            .and_then(|c| c.first())
+            .is_some_and(|p| p.clip == id)
+    };
+    let i = (0..layers.len()).rev().find(ours)?;
+    let picture = layers[i].0;
+    if !matches!(picture.sampling(), Sampling::Own | Sampling::Rounded) {
+        return None;
+    }
+    let (texture, _) = slots.get(i)?.converted.as_ref()?;
+    let p = &placed[i][0];
+    let at = p.source as f64;
+    let grade = (p.picture.grade.as_ref()).map_or_else(Grade::default, |g| g.at(at).into_owned());
+    let [_, _, w, h] = picture.placement(shots::LARGEST, shots::LARGEST);
+    Some(shots::Source {
+        view: texture.create_view(&Default::default()),
+        size: (texture.width(), texture.height()),
+        turn: picture.rotation(),
+        aspect: w / h.max(1.0),
+        height,
+        grade,
+    })
 }
 
 impl Slot {
