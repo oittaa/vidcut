@@ -3077,7 +3077,13 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Parallel Mixer that is off gives the same result as when it is on.
   - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
   - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
-  - vidcut: the menu of a mixer has these items in this order, but not Remove One Input ([todo](todo/color-page.md)).
+  - vidcut: the menu of a mixer has these items in this order.
+  - Measured in Resolve Studio 21.2: Remove One Input removes the last input with no link. The inputs after it move up one.
+  - Measured: thus with an empty last input, that input goes. Else an empty input in the middle goes.
+  - Measured: Remove One Input does nothing when each input has a link. A mixer with a linked input and an empty input keeps one input.
+  - Measured: a Key Mixer and a Parallel Mixer act the same.
+  - vidcut: `grade.input.remove` does the same, on each kind of mixer. Remove One Input in the menu of a mixer sends it.
+  - Not measured: Remove One Input on a Layer Mixer, and on a mixer with one empty input. vidcut keeps that one input.
   - Measured in Resolve Studio 21.2: the Add Node submenu of a mixer has Add Serial (Alt+S) and Add Serial Before (Shift+S).
   - vidcut: the Add Node submenu of a mixer has these two items, with their keys.
 - **Lock Node** (pp. 3374, 3454):
@@ -3183,7 +3189,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
   - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
-  - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node and Add One Input. Remove One Input and the Add Node submenu come later ([todo](todo/color-page.md)).
+  - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node, Add One Input and Remove One Input. The Add Node submenu comes later ([todo](todo/color-page.md)).
   - vidcut: a key link is blue. A node cannot drop into a key link.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
   - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
@@ -3194,7 +3200,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Not measured: Reset in the Key palette with Matte or the Key Output Invert on. vidcut resets them.
   - Not measured: Add Serial and Add Serial Before on a Key Mixer.
 
-Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
+Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.
 `grade.get` gives the nodes and the `output`.
 

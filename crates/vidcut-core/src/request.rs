@@ -2965,6 +2965,19 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         key: bool,
     },
+    /// Remove one input with no link from a mixer of the grade of a clip,
+    /// or with `timeline` of the timeline grade (Remove One Input). The
+    /// last input with no link goes, and the inputs after it move up one.
+    /// A mixer with each input linked, or with one input, stays as it is.
+    #[serde(rename = "grade.input.remove")]
+    GradeInputRemove {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        node: u32,
+    },
     /// Copy the settings of a corrector of the grade of a clip, or with
     /// `timeline` of the timeline grade (Ctrl+C on the Color page): its
     /// values, its keyframes, its label and whether it is on. Returns them

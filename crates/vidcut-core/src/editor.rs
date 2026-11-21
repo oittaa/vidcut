@@ -4817,6 +4817,15 @@ fn mutate(
             ops::grade::connect(p, &of, (*node, *input), *from, *key)?;
             Value::Null
         }
+        Request::GradeInputRemove {
+            clip,
+            timeline,
+            node,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade::remove_input(p, &of, *node)?;
+            Value::Null
+        }
         Request::GradePaste {
             clips,
             timeline,

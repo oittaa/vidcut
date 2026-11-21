@@ -1170,6 +1170,26 @@ fn linked(
     }
 }
 
+pub fn remove_input(p: &mut Project, of: &GradeOf, n: u32) -> Result<()> {
+    edited(p, of, |g| {
+        let d = node(g, n)?;
+        if matches!(d.tool, GradeTool::Corrector(_)) {
+            return Err(Error::invalid(format!(
+                "node {n} is a corrector, not a mixer"
+            )));
+        }
+        let empty = d.inputs.iter().rposition(Option::is_none);
+        let Some(i) = empty.filter(|_| d.inputs.len() > 1) else {
+            return Ok(());
+        };
+        d.inputs.remove(i);
+        if let GradeTool::KeyMixer { mix } = &mut d.tool {
+            mix.remove(i);
+        }
+        Ok(())
+    })
+}
+
 pub fn connect(
     p: &mut Project,
     of: &GradeOf,
