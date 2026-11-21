@@ -344,7 +344,10 @@ pub enum Work {
     Grain(Box<Graining>),
     Vignette(Shading),
     Sharpen(Sharpening),
-    Grade(Box<crate::grade::Graded>),
+    Grade {
+        graded: Box<crate::grade::Graded>,
+        back: [f64; 8],
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -837,9 +840,12 @@ impl Working {
         }
     }
 
-    pub fn graded(g: &crate::model::Grade) -> Option<Self> {
+    pub fn graded(g: &crate::model::Grade, back: [f64; 8]) -> Option<Self> {
         crate::grade::Graded::of(g).map(|graded| Self {
-            work: Work::Grade(Box::new(graded)),
+            work: Work::Grade {
+                graded: Box::new(graded),
+                back,
+            },
             blend: 1.0,
             use_alpha: false,
             masks: Vec::new(),
@@ -899,7 +905,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
         frame,
         fit: [0.0, 0.0, w, h],
         canvas: [w, h],
-        back: [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0],
+        back: frame_back((w, h)),
     };
     chain
         .into_iter()
@@ -1064,6 +1070,10 @@ pub fn chain(first: &[f64; 8], next: &[f64; 8]) -> [f64; 8] {
     ])
 }
 
+pub fn frame_back((w, h): (f64, f64)) -> [f64; 8] {
+    [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0]
+}
+
 pub fn apply(m: &[f64; 8], [x, y]: [f64; 2]) -> [f64; 2] {
     let [a, b, e, c, d, f, g, h] = *m;
     let w = g * x + h * y + 1.0;
@@ -1144,8 +1154,12 @@ impl Placing {
             .iter()
             .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
             .collect();
-        let graded =
-            (p.picture.grade.as_ref()).and_then(|g| Working::graded(&g.at(p.source as f64)));
+        let [fx, fy, fw, fh] = fitted;
+        let (cw, ch) = frame;
+        let fitted_frame = [fw / cw, 0.0, fx / cw, 0.0, fh / ch, fy / ch, 0.0, 0.0];
+        let windows = chain(&own.back, &fitted_frame);
+        let graded = (p.picture.grade.as_ref())
+            .and_then(|g| Working::graded(&g.at(p.source as f64), windows));
         effects.extend(graded);
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&own.back, c));

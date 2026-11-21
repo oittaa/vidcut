@@ -1,7 +1,9 @@
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Corrector, Grade, GradeKey, GradeNode, GradeTool, KeyOutput, Project};
+use crate::model::{
+    Clip, Corrector, Grade, GradeKey, GradeNode, GradeTool, GradeWindow, KeyOutput, Project,
+};
 use crate::preferences::ColorPrefs;
 use crate::request::{
     CopiedNode, GradeAdd, GradeChange, GradeMixer, GradeNodeChange, GradePalette, PrinterColor,
@@ -180,6 +182,12 @@ pub fn checked(g: &Grade) -> Result<Option<Grade>> {
         }
         key_checked(&n.key)?;
         keys_checked(n, k)?;
+        if n.tool.is_mixer() && !n.windows.is_empty() {
+            return Err(Error::invalid(format!("mixer {k} has no windows")));
+        }
+        for w in &n.windows {
+            super::grade_windows::checked(w)?;
+        }
     }
     if crate::grade::order(g).is_none() {
         return Err(Error::invalid("the links of the grade make a loop"));
@@ -434,17 +442,18 @@ pub fn clear(
     if palette.is_some() && n.is_none() {
         return Err(Error::usage("`palette` needs `node`"));
     }
+    let size = [p.settings.width, p.settings.height].map(f64::from);
     for one in of {
         let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
         edited(p, one, |g| match (n, keep_nodes) {
-            (Some(n), _) => cleared(g, n, frame, palette),
+            (Some(n), _) => cleared(g, n, frame, (palette, size)),
             (None, true) => {
                 let correctors: Vec<u32> = (g.nodes.iter().zip(1..))
                     .filter(|(d, _)| !d.tool.is_mixer() && !d.locked)
                     .map(|(_, k)| k)
                     .collect();
                 for k in correctors {
-                    cleared(g, k, frame, None)?;
+                    cleared(g, k, frame, (None, size))?;
                 }
                 Ok(())
             }
@@ -457,12 +466,26 @@ pub fn clear(
     Ok(())
 }
 
-fn cleared(g: &mut Grade, n: u32, frame: Option<i64>, palette: Option<GradePalette>) -> Result<()> {
+fn cleared(
+    g: &mut Grade,
+    n: u32,
+    frame: Option<i64>,
+    (palette, size): (Option<GradePalette>, [f64; 2]),
+) -> Result<()> {
     if palette != Some(GradePalette::Key) {
         changed(g, n, frame, |_| Corrector::default())?;
     }
     if palette != Some(GradePalette::Primaries) {
         key_changed(g, n, frame, |_| KeyOutput::default())?;
+    }
+    if palette.is_none() {
+        for w in &mut unlocked(g, n)?.windows {
+            *w = GradeWindow {
+                on: false,
+                name: std::mem::take(&mut w.name),
+                ..GradeWindow::new(w.shape.kind(), size)
+            };
+        }
     }
     Ok(())
 }
@@ -594,6 +617,7 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd) -> Result<u32> {
                 animated: false,
                 key: Default::default(),
                 locked: false,
+                windows: Vec::new(),
             });
         }
     }
@@ -776,6 +800,7 @@ pub fn copy(p: &Project, of: &GradeOf, n: u32) -> Result<CopiedNode> {
         on: d.on,
         animated: d.is_animated(),
         key: d.key,
+        windows: d.windows.clone(),
     })
 }
 
@@ -791,6 +816,7 @@ pub fn paste(p: &mut Project, of: &[GradeOf], n: u32, copied: &CopiedNode) -> Re
             d.on = copied.on;
             d.animated = copied.animated;
             d.key = copied.key;
+            d.windows.clone_from(&copied.windows);
             Ok(())
         })?;
     }
@@ -922,6 +948,7 @@ pub fn swap(p: &mut Project, of: &GradeOf, n: u32, with: u32) -> Result<()> {
             d.on = from.on;
             d.animated = from.animated;
             d.key = from.key;
+            d.windows = from.windows;
         }
         Ok(())
     })

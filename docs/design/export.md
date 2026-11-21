@@ -773,7 +773,15 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - Texture 0 is the picture of the clip. A node writes on the texture of its first input when no other node reads it later. Else a `Copy` pass first gives it a new texture (`Registers`).
   - Why: most trees then need no texture more than the picture.
   - A corrector that is off or at its defaults takes the texture of its input. It costs no pass.
-  - A `Correct` pass runs `grade_into` with the `Grading` of the corrector and its key. The key is the share of the change that the pass keeps (`KeyOutput::of`). It is from 0 to 1.
+  - A `Correct` pass runs `grade_into` with the `Grading` of the corrector and its key (`grade::Key`). The key is the share of the change that the pass keeps.
+  - A corrector with no window that is on has one key for all pixels (`Key::Flat`, `KeyOutput::of`). It is from 0 to 1.
+  - A corrector with a window that is on gets a `Key` pass first. It draws the key of the windows into a texture (`Key::Map`). The `Correct`, `Layer` and tap passes of the corrector read it.
+  - The key texture comes from the same `Registers` as the pictures. It is free again after its last use (`Registers::used`).
+  - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
+  - The grade works on textures of the render size. `texel_map` maps each fragment to a pixel of the timeline frame.
+  - `texel_map` gives `back` the index of the texel, not its middle. Why: Edit Sizing acts on a window about the pixel W/2, H/2 ([spec §8.23](../spec.md#823-windows-pp-32653279)).
+  - `back` of `Work::Grade` maps a pixel of the work texture to the timeline frame. A clip chains its placement and its fit. The timeline grade uses `frame_back`, and a thumbnail `shot_back`.
+  - Why: a window moves with the Edit Sizing of its clip, but the grade works after Edit Sizing ([spec §8.23](../spec.md#823-windows-pp-32653279)).
   - A corrector with the key 0 also takes the texture of its input. A Layer Mixer that reads it gives it no `Layer` pass.
   - A `Parallel` pass adds the change of one input: mix + input − base.
   - `grade::base` finds the base: the nearest node that each path to each input goes through. An input counts for its own path.

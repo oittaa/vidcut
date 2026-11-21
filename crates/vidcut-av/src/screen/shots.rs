@@ -39,7 +39,27 @@ pub(super) struct Source {
     pub(super) turn: u16,
     pub(super) aspect: f64,
     pub(super) height: u32,
+    pub(super) frame: [f64; 2],
     pub(super) grade: Grade,
+}
+
+fn shot_back([x, y, fw, fh]: [f64; 4], [fx, fy]: [f64; 2], aspect: f64) -> [f64; 8] {
+    let (pw, ph) = match fx / fy > aspect {
+        true => (fy * aspect, fy),
+        false => (fx, fx / aspect),
+    };
+    let (px, py) = ((fx - pw) / 2.0, (fy - ph) / 2.0);
+    let (kx, ky) = (pw / fw, ph / fh);
+    [
+        kx / fx,
+        0.0,
+        (px - 0.5 + (0.5 - x) * kx) / fx,
+        0.0,
+        ky / fy,
+        (py - 0.5 + (0.5 - y) * ky) / fy,
+        0.0,
+        0.0,
+    ]
 }
 
 struct Room {
@@ -140,7 +160,9 @@ impl Shots {
             .collect();
         let room_parts = (&room.scratch, &mut room.spare);
         let into = (&atlas.wide.texture, &places[..]);
-        blur::tapped_into(gpu, &room.own, room_parts, &graded, into, encoder);
+        let back = shot_back(fit, source.frame, source.aspect);
+        let how = (&graded, &back, source.frame);
+        blur::tapped_into(gpu, &room.own, room_parts, how, into, encoder);
         {
             let mut pass = begin(encoder, &atlas.shown.view, Some(wgpu::Color::BLACK));
             pass.set_pipeline(&gpu.screen);
