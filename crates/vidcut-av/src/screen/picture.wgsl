@@ -1848,6 +1848,45 @@ fn fs_grade_mix(in: Out) -> @location(0) vec4<f32> {
     return mix(under, vec4<f32>(m * a, a), grade_mixing.how.z);
 }
 
+struct Shot {
+    size: vec4<f32>,
+    fit: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> shooting: Shot;
+
+fn shot_stored(u: vec2<f32>, turn: u32) -> vec2<f32> {
+    switch turn {
+        case 1u: { return vec2<f32>(u.y, 1.0 - u.x); }
+        case 2u: { return vec2<f32>(1.0 - u.x, 1.0 - u.y); }
+        case 3u: { return vec2<f32>(1.0 - u.y, u.x); }
+        default: { return u; }
+    }
+}
+
+@fragment
+fn fs_shot(in: Out) -> @location(0) vec4<f32> {
+    let size = vec2<f32>(textureDimensions(blur_source));
+    let last = vec2<i32>(size) - 1;
+    let n = max(i32(shooting.size.z), 1);
+    let turn = u32(shooting.size.w + 0.5);
+    let cell = floor(in.position.xy);
+    var sum = vec4<f32>(0.0);
+    for (var j = 0; j < n; j++) {
+        for (var i = 0; i < n; i++) {
+            let p = cell + (vec2<f32>(f32(i), f32(j)) + 0.5) / f32(n);
+            let u = vec2<f32>(p.x / shooting.size.x, (p.y - shooting.fit.x) / shooting.fit.y);
+            if u.y < 0.0 || u.y >= 1.0 {
+                sum += vec4<f32>(0.0, 0.0, 0.0, 1.0);
+                continue;
+            }
+            let at = vec2<i32>(shot_stored(u, turn) * size);
+            sum += textureLoad(blur_source, clamp(at, vec2<i32>(0), last), 0);
+        }
+    }
+    return sum / f32(n * n);
+}
+
 struct Mosaic {
     grid: vec4<f32>,
     way: vec4<i32>,

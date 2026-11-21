@@ -3,7 +3,7 @@ use std::hash::Hash;
 
 use eframe::egui::{
     self, Align2, Color32, CornerRadius, FontId, PointerButton, Pos2, Rect, Sense, Stroke,
-    StrokeKind, Ui, Vec2, pos2, vec2,
+    StrokeKind, TextureId, Ui, Vec2, pos2, vec2,
 };
 
 use vidcut_core::request::NodeZoom;
@@ -12,6 +12,13 @@ use super::theme;
 
 const CELL: Vec2 = vec2(132.0, 64.0);
 const BOX: Vec2 = vec2(104.0, 30.0);
+const SHOT_BOX: Vec2 = vec2(104.0, 66.0);
+const STRIP: f32 = 16.0;
+const SHOT_MARGIN: f32 = 4.0;
+const ROW_SHOT: Vec2 = vec2(46.0, 22.0);
+const VEILED: f32 = 0.5;
+const VEIL: Color32 = Color32::from_rgba_premultiplied(80, 80, 80, 160);
+pub(super) const SHOT_HEIGHT: f32 = SHOT_BOX.y - STRIP - SHOT_MARGIN;
 const MARGIN: Vec2 = vec2(40.0, 40.0);
 const KNOT: f32 = 5.0;
 const PORT: f32 = KNOT * 3.0;
@@ -59,6 +66,11 @@ pub(super) struct Outlet {
     pub(super) color: Color32,
 }
 
+pub(super) struct Shot {
+    pub(super) picture: Option<(TextureId, Rect, Vec2)>,
+    pub(super) veiled: bool,
+}
+
 pub(super) struct Tile<K> {
     pub(super) key: K,
     pub(super) label: String,
@@ -71,6 +83,7 @@ pub(super) struct Tile<K> {
     pub(super) outlet: Option<Outlet>,
     pub(super) inlets: Vec<Inlet>,
     pub(super) edge: Option<Edge>,
+    pub(super) shot: Option<Shot>,
 }
 
 pub(super) struct Wire<K> {
@@ -168,6 +181,8 @@ pub(super) struct NodeView<K> {
     naming: Option<Naming<K>>,
     asked: Option<NodeZoom>,
     shown: Option<Rect>,
+    cell: Vec2,
+    tile: Vec2,
 }
 
 impl<K> Default for NodeView<K> {
@@ -181,6 +196,8 @@ impl<K> Default for NodeView<K> {
             naming: None,
             asked: None,
             shown: None,
+            cell: CELL,
+            tile: BOX,
         }
     }
 }
@@ -200,9 +217,9 @@ impl<K> NodeView<K> {
         let origin = rect.min + MARGIN * z + self.pan;
         let inset = vec2(MARGIN.x * 2.0, MARGIN.y);
         let from = rect.min + inset;
-        let to = (rect.max - inset - BOX * z).max(from);
+        let to = (rect.max - inset - self.tile * z).max(from);
         let place = |at: Pos2| {
-            let d = (at - origin) / (CELL * z);
+            let d = (at - origin) / (self.cell * z);
             [f64::from(d.x), f64::from(d.y)]
         };
         Some([place(from), place(to)])
@@ -223,8 +240,9 @@ impl<K> NodeView<K> {
             NodeZoom::Out => about(self, self.zoom / ZOOM_STEP),
             NodeZoom::Original => about(self, 1.0),
             NodeZoom::Fit => {
+                let cell = self.cell;
                 let boxes = (tiles.iter().filter(|t| t.edge.is_none())).map(|t| {
-                    let at = vec2(t.place[0] as f32 * CELL.x, t.place[1] as f32 * CELL.y);
+                    let at = vec2(t.place[0] as f32 * cell.x, t.place[1] as f32 * cell.y);
                     Rect::from_min_size(at.to_pos2(), size(t))
                 });
                 let Some(all) = boxes.reduce(|a, b| a.union(b)) else {
@@ -298,7 +316,27 @@ fn along(side: Side) -> Vec2 {
 
 fn size<K>(t: &Tile<K>) -> Vec2 {
     let left = t.inlets.iter().filter(|i| i.side == Side::Left).count();
-    vec2(BOX.x, BOX.y.max(left as f32 * PORT + KNOT * 2.0))
+    let body = if t.shot.is_some() { SHOT_BOX } else { BOX };
+    vec2(body.x, body.y.max(left as f32 * PORT + KNOT * 2.0))
+}
+
+fn shots_in<K>(tiles: &[Tile<K>]) -> bool {
+    tiles.iter().any(|t| t.shot.is_some())
+}
+
+fn paint_shot(painter: &egui::Painter, area: Rect, shot: &Shot) {
+    painter.rect_filled(area, CornerRadius::same(2), theme::colors().panel_dark);
+    let Some((texture, uv, pixels)) = shot.picture else {
+        return;
+    };
+    let scale = (area.width() / pixels.x).min(area.height() / pixels.y);
+    let shown = Rect::from_center_size(area.center(), pixels * scale);
+    painter.image(texture, shown, uv, Color32::WHITE);
+    if shot.veiled {
+        let left = shown.right() - shown.width() * VEILED;
+        let veil = Rect::from_min_max(pos2(left, shown.top()), shown.max);
+        painter.rect_filled(veil, CornerRadius::ZERO, VEIL);
+    }
 }
 
 fn outlet_at<K>(r: Rect, t: &Tile<K>) -> Pos2 {
@@ -439,6 +477,7 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
     let numbers = (graph.tiles.iter().filter(|t| t.switch))
         .map(|t| (ui.painter()).layout_no_wrap(t.label.clone(), font.clone(), c.text))
         .fold(0.0, |widest, shown| shown.size().x.max(widest));
+    let shots = shots_in(&graph.tiles);
     egui::ScrollArea::vertical().show(ui, |ui| {
         for t in graph.tiles.iter().rev().filter(|t| t.edge.is_none()) {
             let width = ui.available_width();
@@ -477,7 +516,15 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
                 };
                 painter.text(eye.center(), Align2::CENTER_CENTER, icon, font.clone(), dim);
             }
-            let left = (eye.right() + 4.0).max(number.right() + 10.0);
+            let mut left = (eye.right() + 4.0).max(number.right() + 10.0);
+            if shots {
+                let at = pos2(left, r.center().y - ROW_SHOT.y / 2.0);
+                let area = Rect::from_min_size(at, ROW_SHOT);
+                if let Some(shot) = &t.shot {
+                    paint_shot(&painter, area, shot);
+                }
+                left = area.right() + 6.0;
+            }
             let mut right = r.right() - 8.0;
             for b in t.badges.iter().rev() {
                 let at = pos2(right, r.center().y);
@@ -526,6 +573,13 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
 ) -> Done<K> {
     let rect = ui.available_rect_before_wrap();
     view.shown = Some(rect);
+    view.tile = if shots_in(&graph.tiles) {
+        SHOT_BOX
+    } else {
+        BOX
+    };
+    view.cell = CELL + vec2(0.0, view.tile.y - BOX.y);
+    let cell = view.cell;
     view.zoomed(rect, &graph.tiles);
     let resp = ui.allocate_rect(rect, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
@@ -545,7 +599,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     let z = view.zoom;
     let origin = rect.min + MARGIN * z + view.pan;
     let grid_at = |at: Pos2| {
-        let d = (at - origin) / (CELL * z);
+        let d = (at - origin) / (cell * z);
         [rounded(f64::from(d.x)), rounded(f64::from(d.y))]
     };
     let moving = view.moving.as_ref();
@@ -556,8 +610,8 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         });
         match from {
             Some((by, at)) => [
-                at[0] + f64::from(by.x / (CELL.x * z)),
-                at[1] + f64::from(by.y / (CELL.y * z)),
+                at[0] + f64::from(by.x / (cell.x * z)),
+                at[1] + f64::from(by.y / (cell.y * z)),
             ],
             None => t.place,
         }
@@ -569,7 +623,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             Some(edge) => Rect::from_center_size(edge_at(rect, edge), Vec2::splat(KNOT * 4.0)),
             None => {
                 let [x, y] = place(t);
-                let at = origin + vec2(x as f32 * CELL.x, y as f32 * CELL.y) * z;
+                let at = origin + vec2(x as f32 * cell.x, y as f32 * cell.y) * z;
                 Rect::from_min_size(at, size(t) * z)
             }
         })
@@ -697,18 +751,38 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             _ => Stroke::new(1.0, c.text_dim.gamma_multiply(0.6)),
         };
         painter.rect_stroke(r, CornerRadius::same(4), edge, StrokeKind::Inside);
+        let (at, align, line) = match &t.shot {
+            Some(_) => {
+                let line = r.top() + STRIP * z / 2.0;
+                (
+                    pos2(r.left() + 2.0 * KNOT * z, line),
+                    Align2::LEFT_CENTER,
+                    line,
+                )
+            }
+            None => (r.center(), Align2::CENTER_CENTER, r.center().y),
+        };
         let label = painter.text(
-            r.center(),
-            Align2::CENTER_CENTER,
+            at,
+            align,
             &t.label,
             FontId::proportional(12.0 * z.clamp(0.6, 1.4)),
             c.text.gamma_multiply(fade),
         );
+        if let Some(shot) = &t.shot {
+            let top = vec2(SHOT_MARGIN, STRIP) * z;
+            let inset = vec2(SHOT_MARGIN, SHOT_MARGIN) * z;
+            paint_shot(
+                &painter,
+                Rect::from_min_max(r.min + top, r.max - inset),
+                shot,
+            );
+        }
         let mark = FontId::proportional(10.0 * z.clamp(0.6, 1.4));
         let mut right = r.right() - 2.0 * KNOT * z;
         let hover = node_resp.hover_pos();
         for b in t.badges.iter().rev() {
-            let at = pos2(right, r.center().y);
+            let at = pos2(right, line);
             let color = c.text_dim.gamma_multiply(fade);
             let shown = painter.text(at, Align2::RIGHT_CENTER, b.icon, mark.clone(), color);
             right = shown.left() - 3.0 * z;
@@ -828,8 +902,8 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             let moved = (m.from.iter())
                 .map(|(key, from)| {
                     let to = [
-                        rounded(from[0] + f64::from(m.by.x / (CELL.x * z))),
-                        rounded(from[1] + f64::from(m.by.y / (CELL.y * z))),
+                        rounded(from[0] + f64::from(m.by.x / (cell.x * z))),
+                        rounded(from[1] + f64::from(m.by.y / (cell.y * z))),
                     ];
                     (key.clone(), *from, to)
                 })

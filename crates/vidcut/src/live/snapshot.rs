@@ -286,6 +286,8 @@ pub struct Snapshot {
     pub scopes: vidcut_core::preferences::Scopes,
     pub show_upscale: bool,
     pub switching_clips: vidcut_core::preferences::SwitchingClips,
+    pub show_thumbnails: bool,
+    pub disable_thumbnail_refresh: bool,
     pub bindings: Arc<vidcut_core::shortcuts::Bindings>,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,

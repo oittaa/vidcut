@@ -609,6 +609,14 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         switching_clips: crate::preferences::load()
             .map(|p| p.color.switching_clips)
             .unwrap_or_default(),
+        show_thumbnails: crate::preferences::load()
+            .map(|p| p.color)
+            .unwrap_or_default()
+            .show_thumbnails,
+        disable_thumbnail_refresh: crate::preferences::load()
+            .map(|p| p.color)
+            .unwrap_or_default()
+            .disable_thumbnail_refresh,
         bindings: Arc::new(crate::preferences::bindings()),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
@@ -717,6 +725,14 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         switching_clips: crate::preferences::load()
             .map(|p| p.color.switching_clips)
             .unwrap_or_default(),
+        show_thumbnails: crate::preferences::load()
+            .map(|p| p.color)
+            .unwrap_or_default()
+            .show_thumbnails,
+        disable_thumbnail_refresh: crate::preferences::load()
+            .map(|p| p.color)
+            .unwrap_or_default()
+            .disable_thumbnail_refresh,
         bindings: Arc::new(crate::preferences::bindings()),
         audio_noticed: None,
         playing: false,
@@ -992,6 +1008,8 @@ struct Live {
     scopes: vidcut_core::preferences::Scopes,
     show_upscale: bool,
     switching_clips: vidcut_core::preferences::SwitchingClips,
+    show_thumbnails: bool,
+    disable_thumbnail_refresh: bool,
     bindings: Arc<vidcut_core::shortcuts::Bindings>,
     audio_noticed: Option<String>,
     playing: bool,
@@ -1278,6 +1296,17 @@ impl Live {
                     .unwrap_or_default();
                 if self.switching_clips != switching_clips {
                     self.switching_clips = switching_clips;
+                    changed = true;
+                }
+                let color = crate::preferences::load()
+                    .map(|p| p.color)
+                    .unwrap_or_default();
+                if self.show_thumbnails != color.show_thumbnails {
+                    self.show_thumbnails = color.show_thumbnails;
+                    changed = true;
+                }
+                if self.disable_thumbnail_refresh != color.disable_thumbnail_refresh {
+                    self.disable_thumbnail_refresh = color.disable_thumbnail_refresh;
                     changed = true;
                 }
                 let bindings = crate::preferences::bindings();
@@ -1645,6 +1674,8 @@ impl Live {
             scopes: self.scopes,
             show_upscale: self.show_upscale,
             switching_clips: self.switching_clips,
+            show_thumbnails: self.show_thumbnails,
+            disable_thumbnail_refresh: self.disable_thumbnail_refresh,
             bindings: self.bindings.clone(),
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),

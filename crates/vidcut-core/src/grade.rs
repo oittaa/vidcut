@@ -95,6 +95,8 @@ const NEWTON_CLOSE: f64 = 1e-12;
 
 pub const TONE_SIZE: usize = 1024;
 
+pub const THUMBNAIL_GRAY: f64 = 0.5;
+
 pub const TONE_EPS: f64 = 0.01;
 
 pub const TONE_TOP: f64 = 2.0;
@@ -502,9 +504,18 @@ pub enum Pass {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Tap {
+    pub node: u32,
+    pub after: usize,
+    pub from: Option<usize>,
+    pub key: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Graded {
     pub passes: Vec<Pass>,
     pub registers: usize,
+    pub taps: Vec<Tap>,
 }
 
 pub fn order(g: &Grade) -> Option<Vec<u32>> {
@@ -623,6 +634,7 @@ struct Uses {
     all: Vec<usize>,
     over: Vec<usize>,
     whole: Vec<usize>,
+    tapped: bool,
 }
 
 impl Uses {
@@ -632,7 +644,8 @@ impl Uses {
 
     fn twice(&self, node: &GradeNode, c: &Corrector, k: usize) -> bool {
         let key = node.key.of(1.0);
-        node.on && !c.is_usual() && self.over[k] > 0 && self.kept(k) > 0 && key > 0.0 && key < 1.0
+        let used = self.over[k] > 0 || self.tapped;
+        node.on && !c.is_usual() && used && self.kept(k) > 0 && key > 0.0 && key < 1.0
     }
 }
 
@@ -641,31 +654,16 @@ fn corrected(
     uses: &mut Uses,
     r: &mut Registers,
     passes: &mut Vec<Pass>,
-) {
+) -> Option<usize> {
     let key = node.key.of(1.0);
     let grading = || Box::new(Grading::of(c));
     if !node.on {
         r.alias(k, x, uses.kept(k));
+        Some(r.holder[k])
     } else if c.is_usual() || key == 0.0 {
         r.alias(k, x, uses.all[k]);
-    } else if uses.over[k] == 0 {
-        let on = r.take(x, passes);
-        passes.push(Pass::Correct {
-            on,
-            grading: grading(),
-            key,
-        });
-        r.hold(k, on, uses.all[k]);
-    } else if !uses.twice(node, c, k) {
-        let on = r.take(x, passes);
-        let key = 1.0;
-        passes.push(Pass::Correct {
-            on,
-            grading: grading(),
-            key,
-        });
-        r.hold(k, on, uses.all[k]);
-    } else {
+        (key > 0.0).then_some(r.holder[k])
+    } else if uses.twice(node, c, k) {
         let mix = r.take(x, passes);
         let on = r.take(x, passes);
         passes.push(Pass::Correct {
@@ -679,10 +677,25 @@ fn corrected(
             mode: BlendMode::Normal,
             key,
         });
-        let whole = uses.all.len() + k;
         r.hold(k, mix, uses.kept(k));
-        r.hold(whole, on, uses.over[k]);
-        uses.whole[k] = whole;
+        if uses.over[k] == 0 {
+            r.free.push(on);
+        } else {
+            let whole = uses.all.len() + k;
+            r.hold(whole, on, uses.over[k]);
+            uses.whole[k] = whole;
+        }
+        Some(on)
+    } else {
+        let on = r.take(x, passes);
+        let key = if uses.over[k] == 0 { key } else { 1.0 };
+        passes.push(Pass::Correct {
+            on,
+            grading: grading(),
+            key,
+        });
+        r.hold(k, on, uses.all[k]);
+        Some(on)
     }
 }
 
@@ -713,6 +726,16 @@ fn layered(
 
 impl Graded {
     pub fn of(g: &Grade) -> Option<Self> {
+        let made = Self::made(g, false)?;
+        let only_copies = (made.passes.iter()).all(|p| matches!(p, Pass::Copy { .. }));
+        (!only_copies).then_some(made)
+    }
+
+    pub fn tapped(g: &Grade) -> Option<Self> {
+        Self::made(g, true)
+    }
+
+    fn made(g: &Grade, tapped: bool) -> Option<Self> {
         if !complete(g) {
             return None;
         }
@@ -725,6 +748,7 @@ impl Graded {
             all: vec![0; count],
             over: vec![0; count],
             whole: (0..count).collect(),
+            tapped,
         };
         for &k in &order {
             let node = g.node(k)?;
@@ -759,13 +783,21 @@ impl Graded {
             free: Vec::new(),
         };
         let mut passes = Vec::new();
+        let mut taps = Vec::new();
         for &k in &order {
             let node = g.node(k)?;
             let ins: Vec<usize> = node.inputs.iter().flatten().map(|v| *v as usize).collect();
+            let number = k;
             let k = k as usize;
             match &node.tool {
                 GradeTool::Corrector(c) => {
-                    corrected((node, c, k, ins[0]), &mut uses, &mut r, &mut passes);
+                    let from = corrected((node, c, k, ins[0]), &mut uses, &mut r, &mut passes);
+                    taps.extend(tapped.then(|| Tap {
+                        node: number,
+                        after: passes.len(),
+                        from,
+                        key: node.key.of(1.0),
+                    }));
                 }
                 GradeTool::ParallelMixer => {
                     let x = bases[k]?;
@@ -793,10 +825,10 @@ impl Graded {
                 to: 0,
             });
         }
-        let only_copies = passes.iter().all(|p| matches!(p, Pass::Copy { .. }));
-        (!only_copies).then_some(Self {
+        Some(Self {
             passes,
             registers: r.left.len(),
+            taps,
         })
     }
 }
