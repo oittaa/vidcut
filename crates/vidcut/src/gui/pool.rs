@@ -729,8 +729,7 @@ impl Workspace {
     fn pooled_compounds(&mut self, ui: &mut egui::Ui, p: &Project, bin: &str) -> bool {
         let needle = self.search.to_lowercase();
         let shown: Vec<_> = p
-            .compounds
-            .iter()
+            .pool_compounds()
             .filter(|k| match needle.is_empty() {
                 true => k.bin == bin,
                 false => k.name.to_lowercase().contains(&needle),
@@ -746,7 +745,8 @@ impl Workspace {
         ui.horizontal_wrapped(|ui| {
             for k in shown {
                 let on = open_id == Some(k.id.as_str());
-                let length = p.length_timecode(k.frames());
+                let frames = p.compound_frames(k);
+                let length = p.length_timecode(frames);
                 let r = ui
                     .selectable_label(on, format!("{}  {length}", k.name))
                     .interact(Sense::click_and_drag());
@@ -756,7 +756,7 @@ impl Workspace {
                 if r.drag_started()
                     && let Some(press) = r.ctx.input(|i| i.pointer.press_origin())
                 {
-                    self.start_compound_drag(&k.id, &k.name, k.frames(), press);
+                    self.start_compound_drag(&k.id, &k.name, frames, press);
                 }
                 r.context_menu(|ui| {
                     if ui.button("Open in Timeline").clicked() {
@@ -776,7 +776,7 @@ impl Workspace {
                     ui.separator();
                     if ui.button("Starting Timecode…").clicked() {
                         let drop = k.counts_drop_frame();
-                        let tc = vidcut_core::time::format_timecode(0, k.fps, k.start_tc(), drop);
+                        let tc = vidcut_core::time::format_timecode(0, k.fps, k.start_tc, drop);
                         self.compound_tc = Some(super::compound::CompoundStartTc::new(
                             &k.id, &k.name, tc, k.fps, drop,
                         ));

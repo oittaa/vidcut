@@ -965,14 +965,23 @@ mod tests {
         f.append("m2", 10, 60);
         let mut p = f.editor.project().clone();
         let inner = p.tracks[0].clone();
-        p.tracks[0].clips[1].compound = Some(crate::model::Compound {
-            stack: Default::default(),
+        let cid = p.alloc_compound_id();
+        p.compounds.push(crate::model::Compound {
+            id: cid.clone(),
+            name: "Compound Clip 1".into(),
+            bin: String::new(),
+            removed: false,
+            sequence_id: "{test-c2-compound}".into(),
+            fps: p.fps(),
+            drop_frame: p.counts_drop_frame(),
+            start_tc: 0,
             frames: 100,
             tracks: vec![inner],
-            made_from: Vec::new(),
+            marks: Default::default(),
             markers: Vec::new(),
-            start_tc: 0,
+            kept_otio: None,
         });
+        p.tracks[0].clips[1].compound = Some(cid);
         p
     }
 

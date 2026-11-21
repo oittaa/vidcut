@@ -37,8 +37,8 @@ pub use transition::{
 
 use crate::error::{Error, Result};
 use crate::model::{
-    AlphaMode, Clip, ClipAudio, ColorSpace, Compound, Generator, Marker, Media, MediaUpscaler,
-    Project, Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
+    AlphaMode, Clip, ClipAudio, ColorSpace, Generator, Marker, Media, MediaUpscaler, Project,
+    Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -1543,11 +1543,15 @@ fn check_source(p: &Project, c: &Clip) -> Result<()> {
         return Ok(());
     }
     let (lo, hi) = c.shown();
-    if let Some(k) = &c.compound {
-        if lo < 0 || hi > k.frames {
+    if let Some(cid) = &c.compound {
+        let k = p
+            .compound(cid)
+            .ok_or_else(|| Error::not_found(format!("no compound clip {cid}")))?;
+        let frames = p.compound_frames(k);
+        if lo < 0 || hi > frames {
             return Err(Error::invalid(format!(
-                "{} would need frames {lo}..{hi} of its compound, which has 0..{}",
-                c.id, k.frames
+                "{} would need frames {lo}..{hi} of its compound, which has 0..{frames}",
+                c.id
             )));
         }
         return Ok(());
@@ -2761,11 +2765,6 @@ pub fn is_date(text: &str) -> bool {
 
 fn clip_outside(tracks: &[Track], media: &str, part: (f64, f64)) -> Option<String> {
     for c in tracks.iter().flat_map(|t| &t.clips) {
-        if let Some(k) = &c.compound
-            && let Some(id) = compound_outside(k, media, part)
-        {
-            return Some(id);
-        }
         if c.media == media {
             let (lo, hi) = c.shown();
             let (lo, hi) = (lo as f64 + c.phase, hi as f64 + c.phase);
@@ -2775,10 +2774,6 @@ fn clip_outside(tracks: &[Track], media: &str, part: (f64, f64)) -> Option<Strin
         }
     }
     None
-}
-
-fn compound_outside(k: &Compound, media: &str, part: (f64, f64)) -> Option<String> {
-    clip_outside(&k.tracks, media, part).or_else(|| clip_outside(&k.made_from, media, part))
 }
 
 fn shift_source(c: &mut Clip, (per, file_by): (crate::time::Rational, i64)) {
@@ -2816,18 +2811,10 @@ fn shift_source(c: &mut Clip, (per, file_by): (crate::time::Rational, i64)) {
 
 fn shift_clips(tracks: &mut [Track], media: &str, by: (crate::time::Rational, i64)) {
     for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
-        if let Some(k) = c.compound.as_mut() {
-            shift_compound(k, media, by);
-        }
         if c.media == media {
             shift_source(c, by);
         }
     }
-}
-
-fn shift_compound(k: &mut Compound, media: &str, by: (crate::time::Rational, i64)) {
-    shift_clips(&mut k.tracks, media, by);
-    shift_clips(&mut k.made_from, media, by);
 }
 
 pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> Result<()> {
@@ -2858,13 +2845,9 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
             (p.timelines.iter()).find_map(|t| clip_outside(&t.tracks, media, part(fps_of(t))))
         })
         .or_else(|| {
-            (p.compound_path.iter()).find_map(|c| clip_outside(&c.tracks, media, part(c.fps)))
-        })
-        .or_else(|| {
-            p.compounds.iter().find_map(|k| {
-                k.blocks()
-                    .find_map(|block| compound_outside(block, media, part(k.fps)))
-            })
+            p.compounds
+                .iter()
+                .find_map(|k| clip_outside(&k.tracks, media, part(k.fps)))
         });
     if !m.is_still()
         && let Some(c) = outside
@@ -2898,15 +2881,9 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
         let per = t.own.map_or(project, |o| o.fps).over(rate);
         shift_clips(&mut t.tracks, media, (per, by));
     }
-    for c in &mut p.compound_path {
-        let per = c.fps.over(rate);
-        shift_clips(&mut c.tracks, media, (per, by));
-    }
     for k in &mut p.compounds {
         let per = k.fps.over(rate);
-        for block in k.blocks_mut() {
-            shift_compound(block, media, (per, by));
-        }
+        shift_clips(&mut k.tracks, media, (per, by));
     }
     let m = p
         .media
@@ -3215,7 +3192,10 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
     for TrackClip { track, clip: c } in clips {
         let has_video = if c.is_block() {
             let (lo, hi) = c.shown();
-            let outside = c.compound.as_ref().is_some_and(|k| lo < 0 || hi > k.frames);
+            let outside = c.compound.as_deref().is_some_and(|cid| {
+                p.compound(cid)
+                    .is_none_or(|k| lo < 0 || hi > p.compound_frames(k))
+            });
             if c.duration <= 0 || !c.media.is_empty() || c.audio.is_some() || outside {
                 return Err(Error::invalid(format!(
                     "pasted clip {} is a block with media, audio or frames it hasn't",
@@ -3340,7 +3320,12 @@ pub fn remove_bin(p: &mut Project, path: &str) -> Result<()> {
     timelines::delete(p, &timelines)?;
     p.bins.retain(|b| !within(b, path));
     p.groups.retain(|g| !within(&g.bin, path));
-    p.compounds.retain(|k| !within(&k.bin, path));
+    for k in &mut p.compounds {
+        if !k.removed && within(&k.bin, path) {
+            k.removed = true;
+            k.bin.clear();
+        }
+    }
     Ok(())
 }
 
