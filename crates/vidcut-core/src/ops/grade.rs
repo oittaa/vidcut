@@ -707,7 +707,33 @@ fn spread(g: &Grade, k: u32, spans: &mut [Option<f64>]) -> f64 {
     s
 }
 
-pub fn cleanup(p: &mut Project, of: &GradeOf) -> Result<()> {
+fn filled(g: &mut Grade, [from, to]: [[f64; 2]; 2]) {
+    for axis in 0..2 {
+        let (low, high) = (g.nodes.iter().map(|d| d.place[axis]))
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), v| {
+                (l.min(v), h.max(v))
+            });
+        let span = high - low;
+        let step = match span > 0.0 {
+            true => ((to[axis] - from[axis]) / span).max(1.0),
+            false => 1.0,
+        };
+        let middle = (from[axis] + to[axis]) / 2.0;
+        for d in &mut g.nodes {
+            d.place[axis] = middle + (d.place[axis] - (low + high) / 2.0) * step;
+        }
+    }
+}
+
+pub fn cleanup(p: &mut Project, of: &GradeOf, area: Option<[[f64; 2]; 2]>) -> Result<()> {
+    if let Some([from, to]) = area {
+        finite(&[from, to].concat(), "area")?;
+        if to[0] < from[0] || to[1] < from[1] {
+            return Err(Error::invalid(
+                "area goes from its top left to its bottom right",
+            ));
+        }
+    }
     edited(p, of, |g| {
         let order = crate::grade::order(g)
             .ok_or_else(|| Error::invalid("the links of the grade make a loop"))?;
@@ -765,6 +791,9 @@ pub fn cleanup(p: &mut Project, of: &GradeOf) -> Result<()> {
                     [loose - 1.0, below]
                 }
             };
+        }
+        if let Some(area) = area {
+            filled(g, area);
         }
         Ok(())
     })

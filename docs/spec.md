@@ -2911,6 +2911,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: one keyframe, or two keyframes with equal values, give no keyframe badge. A change at a keyframe gives it.
   - Measured: the keyframe badge stays when the value goes back, so that the keyframes are equal again.
   - vidcut: `grade.set` with `label`. Node Label in the menu of a corrector and a double-click on the label edit the label in place. Enter keeps the text, and Esc drops it.
+  - vidcut: in List View, Node Label edits the label in the row of the node.
   - vidcut: a long label ends in "…". A pointer on it shows the full text.
   - vidcut: the Primaries, Log and Keyframes badges are at the right of the node. The first two count the values of the node and of each keyframe.
   - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node. It stays until the last keyframe goes (`animated` of the node).
@@ -2975,11 +2976,16 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: Add Source and Add Alpha Output come next. Then come the four zoom items, Toggle Display Mode and Cleanup Node Graph.
   - Measured: Toggle Display Mode puts the Node Editor in the place of the viewer. The transport controls stay.
   - Measured: Cleanup Node Graph puts the nodes in columns by their depth, at even distances. A chain stays on one row. The inputs of a mixer go evenly above and below its row.
+  - Measured in Resolve Studio 21.2: Cleanup Node Graph does not change the zoom. The nodes keep their size on the screen.
+  - Measured: the columns spread evenly over the visible width of the Node Editor, with a small margin. The rows spread evenly over the visible height.
+  - Measured: Source and Output stay at the edges. At a larger zoom, the columns are fewer grid steps apart. At a smaller zoom, they are more.
+  - Measured: a second Cleanup Node Graph after a zoom change spreads the nodes again over the new visible area.
   - Measured: the view menu at the upper right has Graph View and List View.
   - Measured: List View has one row for each node, with 01 at the bottom. A row has the number, an eye, a lock, the thumbnail, the label and the badges at the right.
   - Measured: a mixer row has a mixer icon and no number. The eye turns the node off or on. The current row has the red outline.
   - vidcut: `grade.cleanup` and `gui.node_view` with `zoom`, `list` and `wide`.
-  - vidcut: the columns of Cleanup Node Graph are one grid step apart, at each size of the Node Editor. Zoom to Window then fits them.
+  - vidcut: Cleanup Node Graph sends `grade.cleanup` with `area`, the visible part of the Node Editor. One column or one row goes to the middle.
+  - vidcut: without `area`, the columns are one grid step apart. With `area`, the nodes never come closer than without it.
   - vidcut: a mixer row shows the name of the mixer. The rows have no lock and no thumbnail yet ([todo](todo/color-page.md)).
 - **Turn off and reset** (pp. 3392–3393):
   - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.

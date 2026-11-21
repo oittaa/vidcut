@@ -2967,6 +2967,14 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
+        /// The area for the places of the nodes, `[[x, y], [x, y]]` from
+        /// its top left to its bottom right, in node places. The columns go
+        /// evenly from its left to its right, and the rows from its top to
+        /// its bottom. One column or one row goes to the middle. The nodes
+        /// stay at least as far apart as without an area. Without it, the
+        /// columns are one node place apart.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        area: Option<[[f64; 2]; 2]>,
     },
     /// Swap the settings of two correctors of the grade of a clip, or with
     /// `timeline` of the timeline grade: their values, their keyframes,

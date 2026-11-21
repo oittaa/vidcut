@@ -1614,7 +1614,10 @@ impl Workspace {
                 self.send("gui.node_view", json!({ "wide": wide }));
                 return;
             }
-            FieldAct::Cleanup => ("grade.cleanup", json!({})),
+            FieldAct::Cleanup => {
+                let area = self.effects_page.grade_view.area();
+                ("grade.cleanup", json!({ "area": area }))
+            }
             FieldAct::Corrector => {
                 let at = self.effects_page.grade_spot.unwrap_or_default();
                 self.select_coming(g.last() + 1);
@@ -1720,7 +1723,7 @@ impl Workspace {
             }
         };
         let done = match listed {
-            true => node_editor::list(ui, &graph, menu),
+            true => node_editor::list(ui, &mut self.effects_page.grade_view, &graph, menu),
             false => node_editor::show(ui, &mut self.effects_page.grade_view, &graph, menu, |ui| {
                 field_menu(ui, &mut field_act)
             }),

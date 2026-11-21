@@ -24,6 +24,7 @@ const STEPS: usize = 24;
 const FADED: f32 = 0.45;
 const NOTE: Vec2 = vec2(140.0, 18.0);
 const LIT: Color32 = Color32::from_rgb(110, 170, 255);
+const CURRENT_ROW: Color32 = super::viewer::ACTIVE_ANGLE;
 pub(super) const PICTURE_KNOT: Color32 = Color32::from_rgb(230, 200, 60);
 pub(super) const MASK_KNOT: Color32 = Color32::from_rgb(90, 140, 230);
 pub(super) const RGB_KNOT: Color32 = Color32::from_rgb(120, 210, 120);
@@ -166,6 +167,7 @@ pub(super) struct NodeView<K> {
     band: Option<(Pos2, bool)>,
     naming: Option<Naming<K>>,
     asked: Option<NodeZoom>,
+    shown: Option<Rect>,
 }
 
 impl<K> Default for NodeView<K> {
@@ -178,6 +180,7 @@ impl<K> Default for NodeView<K> {
             band: None,
             naming: None,
             asked: None,
+            shown: None,
         }
     }
 }
@@ -189,6 +192,19 @@ impl<K> NodeView<K> {
 
     pub(super) fn zoom(&self) -> f32 {
         self.zoom
+    }
+
+    pub(super) fn area(&self) -> Option<[[f64; 2]; 2]> {
+        let rect = self.shown?;
+        let z = self.zoom;
+        let origin = rect.min + MARGIN * z + self.pan;
+        let from = rect.min + MARGIN;
+        let to = (rect.max - MARGIN - BOX * z).max(from);
+        let place = |at: Pos2| {
+            let d = (at - origin) / (CELL * z);
+            [f64::from(d.x), f64::from(d.y)]
+        };
+        Some([place(from), place(to)])
     }
 
     fn zoomed(&mut self, rect: Rect, tiles: &[Tile<K>]) {
@@ -239,6 +255,33 @@ impl<K> NodeView<K> {
             started: false,
         });
     }
+}
+
+fn label_field<K: Clone + PartialEq>(
+    ui: &mut Ui,
+    naming: &mut Option<Naming<K>>,
+    key: &K,
+    field: Rect,
+    font: FontId,
+    named: &mut Option<(K, String)>,
+) -> bool {
+    let Some(n) = naming.as_mut().filter(|n| n.key == *key) else {
+        return false;
+    };
+    let edit = egui::TextEdit::singleline(&mut n.text)
+        .font(font)
+        .margin(vec2(2.0, 0.0));
+    let edit = ui.put(field, edit);
+    if !n.started {
+        edit.request_focus();
+        n.started = true;
+    } else if edit.lost_focus() {
+        if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            *named = Some((n.key.clone(), n.text.clone()));
+        }
+        *naming = None;
+    }
+    true
 }
 
 fn rounded(x: f64) -> f64 {
@@ -381,14 +424,20 @@ impl<K> Done<K> {
 
 pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
     ui: &mut Ui,
+    view: &mut NodeView<K>,
     graph: &Graph<'_, K>,
     mut node_menu: impl FnMut(&mut Ui, &K),
 ) -> Done<K> {
     let mut done = Done::none();
+    let mut naming = view.naming.take();
     let c = theme::colors();
     let rect = ui.available_rect_before_wrap();
     ui.painter()
         .rect_filled(rect, CornerRadius::same(2), c.panel_dark);
+    let font = FontId::proportional(12.0);
+    let numbers = (graph.tiles.iter().filter(|t| t.switch))
+        .map(|t| (ui.painter()).layout_no_wrap(t.label.clone(), font.clone(), c.text))
+        .fold(0.0, |widest, shown| shown.size().x.max(widest));
     egui::ScrollArea::vertical().show(ui, |ui| {
         for t in graph.tiles.iter().rev().filter(|t| t.edge.is_none()) {
             let width = ui.available_width();
@@ -400,7 +449,7 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
                 graph.selected.last() == Some(&t.key),
                 graph.selected.contains(&t.key),
             ) {
-                (true, _) => Stroke::new(2.0, graph.active),
+                (true, _) => Stroke::new(2.0, CURRENT_ROW),
                 (false, true) => Stroke::new(1.5, Color32::WHITE),
                 _ => Stroke::NONE,
             };
@@ -410,10 +459,16 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
                 edge,
                 StrokeKind::Inside,
             );
-            let font = FontId::proportional(12.0);
             let dim = c.text_dim.gamma_multiply(fade);
-            let mut left = r.left() + 6.0;
-            let eye = Rect::from_min_size(pos2(left, r.top()), vec2(ROW, ROW));
+            let start = r.left() + 6.0;
+            let number = painter.text(
+                pos2(start, r.center().y),
+                Align2::LEFT_CENTER,
+                &t.label,
+                font.clone(),
+                c.text.gamma_multiply(fade),
+            );
+            let eye = Rect::from_min_size(pos2(start + numbers + 4.0, r.top()), vec2(ROW, ROW));
             if t.switch {
                 let icon = match t.faded {
                     true => egui_phosphor::regular::EYE_SLASH,
@@ -421,24 +476,26 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
                 };
                 painter.text(eye.center(), Align2::CENTER_CENTER, icon, font.clone(), dim);
             }
-            left = eye.right() + 4.0;
-            let number = painter.text(
-                pos2(left, r.center().y),
-                Align2::LEFT_CENTER,
-                &t.label,
-                font.clone(),
-                c.text.gamma_multiply(fade),
-            );
-            left = number.right() + 10.0;
+            let left = (eye.right() + 4.0).max(number.right() + 10.0);
             let mut right = r.right() - 8.0;
             for b in t.badges.iter().rev() {
                 let at = pos2(right, r.center().y);
                 let shown = painter.text(at, Align2::RIGHT_CENTER, b.icon, font.clone(), dim);
                 right = shown.left() - 4.0;
             }
-            if !t.note.is_empty() {
+            let field = Rect::from_min_max(pos2(left, r.top()), pos2(right.max(left), r.bottom()));
+            let editing = label_field(
+                ui,
+                &mut naming,
+                &t.key,
+                field,
+                font.clone(),
+                &mut done.named,
+            );
+            if !editing && !t.note.is_empty() {
                 let color = c.text.gamma_multiply(fade);
-                let shown = super::history::one_line(ui, &t.note, right - left, font, color);
+                let width = right - left;
+                let shown = super::history::one_line(ui, &t.note, width, font.clone(), color);
                 painter.galley(
                     pos2(left, r.center().y - shown.size().y / 2.0),
                     shown,
@@ -455,6 +512,7 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
             resp.context_menu(|ui| node_menu(ui, &t.key));
         }
     });
+    view.naming = naming.filter(|n| graph.tiles.iter().any(|t| t.key == n.key));
     done
 }
 
@@ -466,6 +524,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     field_menu: impl FnOnce(&mut Ui),
 ) -> Done<K> {
     let rect = ui.available_rect_before_wrap();
+    view.shown = Some(rect);
     view.zoomed(rect, &graph.tiles);
     let resp = ui.allocate_rect(rect, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
@@ -661,39 +720,29 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             r.left_top() - vec2(0.0, NOTE.y * z + 2.0),
             vec2(r.width().max(NOTE.x * z), NOTE.y * z),
         );
-        match naming.as_mut().filter(|n| n.key == t.key) {
-            Some(n) => {
-                let edit = egui::TextEdit::singleline(&mut n.text)
-                    .font(font)
-                    .margin(vec2(2.0, 0.0));
-                let edit = ui.put(field, edit);
-                if !n.started {
-                    edit.request_focus();
-                    n.started = true;
-                } else if edit.lost_focus() {
-                    if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        done.named = Some((t.key.clone(), n.text.clone()));
-                    }
-                    naming = None;
-                }
+        let editing = label_field(
+            ui,
+            &mut naming,
+            &t.key,
+            field,
+            font.clone(),
+            &mut done.named,
+        );
+        if !editing && !t.note.is_empty() {
+            let color = c.text.gamma_multiply(fade);
+            let shown = super::history::one_line(ui, &t.note, r.width(), font, color);
+            let at = r.left_top() - vec2(0.0, shown.size().y + 2.0);
+            let place = Rect::from_min_size(at, shown.size());
+            painter.galley(at, shown.clone(), color);
+            let note = ui.interact(place, id.with("note"), Sense::click());
+            super::history::full_on_hover(&note, &shown, &t.note);
+            if note.double_clicked() {
+                naming = Some(Naming {
+                    key: t.key.clone(),
+                    text: t.note.clone(),
+                    started: false,
+                });
             }
-            None if !t.note.is_empty() => {
-                let color = c.text.gamma_multiply(fade);
-                let shown = super::history::one_line(ui, &t.note, r.width(), font, color);
-                let at = r.left_top() - vec2(0.0, shown.size().y + 2.0);
-                let place = Rect::from_min_size(at, shown.size());
-                painter.galley(at, shown.clone(), color);
-                let note = ui.interact(place, id.with("note"), Sense::click());
-                super::history::full_on_hover(&note, &shown, &t.note);
-                if note.double_clicked() {
-                    naming = Some(Naming {
-                        key: t.key.clone(),
-                        text: t.note.clone(),
-                        started: false,
-                    });
-                }
-            }
-            None => {}
         }
         if let Some(o) = &t.outlet {
             let out = if used { o.color } else { c.text_dim };
