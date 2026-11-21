@@ -429,13 +429,14 @@ pub fn describe_at(
         "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
         "grade.paste" if d.flag("timeline") => "Paste a node into the timeline grade".into(),
         "grade.paste" => format!("Paste a node into the grade of {}", d.clips("clips")),
-        "grade.add" | "grade.remove" | "grade.connect" | "grade.swap" | "grade.keys.add"
-        | "grade.keys.set" | "grade.keys.move" | "grade.keys.remove" => format!(
+        "grade.add" | "grade.remove" | "grade.connect" | "grade.swap" | "grade.cleanup"
+        | "grade.keys.add" | "grade.keys.set" | "grade.keys.move" | "grade.keys.remove" => format!(
             "{} {}",
             match method {
                 "grade.add" => "Add a node to",
                 "grade.remove" => "Remove a node from",
                 "grade.swap" => "Swap two nodes of",
+                "grade.cleanup" => "Clean up the nodes of",
                 "grade.keys.add" => "Add a keyframe to",
                 "grade.keys.set" => "Change keyframes of",
                 "grade.keys.move" => "Move keyframes of",

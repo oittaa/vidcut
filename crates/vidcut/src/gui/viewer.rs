@@ -7,7 +7,7 @@ use eframe::egui::{
 use serde_json::json;
 use vidcut_core::model::{Marks, Media, Project, TrackKind};
 use vidcut_core::request::{
-    TimecodeDisplay, ViewerFrame, ViewerFrameKey, ViewerMode, viewer_frame_after,
+    Page, TimecodeDisplay, ViewerFrame, ViewerFrameKey, ViewerMode, viewer_frame_after,
 };
 use vidcut_core::shortcuts::Action;
 use vidcut_core::time::{Rational, parse_frame_number};
@@ -322,6 +322,15 @@ impl Workspace {
             Pos2::new(avail.max.x, area.bottom()),
         );
         self.viewer_meter(ui, meter);
+        if self.effects_page.page == Page::Color && self.effects_page.grade_wide {
+            let mut nodes = ui.new_child(egui::UiBuilder::new().max_rect(area));
+            self.grade_nodes_panel(&mut nodes);
+            ui.allocate_rect(area, Sense::hover());
+            ui.add_space(4.0);
+            self.clip_edge_hint(ui);
+            self.transport(ui, id, None);
+            return;
+        }
         let aspect = self
             .project()
             .map_or(16.0 / 9.0, |p| p.width() as f32 / p.height().max(1) as f32);

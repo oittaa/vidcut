@@ -90,6 +90,8 @@ pub(super) struct EffectsPage {
     pub(super) grade_left: Lru<(String, GradeOf), u32, GRADES_LEFT_KEPT>,
     pub(super) grade_coming: Option<(u32, Instant)>,
     pub(super) grade_view: NodeView<Port>,
+    pub(super) grade_list: bool,
+    pub(super) grade_wide: bool,
     pub(super) grade_spot: Option<[f64; 2]>,
     pub(super) grade_keys: super::grade_keys::GradeKeys,
     boxed: Option<Boxed>,
@@ -121,6 +123,8 @@ impl Default for EffectsPage {
             grade_left: Lru::new(),
             grade_coming: None,
             grade_view: NodeView::default(),
+            grade_list: false,
+            grade_wide: false,
             grade_spot: None,
             grade_keys: Default::default(),
             boxed: None,
@@ -2072,6 +2076,28 @@ impl Workspace {
             },
             None => {}
         }
+    }
+
+    pub(super) fn set_node_view(
+        &mut self,
+        zoom: Option<vidcut_core::request::NodeZoom>,
+        list: Option<bool>,
+        wide: Option<bool>,
+    ) {
+        match (zoom, self.effects_page.page) {
+            (Some(z), Page::Effects) => self.effects_page.graph.ask(z),
+            (Some(z), _) => self.effects_page.grade_view.ask(z),
+            (None, _) => {}
+        }
+        self.effects_page.grade_list = list.unwrap_or(self.effects_page.grade_list);
+        self.effects_page.grade_wide = wide.unwrap_or(self.effects_page.grade_wide);
+    }
+
+    pub(super) fn node_zoom(&self) -> f64 {
+        f64::from(match self.effects_page.page {
+            Page::Effects => self.effects_page.graph.zoom(),
+            _ => self.effects_page.grade_view.zoom(),
+        })
     }
 
     fn node_keys(&mut self, fired: &Fired, mine: &Fired) {

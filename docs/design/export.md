@@ -759,6 +759,8 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
   - It also refuses a corrector without one input and a mixer without an input.
   - `ops::grade` changes the tree for `grade.add`, `grade.remove` and `grade.connect`. A removed node gives each node after it one number less (`renumbered`).
+  - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
+  - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
   - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
 - `Placing::new` adds the grade after the effects of the clip, as the last `place::Working` (`Work::Grade`).

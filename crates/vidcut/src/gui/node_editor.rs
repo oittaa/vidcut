@@ -6,6 +6,8 @@ use eframe::egui::{
     StrokeKind, Ui, Vec2, pos2, vec2,
 };
 
+use vidcut_core::request::NodeZoom;
+
 use super::theme;
 
 const CELL: Vec2 = vec2(132.0, 64.0);
@@ -14,12 +16,15 @@ const MARGIN: Vec2 = vec2(40.0, 40.0);
 const KNOT: f32 = 5.0;
 const PORT: f32 = KNOT * 3.0;
 const ZOOMS: (f32, f32) = (0.3, 3.0);
+const ZOOM_STEP: f32 = 1.25;
+const ROW: f32 = 26.0;
 const ROUND: f64 = 100.0;
 const WIRE_HIT: f32 = 6.0;
 const STEPS: usize = 24;
 const FADED: f32 = 0.45;
 const NOTE: Vec2 = vec2(140.0, 18.0);
 const LIT: Color32 = Color32::from_rgb(110, 170, 255);
+const CURRENT_ROW: Color32 = super::viewer::ACTIVE_ANGLE;
 pub(super) const PICTURE_KNOT: Color32 = Color32::from_rgb(230, 200, 60);
 pub(super) const MASK_KNOT: Color32 = Color32::from_rgb(90, 140, 230);
 pub(super) const RGB_KNOT: Color32 = Color32::from_rgb(120, 210, 120);
@@ -161,6 +166,8 @@ pub(super) struct NodeView<K> {
     linking: Option<Linking<K>>,
     band: Option<(Pos2, bool)>,
     naming: Option<Naming<K>>,
+    asked: Option<NodeZoom>,
+    shown: Option<Rect>,
 }
 
 impl<K> Default for NodeView<K> {
@@ -172,11 +179,65 @@ impl<K> Default for NodeView<K> {
             linking: None,
             band: None,
             naming: None,
+            asked: None,
+            shown: None,
         }
     }
 }
 
 impl<K> NodeView<K> {
+    pub(super) fn ask(&mut self, zoom: NodeZoom) {
+        self.asked = Some(zoom);
+    }
+
+    pub(super) fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    pub(super) fn area(&self) -> Option<[[f64; 2]; 2]> {
+        let rect = self.shown?;
+        let z = self.zoom;
+        let origin = rect.min + MARGIN * z + self.pan;
+        let inset = vec2(MARGIN.x * 2.0, MARGIN.y);
+        let from = rect.min + inset;
+        let to = (rect.max - inset - BOX * z).max(from);
+        let place = |at: Pos2| {
+            let d = (at - origin) / (CELL * z);
+            [f64::from(d.x), f64::from(d.y)]
+        };
+        Some([place(from), place(to)])
+    }
+
+    fn zoomed(&mut self, rect: Rect, tiles: &[Tile<K>]) {
+        let Some(asked) = self.asked.take() else {
+            return;
+        };
+        let about = |view: &mut Self, to: f32| {
+            let to = to.clamp(ZOOMS.0, ZOOMS.1);
+            let at = (rect.center() - rect.min - MARGIN * view.zoom - view.pan) / view.zoom;
+            view.pan = rect.center() - rect.min - MARGIN * to - at * to;
+            view.zoom = to;
+        };
+        match asked {
+            NodeZoom::In => about(self, self.zoom * ZOOM_STEP),
+            NodeZoom::Out => about(self, self.zoom / ZOOM_STEP),
+            NodeZoom::Original => about(self, 1.0),
+            NodeZoom::Fit => {
+                let boxes = (tiles.iter().filter(|t| t.edge.is_none())).map(|t| {
+                    let at = vec2(t.place[0] as f32 * CELL.x, t.place[1] as f32 * CELL.y);
+                    Rect::from_min_size(at.to_pos2(), size(t))
+                });
+                let Some(all) = boxes.reduce(|a, b| a.union(b)) else {
+                    return;
+                };
+                let room = rect.size() - MARGIN * 2.0;
+                let fit = (room.x / all.width()).min(room.y / all.height());
+                let to = fit.clamp(ZOOMS.0, ZOOMS.1);
+                self.pan = rect.center() - rect.min - MARGIN * to - all.center().to_vec2() * to;
+                self.zoom = to;
+            }
+        }
+    }
     pub(super) fn calm(&mut self) {
         self.linking = None;
         self.band = None;
@@ -195,6 +256,33 @@ impl<K> NodeView<K> {
             started: false,
         });
     }
+}
+
+fn label_field<K: Clone + PartialEq>(
+    ui: &mut Ui,
+    naming: &mut Option<Naming<K>>,
+    key: &K,
+    field: Rect,
+    font: FontId,
+    named: &mut Option<(K, String)>,
+) -> bool {
+    let Some(n) = naming.as_mut().filter(|n| n.key == *key) else {
+        return false;
+    };
+    let edit = egui::TextEdit::singleline(&mut n.text)
+        .font(font)
+        .margin(vec2(2.0, 0.0));
+    let edit = ui.put(field, edit);
+    if !n.started {
+        edit.request_focus();
+        n.started = true;
+    } else if edit.lost_focus() {
+        if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            *named = Some((n.key.clone(), n.text.clone()));
+        }
+        *naming = None;
+    }
+    true
 }
 
 fn rounded(x: f64) -> f64 {
@@ -317,6 +405,118 @@ pub(super) fn empty(ui: &mut Ui, text: &str) {
     );
 }
 
+impl<K> Done<K> {
+    fn none() -> Self {
+        Self {
+            picked: None,
+            switched: None,
+            named: None,
+            pointed: None,
+            moved: Vec::new(),
+            link: None,
+            band: None,
+            clicked: false,
+            unlink: None,
+            spot: None,
+            dropped: None,
+        }
+    }
+}
+
+pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
+    ui: &mut Ui,
+    view: &mut NodeView<K>,
+    graph: &Graph<'_, K>,
+    mut node_menu: impl FnMut(&mut Ui, &K),
+) -> Done<K> {
+    let mut done = Done::none();
+    let mut naming = view.naming.take();
+    let c = theme::colors();
+    let rect = ui.available_rect_before_wrap();
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(2), c.panel_dark);
+    let font = FontId::proportional(12.0);
+    let numbers = (graph.tiles.iter().filter(|t| t.switch))
+        .map(|t| (ui.painter()).layout_no_wrap(t.label.clone(), font.clone(), c.text))
+        .fold(0.0, |widest, shown| shown.size().x.max(widest));
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for t in graph.tiles.iter().rev().filter(|t| t.edge.is_none()) {
+            let width = ui.available_width();
+            let (r, resp) = ui.allocate_exact_size(vec2(width, ROW), Sense::click());
+            let painter = ui.painter_at(r);
+            let fade = if t.faded { FADED } else { 1.0 };
+            painter.rect_filled(r.shrink(1.0), CornerRadius::same(3), c.panel);
+            let edge = match (
+                graph.selected.last() == Some(&t.key),
+                graph.selected.contains(&t.key),
+            ) {
+                (true, _) => Stroke::new(2.0, CURRENT_ROW),
+                (false, true) => Stroke::new(1.5, Color32::WHITE),
+                _ => Stroke::NONE,
+            };
+            painter.rect_stroke(
+                r.shrink(1.0),
+                CornerRadius::same(3),
+                edge,
+                StrokeKind::Inside,
+            );
+            let dim = c.text_dim.gamma_multiply(fade);
+            let start = r.left() + 6.0;
+            let number = painter.text(
+                pos2(start, r.center().y),
+                Align2::LEFT_CENTER,
+                &t.label,
+                font.clone(),
+                c.text.gamma_multiply(fade),
+            );
+            let eye = Rect::from_min_size(pos2(start + numbers + 4.0, r.top()), vec2(ROW, ROW));
+            if t.switch {
+                let icon = match t.faded {
+                    true => egui_phosphor::regular::EYE_SLASH,
+                    false => egui_phosphor::regular::EYE,
+                };
+                painter.text(eye.center(), Align2::CENTER_CENTER, icon, font.clone(), dim);
+            }
+            let left = (eye.right() + 4.0).max(number.right() + 10.0);
+            let mut right = r.right() - 8.0;
+            for b in t.badges.iter().rev() {
+                let at = pos2(right, r.center().y);
+                let shown = painter.text(at, Align2::RIGHT_CENTER, b.icon, font.clone(), dim);
+                right = shown.left() - 4.0;
+            }
+            let field = Rect::from_min_max(pos2(left, r.top()), pos2(right.max(left), r.bottom()));
+            let editing = label_field(
+                ui,
+                &mut naming,
+                &t.key,
+                field,
+                font.clone(),
+                &mut done.named,
+            );
+            if !editing && !t.note.is_empty() {
+                let color = c.text.gamma_multiply(fade);
+                let width = right - left;
+                let shown = super::history::one_line(ui, &t.note, width, font.clone(), color);
+                painter.galley(
+                    pos2(left, r.center().y - shown.size().y / 2.0),
+                    shown,
+                    color,
+                );
+            }
+            let on_eye = resp.interact_pointer_pos().is_some_and(|p| eye.contains(p));
+            if resp.clicked() && t.switch && on_eye {
+                done.switched = Some(t.key.clone());
+            } else if resp.clicked() {
+                let add = ui.input(|i| i.modifiers.command);
+                done.picked = Some((t.key.clone(), if add { Pick::Toggle } else { Pick::Only }));
+            }
+            resp.context_menu(|ui| node_menu(ui, &t.key));
+        }
+    });
+    view.naming = naming.filter(|n| graph.tiles.iter().any(|t| t.key == n.key));
+    done
+}
+
 pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     ui: &mut Ui,
     view: &mut NodeView<K>,
@@ -325,6 +525,8 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     field_menu: impl FnOnce(&mut Ui),
 ) -> Done<K> {
     let rect = ui.available_rect_before_wrap();
+    view.shown = Some(rect);
+    view.zoomed(rect, &graph.tiles);
     let resp = ui.allocate_rect(rect, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     let c = theme::colors();
@@ -461,19 +663,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             painter.add(egui::Shape::line(sampled_curve(&b, span), lit));
         }
     }
-    let mut done = Done {
-        picked: None,
-        switched: None,
-        named: None,
-        pointed: None,
-        moved: Vec::new(),
-        link: None,
-        band: None,
-        clicked: false,
-        unlink: None,
-        spot: None,
-        dropped: None,
-    };
+    let mut done = Done::none();
     let mut naming = view.naming.take();
     for (t, r) in graph.tiles.iter().zip(&boxes) {
         let r = *r;
@@ -531,39 +721,29 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             r.left_top() - vec2(0.0, NOTE.y * z + 2.0),
             vec2(r.width().max(NOTE.x * z), NOTE.y * z),
         );
-        match naming.as_mut().filter(|n| n.key == t.key) {
-            Some(n) => {
-                let edit = egui::TextEdit::singleline(&mut n.text)
-                    .font(font)
-                    .margin(vec2(2.0, 0.0));
-                let edit = ui.put(field, edit);
-                if !n.started {
-                    edit.request_focus();
-                    n.started = true;
-                } else if edit.lost_focus() {
-                    if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        done.named = Some((t.key.clone(), n.text.clone()));
-                    }
-                    naming = None;
-                }
+        let editing = label_field(
+            ui,
+            &mut naming,
+            &t.key,
+            field,
+            font.clone(),
+            &mut done.named,
+        );
+        if !editing && !t.note.is_empty() {
+            let color = c.text.gamma_multiply(fade);
+            let shown = super::history::one_line(ui, &t.note, r.width(), font, color);
+            let at = r.left_top() - vec2(0.0, shown.size().y + 2.0);
+            let place = Rect::from_min_size(at, shown.size());
+            painter.galley(at, shown.clone(), color);
+            let note = ui.interact(place, id.with("note"), Sense::click());
+            super::history::full_on_hover(&note, &shown, &t.note);
+            if note.double_clicked() {
+                naming = Some(Naming {
+                    key: t.key.clone(),
+                    text: t.note.clone(),
+                    started: false,
+                });
             }
-            None if !t.note.is_empty() => {
-                let color = c.text.gamma_multiply(fade);
-                let shown = super::history::one_line(ui, &t.note, r.width(), font, color);
-                let at = r.left_top() - vec2(0.0, shown.size().y + 2.0);
-                let place = Rect::from_min_size(at, shown.size());
-                painter.galley(at, shown.clone(), color);
-                let note = ui.interact(place, id.with("note"), Sense::click());
-                super::history::full_on_hover(&note, &shown, &t.note);
-                if note.double_clicked() {
-                    naming = Some(Naming {
-                        key: t.key.clone(),
-                        text: t.note.clone(),
-                        started: false,
-                    });
-                }
-            }
-            None => {}
         }
         if let Some(o) = &t.outlet {
             let out = if used { o.color } else { c.text_dim };

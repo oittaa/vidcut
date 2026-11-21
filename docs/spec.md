@@ -2914,6 +2914,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: one keyframe, or two keyframes with equal values, give no keyframe badge. A change at a keyframe gives it.
   - Measured: the keyframe badge stays when the value goes back, so that the keyframes are equal again.
   - vidcut: `grade.set` with `label`. Node Label in the menu of a corrector and a double-click on the label edit the label in place. Enter keeps the text, and Esc drops it.
+  - vidcut: in List View, Node Label edits the label in the row of the node.
   - vidcut: a long label ends in "…". A pointer on it shows the full text.
   - vidcut: the Primaries, Log and Keyframes badges are at the right of the node. The first two count the values of the node and of each keyframe.
   - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node. It stays until the last keyframe goes (`animated` of the node).
@@ -2968,6 +2969,27 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.swap`, `grade.copy` and `grade.paste`. The drops act on correctors. A drop of a mixer only moves it.
   - vidcut: a drop onto a connection is one undo step. A "+" shows above the node while it is over a connection.
   - vidcut: Ctrl+C and Ctrl+V on the Color page copy and paste the settings of the current node.
+- **View and layout** (pp. 3386–3388, 3398):
+  - The icon at the upper right of the Node Editor opens the Layer List view. Node 1 is the bottom layer, and the other nodes stack above it.
+  - Each layer can turn its node off or on and lock it. It also shows a thumbnail and the icons of the tools of its node.
+  - Toggle Display Mode in the menu of the empty Node Editor hides the viewer. The Node Editor then gets more room.
+  - Cleanup Node Graph moves all nodes into an evenly spaced grid that fits the Node Editor.
+  - Zoom In, Zoom Out, Zoom to Window and Original Size in the same menu change the size of the nodes.
+  - Measured in Resolve Studio 21.2: the menu of the empty Node Editor starts with Reset All Grades and Nodes. Reset All Node Stack Layers and Add Node follow.
+  - Measured: Add Source and Add Alpha Output come next. Then come the four zoom items, Toggle Display Mode and Cleanup Node Graph.
+  - Measured: Toggle Display Mode puts the Node Editor in the place of the viewer. The transport controls stay.
+  - Measured: Cleanup Node Graph puts the nodes in columns by their depth, at even distances. A chain stays on one row. The inputs of a mixer go evenly above and below its row.
+  - Measured in Resolve Studio 21.2: Cleanup Node Graph does not change the zoom. The nodes keep their size on the screen.
+  - Measured: the columns spread evenly over the visible width of the Node Editor, with a small margin. The rows spread evenly over the visible height.
+  - Measured: Source and Output stay at the edges. At a larger zoom, the columns are fewer grid steps apart. At a smaller zoom, they are more.
+  - Measured: a second Cleanup Node Graph after a zoom change spreads the nodes again over the new visible area.
+  - Measured: the view menu at the upper right has Graph View and List View.
+  - Measured: List View has one row for each node, with 01 at the bottom. A row has the number, an eye, a lock, the thumbnail, the label and the badges at the right.
+  - Measured: a mixer row has a mixer icon and no number. The eye turns the node off or on. The current row has the red outline.
+  - vidcut: `grade.cleanup` and `gui.node_view` with `zoom`, `list` and `wide`.
+  - vidcut: Cleanup Node Graph sends `grade.cleanup` with `area`, the visible part of the Node Editor. One column or one row goes to the middle.
+  - vidcut: without `area`, the columns are one grid step apart. With `area`, the nodes never come closer than without it.
+  - vidcut: a mixer row shows the name of the mixer. The rows have no lock and no thumbnail yet ([todo](todo/color-page.md)).
 - **Turn off and reset** (pp. 3392–3393):
   - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.
   - Measured in Resolve Studio 21.2: a click on the number turns that node off or on. The current node stays.
@@ -3015,7 +3037,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - A Layer Mixer that is off mixes in Normal, with the Key Output Gain of each input. Subtract with a gain of 0.5 on the last input, off, equals Normal with that gain, on.
   - vidcut: keys, Key Output Gain and the Key Mixer come later ([todo](todo/color-page.md)).
 
-Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste` and `gui.grade_nodes`. `grade.set` with `on`, `place`, `mixer` and `mode` changes a node. `grade.get` gives the nodes and the `output`.
+Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer` and `mode` changes a node. `grade.get` gives the nodes and the `output`.
 
 ### 8.22 Color page keyframes (pp. 3453–3465)
 

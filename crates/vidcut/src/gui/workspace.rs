@@ -336,6 +336,9 @@ impl Workspace {
                 live::GuiChange::Grade(level) => self.set_grading(level),
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
                 live::GuiChange::GradeNodes(nodes) => self.pick_grade_nodes(nodes)?,
+                live::GuiChange::NodeView { zoom, list, wide } => {
+                    self.set_node_view(zoom, list, wide)
+                }
                 live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
         }
@@ -458,6 +461,9 @@ impl Workspace {
                 Page::Color => self.effects_page.grade_nodes.clone(),
                 Page::Effects | Page::Cut => Vec::new(),
             },
+            node_zoom: self.node_zoom(),
+            node_list: self.effects_page.grade_list,
+            node_wide: self.effects_page.grade_wide,
             time: self.page_clock(),
             edit,
             edits,
@@ -2215,7 +2221,7 @@ impl Workspace {
                     theme::decorated(ui, Deco::Card, |ui| self.mixer_panel(ui))
                 });
         }
-        if color {
+        if color && !self.effects_page.grade_wide {
             egui::Panel::right("color-nodes")
                 .resizable(true)
                 .default_size(380.0)

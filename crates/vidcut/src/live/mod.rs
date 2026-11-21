@@ -96,6 +96,11 @@ pub enum GuiChange {
     Grade(GradeLevel),
     Nodes(Vec<String>),
     GradeNodes(Vec<u32>),
+    NodeView {
+        zoom: Option<vidcut_core::request::NodeZoom>,
+        list: Option<bool>,
+        wide: Option<bool>,
+    },
     PageTime(PageTime),
 }
 
@@ -152,6 +157,9 @@ pub struct GuiState {
     pub clip: Option<String>,
     pub nodes: Vec<String>,
     pub grade_nodes: Vec<u32>,
+    pub node_zoom: f64,
+    pub node_list: bool,
+    pub node_wide: bool,
     pub time: Option<PageClock>,
     pub edit: Option<EditPoint>,
     pub edits: Vec<EditPoint>,
@@ -3233,6 +3241,10 @@ impl Live {
             }
             Request::GuiGradeNodes { nodes } => {
                 self.gui_change(vec![GuiChange::GradeNodes(nodes)], |s| json!(s))
+            }
+            Request::GuiNodeView { zoom, list, wide } => {
+                let change = GuiChange::NodeView { zoom, list, wide };
+                self.gui_change(vec![change], |s| json!(s))
             }
             Request::GuiPageTime { at, fast, speed } => {
                 if speed.is_some_and(|s| !s.is_finite() || s.abs() > MAX_SPEED) {

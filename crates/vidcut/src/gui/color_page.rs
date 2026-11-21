@@ -7,7 +7,7 @@ use vidcut_core::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, Pict
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed};
 use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::preferences::SwitchingClips;
-use vidcut_core::request::{GradeAdd, GradeLevel, GradeMixer, Page, PrinterColor};
+use vidcut_core::request::{GradeAdd, GradeLevel, GradeMixer, NodeZoom, Page, PrinterColor};
 use vidcut_core::shortcuts::{Action, Panel};
 
 use super::node_editor::{
@@ -97,6 +97,9 @@ enum FieldAct {
     Corrector,
     ResetAll,
     KeepNodes,
+    Zoom(NodeZoom),
+    Wide,
+    Cleanup,
 }
 
 pub(super) struct Graded {
@@ -518,9 +521,20 @@ fn field_menu(ui: &mut Ui, act: &mut Option<FieldAct>) {
             ui.close();
         }
     };
-    ui.menu_button("Add Node", |ui| pick(ui, "Corrector", FieldAct::Corrector));
-    pick(ui, "Reset Grades and Keep Nodes", FieldAct::KeepNodes);
     pick(ui, "Reset All Grades and Nodes", FieldAct::ResetAll);
+    pick(ui, "Reset Grades and Keep Nodes", FieldAct::KeepNodes);
+    ui.menu_button("Add Node", |ui| pick(ui, "Corrector", FieldAct::Corrector));
+    ui.separator();
+    for (text, zoom) in [
+        ("Zoom In", NodeZoom::In),
+        ("Zoom Out", NodeZoom::Out),
+        ("Zoom to Window", NodeZoom::Fit),
+        ("Original Size", NodeZoom::Original),
+    ] {
+        pick(ui, text, FieldAct::Zoom(zoom));
+    }
+    pick(ui, "Toggle Display Mode", FieldAct::Wide);
+    pick(ui, "Cleanup Node Graph", FieldAct::Cleanup);
 }
 
 fn grade_switch(ui: &mut Ui, level: GradeLevel) -> Option<GradeLevel> {
@@ -1593,6 +1607,19 @@ impl Workspace {
 
     fn grade_field_act(&mut self, of: &GradeOf, g: &Grade, act: FieldAct) {
         let (method, more) = match act {
+            FieldAct::Zoom(zoom) => {
+                self.send("gui.node_view", json!({ "zoom": zoom }));
+                return;
+            }
+            FieldAct::Wide => {
+                let wide = !self.effects_page.grade_wide;
+                self.send("gui.node_view", json!({ "wide": wide }));
+                return;
+            }
+            FieldAct::Cleanup => {
+                let area = self.effects_page.grade_view.area();
+                ("grade.cleanup", json!({ "area": area }))
+            }
             FieldAct::Corrector => {
                 let at = self.effects_page.grade_spot.unwrap_or_default();
                 self.select_coming(g.last() + 1);
@@ -1610,10 +1637,9 @@ impl Workspace {
                 ("grade.clear", json!({}))
             }
         };
-        let field = if method == "grade.add" {
-            "clip"
-        } else {
-            "clips"
+        let field = match method {
+            "grade.add" | "grade.cleanup" => "clip",
+            _ => "clips",
         };
         self.effects_page.graded = None;
         self.send(method, params(of, field, more));
@@ -1633,8 +1659,18 @@ impl Workspace {
         self.settle_grade(&of, &stored);
         let switching = self.snap.switching_clips;
         let mut switch_to = None;
+        let listed = self.effects_page.grade_list;
+        let mut list_to = None;
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.menu_button(icon::LIST_BULLETS, |ui| {
+                    for (list, name) in [(false, "Graph View"), (true, "List View")] {
+                        if ui.radio(list == listed, name).clicked() {
+                            list_to = Some(list);
+                            ui.close();
+                        }
+                    }
+                });
                 ui.menu_button(icon::DOTS_THREE, |ui| {
                     ui.menu_button("Switching Clips Selects", |ui| {
                         for (value, name) in SWITCHING {
@@ -1650,6 +1686,9 @@ impl Workspace {
         if let Some(value) = switch_to {
             let more = json!({ "color": { "switching_clips": value } });
             self.send("preferences.set", more);
+        }
+        if let Some(list) = list_to {
+            self.send("gui.node_view", json!({ "list": list }));
         }
         let salt = match &of {
             GradeOf::Clip(id) => format!("grade-node-{id}"),
@@ -1672,25 +1711,25 @@ impl Workspace {
             .unwrap_or_default();
         let mut node_act: Option<(NodeAct, u32)> = None;
         let mut field_act: Option<FieldAct> = None;
-        let done = node_editor::show(
-            ui,
-            &mut self.effects_page.grade_view,
-            &graph,
-            |ui, p| {
-                let Port::Node(n) = *p else {
-                    return;
-                };
-                let Some(d) = stored.node(n) else {
-                    return;
-                };
-                let mut act = None;
-                node_menu(ui, d, &delete_key, &mut act);
-                if let Some(a) = act {
-                    node_act = Some((a, n));
-                }
-            },
-            |ui| field_menu(ui, &mut field_act),
-        );
+        let menu = |ui: &mut Ui, p: &Port| {
+            let Port::Node(n) = *p else {
+                return;
+            };
+            let Some(d) = stored.node(n) else {
+                return;
+            };
+            let mut act = None;
+            node_menu(ui, d, &delete_key, &mut act);
+            if let Some(a) = act {
+                node_act = Some((a, n));
+            }
+        };
+        let done = match listed {
+            true => node_editor::list(ui, &mut self.effects_page.grade_view, &graph, menu),
+            false => node_editor::show(ui, &mut self.effects_page.grade_view, &graph, menu, |ui| {
+                field_menu(ui, &mut field_act)
+            }),
+        };
         if let Some((inside, off)) = done.band {
             let inside: Vec<u32> = (inside.into_iter())
                 .filter_map(|p| match p {

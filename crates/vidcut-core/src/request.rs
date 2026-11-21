@@ -2955,6 +2955,27 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         settings: Option<CopiedNode>,
     },
+    /// Place the nodes of the grade of a clip, or with `timeline` of the
+    /// timeline grade, in an even grid. Each node goes in the column of its
+    /// longest path from the source. A chain stays on one row, and the
+    /// inputs of a mixer go evenly above and below its row. Nodes that do
+    /// not reach the output go in a row below.
+    #[serde(rename = "grade.cleanup")]
+    GradeCleanup {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// The area for the places of the nodes, `[[x, y], [x, y]]` from
+        /// its top left to its bottom right, in node places. The columns go
+        /// evenly from its left to its right, and the rows from its top to
+        /// its bottom. One column or one row goes to the middle. The nodes
+        /// stay at least as far apart as without an area. Without it, the
+        /// columns are one node place apart.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        area: Option<[[f64; 2]; 2]>,
+    },
     /// Swap the settings of two correctors of the grade of a clip, or with
     /// `timeline` of the timeline grade: their values, their keyframes,
     /// their labels and whether each is on. Their places, numbers and
@@ -4177,6 +4198,20 @@ pub enum Request {
     /// selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes { nodes: Vec<String> },
+    /// The node editor of the shown page. Each value left out stays.
+    /// Answers what `gui.state` does.
+    #[serde(rename = "gui.node_view")]
+    GuiNodeView {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zoom: Option<NodeZoom>,
+        /// The nodes of the color page as a list, from the last node at the
+        /// top to node 1 at the bottom.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        list: Option<bool>,
+        /// The node editor of the color page in the place of the viewer.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wide: Option<bool>,
+    },
     /// Select nodes in the node editor of the color page, by number. The
     /// palette then shows the last one. An empty list selects none.
     /// Answers what `gui.state` does.
@@ -5238,6 +5273,20 @@ pub enum Page {
     /// The primary correction of the clip at the playhead or of the
     /// timeline, its viewer and the timeline.
     Color,
+}
+
+/// A zoom of a node editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeZoom {
+    /// One step larger.
+    In,
+    /// One step smaller.
+    Out,
+    /// All the nodes in view, as large as they fit.
+    Fit,
+    /// The usual size.
+    Original,
 }
 
 /// Which grade the Color page shows.
@@ -6617,6 +6666,7 @@ impl Request {
                 | Self::GuiPage { .. }
                 | Self::GuiNodes { .. }
                 | Self::GuiGradeNodes { .. }
+                | Self::GuiNodeView { .. }
                 | Self::GuiPageTime { .. }
                 | Self::GuiState {}
                 | Self::GuiOnly { .. }

@@ -105,6 +105,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.copy", &["node", "clip"]),
     ("grade.paste", &["node", "clips"]),
     ("grade.swap", &["node", "with", "clip"]),
+    ("grade.cleanup", &["clip"]),
     ("grade.keys.add", &["clip"]),
     ("grade.keys.set", &["clip"]),
     ("grade.keys.move", &["clip"]),

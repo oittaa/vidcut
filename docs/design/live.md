@@ -429,11 +429,13 @@ The bar and the Jobs button:
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
   - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.
   - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
+  - In List View, the current row has a red outline (`CURRENT_ROW`). It is the red of the active angle (`ACTIVE_ANGLE`).
   - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.
   - Another clip, another grade mode or another timeline selects a node by `color.switching_clips` (`Workspace::settle_grade`). With the timeline grade shown, the clip at the playhead counts too (`EffectsPage::grade_seen`).
   - `EffectsPage::grade_left` keeps the current node of each grade that the page showed. `Snapshot::switching_clips` holds the preference.
   - A click on the number of a corrector gives `Done::switched`. The page then sends `grade.set` with `on`, and the selection stays.
   - The label of a node is the `Tile::note` above it. Node Label and a double-click start an edit in place (`NodeView::name`). Enter gives `Done::named`, and the page sends `grade.set` with `label`.
+  - In List View, the label is in the row, and Node Label edits it there. The graph and the list use one edit field (`label_field`).
   - The badges of a corrector (`Badge`) come from the values that differ from the usual values (`badges`). The Keyframes badge comes from `GradeNode::is_animated`. Each grade edit keeps that state in `animated` (`edited`).
   - The option menu at the top right of the Node Editor sets `color.switching_clips` with `preferences.set`.
   - Previous Node and Next Node step through the correctors in number order and wrap. They send `gui.grade_nodes`.
@@ -441,6 +443,10 @@ The bar and the Jobs button:
   - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
   - On a mixer, the keys add only a serial node or an appended node, as the menu does.
   - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
+  - `gui.node_view` asks a zoom of the shown Node Editor (`NodeView::ask`). The editor does it on its next frame, with its own size (`zoomed`).
+  - Cleanup Node Graph sends `grade.cleanup` with the `area` that the editor shows, less a margin and the size of a node (`NodeView::area`). The zoom stays.
+  - `NodeView` keeps the rectangle of its last frame for the area. Only the graph view has the menu with Cleanup Node Graph.
+  - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
   - A tile with `Tile::drops` can land on another such tile or on a link (`Dropped`). `grade_dropped` sends `grade.swap`, `grade.paste`, or one `apply` that inserts the node.
   - An Alt-drag builds the settings with `ops::grade::copy` from the shown project. Ctrl+C sends `grade.copy`; the live core keeps its answer (`node_clipboard`) for `grade.paste`.
   - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.set` and `grade.clear`.

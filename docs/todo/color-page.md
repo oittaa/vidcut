@@ -30,9 +30,8 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 **To do:**
 
-- The thumbnails (p. 3390).
+- The thumbnails (p. 3390), also in the rows of List View.
 - Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3394). They need windows.
-- Cleanup Node Graph, Toggle Display Mode, Zoom to Window and the Layer List view (pp. 3386–3387, 3398).
 - The Nodes submenu of the Color menu (pp. 3392, 3394). The order of its items needs a measurement.
 - The key input and output of each node, the Key Mixer, and Key Output Gain and Offset. Measured in Resolve Studio 21.2 with float renders:
   - smax(a, b) = max(a, b) + 0.5 max(0, 0.5 − |a − b|)². L(x) = (8x − 1) / 7. U(a, b) = L(smax(a, b)). Q(x) = U(0, x).
@@ -46,7 +45,7 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
   - In a Parallel Mixer, out = x + Σ kᵢ (nᵢ − x).
   - The errors are below 8.2e-7. The record is in `fixtures/color/NOTES.md` of the test data.
   - A Layer Mixer that is off keeps the Key Output Gain of its inputs.
-- Lock Node and Remove One Input in the menu of a mixer. Measure first what each one does.
+- Lock Node and Remove One Input in the menu of a mixer. Measure first what each one does. List View then shows the lock.
 - Measure in Resolve, then match:
   - Remove One Input: which input goes, and the least number of inputs.
   - Lock Node: what a locked node refuses.
