@@ -2462,6 +2462,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. Else it is removed.
   - A dissolve to a clip that is not selected is removed.
   - Subtitle items stay out. Passing a subtitle item with other items leaves it on its subtitle track, and a subtitle alone makes no compound clip.
+    - vidcut: `edit.compound` takes clip ids only, so a subtitle cue id is refused.
 - **Locked tracks:** a selected item on a locked track stays out, and the other items go in.
 - **In and Out marks:** the scripting call does not use them. It takes whole items.
 - **The window:**

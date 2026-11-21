@@ -1468,7 +1468,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 ## X163. A compound clip takes its clips whole
 
 - **Resolve:** ([spec §8.18](spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
-  - The window of New Compound Clip has a name and a start timecode (p. 1052).
   - A selection can hold only the picture or only the sound of a linked clip.
   - A selected item on a locked track stays out, and the other items go in.
   - Convert In and Out to Compound Clip ignores a lock. It cuts a locked track and takes its clips inside.
@@ -1476,7 +1475,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. It then plays inside.
   - Decompose in Place has a submenu: Using Clips Only and Preserving Audio Data…
 - **vidcut:**
-  - The window has only a name.
   - A clip goes in with its picture and its sound.
   - A clip on a locked track refuses the request. In Convert In and Out to Compound Clip, a clip in the range on a locked track refuses it too.
   - A range with no clips refuses the request, with a message.
@@ -1505,7 +1503,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - A pan of 1 pixel, a zoom of 0.99, a crop of 1 pixel or a rotation of 0.1°.
     - An opacity of 50% on the picture inside.
   - A title alone does not act in this way. Its mode mixes with the tracks below.
-  - A Vignette on the compound clip also keeps the mode. A Sharpen keeps it only with one of those changes.
+  - A Vignette on the compound clip also brings back the rule. A Sharpen alone does not.
 - **vidcut:**
   - The mode of one picture always mixes with the tracks below.
 - **Why:**
