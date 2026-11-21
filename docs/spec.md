@@ -3061,6 +3061,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the key out acts in serial nodes and in the mixers as measured.
   - vidcut: each keyframe of a corrector holds its Key Output. A change goes to a keyframe as the values do.
   - vidcut: Gain and Offset blend as the values do. Invert changes on the frame of the next keyframe.
+  - vidcut: a corrector has one keyframe track, so the Key Output has no track of its own ([todo](todo/gaps.md)).
   - vidcut: the Key palette shows the Key Output of the keyframe that a change goes to.
   - vidcut: keys, Key Input, the Qualifier controls and the Key Mixer come later ([todo](todo/color-page.md)).
 
