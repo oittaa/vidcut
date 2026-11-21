@@ -9,8 +9,8 @@ use super::{
 };
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Compound, CompoundTarget, Kept, Marker, Marks, OpenCompound, PooledCompound, Project,
-    Settings, Track, TrackKind,
+    Clip, Compound, CompoundTarget, Marker, Marks, OpenCompound, Project, Settings, Track,
+    TrackClip, TrackKind,
 };
 use crate::otio;
 use crate::time::{Rational, TimeSpec, format_timecode};
@@ -90,7 +90,7 @@ fn lift(p: &mut Project, ids: &HashSet<String>, kind: TrackKind, first: i64) -> 
     lifted
 }
 
-fn picture_tracks(whole: &[Track]) -> Vec<Track> {
+pub(crate) fn picture_tracks(whole: &[Track]) -> Vec<Track> {
     whole
         .iter()
         .filter(|t| t.kind == TrackKind::Video)
@@ -135,7 +135,7 @@ fn sound_part(c: &Clip) -> Option<Clip> {
     Some(part)
 }
 
-fn sound_tracks(whole: &[Track]) -> Vec<Track> {
+pub(crate) fn sound_tracks(whole: &[Track]) -> Vec<Track> {
     let mut sound = Vec::new();
     let mut under = 0;
     for t in whole {
@@ -171,7 +171,7 @@ fn number(t: &Track) -> usize {
     t.id[1..].parse().unwrap_or(1)
 }
 
-fn end_of(whole: &[Track]) -> i64 {
+pub(crate) fn end_of(whole: &[Track]) -> i64 {
     let clips = whole
         .iter()
         .flat_map(|t| &t.clips)
@@ -187,29 +187,6 @@ fn end_of(whole: &[Track]) -> i64 {
             })
     });
     clips.chain(fades).max().unwrap_or(0)
-}
-
-fn stack_of(p: &mut Project, whole: &[Track], name: &str, frames: i64) -> Result<Kept> {
-    stack_of_with_id(p, whole, name, frames, p.fps(), None)
-}
-
-fn stack_of_with_id(
-    p: &mut Project,
-    whole: &[Track],
-    name: &str,
-    frames: i64,
-    fps: Rational,
-    seq_id: Option<&str>,
-) -> Result<Kept> {
-    let mut inner = Project::new(Settings {
-        fps,
-        ..p.flat_settings()
-    });
-    inner.tracks = whole.to_vec();
-    inner.media = std::mem::take(&mut p.media);
-    let stack = otio::made_stack(&inner, name, frames, seq_id);
-    p.media = inner.media;
-    stack.map(Kept::from)
 }
 
 fn picture_target(p: &mut Project, lowest: usize, span: (i64, i64)) -> String {
@@ -266,9 +243,7 @@ pub fn nest(
         }
     }
     let span = span_of(p, &ids);
-    let nested = build(p, &ids, span, name, start_tc)?;
-    keep_copy(p, &nested, bin);
-    Ok(nested)
+    build(p, &ids, span, name, bin, start_tc)
 }
 
 fn checked_bin(p: &Project, bin: &str) -> Result<()> {
@@ -276,37 +251,6 @@ fn checked_bin(p: &Project, bin: &str) -> Result<()> {
         return Ok(());
     }
     Err(Error::not_found(format!("no bin {bin}")))
-}
-
-fn keep_copy(p: &mut Project, nested: &Nested, bin: &str) {
-    let hosts: Vec<Clip> = nested
-        .clips
-        .iter()
-        .filter_map(|id| p.clip(id).cloned())
-        .collect();
-    let part = |picture: bool| {
-        hosts
-            .iter()
-            .find(|c| c.video == picture)
-            .and_then(|c| c.compound.clone())
-    };
-    let (picture, sound) = (part(true), part(false));
-    let name = hosts
-        .iter()
-        .find_map(|c| c.name.clone())
-        .unwrap_or_default();
-    let id = p.alloc_pooled_compound_id();
-    let fps = p.fps();
-    let drop_frame = p.counts_drop_frame();
-    p.compounds.push(PooledCompound {
-        id,
-        name,
-        bin: bin.to_string(),
-        fps,
-        drop_frame,
-        picture,
-        sound,
-    });
 }
 
 pub fn pool_range(
@@ -319,17 +263,15 @@ pub fn pool_range(
     checked_bin(p, bin)?;
     let mut copy = p.clone();
     let nested = nest_range(&mut copy, span, name, bin, start_tc)?;
-    let made = copy.compounds.pop().expect("a nest keeps a copy");
-    let id = p.alloc_pooled_compound_id();
-    p.compounds.push(PooledCompound {
-        id: id.clone(),
-        ..made
-    });
+    let mut made = copy.compounds.pop().expect("a nest keeps a copy");
+    let id = p.alloc_compound_id();
+    made.id = id.clone();
+    p.compounds.push(made);
     Ok((id, nested.warnings))
 }
 
 pub fn remove_pooled(p: &mut Project, id: &str) -> Result<()> {
-    if !p.compounds.iter().any(|x| x.id == id) {
+    if p.pooled_compound(id).is_none() {
         return Err(Error::not_found(format!("no compound clip {id}")));
     }
     if p.compound_path
@@ -338,7 +280,10 @@ pub fn remove_pooled(p: &mut Project, id: &str) -> Result<()> {
     {
         close_all(p)?;
     }
-    p.compounds.retain(|x| x.id != id);
+    if let Some(k) = p.compound_mut(id) {
+        k.removed = true;
+        k.bin.clear();
+    }
     Ok(())
 }
 
@@ -351,7 +296,8 @@ struct Host<'a> {
 fn put_host(
     p: &mut Project,
     host: &Host,
-    (kind, part): (TrackKind, Compound),
+    kind: TrackKind,
+    compound_id: &str,
     clips: &mut Vec<String>,
 ) -> Result<()> {
     let ti = ensure_track(p, &format!("{}{}", tracks::prefix(kind), host.number))?;
@@ -362,7 +308,7 @@ fn put_host(
     let mut c = block_clip(p.alloc_clip_id(), (a, b - a), None, None);
     c.video = kind == TrackKind::Video;
     c.name = Some(host.name.to_string());
-    c.compound = Some(part);
+    c.compound = Some(compound_id.to_string());
     clips.push(c.id.clone());
     p.tracks[ti].clips.push(c);
     p.tracks[ti].sort();
@@ -409,41 +355,29 @@ pub fn place_pooled(
     track: Option<&str>,
     how: Place,
 ) -> Result<Nested> {
-    let mut item = p
-        .compounds
-        .iter()
-        .find(|x| x.id == id)
+    let item = p
+        .pooled_compound(id)
         .cloned()
         .ok_or_else(|| Error::not_found(format!("no compound clip {id}")))?;
-    if p.compound_path
-        .iter()
-        .any(|c| matches!(&c.target, CompoundTarget::Pooled { compound } if compound == &item.id))
+    let open_ids: HashSet<String> = p.compound_path.iter().map(|c| c.compound.clone()).collect();
+    let open_seq = open_sequence_ids(p);
+    if (!open_ids.is_empty() || !open_seq.is_empty())
+        && holds_compound(p, &item.id, &open_ids, &open_seq)
     {
         return Err(Error::invalid("a compound clip cannot hold itself"));
     }
-    let open_seq = open_sequence_ids(p);
-    if !open_seq.is_empty() && item.blocks().any(|b| holds_any(b, &open_seq)) {
-        return Err(Error::invalid("a compound clip cannot hold itself"));
-    }
-    if item.frames() < 1 {
+    if item.frames < 1 {
         return Err(Error::invalid("compound clip is empty"));
     }
-    let from_df = item.counts_drop_frame();
-    let to_df = p.counts_drop_frame();
-    if let Some(r) = super::conform::Rates::with_drop(item.fps, from_df, p.fps(), to_df) {
-        super::conform::pooled(p, &mut item, r);
-    } else if from_df != to_df {
-        let base = p.flat_settings();
-        let from = settings_with(&base, item.fps, from_df);
-        let to = settings_with(&base, p.fps(), to_df);
-        for b in item.blocks_mut() {
-            super::conform::relabel_compound(b, &from, &to);
-        }
+    let frames = p.compound_frames(&item);
+    if frames < 1 {
+        return Err(Error::invalid(
+            "compound clip is shorter than one timeline frame",
+        ));
     }
     if let Some(t) = track {
         ensure_track(p, t)?;
     }
-    let frames = item.frames();
     let mut at = at.unwrap_or_else(|| p.end());
     let number = track.and_then(|t| t.get(1..)).unwrap_or("1");
     let ripples = number == "1" && how != Place::Overwrite;
@@ -460,9 +394,10 @@ pub fn place_pooled(
         name: &item.name,
         span: (at, at + frames),
     };
+    let (video, sound) = (item.has_picture() || !item.has_sound(), item.has_sound());
     let mut clips = Vec::new();
-    if let Some(k) = item.picture.clone() {
-        put_host(p, &host, (TrackKind::Video, k), &mut clips)?;
+    if video {
+        put_host(p, &host, TrackKind::Video, &item.id, &mut clips)?;
     }
     if ripples {
         let kept: Vec<(i64, i64)> = old
@@ -480,8 +415,8 @@ pub fn place_pooled(
             },
         );
     }
-    if let Some(k) = item.sound.clone() {
-        put_host(p, &host, (TrackKind::Audio, k), &mut clips)?;
+    if sound {
+        put_host(p, &host, TrackKind::Audio, &item.id, &mut clips)?;
     }
     let mut warnings = Vec::new();
     let dropped = otio::transitions::prune(p);
@@ -546,9 +481,7 @@ pub fn nest_range(
     if ids.is_empty() {
         return Err(Error::invalid("no clips between In and Out"));
     }
-    let nested = build(p, &ids, (a, b), name, start_tc)?;
-    keep_copy(p, &nested, bin);
-    Ok(nested)
+    build(p, &ids, (a, b), name, bin, start_tc)
 }
 
 fn build(
@@ -556,6 +489,7 @@ fn build(
     ids: &HashSet<String>,
     span: (i64, i64),
     name: Option<&str>,
+    bin: &str,
     start_tc: i64,
 ) -> Result<Nested> {
     let frames = span.1 - span.0;
@@ -571,21 +505,20 @@ fn build(
         .map(|i| p.tracks[i].id.clone());
     let mut whole = lift(p, ids, TrackKind::Video, span.0);
     whole.extend(lift(p, ids, TrackKind::Audio, span.0));
-    let stack = stack_of(p, &whole, &name, frames)?;
     let (picture, sound) = (picture_tracks(&whole), sound_tracks(&whole));
+    let cid = p.alloc_compound_id();
+    let seq_id = otio::stack_id(&json!({
+        "id": cid,
+        "name": name,
+        "frames": frames,
+        "tracks": whole,
+    }));
     let mut clips = Vec::new();
-    let mut put = |p: &mut Project, track: String, video: bool, tracks: Vec<Track>| {
+    let mut put = |p: &mut Project, track: String, video: bool| {
         let mut host = block_clip(p.alloc_clip_id(), (span.0, frames), None, None);
         host.video = video;
         host.name = Some(name.clone());
-        host.compound = Some(Compound {
-            stack: stack.clone(),
-            frames,
-            tracks,
-            made_from: whole.clone(),
-            markers: Vec::new(),
-            start_tc,
-        });
+        host.compound = Some(cid.clone());
         clips.push(host.id.clone());
         let t = p.track_mut(&track).expect("a track of the project");
         t.clips.push(host);
@@ -594,12 +527,29 @@ fn build(
     if !picture.is_empty() {
         let lowest = lowest_picture.expect("a picture comes from a video track");
         let track = picture_target(p, lowest, span);
-        put(p, track, true, picture);
+        put(p, track, true);
     }
     if !sound.is_empty() {
         let track = sound_target(p, lowest_sound, span);
-        put(p, track, false, sound);
+        put(p, track, false);
     }
+    let fps = p.fps();
+    let drop_frame = p.counts_drop_frame();
+    p.compounds.push(Compound {
+        id: cid,
+        name,
+        bin: bin.to_string(),
+        removed: false,
+        sequence_id: Some(seq_id),
+        fps,
+        drop_frame,
+        start_tc,
+        frames,
+        tracks: whole,
+        marks: Marks::default(),
+        markers: Vec::new(),
+        kept_otio: None,
+    });
     let mut warnings = Vec::new();
     let dropped = otio::transitions::prune(p);
     if dropped > 0 {
@@ -608,15 +558,11 @@ fn build(
     Ok(Nested { clips, warnings })
 }
 
-pub fn is_made(c: &Clip) -> bool {
-    c.compound.as_ref().is_some_and(|k| !k.made_from.is_empty())
-}
-
 pub fn leads(p: &Project, ids: &[String]) -> Vec<String> {
     let mut kept: Vec<String> = Vec::new();
     for id in ids {
-        let made = p.clip(id).is_some_and(is_made);
-        if made && otio::tied(p, id).iter().any(|x| kept.contains(x)) {
+        let compound = p.clip(id).is_some_and(|c| c.compound.is_some());
+        if compound && otio::tied(p, id).iter().any(|x| kept.contains(x)) {
             continue;
         }
         kept.push(id.clone());
@@ -741,11 +687,19 @@ pub(crate) fn unnest(
     }
     let lead = hosts.iter().find(|(_, c)| c.video).unwrap_or(&hosts[0]);
     let block = lead.1.clone();
-    let k = block.compound.as_ref().expect("a compound clip");
+    let cid = block.compound.as_deref().expect("a compound clip");
+    let mut k = p.compound(cid).expect("compound exists").clone();
+    if let Some(r) = super::conform::Rates::new(k.fps, p.fps()) {
+        for t in &mut k.tracks {
+            super::conform::track(p, t, r);
+        }
+    }
     let source = if hosts.len() > 1 {
-        &k.made_from
+        k.tracks
+    } else if block.video {
+        picture_tracks(&k.tracks)
     } else {
-        &k.tracks
+        sound_tracks(&k.tracks)
     };
     let span = (block.start, block.end());
     let mut made = Vec::new();
@@ -769,32 +723,58 @@ pub(crate) fn unnest(
 fn open_sequence_ids(p: &Project) -> HashSet<String> {
     p.compound_path
         .iter()
-        .filter_map(|c| c.sequence_id.clone())
+        .filter_map(|oc| p.compound(&oc.compound)?.sequence_id.clone())
         .collect()
 }
 
-pub(crate) fn holds_any(k: &Compound, ids: &HashSet<String>) -> bool {
-    if otio::sequence_id(k).is_some_and(|s| ids.contains(s)) || otio::stack_holds_any(&k.stack, ids)
+fn holds_compound_inner(
+    p: &Project,
+    cid: &str,
+    open_ids: &HashSet<String>,
+    open_seq: &HashSet<String>,
+    seen: &mut HashSet<String>,
+) -> bool {
+    if open_ids.contains(cid) || !seen.insert(cid.to_string()) {
+        return open_ids.contains(cid);
+    }
+    let Some(k) = p.compound(cid) else {
+        return false;
+    };
+    if k.sequence_id
+        .as_deref()
+        .is_some_and(|s| open_seq.contains(s))
+        || k.kept_otio
+            .as_ref()
+            .is_some_and(|s| otio::stack_holds_any(s, open_seq))
     {
         return true;
     }
-    k.tracks
+    p.compound_tracks(k)
         .iter()
-        .chain(&k.made_from)
         .flat_map(|t| &t.clips)
-        .filter_map(|c| c.compound.as_ref())
-        .any(|inner| holds_any(inner, ids))
+        .filter_map(|c| c.compound.as_deref())
+        .any(|inner| holds_compound_inner(p, inner, open_ids, open_seq, seen))
+}
+
+pub(crate) fn holds_compound(
+    p: &Project,
+    cid: &str,
+    open_ids: &HashSet<String>,
+    open_seq: &HashSet<String>,
+) -> bool {
+    holds_compound_inner(p, cid, open_ids, open_seq, &mut HashSet::new())
 }
 
 pub(crate) fn check_no_cycle(p: &Project, clips: &[crate::model::TrackClip]) -> Result<()> {
+    let open_ids: HashSet<String> = p.compound_path.iter().map(|c| c.compound.clone()).collect();
     let open_seq = open_sequence_ids(p);
-    if open_seq.is_empty() {
+    if open_ids.is_empty() && open_seq.is_empty() {
         return Ok(());
     }
     if clips
         .iter()
-        .filter_map(|tc| tc.clip.compound.as_ref())
-        .any(|k| holds_any(k, &open_seq))
+        .filter_map(|tc| tc.clip.compound.as_deref())
+        .any(|cid| holds_compound(p, cid, &open_ids, &open_seq))
     {
         return Err(Error::invalid("a compound clip cannot hold itself"));
     }
@@ -802,16 +782,203 @@ pub(crate) fn check_no_cycle(p: &Project, clips: &[crate::model::TrackClip]) -> 
 }
 
 pub(crate) fn check_clips_no_cycle(p: &Project, clip_ids: &[String]) -> Result<()> {
+    let open_ids: HashSet<String> = p.compound_path.iter().map(|c| c.compound.clone()).collect();
     let open_seq = open_sequence_ids(p);
-    if open_seq.is_empty() {
+    if open_ids.is_empty() && open_seq.is_empty() {
         return Ok(());
     }
     let hit = clip_ids
         .iter()
-        .filter_map(|id| p.clip(id).and_then(|c| c.compound.as_ref()))
-        .any(|k| holds_any(k, &open_seq));
+        .filter_map(|id| p.clip(id).and_then(|c| c.compound.as_deref()))
+        .any(|cid| holds_compound(p, cid, &open_ids, &open_seq));
     if hit {
         return Err(Error::invalid("a compound clip cannot hold itself"));
+    }
+    Ok(())
+}
+
+pub(crate) fn check_imported_no_cycle(p: &Project, clips: &[otio::ImportedClip]) -> Result<()> {
+    let open_ids: HashSet<String> = p.compound_path.iter().map(|c| c.compound.clone()).collect();
+    let open_seq = open_sequence_ids(p);
+    if open_ids.is_empty() && open_seq.is_empty() {
+        return Ok(());
+    }
+    let hit = clips.iter().filter_map(|c| c.compound.as_ref()).any(|k| {
+        k.compound_id
+            .as_deref()
+            .is_some_and(|id| open_ids.contains(id))
+            || k.sequence_id
+                .as_deref()
+                .is_some_and(|s| open_seq.contains(s))
+            || otio::stack_holds_any(&k.stack, &open_seq)
+    });
+    if hit {
+        return Err(Error::invalid("a compound clip cannot hold itself"));
+    }
+    Ok(())
+}
+
+pub(crate) fn copied_compounds(p: &Project, clips: &[TrackClip]) -> Vec<Compound> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    let mut pending: Vec<String> = clips
+        .iter()
+        .filter_map(|tc| tc.clip.compound.clone())
+        .collect();
+    while let Some(cid) = pending.pop() {
+        if !seen.insert(cid.clone()) {
+            continue;
+        }
+        let Some(k) = p.compound(&cid) else {
+            continue;
+        };
+        let sheet = p.compound_sheet(k);
+        for c in sheet.tracks.iter().flat_map(|t| &t.clips) {
+            if let Some(child) = &c.compound {
+                pending.push(child.clone());
+            }
+        }
+        let mut copy = k.clone();
+        copy.tracks = sheet.tracks.to_vec();
+        copy.marks = sheet.marks.clone();
+        out.push(copy);
+    }
+    out
+}
+
+fn check_cycle_from<'a>(
+    p: &'a Project,
+    cid: &'a str,
+    state: &mut HashMap<&'a str, u8>,
+) -> Result<()> {
+    match state.get(cid).copied() {
+        Some(1) => return Err(Error::invalid("a compound clip cannot hold itself")),
+        Some(_) => return Ok(()),
+        None => {}
+    }
+    state.insert(cid, 1);
+    if let Some(k) = p.compound(cid) {
+        for c in p.compound_tracks(k).iter().flat_map(|t| &t.clips) {
+            if let Some(inner) = &c.compound {
+                check_cycle_from(p, inner, state)?;
+            }
+        }
+    }
+    state.insert(cid, 2);
+    Ok(())
+}
+
+fn same_compound(a: &Compound, b: &Compound) -> bool {
+    match (&a.sequence_id, &b.sequence_id) {
+        (Some(x), Some(y)) => x == y,
+        (None, None) => {
+            a.name == b.name
+                && a.fps == b.fps
+                && a.drop_frame == b.drop_frame
+                && a.start_tc == b.start_tc
+                && a.frames == b.frames
+                && a.kept_otio == b.kept_otio
+                && a.tracks == b.tracks
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn restore_copied(
+    p: &mut Project,
+    clips: &mut [TrackClip],
+    compounds: &[Compound],
+) -> Result<()> {
+    if compounds.is_empty() {
+        return Ok(());
+    }
+    let mut remap: HashMap<String, String> = HashMap::new();
+    let mut added = Vec::new();
+    for k in compounds {
+        if remap.contains_key(&k.id) {
+            continue;
+        }
+        let existing = p
+            .compound(&k.id)
+            .filter(|e| same_compound(e, k))
+            .or_else(|| p.compounds.iter().find(|e| same_compound(e, k)));
+        if let Some(e) = existing {
+            remap.insert(k.id.clone(), e.id.clone());
+            continue;
+        }
+        if k.id.is_empty() {
+            return Err(Error::invalid("compound clip id is empty"));
+        }
+        if k.drop_frame && !k.fps.has_drop_frame() {
+            return Err(Error::invalid(format!(
+                "compound {} counts drop-frame at {}",
+                k.id, k.fps
+            )));
+        }
+        if k.start_tc < 0 {
+            return Err(Error::invalid("compound clip starts before 00:00:00:00"));
+        }
+        if k.frames < 0 {
+            return Err(Error::invalid(format!(
+                "compound {} has negative length {}",
+                k.id, k.frames
+            )));
+        }
+        let new_id = p.alloc_compound_id();
+        let mut copy = k.clone();
+        copy.id = new_id.clone();
+        copy.removed = true;
+        copy.bin.clear();
+        p.compounds.push(copy);
+        remap.insert(k.id.clone(), new_id.clone());
+        added.push(new_id);
+    }
+    for id in &added {
+        let k = p.compound_mut(id).expect("added above");
+        for c in k.tracks.iter_mut().flat_map(|t| &mut t.clips) {
+            if let Some(cid) = c.compound.as_mut()
+                && let Some(new_id) = remap.get(cid.as_str())
+            {
+                cid.clone_from(new_id);
+            }
+        }
+    }
+    for tc in clips.iter_mut() {
+        if let Some(cid) = tc.clip.compound.as_mut()
+            && let Some(new_id) = remap.get(cid.as_str())
+        {
+            cid.clone_from(new_id);
+        }
+    }
+    if added.is_empty() {
+        return Ok(());
+    }
+    for id in &added {
+        let k = p.compound(id).expect("added above");
+        for c in k.tracks.iter().flat_map(|t| &t.clips) {
+            if let Some(cid) = &c.compound {
+                let child = p
+                    .compound(cid)
+                    .ok_or_else(|| Error::invalid(format!("{}: unknown compound {cid}", c.id)))?;
+                let (lo, hi) = c.shown();
+                let frames = crate::time::rescale(child.frames, child.fps, k.fps);
+                if lo < 0 || hi > frames {
+                    return Err(Error::invalid(format!(
+                        "{}: source {lo}..{hi} outside its compound (0..{frames})",
+                        c.id
+                    )));
+                }
+            } else if !c.is_block() && p.media(&c.media).is_none() {
+                return Err(Error::not_found(format!(
+                    "no media {} in this project",
+                    c.media
+                )));
+            }
+        }
+    }
+    let mut state = HashMap::new();
+    for id in &added {
+        check_cycle_from(p, id, &mut state)?;
     }
     Ok(())
 }
@@ -821,9 +988,10 @@ pub fn breadcrumbs(p: &Project) -> Vec<Value> {
     if let Some(t) = p.timeline() {
         out.push(json!({ "kind": "timeline", "id": t.id, "name": t.name }));
     }
-    for (i, c) in p.compound_path.iter().enumerate() {
-        let mut entry = json!({ "kind": "compound", "depth": i, "name": c.name });
-        match &c.target {
+    for (i, oc) in p.compound_path.iter().enumerate() {
+        let name = p.compound(&oc.compound).map_or("", |k| k.name.as_str());
+        let mut entry = json!({ "kind": "compound", "depth": i, "name": name });
+        match &oc.target {
             CompoundTarget::Clip { clip } => entry["clip"] = json!(clip),
             CompoundTarget::Pooled { compound } => entry["compound"] = json!(compound),
         }
@@ -834,14 +1002,14 @@ pub fn breadcrumbs(p: &Project) -> Vec<Value> {
 
 pub fn path_json(p: &Project) -> Value {
     json!({
-        "name": p.open_compound().map_or("", |c| c.name.as_str()),
+        "name": p.open_compound().map_or("", |k| k.name.as_str()),
         "fps": p.fps(),
         "start_tc": p.timecode(0),
         "path": breadcrumbs(p),
     })
 }
 
-fn otio_has_items(v: &Value) -> bool {
+pub(crate) fn otio_has_items(v: &Value) -> bool {
     let s = v["OTIO_SCHEMA"].as_str().unwrap_or("");
     if s.starts_with("Clip.") || otio::is_compound_stack(v) {
         return true;
@@ -853,39 +1021,9 @@ fn otio_has_items(v: &Value) -> bool {
         .any(otio_has_items)
 }
 
-fn extract_pooled_tracks(pool: &PooledCompound) -> (Vec<Track>, Vec<Marker>) {
-    let primary = pool.picture.as_ref().or(pool.sound.as_ref());
-    if let Some(k) = primary
-        && !k.made_from.is_empty()
-    {
-        return (k.made_from.clone(), k.markers.clone());
-    }
-    let mut out: Vec<Track> = pool
-        .picture
-        .iter()
-        .flat_map(|k| k.tracks.iter().cloned())
-        .collect();
-    out.extend(pool.sound.iter().flat_map(|k| k.tracks.iter().cloned()));
-    let markers = primary.map_or_else(Vec::new, |k| k.markers.clone());
-    (out, markers)
-}
-
-fn combined_tracks(lead: &Compound, partner: Option<&Compound>) -> Vec<Track> {
-    let all = lead
-        .tracks
-        .iter()
-        .chain(partner.into_iter().flat_map(|k| &k.tracks));
-    let mut out: Vec<Track> = all
-        .clone()
-        .filter(|t| t.kind == TrackKind::Video)
-        .cloned()
-        .collect();
-    out.extend(all.filter(|t| t.kind == TrackKind::Audio).cloned());
-    out
-}
-
 fn collect_ids(
     p: &Project,
+    skip_compound: Option<&str>,
     clips: &mut HashSet<String>,
     transitions: &mut HashSet<String>,
     markers: &mut HashSet<String>,
@@ -903,13 +1041,21 @@ fn collect_ids(
             .iter()
             .flat_map(|m| m.markers.iter().map(|k| k.id.clone())),
     );
+    let open_tl = p.checked_out_timeline();
     for t in &p.timelines {
+        if Some(t.id.as_str()) == open_tl {
+            continue;
+        }
         scan(&t.tracks);
         markers.extend(t.markers.iter().map(|k| k.id.clone()));
     }
-    for oc in &p.compound_path {
-        scan(&oc.tracks);
-        markers.extend(oc.markers.iter().map(|k| k.id.clone()));
+    let open_k = p.checked_out_compound();
+    for k in &p.compounds {
+        if Some(k.id.as_str()) == open_k || Some(k.id.as_str()) == skip_compound {
+            continue;
+        }
+        scan(&k.tracks);
+        markers.extend(k.markers.iter().map(|m| m.id.clone()));
     }
 }
 
@@ -924,12 +1070,19 @@ fn renumber_list(video: &mut [Track], audio: &mut [Track]) {
 
 fn prepare_open_tracks(
     p: &mut Project,
+    skip_compound: &str,
     raw_tracks: Vec<Track>,
     raw_markers: Vec<Marker>,
 ) -> (Vec<Track>, Vec<Marker>) {
     let (mut used_clips, mut used_transitions, mut used_markers) =
         (HashSet::new(), HashSet::new(), HashSet::new());
-    collect_ids(p, &mut used_clips, &mut used_transitions, &mut used_markers);
+    collect_ids(
+        p,
+        Some(skip_compound),
+        &mut used_clips,
+        &mut used_transitions,
+        &mut used_markers,
+    );
 
     let (mut video, mut audio): (Vec<Track>, Vec<Track>) = raw_tracks
         .into_iter()
@@ -981,40 +1134,38 @@ fn prepare_open_tracks(
     (out, markers)
 }
 
-struct OpenData {
-    name: String,
-    target: CompoundTarget,
-    fps: Rational,
-    drop_frame: bool,
-    sequence_id: Option<String>,
-    tracks: Vec<Track>,
-    markers: Vec<Marker>,
-    start_tc: i64,
-}
-
-fn push_open(p: &mut Project, data: OpenData) {
-    let (tracks, markers) = prepare_open_tracks(p, data.tracks, data.markers);
+fn push_open(p: &mut Project, cid: String, target: CompoundTarget, missing: &str) -> Result<Value> {
+    if p.compound_path.iter().any(|oc| oc.compound == cid) {
+        return Err(Error::invalid("that compound clip is already open"));
+    }
+    let k = p
+        .compound(&cid)
+        .cloned()
+        .ok_or_else(|| Error::not_found(format!("no compound clip {cid}")))?;
+    if k.sequence_id
+        .as_deref()
+        .is_some_and(|sid| open_sequence_ids(p).contains(sid))
+    {
+        return Err(Error::invalid("that compound clip is already open"));
+    }
+    if k.tracks.is_empty() && k.kept_otio.as_ref().is_some_and(|s| otio_has_items(s)) {
+        return Err(Error::invalid(format!("{missing}'s clips weren't found")));
+    }
+    let (tracks, markers) = prepare_open_tracks(p, &cid, k.tracks, k.markers);
+    if let Some(k) = p.compound_mut(&cid) {
+        k.tracks = tracks;
+        k.markers = markers;
+    }
     p.check_in();
     p.compound_path.push(OpenCompound {
-        id: data.target.key(),
-        name: data.name,
-        target: data.target,
-        fps: data.fps,
-        drop_frame: data.drop_frame,
-        sequence_id: data.sequence_id,
-        tracks,
-        marks: Marks::default(),
-        markers,
-        start_tc: data.start_tc,
+        compound: cid,
+        target,
     });
     p.check_out();
+    Ok(path_json(p))
 }
 
-pub fn open_clip(
-    p: &mut Project,
-    id: &str,
-    imported: Option<(Vec<Track>, Vec<Marker>)>,
-) -> Result<Value> {
+pub fn open_clip(p: &mut Project, id: &str) -> Result<Value> {
     let (ti, ci) = locate(p, id)?;
     if p.tracks[ti].clips[ci].compound.is_none() {
         return Err(Error::invalid(format!("{id} isn't a compound clip")));
@@ -1026,117 +1177,40 @@ pub fn open_clip(
         .find(|cid| p.clip(cid).is_some_and(|c| c.video))
         .cloned()
         .unwrap_or_else(|| id.to_string());
-    let lead = p.clip(&lead_id).expect("located").clone();
-    let partner = all_ids
-        .iter()
-        .find(|cid| *cid != &lead_id)
-        .and_then(|cid| p.clip(cid).and_then(|c| c.compound.clone()));
-    let k = lead.compound.expect("checked");
-    let seq_id = otio::sequence_id(&k).map(str::to_string);
-    if seq_id
-        .as_deref()
-        .is_some_and(|sid| open_sequence_ids(p).contains(sid))
-    {
-        return Err(Error::invalid("that compound clip is already open"));
-    }
-    let name = lead
-        .name
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            k.stack["name"]
-                .as_str()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| "Compound Clip".into());
-    let pooled_other_fps = seq_id.as_deref().and_then(|sid| {
-        p.compounds
-            .iter()
-            .find(|x| x.sequence_id() == Some(sid) && x.fps != p.fps())
-            .cloned()
-    });
-    let (open_fps, open_df, start_tc, raw_tracks, raw_markers) =
-        if let Some(pool) = pooled_other_fps {
-            let tc = pool.start_tc();
-            let (ts, ms) = extract_pooled_tracks(&pool);
-            (pool.fps, pool.counts_drop_frame(), tc, ts, ms)
-        } else if !k.made_from.is_empty() {
-            (
-                p.fps(),
-                p.counts_drop_frame(),
-                k.start_tc,
-                k.made_from.clone(),
-                k.markers.clone(),
-            )
-        } else if let Some((ts, ms)) = imported {
-            (p.fps(), p.counts_drop_frame(), k.start_tc, ts, ms)
-        } else {
-            let fallback = combined_tracks(&k, partner.as_ref());
-            if fallback.is_empty() && otio_has_items(&k.stack) {
-                return Err(Error::invalid(format!("{lead_id}'s clips weren't found")));
-            }
-            (
-                p.fps(),
-                p.counts_drop_frame(),
-                k.start_tc,
-                fallback,
-                k.markers.clone(),
-            )
-        };
+    let lead = p.clip(&lead_id).expect("located");
+    let cid = lead.compound.clone().expect("checked");
     push_open(
         p,
-        OpenData {
-            name,
-            target: CompoundTarget::Clip { clip: lead_id },
-            fps: open_fps,
-            drop_frame: open_df,
-            sequence_id: seq_id,
-            tracks: raw_tracks,
-            markers: raw_markers,
-            start_tc,
+        cid,
+        CompoundTarget::Clip {
+            clip: lead_id.clone(),
         },
-    );
-    Ok(path_json(p))
+        &lead_id,
+    )
 }
 
 pub fn open_pooled(p: &mut Project, query: &str) -> Result<Value> {
     let found = p
-        .compounds
-        .iter()
+        .pool_compounds()
         .find(|x| x.id == query)
-        .or_else(|| p.compounds.iter().find(|x| x.name == query))
-        .cloned()
+        .or_else(|| p.pool_compounds().find(|x| x.name == query))
+        .map(|k| (k.id.clone(), k.name.clone()))
         .ok_or_else(|| Error::not_found(format!("no compound clip {query:?}")))?;
     if p.compound_path.len() == 1
-        && matches!(&p.compound_path[0].target, CompoundTarget::Pooled { compound } if compound == &found.id)
+        && matches!(&p.compound_path[0].target, CompoundTarget::Pooled { compound } if compound == &found.0)
     {
         return Ok(path_json(p));
     }
     if !p.compound_path.is_empty() {
         close_all(p)?;
     }
-    let start_tc = found.start_tc();
-    let seq_id = found.sequence_id().map(str::to_string);
-    let drop_frame = found.counts_drop_frame();
-    let (raw_tracks, raw_markers) = extract_pooled_tracks(&found);
+    let cid = found.0.clone();
     push_open(
         p,
-        OpenData {
-            name: found.name,
-            target: CompoundTarget::Pooled { compound: found.id },
-            fps: found.fps,
-            drop_frame,
-            sequence_id: seq_id,
-            tracks: raw_tracks,
-            markers: raw_markers,
-            start_tc,
-        },
-    );
-    Ok(path_json(p))
+        cid,
+        CompoundTarget::Pooled { compound: found.0 },
+        &found.1,
+    )
 }
 
 pub fn close(p: &mut Project, to: Option<usize>) -> Result<Value> {
@@ -1152,7 +1226,7 @@ pub fn close(p: &mut Project, to: Option<usize>) -> Result<Value> {
     }
     let name = p
         .open_compound()
-        .map(|c| c.name.as_str())
+        .map(|k| k.name.as_str())
         .or_else(|| p.timeline().map(|t| t.name.as_str()));
     Ok(json!({
         "open": p.open_id(),
@@ -1181,333 +1255,26 @@ fn normalize_tracks(tracks: Vec<Track>) -> Vec<Track> {
     video.into_iter().chain(audio).collect()
 }
 
-fn strip_follows(tracks: &mut [Track]) {
-    for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
-        if let Some(title) = c.title.as_mut() {
-            title.follows = None;
-        }
-    }
-}
-
-fn conform_compound(
-    p: &mut Project,
-    k: &mut Compound,
-    from: (Rational, bool),
-    to: (Rational, bool),
-    name: &str,
-    seq_id: Option<&str>,
-) -> Result<()> {
-    let (from_fps, from_df) = (from.0, from.1 && from.0.has_drop_frame());
-    let (to_fps, to_df) = (to.0, to.1 && to.0.has_drop_frame());
-    if let Some(r) = super::conform::Rates::with_drop(from_fps, from_df, to_fps, to_df) {
-        super::conform::compound(p, k, r);
-        let source = if k.made_from.is_empty() {
-            &k.tracks
-        } else {
-            &k.made_from
-        };
-        let frames = end_of(source);
-        k.frames = k.frames.max(frames);
-        k.stack = stack_of_with_id(p, source, name, frames, to_fps, seq_id)?;
-    } else if from_df != to_df {
-        let base = p.flat_settings();
-        let from_s = settings_with(&base, from_fps, from_df);
-        let to_s = settings_with(&base, to_fps, to_df);
-        super::conform::relabel_compound(k, &from_s, &to_s);
-    }
-    Ok(())
-}
-
-struct Replacement<'a> {
-    sid: &'a str,
-    name: &'a str,
-    from: (Rational, bool),
-    pic: &'a Compound,
-    snd: &'a Compound,
-}
-
-fn updated_clip_compound(
-    p: &mut Project,
-    c: &Clip,
-    rep: &Replacement,
-    host: (Rational, bool),
-) -> Result<Compound> {
-    let mut k = if c.video {
-        rep.pic.clone()
-    } else {
-        rep.snd.clone()
-    };
-    conform_compound(p, &mut k, rep.from, host, rep.name, Some(rep.sid))?;
-    let old_frames = c.compound.as_ref().map_or(0, |old| old.frames);
-    k.frames = k.frames.max(c.shown().1).max(old_frames);
-    Ok(k)
-}
-
-fn pooled_blocks(
-    p: &mut Project,
-    rep: &Replacement,
-    pool: (Rational, bool),
-    old_frames: i64,
-) -> Result<(Option<Compound>, Option<Compound>)> {
-    let mut pic = (!rep.pic.tracks.is_empty()).then(|| rep.pic.clone());
-    let mut snd = (!rep.snd.tracks.is_empty()).then(|| rep.snd.clone());
-    if pic.is_none() && snd.is_none() {
-        pic = Some(rep.pic.clone());
-    }
-    for k in pic.iter_mut().chain(&mut snd) {
-        strip_follows(&mut k.tracks);
-        strip_follows(&mut k.made_from);
-        conform_compound(p, k, rep.from, pool, rep.name, Some(rep.sid))?;
-        k.frames = k.frames.max(old_frames);
-    }
-    Ok((pic, snd))
-}
-
-fn propagate_in_compound(
-    p: &mut Project,
-    k: &mut Compound,
-    video: bool,
-    shown_end: i64,
-    host: (Rational, bool),
-    rep: &Replacement,
-    visited: &mut HashSet<String>,
-) -> Result<bool> {
-    let outer_sid = otio::sequence_id(k).map(str::to_string);
-    if let Some(sid) = outer_sid.as_ref()
-        && !visited.insert(sid.clone())
-    {
-        return Ok(false);
-    }
-    let outer_name = k.stack["name"]
-        .as_str()
-        .unwrap_or("Compound Clip")
-        .to_string();
-    let old_frames = k.frames;
-    let res =
-        if !k.made_from.is_empty() {
-            let mut whole = std::mem::take(&mut k.made_from);
-            let hit = propagate_in_tracks(p, &mut whole, host, rep, None, visited);
-            let out = match hit {
-                Ok(true) => {
-                    let frames = end_of(&whole);
-                    k.tracks = if video {
-                        picture_tracks(&whole)
-                    } else {
-                        sound_tracks(&whole)
-                    };
-                    k.frames = old_frames.max(frames).max(shown_end);
-                    stack_of_with_id(p, &whole, &outer_name, frames, host.0, outer_sid.as_deref())
-                        .map(|stack| {
-                            k.stack = stack;
-                            true
-                        })
-                }
-                other => other,
-            };
-            k.made_from = whole;
-            out
-        } else {
-            let mut inner = std::mem::take(&mut k.tracks);
-            let hit = propagate_in_tracks(p, &mut inner, host, rep, None, visited);
-            let out = match hit {
-                Ok(true) => {
-                    let frames = end_of(&inner);
-                    k.frames = old_frames.max(frames).max(shown_end);
-                    stack_of_with_id(p, &inner, &outer_name, frames, host.0, outer_sid.as_deref())
-                        .map(|stack| {
-                            k.stack = stack;
-                            true
-                        })
-                }
-                other => other,
-            };
-            k.tracks = inner;
-            out
-        };
-    if let Some(sid) = outer_sid.as_deref() {
-        visited.remove(sid);
-    }
-    res
-}
-
-fn propagate_in_tracks(
-    p: &mut Project,
-    tracks: &mut [Track],
-    host: (Rational, bool),
-    rep: &Replacement,
-    skip_ids: Option<&HashSet<String>>,
-    visited: &mut HashSet<String>,
-) -> Result<bool> {
-    let mut changed = false;
-    for t in tracks {
-        for c in &mut t.clips {
-            if skip_ids.is_none_or(|s| !s.contains(&c.id))
-                && c.compound
-                    .as_ref()
-                    .and_then(otio::sequence_id)
-                    .is_some_and(|s| s == rep.sid)
-            {
-                let mut updated = updated_clip_compound(p, c, rep, host)?;
-                strip_follows(&mut updated.tracks);
-                strip_follows(&mut updated.made_from);
-                c.compound = Some(updated);
-                changed = true;
-                continue;
-            }
-            let (video, shown_end) = (c.video, c.shown().1);
-            if let Some(k) = c.compound.as_mut()
-                && propagate_in_compound(p, k, video, shown_end, host, rep, visited)?
-            {
-                changed = true;
-            }
-        }
-    }
-    Ok(changed)
-}
-
 fn close_one(p: &mut Project) -> Result<()> {
+    let cid = p
+        .checked_out_compound()
+        .map(str::to_string)
+        .ok_or_else(|| Error::invalid("no compound clip is open"))?;
     let whole = normalize_tracks(std::mem::take(&mut p.tracks));
-    let markers = std::mem::take(&mut p.markers);
+    let inner_frames = end_of(&whole);
+    let empty = whole.is_empty();
+    p.tracks = whole;
     p.marks = Marks::default();
     p.subtitles.clear();
-    let open = p
-        .compound_path
-        .pop()
-        .ok_or_else(|| Error::invalid("no compound clip is open"))?;
+    if let Some(k) = p.compound_mut(&cid) {
+        k.frames = k.frames.max(inner_frames);
+        if empty {
+            k.kept_otio = None;
+        }
+    }
+    p.check_in();
+    p.compound_path.pop();
     p.check_out();
-
-    let inner_frames = end_of(&whole);
-    let pic_tracks = picture_tracks(&whole);
-    let snd_tracks = sound_tracks(&whole);
-    let open_rate = (open.fps, open.counts_drop_frame());
-    let stack = stack_of_with_id(
-        p,
-        &whole,
-        &open.name,
-        inner_frames,
-        open.fps,
-        open.sequence_id.as_deref(),
-    )?;
-    let pic_base = Compound {
-        stack: stack.clone(),
-        frames: inner_frames,
-        tracks: pic_tracks,
-        made_from: whole.clone(),
-        markers: markers.clone(),
-        start_tc: open.start_tc,
-    };
-    let snd_base = Compound {
-        stack,
-        frames: inner_frames,
-        tracks: snd_tracks,
-        made_from: whole,
-        markers,
-        start_tc: open.start_tc,
-    };
-    let sid = otio::sequence_id(&pic_base)
-        .map(str::to_string)
-        .unwrap_or_default();
-
-    let rep = Replacement {
-        sid: open.sequence_id.as_deref().unwrap_or(&sid),
-        name: &open.name,
-        from: open_rate,
-        pic: &pic_base,
-        snd: &snd_base,
-    };
-    let mut updated_targets = HashSet::new();
-    let mut updated_pooled: Option<String> = None;
-
-    match &open.target {
-        CompoundTarget::Clip { clip } => {
-            let mut ids = vec![clip.clone()];
-            ids.extend(otio::tied(p, clip));
-            let host = (p.fps(), p.counts_drop_frame());
-            for tid in ids {
-                if let Some((ti, ci)) = p.find_clip(&tid) {
-                    let c = p.tracks[ti].clips[ci].clone();
-                    let k = updated_clip_compound(p, &c, &rep, host)?;
-                    p.tracks[ti].clips[ci].compound = Some(k);
-                    updated_targets.insert(tid);
-                }
-            }
-        }
-        CompoundTarget::Pooled { compound } => {
-            if let Some(i) = p.compounds.iter().position(|x| &x.id == compound) {
-                let pool = (p.compounds[i].fps, p.compounds[i].counts_drop_frame());
-                let old_frames = p.compounds[i].frames();
-                let (pic, snd) = pooled_blocks(p, &rep, pool, old_frames)?;
-                p.compounds[i].picture = pic;
-                p.compounds[i].sound = snd;
-                updated_pooled = Some(compound.clone());
-            }
-        }
-    }
-
-    if let Some(old_sid) = open.sequence_id.as_deref() {
-        let rep = Replacement {
-            sid: old_sid,
-            ..rep
-        };
-        let mut compounds = std::mem::take(&mut p.compounds);
-        for item in &mut compounds {
-            if updated_pooled.as_deref() == Some(item.id.as_str()) {
-                continue;
-            }
-            let pool = (item.fps, item.counts_drop_frame());
-            if item.sequence_id() == Some(old_sid) {
-                let old_frames = item.frames();
-                let (pic, snd) = pooled_blocks(p, &rep, pool, old_frames)?;
-                item.picture = pic;
-                item.sound = snd;
-                continue;
-            }
-            for (video, slot) in [(true, &mut item.picture), (false, &mut item.sound)] {
-                if let Some(k) = slot.as_mut() {
-                    let mut visited = HashSet::new();
-                    propagate_in_compound(p, k, video, 0, pool, &rep, &mut visited)?;
-                }
-            }
-        }
-        p.compounds = compounds;
-
-        let host = (p.fps(), p.counts_drop_frame());
-        let mut tracks = std::mem::take(&mut p.tracks);
-        let mut visited = HashSet::new();
-        propagate_in_tracks(
-            p,
-            &mut tracks,
-            host,
-            &rep,
-            Some(&updated_targets),
-            &mut visited,
-        )?;
-        p.tracks = tracks;
-
-        let checked_out_tl = p.checked_out_timeline().map(str::to_string);
-        let project_fps = p.settings.fps;
-        let project_df = p.settings.drop_frame;
-        let mut timelines = std::mem::take(&mut p.timelines);
-        for t in &mut timelines {
-            if checked_out_tl.as_deref() == Some(t.id.as_str()) {
-                continue;
-            }
-            let fps = t.own.map_or(project_fps, |o| o.fps);
-            let df = t.own.map_or(project_df, |o| o.drop_frame) && fps.has_drop_frame();
-            let mut visited = HashSet::new();
-            propagate_in_tracks(p, &mut t.tracks, (fps, df), &rep, None, &mut visited)?;
-        }
-        p.timelines = timelines;
-
-        let mut path = std::mem::take(&mut p.compound_path);
-        for oc in &mut path {
-            let oc_rate = (oc.fps, oc.counts_drop_frame());
-            let mut visited = HashSet::new();
-            propagate_in_tracks(p, &mut oc.tracks, oc_rate, &rep, None, &mut visited)?;
-        }
-        p.compound_path = path;
-    }
-
     Ok(())
 }
 
@@ -1525,165 +1292,41 @@ fn settings_with(base: &Settings, fps: Rational, drop_frame: bool) -> Settings {
     }
 }
 
-fn propagate_tracks_start_tc(
-    tracks: &mut [Track],
-    sid: &str,
-    from: &Settings,
-    to: &Settings,
-    frames: i64,
-) {
-    let target = super::conform::relabel_start(from, to, frames);
-    for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
-        if let Some(k) = c.compound.as_mut() {
-            if otio::sequence_id(k) == Some(sid) {
-                k.start_tc = target;
-            }
-            otio::patch_stack_start_tc(k, sid, target);
-            propagate_tracks_start_tc(&mut k.tracks, sid, from, to, frames);
-            propagate_tracks_start_tc(&mut k.made_from, sid, from, to, frames);
-        }
-    }
-}
-
-fn propagate_start_tc(p: &mut Project, sid: &str, from: &Settings, frames: i64) {
-    let base = p.flat_settings();
-    let project_fps = p.settings.fps;
-    let project_df = p.settings.drop_frame;
-    for item in &mut p.compounds {
-        let item_to = settings_with(&base, item.fps, item.counts_drop_frame());
-        let target = super::conform::relabel_start(from, &item_to, frames);
-        let item_match = item.sequence_id() == Some(sid);
-        for b in item.blocks_mut() {
-            if item_match {
-                b.start_tc = target;
-            }
-            otio::patch_stack_start_tc(b, sid, target);
-            propagate_tracks_start_tc(&mut b.tracks, sid, from, &item_to, frames);
-            propagate_tracks_start_tc(&mut b.made_from, sid, from, &item_to, frames);
-        }
-    }
-    let active_to = p.flat_settings();
-    let mut tracks = std::mem::take(&mut p.tracks);
-    propagate_tracks_start_tc(&mut tracks, sid, from, &active_to, frames);
-    p.tracks = tracks;
-
-    let checked_out = p.checked_out_timeline().map(str::to_string);
-    let mut timelines = std::mem::take(&mut p.timelines);
-    for t in &mut timelines {
-        if checked_out.as_deref() == Some(t.id.as_str()) {
-            continue;
-        }
-        let tl_fps = t.own.map_or(project_fps, |o| o.fps);
-        let tl_df = t.own.map_or(project_df, |o| o.drop_frame);
-        let tl_to = settings_with(&base, tl_fps, tl_df);
-        propagate_tracks_start_tc(&mut t.tracks, sid, from, &tl_to, frames);
-    }
-    p.timelines = timelines;
-
-    let mut path = std::mem::take(&mut p.compound_path);
-    for oc in &mut path {
-        let oc_to = settings_with(&base, oc.fps, oc.counts_drop_frame());
-        let target = super::conform::relabel_start(from, &oc_to, frames);
-        if oc.sequence_id.as_deref() == Some(sid) {
-            oc.start_tc = target;
-        }
-        propagate_tracks_start_tc(&mut oc.tracks, sid, from, &oc_to, frames);
-    }
-    p.compound_path = path;
-}
-
 pub fn set_start_tc(p: &mut Project, target: SetTarget<'_>, tc: &TimeSpec) -> Result<Value> {
-    let (fmt, frames, sid) = match target {
-        SetTarget::Open => {
-            if p.compound_path.is_empty() {
-                return Err(Error::invalid("no compound clip is open"));
-            }
-            let fmt = p.flat_settings();
-            let frames = fmt.start_frames(tc)?;
-            let open = p.compound_path.last_mut().expect("non-empty");
-            open.start_tc = frames;
-            let sid = open.sequence_id.clone();
-            (fmt, frames, sid)
-        }
-        SetTarget::Pooled(query) => {
-            let idx = p
-                .compounds
-                .iter()
-                .position(|x| x.id == query)
-                .or_else(|| p.compounds.iter().position(|x| x.name == query))
-                .ok_or_else(|| Error::not_found(format!("no compound clip {query:?}")))?;
-            let fmt = settings_with(
-                &p.settings,
-                p.compounds[idx].fps,
-                p.compounds[idx].counts_drop_frame(),
-            );
-            let frames = fmt.start_frames(tc)?;
-            let id = p.compounds[idx].id.clone();
-            let sid = p.compounds[idx].sequence_id().map(str::to_string);
-            for b in p.compounds[idx].blocks_mut() {
-                b.start_tc = frames;
-            }
-            if sid.is_none()
-                && let Some(oc) = p.compound_path.first_mut()
-                && matches!(&oc.target, CompoundTarget::Pooled { compound } if compound == &id)
-            {
-                oc.start_tc = frames;
-            }
-            (fmt, frames, sid)
-        }
+    let cid = match target {
+        SetTarget::Open => p
+            .checked_out_compound()
+            .ok_or_else(|| Error::invalid("no compound clip is open"))?
+            .to_string(),
+        SetTarget::Pooled(query) => p
+            .pool_compounds()
+            .find(|x| x.id == query)
+            .or_else(|| p.pool_compounds().find(|x| x.name == query))
+            .map(|x| x.id.clone())
+            .ok_or_else(|| Error::not_found(format!("no compound clip {query:?}")))?,
         SetTarget::Clip(query_id) => {
             let (ti, ci) = locate(p, query_id)?;
-            if p.tracks[ti].clips[ci].compound.is_none() {
-                return Err(Error::invalid(format!("{query_id} isn't a compound clip")));
-            }
-            let fmt = p.flat_settings();
-            let frames = fmt.start_frames(tc)?;
-            let sid = p.tracks[ti].clips[ci]
+            p.tracks[ti].clips[ci]
                 .compound
-                .as_ref()
-                .and_then(otio::sequence_id)
-                .map(str::to_string);
-            let mut ids = vec![query_id.to_string()];
-            ids.extend(otio::tied(p, query_id));
-            for id in ids {
-                if let Some((tti, cci)) = p.find_clip(&id)
-                    && let Some(k) = p.tracks[tti].clips[cci].compound.as_mut()
-                {
-                    k.start_tc = frames;
-                }
-            }
-            (fmt, frames, sid)
+                .clone()
+                .ok_or_else(|| Error::invalid(format!("{query_id} isn't a compound clip")))?
         }
     };
-    if let Some(sid) = sid {
-        propagate_start_tc(p, &sid, &fmt, frames);
+    let (fps, drop_frame) = {
+        let k = p
+            .compound(&cid)
+            .ok_or_else(|| Error::not_found(format!("no compound clip {cid}")))?;
+        (k.fps, k.counts_drop_frame())
+    };
+    let fmt = settings_with(&p.settings, fps, drop_frame);
+    let frames = fmt.start_frames(tc)?;
+    if let Some(k) = p.compound_mut(&cid) {
+        k.start_tc = frames;
     }
     Ok(json!({
         "start_tc": format_timecode(0, fmt.fps, frames, fmt.counts_drop_frame()),
         "frames": frames,
     }))
-}
-
-fn relabel_nested_compounds(tracks: &mut [Track], new: &Settings, old: &Settings) {
-    for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
-        if let Some(k) = c.compound.as_mut() {
-            super::conform::relabel_compound(k, old, new);
-        }
-    }
-}
-
-pub fn relabel_start_tc(p: &mut Project, was: &Settings) {
-    let now = p.settings.clone();
-    if p.compound_path.is_empty() && p.timeline().is_none_or(|t| t.own.is_none()) {
-        relabel_nested_compounds(&mut p.tracks, &now, was);
-    }
-    let checked_out = p.checked_out_timeline().map(str::to_string);
-    for t in &mut p.timelines {
-        if checked_out.as_deref() == Some(t.id.as_str()) || t.own.is_some() {
-            continue;
-        }
-        relabel_nested_compounds(&mut t.tracks, &now, was);
-    }
 }
 
 #[cfg(test)]
@@ -1800,7 +1443,7 @@ mod tests {
         let before = f.editor.project().tracks.clone();
         f.ok(req("media.compound", json!({"range": "10f..40f"})));
         assert_eq!(f.editor.project().tracks, before);
-        assert_eq!(f.editor.project().compounds[0].frames(), 30);
+        assert_eq!(f.editor.project().compounds[0].frames, 30);
     }
 
     #[test]
@@ -1883,8 +1526,9 @@ mod tests {
         let moved = json!({"clips": [upper], "to": 20, "mode": "overwrite", "track": "V2"});
         f.ok(req("edit.move", moved));
         f.ok(req("edit.compound_range", json!({"range": "30f..40f"})));
-        let v2 = f.editor.project().track("V2").unwrap();
-        assert_eq!(v2.clips[1].compound.as_ref().unwrap().tracks[0].id, "V1");
+        let p = f.editor.project();
+        let v2 = p.track("V2").unwrap();
+        assert_eq!(p.clip_compound(&v2.clips[1]).unwrap().tracks[0].id, "V1");
         assert_eq!(f.track("V1").len(), 1);
     }
 
@@ -1912,9 +1556,10 @@ mod tests {
             f.ok(req("edit.move", moved));
         }
         let hosts = nest(&mut f, &[&a, &b]);
-        let host = f.editor.project().clip(&hosts[0]).unwrap();
-        let made = &host.compound.as_ref().unwrap().made_from;
-        let shape: Vec<(&str, usize)> = made.iter().map(|t| (&*t.id, t.clips.len())).collect();
+        let p = f.editor.project();
+        let host = p.clip(&hosts[0]).unwrap();
+        let tracks = &p.clip_compound(host).unwrap().tracks;
+        let shape: Vec<(&str, usize)> = tracks.iter().map(|t| (&*t.id, t.clips.len())).collect();
         assert_eq!(shape, [("V1", 1), ("V2", 0), ("V3", 1)]);
     }
 
@@ -1973,8 +1618,10 @@ mod tests {
         let a = f.append("m1", 10, 60);
         l_cut(&mut f, &a, 5);
         let hosts = nest(&mut f, &[&a]);
-        let host = f.editor.project().clip(&hosts[1]).unwrap();
-        let sound: &Clip = &host.compound.as_ref().unwrap().tracks[0].clips[0];
+        let p = f.editor.project();
+        let host = p.clip(&hosts[1]).unwrap();
+        let sound_tracks = super::sound_tracks(&p.clip_compound(host).unwrap().tracks);
+        let sound: &Clip = &sound_tracks[0].clips[0];
         assert_eq!((sound.start, sound.duration, sound.source_in), (0, 55, 10));
     }
 
@@ -2141,12 +1788,9 @@ mod tests {
             json!({"media": sub, "range": "5f..60f"}),
         ));
         let p = f.editor.project();
-        let k = p.clip(&hosts[0]).unwrap().compound.as_ref().unwrap();
-        let tracks = k.tracks[0].clips[0].source_in;
-        let made = k.made_from[0].clips[0].source_in;
-        let pooled = p.compounds[0].picture.as_ref().unwrap();
-        let in_pool = pooled.made_from[0].clips[0].source_in;
-        assert_eq!((tracks, made, in_pool), (5, 5, 5));
+        let k = p.clip_compound(p.clip(&hosts[0]).unwrap()).unwrap();
+        assert_eq!(k.tracks[0].clips[0].source_in, 5);
+        assert_eq!(p.compounds[0].tracks[0].clips[0].source_in, 5);
     }
 
     #[test]
@@ -2210,16 +1854,16 @@ mod tests {
         assert!(p.compound_path.is_empty());
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
         let outer = p.clip(&hosts[0]).unwrap();
-        let k = outer.compound.as_ref().unwrap();
+        let k = p.clip_compound(outer).unwrap();
         assert_eq!(
-            (outer.duration, k.frames, k.made_from[0].clips.len()),
+            (outer.duration, k.frames, k.tracks[0].clips.len()),
             (50, 80, 2)
         );
         assert_eq!(
             k.tracks[0].clips[0].picture.as_ref().unwrap().zoom,
             Some([1.5, 1.5])
         );
-        assert_eq!(k.made_from[0].clips[1].id, b);
+        assert_eq!(k.tracks[0].clips[1].id, b);
         let trim = json!({"clip": hosts[0], "edge": "tail", "to": "75f", "ripple": false});
         f.ok(req("edit.trim", trim));
         let p = f.editor.project();
@@ -2241,9 +1885,9 @@ mod tests {
         let p = f.editor.project();
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
         let outer = p.clip(&hosts[0]).unwrap();
-        let k = outer.compound.as_ref().unwrap();
+        let k = p.clip_compound(outer).unwrap();
         assert_eq!(
-            (outer.duration, k.frames, k.made_from[0].clips[0].duration),
+            (outer.duration, k.frames, k.tracks[0].clips[0].duration),
             (60, 60, 20)
         );
         let plan = crate::render::flatten(p, 25, 30).unwrap();
@@ -2287,32 +1931,22 @@ mod tests {
         f.ok(req("compound.close", json!({})));
         let p = f.editor.project();
         assert_eq!(
-            p.clip(&on_t2[0]).unwrap().compound.as_ref().unwrap().frames,
+            p.compound_frames(p.clip_compound(p.clip(&on_t2[0]).unwrap()).unwrap()),
             120
         );
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
         f.ok(req("timeline.open", json!({"timeline": "t1"})));
         let p = f.editor.project();
         assert_eq!(
-            p.clip(&hosts[0]).unwrap().compound.as_ref().unwrap().frames,
+            p.compound_frames(p.clip_compound(p.clip(&hosts[0]).unwrap()).unwrap()),
             60
         );
         assert_eq!(
-            p.clip(&placed[0])
-                .unwrap()
-                .compound
-                .as_ref()
-                .unwrap()
-                .frames,
+            p.compound_frames(p.clip_compound(p.clip(&placed[0]).unwrap()).unwrap()),
             60
         );
-        assert_eq!(p.compounds[0].frames(), 60);
-        assert_eq!(
-            p.compounds[0].picture.as_ref().unwrap().made_from[0]
-                .clips
-                .len(),
-            2
-        );
+        assert_eq!(p.compounds[0].frames, 60);
+        assert_eq!(p.compounds[0].tracks[0].clips.len(), 2);
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     }
 
@@ -2327,11 +1961,11 @@ mod tests {
         f.ok(req("compound.close", json!({})));
         let p = f.editor.project();
         assert_eq!(
-            p.clip(&hosts[0]).unwrap().compound.as_ref().unwrap().frames,
+            p.clip_compound(p.clip(&hosts[0]).unwrap()).unwrap().frames,
             60
         );
         assert_eq!(
-            p.clip(&hosts[1]).unwrap().compound.as_ref().unwrap().frames,
+            p.clip_compound(p.clip(&hosts[1]).unwrap()).unwrap().frames,
             60
         );
     }
@@ -2351,11 +1985,9 @@ mod tests {
         f.append("m1", 30, 50);
         f.ok(req("compound.close", json!({})));
         let p = f.editor.project();
-        assert!(p.compounds[0].picture.is_none());
-        assert_eq!(
-            p.compounds[0].sound.as_ref().unwrap().tracks[0].clips.len(),
-            2
-        );
+        assert!(!p.compounds[0].has_picture());
+        assert!(p.compounds[0].has_sound());
+        assert_eq!(p.compounds[0].tracks[0].clips.len(), 2);
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     }
 
@@ -2368,9 +2000,10 @@ mod tests {
         f.ok(req("compound.open", json!({"compound": pool})));
         f.ok(req("picture.set", json!({"clips": [a], "zoom": 2.0})));
         f.ok(req("compound.close", json!({})));
-        let outer = f.editor.project().clip(&hosts[0]).unwrap();
+        let p = f.editor.project();
+        let outer = p.clip(&hosts[0]).unwrap();
         assert_eq!(
-            outer.compound.as_ref().unwrap().tracks[0].clips[0]
+            p.clip_compound(outer).unwrap().tracks[0].clips[0]
                 .picture
                 .as_ref()
                 .unwrap()
@@ -2400,7 +2033,7 @@ mod tests {
         assert!(p.timelines.is_empty());
         assert!(p.is_fresh_sheet());
         assert_eq!(
-            p.compounds[0].picture.as_ref().unwrap().made_from[0].clips[0]
+            p.compounds[0].tracks[0].clips[0]
                 .picture
                 .as_ref()
                 .unwrap()
@@ -2427,7 +2060,7 @@ mod tests {
         f.ok(req("compound.close", json!({})));
         let p = f.editor.project();
         assert_eq!(p.compound_path.len(), 1);
-        let k = p.clip(&nested_id).unwrap().compound.as_ref().unwrap();
+        let k = p.clip_compound(p.clip(&nested_id).unwrap()).unwrap();
         assert_eq!(
             k.tracks[0].clips[0].picture.as_ref().unwrap().zoom,
             Some([1.4, 1.4])
@@ -2438,19 +2071,8 @@ mod tests {
         f.ok(req("compound.close", json!({"to": 0})));
         let p = f.editor.project();
         assert!(p.compound_path.is_empty());
-        let ok_zoom = p
-            .clip(&outer[0])
-            .unwrap()
-            .compound
-            .as_ref()
-            .unwrap()
-            .made_from[0]
-            .clips[0]
-            .compound
-            .as_ref()
-            .unwrap()
-            .tracks[0]
-            .clips[0]
+        let outer_k = p.clip_compound(p.clip(&outer[0]).unwrap()).unwrap();
+        let ok_zoom = p.clip_compound(&outer_k.tracks[0].clips[0]).unwrap().tracks[0].clips[0]
             .picture
             .as_ref()
             .unwrap()
@@ -2523,7 +2145,7 @@ mod tests {
         let p = f.editor.project();
         assert!(p.compound_path.is_empty());
         assert_eq!(
-            p.clip(&hosts[0]).unwrap().compound.as_ref().unwrap().tracks[0].clips[0]
+            p.clip_compound(p.clip(&hosts[0]).unwrap()).unwrap().tracks[0].clips[0]
                 .picture
                 .as_ref()
                 .unwrap()
@@ -2557,7 +2179,7 @@ mod tests {
         let p = f.editor.project();
         assert!(p.compound_path.is_empty());
         assert_eq!(
-            p.compounds[0].picture.as_ref().unwrap().made_from[0].clips[0]
+            p.compounds[0].tracks[0].clips[0]
                 .picture
                 .as_ref()
                 .unwrap()
@@ -2577,7 +2199,8 @@ mod tests {
         f.ok(req("media.compound_remove", json!({"compound": pool})));
         let p = f.editor.project();
         assert!(p.compound_path.is_empty());
-        assert!(p.compounds.is_empty());
+        assert_eq!(p.pool_compounds().count(), 0);
+        assert!(p.compounds[0].removed);
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     }
 
@@ -2600,12 +2223,9 @@ mod tests {
         f.append("m1", 30, 50);
         f.ok(req("compound.close", json!({})));
         let p = f.editor.project();
-        let nested_x = p.compounds[1].picture.as_ref().unwrap().made_from[0].clips[0]
-            .compound
-            .as_ref()
-            .unwrap();
+        let nested_x = p.clip_compound(&p.compounds[1].tracks[0].clips[0]).unwrap();
         assert_eq!(nested_x.frames, 50);
-        assert_eq!(nested_x.made_from[0].clips.len(), 2);
+        assert_eq!(nested_x.tracks[0].clips.len(), 2);
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     }
 
@@ -2636,7 +2256,7 @@ mod tests {
             1
         );
         assert_eq!(
-            p.clip(&hosts[0]).unwrap().compound.as_ref().unwrap().frames,
+            p.clip_compound(p.clip(&hosts[0]).unwrap()).unwrap().frames,
             50
         );
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
@@ -2648,11 +2268,11 @@ mod tests {
         f.append("m1", 0, 20);
         let made = f.ok(req("media.compound", json!({"range": "0f..50f"})));
         let pool = made.result["compound"].as_str().unwrap().to_string();
-        assert_eq!(f.editor.project().compounds[0].frames(), 50);
+        assert_eq!(f.editor.project().compounds[0].frames, 50);
         f.ok(req("compound.open", json!({"compound": pool})));
         f.ok(req("compound.close", json!({})));
         let p = f.editor.project();
-        assert_eq!(p.compounds[0].frames(), 50);
+        assert_eq!(p.compounds[0].frames, 50);
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     }
 
@@ -2687,7 +2307,7 @@ mod tests {
         f.ok(req("compound.open", json!({"clip": hosts[0]})));
         let mut proj = f.editor.project().clone();
         proj.tracks[0].clips.push(inner);
-        let e = super::open_clip(&mut proj, "c99", None).unwrap_err();
+        let e = super::open_clip(&mut proj, "c99").unwrap_err();
         assert!(e.message.contains("already open"));
     }
 
@@ -2830,7 +2450,7 @@ mod tests {
         let opened = f.ok(req("compound.open", json!({"clip": hosts[0]})));
         assert_eq!(opened.result["start_tc"], json!("01:02:03:04"));
         assert_eq!(f.editor.project().timecode(0), "01:02:03:04");
-        assert_eq!(f.editor.project().compounds[0].start_tc(), 93079);
+        assert_eq!(f.editor.project().compounds[0].start_tc, 93079);
     }
 
     #[test]
@@ -2888,7 +2508,7 @@ mod tests {
             json!({"compound": kid, "start_tc": "05:00:00:00"}),
         ));
         assert_eq!(r.result["start_tc"], json!("05:00:00:00"));
-        assert_eq!(f.editor.project().compounds[0].start_tc(), 450_000);
+        assert_eq!(f.editor.project().compounds[0].start_tc, 450_000);
         f.ok(req("compound.open", json!({"clip": placed_id})));
         assert_eq!(f.editor.project().timecode(0), "05:00:00:00");
     }
@@ -2929,13 +2549,9 @@ mod tests {
         f.ok(req("history.redo", json!({})));
         assert_eq!(f.editor.project().timecode(0), "04:00:00:00");
         f.ok(req("compound.close", json!({})));
+        let p = f.editor.project();
         assert_eq!(
-            f.editor
-                .project()
-                .clip(&hosts[0])
-                .unwrap()
-                .compound
-                .as_ref()
+            p.clip_compound(p.clip(&hosts[0]).unwrap())
                 .unwrap()
                 .start_tc,
             360_000
@@ -2955,7 +2571,7 @@ mod tests {
         ));
         assert_eq!(f.editor.project().timecode(0), "01:00:00:00");
         f.ok(req("compound.close", json!({})));
-        assert_eq!(f.editor.project().compounds[0].start_tc(), 90_000);
+        assert_eq!(f.editor.project().compounds[0].start_tc, 90_000);
     }
 
     #[test]
@@ -2988,7 +2604,7 @@ mod tests {
     }
 
     #[test]
-    fn compound_start_tc_relabels_when_placed_on_different_fps_timeline() {
+    fn compound_start_tc_preserves_canonical_rate_when_placed_on_different_fps_timeline() {
         let mut f = Fixture::new(&[(4.0, true)]);
         let a = f.append("m1", 0, 25);
         nest(&mut f, &[&a]);
@@ -3003,17 +2619,12 @@ mod tests {
         ));
         let r = f.ok(req("edit.place_compound", json!({"compound": kid})));
         let clip_id = r.result["clips"][0].as_str().unwrap().to_string();
-        assert_eq!(
-            f.editor
-                .project()
-                .clip(&clip_id)
-                .unwrap()
-                .compound
-                .as_ref()
-                .unwrap()
-                .start_tc,
-            108_000
-        );
+        let p = f.editor.project();
+        let k = p.clip_compound(p.clip(&clip_id).unwrap()).unwrap();
+        assert_eq!(k.start_tc, 90_000);
+        assert_eq!(k.fps.to_string(), "25");
+        f.ok(req("compound.open", json!({"clip": clip_id})));
+        assert_eq!(f.editor.project().timecode(0), "01:00:00:00");
     }
 
     #[test]
@@ -3062,17 +2673,9 @@ mod tests {
         f2.ok(req("timeline.import", json!({"otio": doc})));
         let outer_id = f2.editor.project().tracks[0].clips[0].id.clone();
         let copy_id = f2.editor.project().tracks[0].clips[1].id.clone();
-        assert!(
-            f2.editor
-                .project()
-                .clip(&outer_id)
-                .unwrap()
-                .compound
-                .as_ref()
-                .unwrap()
-                .made_from
-                .is_empty()
-        );
+        let p2 = f2.editor.project();
+        let outer_k = p2.clip_compound(p2.clip(&outer_id).unwrap()).unwrap();
+        assert!(outer_k.removed && outer_k.kept_otio.is_some());
         f2.ok(req(
             "compound.set",
             json!({"clip": copy_id, "start_tc": "02:30:00:00"}),
@@ -3101,7 +2704,7 @@ mod tests {
     }
 
     #[test]
-    fn placing_drop_frame_compound_on_non_drop_same_fps_relabels_start_tc() {
+    fn placing_drop_frame_compound_on_non_drop_timeline_preserves_drop_frame() {
         let mut f = ntsc_fixture(true);
         let a = f.append("m1", 0, 30);
         f.ok(req(
@@ -3109,28 +2712,22 @@ mod tests {
             json!({"clips": [a], "start_tc": "01:00:00;00"}),
         ));
         let kid = f.editor.project().compounds[0].id.clone();
-        assert_eq!(f.editor.project().compounds[0].start_tc(), 107_892);
+        assert_eq!(f.editor.project().compounds[0].start_tc, 107_892);
         f.ok(req(
             "timeline.new",
             json!({"name": "NDF", "own": {"fps": "30000/1001", "drop_frame": false}}),
         ));
         let r = f.ok(req("edit.place_compound", json!({"compound": kid})));
         let cid = r.result["clips"][0].as_str().unwrap().to_string();
-        assert_eq!(
-            f.editor
-                .project()
-                .clip(&cid)
-                .unwrap()
-                .compound
-                .as_ref()
-                .unwrap()
-                .start_tc,
-            108_000
-        );
+        let p = f.editor.project();
+        let k = p.clip_compound(p.clip(&cid).unwrap()).unwrap();
+        assert_eq!((k.start_tc, k.drop_frame), (107_892, true));
+        f.ok(req("compound.open", json!({"clip": cid})));
+        assert_eq!(f.editor.project().timecode(0), "01:00:00;00");
     }
 
     #[test]
-    fn placing_drop_frame_compound_on_different_fps_relabels_from_drop_frame() {
+    fn placing_drop_frame_compound_on_different_fps_preserves_drop_frame() {
         let mut f = ntsc_fixture(true);
         let a = f.append("m1", 0, 30);
         f.ok(req(
@@ -3144,21 +2741,15 @@ mod tests {
         ));
         let r = f.ok(req("edit.place_compound", json!({"compound": kid})));
         let cid = r.result["clips"][0].as_str().unwrap().to_string();
-        assert_eq!(
-            f.editor
-                .project()
-                .clip(&cid)
-                .unwrap()
-                .compound
-                .as_ref()
-                .unwrap()
-                .start_tc,
-            90_000
-        );
+        let p = f.editor.project();
+        let k = p.clip_compound(p.clip(&cid).unwrap()).unwrap();
+        assert_eq!((k.start_tc, k.drop_frame), (107_892, true));
+        f.ok(req("compound.open", json!({"clip": cid})));
+        assert_eq!(f.editor.project().timecode(0), "01:00:00;00");
     }
 
     #[test]
-    fn closing_drop_frame_compound_relabels_copy_on_non_drop_timeline() {
+    fn closing_compound_from_drop_frame_timeline_preserves_non_drop_start_tc() {
         let mut f = ntsc_fixture(false);
         let a = f.append("m1", 0, 30);
         let t1_hosts = f
@@ -3182,19 +2773,11 @@ mod tests {
         let t2_clip = placed.result["clips"][0].as_str().unwrap().to_string();
         f.ok(req("compound.open", json!({"clip": t2_clip})));
         f.ok(req("compound.close", json!({})));
-        assert_eq!(f.editor.project().compounds[0].start_tc(), 108_000);
+        let k = &f.editor.project().compounds[0];
+        assert_eq!((k.start_tc, k.drop_frame), (108_000, false));
         f.ok(req("timeline.open", json!({"timeline": t1_id})));
-        assert_eq!(
-            f.editor
-                .project()
-                .clip(&t1_hosts[0])
-                .unwrap()
-                .compound
-                .as_ref()
-                .unwrap()
-                .start_tc,
-            108_000
-        );
+        f.ok(req("compound.open", json!({"clip": t1_hosts[0]})));
+        assert_eq!(f.editor.project().timecode(0), "01:00:00:00");
     }
 
     #[test]
@@ -3213,17 +2796,423 @@ mod tests {
             "compound.set",
             json!({"compound": kid, "start_tc": "01:00:00;00"}),
         ));
-        assert_eq!(f.editor.project().compounds[0].start_tc(), 107_892);
+        let p = f.editor.project();
+        assert_eq!(p.compounds[0].start_tc, 107_892);
         assert_eq!(
-            f.editor
-                .project()
-                .clip(&ndf_clip)
-                .unwrap()
-                .compound
-                .as_ref()
+            p.clip_compound(p.clip(&ndf_clip).unwrap())
                 .unwrap()
                 .start_tc,
-            108_000
+            107_892
         );
+        f.ok(req("compound.open", json!({"clip": ndf_clip})));
+        assert_eq!(f.editor.project().timecode(0), "01:00:00;00");
+    }
+
+    #[test]
+    fn removing_placed_compound_from_pool_keeps_playback_and_drops_when_last_copy_goes() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 40);
+        let hosts = nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req("media.compound_remove", json!({"compound": kid})));
+        let p = f.editor.project();
+        assert_eq!(p.pool_compounds().count(), 0);
+        assert!(p.compounds[0].removed);
+        let plan = crate::render::flatten(p, 0, 40).unwrap();
+        assert!(!matches!(
+            plan.video.as_slice(),
+            [crate::render::VideoPiece::Black { .. }]
+        ));
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        let p = f.editor.project();
+        assert!(p.compounds.is_empty());
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cross_rate_compound_conforms_on_playback_and_decompose() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 25);
+        nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "50fps", "own": {"fps": "50"}}),
+        ));
+        let placed = f.ok(req("edit.place_compound", json!({"compound": kid})));
+        let host = placed.result["clips"][0].as_str().unwrap().to_string();
+        let p = f.editor.project();
+        assert_eq!(p.clip(&host).unwrap().duration, 50);
+        let plan = crate::render::flatten(p, 0, 50).unwrap();
+        assert_eq!(plan.frames, 50);
+        assert!(!matches!(
+            plan.video.as_slice(),
+            [crate::render::VideoPiece::Black { .. }]
+        ));
+        f.ok(req("edit.decompose", json!({"clips": [host]})));
+        let p = f.editor.project();
+        assert_eq!(p.tracks[0].clips.len(), 1);
+        assert_eq!(p.tracks[0].clips[0].media, "m1");
+        assert_eq!(p.tracks[0].clips[0].duration, 50);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cut_and_paste_of_removed_compound_restores_definition() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 40);
+        let hosts = nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req("media.compound_remove", json!({"compound": kid})));
+        let cut = f.ok(req("edit.cut", json!({"clips": [hosts[0]]})));
+        assert!(f.editor.project().compounds.is_empty());
+        let pasted = f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": cut.result["clips"],
+                "compounds": cut.result["compounds"],
+                "fps": cut.result["fps"],
+                "at": 0,
+            }),
+        ));
+        let p = f.editor.project();
+        let pasted_id = pasted.result["clips"][0].as_str().unwrap().to_string();
+        assert_eq!(p.compounds.len(), 1);
+        assert!(p.compounds[0].removed && p.compounds[0].bin.is_empty());
+        assert_ne!(p.compounds[0].id, kid);
+        assert_eq!(
+            p.clip(&pasted_id).unwrap().compound.as_deref(),
+            Some(p.compounds[0].id.as_str())
+        );
+        assert_eq!(p.pool_compounds().count(), 0);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+        f.ok(req("history.undo", json!({})));
+        f.ok(req("history.undo", json!({})));
+        let p = f.editor.project();
+        assert_eq!(p.compounds.len(), 1);
+        assert_eq!(p.compounds[0].id, kid);
+        assert!(p.clip(&hosts[0]).is_some());
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cut_and_paste_of_nested_removed_compounds_restores_hierarchy() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 40);
+        let inner_hosts = nest(&mut f, &[&a]);
+        let outer_hosts = nest(&mut f, &[&inner_hosts[0]]);
+        let ids: Vec<String> = f
+            .editor
+            .project()
+            .compounds
+            .iter()
+            .map(|k| k.id.clone())
+            .collect();
+        for kid in &ids {
+            f.ok(req("media.compound_remove", json!({"compound": kid})));
+        }
+        let cut = f.ok(req("edit.cut", json!({"clips": [outer_hosts[0]]})));
+        assert!(f.editor.project().compounds.is_empty());
+        f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": cut.result["clips"],
+                "compounds": cut.result["compounds"],
+                "fps": cut.result["fps"],
+                "at": 0,
+            }),
+        ));
+        let p = f.editor.project();
+        assert_eq!(p.compounds.len(), 2);
+        assert!(p.compounds.iter().all(|k| k.removed && k.bin.is_empty()));
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cut_and_paste_of_otio_imported_compound_restores_definition() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 40);
+        nest(&mut f, &[&a]);
+        let doc = crate::otio::export(
+            f.editor.project(),
+            "T1",
+            None,
+            crate::otio::Locations::Absolute,
+        )
+        .unwrap();
+        let mut f2 = Fixture::new(&[(4.0, true)]);
+        f2.ok(req("timeline.import", json!({"otio": doc})));
+        let imported = f2.editor.project().tracks[0].clips[0].id.clone();
+        let cut = f2.ok(req("edit.cut", json!({"clips": [imported]})));
+        assert!(f2.editor.project().compounds.is_empty());
+        f2.ok(req(
+            "edit.paste",
+            json!({
+                "clips": cut.result["clips"],
+                "compounds": cut.result["compounds"],
+                "fps": cut.result["fps"],
+                "at": 0,
+            }),
+        ));
+        let p2 = f2.editor.project();
+        assert_eq!(p2.compounds.len(), 1);
+        assert!(p2.compounds[0].removed && p2.compounds[0].bin.is_empty());
+        assert_eq!(crate::validate::everywhere(p2), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cross_rate_paste_clamps_full_compound_rounding_overshoot() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 12);
+        nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "24fps", "own": {"fps": "24"}}),
+        ));
+        let r = f.ok(req("edit.place_compound", json!({"compound": kid})));
+        let on_24 = r.result["clips"][0].as_str().unwrap().to_string();
+        assert_eq!(f.editor.project().clip(&on_24).unwrap().duration, 12);
+        let copied = f.ok(req("edit.copy", json!({"clips": [on_24]})));
+        let t1 = f.editor.project().timelines[0].id.clone();
+        f.ok(req("timeline.open", json!({"timeline": t1})));
+        let pasted = f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": copied.result["compounds"],
+                "fps": copied.result["fps"],
+                "at": 20,
+            }),
+        ));
+        let pasted_id = pasted.result["clips"][0].as_str().unwrap().to_string();
+        let p = f.editor.project();
+        let c = p.clip(&pasted_id).unwrap();
+        assert_eq!((c.duration, c.shown()), (12, (0, 12)));
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cross_rate_paste_clamps_trimmed_compound_rounding_overshoot() {
+        let mut f = Fixture::new(&[]);
+        let r30 = crate::time::Rational::new(30, 1).unwrap();
+        let info = crate::test_support::media_info(5.0, r30, true);
+        f.env = crate::test_support::FakeEnv::default().with("/media/r30.mp4", info);
+        f.ok(req("timeline.set", json!({"own": {"fps": "30"}})));
+        f.ok(req("media.add", json!({"paths": ["/media/r30.mp4"]})));
+        let a = f.append("m1", 0, 100);
+        nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        let t1 = f.editor.project().timelines[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "24fps", "own": {"fps": "24"}}),
+        ));
+        let r = f.ok(req("edit.place_compound", json!({"compound": kid})));
+        let on_24 = r.result["clips"][0].as_str().unwrap().to_string();
+        f.ok(req(
+            "edit.trim",
+            json!({"clip": on_24, "edge": "head", "by": 79, "ripple": true}),
+        ));
+        f.ok(req(
+            "edit.move",
+            json!({"clips": [on_24], "to": "1f", "track": "V1"}),
+        ));
+        let copied = f.ok(req("edit.copy", json!({"clips": [on_24]})));
+        f.ok(req("timeline.open", json!({"timeline": t1})));
+        let pasted = f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": copied.result["compounds"],
+                "fps": copied.result["fps"],
+                "at": 110,
+            }),
+        ));
+        let pasted_id = pasted.result["clips"][0].as_str().unwrap().to_string();
+        let p = f.editor.project();
+        let (lo, hi) = p.clip(&pasted_id).unwrap().shown();
+        assert!(lo >= 0 && hi <= 100);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn nested_cross_rate_decompose_clamps_inner_compound_rounding_overshoot() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 12);
+        nest(&mut f, &[&a]);
+        let kid_b = f.editor.project().compounds[0].id.clone();
+        let t1 = f.editor.project().timelines[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "24fps", "own": {"fps": "24"}}),
+        ));
+        let r_b = f.ok(req("edit.place_compound", json!({"compound": kid_b})));
+        let c_b = r_b.result["clips"][0].as_str().unwrap().to_string();
+        nest(&mut f, &[&c_b]);
+        let kid_a = f
+            .editor
+            .project()
+            .compounds
+            .iter()
+            .find(|k| k.id != kid_b)
+            .unwrap()
+            .id
+            .clone();
+        f.ok(req("timeline.open", json!({"timeline": t1})));
+        let r_a = f.ok(req(
+            "edit.place_compound",
+            json!({"compound": kid_a, "at": 20}),
+        ));
+        let c_a = r_a.result["clips"][0].as_str().unwrap().to_string();
+        let dec = f.ok(req("edit.decompose", json!({"clips": [c_a]})));
+        let out_b = dec.result["clips"][0].as_str().unwrap().to_string();
+        let p = f.editor.project();
+        let c = p.clip(&out_b).unwrap();
+        assert_eq!(c.compound.as_deref(), Some(kid_b.as_str()));
+        assert_eq!((c.duration, c.shown()), (12, (0, 12)));
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn placing_one_frame_high_fps_compound_on_lower_fps_refuses_zero_duration() {
+        let mut f = Fixture::new(&[]);
+        let r60 = crate::time::Rational::new(60, 1).unwrap();
+        let info = crate::test_support::media_info(1.0, r60, true);
+        f.env = crate::test_support::FakeEnv::default().with("/media/r60.mp4", info);
+        f.ok(req("timeline.set", json!({"own": {"fps": "60"}})));
+        f.ok(req("media.add", json!({"paths": ["/media/r60.mp4"]})));
+        let a = f.append("m1", 0, 1);
+        nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "24fps", "own": {"fps": "24"}}),
+        ));
+        let err = f.err(req("edit.place_compound", json!({"compound": kid})));
+        assert!(err.message.contains("shorter than one timeline frame"));
+        assert_eq!(
+            crate::validate::everywhere(f.editor.project()),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn cross_project_paste_allocates_fresh_compound_id_without_future_collision() {
+        let mut a = Fixture::new(&[(4.0, true)]);
+        let mut last = String::new();
+        for _ in 0..11 {
+            last = a.append("m1", 0, 10);
+        }
+        let hosts = nest(&mut a, &[&last]);
+        let src_kid = a.editor.project().compounds[0].id.clone();
+        assert_eq!(src_kid, "k12");
+        let copied = a.ok(req("edit.copy", json!({"clips": [hosts[0]]})));
+
+        let mut b = Fixture::new(&[(4.0, true)]);
+        b.ok(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": copied.result["compounds"],
+                "fps": copied.result["fps"],
+                "at": 0,
+            }),
+        ));
+        for _ in 0..4 {
+            let clip_id = b.append("m1", 0, 10);
+            nest(&mut b, &[&clip_id]);
+        }
+        let p = b.editor.project();
+        assert_eq!(p.compounds.len(), 5);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cross_project_paste_with_same_compound_id_keeps_both_definitions() {
+        let mut a = Fixture::new(&[(4.0, true)]);
+        let ca = a.append("m1", 0, 20);
+        let hosts_a = serde_json::from_value::<Vec<String>>(
+            a.ok(req(
+                "edit.compound",
+                json!({"clips": [ca], "name": "From A"}),
+            ))
+            .result["clips"]
+                .clone(),
+        )
+        .unwrap();
+        let kid_a = a.editor.project().compounds[0].id.clone();
+        let copied = a.ok(req("edit.copy", json!({"clips": [hosts_a[0]]})));
+
+        let mut b = Fixture::new(&[(4.0, true)]);
+        let cb = b.append("m1", 0, 50);
+        b.ok(req(
+            "edit.compound",
+            json!({"clips": [cb], "name": "From B"}),
+        ));
+        let kid_b = b.editor.project().compounds[0].id.clone();
+        assert_eq!(kid_b, kid_a);
+
+        let pasted = b.ok(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": copied.result["compounds"],
+                "fps": copied.result["fps"],
+                "at": 60,
+            }),
+        ));
+        let pasted_id = pasted.result["clips"][0].as_str().unwrap().to_string();
+        let p = b.editor.project();
+        assert_eq!(p.compounds.len(), 2);
+        let b_def = p.compound(&kid_b).unwrap();
+        assert_eq!(
+            (b_def.name.as_str(), b_def.frames, b_def.removed),
+            ("From B", 50, false)
+        );
+        let pasted_clip = p.clip(&pasted_id).unwrap();
+        let pasted_kid = pasted_clip.compound.as_deref().unwrap();
+        assert_ne!(pasted_kid, kid_b);
+        let a_def = p.compound(pasted_kid).unwrap();
+        assert_eq!(
+            (a_def.name.as_str(), a_def.frames, a_def.removed),
+            ("From A", 20, true)
+        );
+        assert_eq!(pasted_clip.duration, 20);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn repeated_paste_of_removed_compound_shares_restored_definition() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 20);
+        let hosts = nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req("media.compound_remove", json!({"compound": kid})));
+        let cut = f.ok(req("edit.cut", json!({"clips": [hosts[0]]})));
+        let p1 = f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": cut.result["clips"],
+                "compounds": cut.result["compounds"],
+                "fps": cut.result["fps"],
+                "at": 0,
+            }),
+        ));
+        let p2 = f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": cut.result["clips"],
+                "compounds": cut.result["compounds"],
+                "fps": cut.result["fps"],
+                "at": 50,
+            }),
+        ));
+        let c1 = p1.result["clips"][0].as_str().unwrap().to_string();
+        let c2 = p2.result["clips"][0].as_str().unwrap().to_string();
+        let p = f.editor.project();
+        assert_eq!(p.compounds.len(), 1);
+        assert_eq!(p.clip(&c1).unwrap().compound, p.clip(&c2).unwrap().compound);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     }
 }

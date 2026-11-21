@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, Compound, Grade, ImageSequence, Keyframe, Marks, Media, MotionPath, Picture,
-    Project, Section, Speed, Title, TrackKind,
+    Clip, ClipAudio, Compound, Grade, ImageSequence, Kept, Keyframe, Marks, Media, MotionPath,
+    Picture, Project, Section, Settings, Speed, Title, TrackKind,
 };
 use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
@@ -222,6 +222,23 @@ fn bundled_sequence(location: &str, s: &ImageSequence) -> (String, ImageSequence
     }
 }
 
+fn written_compound(p: &Project, k: &Compound, locations: Locations) -> Compound {
+    let Locations::Bundle(names) = locations else {
+        return k.clone();
+    };
+    let mut out = k.clone();
+    if let Some(kept) = out.kept_otio.as_mut() {
+        let used: HashSet<String> = played_by(p, k).into_iter().collect();
+        let bundled: Vec<&Media> = p
+            .media
+            .iter()
+            .filter(|m| names.contains_key(&m.id) && used.contains(&m.id))
+            .collect();
+        bundle_nested(kept.make_mut(), &bundled, names, k.fps);
+    }
+    out
+}
+
 fn written(m: &Media, locations: Locations) -> Media {
     let at = match locations {
         Locations::Bundle(names) => names.get(&m.id),
@@ -250,22 +267,34 @@ fn audio_part(c: &crate::model::Clip, a: i64, b: i64) -> Option<(i64, i64)> {
     (e > s).then_some((s, e))
 }
 
-fn played<'a>(c: &'a Clip, used: &mut Vec<String>, seen: &mut HashSet<&'a str>) {
-    match &c.compound {
+fn played<'a>(
+    p: &'a Project,
+    c: &'a Clip,
+    used: &mut Vec<String>,
+    seen: &mut HashSet<&'a str>,
+    visiting: &mut HashSet<&'a str>,
+) {
+    match p.clip_compound(c) {
         Some(k) => {
-            for c in k.tracks.iter().flat_map(|t| &t.clips) {
-                played(c, used, seen);
+            if !visiting.insert(k.id.as_str()) {
+                return;
             }
+            for c in p.compound_tracks(k).iter().flat_map(|t| &t.clips) {
+                played(p, c, used, seen, visiting);
+            }
+            visiting.remove(k.id.as_str());
         }
         None if !c.is_block() && seen.insert(&c.media) => used.push(c.media.clone()),
         None => {}
     }
 }
 
-pub fn played_by(k: &Compound) -> Vec<String> {
-    let (mut used, mut seen) = (Vec::new(), HashSet::new());
-    for c in k.tracks.iter().flat_map(|t| &t.clips) {
-        played(c, &mut used, &mut seen);
+pub fn played_by(p: &Project, k: &Compound) -> Vec<String> {
+    let (mut used, mut seen, mut visiting) = (Vec::new(), HashSet::new(), HashSet::new());
+    if visiting.insert(k.id.as_str()) {
+        for c in p.compound_tracks(k).iter().flat_map(|t| &t.clips) {
+            played(p, c, &mut used, &mut seen, &mut visiting);
+        }
     }
     used
 }
@@ -323,10 +352,10 @@ pub fn out_of_reach(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
 pub fn used_media(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     let mut used: Vec<String> = Vec::new();
-    let mut seen: HashSet<&str> = HashSet::new();
+    let (mut seen, mut visiting) = (HashSet::new(), HashSet::new());
     for c in p.tracks.iter().flat_map(|t| &t.clips) {
         if exported(c, a, b) {
-            played(c, &mut used, &mut seen);
+            played(p, c, &mut used, &mut seen, &mut visiting);
         }
     }
     used
@@ -713,6 +742,17 @@ pub fn export_drawn(
     locations: Locations,
     drawn: &dyn Fn(&Title) -> titles::Drawn,
 ) -> Result<Value> {
+    export_with(p, name, span, locations, drawn, &mut HashMap::new())
+}
+
+fn export_with(
+    p: &Project,
+    name: &str,
+    span: Option<(i64, i64)>,
+    locations: Locations,
+    drawn: &dyn Fn(&Title) -> titles::Drawn,
+    stacks: &mut HashMap<String, Value>,
+) -> Result<Value> {
     let fps = p.fps();
     let rate = fps.as_f64();
     let (a, b) = span.unwrap_or((0, p.end()));
@@ -789,8 +829,8 @@ pub fn export_drawn(
                 .iter()
                 .flat_map(|t| &t.clips)
                 .filter(|c| exported(c, a, b))
-                .filter_map(|c| c.compound.as_ref())
-                .flat_map(played_by)
+                .filter_map(|c| p.clip_compound(c))
+                .flat_map(|k| played_by(p, k))
                 .collect();
             p.media
                 .iter()
@@ -799,14 +839,29 @@ pub fn export_drawn(
         }
         Locations::Absolute => Vec::new(),
     };
-    let block =
-        |c: &Clip, k: &Compound, label: &str, source: i64, frames: i64, effects: Vec<Value>| {
-            let mut it = compound_item(c, k, label, source, frames, effects, rate);
-            if let Locations::Bundle(names) = locations {
-                bundle_nested(&mut it["children"], &bundled, names, fps);
-            }
-            it
-        };
+    let mut block = |c: &Clip,
+                     k: &Compound,
+                     label: &str,
+                     source: i64,
+                     frames: i64,
+                     effects: Vec<Value>|
+     -> Result<Value> {
+        let mut it = compound_item(
+            p,
+            c,
+            k,
+            label,
+            (source, frames),
+            effects,
+            rate,
+            drawn,
+            stacks,
+        )?;
+        if let Locations::Bundle(names) = locations {
+            bundle_nested(&mut it["children"], &bundled, names, k.fps);
+        }
+        Ok(it)
+    };
     let media: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
     let shown_color = |c: &Clip| {
         c.color
@@ -916,8 +971,9 @@ pub fn export_drawn(
                     Some(t) => titles::with_opacity(t, effects, c.content_at(s)),
                     None => with_picture(c, &shape_of(p, c, m), effects, g, c.content_at(s)),
                 };
-                let mut it = match &c.compound {
-                    Some(k) => block(c, k, &label, c.source_at(s), e - s, effects),
+                let compound = p.clip_compound(c);
+                let mut it = match compound {
+                    Some(k) => block(c, k, &label, c.source_at(s), e - s, effects)?,
                     None => item(
                         &label,
                         c,
@@ -932,7 +988,7 @@ pub fn export_drawn(
                 if let Some(x) = shown_color(c) {
                     it["color"] = x;
                 }
-                if let Some(k) = &c.compound {
+                if let Some(k) = compound {
                     tie(&mut it, c, k, &links, &mut given, &mut groups);
                     own_pace(&mut it["metadata"][VIDCUT], c, s);
                 }
@@ -1055,7 +1111,7 @@ pub fn export_drawn(
                 }
                 ta = e;
             }
-            if let Some(k) = c.compound.as_ref().filter(|_| !c.video) {
+            if let Some(k) = p.clip_compound(c).filter(|_| !c.video) {
                 let (s, e) = (c.start.max(a).max(ta), c.end().min(b));
                 if e > s {
                     if s > ta {
@@ -1072,7 +1128,7 @@ pub fn export_drawn(
                             x.written(c.source_at(s), s > c.start, e < c.end())
                         }),
                     );
-                    let mut it = block(c, k, &label, c.source_at(s), e - s, effects);
+                    let mut it = block(c, k, &label, c.source_at(s), e - s, effects)?;
                     tie(&mut it, c, k, &links, &mut given, &mut groups);
                     own_pace(&mut it["metadata"][VIDCUT], c, s);
                     audio.push(it);
@@ -1173,6 +1229,9 @@ pub fn export_drawn(
             subtitles: p.subtitles.clone(),
             timelines: p.timelines.clone(),
             recent: p.recent.clone(),
+            compounds: (p.compounds.iter())
+                .map(|k| written_compound(p, k, locations))
+                .collect(),
         });
     }
     let tracks = with(
@@ -1211,7 +1270,16 @@ pub fn export_drawn(
     ))
 }
 
-fn compound_of(item: &Value, fps: Rational) -> Compound {
+fn compound_of(item: &Value, host_fps: Rational) -> ImportedCompound {
+    let fps = item["metadata"][VIDCUT]["fps"]
+        .as_str()
+        .and_then(|s| s.parse::<Rational>().ok())
+        .or_else(|| {
+            item["metadata"][EDITOR]["Sequence Fps"]
+                .as_f64()
+                .and_then(|r| rational(r).ok())
+        })
+        .unwrap_or(host_fps);
     let inner = item["children"]
         .as_array()
         .into_iter()
@@ -1241,6 +1309,14 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         .as_i64()
         .filter(|&n| n >= 0)
         .unwrap_or(0);
+    let drop_frame =
+        item["metadata"][VIDCUT]["drop_frame"].as_bool() == Some(true) && fps.has_drop_frame();
+    let sequence_id = item["metadata"][EDITOR]["Sequence ID"]
+        .as_str()
+        .map(str::to_string);
+    let compound_id = item["metadata"][VIDCUT]["compound"]
+        .as_str()
+        .map(str::to_string);
     let mut stack = item.clone();
     if let Some(o) = stack.as_object_mut() {
         for key in ["source_range", "effects", "markers"] {
@@ -1257,69 +1333,127 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         .pointer_mut(&format!("/metadata/{VIDCUT}"))
         .and_then(Value::as_object_mut)
     {
-        m.remove("markers");
-        m.remove("start_tc");
+        for key in ["markers", "start_tc", "drop_frame", "compound", "fps"] {
+            m.remove(key);
+        }
     }
-    Compound {
+    ImportedCompound {
         stack: stack.into(),
+        fps,
         frames,
-        tracks: Vec::new(),
-        made_from: Vec::new(),
         markers,
         start_tc,
+        sequence_id,
+        compound_id,
+        drop_frame,
     }
 }
 
-pub(crate) fn made_stack(
-    inner: &Project,
-    name: &str,
-    frames: i64,
-    seq_id: Option<&str>,
+fn stack_for(
+    p: &Project,
+    k: &Compound,
+    drawn: &dyn Fn(&Title) -> titles::Drawn,
+    stacks: &mut HashMap<String, Value>,
 ) -> Result<Value> {
-    let mut stack = if frames > 0 {
-        export(inner, name, Some((0, frames)), Locations::Absolute)?["tracks"].clone()
+    let tracks = p.compound_tracks(k);
+    if tracks.is_empty()
+        && k.marks.is_empty()
+        && let Some(kept) = &k.kept_otio
+    {
+        return Ok((**kept).clone());
+    }
+    let frames = k.frames.max(crate::ops::compound::end_of(tracks));
+    let mut inner = Project::new(Settings {
+        fps: k.fps,
+        drop_frame: k.counts_drop_frame(),
+        ..p.flat_settings()
+    });
+    inner.tracks = tracks.to_vec();
+    inner.marks = k.marks.clone();
+    inner.media = p.media.clone();
+    inner.compounds = p
+        .compounds
+        .iter()
+        .filter(|other| other.id != k.id)
+        .cloned()
+        .collect();
+    let mut stack = if !tracks.is_empty() && frames > 0 {
+        export_with(
+            &inner,
+            &k.name,
+            Some((0, frames)),
+            Locations::Absolute,
+            drawn,
+            stacks,
+        )?["tracks"]
+            .clone()
     } else {
         json!({
             "OTIO_SCHEMA": "Stack.1",
-            "name": name,
+            "name": k.name,
             "children": [],
             "markers": [],
             "enabled": true,
         })
     };
-    stack["name"] = json!(name);
-    stack["metadata"] = json!({ EDITOR: {
-        "Sequence Type": "Compound Clip",
-        "Sequence Fps": inner.fps().as_f64(),
-    }});
+    stack["name"] = json!(k.name);
+    let mut meta = k
+        .kept_otio
+        .as_ref()
+        .and_then(|kept| kept["metadata"].as_object())
+        .cloned()
+        .unwrap_or_default();
+    meta.remove(VIDCUT);
+    stack["metadata"] = Value::Object(meta);
+    let seq_type = k
+        .kept_otio
+        .as_ref()
+        .and_then(|kept| kept["metadata"][EDITOR]["Sequence Type"].as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Compound Clip");
+    stack["metadata"][EDITOR]["Sequence Type"] = json!(seq_type);
+    stack["metadata"][EDITOR]["Sequence Fps"] = json!(k.fps.as_f64());
     if let Some(o) = stack.as_object_mut() {
         for key in ["source_range", "effects", "markers"] {
             o.remove(key);
         }
     }
-    let id = seq_id
-        .map(str::to_string)
-        .unwrap_or_else(|| stack_id(&stack));
+    let id = k.sequence_id.clone().unwrap_or_else(|| stack_id(&stack));
     stack["metadata"][EDITOR]["Sequence ID"] = json!(id);
     Ok(stack)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compound_item(
+    p: &Project,
     c: &Clip,
     k: &Compound,
     label: &str,
-    source: i64,
-    frames: i64,
+    (source, frames): (i64, i64),
     effects: Vec<Value>,
     rate: f64,
-) -> Value {
-    let mut v = (*k.stack).clone();
+    drawn: &dyn Fn(&Title) -> titles::Drawn,
+    stacks: &mut HashMap<String, Value>,
+) -> Result<Value> {
+    let mut v = match stacks.get(&k.id) {
+        Some(cached) => cached.clone(),
+        None => {
+            let made = stack_for(p, k, drawn, stacks)?;
+            stacks.insert(k.id.clone(), made.clone());
+            made
+        }
+    };
     v["name"] = json!(label);
     v["source_range"] = range(source as f64, frames as f64, rate);
     v["effects"] = Value::Array(effects);
     v["markers"] = json!([]);
     v["enabled"] = json!(c.enabled);
-    v["metadata"][VIDCUT] = json!({ "clip": c.id, "color": c.color });
+    v["metadata"][VIDCUT] = json!({
+        "clip": c.id,
+        "color": c.color,
+        "compound": k.id,
+        "fps": k.fps,
+    });
     if let Some(x) = &c.picture {
         v["metadata"][VIDCUT]["picture"] = json!(x);
     }
@@ -1329,7 +1463,10 @@ fn compound_item(
     if k.start_tc != 0 {
         v["metadata"][VIDCUT]["start_tc"] = json!(k.start_tc);
     }
-    v
+    if k.counts_drop_frame() {
+        v["metadata"][VIDCUT]["drop_frame"] = json!(true);
+    }
+    Ok(v)
 }
 
 fn is_multicam(item: &Value) -> bool {
@@ -1373,10 +1510,6 @@ fn no_media_ties(p: &Project, a: i64, b: i64) -> HashMap<NoMediaTie, usize> {
     ties
 }
 
-pub(crate) fn sequence_id(k: &Compound) -> Option<&str> {
-    k.stack["metadata"][EDITOR]["Sequence ID"].as_str()
-}
-
 pub(crate) fn is_compound_stack(v: &Value) -> bool {
     v["OTIO_SCHEMA"]
         .as_str()
@@ -1398,80 +1531,7 @@ pub(crate) fn stack_holds_any(v: &Value, ids: &std::collections::HashSet<String>
         .any(|ch| stack_holds_any(ch, ids))
 }
 
-fn is_compound_node(v: &Value) -> bool {
-    schema(v).starts_with("Stack.") && !is_multicam(v)
-}
-
-fn any_descendant_stack(v: &Value, pred: &impl Fn(&Value) -> bool) -> bool {
-    v["children"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .any(|ch| (is_compound_node(ch) && pred(ch)) || any_descendant_stack(ch, pred))
-}
-
-fn walk_descendant_stacks(v: &mut Value, visit: &impl Fn(&mut Value)) {
-    let Some(children) = v.get_mut("children").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for ch in children {
-        if is_compound_node(ch) {
-            visit(ch);
-        }
-        walk_descendant_stacks(ch, visit);
-    }
-}
-
-fn set_stack_start_tc(v: &mut Value, start_tc: i64) {
-    if start_tc != 0 {
-        v["metadata"][VIDCUT]["start_tc"] = json!(start_tc);
-    } else if let Some(m) = v
-        .pointer_mut(&format!("/metadata/{VIDCUT}"))
-        .and_then(Value::as_object_mut)
-    {
-        m.remove("start_tc");
-    }
-}
-
-pub(crate) fn patch_stack_start_tc(k: &mut Compound, sid: &str, start_tc: i64) {
-    let needs = |v: &Value| {
-        v["metadata"][EDITOR]["Sequence ID"].as_str() == Some(sid)
-            && v["metadata"][VIDCUT]["start_tc"].as_i64().unwrap_or(0) != start_tc
-    };
-    if !any_descendant_stack(&k.stack, &needs) {
-        return;
-    }
-    walk_descendant_stacks(k.stack.make_mut(), &|v| {
-        if v["metadata"][EDITOR]["Sequence ID"].as_str() == Some(sid) {
-            set_stack_start_tc(v, start_tc);
-        }
-    });
-}
-
-pub(crate) fn relabel_stack_start_tc(k: &mut Compound, map: &impl Fn(i64) -> i64) {
-    let needs = |v: &Value| {
-        v["metadata"][VIDCUT]["start_tc"]
-            .as_i64()
-            .filter(|&n| n > 0)
-            .is_some_and(|n| map(n) != n)
-    };
-    if !any_descendant_stack(&k.stack, &needs) {
-        return;
-    }
-    walk_descendant_stacks(k.stack.make_mut(), &|v| {
-        if let Some(n) = v["metadata"][VIDCUT]["start_tc"]
-            .as_i64()
-            .filter(|&n| n > 0)
-        {
-            let next = map(n);
-            if next != n {
-                set_stack_start_tc(v, next);
-            }
-        }
-    });
-}
-
-fn stack_id(stack: &Value) -> String {
+pub(crate) fn stack_id(stack: &Value) -> String {
     let h = crate::fingerprint::short_digest(stack.to_string().as_bytes());
     format!(
         "{{{}-{}-{}-{}-{}}}",
@@ -1484,7 +1544,10 @@ fn stack_id(stack: &Value) -> String {
 }
 
 fn sequence_of(k: &Compound) -> String {
-    sequence_id(k).map_or_else(|| stack_id(&k.stack), str::to_string)
+    k.sequence_id
+        .clone()
+        .or_else(|| k.kept_otio.as_ref().map(|kept| stack_id(kept)))
+        .unwrap_or_else(|| stack_id(&json!({ "id": k.id, "name": k.name })))
 }
 
 pub fn tied(p: &Project, id: &str) -> Vec<String> {
@@ -1522,7 +1585,7 @@ fn compound_links(p: &Project, a: i64, b: i64) -> Links<'_> {
             .iter()
             .flat_map(|t| &t.clips)
             .filter(move |c| c.video == picture && c.start.max(a) < c.end().min(b))
-            .filter_map(|c| Some((c, c.compound.as_ref()?)))
+            .filter_map(|c| Some((c, p.clip_compound(c)?)))
     };
     let mut links = HashMap::new();
     for (n, (c, k)) in blocks(true).enumerate() {
@@ -1530,7 +1593,7 @@ fn compound_links(p: &Project, a: i64, b: i64) -> Links<'_> {
             !links.contains_key(s.id.as_str())
                 && (s.start, s.duration, s.source_in) == (c.start, c.duration, c.source_in)
                 && s.pace() == c.pace()
-                && sequence_id(j) == sequence_id(k)
+                && j.id == k.id
         };
         if let Some((s, _)) = blocks(false).find(same) {
             let id = sequence_of(k);
@@ -1564,11 +1627,26 @@ fn tie(
 }
 
 pub fn compound_kind(k: &Compound) -> String {
-    k.stack["metadata"][EDITOR]["Sequence Type"]
-        .as_str()
-        .filter(|n| !n.is_empty())
-        .unwrap_or("compound")
-        .to_string()
+    match &k.kept_otio {
+        Some(kept) => kept["metadata"][EDITOR]["Sequence Type"]
+            .as_str()
+            .filter(|n| !n.is_empty())
+            .unwrap_or("compound"),
+        None => "Compound Clip",
+    }
+    .to_string()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedCompound {
+    pub stack: Kept,
+    pub fps: Rational,
+    pub frames: i64,
+    pub markers: Vec<crate::model::Marker>,
+    pub start_tc: i64,
+    pub sequence_id: Option<String>,
+    pub compound_id: Option<String>,
+    pub drop_frame: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -1623,7 +1701,7 @@ pub struct ImportedClip {
     pub title_from: Option<Value>,
     pub picture: Option<Picture>,
     pub motion: Vec<MotionPath>,
-    pub compound: Option<Compound>,
+    pub compound: Option<ImportedCompound>,
     pub speed: Option<Speed>,
     pub retime: crate::model::ClipRetime,
     pub color: Option<String>,
@@ -1820,6 +1898,8 @@ pub struct ProjectMeta {
     pub timelines: Vec<crate::model::Timeline>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compounds: Vec<Compound>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

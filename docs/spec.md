@@ -2500,7 +2500,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - **vidcut:**
     - A compound clip in the Media tab also opens by double-click or its context menu.
     - Opening a nested compound clip adds one more level to the path bar. Double-clicking any parent steps back to that level.
-    - Closing writes edits back to the opened target. It also updates all copies with that `Sequence ID` across timelines, nested clips and the Media tab.
+    - Closing writes edits back to the canonical compound definition, so every placement shows the change.
     - Growing inner tracks unlocks tail trims on placed clips.
     - Shrinking inner tracks keeps existing placed lengths and edge dissolves intact. Past the new end, playback gives black and silence.
     - Placing, pasting or importing a compound clip inside itself or an open parent is refused. Reopening an already open copy is refused too.
@@ -2513,10 +2513,13 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A new compound clip defaults to `00:00:00:00` (`00:00:00;00` on a drop-frame timeline), regardless of clip placement.
   - Right-click a compound clip in the Media Pool and choose Starting Timecode to change it (`Set New Start Timecode`).
   - Both `;` and `:` work in `start_tc` on drop-frame timelines. Changing the starting timecode keeps clip positions and trims.
+  - Measured: a compound clip keeps its own frame rate, drop-frame setting and Start Timecode across timelines of any rate or drop-frame setting.
+  - Measured: placed lengths scale to the host timeline's frame rate, while the compound's inner tracks stay at its own rate.
   - In OTIO export, `Stack.source_range` and `Stack.markers` stay zero-based and Resolve leaves compound start timecodes out.
   - **vidcut:**
     - `edit.compound`, `edit.compound_range` and `media.compound` accept `start_tc`, and New Compound Clip shows Start Timecode.
-    - `compound.set` and Starting Timecode in the Media tab update all copies sharing a `Sequence ID`.
+    - `compound.set` and Starting Timecode in the Media tab update the canonical compound definition, so every placement reflects it.
+    - Opening a compound clip uses its own frame rate, drop-frame flag and `start_tc`, regardless of the host timeline.
     - OTIO keeps `source_range` zero-based for interchange and stores non-zero `start_tc` in `metadata.vidcut.start_tc`.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.

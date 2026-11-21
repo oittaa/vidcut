@@ -484,7 +484,7 @@ fn clip(
                     .as_ref()
                     .map(|g| vidcut_core::generators::name(g).to_string())
             })
-            .or_else(|| c.compound.as_ref().map(vidcut_core::otio::compound_kind))
+            .or_else(|| p.clip_compound(c).map(vidcut_core::otio::compound_kind))
             .unwrap_or_default();
         let left = x0.max(painter.clip_rect().left()) + if keyed { 12.0 } else { 0.0 };
         let told = c.audio.is_some() && assets.transcribed.contains(&c.media);
