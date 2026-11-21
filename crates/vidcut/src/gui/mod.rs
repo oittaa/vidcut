@@ -18,6 +18,7 @@ mod folders;
 pub mod frame;
 mod generator_browser;
 mod grade_keys;
+mod grade_windows;
 mod help;
 mod history;
 mod import;

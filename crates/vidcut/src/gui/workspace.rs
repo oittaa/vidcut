@@ -348,6 +348,7 @@ impl Workspace {
                 live::GuiChange::Grade(level) => self.set_grading(level),
                 live::GuiChange::Palette(palette) => self.effects_page.palette = palette,
                 live::GuiChange::Primaries(view) => self.effects_page.primaries = view,
+                live::GuiChange::Window(w) => self.effects_page.window = w,
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
                 live::GuiChange::GradeNodes(nodes) => self.pick_grade_nodes(nodes)?,
                 live::GuiChange::NodeView { zoom, list, wide } => {
@@ -467,6 +468,7 @@ impl Workspace {
             grade: self.effects_page.grading,
             palette: self.effects_page.palette,
             primaries: self.effects_page.primaries,
+            window: self.effects_page.window,
             clip: match (page, self.effects_page.grading) {
                 (Page::Effects, _) => self.effects_clip(),
                 (Page::Color, GradeLevel::Clip) => self.color_clip(),
