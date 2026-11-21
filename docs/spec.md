@@ -3277,10 +3277,13 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - `grade.get` gives the windows of each corrector. The values are those of the palette.
   - The windows work as measured in the viewer and the export. vidcut renders the 133 measured cases within 1.6e-4.
   - Measured: the thumbnail of a node uses the window key of each pixel. vidcut uses it as k of the thumbnail.
-  - Measured: a window moves with the Edit Sizing of its clip: the position, the zoom, the rotation and the flips. Its outline in the viewer moves with it.
+  - Measured: a window moves with the Edit Sizing of its clip: position, zoom, rotation, flips, pitch, yaw and Dynamic Zoom.
+  - Measured: its outline in the viewer moves with the position and the zoom.
   - Measured: a window is in pixels of the timeline frame, on the clip as fitted. A 3840×2160 clip in a 1920×1080 timeline gets the window of a 1920×1080 clip.
   - Measured: the zoom, the rotation and the flips act on the window about the pixel at W/2, H/2. The picture turns about the middle of the frame, half a pixel away.
-  - vidcut: the same. The grade itself works after Edit Sizing ([§13](#13-order-of-operations-pp-287296-3407)). vidcut renders the 8 measured moved clips within 3.4e-4.
+  - vidcut: the same. The grade itself works after Edit Sizing ([§13](#13-order-of-operations-pp-287296-3407)). vidcut renders the 15 measured moved clips within 3.4e-4.
+    - The exception is the edge pixels of a picture with a pitch or a yaw. There the result differs by up to 0.65 of the key.
+    - These pixels are outside the measured windows. The edge of a leaned picture differs also without a window ([§8.17](#817-generators-p-766)).
   - A circle made in Resolve with Toggle Display Mode on has no radius ([gotchas](gotchas.md#resolves-renders)). vidcut does not copy this fault.
   - A locked node refuses a change of its windows ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
   - Measured: Reset Node Grade turns each window off at its usual values, with Invert and Mask off. The rows and their names stay.
