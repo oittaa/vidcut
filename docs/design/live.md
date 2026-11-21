@@ -436,6 +436,7 @@ The bar and the Jobs button:
   - A drag of a handle changes a copy of the grade (`WindowGrab`). The palette then sends `grade.window.set` when the mouse button comes up, as for a field.
   - The viewer draws after the palette. Thus a change in the viewer updates the preview at once, and asks for one more frame. In that frame the palette sends it.
   - A click on a polygon edge adds a corner, and a middle-click removes one. Both go through the same copy.
+  - Copy Window sends `grade.window.copy`. The live core keeps its answer (`window_clipboard`) for `grade.window.paste`. The snapshot gives the shape of the copy, so the palette knows which window becomes current.
   - A curve has a handle at each point (`Grip::Point`) and at each Bezier handle (`Grip::Tangent`).
   - A click on a curve adds a point with `curve_split`. `curve_inserted` cuts the Bezier segment there, so the shape stays.
   - While the current curve is on and has no points, a click adds a point. `Drawing` then keeps the curve open until a click on its first point.

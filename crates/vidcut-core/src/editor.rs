@@ -4937,6 +4937,21 @@ fn mutate(
             let of = grade_of(p, clip, *timeline, playhead)?;
             json!({ "window": ops::grade_windows::convert(p, &of, *node, *window)? })
         }
+        Request::GradeWindowPaste {
+            clip,
+            timeline,
+            node,
+            window,
+            append,
+            settings,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let copied = settings.as_ref().ok_or_else(|| {
+                Error::usage("give `settings`, a window from `grade.window.copy`")
+            })?;
+            let to = ops::grade_windows::paste(p, &of, *node, (*window, *append), copied)?;
+            json!({ "window": to })
+        }
         Request::EffectsAdd { clips, kind } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             ops::effect::add(p, &ids, *kind)?
@@ -8522,6 +8537,15 @@ pub fn query(
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
             json!({ "settings": ops::grade::copy(p, &of, *node)? })
+        }
+        Request::GradeWindowCopy {
+            clip,
+            timeline,
+            node,
+            window,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            json!({ "settings": ops::grade_windows::copy(p, &of, *node, *window)? })
         }
         Request::GradeGet { clip, timeline, at } => {
             let of = grade_of(p, clip, *timeline, playhead)?;

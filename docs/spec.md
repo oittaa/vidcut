@@ -3389,9 +3389,17 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - A middle-click removes any point of a curve.
     - The viewer shows the outline, thin lines at the inner and the outer path, the points, the Bezier handles and a middle dot.
     - Not measured: the look of a curve in the viewer of Resolve, and its key before the curve is closed.
-  - Window keyframes, Copy and Paste Window, the softness points of a curve and the Shift box come later ([todo](todo/color-page.md)).
+  - Measured in the Window palette of Resolve Studio 21.2: Copy Window in the option menu copies the current window.
+    - Paste Window with a window of the same shape current gives it the copied values. It adds no row.
+    - Paste Window with a window of another shape current adds a copy at the end, on and current. The other window does not change.
+    - Paste Append Window adds a copy at the end, on and current, also with a window of the same shape current.
+  - vidcut: the same, with `grade.window.copy` and `grade.window.paste`. `append` gives Paste Append Window.
+    - The copy has the shape, the softness, the Transform values, Invert and Mask.
+    - A window that takes a copy keeps its name, and stays on or off. A copy at the end has no name.
+    - Not measured: the name, Invert, Mask and the on state after a paste.
+  - Window keyframes, the softness points of a curve and the Shift box come later ([todo](todo/color-page.md)).
 
-Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove` and `grade.window.convert`.
+Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.window.convert`, `grade.window.copy` and `grade.window.paste`.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
