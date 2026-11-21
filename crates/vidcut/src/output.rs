@@ -1468,10 +1468,11 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 }
             );
             println!(
-                "color grade {}, palette {} ({}), nodes {}",
+                "color grade {}, palette {} ({}), window {}, nodes {}",
                 v["grade"].as_str().unwrap_or("-"),
                 v["palette"].as_str().unwrap_or("-"),
                 v["primaries"].as_str().unwrap_or("-"),
+                v["window"],
                 if grade_nodes.is_empty() {
                     "-".to_string()
                 } else {

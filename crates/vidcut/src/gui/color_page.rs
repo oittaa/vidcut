@@ -4,7 +4,10 @@ use egui::{Color32, CursorIcon, DragValue, Label, Rect, Response, Sense, Stroke,
 use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
 use vidcut_av::screen::{ShotsOf, ShotsWanted};
-use vidcut_core::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, KeyOutput, Picture};
+use vidcut_core::model::{
+    BlendMode, Corrector, Grade, GradeNode, GradeTool, GradeWindow, KeyOutput, Picture, Project,
+    WindowKind,
+};
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed, taken_out};
 use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::preferences::SwitchingClips;
@@ -13,6 +16,7 @@ use vidcut_core::request::{
 };
 use vidcut_core::shortcuts::{Action, Bindings, Panel};
 
+use super::grade_windows::{self, WindowAct};
 use super::node_editor::{
     self, Badge, Dropped, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, SHOT_HEIGHT, Shot,
     Side, Spot, Tile, Wire,
@@ -405,6 +409,20 @@ fn keyed(key: KeyOutput, c: &Change) -> KeyOutput {
         _ => {}
     }
     key
+}
+
+fn window_sets(from: &Grade, to: &Grade, n: u32) -> Vec<(usize, Map<String, Value>)> {
+    let (Some(a), Some(b)) = (from.node(n), to.node(n)) else {
+        return Vec::new();
+    };
+    if a.windows.len() != b.windows.len() {
+        return Vec::new();
+    }
+    let pairs = a.windows.iter().zip(&b.windows).enumerate();
+    pairs
+        .map(|(i, (a, b))| (i, grade_windows::window_changes(a, b)))
+        .filter(|(_, m)| !m.is_empty())
+        .collect()
 }
 
 fn key_changes(from: KeyOutput, to: KeyOutput) -> Map<String, Value> {
@@ -1322,6 +1340,7 @@ impl Workspace {
             ui.separator();
             for (p, text) in [
                 (GradePalette::Primaries, "Primaries"),
+                (GradePalette::Window, "Window"),
                 (GradePalette::Key, "Key"),
             ] {
                 if ui.selectable_label(palette == p, text).clicked() && palette != p {
@@ -1329,7 +1348,7 @@ impl Workspace {
                 }
             }
             ui.separator();
-            if palette == GradePalette::Key {
+            if palette != GradePalette::Primaries {
                 reset = ui.button("Reset").clicked();
                 picked = grade_switch(ui, level);
                 return;
@@ -1403,9 +1422,14 @@ impl Workspace {
             self.send("gui.page", Value::Object(view));
         }
         let key_now = key_output_held(&grade, n, frame).unwrap_or_default();
+        let mut window_acts = Vec::new();
         let point = match palette {
             GradePalette::Key => {
                 key_output(ui, &mut changes, key_now);
+                None
+            }
+            GradePalette::Window => {
+                window_acts = self.window_body(ui, &grade, n);
                 None
             }
             GradePalette::Primaries => primaries_body(ui, (&g, mode), &mut changes),
@@ -1414,6 +1438,10 @@ impl Workspace {
         let locked = grade.node(n).is_some_and(|d| d.locked);
         if locked {
             changes.clear();
+            window_acts.clear();
+        }
+        for act in window_acts {
+            self.window_act(&of, &grade, (n, frame, at), act);
         }
         if reset && !locked {
             self.effects_page.graded = None;
@@ -1459,17 +1487,27 @@ impl Workspace {
                 if let (Some(a), Some(b)) = keys {
                     params.extend(key_changes(a, b));
                 }
-                Some(params)
+                Some((params, window_sets(&stored, &h.grade, n)))
             }
             _ => None,
         };
         match ready {
-            Some(params) if params.is_empty() => self.effects_page.graded = None,
-            Some(mut params) => {
-                params.insert(field, target);
-                params.insert("node".into(), json!(n));
-                params.insert("at".into(), json!(at));
-                self.send("grade.set", Value::Object(params));
+            Some((params, sets)) if params.is_empty() && sets.is_empty() => {
+                self.effects_page.graded = None;
+            }
+            Some((mut params, sets)) => {
+                for (i, mut set) in sets {
+                    set.insert(field.clone(), target.clone());
+                    set.insert("node".into(), json!(n));
+                    set.insert("window".into(), json!(i));
+                    self.send("grade.window.set", Value::Object(set));
+                }
+                if !params.is_empty() {
+                    params.insert(field, target);
+                    params.insert("node".into(), json!(n));
+                    params.insert("at".into(), json!(at));
+                    self.send("grade.set", Value::Object(params));
+                }
             }
             None => {}
         }
@@ -1477,6 +1515,97 @@ impl Workspace {
             self.printer_point(point);
         }
         palette == GradePalette::Primaries
+    }
+
+    fn window_body(&mut self, ui: &mut Ui, grade: &Grade, n: u32) -> Vec<WindowAct> {
+        let windows = grade.node(n).map_or(&[][..], |d| &d.windows[..]);
+        let current = self
+            .effects_page
+            .window
+            .min(windows.len().saturating_sub(1));
+        let size = self.project().map_or([0.0; 2], Project::frame_size);
+        let usual = (windows.get(current)).map(|w| GradeWindow::new(w.shape.kind(), size));
+        let shown = (windows, current, usual.as_ref());
+        let editing = &mut self.effects_page.window_name;
+        grade_windows::window_palette(ui, shown, editing)
+    }
+
+    fn window_act(
+        &mut self,
+        of: &GradeOf,
+        grade: &Grade,
+        (n, frame, at): (u32, i64, i64),
+        act: WindowAct,
+    ) {
+        let windows = grade.node(n).map_or(&[][..], |d| &d.windows[..]);
+        let current = self
+            .effects_page
+            .window
+            .min(windows.len().saturating_sub(1));
+        let (field, target) = named(of);
+        let send = |this: &mut Self, method: &str, mut params: Map<String, Value>| {
+            this.effects_page.graded = None;
+            params.insert(field.clone(), target.clone());
+            params.insert("node".into(), json!(n));
+            this.send(method, Value::Object(params));
+        };
+        let set = |i: usize, name: &str, v: Value| {
+            Map::from_iter([("window".to_string(), json!(i)), (name.to_string(), v)])
+        };
+        match act {
+            WindowAct::Add(kind) => {
+                self.effects_page.window = windows.len();
+                let params = Map::from_iter([("shape".to_string(), json!(kind))]);
+                send(self, "grade.window.add", params);
+            }
+            WindowAct::Delete => {
+                if let Some(w) = windows.get(current) {
+                    if current >= WindowKind::ALL.len() {
+                        self.effects_page.window = grade_windows::first_of(w.shape.kind());
+                    }
+                    let params = Map::from_iter([("window".to_string(), json!(current))]);
+                    send(self, "grade.window.remove", params);
+                }
+            }
+            WindowAct::Pick(i) => self.effects_page.window = i,
+            WindowAct::Toggle(i) => {
+                self.effects_page.window = i;
+                if let Some(w) = windows.get(i) {
+                    send(self, "grade.window.set", set(i, "on", json!(!w.on)));
+                }
+            }
+            WindowAct::Invert(i, v) => send(self, "grade.window.set", set(i, "invert", json!(v))),
+            WindowAct::Mask(i, v) => send(self, "grade.window.set", set(i, "mask", json!(v))),
+            WindowAct::Rename(i, name) => {
+                send(self, "grade.window.set", set(i, "name", json!(name)));
+            }
+            WindowAct::ResetWindow => {
+                let size = self.project().map_or([0.0; 2], Project::frame_size);
+                if let Some(w) = windows.get(current) {
+                    let usual = grade_windows::reset(w, size);
+                    let mut params = grade_windows::window_changes(w, &usual);
+                    if !params.is_empty() {
+                        params.insert("window".into(), json!(current));
+                        send(self, "grade.window.set", params);
+                    }
+                }
+            }
+            WindowAct::Value(i, f, v) => {
+                let mut next = grade.clone();
+                let at_window = next.node_mut(n).and_then(|d| d.windows.get_mut(i));
+                if let Some(w) = at_window {
+                    *w = grade_windows::with_value(w, f, v);
+                }
+                self.effects_page.graded = Some(Graded {
+                    of: of.clone(),
+                    node: n,
+                    frame,
+                    at,
+                    grade: next,
+                    sent: None,
+                });
+            }
+        }
     }
 
     fn printer_point(&mut self, point: (PrinterColor, f64)) {
