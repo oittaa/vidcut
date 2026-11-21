@@ -2461,6 +2461,8 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A compound clip can hold a compound clip.
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. Else it is removed.
   - A dissolve to a clip that is not selected is removed.
+  - Subtitle items stay out. Passing a subtitle item with other items leaves it on its subtitle track, and a subtitle alone makes no compound clip.
+    - vidcut: `edit.compound` takes clip ids only, so a subtitle cue id is refused.
 - **Locked tracks:** a selected item on a locked track stays out, and the other items go in.
 - **In and Out marks:** the scripting call does not use them. It takes whole items.
 - **The window:**
@@ -2500,7 +2502,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - **vidcut:**
     - A compound clip in the Media tab also opens by double-click or its context menu.
     - Opening a nested compound clip adds one more level to the path bar. Double-clicking any parent steps back to that level.
-    - Closing writes edits back to the opened target. It also updates all copies with that `Sequence ID` across timelines, nested clips and the Media tab.
+    - Closing writes edits back to the canonical compound definition, so every placement shows the change.
     - Growing inner tracks unlocks tail trims on placed clips.
     - Shrinking inner tracks keeps existing placed lengths and edge dissolves intact. Past the new end, playback gives black and silence.
     - Placing, pasting or importing a compound clip inside itself or an open parent is refused. Reopening an already open copy is refused too.
@@ -2513,10 +2515,13 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A new compound clip defaults to `00:00:00:00` (`00:00:00;00` on a drop-frame timeline), regardless of clip placement.
   - Right-click a compound clip in the Media Pool and choose Starting Timecode to change it (`Set New Start Timecode`).
   - Both `;` and `:` work in `start_tc` on drop-frame timelines. Changing the starting timecode keeps clip positions and trims.
+  - Measured: a compound clip keeps its own frame rate, drop-frame setting and Start Timecode across timelines of any rate or drop-frame setting.
+  - Measured: placed lengths scale to the host timeline's frame rate, while the compound's inner tracks stay at its own rate.
   - In OTIO export, `Stack.source_range` and `Stack.markers` stay zero-based and Resolve leaves compound start timecodes out.
   - **vidcut:**
     - `edit.compound`, `edit.compound_range` and `media.compound` accept `start_tc`, and New Compound Clip shows Start Timecode.
-    - `compound.set` and Starting Timecode in the Media tab update all copies sharing a `Sequence ID`.
+    - `compound.set` and Starting Timecode in the Media tab update the canonical compound definition, so every placement reflects it.
+    - Opening a compound clip uses its own frame rate, drop-frame flag and `start_tc`, regardless of the host timeline.
     - OTIO keeps `source_range` zero-based for interchange and stores non-zero `start_tc` in `metadata.vidcut.start_tc`.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
@@ -5337,7 +5342,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A picture at an opacity of 0 counts as a picture.
       - An upper soft edge over a partly clear picture gives the premultiplied sum of the same formula.
       - A Gaussian Blur on the compound clip works on a title alone.
-      - A Mosaic Blur and a Glow on the compound clip follow the rule of the Gaussian Blur, at their default values.
+      - Mosaic Blur, Glow, Vignette and Sharpen on the compound clip follow the rule of the Gaussian Blur, at their default values.
       - A Film Grain on the compound clip counts its frames from the first frame of the compound clip.
       - A trim or a move of the compound clip does not change the pattern of the grain.
       - Float values stay exact inside a compound clip. A value above 1 is not clipped, and a value between 8-bit steps is not rounded.

@@ -1571,8 +1571,9 @@ pub enum Request {
         at: Option<TimeSpec>,
         ease: Ease,
     },
-    /// Copy clips (Ctrl+C): returns them with their tracks as `clips`, and
-    /// the timeline's frame rate as `fps`, ready for `edit.paste`. The GUI
+    /// Copy clips (Ctrl+C): returns them with their tracks as `clips`,
+    /// their compound definitions as `compounds` when needed, and the
+    /// timeline's frame rate as `fps`, ready for `edit.paste`. The GUI
     /// also keeps them on its clipboard.
     /// With `range` instead of `clips`: the parts of the clips on the
     /// unlocked tracks in that range (Copy in the Transcription window).
@@ -1614,6 +1615,10 @@ pub enum Request {
     EditPaste {
         #[serde(default)]
         clips: Option<Vec<TrackClip>>,
+        /// Compound definitions used by `clips`, as `edit.copy` and `edit.cut`
+        /// give them. Missing definitions are restored as removed from the Media tab.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        compounds: Vec<crate::model::Compound>,
         #[serde(default)]
         cues: Option<Vec<crate::model::TrackCue>>,
         #[serde(default)]

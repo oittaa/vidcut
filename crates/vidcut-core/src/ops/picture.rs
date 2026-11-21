@@ -62,10 +62,6 @@ pub fn ungraded_usual(mut p: Picture, frame: [f64; 2]) -> Option<Picture> {
     (!p.is_usual()).then_some(p)
 }
 
-pub fn kept(p: &Picture, frame: [f64; 2]) -> Result<Option<Picture>> {
-    Ok(checked(p)?.and_then(|p| ungraded_usual(p, frame)))
-}
-
 fn within(v: Option<f64>, (low, high): (f64, f64), why: &str) -> Result<()> {
     match v.is_none_or(|v| v.is_finite() && (low..=high).contains(&v)) {
         true => Ok(()),

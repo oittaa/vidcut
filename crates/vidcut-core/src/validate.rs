@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::model::{Compound, Generator, Media, Project, TrackKind};
+use crate::model::{Generator, Media, Project, TrackKind};
 
 pub const GAIN: std::ops::RangeInclusive<f64> = -100.0..=30.0;
 pub const FADER: std::ops::RangeInclusive<f64> = -100.0..=10.0;
@@ -10,17 +10,82 @@ pub fn fader_silent(volume_db: f64) -> bool {
     volume_db <= *FADER.start()
 }
 
-fn compound_media(k: &Compound, pool: &HashMap<&str, &Media>, v: &mut Vec<String>) {
-    if k.start_tc < 0 {
-        v.push("compound clip starts before 00:00:00:00".into());
-    }
-    for c in k.tracks.iter().chain(&k.made_from).flat_map(|t| &t.clips) {
-        if let Some(k) = &c.compound {
-            compound_media(k, pool, v);
-        } else if !c.is_block() && !pool.contains_key(c.media.as_str()) {
-            v.push(format!("{}: unknown media {}", c.id, c.media));
+fn compounds(p: &Project, pool: &HashMap<&str, &Media>, v: &mut Vec<String>) {
+    let mut ids = HashSet::new();
+    for k in &p.compounds {
+        if !ids.insert(k.id.as_str()) {
+            v.push(format!("duplicate compound {}", k.id));
+        }
+        if k.sequence_id.trim().is_empty() {
+            v.push(format!("compound {} has no sequence_id", k.id));
+        }
+        if k.removed && !k.bin.is_empty() {
+            v.push(format!("removed compound {} is in bin {:?}", k.id, k.bin));
+        }
+        if !k.bin.is_empty() && !p.bins.contains(&k.bin) {
+            v.push(format!("{} is in unknown bin {:?}", k.id, k.bin));
+        }
+        if k.drop_frame && !k.fps.has_drop_frame() {
+            v.push(format!("compound {} counts drop-frame at {}", k.id, k.fps));
+        }
+        if k.start_tc < 0 {
+            v.push("compound clip starts before 00:00:00:00".into());
+        }
+        if k.frames < 0 {
+            v.push(format!(
+                "compound {} has negative length {}",
+                k.id, k.frames
+            ));
+        }
+        for c in k.tracks.iter().flat_map(|t| &t.clips) {
+            if let Some(cid) = &c.compound {
+                match p.compound(cid) {
+                    None => v.push(format!("{}: unknown compound {cid}", c.id)),
+                    Some(child) => {
+                        let (lo, hi) = c.shown();
+                        let frames = crate::time::rescale(child.frames, child.fps, k.fps);
+                        if lo < 0 || hi > frames {
+                            v.push(format!(
+                                "{}: source {lo}..{hi} outside its compound (0..{frames})",
+                                c.id
+                            ));
+                        }
+                    }
+                }
+            } else if !c.is_block() && !pool.contains_key(c.media.as_str()) {
+                v.push(format!("{}: unknown media {}", c.id, c.media));
+            }
         }
     }
+    let mut state: HashMap<&str, u8> = HashMap::new();
+    for k in &p.compounds {
+        compound_cycle(p, &k.id, &mut state, v);
+    }
+}
+
+fn compound_cycle<'a>(
+    p: &'a Project,
+    cid: &'a str,
+    state: &mut HashMap<&'a str, u8>,
+    v: &mut Vec<String>,
+) {
+    match state.get(cid).copied() {
+        Some(1) => {
+            v.push(format!("compound {cid} holds itself"));
+            return;
+        }
+        Some(_) => return,
+        None => {}
+    }
+    state.insert(cid, 1);
+    if let Some(k) = p.compound(cid) {
+        for c in p.compound_tracks(k).iter().flat_map(|t| &t.clips) {
+            if let Some(inner) = &c.compound {
+                compound_cycle(p, inner, state, v);
+            }
+        }
+    }
+    state.insert(cid, 2);
 }
 
 pub fn violations(p: &Project) -> Vec<String> {
@@ -112,13 +177,18 @@ pub fn violations(p: &Project) -> Vec<String> {
                     v.push(format!("{}: {why}", c.id));
                 }
                 let (lo, hi) = c.shown();
-                if let Some(k) = &c.compound {
-                    compound_media(k, &pool, &mut v);
-                    if lo < 0 || hi > k.frames {
-                        v.push(format!(
-                            "{}: source {lo}..{hi} outside its compound (0..{})",
-                            c.id, k.frames
-                        ));
+                if let Some(cid) = &c.compound {
+                    match p.compound(cid) {
+                        None => v.push(format!("{}: unknown compound {cid}", c.id)),
+                        Some(k) => {
+                            let frames = p.compound_frames(k);
+                            if lo < 0 || hi > frames {
+                                v.push(format!(
+                                    "{}: source {lo}..{hi} outside its compound (0..{frames})",
+                                    c.id
+                                ));
+                            }
+                        }
                     }
                 }
                 continue;
@@ -263,17 +333,7 @@ pub fn violations(p: &Project) -> Vec<String> {
             v.push(format!("{} is in unknown bin {:?}", m.id, m.bin));
         }
     }
-    for k in &p.compounds {
-        if !k.bin.is_empty() && !p.bins.contains(&k.bin) {
-            v.push(format!("{} is in unknown bin {:?}", k.id, k.bin));
-        }
-        if k.drop_frame && !k.fps.has_drop_frame() {
-            v.push(format!("compound {} counts drop-frame at {}", k.id, k.fps));
-        }
-        for block in k.blocks() {
-            compound_media(block, &pool, &mut v);
-        }
-    }
+    compounds(p, &pool, &mut v);
     for m in &p.media {
         if let Some(s) = m.subclip
             && (s.start < 0 || s.end <= s.start)
@@ -372,6 +432,9 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
         if t.start_tc < 0 {
             v.push(format!("timeline {} starts before 00:00:00:00", t.id));
         }
+        if let Some(Err(e)) = t.grade.as_ref().map(crate::ops::grade::checked) {
+            v.push(format!("timeline {}: {}", t.id, e.message));
+        }
         if let Some(o) = t.own {
             if o.drop_frame && !o.fps.has_drop_frame() {
                 v.push(format!("timeline {} counts drop-frame at {}", t.id, o.fps));
@@ -407,33 +470,27 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
             v.push(format!("timeline {} has no V1 track", t.id));
         }
     }
-    if let Some(c) = p.compound_path.last()
-        && !(c.tracks.is_empty() && c.marks.is_empty() && c.markers.is_empty())
+    if let Some(oc) = p.compound_path.last()
+        && let Some(k) = p.compound(&oc.compound)
+        && !(k.tracks.is_empty() && k.marks.is_empty() && k.markers.is_empty())
     {
-        v.push(format!("open compound {} holds its own tracks", c.name));
+        v.push(format!("open compound {} holds its own tracks", k.name));
     }
-    for (i, c) in p.compound_path.iter().enumerate() {
-        if c.name.trim().is_empty() {
+    let mut open_seen = HashSet::new();
+    for (i, oc) in p.compound_path.iter().enumerate() {
+        if !open_seen.insert(oc.compound.as_str()) {
+            v.push(format!("open compound {} is in path twice", oc.compound));
+        }
+        let Some(k) = p.compound(&oc.compound) else {
+            v.push(format!("open compound {i} has unknown id {}", oc.compound));
+            continue;
+        };
+        if k.name.trim().is_empty() {
             v.push(format!("open compound {i} has no name"));
         }
-        if c.start_tc < 0 {
-            v.push(format!(
-                "open compound {} starts before 00:00:00:00",
-                c.name
-            ));
-        }
-        if c.drop_frame && !c.fps.has_drop_frame() {
-            v.push(format!(
-                "open compound {} counts drop-frame at {}",
-                c.name, c.fps
-            ));
-        }
-        if c.id != c.target.key() {
-            v.push(format!("open compound {} has id {}", c.name, c.id));
-        }
-        match &c.target {
+        match &oc.target {
             crate::model::CompoundTarget::Pooled { compound } => {
-                if i != 0 || !p.compounds.iter().any(|k| &k.id == compound) {
+                if i != 0 || compound != &oc.compound || p.pooled_compound(compound).is_none() {
                     v.push(format!("open compound targets missing pooled {compound}"));
                 }
             }
@@ -441,12 +498,13 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
                 let tracks: Option<&[crate::model::Track]> = if i == 0 {
                     p.timeline().map(|t| t.tracks.as_slice())
                 } else {
-                    Some(p.compound_path[i - 1].tracks.as_slice())
+                    p.compound(&p.compound_path[i - 1].compound)
+                        .map(|pk| pk.tracks.as_slice())
                 };
                 let ok = tracks.is_some_and(|ts| {
-                    ts.iter()
-                        .flat_map(|t| &t.clips)
-                        .any(|x| &x.id == clip && x.compound.is_some())
+                    ts.iter().flat_map(|t| &t.clips).any(|x| {
+                        &x.id == clip && x.compound.as_deref() == Some(oc.compound.as_str())
+                    })
                 });
                 if !ok {
                     v.push(format!("open compound targets missing clip {clip}"));
@@ -524,7 +582,8 @@ mod tests {
         let a = f.append("m1", 0, 50);
         f.ok(json!({"method": "edit.compound", "params": {"clips": [a]}}));
         let mut p = f.editor.project().clone();
-        let inner = &mut p.tracks[0].clips[0].compound.as_mut().unwrap().tracks[0].clips[0];
+        let cid = p.tracks[0].clips[0].compound.clone().unwrap();
+        let inner = &mut p.compound_mut(&cid).unwrap().tracks[0].clips[0];
         inner.media = "gone".into();
         let want = format!("{}: unknown media gone", inner.id);
         assert_eq!(violations(&p), vec![want]);
@@ -547,7 +606,7 @@ mod tests {
         f.append("m1", 0, 60);
         f.ok(json!({"method": "media.compound", "params": {"range": "10f..40f"}}));
         let mut p = f.editor.project().clone();
-        p.compounds[0].picture.as_mut().unwrap().start_tc = -1;
+        p.compounds[0].start_tc = -1;
         assert_eq!(
             violations(&p),
             vec!["compound clip starts before 00:00:00:00".to_string()]
@@ -566,5 +625,35 @@ mod tests {
                 .iter()
                 .any(|e| e.contains("counts drop-frame"))
         );
+    }
+
+    #[test]
+    fn unknown_compound_id_on_clip_is_reported() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 50);
+        let mut p = f.editor.project().clone();
+        p.tracks[0].clips[0].media.clear();
+        p.tracks[0].clips[0].audio = None;
+        p.tracks[0].clips[0].compound = Some("k99".into());
+        assert!(
+            violations(&p)
+                .iter()
+                .any(|e| e.contains("unknown compound k99"))
+        );
+    }
+
+    #[test]
+    fn cyclic_compounds_are_reported() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 30);
+        let inner = f.ok(json!({"method": "edit.compound", "params": {"clips": [a]}}));
+        let inner_id = inner.result["clips"][0].as_str().unwrap().to_string();
+        f.ok(json!({"method": "edit.compound", "params": {"clips": [inner_id]}}));
+        let mut p = f.editor.project().clone();
+        let outer_kid = p.compounds[1].id.clone();
+        p.compounds[0].tracks[0].clips[0].media.clear();
+        p.compounds[0].tracks[0].clips[0].audio = None;
+        p.compounds[0].tracks[0].clips[0].compound = Some(outer_kid);
+        assert!(violations(&p).iter().any(|e| e.contains("holds itself")));
     }
 }
