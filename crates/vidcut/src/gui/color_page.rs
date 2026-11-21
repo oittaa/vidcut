@@ -1472,12 +1472,9 @@ impl Workspace {
             .flatten();
         let switching = self.snap.switching_clips;
         let page = &mut self.effects_page;
-        if page
-            .grade_seen
-            .as_ref()
-            .is_none_or(|(t, o, c)| *t != open || o != of || *c != clip)
-        {
-            let was = page.grade_nodes.last().copied();
+        let was = page.grade_nodes.last().copied();
+        let seen = page.grade_seen.as_ref();
+        if seen.is_none_or(|(t, o, _)| *t != open || o != of) {
             if let (Some((t, o, _)), Some(n)) = (page.grade_seen.take(), was) {
                 page.grade_left.insert((t, o), n);
             }
@@ -1488,6 +1485,12 @@ impl Workspace {
             page.grade_view.stop();
             page.grade_spot = None;
             page.grade_keys.forget();
+        } else if seen.is_some_and(|(_, _, c)| *c != clip) {
+            let n = switched_to(g, switching, was, was);
+            if Some(n) != was {
+                page.grade_nodes = vec![n];
+            }
+            page.grade_seen = Some((open, of.clone(), clip));
         }
         if (page.grade_coming).is_some_and(|(n, t)| g.node(n).is_some() || t.elapsed() > LANDING) {
             page.grade_coming = None;
