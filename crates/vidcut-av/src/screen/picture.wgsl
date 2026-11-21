@@ -1947,6 +1947,9 @@ fn window_one(b: u32, q: vec2<f32>) -> f32 {
 fn fs_window_key(in: Out) -> @location(0) vec4<f32> {
     let f = vec3<f32>(in.position.xy, 1.0);
     let h = vec3<f32>(dot(window_keying.map0.xyz, f), dot(window_keying.map1.xyz, f), dot(window_keying.map2.xyz, f));
+    if abs(h.z) < 1e-6 {
+        return vec4<f32>(0.0);
+    }
     let q = h.xy / h.z;
     let count = u32(window_keying.map0.w);
     let start = u32(window_keying.map1.w);
