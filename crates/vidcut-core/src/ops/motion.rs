@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -265,16 +266,48 @@ pub fn settle(p: &mut Project) -> Vec<String> {
             _ => title.follows = None,
         }
     }
-    for c in p.tracks.iter_mut().flat_map(|t| &mut t.clips) {
-        let inside = c.compound.as_mut();
-        if inside.is_some_and(|k| unled(&mut k.tracks) | unled(&mut k.made_from)) {
-            warnings.push(format!(
-                "{}: a title inside a compound clip follows no motion path",
-                c.id
-            ));
+    let mut stripped = HashSet::new();
+    for k in &mut p.compounds {
+        if unled(&mut k.tracks) {
+            stripped.insert(k.id.clone());
+        }
+    }
+    if !stripped.is_empty() {
+        for c in p.tracks.iter().flat_map(|t| &t.clips) {
+            let mut seen = HashSet::new();
+            if c.compound
+                .as_deref()
+                .is_some_and(|cid| holds_stripped(p, cid, &stripped, &mut seen))
+            {
+                warnings.push(format!(
+                    "{}: a title inside a compound clip follows no motion path",
+                    c.id
+                ));
+            }
         }
     }
     warnings
+}
+
+fn holds_stripped(
+    p: &Project,
+    cid: &str,
+    stripped: &HashSet<String>,
+    seen: &mut HashSet<String>,
+) -> bool {
+    if stripped.contains(cid) {
+        return true;
+    }
+    if !seen.insert(cid.to_string()) {
+        return false;
+    }
+    p.compound(cid).is_some_and(|k| {
+        k.tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter_map(|c| c.compound.as_deref())
+            .any(|inner| holds_stripped(p, inner, stripped, seen))
+    })
 }
 
 fn unled(tracks: &mut [Track]) -> bool {
@@ -282,9 +315,6 @@ fn unled(tracks: &mut [Track]) -> bool {
     for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
         if let Some(title) = c.title.as_mut() {
             any |= title.follows.take().is_some();
-        }
-        if let Some(k) = c.compound.as_mut() {
-            any |= unled(&mut k.tracks) | unled(&mut k.made_from);
         }
     }
     any

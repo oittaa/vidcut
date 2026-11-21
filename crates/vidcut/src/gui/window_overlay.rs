@@ -896,6 +896,9 @@ impl Workspace {
                 true => self.curve_click(&of, n, (&grade, current), (own(p), p, &framing)),
                 false => self.window_click(&of, n, (&grade, current, locked), (&seen, p, &framing)),
             }
+            if adding && self.effects_page.window_drawing.is_none() {
+                ui.ctx().request_repaint();
+            }
         }
         if resp.double_clicked()
             && alt

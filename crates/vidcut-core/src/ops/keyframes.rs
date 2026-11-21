@@ -1118,16 +1118,15 @@ fn ease_path(p: &mut Project, id: &str, frames: impl IntoIterator<Item = i64>, e
 }
 
 fn save(p: &mut Project, id: &str, picture: &Picture) -> Result<()> {
-    let frame = p.frame_size();
     if let Some((ti, ci)) = p.find_cue(id) {
         super::subtitles::unlocked(p, ti)?;
-        p.subtitles[ti].cues[ci].picture = super::picture::kept(picture, frame)?;
+        p.subtitles[ti].cues[ci].picture = super::picture::checked(picture)?;
         return Ok(());
     }
     let (ti, ci) = locate(p, id)?;
     let c = &mut p.tracks[ti].clips[ci];
     let Some(mut t) = c.title.clone() else {
-        c.picture = super::picture::kept(picture, frame)?;
+        c.picture = super::picture::checked(picture)?;
         return Ok(());
     };
     if picture

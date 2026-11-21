@@ -1098,7 +1098,7 @@ fn a_compound_clip_opened_from_a_bundle_plays_the_bundles_media() {
     let (p, _) = crate::editor::open_otio(&doc, Some(Path::new("/away")), &env)
         .unwrap()
         .unwrap();
-    let k = p.tracks[0].clips[0].compound.as_ref().unwrap();
+    let k = p.clip_compound(&p.tracks[0].clips[0]).unwrap();
     let played: Vec<&str> = k
         .tracks
         .iter()
@@ -1149,11 +1149,9 @@ fn a_compound_clip_decomposed_out_of_one_from_a_bundle_still_plays() {
     let mut f = opened_bundle(&outer);
     let id = f.editor.project().tracks[0].clips[0].id.clone();
     f.ok(req("edit.decompose", json!({"clips": [id]})));
-    let k = f.editor.project().tracks[0].clips[0]
-        .compound
-        .clone()
-        .unwrap();
-    assert_eq!(played_by(&k), ["m1"]);
+    let p = f.editor.project();
+    let k = p.clip_compound(&p.tracks[0].clips[0]).unwrap();
+    assert_eq!(played_by(p, k), ["m1"]);
 }
 
 fn relink(v: &mut Value, from: &str, to: &str) {
@@ -1289,23 +1287,17 @@ fn imported_otio_compound_opens_edits_closes_and_keeps_sequence_id() {
     f.ok(req("timeline.import", json!({"otio": written(&src)})));
     let id = f.editor.project().tracks[0].clips[0].id.clone();
     let seq_id = {
-        let k = f
-            .editor
-            .project()
-            .clip(&id)
-            .unwrap()
-            .compound
-            .as_ref()
-            .unwrap();
-        assert!(k.made_from.is_empty());
-        sequence_id(k).unwrap().to_string()
+        let p = f.editor.project();
+        let k = p.clip_compound(p.clip(&id).unwrap()).unwrap();
+        assert!(k.removed && k.kept_otio.is_some());
+        k.sequence_id.clone()
     };
     f.ok(req("compound.open", json!({"clip": id})));
     f.append("m1", 50, 80);
     f.ok(req("compound.close", json!({})));
     let p = f.editor.project();
-    let k = p.clip(&id).unwrap().compound.as_ref().unwrap();
-    assert_eq!(sequence_id(k), Some(seq_id.as_str()));
+    let k = p.clip_compound(p.clip(&id).unwrap()).unwrap();
+    assert_eq!(k.sequence_id, seq_id);
     assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     let doc = written(&f);
     let inner = doc["tracks"]["children"][0]["children"][0]["children"][0]["children"]
@@ -1339,14 +1331,8 @@ fn compound_markers_roundtrip_through_otio_without_becoming_outer_markers() {
     f2.ok(req("timeline.import", json!({"otio": doc})));
     assert!(f2.editor.project().markers.is_empty());
     let imported_id = f2.editor.project().tracks[0].clips[0].id.clone();
-    let k = f2
-        .editor
-        .project()
-        .clip(&imported_id)
-        .unwrap()
-        .compound
-        .as_ref()
-        .unwrap();
+    let p2 = f2.editor.project();
+    let k = p2.clip_compound(p2.clip(&imported_id).unwrap()).unwrap();
     assert_eq!(k.markers.len(), 1);
     assert_eq!((k.markers[0].name.as_str(), k.markers[0].at), ("inner", 10));
     f2.ok(req("compound.open", json!({"clip": imported_id})));
@@ -1382,10 +1368,7 @@ fn compound_start_tc_round_trips_in_otio_with_zero_based_source_range() {
     assert_eq!(
         f2.editor
             .project()
-            .clip(&imported_id)
-            .unwrap()
-            .compound
-            .as_ref()
+            .clip_compound(f2.editor.project().clip(&imported_id).unwrap())
             .unwrap()
             .start_tc,
         93079
@@ -1393,4 +1376,76 @@ fn compound_start_tc_round_trips_in_otio_with_zero_based_source_range() {
     f2.ok(req("compound.open", json!({"clip": imported_id})));
     assert_eq!(f2.editor.project().timecode(0), "01:02:03:04");
     assert!(!id.is_empty());
+}
+
+#[test]
+fn nested_cross_rate_compounds_round_trip_through_otio() {
+    let r25 = Rational::new(25, 1).unwrap();
+    let r24 = Rational::new(24, 1).unwrap();
+    let mut f = Fixture::new(&[]);
+    f.env = FakeEnv::default().with("/media/p25.mp4", media_info(4.0, r25, true));
+    f.ok(req("media.add", json!({"paths": ["/media/p25.mp4"]})));
+    let inner_src = f.append("m1", 0, 30);
+    let b_hosts: Vec<String> = serde_json::from_value(
+        f.ok(req("edit.compound", json!({"clips": [inner_src]})))
+            .result["clips"]
+            .clone(),
+    )
+    .unwrap();
+    let b_id = f.editor.project().compounds[0].id.clone();
+    f.ok(req(
+        "timeline.new",
+        json!({"name": "A24", "own": {"fps": "24"}}),
+    ));
+    let b_on_24: Vec<String> = serde_json::from_value(
+        f.ok(req("edit.place_compound", json!({"compound": b_id})))
+            .result["clips"]
+            .clone(),
+    )
+    .unwrap();
+    f.ok(req("edit.compound", json!({"clips": [&b_on_24[0]]})));
+    let a_id = f
+        .editor
+        .project()
+        .compounds
+        .iter()
+        .find(|k| k.id != b_id)
+        .unwrap()
+        .id
+        .clone();
+    f.ok(req(
+        "timeline.new",
+        json!({"name": "H30", "own": {"fps": "30"}}),
+    ));
+    f.ok(req("edit.place_compound", json!({"compound": a_id})));
+    assert!(!b_hosts.is_empty());
+    let doc = written(&f);
+
+    let mut f2 = Fixture::new(&[]);
+    f2.env = FakeEnv::default().with("/media/p25.mp4", media_info(4.0, r25, true));
+    f2.ok(req("timeline.import", json!({"otio": doc})));
+    let p2 = f2.editor.project();
+    assert_eq!(crate::validate::everywhere(p2), Vec::<String>::new());
+    assert!(p2.compounds.iter().any(|k| k.fps == r25));
+    assert!(p2.compounds.iter().any(|k| k.fps == r24));
+    assert!(crate::render::flatten(p2, 0, p2.end()).is_ok());
+
+    let mut foreign = doc;
+    foreign["metadata"]["vidcut"]
+        .as_object_mut()
+        .unwrap()
+        .remove("project");
+    let mut f3 = Fixture::new(&[]);
+    f3.env = FakeEnv::default().with("/media/p25.mp4", media_info(4.0, r25, true));
+    f3.ok(req("timeline.import", json!({"otio": foreign})));
+    let outer_id = f3.editor.project().tracks[0].clips[0].id.clone();
+    f3.ok(req("compound.open", json!({"clip": outer_id})));
+    assert_eq!(f3.editor.project().fps(), r24);
+    let inner_id = f3.editor.project().tracks[0].clips[0].id.clone();
+    f3.ok(req("compound.open", json!({"clip": inner_id})));
+    assert_eq!(f3.editor.project().fps(), r25);
+    f3.ok(req("compound.close", json!({"to": 0})));
+    let p3 = f3.editor.project();
+    assert_eq!(crate::validate::everywhere(p3), Vec::<String>::new());
+    assert!(crate::render::flatten(p3, 0, p3.end()).is_ok());
 }
