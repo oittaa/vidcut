@@ -2523,6 +2523,15 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - `compound.set` and Starting Timecode in the Media tab update the canonical compound definition, so every placement reflects it.
     - Opening a compound clip uses its own frame rate, drop-frame flag and `start_tc`, regardless of the host timeline.
     - OTIO keeps `source_range` zero-based for interchange and stores non-zero `start_tc` in `metadata.vidcut.start_tc`.
+- **Name** (pp. 424, 1025; measured in Resolve Studio 21.2):
+  - In the Media Pool, a click on the name, a pause and a second click open the name for editing.
+  - Return or a click elsewhere keeps the new name. Escape drops it.
+  - An empty name is refused, and the old name stays.
+  - Two compound clips can have the same name.
+  - A new name shows on each placed copy that has no name of its own.
+  - A placed copy can have a name of its own. Its picture and its sound show that name. The Media Pool name stays.
+  - In OTIO export, each `Stack` has the name that its copy shows.
+  - **vidcut:** `compound.set` with `name` renames a compound clip. `clip.set` with `name` gives a copy its own name.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.

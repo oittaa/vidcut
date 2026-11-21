@@ -2101,6 +2101,8 @@ pub struct Clip {
     pub audio: Option<ClipAudio>,
     /// Disabled clips are kept but not shown (the D key).
     pub enabled: bool,
+    /// Its own name. Left out, it shows the name of its compound clip or of
+    /// its media.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Effects on its picture, carried from another editor.
@@ -7903,6 +7905,14 @@ impl Project {
 
     pub fn clip_compound(&self, c: &Clip) -> Option<&Compound> {
         c.compound.as_deref().and_then(|id| self.compound(id))
+    }
+
+    pub fn clip_name(&self, c: &Clip) -> Option<String> {
+        c.name
+            .clone()
+            .filter(|n| !n.is_empty())
+            .or_else(|| self.clip_compound(c).map(|k| k.name.clone()))
+            .or_else(|| self.media(&c.media).map(|m| m.name.clone()))
     }
 
     pub fn compound_frames(&self, k: &Compound) -> i64 {

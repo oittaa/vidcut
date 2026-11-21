@@ -1298,10 +1298,7 @@ impl Editor {
 fn what(p: &Project, path: &[String]) -> String {
     for part in path.iter().rev() {
         if let Some(c) = p.clip(part) {
-            let name = c.name.clone().filter(|n| !n.is_empty());
-            return name
-                .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
-                .unwrap_or_else(|| part.clone());
+            return p.clip_name(c).unwrap_or_else(|| part.clone());
         }
         if let Some(m) = p.media(part) {
             return m.name.clone();
@@ -3084,22 +3081,23 @@ fn mutate(
         Request::CompoundSet {
             clip,
             compound,
+            name,
             start_tc,
-        } => match (clip, compound) {
-            (Some(clip), None) => {
-                let id = resolve_clip(p, clip, playhead)?;
-                ops::compound::set_start_tc(p, ops::compound::SetTarget::Clip(&id), start_tc)?
+        } => {
+            if clip.is_some() && compound.is_some() {
+                return Err(Error::usage("give `clip` or `compound`, not both"));
             }
-            (None, Some(compound)) => ops::compound::set_start_tc(
-                p,
-                ops::compound::SetTarget::Pooled(compound),
-                start_tc,
-            )?,
-            (None, None) => {
-                ops::compound::set_start_tc(p, ops::compound::SetTarget::Open, start_tc)?
-            }
-            (Some(_), Some(_)) => return Err(Error::usage("give `clip` or `compound`, not both")),
-        },
+            let id = match clip {
+                Some(clip) => Some(resolve_clip(p, clip, playhead)?),
+                None => None,
+            };
+            let target = match (&id, compound) {
+                (Some(id), _) => ops::compound::SetTarget::Clip(id),
+                (None, Some(compound)) => ops::compound::SetTarget::Pooled(compound),
+                (None, None) => ops::compound::SetTarget::Open,
+            };
+            ops::compound::set(p, target, name.as_deref(), start_tc.as_ref())?
+        }
         Request::BinsAdd { path } => {
             ops::add_bin(p, path)?;
             Value::Null
@@ -6877,6 +6875,9 @@ fn place_imported(
                     reuse_compounds,
                     imported_compounds,
                 ));
+                if clip.name == p.clip_compound(&clip).map(|k| k.name.clone()) {
+                    clip.name = None;
+                }
             }
             p.track_mut(&track_of(&c.track))
                 .expect("made above")
@@ -7319,7 +7320,7 @@ fn fill_contents(
             let cid = c.compound.as_ref()?;
             let k = p.compound(cid)?;
             (k.tracks.is_empty() && k.kept_otio.is_some() && seen.insert(cid.clone()))
-                .then(|| (cid.clone(), c.name.clone().unwrap_or_else(|| c.id.clone())))
+                .then(|| (cid.clone(), p.clip_name(c).unwrap_or_else(|| c.id.clone())))
         })
         .collect();
     for (cid, label) in pending {

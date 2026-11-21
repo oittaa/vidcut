@@ -48,6 +48,13 @@ impl NewCompound {
 }
 
 #[derive(Debug)]
+pub(super) struct CompoundRename {
+    pub(super) id: String,
+    pub(super) text: String,
+    pub(super) focus: bool,
+}
+
+#[derive(Debug)]
 pub(super) struct CompoundStartTc {
     id: String,
     name: String,

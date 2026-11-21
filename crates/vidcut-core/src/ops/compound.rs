@@ -289,7 +289,6 @@ pub fn remove_pooled(p: &mut Project, id: &str) -> Result<()> {
 
 struct Host<'a> {
     number: &'a str,
-    name: &'a str,
     span: (i64, i64),
 }
 
@@ -307,7 +306,6 @@ fn put_host(
     fix_audio(p, ti);
     let mut c = block_clip(p.alloc_clip_id(), (a, b - a), None, None);
     c.video = kind == TrackKind::Video;
-    c.name = Some(host.name.to_string());
     c.compound = Some(compound_id.to_string());
     clips.push(c.id.clone());
     p.tracks[ti].clips.push(c);
@@ -391,7 +389,6 @@ pub fn place_pooled(
     }
     let host = Host {
         number,
-        name: &item.name,
         span: (at, at + frames),
     };
     let (video, sound) = (item.has_picture() || !item.has_sound(), item.has_sound());
@@ -517,7 +514,6 @@ fn build(
     let mut put = |p: &mut Project, track: String, video: bool| {
         let mut host = block_clip(p.alloc_clip_id(), (span.0, frames), None, None);
         host.video = video;
-        host.name = Some(name.clone());
         host.compound = Some(cid.clone());
         clips.push(host.id.clone());
         let t = p.track_mut(&track).expect("a track of the project");
@@ -1276,7 +1272,18 @@ fn settings_with(base: &Settings, fps: Rational, drop_frame: bool) -> Settings {
     }
 }
 
-pub fn set_start_tc(p: &mut Project, target: SetTarget<'_>, tc: &TimeSpec) -> Result<Value> {
+pub fn set(
+    p: &mut Project,
+    target: SetTarget<'_>,
+    name: Option<&str>,
+    tc: Option<&TimeSpec>,
+) -> Result<Value> {
+    if name.is_none() && tc.is_none() {
+        return Err(Error::usage("give `name` or `start_tc`"));
+    }
+    if name.is_some_and(|n| n.trim().is_empty()) {
+        return Err(Error::usage("a compound clip needs a name"));
+    }
     let cid = match target {
         SetTarget::Open => p
             .checked_out_compound()
@@ -1296,18 +1303,21 @@ pub fn set_start_tc(p: &mut Project, target: SetTarget<'_>, tc: &TimeSpec) -> Re
                 .ok_or_else(|| Error::invalid(format!("{query_id} isn't a compound clip")))?
         }
     };
-    let (fps, drop_frame) = {
-        let k = p
-            .compound(&cid)
-            .ok_or_else(|| Error::not_found(format!("no compound clip {cid}")))?;
-        (k.fps, k.counts_drop_frame())
+    let k = p
+        .compound(&cid)
+        .ok_or_else(|| Error::not_found(format!("no compound clip {cid}")))?;
+    let fmt = settings_with(&p.settings, k.fps, k.counts_drop_frame());
+    let frames = match tc {
+        Some(tc) => fmt.start_frames(tc)?,
+        None => k.start_tc,
     };
-    let fmt = settings_with(&p.settings, fps, drop_frame);
-    let frames = fmt.start_frames(tc)?;
-    if let Some(k) = p.compound_mut(&cid) {
-        k.start_tc = frames;
+    let k = p.compound_mut(&cid).expect("found above");
+    k.start_tc = frames;
+    if let Some(n) = name {
+        k.name = n.to_string();
     }
     Ok(json!({
+        "name": k.name,
         "start_tc": format_timecode(0, fmt.fps, frames, fmt.counts_drop_frame()),
         "frames": frames,
     }))

@@ -6,7 +6,7 @@ use eframe::egui::{
     pos2, vec2,
 };
 use serde_json::json;
-use vidcut_core::model::{CompoundTarget, Media, Project};
+use vidcut_core::model::{Compound, CompoundTarget, Media, Project};
 use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
 use vidcut_core::shortcuts::Action;
 
@@ -744,12 +744,19 @@ impl Workspace {
         };
         ui.horizontal_wrapped(|ui| {
             for k in shown {
+                if self.compound_rename.as_ref().is_some_and(|e| e.id == k.id) {
+                    self.compound_name_field(ui, k);
+                    continue;
+                }
                 let on = open_id == Some(k.id.as_str());
                 let frames = p.compound_frames(k);
                 let length = p.length_timecode(frames);
                 let r = ui
                     .selectable_label(on, format!("{}  {length}", k.name))
                     .interact(Sense::click_and_drag());
+                if r.clicked() {
+                    self.compound_name_clicked(ui, k);
+                }
                 if r.double_clicked() {
                     self.send("compound.open", json!({ "compound": k.id }));
                 }
@@ -792,6 +799,45 @@ impl Workspace {
         });
         ui.separator();
         true
+    }
+
+    fn compound_name_clicked(&mut self, ui: &egui::Ui, k: &Compound) {
+        let now = ui.input(|i| i.time);
+        let quick = ui.ctx().options(|o| o.input_options.max_double_click_delay);
+        let again = self
+            .compound_click
+            .as_ref()
+            .is_some_and(|(id, at)| *id == k.id && now - at > quick);
+        if again {
+            self.compound_click = None;
+            self.compound_rename = Some(super::compound::CompoundRename {
+                id: k.id.clone(),
+                text: k.name.clone(),
+                focus: true,
+            });
+        } else {
+            self.compound_click = Some((k.id.clone(), now));
+        }
+    }
+
+    fn compound_name_field(&mut self, ui: &mut egui::Ui, k: &Compound) {
+        let Some(mut edit) = self.compound_rename.take() else {
+            return;
+        };
+        let field = ui.add(egui::TextEdit::singleline(&mut edit.text).desired_width(160.0));
+        if edit.focus {
+            field.request_focus();
+            edit.focus = false;
+        }
+        if !field.lost_focus() {
+            self.compound_rename = Some(edit);
+            return;
+        }
+        let name = edit.text.trim();
+        let keep = !ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if keep && !name.is_empty() && name != k.name {
+            self.send("compound.set", json!({ "compound": k.id, "name": name }));
+        }
     }
 
     fn pool_box(&mut self, ui: &egui::Ui, background: &egui::Response, media: &[&Media]) {

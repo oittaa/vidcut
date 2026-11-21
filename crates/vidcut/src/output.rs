@@ -260,7 +260,8 @@ pub fn print(method: &str, r: &Response, json: bool) {
         }
         "compound.set" => {
             println!(
-                "ok {method}: {} (rev {})",
+                "ok {method}: {} {} (rev {})",
+                r.result["name"].as_str().unwrap_or_default(),
                 r.result["start_tc"].as_str().unwrap_or_default(),
                 r.rev
             );

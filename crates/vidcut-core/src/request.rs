@@ -989,9 +989,10 @@ pub enum Request {
         #[serde(default)]
         to: Option<usize>,
     },
-    /// Change a compound clip's starting timecode. Pass `compound` (from the
-    /// Media tab), `clip` (on the timeline), or neither for the open compound
-    /// clip.
+    /// Change a compound clip's name or starting timecode. Pass `compound`
+    /// (from the Media tab), `clip` (on the timeline), or neither for the
+    /// open compound clip. A new name shows on each copy that has no name of
+    /// its own (`clip.set` `name`).
     #[serde(rename = "compound.set")]
     CompoundSet {
         /// A copy on the timeline (by clip id, label, or `playhead`).
@@ -1000,8 +1001,12 @@ pub enum Request {
         /// A compound clip in the Media tab (by id or name).
         #[serde(default)]
         compound: Option<String>,
+        /// The new name. Two compound clips can have the same name.
+        #[serde(default)]
+        name: Option<String>,
         /// The new starting timecode (`HH:MM:SS:FF`, frames, or seconds).
-        start_tc: TimeSpec,
+        #[serde(default)]
+        start_tc: Option<TimeSpec>,
     },
 
     /// Append after the last clip (Shift+F12).

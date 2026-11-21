@@ -1047,7 +1047,7 @@ impl Workspace {
         ui.horizontal(|ui| {
             ui.label(RichText::new(vidcut_core::composition::MEDIA_OUT).strong());
             if let (Some(p), Some(c)) = (&p, &clip) {
-                ui.label(dim(clip_name(p, c)));
+                ui.label(dim(p.clip_name(c).unwrap_or_else(|| c.id.clone())));
             }
         });
         let avail = ui.available_rect_before_wrap();
@@ -2208,11 +2208,4 @@ impl Workspace {
 fn slid((v0, v1): (f64, f64), by: f64) -> (f64, f64) {
     let by = by.max(-v0).min(1.0 - v1);
     (v0 + by, v1 + by)
-}
-
-fn clip_name(p: &Project, c: &Clip) -> String {
-    c.name
-        .clone()
-        .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
-        .unwrap_or_else(|| c.id.clone())
 }
