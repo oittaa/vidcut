@@ -2964,6 +2964,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
   - vidcut: the new corrector takes the input of the current node, as measured.
   - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L and Alt+K. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+  - Measured in Resolve Studio 21.2: Add Serial Before on a Parallel Mixer puts the new corrector on input 0 of the mixer. The node on that input feeds the new corrector.
+  - vidcut: `before` on a mixer does the same, also with Shift+S. With input 0 empty, the new corrector takes nothing. This part is not measured in Resolve.
 - **Delete and extract** (pp. 3395–3396):
   - Delete Node removes a node. The nodes at its left and its right then connect.
   - The Forward-Delete key deletes the selected node (p. 3395).
@@ -2982,6 +2984,21 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
+- **The Nodes submenu** (pp. 3392, 3395):
+  - The Color menu has a Nodes submenu. Its items add, select, turn off and remove nodes.
+  - Measured in Resolve Studio 21.2: the submenu has six groups of items:
+    - Switch to Node Layer, Previous Node and Next Node.
+    - Add Serial Node, Add Serial Before Current, Add Parallel Node, Add Layer Node, Append a Node, Add Outside Node and Add Splitter Combiner Node.
+    - Add Serial Node + CPW, + LPW, + PPW and + PCW.
+    - Enable/Disable Selected Nodes and Enable/Disable All Nodes.
+    - Extract Current Node and Delete Current Node.
+    - Label Selected Node.
+  - Measured: Add Outside Node, Delete Current Node and Label Selected Node show no key. The other items show their keys.
+  - Measured: the manual has other names for three items: Add Serial, Add Before Current and Append Node (p. 3395).
+  - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. Each item shows its key.
+  - vidcut: Delete Current Node deletes the current node. Label Selected Node edits the label of the current corrector in place.
+  - vidcut: the submenu comes after the printer submenus. Its place in the Color menu of Resolve is not measured.
+  - vidcut: Switch to Node Layer, Add Outside Node, Add Splitter Combiner Node and the window items are not in the submenu ([todo](todo/color-page.md)).
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.
@@ -3045,7 +3062,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
   - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
   - vidcut: the menu of a mixer has these items in this order, but not Remove One Input ([todo](todo/color-page.md)).
-  - vidcut: in the Add Node submenu of a mixer, only Add Serial and Append Node work. The other items are grey. This is not measured in Resolve.
+  - Measured in Resolve Studio 21.2: the Add Node submenu of a mixer has Add Serial (Alt+S) and Add Serial Before (Shift+S).
+  - vidcut: the Add Node submenu of a mixer has these two items, with their keys.
 - **Lock Node** (pp. 3374, 3454):
   - A lock prevents any change to its node. A locked node shows a lock icon. Lock Node in the menu of a node locks or unlocks it (p. 3454).
   - A new Shared node is locked (p. 3374).

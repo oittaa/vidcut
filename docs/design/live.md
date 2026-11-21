@@ -466,6 +466,7 @@ The bar and the Jobs button:
   - An Alt-drag builds the settings with `ops::grade::copy` from the shown project. Ctrl+C sends `grade.copy`; the live core keeps its answer (`node_clipboard`) for `grade.paste`.
   - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.set` and `grade.clear`.
   - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, reset, and the previous and the next node.
+  - The Nodes submenu of the Color menu (`Workspace::nodes_menu`) runs the same actions (`Workspace::grade_keys_struck`). Its Delete Current Node and Label Selected Node act on the current node.
   - Ctrl+D and Alt+D send one `grade.set` with `on` for each node that changes (`Workspace::switch_grade_nodes`).
   - A delete sends one `grade.remove` for each node, from the highest number down (`Workspace::delete_grade_nodes`). Thus each number stays right until its turn.
   - After a delete, the last corrector becomes the current node.

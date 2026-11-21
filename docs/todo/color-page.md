@@ -32,8 +32,8 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 
 **To do:**
 
-- Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3394). They need windows.
-- The Nodes submenu of the Color menu (pp. 3392, 3394). The order of its items needs a measurement.
+- Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3395). They need windows.
+- Switch to Node Layer in the Nodes submenu, with the Node Stack Layers (pp. 3400–3401). Add Splitter Combiner Node (Option-Y, p. 3441).
 - The key input and output of each node, and the Key Mixer. Measured in Resolve Studio 21.2 with float renders:
   - smax(a, b) = max(a, b) + 0.5 max(0, 0.5 − |a − b|)². L(x) = (8x − 1) / 7. U(a, b) = L(smax(a, b)). Q(x) = U(0, x).
   - Key Mixer input i with key kᵢ: xᵢ = gᵢ kᵢ + oᵢ (Gain and Offset of the input). Invert gives 1 − xᵢ.
@@ -46,6 +46,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - Remove One Input in the menu of a mixer.
 - Measure in Resolve, then match:
   - Remove One Input: which empty input goes when there are several, and whether it takes the empty input of two. Measured: it removes an empty input, also one in the middle, and does nothing when each input is linked.
-  - The items of the Add Node submenu of a mixer, and the menu of a Parallel Mixer.
+  - The menu of a Parallel Mixer.
   - Delete after a drag box that does not hold the current node: does the current node go too.
   - A Ctrl-click on a node that is selected already.
