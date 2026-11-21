@@ -3216,6 +3216,30 @@ mod tests {
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     }
 
+    fn strip_otio_ids(doc: &mut Value) {
+        doc.as_object_mut().unwrap().remove("metadata");
+        for track in doc["tracks"]["children"].as_array_mut().unwrap() {
+            for item in track["children"].as_array_mut().unwrap() {
+                if let Some(meta) = item["metadata"].as_object_mut() {
+                    meta.remove("vidcut");
+                    if let Some(ed) = meta.get_mut("Resolve_OTIO").and_then(Value::as_object_mut) {
+                        ed.remove("Sequence ID");
+                    }
+                }
+            }
+        }
+    }
+
+    fn audio_only_fixture() -> Fixture {
+        let mut f = Fixture::new(&[]);
+        let mut info =
+            crate::test_support::media_info(4.0, crate::time::Rational::new(25, 1).unwrap(), true);
+        info.video = None;
+        f.env = crate::test_support::FakeEnv::default().with("/media/a.wav", info);
+        f.ok(req("media.add", json!({"paths": ["/media/a.wav"]})));
+        f
+    }
+
     #[test]
     fn pasting_copied_foreign_compound_into_itself_while_open_is_refused() {
         let mut f = Fixture::new(&[(4.0, true)]);
@@ -3228,21 +3252,55 @@ mod tests {
             crate::otio::Locations::Absolute,
         )
         .unwrap();
-        doc.as_object_mut().unwrap().remove("metadata");
-        for track in doc["tracks"]["children"].as_array_mut().unwrap() {
-            for item in track["children"].as_array_mut().unwrap() {
-                if let Some(meta) = item["metadata"].as_object_mut() {
-                    meta.remove("vidcut");
-                    if let Some(ed) = meta.get_mut("Resolve_OTIO").and_then(Value::as_object_mut) {
-                        ed.remove("Sequence ID");
-                    }
-                }
-            }
-        }
+        strip_otio_ids(&mut doc);
         let mut f2 = Fixture::new(&[(4.0, true)]);
         f2.ok(req("timeline.import", json!({"otio": doc})));
         let imported = f2.editor.project().tracks[0].clips[0].id.clone();
-        assert!(f2.editor.project().compounds[0].sequence_id.is_none());
+        assert!(f2.editor.project().compounds[0].sequence_id.is_some());
+        let copied = f2.ok(req("edit.copy", json!({"clips": [imported]})));
+        f2.ok(req("compound.open", json!({"clip": imported})));
+        let inner = f2.editor.project().tracks[0].clips[0].id.clone();
+        f2.ok(req("picture.set", json!({"clips": [inner], "zoom": 1.5})));
+        let err = f2.err(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": copied.result["compounds"],
+                "fps": copied.result["fps"],
+                "at": 0,
+            }),
+        ));
+        assert!(err.message.contains("cannot hold itself"));
+        let p2 = f2.editor.project();
+        assert_eq!(p2.compounds.len(), 1);
+        assert_eq!(crate::validate::everywhere(p2), Vec::<String>::new());
+    }
+
+    #[test]
+    fn pasting_copied_audio_only_foreign_compound_into_itself_while_open_is_refused() {
+        let mut f = audio_only_fixture();
+        let ac = f.append("m1", 0, 30);
+        nest(&mut f, &[&ac]);
+        let mut doc = crate::otio::export(
+            f.editor.project(),
+            "T1",
+            None,
+            crate::otio::Locations::Absolute,
+        )
+        .unwrap();
+        strip_otio_ids(&mut doc);
+        let mut f2 = audio_only_fixture();
+        f2.ok(req("timeline.import", json!({"otio": doc})));
+        let imported = f2
+            .editor
+            .project()
+            .tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .find(|c| c.compound.is_some())
+            .unwrap()
+            .id
+            .clone();
         let copied = f2.ok(req("edit.copy", json!({"clips": [imported]})));
         f2.ok(req("compound.open", json!({"clip": imported})));
         let err = f2.err(req(
@@ -3258,5 +3316,29 @@ mod tests {
         let p2 = f2.editor.project();
         assert_eq!(p2.compounds.len(), 1);
         assert_eq!(crate::validate::everywhere(p2), Vec::<String>::new());
+    }
+
+    #[test]
+    fn timeline_import_append_refuses_foreign_compound_without_sequence_id_while_open() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 40);
+        nest(&mut f, &[&a]);
+        let mut doc = crate::otio::export(
+            f.editor.project(),
+            "T1",
+            None,
+            crate::otio::Locations::Absolute,
+        )
+        .unwrap();
+        strip_otio_ids(&mut doc);
+        let mut f2 = Fixture::new(&[(4.0, true)]);
+        f2.ok(req("timeline.import", json!({"otio": doc})));
+        let imported = f2.editor.project().tracks[0].clips[0].id.clone();
+        f2.ok(req("compound.open", json!({"clip": imported})));
+        let err = f2.err(req(
+            "timeline.import",
+            json!({"otio": doc, "mode": "append"}),
+        ));
+        assert!(err.message.contains("hold itself"));
     }
 }

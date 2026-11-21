@@ -1317,6 +1317,21 @@ fn compound_of(item: &Value, host_fps: Rational) -> ImportedCompound {
     let compound_id = item["metadata"][VIDCUT]["compound"]
         .as_str()
         .map(str::to_string);
+    let stack = clean_stack(item);
+    let sequence_id = sequence_id.or_else(|| Some(stack_id(&stack)));
+    ImportedCompound {
+        stack: stack.into(),
+        fps,
+        frames,
+        markers,
+        start_tc,
+        sequence_id,
+        compound_id,
+        drop_frame,
+    }
+}
+
+fn clean_stack(item: &Value) -> Value {
     let mut stack = item.clone();
     if let Some(o) = stack.as_object_mut() {
         for key in ["source_range", "effects", "markers"] {
@@ -1337,16 +1352,7 @@ fn compound_of(item: &Value, host_fps: Rational) -> ImportedCompound {
             m.remove(key);
         }
     }
-    ImportedCompound {
-        stack: stack.into(),
-        fps,
-        frames,
-        markers,
-        start_tc,
-        sequence_id,
-        compound_id,
-        drop_frame,
-    }
+    stack
 }
 
 fn stack_for(
@@ -1518,10 +1524,11 @@ pub(crate) fn is_compound_stack(v: &Value) -> bool {
 }
 
 pub(crate) fn stack_holds_any(v: &Value, ids: &std::collections::HashSet<String>) -> bool {
-    if v["metadata"][EDITOR]["Sequence ID"]
-        .as_str()
-        .is_some_and(|s| ids.contains(s))
-    {
+    let matched = match v["metadata"][EDITOR]["Sequence ID"].as_str() {
+        Some(s) => ids.contains(s),
+        None => is_compound_stack(v) && ids.contains(&stack_id(&clean_stack(v))),
+    };
+    if matched {
         return true;
     }
     v["children"]
