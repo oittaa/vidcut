@@ -3799,18 +3799,16 @@ pub struct Grade {
     pub output: Option<u32>,
 }
 
-impl Default for Grade {
-    fn default() -> Self {
+impl Grade {
+    pub fn usual(frame: [f64; 2]) -> Self {
         Self {
-            nodes: vec![GradeNode::corrector(Some(0), [0.0, 0.0])],
+            nodes: vec![GradeNode::corrector(Some(0), [0.0, 0.0], frame)],
             output: Some(1),
         }
     }
-}
 
-impl Grade {
-    pub fn is_usual(&self) -> bool {
-        *self == Self::default()
+    pub fn is_usual(&self, frame: [f64; 2]) -> bool {
+        *self == Self::usual(frame)
     }
 
     pub fn node(&self, number: u32) -> Option<&GradeNode> {
@@ -3876,13 +3874,16 @@ pub struct GradeNode {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
     /// The windows of a corrector, in the order of the window list. They
-    /// make the key of the corrector. Left out when it has none.
+    /// make the key of the corrector. A corrector has a linear, a circle, a
+    /// polygon and a gradient window first, off at first, which stay. The
+    /// windows that `grade.window.add` adds come after them. A mixer has
+    /// none, and leaves it out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<GradeWindow>,
 }
 
 impl GradeNode {
-    pub fn corrector(input: Option<u32>, place: [f64; 2]) -> Self {
+    pub fn corrector(input: Option<u32>, place: [f64; 2], frame: [f64; 2]) -> Self {
         Self {
             tool: GradeTool::Corrector(Box::default()),
             inputs: vec![input],
@@ -3893,7 +3894,7 @@ impl GradeNode {
             animated: false,
             key: KeyOutput::default(),
             locked: false,
-            windows: Vec::new(),
+            windows: GradeWindow::fixed(frame),
         }
     }
 
@@ -3918,7 +3919,8 @@ impl GradeNode {
 pub struct GradeWindow {
     #[serde(flatten)]
     pub shape: WindowShape,
-    /// Off, the window is not in the key. Usual: on.
+    /// Off, the window is not in the key. The first windows of a corrector
+    /// are off at first, and an added window is on. Left out when on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub on: bool,
     /// The name in the window list. Left out when it has none.
@@ -3996,6 +3998,10 @@ pub enum WindowKind {
     Gradient,
 }
 
+impl WindowKind {
+    pub const ALL: [Self; 4] = [Self::Linear, Self::Circle, Self::Polygon, Self::Gradient];
+}
+
 impl WindowShape {
     pub fn kind(&self) -> WindowKind {
         match self {
@@ -4034,6 +4040,15 @@ impl GradeWindow {
             rotate: 0.0,
             opacity: 100.0,
         }
+    }
+
+    pub fn fixed(frame: [f64; 2]) -> Vec<Self> {
+        WindowKind::ALL
+            .map(|kind| Self {
+                on: false,
+                ..Self::new(kind, frame)
+            })
+            .into()
     }
 }
 
@@ -8145,6 +8160,10 @@ impl Project {
 
     pub fn height(&self) -> u32 {
         self.format().height
+    }
+
+    pub fn frame_size(&self) -> [f64; 2] {
+        [self.width(), self.height()].map(f64::from)
     }
 
     pub fn counts_drop_frame(&self) -> bool {

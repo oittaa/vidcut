@@ -3246,6 +3246,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - A window limits the grade of its node to a part of the picture. All windows of a node work together (p. 3268).
   - There are five shapes: Linear, Circular, Polygonal, Curve and Gradient (pp. 3269–3270).
   - Each row of the window list has an On/Off button with the shape, a name field, Invert and Mask (p. 3269).
+  - A button of each shape above the list adds a window. Delete removes the selected window (p. 3270).
   - Mask off adds the window to the other windows. Mask on takes it away from them (p. 3269).
   - p. 3276 names the two states of Mask the other way round. The measurements agree with p. 3269.
   - Transform: Size, Aspect, Pan, Tilt, Rotate and Opacity. Size, Aspect, Pan and Tilt are 50 at first. Rotate is 0 (p. 3271).
@@ -3283,7 +3284,12 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Thus the masks of two shapes or more, with no add window, give a key of 0 at each pixel.
   - The key is clamped to 0..1 at the end. Then the Key Output acts on it ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
 - vidcut:
-  - `grade.window.add` adds a window at its usual values, at the end of the window list. `grade.window.set` changes a window, and `grade.window.remove` removes it.
+  - Measured in Resolve Studio 21.2: the window list of a new node has a linear, a circle, a polygon, a curve and a gradient row. These windows are off.
+  - Measured: these first rows stay. Delete on one of them gives a warning, and the list does not change.
+  - Measured: an added window goes to the end of the list, after the earlier adds. It is on.
+  - vidcut: a corrector has a linear, a circle, a polygon and a gradient window first, off at first. Curve windows come later.
+  - `grade.window.add` adds a window at its usual values, at the end of the window list. `grade.window.set` changes a window.
+  - `grade.window.remove` removes an added window. It refuses the first windows: `on` turns them off.
   - `grade.get` gives the windows of each corrector. The values are those of the palette.
   - The windows work as measured in the viewer and the export. vidcut renders the 133 measured cases within 1.6e-4.
   - Measured: the thumbnail of a node uses the window key of each pixel. vidcut uses it as k of the thumbnail.

@@ -6602,16 +6602,19 @@ fn to_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds, keep: bool) {
 fn imported_picture(
     c: &otio::ImportedClip,
     shape: Option<otio::picture::Shape>,
+    size: [f64; 2],
     warnings: &mut Vec<String>,
 ) -> (Vec<Value>, Option<Picture>) {
-    match shape.filter(|_| c.has_picture()) {
+    let (effects, picture) = match shape.filter(|_| c.has_picture()) {
         None => (c.effects.clone(), c.picture.clone()),
         Some(shape) => otio::picture::take(&c.effects, c.picture.as_ref(), &shape, c.key_origin())
             .unwrap_or_else(|names| {
                 otio::note_kept(warnings, &names);
                 (c.effects.clone(), None)
             }),
-    }
+    };
+    let picture = picture.and_then(|pic| ops::picture::ungraded_usual(pic, size));
+    (effects, picture)
 }
 
 fn reach(most: i64, ok: impl Fn(i64) -> bool) -> i64 {
@@ -6710,7 +6713,7 @@ fn place_imported(
                 .or_else(|| c.title.clone());
             let shape = (c.compound.is_some() || c.has_picture())
                 .then(|| otio::picture::Shape::whole(frame));
-            let (effects, picture) = imported_picture(c, shape, warnings);
+            let (effects, picture) = imported_picture(c, shape, p.frame_size(), warnings);
             let id = clip_id(p, &c.id);
             clips.push(id.clone());
             made.insert(c.key, (id.clone(), track_of(&c.track)));
@@ -6884,7 +6887,7 @@ fn place_imported(
             .video
             .as_ref()
             .map(|v| otio::picture::Shape::of(v, frame));
-        let (effects, picture) = imported_picture(c, shape, warnings);
+        let (effects, picture) = imported_picture(c, shape, p.frame_size(), warnings);
         let effects = carry(&effects, c.source_in);
         let id = clip_id(p, &c.id);
         clips.push(id.clone());
@@ -7571,6 +7574,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             }
             p.set_start_tc(t.start_tc);
             if let Some(grade) = t.grade.clone()
+                && !grade.is_usual(p.frame_size())
                 && let Some(open) = p.timeline_mut()
             {
                 open.grade = Some(grade);

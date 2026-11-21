@@ -1156,9 +1156,11 @@ impl Workspace {
         let GradeOf::Clip(id) = &h.of else {
             return None;
         };
-        let c = self.project()?.clip(id)?;
+        let p = self.project()?;
+        let c = p.clip(id)?;
         let mut picture = c.picture.clone().unwrap_or_default();
-        picture.grade = checked(&h.grade).ok()?;
+        checked(&h.grade).ok()?;
+        picture.grade = (!h.grade.is_usual(p.frame_size())).then(|| h.grade.clone());
         Some((id.clone(), picture))
     }
 
@@ -1184,14 +1186,15 @@ impl Workspace {
                 let c = p.clip(&id)?;
                 let stored = c.picture.as_ref().and_then(|pic| pic.grade.clone());
                 let name = c.name.clone().unwrap_or_else(|| id.clone());
-                Some((GradeOf::Clip(id), name, stored.unwrap_or_default()))
+                let usual = || Grade::usual(p.frame_size());
+                Some((GradeOf::Clip(id), name, stored.unwrap_or_else(usual)))
             }
             GradeLevel::Timeline => {
                 if !p.compound_path.is_empty() {
                     return None;
                 }
                 let t = p.timeline()?;
-                let stored = t.grade.clone().unwrap_or_default();
+                let stored = (t.grade.clone()).unwrap_or_else(|| Grade::usual(p.frame_size()));
                 Some((GradeOf::Timeline, t.name.clone(), stored))
             }
         }
