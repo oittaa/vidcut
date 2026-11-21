@@ -1473,14 +1473,13 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Convert In and Out to Compound Clip ignores a lock. It cuts a locked track and takes its clips inside.
   - A range with no clips does nothing, and shows no message.
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. It then plays inside.
-  - Decompose in Place has a submenu: Using Clips Only and Preserving Audio Data…
 - **vidcut:**
   - A clip goes in with its picture and its sound.
   - A clip on a locked track refuses the request. In Convert In and Out to Compound Clip, a clip in the range on a locked track refuses it too.
   - A range with no clips refuses the request, with a message.
   - A J or L cut that reaches a mark is undone at its picture cut, as at a blade.
   - A dissolve goes inside when its clips go inside. It plays there.
-  - `edit.decompose` acts as Using Clips Only. It brings such a dissolve back.
+  - `edit.decompose` brings such a dissolve back.
   - After a decompose beside a J or L cut, the cut stays. A sound that comes back starts after that cut.
     - A clip whose sound the cuts cover, alone or together, has no sound.
 - **Why:**
@@ -1489,7 +1488,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
   - A sound that runs past a mark cannot stay on the timeline without its picture.
   - vidcut has no selection of a dissolve in this request. A dissolve that goes away is a loss that the user did not ask for.
-  - The behavior of Preserving Audio Data is not known.
   - The main track plays one sound at a time. Thus a sound that comes back cannot play under a J or L cut.
 
 ## X164. A mode inside a compound clip always mixes with the tracks below

@@ -2524,7 +2524,13 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Opening a compound clip uses its own frame rate, drop-frame flag and `start_tc`, regardless of the host timeline.
     - OTIO keeps `source_range` zero-based for interchange and stores non-zero `start_tc` in `metadata.vidcut.start_tc`.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
-  - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
+  - The submenu has Using Clips Only and Preserving Audio Data….
+  - Preserving Audio Data… is for a nested timeline on the Fairlight page (pp. 3960–3961).
+    - It keeps the mix automation and the plugin automation of the tracks.
+    - It has three choices for the busses: New Matching Busses, Preserve Existing Paths and Leave Unassigned.
+  - For a compound clip, Preserving Audio Data… is dimmed (measured in Resolve Studio 21.2).
+    - The tests: plain sound, −6 dB on the clip inside, and −6 dB on the compound clip.
+  - vidcut: `edit.decompose` acts as Using Clips Only.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.
   - Thus a compound clip on V2 puts inner V1 on V2 and inner V2 on V3.
   - Cuts stay. A clip that was cut at In comes back as two pieces.
