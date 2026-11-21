@@ -868,13 +868,42 @@ fn check_cycle_from<'a>(
     Ok(())
 }
 
-pub(crate) fn restore_copied(p: &mut Project, compounds: &[Compound]) -> Result<()> {
+fn same_compound(a: &Compound, b: &Compound) -> bool {
+    match (&a.sequence_id, &b.sequence_id) {
+        (Some(x), Some(y)) => x == y,
+        (None, None) => {
+            a.name == b.name
+                && a.fps == b.fps
+                && a.drop_frame == b.drop_frame
+                && a.start_tc == b.start_tc
+                && a.frames == b.frames
+                && a.kept_otio == b.kept_otio
+                && a.tracks == b.tracks
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn restore_copied(
+    p: &mut Project,
+    clips: &mut [TrackClip],
+    compounds: &[Compound],
+) -> Result<()> {
     if compounds.is_empty() {
         return Ok(());
     }
+    let mut remap: HashMap<String, String> = HashMap::new();
     let mut added = Vec::new();
     for k in compounds {
-        if p.compound(&k.id).is_some() {
+        if remap.contains_key(&k.id) {
+            continue;
+        }
+        let existing = p
+            .compound(&k.id)
+            .filter(|e| same_compound(e, k))
+            .or_else(|| p.compounds.iter().find(|e| same_compound(e, k)));
+        if let Some(e) = existing {
+            remap.insert(k.id.clone(), e.id.clone());
             continue;
         }
         if k.id.is_empty() {
@@ -895,11 +924,31 @@ pub(crate) fn restore_copied(p: &mut Project, compounds: &[Compound]) -> Result<
                 k.id, k.frames
             )));
         }
+        let new_id = p.alloc_compound_id();
         let mut copy = k.clone();
+        copy.id = new_id.clone();
         copy.removed = true;
         copy.bin.clear();
         p.compounds.push(copy);
-        added.push(k.id.clone());
+        remap.insert(k.id.clone(), new_id.clone());
+        added.push(new_id);
+    }
+    for id in &added {
+        let k = p.compound_mut(id).expect("added above");
+        for c in k.tracks.iter_mut().flat_map(|t| &mut t.clips) {
+            if let Some(cid) = c.compound.as_mut()
+                && let Some(new_id) = remap.get(cid.as_str())
+            {
+                cid.clone_from(new_id);
+            }
+        }
+    }
+    for tc in clips.iter_mut() {
+        if let Some(cid) = tc.clip.compound.as_mut()
+            && let Some(new_id) = remap.get(cid.as_str())
+        {
+            cid.clone_from(new_id);
+        }
     }
     if added.is_empty() {
         return Ok(());
@@ -2827,16 +2876,21 @@ mod tests {
             }),
         ));
         let p = f.editor.project();
+        let pasted_id = pasted.result["clips"][0].as_str().unwrap().to_string();
         assert_eq!(p.compounds.len(), 1);
         assert!(p.compounds[0].removed && p.compounds[0].bin.is_empty());
-        assert_eq!(p.compounds[0].id, kid);
+        assert_ne!(p.compounds[0].id, kid);
+        assert_eq!(
+            p.clip(&pasted_id).unwrap().compound.as_deref(),
+            Some(p.compounds[0].id.as_str())
+        );
         assert_eq!(p.pool_compounds().count(), 0);
-        assert!(!pasted.result["clips"].as_array().unwrap().is_empty());
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
         f.ok(req("history.undo", json!({})));
         f.ok(req("history.undo", json!({})));
         let p = f.editor.project();
         assert_eq!(p.compounds.len(), 1);
+        assert_eq!(p.compounds[0].id, kid);
         assert!(p.clip(&hosts[0]).is_some());
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     }
@@ -3041,5 +3095,124 @@ mod tests {
             crate::validate::everywhere(f.editor.project()),
             Vec::<String>::new()
         );
+    }
+
+    #[test]
+    fn cross_project_paste_allocates_fresh_compound_id_without_future_collision() {
+        let mut a = Fixture::new(&[(4.0, true)]);
+        let mut last = String::new();
+        for _ in 0..11 {
+            last = a.append("m1", 0, 10);
+        }
+        let hosts = nest(&mut a, &[&last]);
+        let src_kid = a.editor.project().compounds[0].id.clone();
+        assert_eq!(src_kid, "k12");
+        let copied = a.ok(req("edit.copy", json!({"clips": [hosts[0]]})));
+
+        let mut b = Fixture::new(&[(4.0, true)]);
+        b.ok(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": copied.result["compounds"],
+                "fps": copied.result["fps"],
+                "at": 0,
+            }),
+        ));
+        for _ in 0..4 {
+            let clip_id = b.append("m1", 0, 10);
+            nest(&mut b, &[&clip_id]);
+        }
+        let p = b.editor.project();
+        assert_eq!(p.compounds.len(), 5);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cross_project_paste_with_same_compound_id_keeps_both_definitions() {
+        let mut a = Fixture::new(&[(4.0, true)]);
+        let ca = a.append("m1", 0, 20);
+        let hosts_a = serde_json::from_value::<Vec<String>>(
+            a.ok(req(
+                "edit.compound",
+                json!({"clips": [ca], "name": "From A"}),
+            ))
+            .result["clips"]
+                .clone(),
+        )
+        .unwrap();
+        let kid_a = a.editor.project().compounds[0].id.clone();
+        let copied = a.ok(req("edit.copy", json!({"clips": [hosts_a[0]]})));
+
+        let mut b = Fixture::new(&[(4.0, true)]);
+        let cb = b.append("m1", 0, 50);
+        b.ok(req(
+            "edit.compound",
+            json!({"clips": [cb], "name": "From B"}),
+        ));
+        let kid_b = b.editor.project().compounds[0].id.clone();
+        assert_eq!(kid_b, kid_a);
+
+        let pasted = b.ok(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": copied.result["compounds"],
+                "fps": copied.result["fps"],
+                "at": 60,
+            }),
+        ));
+        let pasted_id = pasted.result["clips"][0].as_str().unwrap().to_string();
+        let p = b.editor.project();
+        assert_eq!(p.compounds.len(), 2);
+        let b_def = p.compound(&kid_b).unwrap();
+        assert_eq!(
+            (b_def.name.as_str(), b_def.frames, b_def.removed),
+            ("From B", 50, false)
+        );
+        let pasted_clip = p.clip(&pasted_id).unwrap();
+        let pasted_kid = pasted_clip.compound.as_deref().unwrap();
+        assert_ne!(pasted_kid, kid_b);
+        let a_def = p.compound(pasted_kid).unwrap();
+        assert_eq!(
+            (a_def.name.as_str(), a_def.frames, a_def.removed),
+            ("From A", 20, true)
+        );
+        assert_eq!(pasted_clip.duration, 20);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn repeated_paste_of_removed_compound_shares_restored_definition() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 20);
+        let hosts = nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req("media.compound_remove", json!({"compound": kid})));
+        let cut = f.ok(req("edit.cut", json!({"clips": [hosts[0]]})));
+        let p1 = f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": cut.result["clips"],
+                "compounds": cut.result["compounds"],
+                "fps": cut.result["fps"],
+                "at": 0,
+            }),
+        ));
+        let p2 = f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": cut.result["clips"],
+                "compounds": cut.result["compounds"],
+                "fps": cut.result["fps"],
+                "at": 50,
+            }),
+        ));
+        let c1 = p1.result["clips"][0].as_str().unwrap().to_string();
+        let c2 = p2.result["clips"][0].as_str().unwrap().to_string();
+        let p = f.editor.project();
+        assert_eq!(p.compounds.len(), 1);
+        assert_eq!(p.clip(&c1).unwrap().compound, p.clip(&c2).unwrap().compound);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     }
 }

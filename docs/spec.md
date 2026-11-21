@@ -2513,8 +2513,8 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A new compound clip defaults to `00:00:00:00` (`00:00:00;00` on a drop-frame timeline), regardless of clip placement.
   - Right-click a compound clip in the Media Pool and choose Starting Timecode to change it (`Set New Start Timecode`).
   - Both `;` and `:` work in `start_tc` on drop-frame timelines. Changing the starting timecode keeps clip positions and trims.
-  - A compound clip keeps its own frame rate, drop-frame setting and Start Timecode across timelines of any rate or drop-frame setting.
-  - Placed lengths scale to the host timeline's frame rate, while the compound's inner tracks stay at its own rate.
+  - Measured: a compound clip keeps its own frame rate, drop-frame setting and Start Timecode across timelines of any rate or drop-frame setting.
+  - Measured: placed lengths scale to the host timeline's frame rate, while the compound's inner tracks stay at its own rate.
   - In OTIO export, `Stack.source_range` and `Stack.markers` stay zero-based and Resolve leaves compound start timecodes out.
   - **vidcut:**
     - `edit.compound`, `edit.compound_range` and `media.compound` accept `start_tc`, and New Compound Clip shows Start Timecode.

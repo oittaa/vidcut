@@ -34,9 +34,16 @@ pub fn track(p: &Project, t: &mut Track, r: Rates) {
         clip(p, c, r);
     }
     t.clips.retain(|c| c.duration > 0);
+    t.transitions.retain(|x| {
+        [&x.from, &x.to]
+            .into_iter()
+            .flatten()
+            .all(|id| t.clips.iter().any(|c| &c.id == id))
+    });
     for x in &mut t.transitions {
         transition(x, r);
     }
+    t.transitions.retain(|x| x.before > 0 || x.after > 0);
 }
 
 pub fn cues(list: &mut [TrackCue], r: Rates) {

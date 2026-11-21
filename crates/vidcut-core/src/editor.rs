@@ -4265,8 +4265,8 @@ fn mutate(
             let clips = clips.as_ref().ok_or_else(|| {
                 Error::usage("edit.paste needs `clips` or `cues` (the GUI pastes its clipboard)")
             })?;
-            ops::compound::restore_copied(p, compounds)?;
             let mut clips = clips.clone();
+            ops::compound::restore_copied(p, &mut clips, compounds)?;
             if let Some(r) = rates {
                 ops::conform::clips(p, &mut clips, r);
             }
