@@ -448,6 +448,13 @@ fn named(of: &GradeOf) -> (String, Value) {
     }
 }
 
+fn window_target(of: &GradeOf) -> (String, Value) {
+    match of {
+        GradeOf::Clip(id) => ("clip".into(), json!(id)),
+        GradeOf::Timeline => ("timeline".into(), json!(true)),
+    }
+}
+
 const PRINTER_COLORS: [PrinterColor; 7] = [
     PrinterColor::Master,
     PrinterColor::Red,
@@ -1500,8 +1507,9 @@ impl Workspace {
                 self.effects_page.graded = None;
             }
             Some((mut params, sets)) => {
+                let (one, clip) = window_target(&of);
                 for (i, mut set) in sets {
-                    set.insert(field.clone(), target.clone());
+                    set.insert(one.clone(), clip.clone());
                     set.insert("node".into(), json!(n));
                     set.insert("window".into(), json!(i));
                     self.send("grade.window.set", Value::Object(set));
@@ -1546,7 +1554,7 @@ impl Workspace {
             .effects_page
             .window
             .min(windows.len().saturating_sub(1));
-        let (field, target) = named(of);
+        let (field, target) = window_target(of);
         let send = |this: &mut Self, method: &str, mut params: Map<String, Value>| {
             this.effects_page.graded = None;
             params.insert(field.clone(), target.clone());
@@ -1562,15 +1570,17 @@ impl Workspace {
                 let params = Map::from_iter([("shape".to_string(), json!(kind))]);
                 send(self, "grade.window.add", params);
             }
-            WindowAct::Delete => {
-                if let Some(w) = windows.get(current) {
-                    if current >= WindowKind::ALL.len() {
-                        self.effects_page.window = grade_windows::first_of(w.shape.kind());
-                    }
+            WindowAct::Delete => match windows.get(current) {
+                Some(_) if current < WindowKind::ALL.len() => {
+                    self.say("This window can't be deleted. Turn it off instead.");
+                }
+                Some(w) => {
+                    self.effects_page.window = grade_windows::first_of(w.shape.kind());
                     let params = Map::from_iter([("window".to_string(), json!(current))]);
                     send(self, "grade.window.remove", params);
                 }
-            }
+                None => {}
+            },
             WindowAct::Pick(i) => self.effects_page.window = i,
             WindowAct::Toggle(i) => {
                 self.effects_page.window = i;

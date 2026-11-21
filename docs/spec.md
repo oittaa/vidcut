@@ -3291,6 +3291,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut: a corrector has a linear, a circle, a polygon and a gradient window first, off at first. Curve windows come later.
   - `grade.window.add` adds a window at its usual values, at the end of the window list. `grade.window.set` changes a window.
   - `grade.window.remove` removes an added window. It refuses the first windows: `on` turns them off.
+  - Delete in the Window palette on a first window shows a warning line in the status bar.
   - `grade.get` gives the windows of each corrector. The values are those of the palette.
   - The windows work as measured in the viewer and the export. vidcut renders the 133 measured cases within 1.6e-4.
   - Measured: the thumbnail of a node uses the window key of each pixel. vidcut uses it as k of the thumbnail.
