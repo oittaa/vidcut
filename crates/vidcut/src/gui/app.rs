@@ -304,6 +304,9 @@ impl eframe::App for App {
         self.ws.scope_pictures =
             self.viewer
                 .sync_scopes(&self.render, &self.ws.scope_want, self.ws.snap.scopes.scale);
+        self.ws.node_shots = self
+            .viewer
+            .sync_shots(&self.render, self.ws.shots_want.as_ref());
         self.ws.levels = self.viewer.levels();
         let ctx = ui.ctx().clone();
         let snap = &self.ws.snap;

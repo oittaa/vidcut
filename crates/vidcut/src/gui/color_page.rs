@@ -3,21 +3,22 @@ use std::time::{Duration, Instant};
 use egui::{Color32, CursorIcon, DragValue, Label, Rect, Response, Sense, Stroke, Ui, Vec2};
 use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
+use vidcut_av::screen::{ShotsOf, ShotsWanted};
 use vidcut_core::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, KeyOutput, Picture};
-use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed};
+use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed, taken_out};
 use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::preferences::SwitchingClips;
 use vidcut_core::request::{
-    GradeAdd, GradeLevel, GradeMixer, GradePalette, NodeZoom, Page, PrinterColor,
+    GradeAdd, GradeLevel, GradeMixer, GradePalette, NodeZoom, Page, PrimariesView, PrinterColor,
 };
 use vidcut_core::shortcuts::{Action, Panel};
 
 use super::node_editor::{
-    self, Badge, Dropped, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, Side, Spot, Tile,
-    Wire,
+    self, Badge, Dropped, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, SHOT_HEIGHT, Shot,
+    Side, Spot, Tile, Wire,
 };
 use super::theme;
-use super::workspace::Workspace;
+use super::workspace::{NodeShots, Workspace};
 
 const WHEEL: f32 = 132.0;
 
@@ -38,6 +39,8 @@ const BLUE_AXIS: [f64; 3] = [0.0, -0.1873, 1.8556];
 const RED_AXIS: [f64; 3] = [1.5748, -0.4681, 0.0];
 
 const LANDING: Duration = Duration::from_secs(2);
+
+const SHOT_STEP: u32 = 16;
 
 const LOG_BADGE: [&str; 4] = ["contrast", "log_shadow", "log_midtone", "log_highlight"];
 
@@ -191,6 +194,10 @@ fn key_at(g: &Grade, n: u32, frame: i64) -> Option<usize> {
     g.node(n)?.changed_key(frame)
 }
 
+fn key_output_held(g: &Grade, n: u32, frame: i64) -> Option<KeyOutput> {
+    g.node(n)?.key_output_changed_at(frame)
+}
+
 fn correctors(g: &Grade) -> impl DoubleEndedIterator<Item = u32> + '_ {
     (g.nodes.iter().enumerate())
         .filter(|(_, d)| !d.tool.is_mixer())
@@ -238,7 +245,13 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
         ),
         (changed.iter().any(log), icon::CIRCLE_HALF, "Log"),
         (d.is_animated(), icon::DIAMOND, "Keyframes"),
-        (!d.key.is_usual(), icon::SQUARE_HALF, "Key"),
+        (
+            std::iter::once(&d.key)
+                .chain(d.keys.iter().map(|k| &k.key))
+                .any(|k| !k.is_usual()),
+            icon::SQUARE_HALF,
+            "Key",
+        ),
     ]
     .into_iter()
     .filter(|(on, ..)| *on)
@@ -262,19 +275,6 @@ fn differences(from: &Corrector, to: &Corrector) -> Map<String, Value> {
         return Map::new();
     };
     b.into_iter().filter(|(k, v)| a.get(k) != Some(v)).collect()
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Mode {
-    Wheels,
-    Bars,
-    Log,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Palette {
-    Primaries,
-    Key,
 }
 
 const KEY_SWATCH: Vec2 = Vec2::new(96.0, 54.0);
@@ -322,23 +322,23 @@ fn key_output(ui: &mut Ui, changes: &mut Vec<Change>, key: KeyOutput) {
 
 fn primaries_body(
     ui: &mut Ui,
-    (g, mode): (&Corrector, Mode),
+    (g, mode): (&Corrector, PrimariesView),
     changes: &mut Vec<Change>,
 ) -> Option<(PrinterColor, f64)> {
     let wheels = match mode {
-        Mode::Log => logs(g),
-        Mode::Wheels | Mode::Bars => primaries(g),
+        PrimariesView::Log => logs(g),
+        PrimariesView::Wheels | PrimariesView::Bars => primaries(g),
     };
     let mut point = None;
     ui.horizontal(|ui| {
         for w in &wheels {
             let made = match mode {
-                Mode::Bars => {
+                PrimariesView::Bars => {
                     let (made, pressed) = bars(ui, w);
                     point = point.or(pressed);
                     made
                 }
-                Mode::Wheels | Mode::Log => wheel(ui, w),
+                PrimariesView::Wheels | PrimariesView::Log => wheel(ui, w),
             };
             if let Some(values) = made {
                 changes.push(Change {
@@ -493,7 +493,14 @@ fn kind(tool: &GradeTool) -> &'static str {
     }
 }
 
-fn tiles(g: &Grade) -> Vec<Tile<Port>> {
+fn shot_of(shots: &NodeShots, n: u32) -> Shot {
+    let cell = shots.cells.iter().find(|(k, ..)| *k == n);
+    Shot {
+        picture: cell.and_then(|&(_, uv, size)| Some((shots.texture?, uv, size))),
+    }
+}
+
+fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
     let line = Stroke::new(1.5, theme::colors().text_dim);
     let input = |slot: usize, name: String| Inlet {
         slot,
@@ -517,15 +524,21 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         }),
         inlets: Vec::new(),
         edge: Some(Edge::Left),
+        shot: None,
     }];
     for (d, n) in g.nodes.iter().zip(1u32..) {
-        let (label, inlets) = match &d.tool {
-            GradeTool::Corrector(_) => (format!("{n:02}"), vec![input(0, "RGB Input".into())]),
+        let (label, inlets, shot) = match &d.tool {
+            GradeTool::Corrector(_) => (
+                format!("{n:02}"),
+                vec![input(0, "RGB Input".into())],
+                shots.map(|s| shot_of(s, n)),
+            ),
             tool => (
                 kind(tool).to_string(),
                 (0..d.inputs.len())
                     .map(|i| input(i, format!("Input {}", i + 1)))
                     .collect(),
+                None,
             ),
         };
         out.push(Tile {
@@ -543,6 +556,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
             }),
             inlets,
             edge: None,
+            shot,
         });
     }
     out.push(Tile {
@@ -557,6 +571,7 @@ fn tiles(g: &Grade) -> Vec<Tile<Port>> {
         outlet: None,
         inlets: vec![input(0, "Output".into())],
         edge: Some(Edge::Right),
+        shot: None,
     });
     out
 }
@@ -1275,40 +1290,41 @@ impl Workspace {
             }
             return false;
         };
-        let key = egui::Id::unique("color-wheels-mode");
-        let mut mode = ui.data(|d| d.get_temp::<Mode>(key)).unwrap_or(Mode::Wheels);
-        let shown = egui::Id::unique("color-palette");
-        let mut palette = (ui.data(|d| d.get_temp::<Palette>(shown))).unwrap_or(Palette::Primaries);
+        let (palette, mode) = (self.effects_page.palette, self.effects_page.primaries);
+        let (mut palette_picked, mut mode_picked) = (None, None);
         let mut changes: Vec<Change> = Vec::new();
         let mut reset = false;
         ui.horizontal(|ui| {
             ui.strong(name);
             ui.label(format!("Node {n:02}"));
             ui.separator();
-            for (p, text) in [(Palette::Primaries, "Primaries"), (Palette::Key, "Key")] {
-                if ui.selectable_label(palette == p, text).clicked() {
-                    palette = p;
+            for (p, text) in [
+                (GradePalette::Primaries, "Primaries"),
+                (GradePalette::Key, "Key"),
+            ] {
+                if ui.selectable_label(palette == p, text).clicked() && palette != p {
+                    palette_picked = Some(p);
                 }
             }
             ui.separator();
-            if palette == Palette::Key {
+            if palette == GradePalette::Key {
                 reset = ui.button("Reset").clicked();
                 picked = grade_switch(ui, level);
                 return;
             }
             for (m, text) in [
-                (Mode::Wheels, "Wheels"),
-                (Mode::Bars, "Bars"),
-                (Mode::Log, "Log"),
+                (PrimariesView::Wheels, "Wheels"),
+                (PrimariesView::Bars, "Bars"),
+                (PrimariesView::Log, "Log"),
             ] {
-                if ui.selectable_label(mode == m, text).clicked() {
-                    mode = m;
+                if ui.selectable_label(mode == m, text).clicked() && mode != m {
+                    mode_picked = Some(m);
                 }
             }
             ui.separator();
             reset = ui.button("Reset").clicked();
             ui.separator();
-            let log = mode == Mode::Log;
+            let log = mode == PrimariesView::Log;
             let c = &mut changes;
             slider(ui, c, ("Temp", "temp"), g.temp, 10.0, (-4000.0, 4000.0));
             slider(ui, c, ("Tint", "tint"), g.tint, 0.5, (-100.0, 100.0));
@@ -1350,34 +1366,37 @@ impl Workspace {
             }
             picked = grade_switch(ui, level);
         });
-        ui.data_mut(|d| {
-            d.insert_temp(key, mode);
-            d.insert_temp(shown, palette);
-        });
-        if let Some(l) = picked {
-            self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
+        let mut view = Map::new();
+        if let Some(p) = palette_picked {
+            view.insert("palette".into(), json!(p));
         }
-        let key_now = grade.node(n).map(|d| d.key).unwrap_or_default();
+        if let Some(m) = mode_picked {
+            view.insert("primaries".into(), json!(m));
+        }
+        if let Some(l) = picked {
+            view.insert("grade".into(), json!(l));
+        }
+        if !view.is_empty() {
+            view.insert("page".into(), json!(Page::Color));
+            self.send("gui.page", Value::Object(view));
+        }
+        let key_now = key_output_held(&grade, n, frame).unwrap_or_default();
         let point = match palette {
-            Palette::Key => {
+            GradePalette::Key => {
                 key_output(ui, &mut changes, key_now);
                 None
             }
-            Palette::Primaries => primaries_body(ui, (&g, mode), &mut changes),
+            GradePalette::Primaries => primaries_body(ui, (&g, mode), &mut changes),
         };
         let (field, target) = named(&of);
         if reset {
             self.effects_page.graded = None;
             let node = ("node".to_string(), json!(n));
             let at = ("at".to_string(), json!(self.snap.timeline.position));
-            let part = match palette {
-                Palette::Key => GradePalette::Key,
-                Palette::Primaries => GradePalette::Primaries,
-            };
-            let part = ("palette".to_string(), json!(part));
+            let part = ("palette".to_string(), json!(palette));
             let params = Map::from_iter([(field, target), node, at, part]);
             self.send("grade.clear", Value::Object(params));
-            return palette == Palette::Primaries;
+            return palette == GradePalette::Primaries;
         }
         if !changes.is_empty() {
             let (keys, values): (Vec<Change>, Vec<Change>) = changes
@@ -1388,7 +1407,7 @@ impl Workspace {
                 .fold(g, |g, c| changed_corrector(&g, c.field, c.value));
             let mut next = with_corrector(&grade, n, frame, c);
             if let Some(d) = next.node_mut(n) {
-                d.key = keys.iter().fold(d.key, keyed);
+                d.change_key_output_at(frame, |k| keys.iter().fold(k, keyed));
             }
             self.effects_page.graded = Some(Graded {
                 of: of.clone(),
@@ -1407,8 +1426,12 @@ impl Workspace {
                     (Some(a), Some(b)) => differences(a, b),
                     _ => Map::new(),
                 };
-                if let (Some(a), Some(b)) = (stored.node(n), h.grade.node(n)) {
-                    params.extend(key_changes(a.key, b.key));
+                let keys = (
+                    key_output_held(&stored, n, frame),
+                    key_output_held(&h.grade, n, frame),
+                );
+                if let (Some(a), Some(b)) = keys {
+                    params.extend(key_changes(a, b));
                 }
                 Some(params)
             }
@@ -1427,7 +1450,7 @@ impl Workspace {
         if let Some(point) = point {
             self.printer_point(point);
         }
-        palette == Palette::Primaries
+        palette == GradePalette::Primaries
     }
 
     fn printer_point(&mut self, point: (PrinterColor, f64)) {
@@ -1733,12 +1756,29 @@ impl Workspace {
         let mut order = gone.to_vec();
         order.sort_unstable_by(|a, b| b.cmp(a));
         order.dedup();
-        let commands = (order.iter())
-            .map(|n| command("grade.remove", params(of, "clip", json!({ "node": n }))))
-            .collect();
-        let renumbered = |k: u32| k - order.iter().filter(|n| **n < k).count() as u32;
-        let last = last_corrector(g, |k| !order.contains(&k));
-        self.effects_page.grade_nodes = last.map(renumbered).into_iter().collect();
+        let mut left = g.clone();
+        let mut now: Vec<Option<u32>> = (0..=g.last()).map(Some).collect();
+        let mut commands = Vec::new();
+        for n in order {
+            let Some(at) = now.get(n as usize).copied().flatten() else {
+                continue;
+            };
+            let Ok(out) = taken_out(&mut left, at) else {
+                continue;
+            };
+            commands.push(command(
+                "grade.remove",
+                params(of, "clip", json!({ "node": at })),
+            ));
+            for k in &mut now {
+                *k = k.filter(|c| !out.contains(c)).map(|c| {
+                    let below = out.iter().filter(|o| **o < c).count();
+                    c - below as u32
+                });
+            }
+        }
+        let last = last_corrector(&left, |_| true);
+        self.effects_page.grade_nodes = last.into_iter().collect();
         self.effects_page.graded = None;
         self.send_all(commands, "Delete Node");
     }
@@ -1902,6 +1942,9 @@ impl Workspace {
         let mut switch_to = None;
         let listed = self.effects_page.grade_list;
         let mut list_to = None;
+        let mut thumbnails = self.snap.show_thumbnails;
+        let mut held = self.snap.disable_thumbnail_refresh;
+        let mut color_to = None;
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button(icon::LIST_BULLETS, |ui| {
@@ -1921,12 +1964,41 @@ impl Workspace {
                             }
                         }
                     });
+                    if ui.checkbox(&mut thumbnails, "Show Thumbnails").clicked() {
+                        color_to = Some(json!({ "show_thumbnails": thumbnails }));
+                        ui.close();
+                    }
+                    let hold =
+                        egui::Checkbox::new(&mut held, "Disable Thumbnail Refresh During Playback");
+                    if ui.add_enabled(thumbnails, hold).clicked() {
+                        color_to = Some(json!({ "disable_thumbnail_refresh": held }));
+                        ui.close();
+                    }
                 });
             });
         });
         if let Some(value) = switch_to {
             let more = json!({ "color": { "switching_clips": value } });
             self.send("preferences.set", more);
+        }
+        if let Some(color) = color_to {
+            self.send("preferences.set", json!({ "color": color }));
+        }
+        if self.snap.show_thumbnails {
+            let zoom = match listed {
+                true => 1.0,
+                false => self.effects_page.grade_view.zoom().max(1.0),
+            };
+            let pixels = SHOT_HEIGHT * zoom * ui.ctx().pixels_per_point();
+            let playing = self.snap.timeline.playing;
+            self.shots_want = Some(ShotsWanted {
+                of: match &of {
+                    GradeOf::Clip(id) => ShotsOf::Clip(id.clone()),
+                    GradeOf::Timeline => ShotsOf::Timeline,
+                },
+                height: (pixels.ceil() as u32).next_multiple_of(SHOT_STEP),
+                refresh: !(self.snap.disable_thumbnail_refresh && playing),
+            });
         }
         if let Some(list) = list_to {
             self.send("gui.node_view", json!({ "list": list }));
@@ -1940,7 +2012,10 @@ impl Workspace {
             .collect();
         let graph = Graph {
             salt,
-            tiles: tiles(&stored),
+            tiles: tiles(
+                &stored,
+                self.snap.show_thumbnails.then_some(&self.node_shots),
+            ),
             wires: wires(&stored),
             selected: &selected,
             active: CURRENT,

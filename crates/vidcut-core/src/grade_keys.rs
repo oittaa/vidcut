@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::model::{Corrector, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool};
+use crate::model::{Corrector, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, KeyOutput};
 
 pub const LAST_PROFILE: u8 = 10;
 
@@ -208,6 +208,36 @@ impl Corrector {
     }
 }
 
+impl KeyOutput {
+    pub fn blended(&self, to: &KeyOutput, w: f64) -> KeyOutput {
+        KeyOutput {
+            gain: self.gain + (to.gain - self.gain) * w,
+            offset: self.offset + (to.offset - self.offset) * w,
+            invert: self.invert,
+        }
+    }
+
+    pub fn carried(&self, was: &KeyOutput, now: &KeyOutput) -> KeyOutput {
+        KeyOutput {
+            gain: if was.gain == now.gain {
+                self.gain
+            } else {
+                now.gain
+            },
+            offset: if was.offset == now.offset {
+                self.offset
+            } else {
+                now.offset
+            },
+            invert: if was.invert == now.invert {
+                self.invert
+            } else {
+                now.invert
+            },
+        }
+    }
+}
+
 impl GradeKey {
     pub fn is_static(&self) -> bool {
         self.kind == GradeKeyKind::Static
@@ -250,6 +280,37 @@ impl GradeNode {
         }
     }
 
+    fn key_output_mut(&mut self, key: Option<usize>) -> Option<&mut KeyOutput> {
+        match key {
+            _ if self.tool.is_mixer() => None,
+            Some(i) => Some(&mut self.keys[i].key),
+            None => Some(&mut self.key),
+        }
+    }
+
+    pub fn key_output_changed_at(&self, frame: i64) -> Option<KeyOutput> {
+        self.own()?;
+        Some(
+            self.changed_key(frame)
+                .map_or(self.key, |i| self.keys[i].key),
+        )
+    }
+
+    pub fn change_key_output_at(
+        &mut self,
+        frame: i64,
+        change: impl FnOnce(KeyOutput) -> KeyOutput,
+    ) -> Option<()> {
+        let key = self.changed_key(frame);
+        let was = self.key_output_changed_at(frame)?;
+        let now = change(was);
+        if let Some(other) = self.paired_key(key).and_then(|k| self.key_output_mut(k)) {
+            *other = other.carried(&was, &now);
+        }
+        *self.key_output_mut(key)? = now;
+        Some(())
+    }
+
     pub fn changed_at(&self, frame: i64) -> Option<&Corrector> {
         let own = self.own()?;
         Some(
@@ -273,23 +334,31 @@ impl GradeNode {
         Some(())
     }
 
+    fn span(&self, frame: f64) -> Option<(&GradeKey, Option<(&GradeKey, f64)>)> {
+        let i = self.keys.partition_point(|k| k.frame as f64 <= frame);
+        let k = &self.keys[i.checked_sub(1)?];
+        let next = self.keys.get(i).filter(|_| !k.is_static()).map(|n| {
+            let u = (frame - k.frame as f64) / (n.frame - k.frame) as f64;
+            (n, Dissolve::of(k.start, k.end).at(u))
+        });
+        Some((k, next.filter(|(_, w)| *w > 0.0)))
+    }
+
     pub fn corrector_at(&self, frame: f64) -> Option<Cow<'_, Corrector>> {
         let own = self.own()?;
-        let i = self.keys.partition_point(|k| k.frame as f64 <= frame);
-        let Some(k) = i.checked_sub(1).map(|i| &self.keys[i]) else {
-            return Some(Cow::Borrowed(own));
-        };
-        let next = self.keys.get(i).filter(|_| !k.is_static());
-        Some(match next {
-            Some(n) => {
-                let u = (frame - k.frame as f64) / (n.frame - k.frame) as f64;
-                match Dissolve::of(k.start, k.end).at(u) {
-                    w if w <= 0.0 => Cow::Borrowed(&k.values),
-                    w => Cow::Owned(k.values.blended(&n.values, w)),
-                }
-            }
-            None => Cow::Borrowed(&k.values),
+        Some(match self.span(frame) {
+            None => Cow::Borrowed(own),
+            Some((k, Some((n, w)))) => Cow::Owned(k.values.blended(&n.values, w)),
+            Some((k, None)) => Cow::Borrowed(&k.values),
         })
+    }
+
+    pub fn key_output_at(&self, frame: f64) -> KeyOutput {
+        match self.span(frame) {
+            None => self.key,
+            Some((k, Some((n, w)))) => k.key.blended(&n.key, w),
+            Some((k, None)) => k.key,
+        }
     }
 
     pub fn key_on(&self, frame: i64) -> Option<&GradeKey> {
@@ -318,6 +387,7 @@ impl Grade {
             if let (GradeTool::Corrector(c), Some(now)) = (&mut d.tool, from.corrector_at(frame)) {
                 **c = now.into_owned();
             }
+            d.key = from.key_output_at(frame);
             d.keys.clear();
             d.animated = false;
         }

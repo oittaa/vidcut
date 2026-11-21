@@ -786,6 +786,9 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A Layer Mixer that is off mixes in Normal. A Parallel Mixer that is off mixes as when on.
   - An input with no link gives no pass.
   - The last pass copies the output to texture 0.
+- `Graded::tapped` makes the same passes for the node thumbnails ([gpu](gpu.md#the-node-thumbnails)). Each `Tap` names the texture with the output of a corrector, after its passes.
+  - A corrector that a Layer Mixer reads, with a key above 0 and below 1, then always gets two textures (`Uses::twice`). One holds its output for the thumbnail.
+  - A corrector that is off taps the texture of its input, with a key of 1. Thus the later thumbnails do not show its change.
 - `graded_into` runs the passes. Each texture past 0 has the size of the picture. They stay between draws in the spare textures, in the slots after `GRADE_SLOTS`. One limit holds all spare textures (`SPARE_TEXTURES`).
 - `fs_grade_mix` makes a `Parallel` or a `Layer` pass in a scratch texture. A copy then takes it back.
   - `Layer` uses `mixed`, the composite of the timeline, on the colors without their alpha. Thus a Layer Mixer and a track give the same mix.
@@ -853,7 +856,7 @@ The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline
 The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes panel of the Color page):
 
 - `GradeNode::keys` holds the keyframes of a corrector, in the order of their frames. A mixer has none.
-  - Each `GradeKey` holds every value of the corrector, its `GradeKeyKind`, and its `start` and `end`.
+  - Each `GradeKey` holds every value of the corrector, its `KeyOutput`, its `GradeKeyKind`, and its `start` and `end`.
   - A keyframe of a clip grade is on a source frame, as a `Keyframe` of an effect is. A keyframe of the timeline grade is on a timeline frame.
   - `ops::grade::checked` refuses keyframes on a mixer, frames out of order, two keyframes on one frame, and a `start` or `end` past `LAST_PROFILE`.
 - `GradeNode::corrector_at` gives the values on a frame:
@@ -861,22 +864,25 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - After a Static keyframe, or after the last keyframe, the values of that keyframe hold.
   - After a Dynamic keyframe, `Dissolve::at` gives the weight of the next keyframe. `Corrector::blended` then mixes each value linearly.
   - Why linear: the renders of the spec equal a grade with no keyframes at the blended values (spec §8.22).
+- `GradeNode::key_output_at` gives the Key Output on a frame in the same way (`KeyOutput::blended`).
+  - Invert cannot blend. It keeps the value of the keyframe before the frame.
 - `Dissolve::of` finds the joints of the curve once: where the straight line touches the start curve and the end curve.
   - `root` scans `STEPS` points for a change of sign, and then halves the step `HALVINGS` times.
   - Where no line touches both curves, the joint is where the slopes of the two curves are equal.
   - There, a line touches the curve that is farther from w = u. It ends where it meets the other curve.
-- `Grade::at` gives the grade of one frame, with no keyframes. Each path that draws a frame takes it:
+- `Grade::at` gives the grade of one frame, with no keyframes and the Key Output of that frame. Each path that draws a frame takes it:
   - `Placing::new` gives `Working::graded` the clip grade at the source frame of the placement. `Picture::sampled` does the same.
   - The player gives the viewer the timeline grade at the playhead (`Shown`).
   - `VideoFrames::grading_from` gives an export the timeline frame of its first frame. Each drawn frame then sets the timeline grade of its own frame.
   - `frame.render` and the storyboard give `Finish` the timeline grade of their frame.
 - `ops::grade_keys` changes the keyframes for `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`.
   - `at` is a timeline time. On a clip, `Clip::content_at` gives its source frame (`ops::grade::frame_of`).
-  - A new keyframe takes the values of `corrector_at` on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
+  - A new keyframe takes the values of `corrector_at` and `key_output_at` on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
 - `grade.set` and `grade.printer` change the values with `GradeNode::change_at`:
   - The keyframe on or before `at` changes (`GradeNode::changed_key`). Before the first keyframe, the corrector itself changes.
   - A Static keyframe, or the corrector itself, and the Dynamic keyframe right after it are a pair.
   - The other keyframe of the pair takes only the values that changed (`Corrector::carried`). Each channel of a wheel is one value.
+- `key_gain`, `key_offset` and `key_invert` change the Key Output in the same way (`GradeNode::change_key_output_at`, `KeyOutput::carried`).
 - `grade.clear` with `node` or `keep_nodes` puts these values back to the usual values in the same way. The keyframes stay.
   - It also puts back `KeyOutput::default`. With `palette`, only the values of that palette go back (`GradePalette`).
   - `grade.clear` alone gives `Grade::default`, with no keyframes.

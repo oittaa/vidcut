@@ -5,14 +5,15 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 use eframe::wgpu;
+use eframe::wgpu::FilterMode::{Linear, Nearest};
 use vidcut_av::player::Player;
 use vidcut_core::Error;
 
-use super::workspace::ScopePictures;
+use super::workspace::{NodeShots, ScopePictures};
 use crate::live::stats::{PlayerStats, ViewerStats};
 use crate::live::{Capture, Presented};
 use vidcut_av::screen::Gate;
-use vidcut_av::screen::{Drawn, Gpu, Screen};
+use vidcut_av::screen::{Drawn, Gpu, Screen, ShotsShown, ShotsWanted};
 use vidcut_core::model::Hdr;
 use vidcut_core::preferences::{Scope, ScopeScale};
 
@@ -39,6 +40,8 @@ struct State {
     scale: ScopeScale,
     target: Option<Target>,
     scope_targets: Vec<(Scope, Target)>,
+    shots: Option<ShotsWanted>,
+    shots_shown: Option<ShotsShown>,
     colors: Option<Hdr>,
     has_frame: bool,
     stats: ViewerStats,
@@ -71,6 +74,7 @@ pub struct Viewer {
     thread: Option<JoinHandle<()>>,
     texture: Option<(u64, egui::TextureId)>,
     scope_textures: Vec<(Scope, (u64, egui::TextureId))>,
+    shots_texture: Option<(u64, egui::TextureId)>,
 }
 
 #[derive(Clone)]
@@ -131,6 +135,7 @@ impl Viewer {
             thread,
             texture: None,
             scope_textures: Vec::new(),
+            shots_texture: None,
         }
     }
 
@@ -201,7 +206,7 @@ impl Viewer {
             (s.target.clone(), s.has_frame)
         };
         if let Some(t) = &target {
-            self.texture = Some(native_texture(render, t, self.texture));
+            self.texture = Some(native_texture(render, t, self.texture, Nearest));
         }
         (self.texture.map(|(_, t)| t), has_frame)
     }
@@ -238,11 +243,11 @@ impl Viewer {
                 .map(|(_, h)| h);
             let made = match held {
                 Some(h) => {
-                    *h = native_texture(render, target, Some(*h));
+                    *h = native_texture(render, target, Some(*h), Nearest);
                     h.1
                 }
                 None => {
-                    let h = native_texture(render, target, None);
+                    let h = native_texture(render, target, None, Nearest);
                     self.scope_textures.push((*scope, h));
                     h.1
                 }
@@ -251,14 +256,53 @@ impl Viewer {
         }
         ScopePictures { textures, colors }
     }
+
+    pub fn sync_shots(&mut self, render: &RenderState, wanted: Option<&ShotsWanted>) -> NodeShots {
+        let shown = {
+            let mut s = self.shared.lock();
+            if s.shots.as_ref() != wanted {
+                s.shots = wanted.cloned();
+                s.woken = true;
+                self.shared.wake.notify_all();
+            }
+            s.shots_shown.clone()
+        };
+        let Some(shown) = shown else {
+            if let Some((_, tex)) = self.shots_texture.take() {
+                render.renderer.write().free_texture(&tex);
+            }
+            return NodeShots::default();
+        };
+        let target = Target {
+            generation: shown.generation,
+            view: shown.view,
+        };
+        let held = native_texture(render, &target, self.shots_texture, Linear);
+        self.shots_texture = Some(held);
+        let (w, h) = (shown.size.0 as f32, shown.size.1 as f32);
+        let cells = (shown.cells.into_iter())
+            .map(|(node, [x, y, cw, ch])| {
+                let [x, y, cw, ch] = [x, y, cw, ch].map(|v| v as f32);
+                let uv = egui::Rect::from_min_max(
+                    egui::pos2(x / w, y / h),
+                    egui::pos2((x + cw) / w, (y + ch) / h),
+                );
+                (node, uv, egui::vec2(cw, ch))
+            })
+            .collect();
+        NodeShots {
+            texture: Some(held.1),
+            cells,
+        }
+    }
 }
 
 fn native_texture(
     render: &RenderState,
     target: &Target,
     held: Option<(u64, egui::TextureId)>,
+    filter: wgpu::FilterMode,
 ) -> (u64, egui::TextureId) {
-    let filter = wgpu::FilterMode::Nearest;
     match held {
         Some((g, tex)) if g == target.generation => (g, tex),
         Some((_, tex)) => {
@@ -318,7 +362,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     let mut generation = 0u64;
     let mut next: Option<Instant> = None;
     loop {
-        let (tasks, engine, want, upscale, scopes, scale) = {
+        let (tasks, engine, want, upscale, scopes, scale, shots) = {
             let mut s = shared.lock();
             while !s.woken && !s.stop {
                 let wait = next.map_or(IDLE, |n| n.saturating_duration_since(Instant::now()));
@@ -342,6 +386,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
                 s.upscale,
                 s.scopes.clone(),
                 s.scale,
+                s.shots.clone(),
             )
         };
         let now = Instant::now();
@@ -364,6 +409,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
         screen.set_timeline_grade(shown.as_ref().and_then(|s| s.timeline_grade.as_ref()));
         screen.set_frame_size(shown.as_ref().map(|s| s.size));
         screen.scoping(!scopes.is_empty());
+        screen.set_shots(shots);
         let drawn = screen.draw(
             gpu,
             shown.as_ref().map(|s| &s.picture),
@@ -398,6 +444,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             .into_iter()
             .map(|(scope, generation, view)| (scope, Target { generation, view }))
             .collect();
+        let shots_shown = screen.shots();
         let colors = shown.as_ref().and_then(|s| s.colors);
         let has_frame = shown.is_some();
         let shown_how = shown.as_ref().map(|s| how(s, &screen));
@@ -410,6 +457,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             let mut s = shared.lock();
             s.target = target;
             s.scope_targets = scope_targets;
+            s.shots_shown = shots_shown;
             s.colors = colors;
             s.has_frame = has_frame;
             s.stats.size = [w.max(2) as u32, h.max(2) as u32];

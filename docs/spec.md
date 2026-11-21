@@ -2863,6 +2863,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
 - `grade.set`, `grade.clear` and `grade.printer` take `node`, the number of a corrector. Without it, they change node 1.
 - `grade.printer` takes `points`: 1 for a full point, 0.5 for a half point and 0.25 for a quarter point.
 - `gui.page` with `grade` selects Clip or Timeline on the Color page.
+- `gui.page` with `palette` selects the Primaries or the Key palette. With `primaries`, it selects Wheels, Bars or Log.
+- `gui.state` gives the `grade`, the `palette` and the `primaries` mode.
 
 ### 8.21 Color page nodes (pp. 3385–3399, 3409–3415)
 
@@ -2902,7 +2904,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a click on the empty Node Editor keeps the current node.
   - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
   - vidcut: a Ctrl-click adds a node to the selection, and a drag box adds the nodes in the box. The current node stays.
-  - vidcut: a click on the empty Node Editor keeps the current node. The other selected nodes are no longer selected. This part is not measured in Resolve.
+  - Measured: a click on the empty Node Editor clears the other selected nodes. The current node stays.
+  - vidcut: does the same.
 - **Labels and badges** (pp. 3390–3391):
   - A label appears above the node. Change Label in the menu of a node sets it (p. 3390).
   - A double-click on the label changes it (p. 3391).
@@ -2920,6 +2923,31 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the Primaries, Log and Keyframes badges are at the right of the node. The first two count the values of the node and of each keyframe.
   - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node. It stays until the last keyframe goes (`animated` of the node).
   - vidcut: the Key badge shows when the Key Output is not at its usual values.
+- **Thumbnails** (pp. 3385, 3390):
+  - Each corrector node has a thumbnail. The badges are under the thumbnail (p. 3390).
+  - Show Thumbnails in the option menu of the Node Editor turns the thumbnails off or on. Without thumbnails, the nodes are shorter (p. 3385).
+  - Measured in Resolve Studio 21.2: the thumbnail of a corrector shows the picture at the output of its node. Thus a later thumbnail shows the earlier nodes.
+  - Measured: the thumbnail is clamp(k·o + (1 − k)·0.5). k is the Key Output of the node at a key of 1.
+  - o is the output of the node: x + k (n − x), with its input x and its full change n. At k 0.5 and CDL Slope 0.5, the viewer shows (208, 18, 0) and the thumbnail (168, 73, 62).
+  - Measured: the mix uses the values before the clip to 0..1. At k 0.5, a ramp from −4 to 8 keeps 0 and 1 at its ends.
+  - Measured: the thumbnail shows the source picture of the clip, before Sizing and before its place in the timeline frame.
+  - Measured: the thumbnail box has its own aspect of about 2.07:1, 91 × 44 pixels at a UI scale of 175 %.
+  - Measured: the picture fits inside the box, at the middle. A 16:9 picture has bars at its sides, and a 2.4:1 picture above and below.
+  - Measured: the bars hold black. At k 0.5 they show 0.25. At k 0, all of the box is 0.5. A grade that lifts black was not measured on them.
+  - Measured: a value v shows as v × 255, with no curve. No output LUT and no display transform apply.
+  - Measured: a mixer shows its icon and no thumbnail.
+  - Measured: an off corrector shows at 40 % of its brightness: the border, the number and the thumbnail.
+  - Measured: the thumbnail of an off corrector shows its input with no mix to grey. The later thumbnails do not show its change.
+  - Measured: the thumbnails of the timeline grade show the picture after the clip grades.
+  - Measured: the option menu also has Disable Thumbnail Refresh during Playback. It is grey while Show Thumbnails is off.
+  - Measured: Show Thumbnails is on by default, and Disable Thumbnail Refresh during Playback is off.
+  - Measured: without thumbnails, a node is a short bar with its number and its badges.
+  - Measured: with Disable Thumbnail Refresh during Playback, the thumbnails keep their picture during playback. They show the frame again when playback stops.
+  - vidcut: the preferences `color.show_thumbnails` (on) and `color.disable_thumbnail_refresh` (off). The option menu of the Node Editor has both, as measured.
+  - vidcut: the thumbnail is clamp(k·o + (1 − k)·0.5) in a 91:44 box, as measured. The picture fits inside the box. The bars go through the grade as black pixels.
+  - vidcut: the thumbnails show the frame at the playhead. A clip grade has thumbnails only while the viewer shows that clip.
+  - vidcut: a clip picture that comes to the viewer already placed in the frame gives no thumbnails.
+  - vidcut: an off corrector shows at 40 %, with its input in the thumbnail. A mixer shows its name and no thumbnail.
 - **Add nodes** (pp. 3394–3395, 3410–3413):
   - The menu of a node has an Add Node submenu. The menu of the empty Node Editor has Add Node > Corrector. That corrector has no connection.
   - Alt+S adds a serial node after the current node. Alt+K appends a serial node at the end of the tree.
@@ -2933,8 +2961,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
   - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append` or `corrector`. The menus of the Node Editor have each one.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
-  - vidcut: the new corrector takes the input of the current node. In the measured tree, that input is the source.
-  - Not measured in Resolve: Alt+L at a corrector on a Parallel Mixer, and a current node that does not take the source.
+  - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
+  - vidcut: the new corrector takes the input of the current node, as measured.
   - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L and Alt+K. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
 - **Delete and extract** (pp. 3395–3396):
   - Delete Node removes a node. The nodes at its left and its right then connect.
@@ -2942,6 +2970,9 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - After a delete, each node after it gets one number less.
   - Measured in Resolve Studio 21.2: the Delete key deletes the current node. With two nodes selected by a drag box, it deletes both.
   - Measured: a mixer input that took a deleted corrector stays, with no connection. Thus the mixer keeps all its inputs.
+  - Measured: in node 1 to node 2 to a mixer input, the delete of node 2 leaves that input with no connection.
+  - Measured: a delete that leaves a mixer with one linked input removes the mixer too. The node on that input takes the place of the mixer at its output.
+  - Measured: this occurs with a Parallel Mixer and a Layer Mixer, with two inputs, and with three inputs of which one is empty.
   - Measured: after the delete of a mixer, its input nodes keep their inputs. Nothing connects to the Node Tree output. The result is the source picture.
   - Measured: after a delete, the last corrector is the current node.
   - Measured: the menu of a mixer shows Shift+Backspace at Delete Node.
@@ -2949,7 +2980,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
   - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. The last corrector then becomes the current node.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
-  - vidcut: what took the picture of a deleted mixer then takes nothing.
+  - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
+  - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
 - **The Nodes submenu** (pp. 3392, 3394):
   - The Color menu has a Nodes submenu. Its items add, select, turn off and remove nodes.
   - Measured in Resolve Studio 21.2: the submenu has six groups of items:
@@ -3006,7 +3038,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.cleanup` and `gui.node_view` with `zoom`, `list` and `wide`.
   - vidcut: Cleanup Node Graph sends `grade.cleanup` with `area`, the visible part of the Node Editor. One column or one row goes to the middle.
   - vidcut: without `area`, the columns are one grid step apart. With `area`, the nodes never come closer than without it.
-  - vidcut: a mixer row shows the name of the mixer. The rows have no lock and no thumbnail yet ([todo](todo/color-page.md)).
+  - vidcut: a mixer row shows the name of the mixer. With Show Thumbnails on, a corrector row has its thumbnail after the eye.
+  - vidcut: the rows have no lock yet ([todo](todo/color-page.md)).
 - **Turn off and reset** (pp. 3392–3393):
   - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.
   - Measured in Resolve Studio 21.2: a click on the number turns that node off or on. The current node stays.
@@ -3061,7 +3094,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Parallel Mixer: out = x + Σ kᵢ (nᵢ − x).
   - A Layer Mixer that is off mixes in Normal, with the Key Output Gain of each input. Subtract with a gain of 0.5 on the last input, off, equals Normal with that gain, on.
   - Measured: a corrector that is off adds nothing to a Layer Mixer. The mix of the inputs before it stays.
+  - Keyframes of Gain fade the change of the node in or out (p. 3436).
   - Measured: a Key Output change gets a keyframe on the Defocus track of the node, not on the Color Corrector track.
+  - Measured: Add Keyframe in All or Color mode puts a keyframe on each track of the node. The track of the Key Output gets one too.
+  - Measured: a Key Output change goes to a keyframe by the same rule as a change of the values, with the same pairs.
+  - Measured: from a usual Dynamic keyframe to the next, Gain blends linearly.
   - Measured: Reset in the Primaries palette keeps the Key Output. Reset Node Grade and Reset Grades and Keep Nodes reset it.
   - vidcut: Primaries and Key at the top of the palette select the palette. The Key palette has the preview, Invert, Gain and Offset of Key Output.
   - vidcut: the Key palette keeps the height of the Primaries palette.
@@ -3070,7 +3107,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.clear` with `node` and `palette` resets one palette of the node: `primaries` or `key`.
   - vidcut: `grade.set` with `key_gain`, `key_offset` and `key_invert`. It refuses a value outside the range.
   - vidcut: the key out acts in serial nodes and in the mixers as measured.
-  - vidcut: the Key Output has no keyframes yet. Keys, Key Input, the Qualifier controls and the Key Mixer come later ([todo](todo/color-page.md)).
+  - vidcut: each keyframe of a corrector holds its Key Output. A change goes to a keyframe as the values do.
+  - vidcut: Gain and Offset blend as the values do. Invert changes on the frame of the next keyframe.
+  - vidcut: a corrector has one keyframe track, so the Key Output has no track of its own ([todo](todo/gaps.md)).
+  - vidcut: the Key palette shows the Key Output of the keyframe that a change goes to.
+  - vidcut: keys, Key Input, the Qualifier controls and the Key Mixer come later ([todo](todo/color-page.md)).
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 `grade.get` gives the nodes and the `output`.
