@@ -2828,9 +2828,10 @@ pub enum Request {
     /// Put the grade of clips, or with `timeline` the timeline grade, back
     /// at its usual value: one corrector at its usual values, with no
     /// keyframes. With `node`, only that corrector goes back to its usual
-    /// values. With `keep_nodes`, each corrector does, and the nodes and
-    /// their links stay. With `node` or `keep_nodes`, the keyframes stay,
-    /// and the values go back where `grade.set` changes them.
+    /// values and its usual Key Output. With `keep_nodes`, each corrector
+    /// does, and the nodes and their links stay. With `node` or
+    /// `keep_nodes`, the keyframes stay, and the values go back where
+    /// `grade.set` changes them.
     #[serde(rename = "grade.clear")]
     GradeClear {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2842,6 +2843,10 @@ pub enum Request {
         node: Option<u32>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         keep_nodes: bool,
+        /// With `node`: only the values of this palette go back. Left out:
+        /// all of them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        palette: Option<GradePalette>,
         /// The time whose keyframe goes back. Left out: the playhead.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<TimeSpec>,
@@ -4454,6 +4459,16 @@ pub struct GradeNodeChange {
     /// The key that a corrector gives out is turned over: 1 minus it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_invert: Option<bool>,
+}
+
+/// A palette of a corrector, as `grade.clear` resets it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GradePalette {
+    /// The values of the corrector: Primaries and Log.
+    Primaries,
+    /// The Key Output.
+    Key,
 }
 
 /// A kind of mixer of a grade.

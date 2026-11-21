@@ -427,6 +427,7 @@ The bar and the Jobs button:
 - The palette shows the current node of the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
   - Primaries and Key at the top select the palette (`Palette`). The Key palette draws the Key Output of the node (`key_output`).
   - A change in the Key palette changes the `key` of the node in the dragged grade. The sent `grade.set` has `key_gain`, `key_offset` or `key_invert`.
+  - Reset in a palette sends `grade.clear` with the `palette` of that palette.
   - The other palettes, and the line for a mixer, keep the height of the last Primaries palette (`primaries_panel`). Thus the page does not move when the palette changes.
 - The Node Editor of the grade is at the right of the viewer (`Workspace::grade_nodes_panel`).
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).

@@ -7,7 +7,9 @@ use vidcut_core::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, KeyO
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed};
 use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::preferences::SwitchingClips;
-use vidcut_core::request::{GradeAdd, GradeLevel, GradeMixer, NodeZoom, Page, PrinterColor};
+use vidcut_core::request::{
+    GradeAdd, GradeLevel, GradeMixer, GradePalette, NodeZoom, Page, PrinterColor,
+};
 use vidcut_core::shortcuts::{Action, Panel};
 
 use super::node_editor::{
@@ -1330,20 +1332,13 @@ impl Workspace {
             self.effects_page.graded = None;
             let node = ("node".to_string(), json!(n));
             let at = ("at".to_string(), json!(self.snap.timeline.position));
-            let mut params = Map::from_iter([(field, target), node]);
-            match palette {
-                Palette::Key => {
-                    let usual = KeyOutput::default();
-                    params.insert("key_gain".into(), json!(usual.gain));
-                    params.insert("key_offset".into(), json!(usual.offset));
-                    params.insert("key_invert".into(), json!(usual.invert));
-                    self.send("grade.set", Value::Object(params));
-                }
-                Palette::Primaries => {
-                    params.extend([at]);
-                    self.send("grade.clear", Value::Object(params));
-                }
-            }
+            let part = match palette {
+                Palette::Key => GradePalette::Key,
+                Palette::Primaries => GradePalette::Primaries,
+            };
+            let part = ("palette".to_string(), json!(part));
+            let params = Map::from_iter([(field, target), node, at, part]);
+            self.send("grade.clear", Value::Object(params));
             return palette == Palette::Primaries;
         }
         if !changes.is_empty() {

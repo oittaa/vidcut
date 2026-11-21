@@ -3047,9 +3047,12 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - A Layer Mixer that is off mixes in Normal, with the Key Output Gain of each input. Subtract with a gain of 0.5 on the last input, off, equals Normal with that gain, on.
   - Measured: a corrector that is off adds nothing to a Layer Mixer. The mix of the inputs before it stays.
   - Measured: a Key Output change gets a keyframe on the Defocus track of the node, not on the Color Corrector track.
+  - Measured: Reset in the Primaries palette keeps the Key Output. Reset Node Grade and Reset Grades and Keep Nodes reset it.
   - vidcut: Primaries and Key at the top of the palette select the palette. The Key palette has the preview, Invert, Gain and Offset of Key Output.
   - vidcut: the Key palette keeps the height of the Primaries palette.
-  - vidcut: a typed value outside the range goes to the nearest end. Reset in the Key palette sets the usual values.
+  - vidcut: a typed value outside the range goes to the nearest end.
+  - vidcut: the resets work as measured. Reset in the Key palette resets only the Key Output.
+  - vidcut: `grade.clear` with `node` and `palette` resets one palette of the node: `primaries` or `key`.
   - vidcut: `grade.set` with `key_gain`, `key_offset` and `key_invert`. It refuses a value outside the range.
   - vidcut: the key out acts in serial nodes and in the mixers as measured.
   - vidcut: the Key Output has no keyframes yet. Keys, Key Input, the Qualifier controls and the Key Mixer come later ([todo](todo/color-page.md)).

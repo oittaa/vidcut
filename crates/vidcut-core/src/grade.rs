@@ -631,7 +631,8 @@ impl Uses {
     }
 
     fn twice(&self, node: &GradeNode, c: &Corrector, k: usize) -> bool {
-        node.on && !c.is_usual() && self.over[k] > 0 && self.kept(k) > 0 && node.key.of(1.0) != 1.0
+        let key = node.key.of(1.0);
+        node.on && !c.is_usual() && self.over[k] > 0 && self.kept(k) > 0 && key > 0.0 && key < 1.0
     }
 }
 
@@ -645,7 +646,7 @@ fn corrected(
     let grading = || Box::new(Grading::of(c));
     if !node.on {
         r.alias(k, x, uses.kept(k));
-    } else if c.is_usual() || (key == 0.0 && uses.over[k] == 0) {
+    } else if c.is_usual() || key == 0.0 {
         r.alias(k, x, uses.all[k]);
     } else if uses.over[k] == 0 {
         let on = r.take(x, passes);
@@ -672,15 +673,12 @@ fn corrected(
             grading: grading(),
             key: 1.0,
         });
-        if key > 0.0 {
-            let mode = BlendMode::Normal;
-            passes.push(Pass::Layer {
-                on: mix,
-                top: on,
-                mode,
-                key,
-            });
-        }
+        passes.push(Pass::Layer {
+            on: mix,
+            top: on,
+            mode: BlendMode::Normal,
+            key,
+        });
         let whole = uses.all.len() + k;
         r.hold(k, mix, uses.kept(k));
         r.hold(whole, on, uses.over[k]);
@@ -773,8 +771,8 @@ impl Graded {
                     let x = bases[k]?;
                     let on = r.take(ins[0], &mut passes);
                     for &v in &ins[1..] {
-                        if v != x {
-                            let (change, base) = (r.holder[v], r.holder[x]);
+                        let (change, base) = (r.holder[v], r.holder[x]);
+                        if change != base {
                             passes.push(Pass::Parallel { on, change, base });
                         }
                         r.done(v);

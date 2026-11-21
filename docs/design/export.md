@@ -878,6 +878,7 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - A Static keyframe, or the corrector itself, and the Dynamic keyframe right after it are a pair.
   - The other keyframe of the pair takes only the values that changed (`Corrector::carried`). Each channel of a wheel is one value.
 - `grade.clear` with `node` or `keep_nodes` puts these values back to the usual values in the same way. The keyframes stay.
+  - It also puts back `KeyOutput::default`. With `palette`, only the values of that palette go back (`GradePalette`).
   - `grade.clear` alone gives `Grade::default`, with no keyframes.
 - `Picture::retimed_to`, `Picture::scale_times` and `Picture::retarget` move the keyframes of a clip grade with the keyframes of its effects.
 
