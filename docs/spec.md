@@ -3044,8 +3044,19 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Parallel Mixer that is off gives the same result as when it is on.
   - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
   - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
-  - vidcut: the menu of a mixer has these items in this order, but not Lock Node and Remove One Input ([todo](todo/color-page.md)).
+  - vidcut: the menu of a mixer has these items in this order, but not Remove One Input ([todo](todo/color-page.md)).
   - vidcut: in the Add Node submenu of a mixer, only Add Serial and Append Node work. The other items are grey. This is not measured in Resolve.
+- **Lock Node** (pp. 3374, 3454):
+  - A lock prevents any change to its node. A locked node shows a lock icon. Lock Node in the menu of a node locks or unlocks it (p. 3454).
+  - A new Shared node is locked (p. 3374).
+  - Measured in Resolve Studio 21.2: Lock Node has a check mark on a locked node. The lock icon is at the bottom right of the node.
+  - Measured: a locked corrector refuses a typed Contrast, a typed Key Output Gain and Reset Node Grade. The field shows the typed value, then the stored value again.
+  - Measured: a locked node can still be deleted, moved and turned off or on. Alt+S adds a node after it.
+  - vidcut: `grade.set` with `locked`. Lock Node in the menu of each node has a check mark. A locked node shows a lock badge at its right, also in List View.
+  - vidcut: a locked node refuses `grade.set` of its values, its Key Output, and its mixer kind or mode. It also refuses `grade.clear` with `node`, `grade.printer`, `grade.paste`, `grade.swap` and the keyframe requests.
+  - vidcut: the palette of a locked node drops each change. Thus its controls show the stored values again.
+  - Not measured in Resolve: Reset Grades and Keep Nodes, and the keyframe requests for all nodes. vidcut skips a locked node in them.
+  - Not measured in Resolve: a lock on a mixer, and a label change on a locked node. vidcut follows the manual for a mixer, and lets the label change.
 - **Mixers**, measured in Resolve Studio 21.2 with float renders:
   - Serial: node 2 works on the output of node 1. The error is 6.8e-6.
   - Parallel Mixer: out = x + Σ (nᵢ − x). The error is 8.4e-7.
