@@ -3128,7 +3128,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Primaries and Key at the top of the palette select the palette. The Key palette has the Key Input, and the preview, Invert, Gain and Offset of Key Output.
   - vidcut: the Key palette keeps the height of the Primaries palette.
   - vidcut: a typed value outside the range goes to the nearest end.
-  - vidcut: the resets work as measured. Reset in the Key palette resets the Key Input and the Key Output.
+  - vidcut: the resets work as measured. Reset in the Key palette resets the Key Input and the Key Output, and keeps the Key Input Invert.
   - vidcut: `grade.clear` with `node` and `palette` resets one palette of the node: `primaries`, `window` or `key`.
   - vidcut: `grade.set` with `key_gain`, `key_offset` and `key_invert`. It refuses a value outside the range.
   - vidcut: the key out acts in serial nodes and in the mixers as measured.
@@ -3159,28 +3159,35 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a node with windows and no link on its key input has the key of its windows, with no Q.
   - Measured: Blur Radius goes from −1 to 1. It is a near-Gaussian blur. Its sigma is in proportion to the value and to the frame height.
   - Measured: Blur H/V h multiplies the sigma across by min(1, 1 + h), and the sigma down by min(1, 1 − h).
-  - Measured: a Blur Radius below 0 gives no change to a hard edge.
+  - Measured: a Blur Radius of −r gives clamp(2k − b, 0, 1), where b is the blur of radius r. The error is below 1.6e-4 at r = 0.5. Thus a hard edge does not change.
+  - Measured: a key link from a corrector that is off gives the linked corrector no correction. The Invert and the Offset of its Key Input do not change that.
+  - Measured: a Key Mixer that is off mixes the keys as when it is on.
+  - Measured: a Key Mixer skips an input with no link. A Key Mixer with no linked input gives a key of 1.
+  - Measured: Extract of a node removes its key links.
+  - Measured: in the Key Input, the Key Output and each Key Mixer input, Gain goes from 0 to 2 and Offset from −1 to 1.
+  - Measured: Reset in the Key palette resets the values of the Key Input and of the Key Output. The Key Input Invert stays on.
+  - Measured: a change of the Key Input gets a keyframe on the Defocus track of the node. A change of a Key Mixer gets a keyframe on its Color Corrector track.
+  - Measured: the Add Node submenu of a corrector has Add Outside as its last item. Color > Nodes > Add Outside Node shows no shortcut, and Alt+O adds no node.
+  - Measured: the menu of a Key Mixer has Reset Node Grade, Add Node, Lock Node, Delete Node, Add One Input and Remove One Input. Its Add Node submenu has Add Serial and Add Serial Before.
   - The errors of the key functions are below 8.2e-7. The record is in `fixtures/color/NOTES.md` of the test data.
-  - vidcut: the keys combine as measured. Blur Radius is a Gaussian blur with the measured sigma.
+  - vidcut: the keys combine as measured. Blur Radius is a Gaussian blur with the measured sigma. A Blur Radius below 0 sharpens as measured.
+  - vidcut: a key link from a corrector that is off, an off Key Mixer and the inputs with no link act as measured.
+  - vidcut: a Key Mixer with no linked input gives its Key Output of a key of 1.
   - vidcut: `grade.connect` with `key` links a key output to a key input. `grade.add` with `key_mixer` and `outside` adds the nodes.
   - vidcut: `grade.set` with `key_input_invert`, `key_input_mask`, `key_input_gain`, `key_input_offset`, `key_input_blur` and `key_input_blur_ratio` changes the Key Input.
   - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
-  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector has Add Outside Node. Alt+O adds an Outside node (p. 3417).
+  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
+  - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node and Add One Input. Remove One Input and the Add Node submenu come later ([todo](todo/color-page.md)).
   - vidcut: a key link is blue. A node cannot drop into a key link.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
   - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
-  - Not measured: the place of Add Outside Node in the menu of a node. vidcut has it in the Add Node submenu.
-  - Not measured: the key output of a node that is off. vidcut gives the key as when the node is on.
-  - Not measured: a Key Mixer that is off. vidcut mixes the keys as when it is on.
-  - Not measured: a Key Mixer input with no link. vidcut skips it.
-  - Not measured: a Key Mixer with no linked input. vidcut turns the grade off, as for a mixer with no connection.
+  - vidcut: the Key Input and the Key Mixer have no keyframes yet ([todo](todo/color-page.md)).
+  - Not measured: a key link from a corrector that is off into a Key Mixer. vidcut mixes that key as when the corrector is on.
+  - Not measured: the Key Output of a Key Mixer with no linked input.
   - Not measured: a Key Mixer with one linked input after a delete. vidcut keeps it.
-  - Not measured: Extract of a node with key links. vidcut removes its key links.
-  - Not measured: a Blur Radius below 0 on a soft key. vidcut does not change the key.
-  - Not measured: the ranges of Gain and Offset of the Key Input and of a Key Mixer input. vidcut uses 0 to 2 and −1 to 1.
-  - Not measured: whether Reset in the Key palette resets the Key Input. vidcut resets it.
-  - Not measured: keyframes of the Key Input and of a Key Mixer. vidcut has none.
+  - Not measured: Reset in the Key palette with Matte or the Key Output Invert on. vidcut resets them.
+  - Not measured: Add Serial and Add Serial Before on a Key Mixer.
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.

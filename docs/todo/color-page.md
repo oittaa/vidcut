@@ -50,11 +50,7 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
   - Delete after a drag box that does not hold the current node: does the current node go too.
   - A Ctrl-click on a node that is selected already.
   - The keys of the nodes ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)):
-    - The place of Add Outside Node in the menu of a node.
-    - The key output of a node that is off, and a Key Mixer that is off.
-    - A Key Mixer with no linked input, and a Key Mixer with one linked input after a delete.
-    - Extract of a node with key links.
-    - A Blur Radius below 0 on a soft key.
-    - The ranges of Gain and Offset of the Key Input and of a Key Mixer input.
-    - Whether Reset in the Key palette resets the Key Input.
-    - Keyframes of the Key Input and of a Key Mixer.
+    - A key link from a node that is off into a Key Mixer.
+    - A Key Mixer with one linked input after a delete.
+    - Add Serial and Add Serial Before in the menu of a Key Mixer.
+- Keyframes of the Key Input, on the Defocus track, and of a Key Mixer, on its Color Corrector track ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).

@@ -128,8 +128,8 @@ const ADD_MENU: [(GradeAdd, &str); 6] = [
     (GradeAdd::Before, "Add Before Current"),
     (GradeAdd::Parallel, "Add Parallel"),
     (GradeAdd::Layer, "Add Layer"),
-    (GradeAdd::Outside, "Add Outside Node"),
     (GradeAdd::Append, "Append Node"),
+    (GradeAdd::Outside, "Add Outside"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -999,6 +999,8 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
             return;
         }
         GradeTool::KeyMixer { .. } => {
+            let reset = egui::Button::new("Reset Node Grade");
+            pick(ui, true, reset, NodeAct::Reset);
             let lock = egui::Button::selectable(d.locked, "Lock Node");
             pick(ui, true, lock, NodeAct::Lock);
             pick(ui, true, delete(), NodeAct::Delete);

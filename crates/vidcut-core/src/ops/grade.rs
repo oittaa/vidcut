@@ -620,7 +620,11 @@ fn cleared(
     }
     if resets(GradePalette::Key) {
         key_changed(g, n, frame, |_| KeyOutput::default())?;
-        key_input_changed(g, n, |_| KeyInput::default())?;
+        let kept = palette.is_some();
+        key_input_changed(g, n, |i| KeyInput {
+            invert: kept && i.invert,
+            ..KeyInput::default()
+        })?;
     }
     if resets(GradePalette::Window) {
         let d = unlocked(g, n)?;

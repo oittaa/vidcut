@@ -572,6 +572,12 @@ fn key_steps(node: &GradeNode) -> Vec<(KeySource, KeyFold)> {
     steps
 }
 
+fn cut_off(g: &Grade, node: &GradeNode) -> bool {
+    let corrector = |d: &GradeNode| matches!(d.tool, GradeTool::Corrector(_));
+    let off = |v: u32| g.node(v).is_some_and(|d| !d.on && corrector(d));
+    corrector(node) && node.key_from.is_some_and(off)
+}
+
 fn key_sources(node: &GradeNode) -> impl Iterator<Item = u32> + '_ {
     let mixed = node.inputs.iter().flatten().filter(|_| node.takes_keys());
     mixed.copied().chain(node.key_from)
@@ -620,6 +626,10 @@ pub enum Pass {
     KeyBlur {
         on: usize,
         blur: (f64, f64),
+    },
+    KeySharpen {
+        on: usize,
+        from: usize,
     },
     Correct {
         on: usize,
@@ -691,6 +701,7 @@ pub fn complete(g: &Grade) -> bool {
         && g.nodes.iter().zip(1..).all(|(n, k)| {
             let fed = match n.tool {
                 GradeTool::Corrector(_) => n.inputs.iter().all(Option::is_some),
+                GradeTool::KeyMixer { .. } => true,
                 _ => n.inputs.iter().any(Option::is_some),
             };
             fed && used(k)
@@ -837,11 +848,18 @@ impl Uses {
         let key = self.keys[v as usize].clone();
         let blur = (node.key_input.blur, node.key_input.blur_ratio);
         match key {
-            Key::Map(from) if !node.takes_keys() && blur.0 > 0.0 => {
+            Key::Map(from) if !node.takes_keys() && blur.0 != 0.0 => {
                 let to = r.kept(1);
                 passes.push(Pass::Copy { from, to });
+                let spread = (blur.0.abs(), blur.1);
+                passes.push(Pass::KeyBlur {
+                    on: to,
+                    blur: spread,
+                });
+                if blur.0 < 0.0 {
+                    passes.push(Pass::KeySharpen { on: to, from });
+                }
                 r.used(&key);
-                passes.push(Pass::KeyBlur { on: to, blur });
                 Key::Map(to)
             }
             _ => key,
@@ -1002,7 +1020,11 @@ fn layered(
 fn keys_only(p: &Pass) -> bool {
     matches!(
         p,
-        Pass::Copy { .. } | Pass::Key { .. } | Pass::KeyFold { .. } | Pass::KeyBlur { .. }
+        Pass::Copy { .. }
+            | Pass::Key { .. }
+            | Pass::KeyFold { .. }
+            | Pass::KeyBlur { .. }
+            | Pass::KeySharpen { .. }
     )
 }
 
@@ -1020,7 +1042,11 @@ impl Graded {
         let count = g.nodes.len() + 1;
         let mut shapes = vec![Shape::Flat(1.0); count];
         for &k in order {
-            shapes[k as usize] = shape_of(g.node(k)?, &shapes);
+            let node = g.node(k)?;
+            shapes[k as usize] = match cut_off(g, node) {
+                true => Shape::Flat(0.0),
+                false => shape_of(node, &shapes),
+            };
         }
         let mut uses = Uses {
             all: vec![0; count],
@@ -1062,7 +1088,7 @@ impl Graded {
             let node = g.node(k)?;
             let k = k as usize;
             uses.counts[k] += uses.own(node, k);
-            if uses.counts[k] > 0 {
+            if uses.counts[k] > 0 && !cut_off(g, node) {
                 for v in key_sources(node) {
                     uses.counts[v as usize] += 1;
                 }

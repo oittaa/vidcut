@@ -1837,6 +1837,9 @@ fn fs_grade_mix(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let under = textureLoad(blur_start, px, 0);
     let top = textureLoad(blur_source, px, 0);
+    if grade_mixing.how.x > 1.5 {
+        return clamp(2.0 * top - under, vec4<f32>(0.0), vec4<f32>(1.0));
+    }
     if grade_mixing.how.x < 0.5 {
         return under + top - textureLoad(grade_base, px, 0);
     }

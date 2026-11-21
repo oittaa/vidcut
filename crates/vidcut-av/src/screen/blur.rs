@@ -77,6 +77,7 @@ const WINDOW_STARTS: u32 = 4;
 const WINDOW_ENDS: u32 = 8;
 
 const MIX_PARALLEL: f64 = 0.0;
+const MIX_SHARPEN: f64 = 2.0;
 
 const MIX_LAYER: f64 = 1.0;
 
@@ -1610,6 +1611,13 @@ fn pass_into(
         GradePass::KeyBlur { on, blur } => {
             key_blur_into(gpu, at[*on], (*blur, spot), &scratch[0], encoder);
         }
+        GradePass::KeySharpen { on, from } => mix_into(
+            gpu,
+            at[*on],
+            (at[*from], at[*on]),
+            (&scratch[0], [MIX_SHARPEN, 0.0, 1.0], None),
+            encoder,
+        ),
         GradePass::Copy { from, to } => encoder.copy_texture_to_texture(
             at[*from].texture.as_image_copy(),
             at[*to].texture.as_image_copy(),
