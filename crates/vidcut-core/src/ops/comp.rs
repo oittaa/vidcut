@@ -137,10 +137,11 @@ fn insert(c: &mut Composition, mut node: Node, after: Option<&str>, id: &str) ->
 }
 
 fn tidied(p: &mut Project, id: &str) -> Result<()> {
+    let frame = p.frame_size();
     let (ti, ci) = locate(p, id)?;
     let c = &mut p.tracks[ti].clips[ci];
     if let Some(picture) = c.picture.take() {
-        c.picture = super::picture::checked(&picture)?;
+        c.picture = super::picture::kept(&picture, frame)?;
     }
     Ok(())
 }

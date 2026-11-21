@@ -28,6 +28,9 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
     if let Some(why) = crate::keyframes::picture_problem(p) {
         return Err(Error::invalid(why));
     }
+    if let Some(g) = &p.grade {
+        super::grade::checked(g)?;
+    }
     let effects = p
         .effects
         .iter()
@@ -49,15 +52,18 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
             .as_ref()
             .map(composition_checked)
             .transpose()?,
-        grade: p
-            .grade
-            .as_ref()
-            .map(super::grade::checked)
-            .transpose()?
-            .flatten(),
         ..p.clone()
     };
     Ok((!out.is_usual()).then_some(out))
+}
+
+pub fn ungraded_usual(mut p: Picture, frame: [f64; 2]) -> Option<Picture> {
+    p.grade = p.grade.filter(|g| !g.is_usual(frame));
+    (!p.is_usual()).then_some(p)
+}
+
+pub fn kept(p: &Picture, frame: [f64; 2]) -> Result<Option<Picture>> {
+    Ok(checked(p)?.and_then(|p| ungraded_usual(p, frame)))
 }
 
 fn within(v: Option<f64>, (low, high): (f64, f64), why: &str) -> Result<()> {

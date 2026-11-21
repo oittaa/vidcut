@@ -2935,7 +2935,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     let grade = tl["metadata"][VIDCUT]
         .get("grade")
         .and_then(|v| serde_json::from_value::<Grade>(v.clone()).ok())
-        .and_then(|g| crate::ops::grade::checked(&g).ok().flatten());
+        .filter(|g| crate::ops::grade::checked(g).is_ok());
     let project = tl["metadata"][VIDCUT]
         .get("project")
         .and_then(|v| match serde_json::from_value::<ProjectMeta>(v.clone()) {

@@ -3181,8 +3181,9 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         points: Option<Vec<[f64; 2]>>,
     },
-    /// Remove a window of a corrector of the grade of a clip, or with
-    /// `timeline` of the timeline grade. The windows after it move up.
+    /// Remove a window that `grade.window.add` added to a corrector of the
+    /// grade of a clip, or with `timeline` of the timeline grade. The
+    /// windows after it move up. The first windows of a corrector stay.
     #[serde(rename = "grade.window.remove")]
     GradeWindowRemove {
         #[serde(default, skip_serializing_if = "Option::is_none")]

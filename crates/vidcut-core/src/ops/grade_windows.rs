@@ -41,7 +41,7 @@ fn window(d: &mut GradeNode, n: u32, i: usize) -> Result<&mut GradeWindow> {
 }
 
 pub fn add(p: &mut Project, of: &GradeOf, n: u32, kind: WindowKind) -> Result<usize> {
-    let frame = [p.settings.width, p.settings.height].map(f64::from);
+    let frame = p.frame_size();
     let mut made = 0;
     edited(p, of, |g| {
         let d = corrector(g, n)?;
@@ -182,6 +182,11 @@ pub fn remove(p: &mut Project, of: &GradeOf, n: u32, i: usize) -> Result<()> {
     edited(p, of, |g| {
         let d = corrector(g, n)?;
         window(d, n, i)?;
+        if i < WindowKind::ALL.len() {
+            return Err(Error::invalid(format!(
+                "window {i} is one of the first windows of node {n}, which stay: turn it off with `on`"
+            )));
+        }
         d.windows.remove(i);
         Ok(())
     })

@@ -2260,7 +2260,7 @@ impl Screen {
                     aspect: f64::from(size.0) / f64::from(size.1),
                     height,
                     frame,
-                    grade: self.shots.timeline.clone().unwrap_or_default(),
+                    grade: (self.shots.timeline.clone()).unwrap_or_else(|| Grade::usual(frame)),
                 }),
             };
             self.shots.draw(gpu, source, &mut encoder);
@@ -2365,7 +2365,8 @@ fn clip_shot(
     let (texture, _) = slots.get(i)?.converted.as_ref()?;
     let p = &placed[i][0];
     let at = p.source as f64;
-    let grade = (p.picture.grade.as_ref()).map_or_else(Grade::default, |g| g.at(at).into_owned());
+    let grade =
+        (p.picture.grade.as_ref()).map_or_else(|| Grade::usual(frame), |g| g.at(at).into_owned());
     let [_, _, w, h] = picture.placement(shots::LARGEST, shots::LARGEST);
     Some(shots::Source {
         view: texture.create_view(&Default::default()),

@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, Corrector, Grade, GradeKey, GradeNode, GradeTool, GradeWindow, KeyOutput, Project,
+    WindowKind,
 };
 use crate::preferences::ColorPrefs;
 use crate::request::{
@@ -155,7 +156,7 @@ fn key_checked(k: &KeyOutput) -> Result<()> {
     within(k.offset, (-1.0, 1.0), "key_offset")
 }
 
-pub fn checked(g: &Grade) -> Result<Option<Grade>> {
+pub fn checked(g: &Grade) -> Result<()> {
     let last = g.last();
     if let Some(o) = g.output.filter(|o| *o > last) {
         return Err(no_node(o));
@@ -169,6 +170,12 @@ pub fn checked(g: &Grade) -> Result<Option<Grade>> {
             GradeTool::Corrector(c) => {
                 if n.inputs.len() != 1 {
                     return Err(Error::invalid(format!("corrector {k} has one input")));
+                }
+                let kinds = n.windows.iter().map(|w| w.shape.kind());
+                if !kinds.take(WindowKind::ALL.len()).eq(WindowKind::ALL) {
+                    return Err(Error::invalid(format!(
+                        "corrector {k} starts its windows with a linear, a circle, a polygon and a gradient window"
+                    )));
                 }
                 corrector_checked(c)?;
             }
@@ -192,7 +199,7 @@ pub fn checked(g: &Grade) -> Result<Option<Grade>> {
     if crate::grade::order(g).is_none() {
         return Err(Error::invalid("the links of the grade make a loop"));
     }
-    Ok((!g.is_usual()).then(|| g.clone()))
+    Ok(())
 }
 
 impl PrinterColor {
@@ -266,11 +273,14 @@ pub fn stored(p: &Project, of: &GradeOf) -> Result<Grade> {
             c.picture.as_ref().and_then(|pic| pic.grade.as_ref())
         }
     };
-    Ok(grade.cloned().unwrap_or_default())
+    Ok(grade
+        .cloned()
+        .unwrap_or_else(|| Grade::usual(p.frame_size())))
 }
 
 fn store(p: &mut Project, of: &GradeOf, grade: &Grade) -> Result<()> {
-    let grade = checked(grade)?;
+    checked(grade)?;
+    let grade = (!grade.is_usual(p.frame_size())).then(|| grade.clone());
     match of {
         GradeOf::Timeline => {
             if !p.compound_path.is_empty() {
@@ -442,7 +452,7 @@ pub fn clear(
     if palette.is_some() && n.is_none() {
         return Err(Error::usage("`palette` needs `node`"));
     }
-    let size = [p.settings.width, p.settings.height].map(f64::from);
+    let size = p.frame_size();
     for one in of {
         let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
         edited(p, one, |g| match (n, keep_nodes) {
@@ -458,7 +468,7 @@ pub fn clear(
                 Ok(())
             }
             (None, false) => {
-                *g = Grade::default();
+                *g = Grade::usual(size);
                 Ok(())
             }
         })?;
@@ -586,7 +596,7 @@ fn mixer_of(kind: GradeAdd) -> GradeTool {
     }
 }
 
-fn beside(g: &mut Grade, n: u32, kind: GradeAdd) -> Result<u32> {
+fn beside(g: &mut Grade, n: u32, kind: GradeAdd, frame: [f64; 2]) -> Result<u32> {
     let input = input_of(g, n)?;
     let at = g.node(n).map_or([0.0; 2], |d| d.place);
     let added = g.last() + 1;
@@ -599,13 +609,13 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd) -> Result<u32> {
     match mixer {
         Some(m) => {
             let place = free_below(g, at);
-            g.nodes.push(GradeNode::corrector(input, place));
+            g.nodes.push(GradeNode::corrector(input, place, frame));
             node(g, m)?.inputs.push(Some(added));
         }
         None => {
             shifted(g, at[0] + 1.0);
             let place = free_below(g, at);
-            g.nodes.push(GradeNode::corrector(input, place));
+            g.nodes.push(GradeNode::corrector(input, place, frame));
             retake(g, n, Some(added + 1), 0);
             g.nodes.push(GradeNode {
                 tool: mixer_of(kind),
@@ -631,6 +641,7 @@ pub fn add(
     n: Option<u32>,
     place: Option<[f64; 2]>,
 ) -> Result<Value> {
+    let frame = p.frame_size();
     let mut made = 0;
     edited(p, of, |g| {
         let added = g.last() + 1;
@@ -643,7 +654,8 @@ pub fn add(
             GradeAdd::Serial => {
                 let (n, [x, y]) = around(g)?;
                 shifted(g, x + 1.0);
-                g.nodes.push(GradeNode::corrector(Some(n), [x + 1.0, y]));
+                g.nodes
+                    .push(GradeNode::corrector(Some(n), [x + 1.0, y], frame));
                 retake(g, n, Some(added), added);
                 added
             }
@@ -651,7 +663,7 @@ pub fn add(
                 let (n, [x, y]) = around(g)?;
                 let input = node(g, n)?.inputs.first().copied().flatten();
                 shifted(g, x);
-                g.nodes.push(GradeNode::corrector(input, [x, y]));
+                g.nodes.push(GradeNode::corrector(input, [x, y], frame));
                 if let Some(first) = node(g, n)?.inputs.first_mut() {
                     *first = Some(added);
                 }
@@ -659,7 +671,7 @@ pub fn add(
             }
             GradeAdd::Parallel | GradeAdd::Layer => {
                 let (n, _) = around(g)?;
-                beside(g, n, kind)?
+                beside(g, n, kind, frame)?
             }
             GradeAdd::Append => {
                 let at = match g.output.and_then(|o| g.node(o)) {
@@ -669,14 +681,14 @@ pub fn add(
                         [right, 0.0]
                     }
                 };
-                g.nodes.push(GradeNode::corrector(g.output, at));
+                g.nodes.push(GradeNode::corrector(g.output, at, frame));
                 g.output = Some(added);
                 added
             }
             GradeAdd::Corrector => {
                 let below = g.nodes.iter().map(|d| d.place[1] + 1.0).fold(0.0, f64::max);
                 let at = place.unwrap_or([0.0, below]);
-                g.nodes.push(GradeNode::corrector(None, at));
+                g.nodes.push(GradeNode::corrector(None, at, frame));
                 added
             }
         };
