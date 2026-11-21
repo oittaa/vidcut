@@ -3282,7 +3282,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Measured: a window is in pixels of the timeline frame, on the clip as fitted. A 3840×2160 clip in a 1920×1080 timeline gets the window of a 1920×1080 clip.
   - Measured: the zoom, the rotation and the flips act on the window about the pixel at W/2, H/2. The picture turns about the middle of the frame, half a pixel away.
   - vidcut: the same. The grade itself works after Edit Sizing ([§13](#13-order-of-operations-pp-287296-3407)). vidcut renders the 15 measured moved clips within 3.4e-4.
-    - The exception is the edge pixels of a picture with a pitch or a yaw. There the result differs by up to 0.65 of the key.
+    - The exception is the edge pixels of a picture with a pitch or a yaw. There the output differs by up to 82.6 of 255.
     - These pixels are outside the measured windows. The edge of a leaned picture differs also without a window ([§8.17](#817-generators-p-766)).
   - A circle made in Resolve with Toggle Display Mode on has no radius ([gotchas](gotchas.md#resolves-renders)). vidcut does not copy this fault.
   - A locked node refuses a change of its windows ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
