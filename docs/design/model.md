@@ -159,7 +159,9 @@ Timelines (spec §3):
 - In memory, the open timeline is checked out: its `tracks`, `marks`, `markers` and `subtitles` are the fields of `Project` with these names. Its entry in `timelines` has empty lists.
   - Why: the code that edits, plays and exports a timeline reads these fields. It does not change for many timelines.
   - `Project::check_in` puts them back into the entry, and `Project::check_out` takes them out. `Project::open_timeline` does both.
-  - `Project::compound_path` holds open compound clips (`OpenCompound`, outermost first) with their `CompoundTarget`. An `OpenCompound` holds `tracks`, `marks` and `markers`, with no subtitles, and `Project::start_tc` gives `0` while one is open.
+  - `Project::compound_path` holds open compound clips (`OpenCompound`, outermost first) with their `CompoundTarget`.
+    - An `OpenCompound` holds `fps`, `drop_frame`, `tracks`, `marks`, `markers` and `start_tc`, with no subtitles.
+    - While one is open, `Project::format` uses its `fps` and `drop_frame`, and `Project::start_tc` gives `OpenCompound::start_tc`.
   - `Project::checked_out_timeline` and `Project::sheet_key` name what is checked out. Exports while open export that compound clip with no `project` metadata, and `steps::since` reads `sheets_of` including open compounds.
   - The file and the history hold each timeline and open compound with its contents (`Project::whole_timeline`, `Project::sheets`). Thus a diff names the sheet that changed.
 - `TimelineSettings` (`own`) gives a timeline its own frame rate, size, drop-frame and color space. Without it, the timeline uses the project's.
@@ -173,7 +175,7 @@ Timelines (spec §3):
   - An edit into a project with no timeline makes one first (`Editor::apply`).
     - `Project::keep_sheet` makes "Timeline 1" from the open tracks.
     - `need_timeline` applies the rule after the request, and after each command of a batch. Thus a batch gives the same result as its commands one by one.
-- A pool item counts at the project's rate: a sound file and a still count `Settings::fps` (`Media::rate`). A compound clip keeps the rate of the timeline where it was made (`PooledCompound::fps`).
+- A pool item counts at the project's rate: a sound file and a still count `Settings::fps` (`Media::rate`). A compound clip keeps the rate and drop-frame of the timeline where it was made (`PooledCompound::fps`, `PooledCompound::drop_frame`).
 - `ops::conform` converts clips by time from one frame rate to another. `place_pooled` and `edit.paste` use it, and `edit.copy` returns the rate of its clips.
 - Synced groups and the Sync Clips window count frames at the project's rate.
   - The Sync Bin, `multicam.pick` and Source Overwrite line up the files on the frame grid of the project (`ops::synced_at`).

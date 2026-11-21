@@ -6528,6 +6528,10 @@ pub struct Compound {
     /// Timeline markers inside the compound clip. Left out when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<Marker>,
+    /// Starting timecode of the compound clip, as frames from 00:00:00:00.
+    /// Left out at 0.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub start_tc: i64,
 }
 
 /// Where an open compound clip writes its edits back when closed.
@@ -6555,6 +6559,8 @@ pub struct OpenCompound {
     pub name: String,
     pub target: CompoundTarget,
     pub fps: Rational,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drop_frame: bool,
     #[serde(default)]
     pub sequence_id: Option<String>,
     pub tracks: Vec<Track>,
@@ -6562,6 +6568,8 @@ pub struct OpenCompound {
     pub marks: Marks,
     #[serde(default)]
     pub markers: Vec<Marker>,
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub start_tc: i64,
 }
 
 #[derive(Serialize)]
@@ -6570,6 +6578,8 @@ struct OpenCompoundOut<'a> {
     name: &'a str,
     target: &'a CompoundTarget,
     fps: Rational,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    drop_frame: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     sequence_id: Option<&'a str>,
     tracks: &'a [Track],
@@ -6577,6 +6587,8 @@ struct OpenCompoundOut<'a> {
     marks: &'a Marks,
     #[serde(skip_serializing_if = "<[Marker]>::is_empty")]
     markers: &'a [Marker],
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    start_tc: i64,
 }
 
 impl<'a> OpenCompoundOut<'a> {
@@ -6586,10 +6598,12 @@ impl<'a> OpenCompoundOut<'a> {
             name: &c.name,
             target: &c.target,
             fps: c.fps,
+            drop_frame: c.drop_frame,
             sequence_id: c.sequence_id.as_deref(),
             tracks: s.tracks,
             marks: s.marks,
             markers: s.markers,
+            start_tc: c.start_tc,
         }
     }
 }
@@ -6601,6 +6615,10 @@ impl Serialize for OpenCompound {
 }
 
 impl OpenCompound {
+    pub fn counts_drop_frame(&self) -> bool {
+        self.drop_frame && self.fps.has_drop_frame()
+    }
+
     pub fn sheet(&self) -> Sheet<'_> {
         Sheet {
             tracks: &self.tracks,
@@ -6625,6 +6643,9 @@ pub struct PooledCompound {
     /// it was made in. In a timeline at another rate, it plays at the same
     /// speed, and its frames are counted again by time.
     pub fps: Rational,
+    /// Count drop-frame timecode (`01:00:00;00`) at 29.97, 59.94 and 119.88.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drop_frame: bool,
     /// The picture block. Left out when it holds only sound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture: Option<Compound>,
@@ -6644,6 +6665,10 @@ impl Compound {
 }
 
 impl PooledCompound {
+    pub fn counts_drop_frame(&self) -> bool {
+        self.drop_frame && self.fps.has_drop_frame()
+    }
+
     pub fn frames(&self) -> i64 {
         self.picture
             .as_ref()
@@ -6665,6 +6690,13 @@ impl PooledCompound {
 
     pub fn sequence_id(&self) -> Option<&str> {
         self.blocks().find_map(crate::otio::sequence_id)
+    }
+
+    pub fn start_tc(&self) -> i64 {
+        self.picture
+            .as_ref()
+            .or(self.sound.as_ref())
+            .map_or(0, |k| k.start_tc)
     }
 }
 
@@ -8098,7 +8130,7 @@ impl Project {
             .unwrap_or_else(|| TimelineSettings::of(&self.settings));
         if let Some(c) = self.compound_path.last() {
             f.fps = c.fps;
-            f.drop_frame &= f.fps.has_drop_frame();
+            f.drop_frame = c.counts_drop_frame();
         }
         f
     }
@@ -8124,8 +8156,8 @@ impl Project {
     }
 
     pub fn start_tc(&self) -> i64 {
-        if !self.compound_path.is_empty() {
-            return 0;
+        if let Some(c) = self.open_compound() {
+            return c.start_tc;
         }
         self.timeline()
             .map_or_else(|| self.settings.first_hour(), |t| t.start_tc)
@@ -8139,7 +8171,8 @@ impl Project {
     }
 
     pub fn set_start_tc(&mut self, frames: i64) {
-        if !self.compound_path.is_empty() {
+        if let Some(c) = self.compound_path.last_mut() {
+            c.start_tc = frames;
             return;
         }
         if let Some(t) = self.timeline_mut() {

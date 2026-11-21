@@ -258,6 +258,13 @@ pub fn print(method: &str, r: &Response, json: bool) {
             };
             println!("ok {method}: {trail} (rev {})", r.rev);
         }
+        "compound.set" => {
+            println!(
+                "ok {method}: {} (rev {})",
+                r.result["start_tc"].as_str().unwrap_or_default(),
+                r.rev
+            );
+        }
         "timeline.delete" => {
             let deleted: Vec<&str> = (r.result["deleted"].as_array().into_iter().flatten())
                 .filter_map(Value::as_str)

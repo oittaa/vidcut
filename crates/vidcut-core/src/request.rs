@@ -989,6 +989,20 @@ pub enum Request {
         #[serde(default)]
         to: Option<usize>,
     },
+    /// Change a compound clip's starting timecode. Pass `compound` (from the
+    /// Media tab), `clip` (on the timeline), or neither for the open compound
+    /// clip.
+    #[serde(rename = "compound.set")]
+    CompoundSet {
+        /// A copy on the timeline (by clip id, label, or `playhead`).
+        #[serde(default)]
+        clip: Option<ClipRef>,
+        /// A compound clip in the Media tab (by id or name).
+        #[serde(default)]
+        compound: Option<String>,
+        /// The new starting timecode (`HH:MM:SS:FF`, frames, or seconds).
+        start_tc: TimeSpec,
+    },
 
     /// Append after the last clip (Shift+F12).
     #[serde(rename = "edit.append")]
@@ -1257,6 +1271,9 @@ pub enum Request {
         /// The bin of its copy in the Media tab. Default: the top level.
         #[serde(default)]
         bin: Option<String>,
+        /// Starting timecode of the compound clip. Default: `00:00:00:00`.
+        #[serde(default)]
+        start_tc: Option<TimeSpec>,
     },
     /// Convert In and Out to Compound Clip: cuts the clips of every track at
     /// the In mark and the Out mark, and makes a compound clip of what is
@@ -1275,6 +1292,9 @@ pub enum Request {
         /// The bin of its copy in the Media tab. Default: the top level.
         #[serde(default)]
         bin: Option<String>,
+        /// Starting timecode of the compound clip. Default: `00:00:00:00`.
+        #[serde(default)]
+        start_tc: Option<TimeSpec>,
     },
     /// Create Compound Clip: makes a compound clip of what is between the
     /// marks, only in the Media tab. The timeline does not change. `range`
@@ -1289,6 +1309,9 @@ pub enum Request {
         /// The bin it goes in. Default: the top level.
         #[serde(default)]
         bin: Option<String>,
+        /// Starting timecode of the compound clip. Default: `00:00:00:00`.
+        #[serde(default)]
+        start_tc: Option<TimeSpec>,
     },
     /// Delete a compound clip from the Media tab. Copies on the timeline
     /// stay.

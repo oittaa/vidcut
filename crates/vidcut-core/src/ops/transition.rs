@@ -971,6 +971,7 @@ mod tests {
             tracks: vec![inner],
             made_from: Vec::new(),
             markers: Vec::new(),
+            start_tc: 0,
         });
         p
     }

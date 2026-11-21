@@ -2505,9 +2505,19 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Shrinking inner tracks keeps existing placed lengths and edge dissolves intact. Past the new end, playback gives black and silence.
     - Placing, pasting or importing a compound clip inside itself or an open parent is refused. Reopening an already open copy is refused too.
     - Switching, making or duplicating a timeline closes open compound clips first. Removing an open compound from the Media tab closes it too.
-    - A `.vidcut` file saves `compound_path`. Thus reopening resumes inside the open compound clip at `00:00:00:00`.
+    - A `.vidcut` file saves `compound_path`. Thus reopening resumes inside the open compound clip at its `start_tc`.
     - Exporting while a compound clip is open writes that compound clip with its name and no project data.
-    - Subtitles, a Timeline Color grade and custom compound start timecodes wait in [the gaps](todo/gaps.md).
+    - Subtitles and a Timeline Color grade inside a compound clip wait in [the gaps](todo/gaps.md).
+- **Starting Timecode** (pp. 1052–1054; measured in Resolve Studio 21.2):
+  - New Compound Clip, Convert In and Out to Compound Clip, and Create Compound Clip accept a Start Timecode.
+  - A new compound clip defaults to `00:00:00:00` (`00:00:00;00` on a drop-frame timeline), regardless of clip placement.
+  - Right-click a compound clip in the Media Pool and choose Starting Timecode to change it (`Set New Start Timecode`).
+  - Both `;` and `:` work in `start_tc` on drop-frame timelines. Changing the starting timecode keeps clip positions and trims.
+  - In OTIO export, `Stack.source_range` and `Stack.markers` stay zero-based and Resolve leaves compound start timecodes out.
+  - **vidcut:**
+    - `edit.compound`, `edit.compound_range` and `media.compound` accept `start_tc`, and New Compound Clip shows Start Timecode.
+    - `compound.set` and Starting Timecode in the Media tab update all copies sharing a `Sequence ID`.
+    - OTIO keeps `source_range` zero-based for interchange and stores non-zero `start_tc` in `metadata.vidcut.start_tc`.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.

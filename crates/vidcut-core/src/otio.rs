@@ -1237,6 +1237,10 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
     let frames = inner.max(source_end);
     let markers: Vec<crate::model::Marker> =
         serde_json::from_value(item["metadata"][VIDCUT]["markers"].clone()).unwrap_or_default();
+    let start_tc = item["metadata"][VIDCUT]["start_tc"]
+        .as_i64()
+        .filter(|&n| n >= 0)
+        .unwrap_or(0);
     let mut stack = item.clone();
     if let Some(o) = stack.as_object_mut() {
         for key in ["source_range", "effects", "markers"] {
@@ -1254,6 +1258,7 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         .and_then(Value::as_object_mut)
     {
         m.remove("markers");
+        m.remove("start_tc");
     }
     Compound {
         stack: stack.into(),
@@ -1261,6 +1266,7 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         tracks: Vec::new(),
         made_from: Vec::new(),
         markers,
+        start_tc,
     }
 }
 
@@ -1319,6 +1325,9 @@ fn compound_item(
     }
     if !k.markers.is_empty() {
         v["metadata"][VIDCUT]["markers"] = json!(k.markers);
+    }
+    if k.start_tc != 0 {
+        v["metadata"][VIDCUT]["start_tc"] = json!(k.start_tc);
     }
     v
 }
@@ -1387,6 +1396,79 @@ pub(crate) fn stack_holds_any(v: &Value, ids: &std::collections::HashSet<String>
         .into_iter()
         .flatten()
         .any(|ch| stack_holds_any(ch, ids))
+}
+
+fn is_compound_node(v: &Value) -> bool {
+    schema(v).starts_with("Stack.") && !is_multicam(v)
+}
+
+fn any_descendant_stack(v: &Value, pred: &impl Fn(&Value) -> bool) -> bool {
+    v["children"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|ch| (is_compound_node(ch) && pred(ch)) || any_descendant_stack(ch, pred))
+}
+
+fn walk_descendant_stacks(v: &mut Value, visit: &impl Fn(&mut Value)) {
+    let Some(children) = v.get_mut("children").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for ch in children {
+        if is_compound_node(ch) {
+            visit(ch);
+        }
+        walk_descendant_stacks(ch, visit);
+    }
+}
+
+fn set_stack_start_tc(v: &mut Value, start_tc: i64) {
+    if start_tc != 0 {
+        v["metadata"][VIDCUT]["start_tc"] = json!(start_tc);
+    } else if let Some(m) = v
+        .pointer_mut(&format!("/metadata/{VIDCUT}"))
+        .and_then(Value::as_object_mut)
+    {
+        m.remove("start_tc");
+    }
+}
+
+pub(crate) fn patch_stack_start_tc(k: &mut Compound, sid: &str, start_tc: i64) {
+    let needs = |v: &Value| {
+        v["metadata"][EDITOR]["Sequence ID"].as_str() == Some(sid)
+            && v["metadata"][VIDCUT]["start_tc"].as_i64().unwrap_or(0) != start_tc
+    };
+    if !any_descendant_stack(&k.stack, &needs) {
+        return;
+    }
+    walk_descendant_stacks(k.stack.make_mut(), &|v| {
+        if v["metadata"][EDITOR]["Sequence ID"].as_str() == Some(sid) {
+            set_stack_start_tc(v, start_tc);
+        }
+    });
+}
+
+pub(crate) fn relabel_stack_start_tc(k: &mut Compound, map: &impl Fn(i64) -> i64) {
+    let needs = |v: &Value| {
+        v["metadata"][VIDCUT]["start_tc"]
+            .as_i64()
+            .filter(|&n| n > 0)
+            .is_some_and(|n| map(n) != n)
+    };
+    if !any_descendant_stack(&k.stack, &needs) {
+        return;
+    }
+    walk_descendant_stacks(k.stack.make_mut(), &|v| {
+        if let Some(n) = v["metadata"][VIDCUT]["start_tc"]
+            .as_i64()
+            .filter(|&n| n > 0)
+        {
+            let next = map(n);
+            if next != n {
+                set_stack_start_tc(v, next);
+            }
+        }
+    });
 }
 
 fn stack_id(stack: &Value) -> String {

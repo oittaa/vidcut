@@ -774,6 +774,15 @@ impl Workspace {
                         ui.close();
                     }
                     ui.separator();
+                    if ui.button("Starting Timecode…").clicked() {
+                        let drop = k.counts_drop_frame();
+                        let tc = vidcut_core::time::format_timecode(0, k.fps, k.start_tc(), drop);
+                        self.compound_tc = Some(super::compound::CompoundStartTc::new(
+                            &k.id, &k.name, tc, k.fps, drop,
+                        ));
+                        ui.close();
+                    }
+                    ui.separator();
                     if ui.button("Delete").clicked() {
                         self.send("media.compound_remove", json!({ "compound": k.id }));
                         ui.close();

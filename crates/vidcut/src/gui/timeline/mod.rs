@@ -1359,6 +1359,7 @@ impl Workspace {
         self.marker_window(ui.ctx());
         self.subclip_windows_tick(ui.ctx());
         self.compound_window_tick(ui.ctx());
+        self.compound_tc_window_tick(ui.ctx());
         self.duration_window(ui.ctx());
         self.fade_window(ui.ctx());
         self.speed_window(ui.ctx());
@@ -2836,11 +2837,13 @@ impl Workspace {
 
     fn ruler_menu(&mut self, ui: &mut egui::Ui) {
         if ui.button("Convert In and Out to Compound Clip…").clicked() {
-            self.new_compound = Some(NewCompound::of_marks());
+            let (fps, drop) = self.new_compound_rate();
+            self.new_compound = Some(NewCompound::of_marks(fps, drop));
             ui.close();
         }
         if ui.button("Create Compound Clip…").clicked() {
-            self.new_compound = Some(NewCompound::in_pool());
+            let (fps, drop) = self.new_compound_rate();
+            self.new_compound = Some(NewCompound::in_pool(fps, drop));
             ui.close();
         }
     }
@@ -3055,7 +3058,8 @@ impl Workspace {
         }
         ui.separator();
         if ui.button("New Compound Clip…").clicked() {
-            self.new_compound = Some(NewCompound::new(clips.clone()));
+            let (fps, drop) = self.new_compound_rate();
+            self.new_compound = Some(NewCompound::new(clips.clone(), fps, drop));
             ui.close();
         }
         if vidcut_core::ops::picture::has_picture(c) {

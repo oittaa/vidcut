@@ -186,6 +186,7 @@ pub fn describe_at(
             id => format!("Open Compound Clip {id}"),
         },
         "compound.close" => "Close Compound Clip".to_string(),
+        "compound.set" => "Set Compound Clip Starting Timecode".to_string(),
         "edit.slide" => format!(
             "Slide {} {}{}",
             d.clips("clip"),

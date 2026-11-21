@@ -11,6 +11,9 @@ pub fn fader_silent(volume_db: f64) -> bool {
 }
 
 fn compound_media(k: &Compound, pool: &HashMap<&str, &Media>, v: &mut Vec<String>) {
+    if k.start_tc < 0 {
+        v.push("compound clip starts before 00:00:00:00".into());
+    }
     for c in k.tracks.iter().chain(&k.made_from).flat_map(|t| &t.clips) {
         if let Some(k) = &c.compound {
             compound_media(k, pool, v);
@@ -264,6 +267,9 @@ pub fn violations(p: &Project) -> Vec<String> {
         if !k.bin.is_empty() && !p.bins.contains(&k.bin) {
             v.push(format!("{} is in unknown bin {:?}", k.id, k.bin));
         }
+        if k.drop_frame && !k.fps.has_drop_frame() {
+            v.push(format!("compound {} counts drop-frame at {}", k.id, k.fps));
+        }
         for block in k.blocks() {
             compound_media(block, &pool, &mut v);
         }
@@ -410,6 +416,18 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
         if c.name.trim().is_empty() {
             v.push(format!("open compound {i} has no name"));
         }
+        if c.start_tc < 0 {
+            v.push(format!(
+                "open compound {} starts before 00:00:00:00",
+                c.name
+            ));
+        }
+        if c.drop_frame && !c.fps.has_drop_frame() {
+            v.push(format!(
+                "open compound {} counts drop-frame at {}",
+                c.name, c.fps
+            ));
+        }
         if c.id != c.target.key() {
             v.push(format!("open compound {} has id {}", c.name, c.id));
         }
@@ -521,5 +539,32 @@ mod tests {
         p.compounds[0].bin = "gone".into();
         let want = format!("{} is in unknown bin \"gone\"", p.compounds[0].id);
         assert_eq!(violations(&p), vec![want]);
+    }
+
+    #[test]
+    fn negative_compound_start_tc_is_reported() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 60);
+        f.ok(json!({"method": "media.compound", "params": {"range": "10f..40f"}}));
+        let mut p = f.editor.project().clone();
+        p.compounds[0].picture.as_mut().unwrap().start_tc = -1;
+        assert_eq!(
+            violations(&p),
+            vec!["compound clip starts before 00:00:00:00".to_string()]
+        );
+    }
+
+    #[test]
+    fn pooled_compound_drop_frame_at_non_drop_fps_is_reported() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 60);
+        f.ok(json!({"method": "media.compound", "params": {"range": "10f..40f"}}));
+        let mut p = f.editor.project().clone();
+        p.compounds[0].drop_frame = true;
+        assert!(
+            violations(&p)
+                .iter()
+                .any(|e| e.contains("counts drop-frame"))
+        );
     }
 }

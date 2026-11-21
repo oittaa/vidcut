@@ -1,6 +1,6 @@
 use crate::model::{
-    Clip, Compound, Cue, Effects, Generator, Marker, Marks, PooledCompound, Project, Track,
-    TrackClip, TrackCue, Transition,
+    Clip, Compound, Cue, Effects, Generator, Marker, Marks, PooledCompound, Project, Settings,
+    Track, TrackClip, TrackCue, Transition,
 };
 use crate::time::{Rational, rescale};
 
@@ -8,11 +8,22 @@ use crate::time::{Rational, rescale};
 pub struct Rates {
     pub from: Rational,
     pub to: Rational,
+    pub from_df: bool,
+    pub to_df: bool,
 }
 
 impl Rates {
     pub fn new(from: Rational, to: Rational) -> Option<Self> {
-        (from != to).then_some(Self { from, to })
+        Self::with_drop(from, false, to, false)
+    }
+
+    pub fn with_drop(from: Rational, from_df: bool, to: Rational, to_df: bool) -> Option<Self> {
+        (from != to).then_some(Self {
+            from,
+            to,
+            from_df: from_df && from.has_drop_frame(),
+            to_df: to_df && to.has_drop_frame(),
+        })
     }
 
     fn frame(self, f: i64) -> i64 {
@@ -76,8 +87,43 @@ fn transition(x: &mut Transition, r: Rates) {
     crate::otio::transitions::scale_curve(x.otio.make_mut(), |f| r.frame(f), r.ratio());
 }
 
+pub(crate) fn relabel_start(from: &Settings, to: &Settings, start_tc: i64) -> i64 {
+    if start_tc == 0 || (from.fps == to.fps && from.counts_drop_frame() == to.counts_drop_frame()) {
+        return start_tc;
+    }
+    to.relabel(start_tc, from)
+}
+
+pub(crate) fn relabel_compound(k: &mut Compound, from: &Settings, to: &Settings) {
+    if from.fps == to.fps && from.counts_drop_frame() == to.counts_drop_frame() {
+        return;
+    }
+    k.start_tc = relabel_start(from, to, k.start_tc);
+    crate::otio::relabel_stack_start_tc(k, &|n| relabel_start(from, to, n));
+    for t in k.tracks.iter_mut().chain(&mut k.made_from) {
+        for c in &mut t.clips {
+            if let Some(inner) = c.compound.as_mut() {
+                relabel_compound(inner, from, to);
+            }
+        }
+    }
+}
+
 pub(crate) fn compound(p: &Project, k: &mut Compound, r: Rates) {
     k.frames = r.frame(k.frames);
+    let base = p.flat_settings();
+    let from = Settings {
+        fps: r.from,
+        drop_frame: r.from_df && r.from.has_drop_frame(),
+        ..base.clone()
+    };
+    let to = Settings {
+        fps: r.to,
+        drop_frame: r.to_df && r.to.has_drop_frame(),
+        ..base
+    };
+    k.start_tc = relabel_start(&from, &to, k.start_tc);
+    crate::otio::relabel_stack_start_tc(k, &|n| relabel_start(&from, &to, n));
     for m in &mut k.markers {
         marker(m, r);
     }

@@ -1357,3 +1357,40 @@ fn compound_markers_roundtrip_through_otio_without_becoming_outer_markers() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn compound_start_tc_round_trips_in_otio_with_zero_based_source_range() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    let a = f.append("m1", 0, 50);
+    let r = f.ok(req(
+        "edit.compound",
+        json!({"clips": [a], "start_tc": "01:02:03:04"}),
+    ));
+    let id = r.result["clips"][0].as_str().unwrap().to_string();
+    let doc = written(&f);
+    let stack = &doc["tracks"]["children"][0]["children"][0];
+    assert_eq!(stack["source_range"]["start_time"]["value"], json!(0.0));
+    assert_eq!(stack["metadata"]["vidcut"]["start_tc"], json!(93079));
+
+    let mut f2 = Fixture::new(&[]);
+    f2.env = FakeEnv::default().with(
+        "/media/1.mp4",
+        media_info(4.0, Rational::new(25, 1).unwrap(), true),
+    );
+    f2.ok(req("timeline.import", json!({"otio": doc})));
+    let imported_id = f2.editor.project().tracks[0].clips[0].id.clone();
+    assert_eq!(
+        f2.editor
+            .project()
+            .clip(&imported_id)
+            .unwrap()
+            .compound
+            .as_ref()
+            .unwrap()
+            .start_tc,
+        93079
+    );
+    f2.ok(req("compound.open", json!({"clip": imported_id})));
+    assert_eq!(f2.editor.project().timecode(0), "01:02:03:04");
+    assert!(!id.is_empty());
+}
