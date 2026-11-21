@@ -6541,8 +6541,7 @@ pub struct Compound {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub removed: bool,
     /// OTIO `Sequence ID` for interchange with other editors.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sequence_id: Option<String>,
+    pub sequence_id: String,
     /// The frame rate that its tracks count at: the rate of the timeline
     /// where it was made.
     pub fps: Rational,
@@ -6578,8 +6577,7 @@ struct CompoundOut<'a> {
     bin: &'a str,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     removed: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sequence_id: Option<&'a str>,
+    sequence_id: &'a str,
     fps: Rational,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     drop_frame: bool,
@@ -6603,7 +6601,7 @@ impl<'a> CompoundOut<'a> {
             name: &k.name,
             bin: &k.bin,
             removed: k.removed,
-            sequence_id: k.sequence_id.as_deref(),
+            sequence_id: &k.sequence_id,
             fps: k.fps,
             drop_frame: k.drop_frame,
             start_tc: k.start_tc,

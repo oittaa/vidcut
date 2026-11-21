@@ -1290,14 +1290,14 @@ fn imported_otio_compound_opens_edits_closes_and_keeps_sequence_id() {
         let p = f.editor.project();
         let k = p.clip_compound(p.clip(&id).unwrap()).unwrap();
         assert!(k.removed && k.kept_otio.is_some());
-        k.sequence_id.as_deref().unwrap().to_string()
+        k.sequence_id.clone()
     };
     f.ok(req("compound.open", json!({"clip": id})));
     f.append("m1", 50, 80);
     f.ok(req("compound.close", json!({})));
     let p = f.editor.project();
     let k = p.clip_compound(p.clip(&id).unwrap()).unwrap();
-    assert_eq!(k.sequence_id.as_deref(), Some(seq_id.as_str()));
+    assert_eq!(k.sequence_id, seq_id);
     assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     let doc = written(&f);
     let inner = doc["tracks"]["children"][0]["children"][0]["children"][0]["children"]

@@ -2714,7 +2714,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             name: String::new(),
             bin: String::new(),
             removed: true,
-            sequence_id: None,
+            sequence_id: hid.clone(),
             fps,
             drop_frame,
             start_tc,
