@@ -87,6 +87,7 @@ enum NodeAct {
     Reset,
     Label,
     Toggle,
+    Lock,
     Extract,
     Delete,
     AddInput,
@@ -186,8 +187,12 @@ fn switched_to(g: &Grade, how: SwitchingClips, kept: Option<u32>, was: Option<u3
 }
 
 fn badges(d: &GradeNode) -> Vec<Badge> {
+    let lock = (d.locked).then_some(Badge {
+        icon: icon::LOCK_SIMPLE,
+        tip: "Locked",
+    });
     let GradeTool::Corrector(c) = &d.tool else {
-        return Vec::new();
+        return lock.into_iter().collect();
     };
     let usual = Corrector::default();
     let changed: Vec<String> = std::iter::once(c.as_ref())
@@ -215,6 +220,7 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
     .into_iter()
     .filter(|(on, ..)| *on)
     .map(|(_, icon, tip)| Badge { icon, tip })
+    .chain(lock)
     .collect()
 }
 
@@ -637,6 +643,8 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, delete_key: &str, act: &mut Option<Node
                 NodeAct::Reset,
             );
             pick(ui, true, egui::Button::new("Node Label"), NodeAct::Label);
+            let lock = egui::Button::selectable(d.locked, "Lock Node");
+            pick(ui, true, lock, NodeAct::Lock);
             let off = egui::Button::selectable(!d.on, "Disable Node");
             pick(ui, true, off, NodeAct::Toggle);
             let free = d.inputs.iter().all(Option::is_none);
@@ -652,6 +660,8 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, delete_key: &str, act: &mut Option<Node
         GradeTool::ParallelMixer => ("Morph Into Layer Mixer Node", GradeMixer::LayerMixer),
         GradeTool::LayerMixer { .. } => ("Morph Into Parallel Node", GradeMixer::ParallelMixer),
     };
+    let lock = egui::Button::selectable(d.locked, "Lock Node");
+    pick(ui, true, lock, NodeAct::Lock);
     pick(ui, true, delete(), NodeAct::Delete);
     pick(
         ui,
@@ -1338,7 +1348,11 @@ impl Workspace {
             Palette::Primaries => primaries_body(ui, (&g, mode), &mut changes),
         };
         let (field, target) = named(&of);
-        if reset {
+        let locked = grade.node(n).is_some_and(|d| d.locked);
+        if locked {
+            changes.clear();
+        }
+        if reset && !locked {
             self.effects_page.graded = None;
             let node = ("node".to_string(), json!(n));
             let at = ("at".to_string(), json!(self.snap.timeline.position));
@@ -1400,7 +1414,7 @@ impl Workspace {
             }
             None => {}
         }
-        if let Some(point) = point {
+        if let Some(point) = point.filter(|_| !locked) {
             self.printer_point(point);
         }
         palette == Palette::Primaries
@@ -1752,6 +1766,7 @@ impl Workspace {
                 ("grade.clear", params(of, "clips", more))
             }
             NodeAct::Toggle => set(json!({ "on": !d.on })),
+            NodeAct::Lock => set(json!({ "locked": !d.locked })),
             NodeAct::Morph(to) => set(json!({ "mixer": to })),
             NodeAct::Mode(mode) => set(json!({ "mode": mode })),
             NodeAct::AddInput => ("grade.connect", params(of, "clip", json!({ "node": n }))),
