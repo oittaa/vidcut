@@ -2913,11 +2913,13 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: the pivot and the Log ranges alone give no badge.
   - Measured: one keyframe, or two keyframes with equal values, give no keyframe badge. A change at a keyframe gives it.
   - Measured: the keyframe badge stays when the value goes back, so that the keyframes are equal again.
+  - Measured: Key Output Gain 0.5 gives a key badge. At 1.000 the badge goes.
   - vidcut: `grade.set` with `label`. Node Label in the menu of a corrector and a double-click on the label edit the label in place. Enter keeps the text, and Esc drops it.
   - vidcut: in List View, Node Label edits the label in the row of the node.
   - vidcut: a long label ends in "…". A pointer on it shows the full text.
   - vidcut: the Primaries, Log and Keyframes badges are at the right of the node. The first two count the values of the node and of each keyframe.
   - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node. It stays until the last keyframe goes (`animated` of the node).
+  - vidcut: the Key badge shows when the Key Output is not at its usual values.
 - **Add nodes** (pp. 3394–3395, 3410–3413):
   - The menu of a node has an Add Node submenu. The menu of the empty Node Editor has Add Node > Corrector. That corrector has no connection.
   - Alt+S adds a serial node after the current node. Alt+K appends a serial node at the end of the tree.
@@ -3030,14 +3032,30 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: x and the empty inputs work as measured.
   - Measured: in Lighter Color and Darker Color, a tie of R + G + B goes to the later input.
   - vidcut: the same. The composite of the timeline uses the same formulas.
-- **Key Output Gain** (p. 3415), measured in Resolve Studio 21.2:
-  - It sets the strength of a node in a Layer Mixer or a Parallel Mixer.
+- **Key Output** (pp. 3415, 3435–3436, 3438):
+  - The Key palette of a corrector has Key Input, Key Output and Qualifier controls (p. 3436).
+  - Key Output has Invert, Gain and Offset. Gain sets the strength of the node in the grade. Gain 0 gives no change, and 1 gives the full change.
+  - Offset sets the contrast of the key out. It has no effect on a key that is all white (p. 3436).
+  - Gain fades a serial node, or a node in a Parallel Mixer or a Layer Mixer (p. 3438).
+  - Measured in Resolve Studio 21.2: the palette has a preview of the node key at its left. It is white at the usual values.
+  - Measured: Gain goes from 0 to 2, and Offset from −1 to 1. A typed value outside the range goes to the nearest end.
+  - Measured: a node with no window and no qualifier has the key E = 1. The key out is kg E + ko, clamped to 0..1.
+  - Measured: Invert acts after Gain and Offset: 1 − (kg E + ko). Gain 0.5 and Offset 0.4 give 0.9, and with Invert 0.1.
+  - Measured: a serial corrector with the key k gives x + k (n − x).
   - Layer Mixer with Key Output Gain k: input 0 gives x + k (n₀ − x). Each next input gives mix + k (F(mix, nᵢ) − mix). The error is 3.4e-7.
   - Parallel Mixer: out = x + Σ kᵢ (nᵢ − x).
   - A Layer Mixer that is off mixes in Normal, with the Key Output Gain of each input. Subtract with a gain of 0.5 on the last input, off, equals Normal with that gain, on.
-  - vidcut: keys, Key Output Gain and the Key Mixer come later ([todo](todo/color-page.md)).
+  - Measured: a corrector that is off adds nothing to a Layer Mixer. The mix of the inputs before it stays.
+  - Measured: a Key Output change gets a keyframe on the Defocus track of the node, not on the Color Corrector track.
+  - vidcut: Primaries and Key at the top of the palette select the palette. The Key palette has the preview, Invert, Gain and Offset of Key Output.
+  - vidcut: the Key palette keeps the height of the Primaries palette.
+  - vidcut: a typed value outside the range goes to the nearest end. Reset in the Key palette sets the usual values.
+  - vidcut: `grade.set` with `key_gain`, `key_offset` and `key_invert`. It refuses a value outside the range.
+  - vidcut: the key out acts in serial nodes and in the mixers as measured.
+  - vidcut: the Key Output has no keyframes yet. Keys, Key Input, the Qualifier controls and the Key Mixer come later ([todo](todo/color-page.md)).
 
-Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer` and `mode` changes a node. `grade.get` gives the nodes and the `output`.
+Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
+`grade.get` gives the nodes and the `output`.
 
 ### 8.22 Color page keyframes (pp. 3453–3465)
 

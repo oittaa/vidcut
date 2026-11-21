@@ -1,4 +1,4 @@
-use crate::model::{BlendMode, Corrector, Grade, GradeTool};
+use crate::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool};
 use crate::tone_tables::{HIGHLIGHTS, SHADOWS, TONE_AMOUNTS};
 
 pub const OFFSET_STEP: f64 = 187.5 / 1023.0;
@@ -486,6 +486,7 @@ pub enum Pass {
     Correct {
         on: usize,
         grading: Box<Grading>,
+        key: f64,
     },
     Parallel {
         on: usize,
@@ -496,6 +497,7 @@ pub enum Pass {
         on: usize,
         top: usize,
         mode: BlendMode,
+        key: f64,
     },
 }
 
@@ -617,6 +619,100 @@ impl Grade {
     }
 }
 
+struct Uses {
+    all: Vec<usize>,
+    over: Vec<usize>,
+    whole: Vec<usize>,
+}
+
+impl Uses {
+    fn kept(&self, k: usize) -> usize {
+        self.all[k] - self.over[k]
+    }
+
+    fn twice(&self, node: &GradeNode, c: &Corrector, k: usize) -> bool {
+        node.on && !c.is_usual() && self.over[k] > 0 && self.kept(k) > 0 && node.key.of(1.0) != 1.0
+    }
+}
+
+fn corrected(
+    (node, c, k, x): (&GradeNode, &Corrector, usize, usize),
+    uses: &mut Uses,
+    r: &mut Registers,
+    passes: &mut Vec<Pass>,
+) {
+    let key = node.key.of(1.0);
+    let grading = || Box::new(Grading::of(c));
+    if !node.on {
+        r.alias(k, x, uses.kept(k));
+    } else if c.is_usual() || (key == 0.0 && uses.over[k] == 0) {
+        r.alias(k, x, uses.all[k]);
+    } else if uses.over[k] == 0 {
+        let on = r.take(x, passes);
+        passes.push(Pass::Correct {
+            on,
+            grading: grading(),
+            key,
+        });
+        r.hold(k, on, uses.all[k]);
+    } else if !uses.twice(node, c, k) {
+        let on = r.take(x, passes);
+        let key = 1.0;
+        passes.push(Pass::Correct {
+            on,
+            grading: grading(),
+            key,
+        });
+        r.hold(k, on, uses.all[k]);
+    } else {
+        let mix = r.take(x, passes);
+        let on = r.take(x, passes);
+        passes.push(Pass::Correct {
+            on,
+            grading: grading(),
+            key: 1.0,
+        });
+        if key > 0.0 {
+            let mode = BlendMode::Normal;
+            passes.push(Pass::Layer {
+                on: mix,
+                top: on,
+                mode,
+                key,
+            });
+        }
+        let whole = uses.all.len() + k;
+        r.hold(k, mix, uses.kept(k));
+        r.hold(whole, on, uses.over[k]);
+        uses.whole[k] = whole;
+    }
+}
+
+fn layered(
+    (g, ins, mode): (&Grade, &[usize], BlendMode),
+    uses: &Uses,
+    r: &mut Registers,
+    passes: &mut Vec<Pass>,
+) -> usize {
+    let on = r.take(ins[0], passes);
+    for &v in &ins[1..] {
+        let (key, off) = match g.node(v as u32) {
+            Some(d) if !d.tool.is_mixer() => (d.key.of(1.0), !d.on),
+            _ => (1.0, false),
+        };
+        if off {
+            continue;
+        }
+        let slot = uses.whole[v];
+        if key > 0.0 {
+            let top = r.holder[slot];
+            passes.push(Pass::Layer { on, top, mode, key });
+        }
+        r.done(slot);
+    }
+    on
+}
+
 impl Graded {
     pub fn of(g: &Grade) -> Option<Self> {
         if !complete(g) {
@@ -625,22 +721,43 @@ impl Graded {
         let order = order(g)?;
         let out = g.output? as usize;
         let through = passed(g)?;
-        let mut bases = vec![None; g.nodes.len() + 1];
-        let mut uses = vec![0usize; g.nodes.len() + 1];
+        let count = g.nodes.len() + 1;
+        let mut bases = vec![None; count];
+        let mut uses = Uses {
+            all: vec![0; count],
+            over: vec![0; count],
+            whole: (0..count).collect(),
+        };
         for &k in &order {
-            if matches!(g.node(k)?.tool, GradeTool::ParallelMixer) {
-                let x = base(&through, g, k)?;
-                bases[k as usize] = Some(x as usize);
-                uses[x as usize] += 1;
+            let node = g.node(k)?;
+            match &node.tool {
+                GradeTool::ParallelMixer => {
+                    let x = base(&through, g, k)?;
+                    bases[k as usize] = Some(x as usize);
+                    uses.all[x as usize] += 1;
+                }
+                GradeTool::LayerMixer { .. } => {
+                    for v in node.inputs.iter().flatten().skip(1) {
+                        uses.over[*v as usize] += 1;
+                    }
+                }
+                GradeTool::Corrector(_) => {}
             }
         }
         for v in g.nodes.iter().flat_map(|n| n.inputs.iter().flatten()) {
-            uses[*v as usize] += 1;
+            uses.all[*v as usize] += 1;
         }
-        uses[out] += 1;
+        uses.all[out] += 1;
+        for (node, k) in g.nodes.iter().zip(1..) {
+            if let (GradeTool::Corrector(c), Some(Some(x))) = (&node.tool, node.inputs.first())
+                && uses.twice(node, c, k)
+            {
+                uses.all[*x as usize] += 1;
+            }
+        }
         let mut r = Registers {
-            holder: vec![0; g.nodes.len() + 1],
-            left: vec![uses[0]],
+            holder: vec![0; 2 * count],
+            left: vec![uses.all[0]],
             free: Vec::new(),
         };
         let mut passes = Vec::new();
@@ -649,13 +766,9 @@ impl Graded {
             let ins: Vec<usize> = node.inputs.iter().flatten().map(|v| *v as usize).collect();
             let k = k as usize;
             match &node.tool {
-                GradeTool::Corrector(c) if node.on && !c.is_usual() => {
-                    let on = r.take(ins[0], &mut passes);
-                    let grading = Box::new(Grading::of(c));
-                    passes.push(Pass::Correct { on, grading });
-                    r.hold(k, on, uses[k]);
+                GradeTool::Corrector(c) => {
+                    corrected((node, c, k, ins[0]), &mut uses, &mut r, &mut passes);
                 }
-                GradeTool::Corrector(_) => r.alias(k, ins[0], uses[k]),
                 GradeTool::ParallelMixer => {
                     let x = bases[k]?;
                     let on = r.take(ins[0], &mut passes);
@@ -667,17 +780,12 @@ impl Graded {
                         r.done(v);
                     }
                     r.done(x);
-                    r.hold(k, on, uses[k]);
+                    r.hold(k, on, uses.all[k]);
                 }
                 GradeTool::LayerMixer { mode } => {
                     let mode = if node.on { *mode } else { BlendMode::Normal };
-                    let on = r.take(ins[0], &mut passes);
-                    for &v in &ins[1..] {
-                        let top = r.holder[v];
-                        passes.push(Pass::Layer { on, top, mode });
-                        r.done(v);
-                    }
-                    r.hold(k, on, uses[k]);
+                    let on = layered((g, &ins, mode), &uses, &mut r, &mut passes);
+                    r.hold(k, on, uses.all[k]);
                 }
             }
         }

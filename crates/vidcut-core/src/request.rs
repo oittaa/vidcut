@@ -4445,6 +4445,15 @@ pub struct GradeNodeChange {
     /// The label above it in the node editor. An empty text removes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// The gain of the key that a corrector gives out, from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_gain: Option<f64>,
+    /// The offset of the key that a corrector gives out, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_offset: Option<f64>,
+    /// The key that a corrector gives out is turned over: 1 minus it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_invert: Option<bool>,
 }
 
 /// A kind of mixer of a grade.
@@ -5001,6 +5010,9 @@ pub struct CopiedNode {
     /// As `animated` of a grade node. Left out when not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub animated: bool,
+    /// As `key` of a grade node. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "crate::model::KeyOutput::is_usual")]
+    pub key: crate::model::KeyOutput,
 }
 
 /// A copied keyframe: what `keyframes.copy` returns and `keyframes.paste`

@@ -157,6 +157,11 @@ pub fn checked(g: &Grade) -> Result<Option<Grade>> {
             }
             _ => {}
         }
+        if n.tool.is_mixer() && !n.key.is_usual() {
+            return Err(Error::invalid(format!("mixer {k} gives out no key")));
+        }
+        within(n.key.gain, (0.0, 2.0), "key_gain")?;
+        within(n.key.offset, (-1.0, 1.0), "key_offset")?;
         keys_checked(n, k)?;
     }
     if crate::grade::order(g).is_none() {
@@ -341,6 +346,15 @@ fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
     if let Some(label) = &change.label {
         d.label = label.clone();
     }
+    if let Some(v) = change.key_gain {
+        d.key.gain = v;
+    }
+    if let Some(v) = change.key_offset {
+        d.key.offset = v;
+    }
+    if let Some(v) = change.key_invert {
+        d.key.invert = v;
+    }
     if let Some(to) = change.mixer {
         d.tool = match (&d.tool, to) {
             (GradeTool::Corrector(_), _) => {
@@ -521,6 +535,7 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd) -> Result<u32> {
                 label: String::new(),
                 keys: Vec::new(),
                 animated: false,
+                key: Default::default(),
             });
         }
     }
@@ -668,6 +683,7 @@ pub fn copy(p: &Project, of: &GradeOf, n: u32) -> Result<CopiedNode> {
         label: d.label.clone(),
         on: d.on,
         animated: d.is_animated(),
+        key: d.key,
     })
 }
 
@@ -682,6 +698,7 @@ pub fn paste(p: &mut Project, of: &[GradeOf], n: u32, copied: &CopiedNode) -> Re
             d.label = copied.label.clone();
             d.on = copied.on;
             d.animated = copied.animated;
+            d.key = copied.key;
             Ok(())
         })?;
     }
@@ -812,6 +829,7 @@ pub fn swap(p: &mut Project, of: &GradeOf, n: u32, with: u32) -> Result<()> {
             d.label = from.label;
             d.on = from.on;
             d.animated = from.animated;
+            d.key = from.key;
         }
         Ok(())
     })

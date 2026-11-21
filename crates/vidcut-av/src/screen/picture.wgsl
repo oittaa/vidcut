@@ -1845,7 +1845,7 @@ fn fs_grade_mix(in: Out) -> @location(0) vec4<f32> {
         return under;
     }
     let m = mixed(u32(grade_mixing.how.y + 0.5), top.rgb / a, under.rgb / a);
-    return vec4<f32>(m * a, a);
+    return mix(under, vec4<f32>(m * a, a), grade_mixing.how.z);
 }
 
 struct Mosaic {

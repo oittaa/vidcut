@@ -3865,6 +3865,10 @@ pub struct GradeNode {
     /// not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub animated: bool,
+    /// How the key of a corrector goes out. A mixer has none. Left out at
+    /// its usual value.
+    #[serde(default, skip_serializing_if = "KeyOutput::is_usual")]
+    pub key: KeyOutput,
 }
 
 impl GradeNode {
@@ -3877,6 +3881,7 @@ impl GradeNode {
             label: String::new(),
             keys: Vec::new(),
             animated: false,
+            key: KeyOutput::default(),
         }
     }
 
@@ -3888,6 +3893,44 @@ impl GradeNode {
             }
             _ => false,
         }
+    }
+}
+
+/// The key that a corrector gives out. A corrector with no window and no
+/// qualifier has the key 1 everywhere. The key out is `gain` times the
+/// key plus `offset`, or 1 minus that with `invert`, kept from 0 to 1. The
+/// corrector changes its input by that share of its change. A layer mixer
+/// puts the whole change of the corrector over the inputs before it, by
+/// that share.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct KeyOutput {
+    /// From 0 to 2. Usual: 1.
+    pub gain: f64,
+    /// From -1 to 1. Usual: 0.
+    pub offset: f64,
+    /// Usual: off.
+    pub invert: bool,
+}
+
+impl Default for KeyOutput {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            offset: 0.0,
+            invert: false,
+        }
+    }
+}
+
+impl KeyOutput {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn of(&self, key: f64) -> f64 {
+        let v = self.gain * key + self.offset;
+        let v = if self.invert { 1.0 - v } else { v };
+        v.clamp(0.0, 1.0)
     }
 }
 

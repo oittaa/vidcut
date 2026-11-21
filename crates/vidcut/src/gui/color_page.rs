@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use egui::{Color32, CursorIcon, DragValue, Label, Rect, Response, Sense, Stroke, Ui, Vec2};
 use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
-use vidcut_core::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, Picture};
+use vidcut_core::model::{BlendMode, Corrector, Grade, GradeNode, GradeTool, KeyOutput, Picture};
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed};
 use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::preferences::SwitchingClips;
@@ -198,6 +198,7 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
         ),
         (changed.iter().any(log), icon::CIRCLE_HALF, "Log"),
         (d.is_animated(), icon::DIAMOND, "Keyframes"),
+        (!d.key.is_usual(), icon::SQUARE_HALF, "Key"),
     ]
     .into_iter()
     .filter(|(on, ..)| *on)
@@ -228,6 +229,150 @@ enum Mode {
     Wheels,
     Bars,
     Log,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Palette {
+    Primaries,
+    Key,
+}
+
+const KEY_SWATCH: Vec2 = Vec2::new(96.0, 54.0);
+
+fn key_output(ui: &mut Ui, changes: &mut Vec<Change>, key: KeyOutput) {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(KEY_SWATCH, Sense::hover());
+        let level = (key.of(1.0) * 255.0).round() as u8;
+        ui.painter()
+            .rect_filled(rect, 0.0, Color32::from_gray(level));
+        ui.add_space(12.0);
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.strong("Key Output");
+                let mut invert = key.invert;
+                if ui.toggle_value(&mut invert, "Invert").changed() {
+                    changes.push(Change {
+                        field: "key_invert",
+                        value: json!(invert),
+                    });
+                }
+            });
+            ui.horizontal(|ui| {
+                slider(
+                    ui,
+                    changes,
+                    ("Gain", "key_gain"),
+                    key.gain,
+                    0.005,
+                    (0.0, 2.0),
+                );
+                let range = (-1.0, 1.0);
+                slider(
+                    ui,
+                    changes,
+                    ("Offset", "key_offset"),
+                    key.offset,
+                    0.005,
+                    range,
+                );
+            });
+        });
+    });
+}
+
+fn primaries_body(
+    ui: &mut Ui,
+    (g, mode): (&Corrector, Mode),
+    changes: &mut Vec<Change>,
+) -> Option<(PrinterColor, f64)> {
+    let wheels = match mode {
+        Mode::Log => logs(g),
+        Mode::Wheels | Mode::Bars => primaries(g),
+    };
+    let mut point = None;
+    ui.horizontal(|ui| {
+        for w in &wheels {
+            let made = match mode {
+                Mode::Bars => {
+                    let (made, pressed) = bars(ui, w);
+                    point = point.or(pressed);
+                    made
+                }
+                Mode::Wheels | Mode::Log => wheel(ui, w),
+            };
+            if let Some(values) = made {
+                changes.push(Change {
+                    field: w.field,
+                    value: json!(values),
+                });
+            }
+            ui.add_space(12.0);
+        }
+    });
+    let c = changes;
+    ui.horizontal(|ui| {
+        let percent = (0.0, 100.0);
+        slider(
+            ui,
+            c,
+            ("Color Boost", "color_boost"),
+            g.color_boost,
+            0.5,
+            (-100.0, 100.0),
+        );
+        slider(
+            ui,
+            c,
+            ("Shadows", "shadows"),
+            g.shadows,
+            0.5,
+            (-100.0, 100.0),
+        );
+        slider(
+            ui,
+            c,
+            ("Highlights", "highlights"),
+            g.highlights,
+            0.5,
+            (-100.0, 100.0),
+        );
+        slider(
+            ui,
+            c,
+            ("Saturation", "saturation"),
+            g.saturation,
+            0.5,
+            percent,
+        );
+        slider(ui, c, ("Hue", "hue"), g.hue, 0.5, percent);
+        slider(ui, c, ("Lum Mix", "lum_mix"), g.lum_mix, 0.5, percent);
+    });
+    point
+}
+
+fn keyed(key: KeyOutput, c: &Change) -> KeyOutput {
+    let mut key = key;
+    match (c.field, &c.value) {
+        ("key_gain", Value::Number(v)) => key.gain = v.as_f64().unwrap_or(key.gain),
+        ("key_offset", Value::Number(v)) => key.offset = v.as_f64().unwrap_or(key.offset),
+        ("key_invert", Value::Bool(v)) => key.invert = *v,
+        _ => {}
+    }
+    key
+}
+
+fn key_changes(from: KeyOutput, to: KeyOutput) -> Map<String, Value> {
+    let mut out = Map::new();
+    if from.gain != to.gain {
+        out.insert("key_gain".into(), json!(to.gain));
+    }
+    if from.offset != to.offset {
+        out.insert("key_offset".into(), json!(to.offset));
+    }
+    if from.invert != to.invert {
+        out.insert("key_invert".into(), json!(to.invert));
+    }
+    out
 }
 
 const BAR: Vec2 = Vec2::new(16.0, 110.0);
@@ -556,7 +701,11 @@ fn grade_switch(ui: &mut Ui, level: GradeLevel) -> Option<GradeLevel> {
 }
 
 fn usual(field: &str) -> f64 {
-    serde_json::to_value(Corrector::default())
+    let (values, field) = match field.strip_prefix("key_") {
+        Some(f) => (serde_json::to_value(KeyOutput::default()), f),
+        None => (serde_json::to_value(Corrector::default()), field),
+    };
+    values
         .ok()
         .and_then(|v| v.get(field).and_then(Value::as_f64))
         .unwrap_or_default()
@@ -978,6 +1127,8 @@ impl Workspace {
         let id = ui.scope_id().with("palette-height");
         let room = ui.available_rect_before_wrap();
         let tall = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or(room.height());
+        let full_id = ui.scope_id().with("primaries-height");
+        let full = ui.data(|d| d.get_temp::<f32>(full_id));
         let mut side = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt("color-keys-side")
@@ -999,7 +1150,19 @@ impl Workspace {
             .max_height(inner)
             .min_scrolled_height(inner)
             .auto_shrink([false, true])
-            .show(&mut left, |ui| self.palette(ui));
+            .show(&mut left, |ui| {
+                let primaries = self.palette(ui);
+                let drawn = ui.min_rect();
+                match (primaries, full) {
+                    (true, _) => ui.data_mut(|d| {
+                        d.insert_temp(full_id, drawn.height());
+                    }),
+                    (false, Some(h)) => {
+                        ui.expand_to_include_rect(Rect::from_min_size(drawn.min, Vec2::new(0.0, h)))
+                    }
+                    (false, None) => {}
+                }
+            });
         let palette = left.min_rect();
         if (palette.height() - tall).abs() > 0.5 {
             ui.data_mut(|d| d.insert_temp(id, palette.height()));
@@ -1024,7 +1187,7 @@ impl Workspace {
         super::placing::topmost_by(p, self.snap.timeline.position, takes_effects)
     }
 
-    fn palette(&mut self, ui: &mut Ui) {
+    fn palette(&mut self, ui: &mut Ui) -> bool {
         let level = self.effects_page.grading;
         let mut picked = None;
         let Some((of, name, stored)) = self.grade_shown() else {
@@ -1039,7 +1202,7 @@ impl Workspace {
             if let Some(l) = picked {
                 self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
             }
-            return;
+            return false;
         };
         self.settle_grade(&of, &stored);
         let node = self.current_grade_node(&stored);
@@ -1070,16 +1233,29 @@ impl Workspace {
             if let Some(l) = picked {
                 self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
             }
-            return;
+            return false;
         };
         let key = egui::Id::unique("color-wheels-mode");
         let mut mode = ui.data(|d| d.get_temp::<Mode>(key)).unwrap_or(Mode::Wheels);
+        let shown = egui::Id::unique("color-palette");
+        let mut palette = (ui.data(|d| d.get_temp::<Palette>(shown))).unwrap_or(Palette::Primaries);
         let mut changes: Vec<Change> = Vec::new();
         let mut reset = false;
         ui.horizontal(|ui| {
             ui.strong(name);
             ui.label(format!("Node {n:02}"));
             ui.separator();
+            for (p, text) in [(Palette::Primaries, "Primaries"), (Palette::Key, "Key")] {
+                if ui.selectable_label(palette == p, text).clicked() {
+                    palette = p;
+                }
+            }
+            ui.separator();
+            if palette == Palette::Key {
+                reset = ui.button("Reset").clicked();
+                picked = grade_switch(ui, level);
+                return;
+            }
             for (m, text) in [
                 (Mode::Wheels, "Wheels"),
                 (Mode::Bars, "Bars"),
@@ -1134,93 +1310,59 @@ impl Workspace {
             }
             picked = grade_switch(ui, level);
         });
-        ui.data_mut(|d| d.insert_temp(key, mode));
+        ui.data_mut(|d| {
+            d.insert_temp(key, mode);
+            d.insert_temp(shown, palette);
+        });
         if let Some(l) = picked {
             self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
         }
-        let wheels = match mode {
-            Mode::Log => logs(&g),
-            Mode::Wheels | Mode::Bars => primaries(&g),
-        };
-        let mut point = None;
-        ui.horizontal(|ui| {
-            for w in &wheels {
-                let made = match mode {
-                    Mode::Bars => {
-                        let (made, pressed) = bars(ui, w);
-                        point = point.or(pressed);
-                        made
-                    }
-                    Mode::Wheels | Mode::Log => wheel(ui, w),
-                };
-                if let Some(values) = made {
-                    changes.push(Change {
-                        field: w.field,
-                        value: json!(values),
-                    });
-                }
-                ui.add_space(12.0);
+        let key_now = grade.node(n).map(|d| d.key).unwrap_or_default();
+        let point = match palette {
+            Palette::Key => {
+                key_output(ui, &mut changes, key_now);
+                None
             }
-        });
-        let c = &mut changes;
-        ui.horizontal(|ui| {
-            let percent = (0.0, 100.0);
-            slider(
-                ui,
-                c,
-                ("Color Boost", "color_boost"),
-                g.color_boost,
-                0.5,
-                (-100.0, 100.0),
-            );
-            slider(
-                ui,
-                c,
-                ("Shadows", "shadows"),
-                g.shadows,
-                0.5,
-                (-100.0, 100.0),
-            );
-            slider(
-                ui,
-                c,
-                ("Highlights", "highlights"),
-                g.highlights,
-                0.5,
-                (-100.0, 100.0),
-            );
-            slider(
-                ui,
-                c,
-                ("Saturation", "saturation"),
-                g.saturation,
-                0.5,
-                percent,
-            );
-            slider(ui, c, ("Hue", "hue"), g.hue, 0.5, percent);
-            slider(ui, c, ("Lum Mix", "lum_mix"), g.lum_mix, 0.5, percent);
-        });
+            Palette::Primaries => primaries_body(ui, (&g, mode), &mut changes),
+        };
         let (field, target) = named(&of);
         if reset {
             self.effects_page.graded = None;
             let node = ("node".to_string(), json!(n));
             let at = ("at".to_string(), json!(self.snap.timeline.position));
-            self.send(
-                "grade.clear",
-                Value::Object(Map::from_iter([(field, target), node, at])),
-            );
-            return;
+            let mut params = Map::from_iter([(field, target), node]);
+            match palette {
+                Palette::Key => {
+                    let usual = KeyOutput::default();
+                    params.insert("key_gain".into(), json!(usual.gain));
+                    params.insert("key_offset".into(), json!(usual.offset));
+                    params.insert("key_invert".into(), json!(usual.invert));
+                    self.send("grade.set", Value::Object(params));
+                }
+                Palette::Primaries => {
+                    params.extend([at]);
+                    self.send("grade.clear", Value::Object(params));
+                }
+            }
+            return palette == Palette::Primaries;
         }
         if !changes.is_empty() {
-            let c = changes
+            let (keys, values): (Vec<Change>, Vec<Change>) = changes
+                .into_iter()
+                .partition(|c| c.field.starts_with("key_"));
+            let c = values
                 .into_iter()
                 .fold(g, |g, c| changed_corrector(&g, c.field, c.value));
+            let mut next = with_corrector(&grade, n, frame, c);
+            if let Some(d) = next.node_mut(n) {
+                d.key = keys.iter().fold(d.key, keyed);
+            }
             self.effects_page.graded = Some(Graded {
                 of: of.clone(),
                 node: n,
                 frame,
                 at,
-                grade: with_corrector(&grade, n, frame, c),
+                grade: next,
                 sent: None,
             });
         }
@@ -1228,10 +1370,14 @@ impl Workspace {
         let ready = match &mut self.effects_page.graded {
             Some(h) if h.sent.is_none() && !down => {
                 h.sent = Some(Instant::now());
-                Some(match (held(&stored, n, frame), held(&h.grade, n, frame)) {
+                let mut params = match (held(&stored, n, frame), held(&h.grade, n, frame)) {
                     (Some(a), Some(b)) => differences(a, b),
                     _ => Map::new(),
-                })
+                };
+                if let (Some(a), Some(b)) = (stored.node(n), h.grade.node(n)) {
+                    params.extend(key_changes(a.key, b.key));
+                }
+                Some(params)
             }
             _ => None,
         };
@@ -1248,6 +1394,7 @@ impl Workspace {
         if let Some(point) = point {
             self.printer_point(point);
         }
+        palette == Palette::Primaries
     }
 
     fn printer_point(&mut self, point: (PrinterColor, f64)) {
