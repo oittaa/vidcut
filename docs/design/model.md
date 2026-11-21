@@ -28,6 +28,11 @@ classDiagram
     start_tc
     own: TimelineSettings
   }
+  class Compound {
+    id, name, bin, removed
+    sequence_id, fps, drop_frame
+    start_tc, frames
+  }
   class Media {
     id
     path, name, bin, color, camera
@@ -112,6 +117,11 @@ classDiagram
   Project *-- Settings : settings
   Project *-- "*" Media : media
   Project *-- "*" Timeline : timelines
+  Project *-- "*" Compound : compounds
+  Compound *-- "*" Track : tracks
+  Compound *-- "*" Marker : markers
+  Compound *-- Marks : marks
+  Compound *-- "0..1" Kept : kept_otio
   Timeline *-- "*" Track : tracks
   Timeline *-- "*" Marker : markers
   Timeline *-- "*" SubtitleTrack : subtitles
@@ -127,9 +137,10 @@ classDiagram
   Clip *-- "0..1" Picture : picture
   Clip *-- "*" MotionPath : motion
   Clip ..> Media : media id
+  Clip ..> Compound : compound id
   Clip *-- "0..1" Generator : generator
   Generator *-- "0..1" Kept : reference
-  Clip *-- Kept : effects, compound, speed
+  Clip *-- Kept : effects, speed
   Transition *-- Kept : otio
 ```
 
@@ -159,11 +170,12 @@ Timelines (spec §3):
 - In memory, the open timeline is checked out: its `tracks`, `marks`, `markers` and `subtitles` are the fields of `Project` with these names. Its entry in `timelines` has empty lists.
   - Why: the code that edits, plays and exports a timeline reads these fields. It does not change for many timelines.
   - `Project::check_in` puts them back into the entry, and `Project::check_out` takes them out. `Project::open_timeline` does both.
+  - `Project::compounds` holds canonical compound clip definitions (`Compound`). `Compound::removed` keeps a removed item while clips still use it (`drop_unused_removed`).
   - `Project::compound_path` holds open compound clips (`OpenCompound`, outermost first) with their `CompoundTarget`.
-    - An `OpenCompound` holds `fps`, `drop_frame`, `tracks`, `marks`, `markers` and `start_tc`, with no subtitles.
-    - While one is open, `Project::format` uses its `fps` and `drop_frame`, and `Project::start_tc` gives `OpenCompound::start_tc`.
+    - Each `OpenCompound` refers by id to a `Compound` in `Project::compounds`.
+    - While one is open, `Project::checked_out_compound` names it. `Project::format` uses its `fps` and `drop_frame`, and `Project::start_tc` gives `Compound::start_tc`.
   - `Project::checked_out_timeline` and `Project::sheet_key` name what is checked out. Exports while open export that compound clip with no `project` metadata, and `steps::since` reads `sheets_of` including open compounds.
-  - The file and the history hold each timeline and open compound with its contents (`Project::whole_timeline`, `Project::sheets`). Thus a diff names the sheet that changed.
+  - The file and the history hold each timeline and compound with its contents (`Project::whole_timeline`, `Project::sheets`, `Project::take_sheets`). Thus a diff names the sheet that changed.
 - `TimelineSettings` (`own`) gives a timeline its own frame rate, size, drop-frame and color space. Without it, the timeline uses the project's.
   - `Project::fps`, `width`, `height`, `start_tc` and `counts_drop_frame` give the values of the open timeline. `Settings` holds the project's own values.
   - `Project::flat_settings` gives `Settings` with the format of the open timeline. The export, the render cache and ducking use it.
@@ -175,8 +187,8 @@ Timelines (spec §3):
   - An edit into a project with no timeline makes one first (`Editor::apply`).
     - `Project::keep_sheet` makes "Timeline 1" from the open tracks.
     - `need_timeline` applies the rule after the request, and after each command of a batch. Thus a batch gives the same result as its commands one by one.
-- A pool item counts at the project's rate: a sound file and a still count `Settings::fps` (`Media::rate`). A compound clip keeps the rate and drop-frame of the timeline where it was made (`PooledCompound::fps`, `PooledCompound::drop_frame`).
-- `ops::conform` converts clips by time from one frame rate to another. `place_pooled` and `edit.paste` use it, and `edit.copy` returns the rate of its clips.
+- A pool item counts at the project's rate: a sound file and a still count `Settings::fps` (`Media::rate`). A compound clip keeps its own `Compound::fps` and `Compound::drop_frame`.
+- `ops::conform` converts clips by time from one frame rate to another. `render::expanded`, `ops::compound::unnest`, `place_pooled` and `edit.paste` use it, and `edit.copy` returns the rate of its clips.
 - Synced groups and the Sync Clips window count frames at the project's rate.
   - The Sync Bin, `multicam.pick` and Source Overwrite line up the files on the frame grid of the project (`ops::synced_at`).
   - `multicam::timeline_frames` converts a frame of a group to the open timeline's rate by time, for the strips of the rows.
@@ -803,11 +815,11 @@ Import:
 - An import looks for media at the path, then by their last parts beside the file (`MediaRef::paths`). Then it looks by name in `search` and the folder of the bundle (`find_media`).
 - It looks for the media of a compound clip in the same way.
 - `edit.decompose` first takes the media that the compound clip already plays (`otio::same_media`: by path, then by a file name that no other of them has).
-- `ops::compound::nest` makes a compound clip from timeline clips, in the shape of an imported one: a picture block and a sound block that `compound_links` ties.
-  - `otio::made_stack` writes the kept `Stack`, so an export gives other editors a usual compound clip.
-  - `Compound::made_from` holds each `Clip` whole, on the track that it came from. A new field of `Clip` thus stays through a nest with no change here.
-  - `Compound::tracks` holds what plays. The picture block has the pictures. The sound block has the sounds (`sound_tracks`), each at the length of its own sound.
-  - Each block keeps the dissolves of its tracks. `render::expanded` plays them (`inner_layout`).
+- `ops::compound::nest` stores one `Compound` in `Project::compounds` and puts picture and sound blocks that refer to it by `Clip::compound`.
+  - `compound_links` ties those blocks on export. Every placement across timelines shares one canonical source of tracks, markers and format.
+  - `stack_for` builds an OTIO `Stack` on export from `Project::compound_tracks`. It keeps foreign metadata or offline contents in `Compound::kept_otio`.
+  - `Compound::tracks` holds all tracks together. `picture_tracks` takes video tracks, and `sound_tracks` takes sounds (`sound_part`) at each clip's sound length.
+  - Each track keeps its dissolves. `render::expanded` conforms cross-rate compounds first and plays those tracks (`inner_layout`).
   - `inner_layout` widens the compound clip to reach each dissolve that it shows a part of. `Shown` limits the track to the frames of the compound clip.
     - A stretch widens at its own speed (`at_own_speed`). Thus each stretch has both sides of a dissolve that crosses a speed change.
     - A forward picture stretch counts its reach from the exact source position of its ends. Thus a stretch that starts between two source frames keeps both sides.
@@ -816,17 +828,16 @@ Import:
     - `Shown::held` is the frame of the layout that each frame of the clip shows.
     - A compound clip on a side of that transition takes the frames and the held frame of the track around it. Thus the side shows on each frame of the frozen clip.
   - `ops::compound::nest_range` cuts every track at the two marks, and nests what is between them. The lowest track with clips in the range becomes inner V1 or A1.
-  - Each compound clip made here also has a copy in the Media tab (`PooledCompound`, `keep_copy`). `pool_range` makes one on a clone of the project, so the timeline does not change.
+  - `pool_range` makes a `Compound` on a clone of the project, so the timeline does not change. `remove_pooled` marks it removed while placements still use it.
   - `place_pooled` puts a copy on a video track and on the audio track of its number. `Place` tells how. `compound_preview` gives the requests of a drag.
-  - `ops::compound::unnest` restores `made_from` when the two blocks are still tied. A block without the other brings only its own `tracks`, so that nothing is there twice.
+  - `ops::compound::unnest` conforms `Compound::tracks` when needed and restores all tracks for tied blocks, or only one part when alone.
   - `ops::compound::target` gives the track of each inner track, for a compound clip made here and for an imported one.
-  - `ops::compound::open_clip` and `ops::compound::open_pooled` open a compound clip's inner tracks and `Compound::markers` into the editor sheet, refusing an already open sequence id.
-    - Inner clips, transitions and markers get unique ids against active sheets. An audio-only compound gets an empty V1 track while open.
-  - `ops::compound::close` and `ops::compound::close_all` normalize tracks and write edits back to the opened `CompoundTarget`.
-    - `propagate_in_compound` and `propagate_in_tracks` update copies by sequence id across timelines, nested compounds and `PooledCompound`, keeping each copy's prior `frames` and `Clip::shown` end as a floor.
-    - `holds_any`, `check_no_cycle`, `check_clips_no_cycle` and `otio::stack_holds_any` refuse placing, pasting or importing a compound inside itself or an open parent.
-    - `Compound::markers` round-trips in OTIO under `metadata.vidcut.markers` so outer clip `Stack.markers` stay separate.
-    - `render::expanded` adds each inner track's `volume_db` onto the outer track's `volume_db` (keeping `-100` silent via `validate::fader_silent`) and applies inner `solo`.
+  - `ops::compound::open_clip` and `ops::compound::open_pooled` check out a compound's inner tracks and `Compound::markers` into the editor sheet, refusing an already open sequence id.
+    - Inner clips, transitions and markers get unique ids against active sheets and other compounds. An audio-only compound gets an empty V1 track while open.
+  - `ops::compound::close` and `ops::compound::close_all` normalize tracks and check edits back into `Project::compounds`. Every placement reads that definition with no copy propagation.
+  - `holds_compound`, `check_no_cycle`, `check_clips_no_cycle` and `otio::stack_holds_any` refuse placing, pasting or importing a compound inside itself or an open parent.
+  - `Compound::markers` round-trips in OTIO under `metadata.vidcut.markers` so outer clip `Stack.markers` stay separate.
+  - `render::expanded` adds each inner track's `volume_db` onto the outer track's `volume_db` (keeping `-100` silent via `validate::fader_silent`) and applies inner `solo`.
 
 Modes:
 
@@ -855,7 +866,7 @@ Kept data:
 | the clip pan (`effects::pan`, `effects::pan_on`, `effects::pan_keys`) | `pan`, `pan_on` and `ClipAudio::pan_keys`, taken out of carried effects (`effects::drop_pan`) |
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). A `Generator` when it is a kind that vidcut draws (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |
-| nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
+| nested `Stack` | `Compound` in `Project::compounds`, referenced by `Clip::compound` id; `edit.decompose` breaks it up |
 | multicam `Stack`, or a `MissingReference` with no `Media Url` | `Generator::Carried` with a `MissingReference`: a block with no media that plays as a gap (`Clip::is_offline`). Its `channels` and `link` stay in the reference (`keep_ties`). On an audio track, `Clip::is_sound_block` is true |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `TimeEffect` with `Key Frames` | `Speed`, a section for each key (`ramp`). It is written back while the sections stay, else made again (`ramp_effect`) |

@@ -4348,8 +4348,8 @@ impl Live {
                 for r in refs.to_vec() {
                     let id = vidcut_core::editor::resolve_clip(p, &r, playhead)?;
                     if let Some(c) = p.clip(&id) {
-                        let media = match &c.compound {
-                            Some(k) => vidcut_core::otio::played_by(k),
+                        let media = match p.clip_compound(c) {
+                            Some(k) => vidcut_core::otio::played_by(p, k),
                             None => vec![c.media.clone()],
                         };
                         ranges.push((c.start, c.end(), Some(media)));

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
-    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, Compound, DuckDetect,
+    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, DuckDetect,
     Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, MotionPath, PathSample,
     Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
     SmoothMode, TimelineColors, Title, Track, TrackKind, Transition, Upscale,
@@ -2260,8 +2260,11 @@ fn image_of(m: &Media) -> Option<Image> {
     }
 }
 
-pub(crate) fn plays_inside(c: &Clip) -> bool {
-    c.compound.as_ref().is_some_and(|k| !k.tracks.is_empty())
+pub(crate) fn plays_inside(p: &Project, c: &Clip) -> bool {
+    p.clip_compound(c).is_some_and(|k| match c.video {
+        true => !k.tracks.is_empty() && k.has_picture(),
+        false => !k.tracks.is_empty() && k.has_sound(),
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -2408,32 +2411,38 @@ fn titled(t: &Track, c: &Clip) -> bool {
     t.video_enabled && c.enabled && c.title.is_some()
 }
 
-fn pictures_at(c: &Clip, t: i64) -> Vec<&Clip> {
-    c.compound
-        .iter()
-        .flat_map(|k| &k.tracks)
+fn pictures_at<'a>(p: &'a Project, c: &Clip, t: i64, depth: usize) -> Vec<&'a Clip> {
+    if depth == 0 {
+        return Vec::new();
+    }
+    p.clip_compound(c)
+        .into_iter()
+        .flat_map(|k| p.compound_tracks(k))
+        .filter(|n| n.kind == TrackKind::Video)
         .filter_map(|n| {
             let x = &n.clips[n.clip_covering(t)?];
-            shown_inside(n, x, t).then_some(x)
+            shown_inside(p, n, x, t, depth).then_some(x)
         })
         .collect()
 }
 
-fn shown_inside(n: &Track, x: &Clip, t: i64) -> bool {
-    let holds = n.video_enabled && x.enabled && !pictures_at(x, x.source_at(t)).is_empty();
+fn shown_inside(p: &Project, n: &Track, x: &Clip, t: i64, depth: usize) -> bool {
+    let holds =
+        n.video_enabled && x.enabled && !pictures_at(p, x, x.source_at(t), depth - 1).is_empty();
     visible(n, x) || titled(n, x) || holds
 }
 
 fn crosses_inside(p: &Project, c: &Clip, t: i64) -> bool {
-    c.compound
-        .iter()
-        .flat_map(|k| &k.tracks)
-        .filter(|n| !n.transitions.is_empty())
+    p.clip_compound(c)
+        .into_iter()
+        .flat_map(|k| p.compound_tracks(k))
+        .filter(|n| n.kind == TrackKind::Video && !n.transitions.is_empty())
         .any(|n| {
             transitions::playing(p, n, false, transitions::mixes)
                 .iter()
                 .any(|d| {
-                    let side = |x: &Option<&Clip>| x.is_some_and(|x| shown_inside(n, x, t));
+                    let side =
+                        |x: &Option<&Clip>| x.is_some_and(|x| shown_inside(p, n, x, t, NESTED));
                     d.frames.0 <= t && t < d.frames.1 && (side(&d.before) || side(&d.after))
                 })
         })
@@ -2445,7 +2454,7 @@ fn mode_at(p: &Project, c: &Clip, t: i64) -> CompositeMode {
         .as_ref()
         .map_or(CompositeMode::Normal, |x| x.mode());
     let inner = c.source_at(t);
-    match pictures_at(c, inner).as_slice() {
+    match pictures_at(p, c, inner, NESTED).as_slice() {
         [only] if own == CompositeMode::Normal && !crosses_inside(p, c, inner) => {
             mode_at(p, only, inner)
         }
@@ -2514,12 +2523,12 @@ fn sides_at<'a>(d: &transitions::Playing<'a>, now: i64) -> Vec<(Option<&'a Clip>
 
 fn edges_on(p: &Project, t: &Track) -> HashMap<String, Vec<Edge>> {
     let mut edges: HashMap<String, Vec<Edge>> = HashMap::new();
-    if !t.clips.iter().any(plays_inside) {
+    if !t.clips.iter().any(|c| plays_inside(p, c)) {
         return edges;
     }
     for d in transitions::playing(p, t, false, joins_compound) {
         for (side, falling) in [(d.before, true), (d.after, false)] {
-            let Some(c) = side.filter(|c| plays_inside(c)) else {
+            let Some(c) = side.filter(|c| plays_inside(p, c)) else {
                 continue;
             };
             edges.entry(c.id.clone()).or_default().push(Edge::of(
@@ -2535,13 +2544,17 @@ fn edges_on(p: &Project, t: &Track) -> HashMap<String, Vec<Edge>> {
 
 fn edge_fades(p: &Project) -> HashMap<String, Vec<Fading>> {
     let mut fades: HashMap<String, Vec<Fading>> = HashMap::new();
-    for t in p.tracks.iter().filter(|t| t.clips.iter().any(plays_inside)) {
+    for t in p
+        .tracks
+        .iter()
+        .filter(|t| t.clips.iter().any(|c| plays_inside(p, c)))
+    {
         for d in transitions::cross_fades(p, t) {
             let Some(curve) = transitions::cross_fade(d.transition) else {
                 continue;
             };
             for (side, falling) in [(d.before, true), (d.after, false)] {
-                let Some(c) = side.filter(|c| plays_inside(c)) else {
+                let Some(c) = side.filter(|c| plays_inside(p, c)) else {
                     continue;
                 };
                 let blocks = match c.video {
@@ -2569,11 +2582,11 @@ fn joins_compound(t: &Transition) -> bool {
     transitions::kind_of(t).is_some()
 }
 
-fn touches_compound(t: &Track, x: &Transition) -> bool {
+fn touches_compound(p: &Project, t: &Track, x: &Transition) -> bool {
     [&x.from, &x.to]
         .into_iter()
         .flatten()
-        .any(|id| t.clips.iter().any(|c| &c.id == id && plays_inside(c)))
+        .any(|id| t.clips.iter().any(|c| &c.id == id && plays_inside(p, c)))
 }
 
 fn nest_in<'a>(inner: Option<&'a Inner>, t: &Track, c: &Clip) -> Option<&'a Nest> {
@@ -2588,14 +2601,7 @@ fn whole<'a>(nest: Option<&'a Nest>, c: &'a Clip) -> &'a Clip {
 
 fn hollow(p: &Project, c: &Clip) -> Clip {
     let mut hollow = c.clone();
-    hollow.compound = c.compound.as_ref().map(|k| Compound {
-        stack: Default::default(),
-        frames: k.frames,
-        tracks: Vec::new(),
-        made_from: Vec::new(),
-        markers: Vec::new(),
-        start_tc: k.start_tc,
-    });
+    hollow.compound = c.compound.as_ref().map(|_| String::new());
     let mode = mode_at(p, c, c.end() - 1);
     if mode != CompositeMode::Normal {
         hollow.picture.get_or_insert_default().composite_mode = Some(mode);
@@ -2644,6 +2650,11 @@ fn offline(p: &Project) -> Option<Project> {
     for t in &mut out.tracks {
         slated(&mut t.clips, &gone);
     }
+    for k in &mut out.compounds {
+        for t in &mut k.tracks {
+            slated(&mut t.clips, &gone);
+        }
+    }
     Some(out)
 }
 
@@ -2660,18 +2671,31 @@ fn slated(clips: &mut [Clip], gone: &HashSet<&str>) {
                 })
                 .filter(|p| !p.is_usual());
         }
-        for t in c.compound.iter_mut().flat_map(|k| &mut k.tracks) {
-            slated(&mut t.clips, gone);
-        }
     }
 }
 
 fn expanded(p: &Project) -> Option<(Project, Within)> {
-    let holds = |p: &Project| p.tracks.iter().any(|t| t.clips.iter().any(plays_inside));
+    let holds = |p: &Project| {
+        p.tracks
+            .iter()
+            .any(|t| t.clips.iter().any(|c| plays_inside(p, c)))
+    };
     if !holds(p) {
         return None;
     }
     let mut out = p.clone();
+    let host_fps = out.fps();
+    let mut compounds = std::mem::take(&mut out.compounds);
+    for k in &mut compounds {
+        if let Some(r) = crate::ops::conform::Rates::new(k.fps, host_fps) {
+            for t in &mut k.tracks {
+                crate::ops::conform::track(&out, t, r);
+            }
+            k.frames = r.frame(k.frames);
+            k.fps = host_fps;
+        }
+    }
+    out.compounds = compounds;
     let mut within: Within = out
         .tracks
         .iter()
@@ -2693,10 +2717,10 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             let (mut host, mut host_within) = (t.clone(), Vec::new());
             host.clips.clear();
             host.transitions
-                .retain(|x| x.sound || joins_compound(x) || !touches_compound(t, x));
+                .retain(|x| x.sound || joins_compound(x) || !touches_compound(&out, t, x));
             let mut inner = Vec::new();
             for (c, nest) in t.clips.iter().zip(&w.nests) {
-                if !plays_inside(c) {
+                if !plays_inside(&out, c) {
                     host.clips.push(c.clone());
                     host_within.push(nest.clone());
                     continue;
@@ -2704,7 +2728,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 if !c.enabled {
                     continue;
                 }
-                host.clips.push(hollow(p, c));
+                host.clips.push(hollow(&out, c));
                 opened += 1;
                 let own = c.picture.clone().unwrap_or_default();
                 let edges = edges.get(&c.id).cloned().unwrap_or_default();
@@ -2741,18 +2765,21 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                         ..Nest::default()
                     },
                 });
-                let k = c.compound.as_ref().expect("plays inside");
+                let k = out.clip_compound(c).expect("plays inside");
                 let cut = stretches(wide, t.kind);
                 let parts = if cut.is_empty() {
                     std::slice::from_ref(wide)
                 } else {
                     cut.as_slice()
                 };
-                let inner_tracks = k.tracks.iter().filter(|n| n.kind == t.kind);
-                let inner_solo = k.tracks.iter().any(|n| n.kind == t.kind && n.solo);
+                let derived = match t.kind {
+                    TrackKind::Video => crate::ops::compound::picture_tracks(&k.tracks),
+                    TrackKind::Audio => crate::ops::compound::sound_tracks(&k.tracks),
+                };
+                let inner_solo = derived.iter().any(|n| n.solo);
                 let playing = parts
                     .iter()
-                    .flat_map(|part| inner_tracks.clone().map(move |n| (part, n)));
+                    .flat_map(|part| derived.iter().map(move |n| (part, n)));
                 for (part, n) in playing {
                     let mut v = n.clone();
                     v.id = t.id.clone();
@@ -2768,7 +2795,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     };
                     v.video_enabled &= t.video_enabled;
                     v.render_cache &= t.render_cache;
-                    let laid = inner_layout(p, n, part);
+                    let laid = inner_layout(&out, n, part);
                     v.transitions = laid.transitions;
                     let mut clips: Vec<(Clip, Nest)> = laid
                         .clips
@@ -3526,7 +3553,7 @@ fn cuts_of(p: &Project, lanes: &[VideoLane], (a, b): (i64, i64)) -> Vec<i64> {
             if let Some(c) = d.before.or(d.after).map(|c| whole(nest_in(inner, t, c), c)) {
                 cuts.extend(
                     ((from + 1).max(d.frames.0 + 1)..to.min(d.frames.1)).filter(|&f| {
-                        c.compound.is_some() && mode_at(p, c, f) != mode_at(p, c, f - 1)
+                        p.clip_compound(c).is_some() && mode_at(p, c, f) != mode_at(p, c, f - 1)
                     }),
                 );
             }
