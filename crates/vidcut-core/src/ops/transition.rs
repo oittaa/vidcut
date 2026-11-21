@@ -971,7 +971,7 @@ mod tests {
             name: "Compound Clip 1".into(),
             bin: String::new(),
             removed: false,
-            sequence_id: None,
+            sequence_id: "{test-c2-compound}".into(),
             fps: p.fps(),
             drop_frame: p.counts_drop_frame(),
             start_tc: 0,

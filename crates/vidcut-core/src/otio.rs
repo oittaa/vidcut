@@ -1313,12 +1313,13 @@ fn compound_of(item: &Value, host_fps: Rational) -> ImportedCompound {
         item["metadata"][VIDCUT]["drop_frame"].as_bool() == Some(true) && fps.has_drop_frame();
     let sequence_id = item["metadata"][EDITOR]["Sequence ID"]
         .as_str()
+        .filter(|s| !s.trim().is_empty())
         .map(str::to_string);
     let compound_id = item["metadata"][VIDCUT]["compound"]
         .as_str()
         .map(str::to_string);
     let stack = clean_stack(item);
-    let sequence_id = sequence_id.or_else(|| Some(stack_id(&stack)));
+    let sequence_id = sequence_id.unwrap_or_else(|| stack_id(&stack));
     ImportedCompound {
         stack: stack.into(),
         fps,
@@ -1424,8 +1425,7 @@ fn stack_for(
             o.remove(key);
         }
     }
-    let id = k.sequence_id.clone().unwrap_or_else(|| stack_id(&stack));
-    stack["metadata"][EDITOR]["Sequence ID"] = json!(id);
+    stack["metadata"][EDITOR]["Sequence ID"] = json!(&k.sequence_id);
     Ok(stack)
 }
 
@@ -1517,14 +1517,14 @@ fn no_media_ties(p: &Project, a: i64, b: i64) -> HashMap<NoMediaTie, usize> {
 }
 
 pub(crate) fn is_compound_stack(v: &Value) -> bool {
-    v["OTIO_SCHEMA"]
-        .as_str()
-        .is_some_and(|s| s.starts_with("Stack."))
-        && v["metadata"][EDITOR]["Sequence Type"].is_string()
+    schema(v).starts_with("Stack") && !is_multicam(v)
 }
 
 pub(crate) fn stack_holds_any(v: &Value, ids: &std::collections::HashSet<String>) -> bool {
-    let matched = match v["metadata"][EDITOR]["Sequence ID"].as_str() {
+    let matched = match v["metadata"][EDITOR]["Sequence ID"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+    {
         Some(s) => ids.contains(s),
         None => is_compound_stack(v) && ids.contains(&stack_id(&clean_stack(v))),
     };
@@ -1548,13 +1548,6 @@ pub(crate) fn stack_id(stack: &Value) -> String {
         &h[16..20],
         &h[20..]
     )
-}
-
-fn sequence_of(k: &Compound) -> String {
-    k.sequence_id
-        .clone()
-        .or_else(|| k.kept_otio.as_ref().map(|kept| stack_id(kept)))
-        .unwrap_or_else(|| stack_id(&json!({ "id": k.id, "name": k.name })))
 }
 
 pub fn tied(p: &Project, id: &str) -> Vec<String> {
@@ -1603,7 +1596,7 @@ fn compound_links(p: &Project, a: i64, b: i64) -> Links<'_> {
                 && j.id == k.id
         };
         if let Some((s, _)) = blocks(false).find(same) {
-            let id = sequence_of(k);
+            let id = k.sequence_id.clone();
             links.insert(s.id.as_str(), (n, id.clone()));
             links.insert(c.id.as_str(), (n, id));
         }
@@ -1629,7 +1622,7 @@ fn tie(
             editor["Sequence ID"] = json!(id);
             editor["Link Group ID"] = json!(g);
         }
-        None => editor["Sequence ID"] = json!(sequence_of(k)),
+        None => editor["Sequence ID"] = json!(&k.sequence_id),
     }
 }
 
@@ -1651,7 +1644,7 @@ pub struct ImportedCompound {
     pub frames: i64,
     pub markers: Vec<crate::model::Marker>,
     pub start_tc: i64,
-    pub sequence_id: Option<String>,
+    pub sequence_id: String,
     pub compound_id: Option<String>,
     pub drop_frame: bool,
 }
@@ -2494,7 +2487,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         let mut keys = vec![None; items.len()];
         for (i, (start, len, item)) in items.into_iter().enumerate() {
             let plain = plain_reference(item);
-            let stack = plain.is_none() && schema(item).starts_with("Stack");
+            let stack = is_compound_stack(item);
             if !(is_clip(item) || stack || plain.is_some()) || len <= 0 {
                 continue;
             }
@@ -2629,7 +2622,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         let mut keys = vec![None; items.len()];
         for (i, (start, len, item)) in items.into_iter().enumerate() {
             let plain = plain_reference(item);
-            let stack = plain.is_none() && schema(item).starts_with("Stack");
+            let stack = is_compound_stack(item);
             if !(is_clip(item) || stack || plain.is_some()) || len <= 0 {
                 continue;
             }

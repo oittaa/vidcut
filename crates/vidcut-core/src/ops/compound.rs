@@ -540,7 +540,7 @@ fn build(
         name,
         bin: bin.to_string(),
         removed: false,
-        sequence_id: Some(seq_id),
+        sequence_id: seq_id,
         fps,
         drop_frame,
         start_tc,
@@ -723,7 +723,7 @@ pub(crate) fn unnest(
 fn open_sequence_ids(p: &Project) -> HashSet<String> {
     p.compound_path
         .iter()
-        .filter_map(|oc| p.compound(&oc.compound)?.sequence_id.clone())
+        .filter_map(|oc| p.compound(&oc.compound).map(|k| k.sequence_id.clone()))
         .collect()
 }
 
@@ -740,9 +740,7 @@ fn holds_compound_inner(
     let Some(k) = p.compound(cid) else {
         return false;
     };
-    if k.sequence_id
-        .as_deref()
-        .is_some_and(|s| open_seq.contains(s))
+    if open_seq.contains(&k.sequence_id)
         || k.kept_otio
             .as_ref()
             .is_some_and(|s| otio::stack_holds_any(s, open_seq))
@@ -807,9 +805,7 @@ pub(crate) fn check_imported_no_cycle(p: &Project, clips: &[otio::ImportedClip])
         k.compound_id
             .as_deref()
             .is_some_and(|id| open_ids.contains(id))
-            || k.sequence_id
-                .as_deref()
-                .is_some_and(|s| open_seq.contains(s))
+            || open_seq.contains(&k.sequence_id)
             || otio::stack_holds_any(&k.stack, &open_seq)
     });
     if hit {
@@ -868,22 +864,6 @@ fn check_cycle_from<'a>(
     Ok(())
 }
 
-fn same_compound(p: &Project, a: &Compound, b: &Compound) -> bool {
-    match (&a.sequence_id, &b.sequence_id) {
-        (Some(x), Some(y)) => x == y,
-        (None, None) => {
-            a.name == b.name
-                && a.fps == b.fps
-                && a.drop_frame == b.drop_frame
-                && a.start_tc == b.start_tc
-                && a.frames == b.frames
-                && a.kept_otio == b.kept_otio
-                && p.compound_tracks(a) == b.tracks.as_slice()
-        }
-        _ => false,
-    }
-}
-
 pub(crate) fn restore_copied(
     p: &mut Project,
     clips: &mut [TrackClip],
@@ -898,10 +878,13 @@ pub(crate) fn restore_copied(
         if remap.contains_key(&k.id) {
             continue;
         }
+        if k.sequence_id.trim().is_empty() {
+            return Err(Error::invalid("compound clip sequence_id is empty"));
+        }
         let existing = p
             .compound(&k.id)
-            .filter(|e| same_compound(p, e, k))
-            .or_else(|| p.compounds.iter().find(|e| same_compound(p, e, k)));
+            .filter(|e| e.sequence_id == k.sequence_id)
+            .or_else(|| p.compounds.iter().find(|e| e.sequence_id == k.sequence_id));
         if let Some(e) = existing {
             remap.insert(k.id.clone(), e.id.clone());
             continue;
@@ -1010,15 +993,19 @@ pub fn path_json(p: &Project) -> Value {
 }
 
 pub(crate) fn otio_has_items(v: &Value) -> bool {
-    let s = v["OTIO_SCHEMA"].as_str().unwrap_or("");
-    if s.starts_with("Clip.") || otio::is_compound_stack(v) {
-        return true;
-    }
     v["children"]
         .as_array()
         .into_iter()
         .flatten()
-        .any(otio_has_items)
+        .any(otio_node_has_items)
+}
+
+fn otio_node_has_items(v: &Value) -> bool {
+    let s = v["OTIO_SCHEMA"].as_str().unwrap_or("");
+    if s.starts_with("Clip.") || s.starts_with("Stack.") {
+        return true;
+    }
+    otio_has_items(v)
 }
 
 fn collect_ids(
@@ -1142,10 +1129,7 @@ fn push_open(p: &mut Project, cid: String, target: CompoundTarget, missing: &str
         .compound(&cid)
         .cloned()
         .ok_or_else(|| Error::not_found(format!("no compound clip {cid}")))?;
-    if k.sequence_id
-        .as_deref()
-        .is_some_and(|sid| open_sequence_ids(p).contains(sid))
-    {
+    if open_sequence_ids(p).contains(&k.sequence_id) {
         return Err(Error::invalid("that compound clip is already open"));
     }
     if k.tracks.is_empty() && k.kept_otio.as_ref().is_some_and(|s| otio_has_items(s)) {
@@ -3256,7 +3240,7 @@ mod tests {
         let mut f2 = Fixture::new(&[(4.0, true)]);
         f2.ok(req("timeline.import", json!({"otio": doc})));
         let imported = f2.editor.project().tracks[0].clips[0].id.clone();
-        assert!(f2.editor.project().compounds[0].sequence_id.is_some());
+        assert!(!f2.editor.project().compounds[0].sequence_id.is_empty());
         let copied = f2.ok(req("edit.copy", json!({"clips": [imported]})));
         f2.ok(req("compound.open", json!({"clip": imported})));
         let inner = f2.editor.project().tracks[0].clips[0].id.clone();
@@ -3340,5 +3324,125 @@ mod tests {
             json!({"otio": doc, "mode": "append"}),
         ));
         assert!(err.message.contains("hold itself"));
+    }
+
+    #[test]
+    fn edit_paste_refuses_compound_with_empty_sequence_id() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 20);
+        let hosts = nest(&mut f, &[&a]);
+        let copied = f.ok(req("edit.copy", json!({"clips": [hosts[0]]})));
+        let mut compounds = copied.result["compounds"].as_array().unwrap().clone();
+        compounds[0]["sequence_id"] = json!("");
+        let err = f.err(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": compounds,
+                "fps": copied.result["fps"],
+                "at": 30,
+            }),
+        ));
+        assert!(err.message.contains("sequence_id is empty"));
+    }
+
+    fn strip_all_stack_metadata(v: &mut Value) {
+        if let Some(o) = v.as_object_mut() {
+            if o.get("OTIO_SCHEMA")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s.starts_with("Stack"))
+            {
+                o.remove("metadata");
+            }
+            if let Some(ch) = o.get_mut("children").and_then(Value::as_array_mut) {
+                for child in ch {
+                    strip_all_stack_metadata(child);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn timeline_import_append_refuses_nested_generic_stack_without_sequence_type_while_open() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 40);
+        let inner = nest(&mut f, &[&a]);
+        nest(&mut f, &[&inner[0]]);
+        let mut doc = crate::otio::export(
+            f.editor.project(),
+            "T1",
+            None,
+            crate::otio::Locations::Absolute,
+        )
+        .unwrap();
+        doc.as_object_mut().unwrap().remove("metadata");
+        strip_all_stack_metadata(&mut doc["tracks"]);
+        let mut f2 = Fixture::new(&[(4.0, true)]);
+        f2.ok(req("timeline.import", json!({"otio": doc})));
+        let outer = f2.editor.project().tracks[0].clips[0].id.clone();
+        f2.ok(req("compound.open", json!({"clip": outer})));
+        let inner_clip = f2.editor.project().tracks[0].clips[0].id.clone();
+        f2.ok(req("compound.open", json!({"clip": inner_clip})));
+        let err = f2.err(req(
+            "timeline.import",
+            json!({"otio": doc, "mode": "append"}),
+        ));
+        assert!(err.message.contains("hold itself"));
+    }
+
+    #[test]
+    fn empty_imported_compound_stack_opens_without_missing_clips_error() {
+        let doc = json!({
+            "OTIO_SCHEMA": "Timeline.1",
+            "name": "T1",
+            "global_start_time": {"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": 90000.0},
+            "tracks": {
+                "OTIO_SCHEMA": "Stack.1",
+                "children": [{
+                    "OTIO_SCHEMA": "Track.1",
+                    "name": "Video 1",
+                    "kind": "Video",
+                    "children": [{
+                        "OTIO_SCHEMA": "Stack.1",
+                        "name": "Empty CC",
+                        "metadata": {"Resolve_OTIO": {"Sequence Type": "Compound Clip", "Sequence Fps": 25.0}},
+                        "source_range": {
+                            "OTIO_SCHEMA": "TimeRange.1",
+                            "start_time": {"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": 0.0},
+                            "duration": {"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": 40.0}
+                        },
+                        "children": [{
+                            "OTIO_SCHEMA": "Track.1",
+                            "name": "Video 1",
+                            "kind": "Video",
+                            "children": [{
+                                "OTIO_SCHEMA": "Gap.1",
+                                "source_range": {
+                                    "OTIO_SCHEMA": "TimeRange.1",
+                                    "start_time": {"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": 0.0},
+                                    "duration": {"OTIO_SCHEMA": "RationalTime.1", "rate": 25.0, "value": 40.0}
+                                }
+                            }]
+                        }]
+                    }]
+                }]
+            }
+        });
+        let mut f = Fixture::new(&[]);
+        f.ok(req("timeline.import", json!({"otio": doc})));
+        let clip = f.editor.project().tracks[0].clips[0].id.clone();
+        f.ok(req("compound.open", json!({"clip": clip})));
+        let p = f.editor.project();
+        assert_eq!(p.compound_path.len(), 1);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+        f.ok(req("history.undo", json!({})));
+        let p = f.editor.project();
+        assert!(p.compound_path.is_empty());
+        assert!(p.compounds[0].tracks.is_empty());
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+        f.ok(req("history.redo", json!({})));
+        let p = f.editor.project();
+        assert_eq!(p.compound_path.len(), 1);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
     }
 }

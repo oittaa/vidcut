@@ -16,6 +16,9 @@ fn compounds(p: &Project, pool: &HashMap<&str, &Media>, v: &mut Vec<String>) {
         if !ids.insert(k.id.as_str()) {
             v.push(format!("duplicate compound {}", k.id));
         }
+        if k.sequence_id.trim().is_empty() {
+            v.push(format!("compound {} has no sequence_id", k.id));
+        }
         if k.removed && !k.bin.is_empty() {
             v.push(format!("removed compound {} is in bin {:?}", k.id, k.bin));
         }
