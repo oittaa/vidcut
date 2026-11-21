@@ -3254,30 +3254,33 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Circle: the radius r is 0.15 of the frame width, times the scale. Soft 1 gives s = 16 pixels a step, times the scale.
   - Circle: key = S((r + s − d) / (2s)), with d the distance from the middle in the axes of the Aspect. With Soft 0, a pixel at d = r is in.
   - Linear: the half sizes are 0.2 of the frame width and height, times the scale. Soft i gives 16 pixels a step, times the scale of its axis.
-  - Linear: each side i gives o = 1 − (d + s) / (2s), with d the distance inside the side. key = S(1 − U(U(U(o₁, o₂), o₃), o₄)).
-  - Linear: the sides go left, top, right, bottom. A side with Soft 0 uses s = 1, and the key is 0 where d ≤ 0.
-  - Polygon: the corners go to whole pixels. Inside and Outside give w = 0.04 of the frame diagonal a step. Size does not scale w.
+  - Linear: each side i gives o = 1 − (d + s) / max(2s, 1 pixel), with d the distance inside the side. key = S(1 − U(U(U(o₁, o₂), o₃), o₄)).
+  - Linear: the sides go left, top, right, bottom. A side with Soft 0 thus has o = 1 − d, with no separate cut.
+  - Polygon: the corners go to whole pixels. Inside and Outside give 0.04 of the frame diagonal a step. Size does not scale them.
+  - Polygon: the width w of a side is this value, but 0.25 pixel at least. Thus Inside 0 or Outside 0 gives an edge of 0.25 pixel.
   - Polygon: d is the distance from the outline, above 0 inside, clamped at −1000 pixels. key = S(0.5 + d / (2w)), with the w of that side.
-  - Polygon: Inside 0 or Outside 0 gives a hard edge on that side of the outline. A pixel on the outline gets 0.5.
+  - Polygon: a pixel on the outline gets 0.5.
   - Gradient: Soft 1 gives s = 100 pixels a step. key = S((s + v) / s), with v the distance above the line.
   - A new circle has Soft 1 = 0.015 of the frame diagonal / 16. A new linear window has Soft 1.25 on each side, and a new gradient Soft 2.
   - A new polygon has its corners at 0.25 of the frame width and height, and no softness.
   - Each window key first takes its Invert, 1 − w. Then Opacity multiplies it.
-  - The windows of one shape join with U, in list order. The shapes then join in the order circle, linear, polygon, curve, gradient.
-  - With one shape and no mask, the key is its join G. Else the adds give P = U(…U(U(0, G₁), G₂)…), over the shapes.
-  - With no mask, the key is P.
-  - The masks join in the same way into M. With masks, key = 1 − U(1 − P, M). With masks only, key = 1 − M.
+  - The add windows of one shape join with U, in list order, into a group A. The mask windows of one shape join in the same way into a group M.
+  - With one group in the node, the key is A of that group, or 1 − M.
+  - Else P starts at 0. Each A, clamped to 0..1, gives P = U(P, A). Then each M gives P = 1 − U(1 − P, M).
+  - The groups go in the order of the shapes: circle, linear, polygon, curve, gradient.
+  - Thus the masks of two shapes or more, with no add window, give a key of 0 at each pixel.
   - The key is clamped to 0..1 at the end. Then the Key Output acts on it ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
-  - Not measured: the masks of two shapes, and three windows of one shape. vidcut joins them with U, as above.
 - vidcut:
   - `grade.window.add` adds a window at its usual values, at the end of the window list. `grade.window.set` changes a window, and `grade.window.remove` removes it.
   - `grade.get` gives the windows of each corrector. The values are those of the palette.
-  - The windows work as measured in the viewer and the export. vidcut renders the 81 measured cases within 3.5e-5.
-  - Not measured in Resolve: the thumbnail of a node with windows. vidcut uses the key of each pixel as k of the thumbnail.
+  - The windows work as measured in the viewer and the export. vidcut renders the 124 measured cases within 1.6e-4.
+  - Measured: the thumbnail of a node uses the window key of each pixel. vidcut uses it as k of the thumbnail.
   - The grade of a clip works after Edit Sizing ([§13](#13-order-of-operations-pp-287296-3407)). Thus a window keeps its place in the frame when the clip moves.
   - A circle made in Resolve with Toggle Display Mode on has no radius ([gotchas](gotchas.md#resolves-renders)). vidcut does not copy this fault.
   - A locked node refuses a change of its windows ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
-  - Not measured in Resolve: whether Reset Node Grade, copy, paste and swap take the windows. vidcut keeps the windows of each node in them.
+  - Measured: Reset Node Grade turns each window off at its usual values, with Invert and Mask off. The rows and their names stay.
+  - Measured: Reset Grades and Keep Nodes does the same to each node. Copy, paste and a swap of two nodes take the windows with the other values.
+  - vidcut: the same.
   - The Window palette, the outlines in the viewer, curve windows and window keyframes come later.
 
 Requests: `grade.window.add`, `grade.window.set` and `grade.window.remove`.

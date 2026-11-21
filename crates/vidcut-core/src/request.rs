@@ -5130,6 +5130,9 @@ pub struct CopiedNode {
     /// As `key` of a grade node. Left out at its usual value.
     #[serde(default, skip_serializing_if = "crate::model::KeyOutput::is_usual")]
     pub key: crate::model::KeyOutput,
+    /// As `windows` of a grade node. Left out when it has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<crate::model::GradeWindow>,
 }
 
 /// A copied keyframe: what `keyframes.copy` returns and `keyframes.paste`

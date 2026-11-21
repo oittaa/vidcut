@@ -143,6 +143,34 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn checked(w: &GradeWindow) -> Result<()> {
+    let (soft, inside, outside, points) = match &w.shape {
+        WindowShape::Linear { soft } => (Some(soft.to_vec()), None, None, None),
+        WindowShape::Circle { soft } | WindowShape::Gradient { soft } => {
+            (Some(vec![*soft]), None, None, None)
+        }
+        WindowShape::Polygon {
+            points,
+            inside,
+            outside,
+        } => (None, Some(*inside), Some(*outside), Some(points.clone())),
+    };
+    let all = WindowChange {
+        size: Some(w.size),
+        aspect: Some(w.aspect),
+        pan: Some(w.pan),
+        tilt: Some(w.tilt),
+        rotate: Some(w.rotate),
+        opacity: Some(w.opacity),
+        soft,
+        inside,
+        outside,
+        points,
+        ..WindowChange::default()
+    };
+    changed(&mut w.clone(), &all)
+}
+
 pub fn set(p: &mut Project, of: &GradeOf, n: u32, i: usize, c: &WindowChange) -> Result<()> {
     if *c == WindowChange::default() {
         return Err(Error::usage("give a value to change"));
