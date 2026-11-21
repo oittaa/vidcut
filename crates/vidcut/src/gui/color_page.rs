@@ -164,6 +164,13 @@ pub(super) struct Graded {
     sent: Option<Instant>,
 }
 
+pub(super) struct WindowName {
+    of: GradeOf,
+    node: u32,
+    index: usize,
+    text: String,
+}
+
 struct Wheel {
     name: &'static str,
     field: &'static str,
@@ -1284,6 +1291,10 @@ impl Workspace {
             .map(|h| &h.grade)
     }
 
+    pub(super) fn grade_unsent(&self) -> bool {
+        (self.effects_page.graded.as_ref()).is_some_and(|h| h.sent.is_none())
+    }
+
     pub(super) fn hold_grade(&mut self, of: &GradeOf, n: u32, grade: Grade) {
         self.effects_page.graded = Some(Graded {
             of: of.clone(),
@@ -1457,7 +1468,7 @@ impl Workspace {
                 None
             }
             GradePalette::Window => {
-                window_acts = self.window_body(ui, &grade, n);
+                window_acts = self.window_body(ui, &grade, (&of, n));
                 None
             }
             GradePalette::Primaries => primaries_body(ui, (&g, mode), &mut changes),
@@ -1466,13 +1477,14 @@ impl Workspace {
         let locked = grade.node(n).is_some_and(|d| d.locked);
         if locked {
             changes.clear();
-            window_acts.clear();
+            window_acts.retain(|a| matches!(a, WindowAct::Pick(_)));
         }
         for act in window_acts {
             self.window_act(&of, &grade, (n, frame, at), act);
         }
         if reset && !locked {
             self.effects_page.graded = None;
+            self.effects_page.window_name = None;
             let node = ("node".to_string(), json!(n));
             let at = ("at".to_string(), json!(self.snap.timeline.position));
             let part = ("palette".to_string(), json!(palette));
@@ -1546,8 +1558,15 @@ impl Workspace {
         palette == GradePalette::Primaries
     }
 
-    fn window_body(&mut self, ui: &mut Ui, grade: &Grade, n: u32) -> Vec<WindowAct> {
-        let windows = grade.node(n).map_or(&[][..], |d| &d.windows[..]);
+    fn window_body(
+        &mut self,
+        ui: &mut Ui,
+        grade: &Grade,
+        (of, n): (&GradeOf, u32),
+    ) -> Vec<WindowAct> {
+        let node = grade.node(n);
+        let windows = node.map_or(&[][..], |d| &d.windows[..]);
+        let locked = node.is_some_and(|d| d.locked);
         let current = self
             .effects_page
             .window
@@ -1555,8 +1574,17 @@ impl Workspace {
         let size = self.project().map_or([0.0; 2], Project::frame_size);
         let usual = (windows.get(current)).map(|w| GradeWindow::new(w.shape.kind(), size));
         let shown = (windows, current, usual.as_ref());
-        let editing = &mut self.effects_page.window_name;
-        grade_windows::window_palette(ui, shown, editing)
+        let mut editing = (self.effects_page.window_name.take())
+            .filter(|e| e.of == *of && e.node == n && e.index < windows.len() && !locked)
+            .map(|e| (e.index, e.text));
+        let acts = grade_windows::window_palette(ui, shown, (&mut editing, locked));
+        self.effects_page.window_name = editing.map(|(index, text)| WindowName {
+            of: of.clone(),
+            node: n,
+            index,
+            text,
+        });
+        acts
     }
 
     fn window_act(
@@ -1581,6 +1609,9 @@ impl Workspace {
         let set = |i: usize, name: &str, v: Value| {
             Map::from_iter([("window".to_string(), json!(i)), (name.to_string(), v)])
         };
+        if !matches!(act, WindowAct::Pick(_) | WindowAct::Rename(..)) {
+            self.effects_page.window_name = None;
+        }
         match act {
             WindowAct::Add(kind) => {
                 self.effects_page.window = windows.len();

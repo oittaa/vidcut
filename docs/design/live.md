@@ -434,6 +434,7 @@ The bar and the Jobs button:
   - `Workspace::window_framing` maps the pixels of the windows to the viewer. It takes the placing of the clip, as the render does (`place::window_back`).
   - Each shape comes from `window_key::shaped`. Thus the outline is where the key is.
   - A drag of a handle changes a copy of the grade (`WindowGrab`). The palette then sends `grade.window.set` when the mouse button comes up, as for a field.
+  - The viewer draws after the palette. Thus a change in the viewer updates the preview at once, and asks for one more frame. In that frame the palette sends it.
   - A click on a polygon edge adds a corner, and a middle-click removes one. Both go through the same copy.
   - A curve has a handle at each point (`Grip::Point`) and at each Bezier handle (`Grip::Tangent`).
   - A click on a curve adds a point with `curve_split`. `curve_inserted` cuts the Bezier segment there, so the shape stays.

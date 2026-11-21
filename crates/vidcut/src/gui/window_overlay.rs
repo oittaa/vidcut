@@ -220,8 +220,9 @@ fn drawn(w: &GradeWindow, s: &Shaped, ([fw, fh], gap, open): ([f64; 2], f64, boo
             let boxed = [[-a, -b], [-a, b], [a, b], [a, -b]].map(at);
             let mut guides = vec![[&boxed[..], &boxed[..1]].concat()];
             if sf > 0.0 {
-                guides.push(ellipse((r - sf).max(0.0)));
-                guides.push(ellipse(r + sf));
+                for o in [ellipse((r - sf).max(0.0)), ellipse(r + sf)] {
+                    guides.push([&o[..], &o[..1]].concat());
+                }
             }
             let (oa, ob) = (((r + sf) / sx).max(a + gap), ((r + sf) / sy).max(b + gap));
             let (tip, stem) = turn(circle_scale(w.size));
@@ -493,6 +494,15 @@ fn curve_inserted(
     Some(next)
 }
 
+fn outward(i: usize, [u, v]: [f64; 2]) -> f64 {
+    match i % 4 {
+        0 => -u,
+        1 => v,
+        2 => u,
+        _ => -v,
+    }
+}
+
 fn dragged(
     w: &GradeWindow,
     grip: Grip,
@@ -524,8 +534,8 @@ fn dragged(
             let [sx, sy] = shrink.map(|v| v.max(1.0 / FAR));
             let (mut a, mut b) = (radius / sx, radius / sy);
             match i % 2 {
-                0 => a = (a + lt[0].abs() - lf[0].abs()).max(1.0),
-                _ => b = (b + lt[1].abs() - lf[1].abs()).max(1.0),
+                0 => a = (a + outward(i, lt) - outward(i, lf)).max(1.0),
+                _ => b = (b + outward(i, lt) - outward(i, lf)).max(1.0),
             }
             n.aspect = span(match a >= b {
                 true => 100.0 - 50.0 * b / a,
@@ -534,10 +544,7 @@ fn dragged(
             n.size = span(circle_size(a.min(b) / (CIRCLE_RADIUS * frame[0])));
         }
         (Grip::Soft(i), Outline::Circle { shrink, .. }, WindowShape::Circle { soft }) => {
-            let along = |l: [f64; 2]| match i % 2 {
-                0 => l[0].abs() * shrink[0],
-                _ => l[1].abs() * shrink[1],
-            };
+            let along = |l: [f64; 2]| outward(i, l) * shrink[i % 2];
             let k = circle_scale(w.size);
             let px = (*soft * SOFT_STEP * k + along(lt) - along(lf)).max(0.0);
             *soft = span(px / (SOFT_STEP * k));
@@ -726,6 +733,9 @@ impl Workspace {
         resp: &Response,
         picture: egui::Rect,
     ) -> bool {
+        if !ui.input(|i| i.pointer.primary_down()) {
+            self.effects_page.window_grab = None;
+        }
         if self.effects_page.page != Page::Color
             || self.effects_page.palette != GradePalette::Window
         {
@@ -923,6 +933,12 @@ impl Workspace {
             if removed {
                 self.effects_page.window = index;
                 self.hold_grade(&of, n, next);
+            }
+        }
+        if self.grade_unsent() {
+            self.sync_picture_preview();
+            if !ui.input(|i| i.pointer.any_down()) {
+                ui.ctx().request_repaint();
             }
         }
         true

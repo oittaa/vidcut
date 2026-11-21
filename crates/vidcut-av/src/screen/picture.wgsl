@@ -1943,14 +1943,22 @@ fn window_one(b: u32, q: vec2<f32>) -> f32 {
             let w = vec2<f32>(u / p.x, v / p.y);
             let first = u32(window_cell(b, 13u));
             var j = 0.0;
+            var sides = 0u;
             for (var i = 0u; i < 4u; i++) {
                 let a = window_point(first + i);
                 let e = window_point(first + (i + 1u) % 4u) - a;
-                let n = max(length(e), 1e-6);
+                let n = length(e);
+                if n < 1e-6 {
+                    continue;
+                }
                 let d = ((w.x - a.x) * e.y - (w.y - a.y) * e.x) / n;
                 let least = length(vec2<f32>(e.y / (n * p.x), e.x / (n * p.y)));
                 let o = window_side(d, window_cell(b, 9u + i), least);
-                j = select(window_join(j, o), o, i == 0u);
+                j = select(window_join(j, o), o, sides == 0u);
+                sides++;
+            }
+            if sides == 0u {
+                return 0.0;
             }
             return smoothstep(0.0, 1.0, 1.0 - j);
         }
