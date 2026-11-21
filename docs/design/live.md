@@ -444,7 +444,8 @@ The bar and the Jobs button:
   - A drag of a Bezier handle turns the opposite handle with it (`turned_with`). With Alt, the opposite handle stays.
 - The Node Editor of the grade is at the right of the viewer (`Workspace::grade_nodes_panel`).
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
-  - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.
+  - `EffectsPage::grade_nodes` holds the selection, and `gui.grade_nodes` sets it. The last one is the current node.
+  - With `EffectsPage::grade_loose`, the current node is not selected (`EffectsPage::picked_grade`). A drag box that leaves out the current node sets it.
   - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
   - In List View, the current row has a red outline (`CURRENT_ROW`). It is the red of the active angle (`ACTIVE_ANGLE`).
   - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.
