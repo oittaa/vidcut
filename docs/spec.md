@@ -3040,7 +3040,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.cleanup` and `gui.node_view` with `zoom`, `list` and `wide`.
   - vidcut: Cleanup Node Graph sends `grade.cleanup` with `area`, the visible part of the Node Editor. One column or one row goes to the middle.
   - vidcut: without `area`, the columns are one grid step apart. With `area`, the nodes never come closer than without it.
-  - vidcut: a mixer row shows the name of the mixer. With Show Thumbnails on, a corrector row has its thumbnail after the lock.
+  - vidcut: a mixer row shows the kind of the mixer, then its label. With Show Thumbnails on, a corrector row has its thumbnail after the lock.
   - vidcut: the lock of a row locks or unlocks its node. A row of a mixer has a lock too.
 - **Turn off and reset** (pp. 3392–3393):
   - A click on the number of a node, or Command-D, turns it off or on. Option-D does this for all nodes.

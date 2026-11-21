@@ -503,8 +503,8 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
             let dim = c.text_dim.gamma_multiply(fade);
             let start = r.left() + 6.0;
             let (number, text) = match t.switch {
-                true => (t.label.as_str(), t.note.as_str()),
-                false => ("", t.label.as_str()),
+                true => (t.label.as_str(), t.note.clone()),
+                false => ("", format!("{} {}", t.label, t.note).trim_end().to_string()),
             };
             painter.text(
                 pos2(start, r.center().y),
@@ -565,7 +565,7 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
             if !editing && !text.is_empty() {
                 let color = c.text.gamma_multiply(fade);
                 let width = right - left;
-                let shown = super::history::one_line(ui, text, width, font.clone(), color);
+                let shown = super::history::one_line(ui, &text, width, font.clone(), color);
                 painter.galley(
                     pos2(left, r.center().y - shown.size().y / 2.0),
                     shown,
