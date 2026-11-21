@@ -193,11 +193,7 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
             "Primaries",
         ),
         (changed.iter().any(log), icon::CIRCLE_HALF, "Log"),
-        (
-            d.keys.iter().any(|k| k.values != **c),
-            icon::DIAMOND,
-            "Keyframes",
-        ),
+        (d.is_animated(), icon::DIAMOND, "Keyframes"),
     ]
     .into_iter()
     .filter(|(on, ..)| *on)

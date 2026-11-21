@@ -3860,6 +3860,11 @@ pub struct GradeNode {
     /// has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<GradeKey>,
+    /// Its keyframes have held different values since its first keyframe
+    /// came. The node editor then shows a keyframe badge. Left out when
+    /// not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub animated: bool,
 }
 
 impl GradeNode {
@@ -3871,6 +3876,17 @@ impl GradeNode {
             place,
             label: String::new(),
             keys: Vec::new(),
+            animated: false,
+        }
+    }
+
+    pub fn is_animated(&self) -> bool {
+        match &self.tool {
+            GradeTool::Corrector(c) => {
+                !self.keys.is_empty()
+                    && (self.animated || self.keys.iter().any(|k| k.values != **c))
+            }
+            _ => false,
         }
     }
 }

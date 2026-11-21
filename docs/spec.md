@@ -2908,10 +2908,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: Primaries changes give one bars badge: balance, offset, saturation, hue and lum mix. Contrast and the Log wheels give a circle badge.
   - Measured: the pivot and the Log ranges alone give no badge.
   - Measured: one keyframe, or two keyframes with equal values, give no keyframe badge. A change at a keyframe gives it.
+  - Measured: the keyframe badge stays when the value goes back, so that the keyframes are equal again.
   - vidcut: `grade.set` with `label`. Node Label in the menu of a corrector and a double-click on the label edit the label in place. Enter keeps the text, and Esc drops it.
   - vidcut: a long label ends in "…". A pointer on it shows the full text.
   - vidcut: the Primaries, Log and Keyframes badges are at the right of the node. The first two count the values of the node and of each keyframe.
-  - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node.
+  - vidcut: the Keyframes badge shows when the keyframes do not all have the values of the node. It stays until the last keyframe goes (`animated` of the node).
 - **Add nodes** (pp. 3394–3395, 3410–3413):
   - The menu of a node has an Add Node submenu. The menu of the empty Node Editor has Add Node > Corrector. That corrector has no connection.
   - Alt+S adds a serial node after the current node. Alt+K appends a serial node at the end of the tree.
