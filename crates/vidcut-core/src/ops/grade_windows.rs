@@ -90,7 +90,7 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
     let wrong = |field: &str| Error::invalid(format!("this window has no `{field}`"));
     match (&mut w.shape, &c.soft) {
         (_, None) => {}
-        (WindowShape::Linear { soft }, Some(given)) => {
+        (WindowShape::Linear { soft, .. }, Some(given)) => {
             let given: [f64; 4] = given.as_slice().try_into().map_err(|_| {
                 Error::invalid("a linear window takes four `soft` values: left, top, right, bottom")
             })?;
@@ -105,6 +105,9 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
             *soft = in_range("soft", *v, soft_range)?;
         }
         (WindowShape::Polygon { .. }, Some(_)) => return Err(wrong("soft")),
+    }
+    if c.points.iter().flatten().flatten().any(|v| !v.is_finite()) {
+        return Err(Error::invalid("each point takes two numbers"));
     }
     match &mut w.shape {
         WindowShape::Polygon {
@@ -122,22 +125,34 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
                 if given.len() < 3 {
                     return Err(Error::invalid("a polygon takes three `points` or more"));
                 }
-                if given.iter().flatten().any(|v| !v.is_finite()) {
-                    return Err(Error::invalid("each point takes two numbers"));
-                }
                 points.clone_from(given);
             }
         }
-        _ => {
-            for (field, given) in [
-                ("inside", c.inside.is_some()),
-                ("outside", c.outside.is_some()),
-                ("points", c.points.is_some()),
-            ] {
-                if given {
-                    return Err(wrong(field));
-                }
+        WindowShape::Linear { points, .. } => {
+            if let Some(given) = &c.points {
+                *points = given.as_slice().try_into().map_err(|_| {
+                    Error::invalid("a linear window takes four `points`: bottom left, top left, top right, bottom right")
+                })?;
             }
+            no_inside_outside(c, &wrong)?;
+        }
+        _ => {
+            if c.points.is_some() {
+                return Err(wrong("points"));
+            }
+            no_inside_outside(c, &wrong)?;
+        }
+    }
+    Ok(())
+}
+
+fn no_inside_outside(c: &WindowChange, wrong: &dyn Fn(&str) -> Error) -> Result<()> {
+    for (field, given) in [
+        ("inside", c.inside.is_some()),
+        ("outside", c.outside.is_some()),
+    ] {
+        if given {
+            return Err(wrong(field));
         }
     }
     Ok(())
@@ -145,7 +160,9 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
 
 pub(super) fn checked(w: &GradeWindow) -> Result<()> {
     let (soft, inside, outside, points) = match &w.shape {
-        WindowShape::Linear { soft } => (Some(soft.to_vec()), None, None, None),
+        WindowShape::Linear { soft, points } => {
+            (Some(soft.to_vec()), None, None, Some(points.to_vec()))
+        }
         WindowShape::Circle { soft } | WindowShape::Gradient { soft } => {
             (Some(vec![*soft]), None, None, None)
         }

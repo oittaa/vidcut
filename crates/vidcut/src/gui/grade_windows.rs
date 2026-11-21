@@ -100,7 +100,7 @@ fn value(w: &GradeWindow, f: Field) -> Option<f64> {
         (Field::Tilt, _) => Some(w.tilt),
         (Field::Rotate, _) => Some(w.rotate),
         (Field::Opacity, _) => Some(w.opacity),
-        (Field::Soft(i), WindowShape::Linear { soft }) => soft.get(i).copied(),
+        (Field::Soft(i), WindowShape::Linear { soft, .. }) => soft.get(i).copied(),
         (Field::Soft(0), WindowShape::Circle { soft } | WindowShape::Gradient { soft }) => {
             Some(*soft)
         }
@@ -120,7 +120,7 @@ pub(super) fn with_value(w: &GradeWindow, f: Field, v: f64) -> GradeWindow {
         Field::Rotate => w.rotate = v,
         Field::Opacity => w.opacity = v,
         Field::Soft(_) | Field::Inside | Field::Outside => match (f, &mut w.shape) {
-            (Field::Soft(i), WindowShape::Linear { soft }) if i < soft.len() => soft[i] = v,
+            (Field::Soft(i), WindowShape::Linear { soft, .. }) if i < soft.len() => soft[i] = v,
             (Field::Soft(_), WindowShape::Circle { soft } | WindowShape::Gradient { soft }) => {
                 *soft = v;
             }
@@ -159,8 +159,22 @@ pub(super) fn window_changes(from: &GradeWindow, to: &GradeWindow) -> Map<String
         m.insert("invert".into(), json!(to.invert));
     }
     match (&from.shape, &to.shape) {
-        (WindowShape::Linear { soft: a }, WindowShape::Linear { soft: b }) if a != b => {
-            m.insert("soft".into(), json!(b));
+        (
+            WindowShape::Linear {
+                soft: a,
+                points: ap,
+            },
+            WindowShape::Linear {
+                soft: b,
+                points: bp,
+            },
+        ) => {
+            if a != b {
+                m.insert("soft".into(), json!(b));
+            }
+            if ap != bp {
+                m.insert("points".into(), json!(bp));
+            }
         }
         (WindowShape::Circle { soft: a }, WindowShape::Circle { soft: b })
         | (WindowShape::Gradient { soft: a }, WindowShape::Gradient { soft: b })

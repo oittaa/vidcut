@@ -5,7 +5,6 @@ pub const SOFT_STEP: f64 = 16.0;
 pub const GRADIENT_SOFT_STEP: f64 = 100.0;
 pub const POLYGON_SOFT_STEP: f64 = 1.0 / 25.0;
 pub const CIRCLE_RADIUS: f64 = 0.15;
-pub const LINEAR_HALF: f64 = 0.2;
 pub const LINEAR_MOST: f64 = 4.0;
 pub const FAR_OUTSIDE: f64 = 1000.0;
 pub const EVEN: f64 = 1e-6;
@@ -19,7 +18,8 @@ pub enum Outline {
         shrink: [f64; 2],
     },
     Linear {
-        half: [f64; 2],
+        corners: [[f64; 2]; 4],
+        scale: [f64; 2],
         soft: [f64; 4],
     },
     Polygon {
@@ -74,6 +74,13 @@ pub fn circle_scale(size: f64) -> f64 {
     }
 }
 
+fn origin(window: &GradeWindow, [w, h]: [f64; 2]) -> [f64; 2] {
+    [
+        w / 2.0 + (window.pan - 50.0) * PAN_STEP,
+        h / 2.0 - (window.tilt - 50.0) * PAN_STEP,
+    ]
+}
+
 pub fn aspect_shrink(aspect: f64) -> [f64; 2] {
     [
         if aspect > 50.0 {
@@ -109,11 +116,27 @@ impl Keying {
     }
 }
 
+fn linear_scales(size: f64, aspect: f64) -> [f64; 2] {
+    let k = linear_scale(size);
+    aspect_shrink(aspect).map(|s| match s * LINEAR_MOST > k {
+        true => k / s,
+        false => LINEAR_MOST,
+    })
+}
+
+fn pivot(points: &[[f64; 2]; 4], [w, h]: [f64; 2]) -> [f64; 2] {
+    let n = points.len() as f64;
+    let [sx, sy] = (points.iter()).fold([0.0, 0.0], |[x, y], [px, py]| [x + px, y + py]);
+    [sx * w / n, sy * h / n]
+}
+
 fn shaped(window: &GradeWindow, [w, h]: [f64; 2]) -> Shaped {
-    let middle = [
-        w / 2.0 + (window.pan - 50.0) * PAN_STEP,
-        h / 2.0 - (window.tilt - 50.0) * PAN_STEP,
-    ];
+    let origin = origin(window, [w, h]);
+    let turned = match &window.shape {
+        WindowShape::Linear { points, .. } => pivot(points, [w, h]),
+        _ => [0.0, 0.0],
+    };
+    let middle = [origin[0] + turned[0], origin[1] - turned[1]];
     let (sin, cos) = window.rotate.to_radians().sin_cos();
     let [cos, sin] = [cos, sin].map(|v| if v.abs() < TRIG_ZERO { 0.0 } else { v });
     let outline = match &window.shape {
@@ -125,18 +148,11 @@ fn shaped(window: &GradeWindow, [w, h]: [f64; 2]) -> Shaped {
                 shrink: aspect_shrink(window.aspect),
             }
         }
-        WindowShape::Linear { soft } => {
-            let k = linear_scale(window.size);
-            let [ax, ay] = aspect_shrink(window.aspect).map(|s| match s * LINEAR_MOST > k {
-                true => k / s,
-                false => LINEAR_MOST,
-            });
-            let axis = [ax, ay, ax, ay];
-            Outline::Linear {
-                half: [LINEAR_HALF * w * ax, LINEAR_HALF * h * ay],
-                soft: std::array::from_fn(|i| SOFT_STEP * soft[i] * axis[i]),
-            }
-        }
+        WindowShape::Linear { soft, points } => Outline::Linear {
+            corners: points.map(|[px, py]| [px * w - turned[0], py * h - turned[1]]),
+            scale: linear_scales(window.size, window.aspect),
+            soft: soft.map(|s| SOFT_STEP * s),
+        },
         WindowShape::Polygon {
             points,
             inside,
