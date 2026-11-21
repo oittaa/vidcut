@@ -110,6 +110,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.keys.set", &["clip"]),
     ("grade.keys.move", &["clip"]),
     ("grade.keys.remove", &["clip"]),
+    ("grade.window.add", &["shape", "clip"]),
+    ("grade.window.set", &["window", "clip"]),
+    ("grade.window.remove", &["window", "clip"]),
     ("effects.add", &["clips", "kind"]),
     ("comp.add", &["clip", "tool"]),
     ("comp.set", &["clip", "node"]),
@@ -229,6 +232,7 @@ const GROUPS: &[(&str, &str)] = &[
         "The grades of clips and of the timeline: nodes of primary corrections and mixers",
     ),
     ("grade.keys", "Keyframes of the correctors of a grade"),
+    ("grade.window", "Windows of the correctors of a grade"),
     (
         "gui",
         "The running GUI: its window, command log, screenshots, panels, target track and timeline view",

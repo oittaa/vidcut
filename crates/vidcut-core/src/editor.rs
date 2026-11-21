@@ -4846,6 +4846,66 @@ fn mutate(
             ops::grade_keys::remove(p, &of, *node, &pick)?;
             Value::Null
         }
+        Request::GradeWindowAdd {
+            clip,
+            timeline,
+            node,
+            shape,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let window = ops::grade_windows::add(p, &of, *node, *shape)?;
+            json!({ "window": window })
+        }
+        Request::GradeWindowSet {
+            clip,
+            timeline,
+            node,
+            window,
+            on,
+            name,
+            invert,
+            mask,
+            size,
+            aspect,
+            pan,
+            tilt,
+            rotate,
+            opacity,
+            soft,
+            inside,
+            outside,
+            points,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let change = ops::grade_windows::WindowChange {
+                on: *on,
+                name: name.clone(),
+                invert: *invert,
+                mask: *mask,
+                size: *size,
+                aspect: *aspect,
+                pan: *pan,
+                tilt: *tilt,
+                rotate: *rotate,
+                opacity: *opacity,
+                soft: soft.clone(),
+                inside: *inside,
+                outside: *outside,
+                points: points.clone(),
+            };
+            ops::grade_windows::set(p, &of, *node, *window, &change)?;
+            Value::Null
+        }
+        Request::GradeWindowRemove {
+            clip,
+            timeline,
+            node,
+            window,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade_windows::remove(p, &of, *node, *window)?;
+            Value::Null
+        }
         Request::EffectsAdd { clips, kind } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             ops::effect::add(p, &ids, *kind)?

@@ -3875,6 +3875,10 @@ pub struct GradeNode {
     /// not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
+    /// The windows of a corrector, in the order of the window list. They
+    /// make the key of the corrector. Left out when it has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<GradeWindow>,
 }
 
 impl GradeNode {
@@ -3889,6 +3893,7 @@ impl GradeNode {
             animated: false,
             key: KeyOutput::default(),
             locked: false,
+            windows: Vec::new(),
         }
     }
 
@@ -3900,6 +3905,134 @@ impl GradeNode {
                         || (self.keys.iter()).any(|k| k.values != **c || k.key != self.key))
             }
             _ => false,
+        }
+    }
+}
+
+/// A window of a corrector. The windows that are on make the key of the
+/// corrector: the windows of one shape join first, then the shapes, in
+/// the order linear, circle, polygon, gradient. A mask takes its key away
+/// from the key of the others. The place of a window is in pixels of the
+/// timeline frame, from its middle.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GradeWindow {
+    #[serde(flatten)]
+    pub shape: WindowShape,
+    /// Off, the window is not in the key. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub on: bool,
+    /// The name in the window list. Left out when it has none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    /// The window gives 1 minus its key. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invert: bool,
+    /// The window takes its key away from the key of the other windows,
+    /// and alone gives 1 minus its key. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mask: bool,
+    /// From 0. Up to 50, the shape grows to its usual size. Above 50, it
+    /// grows by 0.06 of that size a step, a circle by 0.08. Usual: 50.
+    pub size: f64,
+    /// From 0 to 100. Above 50 the shape is wider, and below 50 it is
+    /// taller. A linear window and a circle only. Usual: 50.
+    pub aspect: f64,
+    /// To the right by 81.92 pixels of the timeline a step. Usual: 50.
+    pub pan: f64,
+    /// Up by 81.92 pixels of the timeline a step. Usual: 50.
+    pub tilt: f64,
+    /// Degrees, clockwise. Usual: 0.
+    pub rotate: f64,
+    /// The share of the key of the window, from 0 to 100. Usual: 100.
+    pub opacity: f64,
+}
+
+/// The shape of a window, with its softness.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "shape", rename_all = "snake_case")]
+pub enum WindowShape {
+    /// A rectangle, 0.4 of the frame wide and 0.4 of the frame high at
+    /// size 50.
+    Linear {
+        /// The softness of the left, the top, the right and the bottom
+        /// side: 16 pixels of the timeline a step. Usual: 1.25 each.
+        soft: [f64; 4],
+    },
+    /// A round shape with a radius of 0.15 of the frame width at size 50.
+    Circle {
+        /// The softness of the edge: 16 pixels of the timeline a step. A
+        /// new circle gets 0.015 of the frame diagonal.
+        soft: f64,
+    },
+    /// A shape with straight sides.
+    Polygon {
+        /// The corners `[x, y]`, in frame widths and frame heights from the
+        /// middle of the window, y up. A new polygon has its corners at
+        /// 0.25 of the frame.
+        points: Vec<[f64; 2]>,
+        /// The softness inside the edge: 0.04 of the frame diagonal a step.
+        /// Usual: 0.
+        inside: f64,
+        /// The softness outside the edge: 0.04 of the frame diagonal a
+        /// step. Usual: 0.
+        outside: f64,
+    },
+    /// A line through the middle of the window. The key is 1 above it and
+    /// goes to 0 below it.
+    Gradient {
+        /// The softness below the line: 100 pixels of the timeline a step.
+        /// Usual: 2.
+        soft: f64,
+    },
+}
+
+/// The shape of a new window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowKind {
+    Linear,
+    Circle,
+    Polygon,
+    Gradient,
+}
+
+impl WindowShape {
+    pub fn kind(&self) -> WindowKind {
+        match self {
+            Self::Linear { .. } => WindowKind::Linear,
+            Self::Circle { .. } => WindowKind::Circle,
+            Self::Polygon { .. } => WindowKind::Polygon,
+            Self::Gradient { .. } => WindowKind::Gradient,
+        }
+    }
+}
+
+impl GradeWindow {
+    pub fn new(kind: WindowKind, [w, h]: [f64; 2]) -> Self {
+        let shape = match kind {
+            WindowKind::Linear => WindowShape::Linear { soft: [1.25; 4] },
+            WindowKind::Circle => WindowShape::Circle {
+                soft: 0.015 * w.hypot(h) / 16.0,
+            },
+            WindowKind::Polygon => WindowShape::Polygon {
+                points: vec![[-0.25, -0.25], [-0.25, 0.25], [0.25, 0.25], [0.25, -0.25]],
+                inside: 0.0,
+                outside: 0.0,
+            },
+            WindowKind::Gradient => WindowShape::Gradient { soft: 2.0 },
+        };
+        Self {
+            shape,
+            on: true,
+            name: String::new(),
+            invert: false,
+            mask: false,
+            size: 50.0,
+            aspect: 50.0,
+            pan: 50.0,
+            tilt: 50.0,
+            rotate: 0.0,
+            opacity: 100.0,
         }
     }
 }

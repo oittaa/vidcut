@@ -13,7 +13,7 @@ use crate::model::{
     GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind, GrainComposite, GrainPreset, Handle,
     LowerThirdLine, Node, PathSample, PictureTool, PictureTransition, Place, Subject,
     SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay,
-    VignetteMode, VignetteShape, ZoomBox,
+    VignetteMode, VignetteShape, WindowKind, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -3095,6 +3095,82 @@ pub enum Request {
         frames: Option<OneOrMany<i64>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<OneOrMany<TimeSpec>>,
+    },
+    /// Add a window at its usual values to a corrector of the grade of a
+    /// clip, or with `timeline` of the timeline grade. It goes last in the
+    /// window list. Returns its `window` number, from 0.
+    #[serde(rename = "grade.window.add")]
+    GradeWindowAdd {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// The number of the corrector, from 1.
+        node: u32,
+        shape: WindowKind,
+    },
+    /// Change values of a window of a corrector of the grade of a clip, or
+    /// with `timeline` of the timeline grade. Each value given replaces its
+    /// own, as `GradeWindow` says.
+    #[serde(rename = "grade.window.set")]
+    GradeWindowSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// The number of the corrector, from 1.
+        node: u32,
+        /// The number of the window in the window list, from 0.
+        window: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invert: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mask: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        aspect: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pan: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tilt: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotate: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        opacity: Option<f64>,
+        /// One value for a circle or a gradient. Four for a linear window:
+        /// left, top, right and bottom.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        soft: Option<Vec<f64>>,
+        /// A polygon only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inside: Option<f64>,
+        /// A polygon only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outside: Option<f64>,
+        /// The corners of a polygon, three or more.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        points: Option<Vec<[f64; 2]>>,
+    },
+    /// Remove a window of a corrector of the grade of a clip, or with
+    /// `timeline` of the timeline grade. The windows after it move up.
+    #[serde(rename = "grade.window.remove")]
+    GradeWindowRemove {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// The number of the corrector, from 1.
+        node: u32,
+        /// The number of the window in the window list, from 0.
+        window: usize,
     },
     /// Add an effect at its usual values after the effects of clips:
     /// footage, stills, image sequences and compound clips. A generator takes

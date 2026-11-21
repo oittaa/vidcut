@@ -594,6 +594,7 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd) -> Result<u32> {
                 animated: false,
                 key: Default::default(),
                 locked: false,
+                windows: Vec::new(),
             });
         }
     }

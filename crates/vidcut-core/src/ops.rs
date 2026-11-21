@@ -7,6 +7,7 @@ mod follow;
 pub mod generators;
 pub mod grade;
 pub mod grade_keys;
+pub mod grade_windows;
 pub mod keyframes;
 pub mod linked;
 pub mod motion;
