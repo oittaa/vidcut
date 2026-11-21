@@ -3013,8 +3013,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
   - vidcut: the menu of a mixer has these items in this order, but not Remove One Input ([todo](todo/color-page.md)).
   - vidcut: in the Add Node submenu of a mixer, only Add Serial and Append Node work. The other items are grey. This is not measured in Resolve.
-- **Lock Node** (pp. 3374, 3453):
-  - A lock prevents any change to its node. A locked node shows a lock icon. Lock Node in the menu of a node locks or unlocks it (p. 3453).
+- **Lock Node** (pp. 3374, 3454):
+  - A lock prevents any change to its node. A locked node shows a lock icon. Lock Node in the menu of a node locks or unlocks it (p. 3454).
   - A new Shared node is locked (p. 3374).
   - Measured in Resolve Studio 21.2: Lock Node has a check mark on a locked node. The lock icon is at the bottom right of the node.
   - Measured: a locked corrector refuses a typed Contrast, a typed Key Output Gain and Reset Node Grade. The field shows the typed value, then the stored value again.
