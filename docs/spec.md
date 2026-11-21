@@ -3272,9 +3272,11 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - A linear window clamps the scale of each axis to 4.
   - Circle: the radius r is 0.15 of the frame width, times the scale. Soft 1 gives s = 16 pixels a step, times the scale.
   - Circle: key = S((r + s − d) / (2s)), with d the distance from the middle in the axes of the Aspect. With Soft 0, a pixel at d = r is in.
-  - Linear: the half sizes are 0.2 of the frame width and height, times the scale. Soft i gives 16 pixels a step, times the scale of its axis.
-  - Linear: each side i gives o = 1 − (d + s) / max(2s, 1 pixel), with d the distance inside the side. key = S(1 − U(U(U(o₁, o₂), o₃), o₄)).
-  - Linear: the sides go left, top, right, bottom. A side with Soft 0 thus has o = 1 − d, with no separate cut.
+  - Linear: the window has four corners: bottom left, top left, top right and bottom right. A new linear window has them at 0.2 of the frame width and height from its middle.
+  - Linear: Size, Aspect and Rotate act about the mean of the corners. Pan and Tilt move the corners and their mean together.
+  - Linear: a pixel maps back by Pan, Tilt, Rotate and the scales of the axes. Each side is on the line through its two corners. d is the distance inside the side in this unscaled space.
+  - Linear: Soft i gives s = 16 pixels a step, in the same space. Each side i gives o = 1 − (d + s) / max(2s, f). f is one frame pixel along the normal of the side.
+  - Linear: key = S(1 − U(U(U(o₁, o₂), o₃), o₄)). The sides go left, top, right, bottom. A side with Soft 0 thus has o = 1 − d in frame pixels, with no separate cut.
   - Polygon: the corners go to whole pixels. Inside and Outside give 0.04 of the frame diagonal a step. Size does not scale them.
   - Polygon: the width w of a side is this value, but 0.25 pixel at least. Thus Inside 0 or Outside 0 gives an edge of 0.25 pixel.
   - Polygon: d is the distance from the outline, above 0 inside, clamped at −1000 pixels. key = S(0.5 + d / (2w)), with the w of that side.
@@ -3299,6 +3301,12 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Delete in the Window palette on a first window shows a warning line in the status bar.
   - `grade.get` gives the windows of each corrector. The values are those of the palette.
   - The windows work as measured in the viewer and the export. vidcut renders the 133 measured cases within 1.6e-4.
+  - Measured: a drag of a corner of a linear window in the viewer moves only that corner. Size and Pan stay. The center of Size, Aspect and Rotate becomes the mean of the corners.
+  - vidcut renders the 16 measured linear windows with a moved corner within 2.2e-4, except one pixel at 6.3e-4.
+  - vidcut keeps no separate center: it is always the mean of the corners. Resolve keeps it as a separate value, which a DRX file can set.
+  - Not measured: whether a drag of a side of a linear window changes that center in Resolve.
+  - `grade.window.set` with `points` sets the four corners of a linear window.
+  - Two equal corners give a side of no length. The key leaves that side out. Not measured: equal corners in Resolve.
   - Measured: the thumbnail of a node uses the window key of each pixel. vidcut uses it as k of the thumbnail.
   - Measured: a window moves with the Edit Sizing of its clip: position, zoom, rotation, flips, pitch, yaw and Dynamic Zoom.
   - Measured: its outline in the viewer moves with the position and the zoom.

@@ -3952,12 +3952,17 @@ pub struct GradeWindow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "shape", rename_all = "snake_case")]
 pub enum WindowShape {
-    /// A rectangle, 0.4 of the frame wide and 0.4 of the frame high at
-    /// size 50.
+    /// A shape with four corners. A new one is a rectangle, 0.4 of the
+    /// frame wide and 0.4 of the frame high at size 50.
     Linear {
         /// The softness of the left, the top, the right and the bottom
         /// side: 16 pixels of the timeline a step. Usual: 1.25 each.
         soft: [f64; 4],
+        /// The corners `[x, y]`: bottom left, top left, top right and
+        /// bottom right, in frame widths and frame heights from the middle
+        /// of the window, y up. Size, Aspect and Rotate act about their
+        /// mean. A new linear window has them at 0.2 of the frame.
+        points: [[f64; 2]; 4],
     },
     /// A round shape with a radius of 0.15 of the frame width at size 50.
     Circle {
@@ -4015,7 +4020,10 @@ impl WindowShape {
 impl GradeWindow {
     pub fn new(kind: WindowKind, [w, h]: [f64; 2]) -> Self {
         let shape = match kind {
-            WindowKind::Linear => WindowShape::Linear { soft: [1.25; 4] },
+            WindowKind::Linear => WindowShape::Linear {
+                soft: [1.25; 4],
+                points: [[-0.2, -0.2], [-0.2, 0.2], [0.2, 0.2], [0.2, -0.2]],
+            },
             WindowKind::Circle => WindowShape::Circle {
                 soft: 0.015 * w.hypot(h) / 16.0,
             },

@@ -1318,8 +1318,17 @@ fn key_into(
                 soft,
                 shrink,
             } => (0.0, &[*radius, *soft, shrink[0], shrink[1]]),
-            WindowOutline::Linear { half, soft } => {
-                (1.0, &[half[0], half[1], soft[0], soft[1], soft[2], soft[3]])
+            WindowOutline::Linear {
+                corners,
+                scale,
+                soft,
+            } => {
+                let first = (points.len() / 2) as f64;
+                points.extend(corners.iter().flatten());
+                c[7..14].copy_from_slice(&[
+                    scale[0], scale[1], soft[0], soft[1], soft[2], soft[3], first,
+                ]);
+                (1.0, &[])
             }
             WindowOutline::Polygon {
                 points: corners,
