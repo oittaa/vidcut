@@ -618,6 +618,18 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - Speed Warp on gave one sharp bar for the 30-pixel jump. It smeared the 150-pixel jump.
   - Measured with renders of 24-frame Smooth Cuts between pictures with a bar at known places.
 
+## Resolve's edits
+
+These facts come from measurements in Resolve Studio 21.2, by hand and through its scripting API.
+
+- **Convert In and Out to Compound Clip changes locked tracks.**
+  - It cuts the clips of a locked track at the marks, and takes the part in the range inside.
+  - It cuts a cue of a locked subtitle track at the marks. Both parts stay on that track.
+  - The tracks stay locked, and no message shows.
+  - vidcut does not change a locked track:
+    - A clip in the range on a locked track refuses the request, with a message.
+    - A cue on a locked subtitle track stays whole.
+
 ## Resolve's renders
 
 These facts come from float renders in Resolve Studio 21.2, without color management.

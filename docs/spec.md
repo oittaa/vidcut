@@ -2473,12 +2473,12 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - It opens the same window.
   - It cuts the clips at In and at the frame after Out, on all tracks. The Out frame is inside.
   - Thus In 24 and Out 120 give 97 frames, from 24 up to 121.
-  - A subtitle cue across In is cut there too, also on a locked track. Both parts stay on their subtitle track (measured in Resolve Studio 21.2).
+  - A subtitle cue across In is cut there too. Both parts stay on their subtitle track (measured in Resolve Studio 21.2).
   - The compound clip goes on the lowest video track and the lowest audio track with clips in the range, linked.
   - The lowest track with clips in the range is inner V1 or A1. A track below it does not go inside.
   - The clips of the other tracks go inside. Those tracks stay on the timeline, empty.
   - The inner tracks start at the In frame.
-  - A locked track does not stop it. Its clips in the range are cut and go inside.
+  - A locked track does not stop it, and changes: [Resolve's edits](gotchas.md#resolves-edits).
   - With only In, the range runs to the end of the timeline. With only Out, the range starts at the start of the timeline.
   - With no marks, the menu does not have this item or Create Compound Clip….
   - A range with no clips does nothing, and shows no message.

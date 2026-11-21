@@ -767,6 +767,7 @@ pub fn cut_all(p: &mut Project, at: i64) {
     let across: Vec<String> = p
         .subtitles
         .iter()
+        .filter(|t| !t.locked)
         .flat_map(|t| &t.cues)
         .filter(|c| c.start < at && at < c.end())
         .map(|c| c.id.clone())

@@ -1470,13 +1470,12 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:** ([spec §8.18](spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
   - A selection can hold only the picture or only the sound of a linked clip.
   - A selected item on a locked track stays out, and the other items go in.
-  - Convert In and Out to Compound Clip ignores a lock. It cuts a locked track and takes its clips inside.
   - A range with no clips does nothing, and shows no message.
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. It then plays inside.
   - Decompose in Place has a submenu: Using Clips Only and Preserving Audio Data…
 - **vidcut:**
   - A clip goes in with its picture and its sound.
-  - A clip on a locked track refuses the request. In Convert In and Out to Compound Clip, a clip in the range on a locked track refuses it too.
+  - A clip on a locked track refuses the request.
   - A range with no clips refuses the request, with a message.
   - A J or L cut that reaches a mark is undone at its picture cut, as at a blade.
   - A dissolve goes inside when its clips go inside. It plays there.
