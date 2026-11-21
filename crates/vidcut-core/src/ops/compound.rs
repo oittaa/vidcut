@@ -10,7 +10,7 @@ use super::{
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, Compound, CompoundTarget, Marker, Marks, OpenCompound, Project, Settings, Track,
-    TrackKind,
+    TrackClip, TrackKind,
 };
 use crate::otio;
 use crate::time::{Rational, TimeSpec, format_timecode};
@@ -369,10 +369,15 @@ pub fn place_pooled(
     if item.frames < 1 {
         return Err(Error::invalid("compound clip is empty"));
     }
+    let frames = p.compound_frames(&item);
+    if frames < 1 {
+        return Err(Error::invalid(
+            "compound clip is shorter than one timeline frame",
+        ));
+    }
     if let Some(t) = track {
         ensure_track(p, t)?;
     }
-    let frames = p.compound_frames(&item);
     let mut at = at.unwrap_or_else(|| p.end());
     let number = track.and_then(|t| t.get(1..)).unwrap_or("1");
     let ripples = number == "1" && how != Place::Overwrite;
@@ -809,6 +814,122 @@ pub(crate) fn check_imported_no_cycle(p: &Project, clips: &[otio::ImportedClip])
     });
     if hit {
         return Err(Error::invalid("a compound clip cannot hold itself"));
+    }
+    Ok(())
+}
+
+pub(crate) fn copied_compounds(p: &Project, clips: &[TrackClip]) -> Vec<Compound> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    let mut pending: Vec<String> = clips
+        .iter()
+        .filter_map(|tc| tc.clip.compound.clone())
+        .collect();
+    while let Some(cid) = pending.pop() {
+        if !seen.insert(cid.clone()) {
+            continue;
+        }
+        let Some(k) = p.compound(&cid) else {
+            continue;
+        };
+        let sheet = p.compound_sheet(k);
+        for c in sheet.tracks.iter().flat_map(|t| &t.clips) {
+            if let Some(child) = &c.compound {
+                pending.push(child.clone());
+            }
+        }
+        let mut copy = k.clone();
+        copy.tracks = sheet.tracks.to_vec();
+        copy.marks = sheet.marks.clone();
+        out.push(copy);
+    }
+    out
+}
+
+fn check_cycle_from<'a>(
+    p: &'a Project,
+    cid: &'a str,
+    state: &mut HashMap<&'a str, u8>,
+) -> Result<()> {
+    match state.get(cid).copied() {
+        Some(1) => return Err(Error::invalid("a compound clip cannot hold itself")),
+        Some(_) => return Ok(()),
+        None => {}
+    }
+    state.insert(cid, 1);
+    if let Some(k) = p.compound(cid) {
+        for c in p.compound_tracks(k).iter().flat_map(|t| &t.clips) {
+            if let Some(inner) = &c.compound {
+                check_cycle_from(p, inner, state)?;
+            }
+        }
+    }
+    state.insert(cid, 2);
+    Ok(())
+}
+
+pub(crate) fn restore_copied(p: &mut Project, compounds: &[Compound]) -> Result<()> {
+    if compounds.is_empty() {
+        return Ok(());
+    }
+    let mut added = Vec::new();
+    for k in compounds {
+        if p.compound(&k.id).is_some() {
+            continue;
+        }
+        if k.id.is_empty() {
+            return Err(Error::invalid("compound clip id is empty"));
+        }
+        if k.drop_frame && !k.fps.has_drop_frame() {
+            return Err(Error::invalid(format!(
+                "compound {} counts drop-frame at {}",
+                k.id, k.fps
+            )));
+        }
+        if k.start_tc < 0 {
+            return Err(Error::invalid("compound clip starts before 00:00:00:00"));
+        }
+        if k.frames < 0 {
+            return Err(Error::invalid(format!(
+                "compound {} has negative length {}",
+                k.id, k.frames
+            )));
+        }
+        let mut copy = k.clone();
+        copy.removed = true;
+        copy.bin.clear();
+        p.compounds.push(copy);
+        added.push(k.id.clone());
+    }
+    if added.is_empty() {
+        return Ok(());
+    }
+    for id in &added {
+        let k = p.compound(id).expect("added above");
+        for c in k.tracks.iter().flat_map(|t| &t.clips) {
+            if let Some(cid) = &c.compound {
+                let child = p
+                    .compound(cid)
+                    .ok_or_else(|| Error::invalid(format!("{}: unknown compound {cid}", c.id)))?;
+                let (lo, hi) = c.shown();
+                let frames = crate::time::rescale(child.frames, child.fps, k.fps);
+                if lo < 0 || hi > frames {
+                    return Err(Error::invalid(format!(
+                        "{}: source {lo}..{hi} outside its compound (0..{frames})",
+                        c.id
+                    )));
+                }
+            } else if !c.is_block() && p.media(&c.media).is_none() {
+                return Err(Error::not_found(format!(
+                    "no media {} in this project",
+                    c.media
+                )));
+            }
+        }
+    }
+    let mut state = HashMap::new();
+    for id in &added {
+        check_cycle_from(p, id, &mut state)?;
     }
     Ok(())
 }
@@ -2685,5 +2806,240 @@ mod tests {
         assert_eq!(p.tracks[0].clips[0].media, "m1");
         assert_eq!(p.tracks[0].clips[0].duration, 50);
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cut_and_paste_of_removed_compound_restores_definition() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 40);
+        let hosts = nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req("media.compound_remove", json!({"compound": kid})));
+        let cut = f.ok(req("edit.cut", json!({"clips": [hosts[0]]})));
+        assert!(f.editor.project().compounds.is_empty());
+        let pasted = f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": cut.result["clips"],
+                "compounds": cut.result["compounds"],
+                "fps": cut.result["fps"],
+                "at": 0,
+            }),
+        ));
+        let p = f.editor.project();
+        assert_eq!(p.compounds.len(), 1);
+        assert!(p.compounds[0].removed && p.compounds[0].bin.is_empty());
+        assert_eq!(p.compounds[0].id, kid);
+        assert_eq!(p.pool_compounds().count(), 0);
+        assert!(!pasted.result["clips"].as_array().unwrap().is_empty());
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+        f.ok(req("history.undo", json!({})));
+        f.ok(req("history.undo", json!({})));
+        let p = f.editor.project();
+        assert_eq!(p.compounds.len(), 1);
+        assert!(p.clip(&hosts[0]).is_some());
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cut_and_paste_of_nested_removed_compounds_restores_hierarchy() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 40);
+        let inner_hosts = nest(&mut f, &[&a]);
+        let outer_hosts = nest(&mut f, &[&inner_hosts[0]]);
+        let ids: Vec<String> = f
+            .editor
+            .project()
+            .compounds
+            .iter()
+            .map(|k| k.id.clone())
+            .collect();
+        for kid in &ids {
+            f.ok(req("media.compound_remove", json!({"compound": kid})));
+        }
+        let cut = f.ok(req("edit.cut", json!({"clips": [outer_hosts[0]]})));
+        assert!(f.editor.project().compounds.is_empty());
+        f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": cut.result["clips"],
+                "compounds": cut.result["compounds"],
+                "fps": cut.result["fps"],
+                "at": 0,
+            }),
+        ));
+        let p = f.editor.project();
+        assert_eq!(p.compounds.len(), 2);
+        assert!(p.compounds.iter().all(|k| k.removed && k.bin.is_empty()));
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cut_and_paste_of_otio_imported_compound_restores_definition() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 40);
+        nest(&mut f, &[&a]);
+        let doc = crate::otio::export(
+            f.editor.project(),
+            "T1",
+            None,
+            crate::otio::Locations::Absolute,
+        )
+        .unwrap();
+        let mut f2 = Fixture::new(&[(4.0, true)]);
+        f2.ok(req("timeline.import", json!({"otio": doc})));
+        let imported = f2.editor.project().tracks[0].clips[0].id.clone();
+        let cut = f2.ok(req("edit.cut", json!({"clips": [imported]})));
+        assert!(f2.editor.project().compounds.is_empty());
+        f2.ok(req(
+            "edit.paste",
+            json!({
+                "clips": cut.result["clips"],
+                "compounds": cut.result["compounds"],
+                "fps": cut.result["fps"],
+                "at": 0,
+            }),
+        ));
+        let p2 = f2.editor.project();
+        assert_eq!(p2.compounds.len(), 1);
+        assert!(p2.compounds[0].removed && p2.compounds[0].bin.is_empty());
+        assert_eq!(crate::validate::everywhere(p2), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cross_rate_paste_clamps_full_compound_rounding_overshoot() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 12);
+        nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "24fps", "own": {"fps": "24"}}),
+        ));
+        let r = f.ok(req("edit.place_compound", json!({"compound": kid})));
+        let on_24 = r.result["clips"][0].as_str().unwrap().to_string();
+        assert_eq!(f.editor.project().clip(&on_24).unwrap().duration, 12);
+        let copied = f.ok(req("edit.copy", json!({"clips": [on_24]})));
+        let t1 = f.editor.project().timelines[0].id.clone();
+        f.ok(req("timeline.open", json!({"timeline": t1})));
+        let pasted = f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": copied.result["compounds"],
+                "fps": copied.result["fps"],
+                "at": 20,
+            }),
+        ));
+        let pasted_id = pasted.result["clips"][0].as_str().unwrap().to_string();
+        let p = f.editor.project();
+        let c = p.clip(&pasted_id).unwrap();
+        assert_eq!((c.duration, c.shown()), (12, (0, 12)));
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cross_rate_paste_clamps_trimmed_compound_rounding_overshoot() {
+        let mut f = Fixture::new(&[]);
+        let r30 = crate::time::Rational::new(30, 1).unwrap();
+        let info = crate::test_support::media_info(5.0, r30, true);
+        f.env = crate::test_support::FakeEnv::default().with("/media/r30.mp4", info);
+        f.ok(req("timeline.set", json!({"own": {"fps": "30"}})));
+        f.ok(req("media.add", json!({"paths": ["/media/r30.mp4"]})));
+        let a = f.append("m1", 0, 100);
+        nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        let t1 = f.editor.project().timelines[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "24fps", "own": {"fps": "24"}}),
+        ));
+        let r = f.ok(req("edit.place_compound", json!({"compound": kid})));
+        let on_24 = r.result["clips"][0].as_str().unwrap().to_string();
+        f.ok(req(
+            "edit.trim",
+            json!({"clip": on_24, "edge": "head", "by": 79, "ripple": true}),
+        ));
+        f.ok(req(
+            "edit.move",
+            json!({"clips": [on_24], "to": "1f", "track": "V1"}),
+        ));
+        let copied = f.ok(req("edit.copy", json!({"clips": [on_24]})));
+        f.ok(req("timeline.open", json!({"timeline": t1})));
+        let pasted = f.ok(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": copied.result["compounds"],
+                "fps": copied.result["fps"],
+                "at": 110,
+            }),
+        ));
+        let pasted_id = pasted.result["clips"][0].as_str().unwrap().to_string();
+        let p = f.editor.project();
+        let (lo, hi) = p.clip(&pasted_id).unwrap().shown();
+        assert!(lo >= 0 && hi <= 100);
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn nested_cross_rate_decompose_clamps_inner_compound_rounding_overshoot() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 12);
+        nest(&mut f, &[&a]);
+        let kid_b = f.editor.project().compounds[0].id.clone();
+        let t1 = f.editor.project().timelines[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "24fps", "own": {"fps": "24"}}),
+        ));
+        let r_b = f.ok(req("edit.place_compound", json!({"compound": kid_b})));
+        let c_b = r_b.result["clips"][0].as_str().unwrap().to_string();
+        nest(&mut f, &[&c_b]);
+        let kid_a = f
+            .editor
+            .project()
+            .compounds
+            .iter()
+            .find(|k| k.id != kid_b)
+            .unwrap()
+            .id
+            .clone();
+        f.ok(req("timeline.open", json!({"timeline": t1})));
+        let r_a = f.ok(req(
+            "edit.place_compound",
+            json!({"compound": kid_a, "at": 20}),
+        ));
+        let c_a = r_a.result["clips"][0].as_str().unwrap().to_string();
+        let dec = f.ok(req("edit.decompose", json!({"clips": [c_a]})));
+        let out_b = dec.result["clips"][0].as_str().unwrap().to_string();
+        let p = f.editor.project();
+        let c = p.clip(&out_b).unwrap();
+        assert_eq!(c.compound.as_deref(), Some(kid_b.as_str()));
+        assert_eq!((c.duration, c.shown()), (12, (0, 12)));
+        assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn placing_one_frame_high_fps_compound_on_lower_fps_refuses_zero_duration() {
+        let mut f = Fixture::new(&[]);
+        let r60 = crate::time::Rational::new(60, 1).unwrap();
+        let info = crate::test_support::media_info(1.0, r60, true);
+        f.env = crate::test_support::FakeEnv::default().with("/media/r60.mp4", info);
+        f.ok(req("timeline.set", json!({"own": {"fps": "60"}})));
+        f.ok(req("media.add", json!({"paths": ["/media/r60.mp4"]})));
+        let a = f.append("m1", 0, 1);
+        nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "24fps", "own": {"fps": "24"}}),
+        ));
+        let err = f.err(req("edit.place_compound", json!({"compound": kid})));
+        assert!(err.message.contains("shorter than one timeline frame"));
+        assert_eq!(
+            crate::validate::everywhere(f.editor.project()),
+            Vec::<String>::new()
+        );
     }
 }

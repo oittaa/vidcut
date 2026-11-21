@@ -677,6 +677,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
+        compound_clipboard: Vec::new(),
         key_clipboard: Vec::new(),
         node_clipboard: None,
         cue_clipboard: Vec::new(),
@@ -971,6 +972,7 @@ struct Live {
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
+    compound_clipboard: Vec<vidcut_core::model::Compound>,
     key_clipboard: Vec<vidcut_core::request::CopiedKey>,
     node_clipboard: Option<vidcut_core::request::CopiedNode>,
     cue_clipboard: Vec<vidcut_core::model::TrackCue>,
@@ -3733,11 +3735,18 @@ impl Live {
     ) -> Result<Response> {
         match &mut envelope.request {
             Request::EditPaste {
-                clips, cues, fps, ..
+                clips,
+                compounds,
+                cues,
+                fps,
+                ..
             } if clips.is_none() && cues.is_none() => {
                 *fps = fps.or(self.clipboard_fps);
                 if !self.clipboard.is_empty() {
                     *clips = Some(self.clipboard.clone());
+                    if compounds.is_empty() {
+                        *compounds = self.compound_clipboard.clone();
+                    }
                 } else if !self.cue_clipboard.is_empty() {
                     *cues = Some(self.cue_clipboard.clone());
                 } else {
@@ -3846,11 +3855,15 @@ impl Live {
                     self.clipboard_fps = serde_json::from_value(r.result["fps"].clone()).ok();
                     if let Ok(clips) = serde_json::from_value(r.result["clips"].clone()) {
                         self.clipboard = clips;
+                        self.compound_clipboard =
+                            serde_json::from_value(r.result["compounds"].clone())
+                                .unwrap_or_default();
                         self.key_clipboard.clear();
                         self.cue_clipboard.clear();
                     } else if let Ok(cues) = serde_json::from_value(r.result["cues"].clone()) {
                         self.cue_clipboard = cues;
                         self.clipboard.clear();
+                        self.compound_clipboard.clear();
                         self.key_clipboard.clear();
                     }
                 }
@@ -3863,6 +3876,7 @@ impl Live {
                     if let Ok(keys) = serde_json::from_value(r.result["keyframes"].clone()) {
                         self.key_clipboard = keys;
                         self.clipboard.clear();
+                        self.compound_clipboard.clear();
                         self.cue_clipboard.clear();
                     }
                 }

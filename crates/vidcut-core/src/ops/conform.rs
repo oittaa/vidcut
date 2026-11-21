@@ -33,6 +33,7 @@ pub fn track(p: &Project, t: &mut Track, r: Rates) {
     for c in &mut t.clips {
         clip(p, c, r);
     }
+    t.clips.retain(|c| c.duration > 0);
     for x in &mut t.transitions {
         transition(x, r);
     }
@@ -137,4 +138,40 @@ pub fn clip(p: &Project, c: &mut Clip, r: Rates) {
         s.sections = sections.into();
     }
     (c.start, c.duration) = (start, end - start);
+    if let Some(k) = p.clip_compound(c) {
+        fit_compound(c, rescale(k.frames, k.fps, r.to));
+    }
+}
+
+fn fit_compound(c: &mut Clip, limit: i64) {
+    if c.duration <= 0 {
+        return;
+    }
+    if limit <= 0 {
+        c.duration = 0;
+        return;
+    }
+    loop {
+        let (lo, hi) = c.shown();
+        if lo < 0 {
+            c.source_in -= lo;
+            continue;
+        }
+        if hi <= limit {
+            break;
+        }
+        let shift = (hi - limit).min(lo);
+        if shift > 0 {
+            c.source_in -= shift;
+            continue;
+        }
+        if c.speed.is_none() {
+            c.duration = (limit - lo).max(0);
+            break;
+        }
+        c.duration -= 1;
+        if c.duration <= 0 {
+            break;
+        }
+    }
 }

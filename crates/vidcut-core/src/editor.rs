@@ -2758,6 +2758,18 @@ fn drop_unused_removed(p: &mut Project) {
     p.media.retain(|m| !unused.contains(&m.id));
 }
 
+fn copied_json(
+    p: &Project,
+    clips: Vec<crate::model::TrackClip>,
+    compounds: Vec<Compound>,
+) -> Value {
+    let mut out = json!({ "clips": clips, "fps": p.fps() });
+    if !compounds.is_empty() {
+        out["compounds"] = json!(compounds);
+    }
+    out
+}
+
 fn forget_tape_marks(p: &mut Project, media: &str) {
     if p.tape_marks.order.iter().any(|m| m == media) {
         p.tape_marks = Default::default();
@@ -4204,14 +4216,16 @@ fn mutate(
             (Some(clips), None, None) => {
                 let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
                 let copied = ops::copy_clips(p, &ids)?;
+                let compounds = ops::compound::copied_compounds(p, &copied);
                 ops::delete(p, &ids, false)?;
-                json!({ "clips": copied, "fps": p.fps() })
+                copied_json(p, copied, compounds)
             }
             (None, Some(range), None) => {
                 let (a, b) = ctx(p, playhead).range(range)?;
                 let copied = ops::copy_range(p, a, b)?;
+                let compounds = ops::compound::copied_compounds(p, &copied);
                 ops::delete_range(p, a, b, true)?;
-                json!({ "clips": copied, "fps": p.fps() })
+                copied_json(p, copied, compounds)
             }
             (None, None, Some(cues)) => {
                 let ids = resolve_cues(p, &cues.to_vec(), playhead)?;
@@ -4223,6 +4237,7 @@ fn mutate(
         },
         Request::EditPaste {
             clips,
+            compounds,
             cues,
             at,
             insert,
@@ -4235,7 +4250,7 @@ fn mutate(
             };
             let rates = fps.and_then(|f| ops::conform::Rates::new(f, p.fps()));
             if let Some(cues) = cues {
-                if clips.is_some() || *insert || duration.is_some() {
+                if clips.is_some() || !compounds.is_empty() || *insert || duration.is_some() {
                     return Err(Error::usage(
                         "cues paste alone: without clips, insert or duration",
                     ));
@@ -4250,6 +4265,7 @@ fn mutate(
             let clips = clips.as_ref().ok_or_else(|| {
                 Error::usage("edit.paste needs `clips` or `cues` (the GUI pastes its clipboard)")
             })?;
+            ops::compound::restore_copied(p, compounds)?;
             let mut clips = clips.clone();
             if let Some(r) = rates {
                 ops::conform::clips(p, &mut clips, r);
@@ -9084,11 +9100,15 @@ pub fn query(
         Request::EditCopy { clips, range, cues } => match (clips, range, cues) {
             (Some(clips), None, None) => {
                 let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-                json!({ "clips": ops::copy_clips(p, &ids)?, "fps": p.fps() })
+                let copied = ops::copy_clips(p, &ids)?;
+                let compounds = ops::compound::copied_compounds(p, &copied);
+                copied_json(p, copied, compounds)
             }
             (None, Some(range), None) => {
                 let (a, b) = ctx(p, playhead).range(range)?;
-                json!({ "clips": ops::copy_range(p, a, b)?, "fps": p.fps() })
+                let copied = ops::copy_range(p, a, b)?;
+                let compounds = ops::compound::copied_compounds(p, &copied);
+                copied_json(p, copied, compounds)
             }
             (None, None, Some(cues)) => {
                 let ids = resolve_cues(p, &cues.to_vec(), playhead)?;

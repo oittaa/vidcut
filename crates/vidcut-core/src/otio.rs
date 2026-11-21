@@ -742,6 +742,17 @@ pub fn export_drawn(
     locations: Locations,
     drawn: &dyn Fn(&Title) -> titles::Drawn,
 ) -> Result<Value> {
+    export_with(p, name, span, locations, drawn, &mut HashMap::new())
+}
+
+fn export_with(
+    p: &Project,
+    name: &str,
+    span: Option<(i64, i64)>,
+    locations: Locations,
+    drawn: &dyn Fn(&Title) -> titles::Drawn,
+    stacks: &mut HashMap<String, Value>,
+) -> Result<Value> {
     let fps = p.fps();
     let rate = fps.as_f64();
     let (a, b) = span.unwrap_or((0, p.end()));
@@ -828,16 +839,26 @@ pub fn export_drawn(
         }
         Locations::Absolute => Vec::new(),
     };
-    let block = |c: &Clip,
-                 k: &Compound,
-                 label: &str,
-                 source: i64,
-                 frames: i64,
-                 effects: Vec<Value>|
+    let mut block = |c: &Clip,
+                     k: &Compound,
+                     label: &str,
+                     source: i64,
+                     frames: i64,
+                     effects: Vec<Value>|
      -> Result<Value> {
-        let mut it = compound_item(p, c, k, label, (source, frames), effects, rate)?;
+        let mut it = compound_item(
+            p,
+            c,
+            k,
+            label,
+            (source, frames),
+            effects,
+            rate,
+            drawn,
+            stacks,
+        )?;
         if let Locations::Bundle(names) = locations {
-            bundle_nested(&mut it["children"], &bundled, names, fps);
+            bundle_nested(&mut it["children"], &bundled, names, k.fps);
         }
         Ok(it)
     };
@@ -1328,7 +1349,12 @@ fn compound_of(item: &Value, host_fps: Rational) -> ImportedCompound {
     }
 }
 
-fn stack_for(p: &Project, k: &Compound) -> Result<Value> {
+fn stack_for(
+    p: &Project,
+    k: &Compound,
+    drawn: &dyn Fn(&Title) -> titles::Drawn,
+    stacks: &mut HashMap<String, Value>,
+) -> Result<Value> {
     let tracks = p.compound_tracks(k);
     if tracks.is_empty()
         && k.marks.is_empty()
@@ -1352,7 +1378,15 @@ fn stack_for(p: &Project, k: &Compound) -> Result<Value> {
         .cloned()
         .collect();
     let mut stack = if !tracks.is_empty() && frames > 0 {
-        export(&inner, &k.name, Some((0, frames)), Locations::Absolute)?["tracks"].clone()
+        export_with(
+            &inner,
+            &k.name,
+            Some((0, frames)),
+            Locations::Absolute,
+            drawn,
+            stacks,
+        )?["tracks"]
+            .clone()
     } else {
         json!({
             "OTIO_SCHEMA": "Stack.1",
@@ -1389,6 +1423,7 @@ fn stack_for(p: &Project, k: &Compound) -> Result<Value> {
     Ok(stack)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compound_item(
     p: &Project,
     c: &Clip,
@@ -1397,8 +1432,17 @@ fn compound_item(
     (source, frames): (i64, i64),
     effects: Vec<Value>,
     rate: f64,
+    drawn: &dyn Fn(&Title) -> titles::Drawn,
+    stacks: &mut HashMap<String, Value>,
 ) -> Result<Value> {
-    let mut v = stack_for(p, k)?;
+    let mut v = match stacks.get(&k.id) {
+        Some(cached) => cached.clone(),
+        None => {
+            let made = stack_for(p, k, drawn, stacks)?;
+            stacks.insert(k.id.clone(), made.clone());
+            made
+        }
+    };
     v["name"] = json!(label);
     v["source_range"] = range(source as f64, frames as f64, rate);
     v["effects"] = Value::Array(effects);

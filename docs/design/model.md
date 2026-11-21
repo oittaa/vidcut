@@ -817,7 +817,7 @@ Import:
 - `edit.decompose` first takes the media that the compound clip already plays (`otio::same_media`: by path, then by a file name that no other of them has).
 - `ops::compound::nest` stores one `Compound` in `Project::compounds` and puts picture and sound blocks that refer to it by `Clip::compound`.
   - `compound_links` ties those blocks on export. Every placement across timelines shares one canonical source of tracks, markers and format.
-  - `stack_for` builds an OTIO `Stack` on export from `Project::compound_tracks`. It keeps foreign metadata or offline contents in `Compound::kept_otio`.
+  - `stack_for` builds and memoizes an OTIO `Stack` on export from `Project::compound_tracks`. It keeps foreign metadata or offline contents in `Compound::kept_otio`.
   - `Compound::tracks` holds all tracks together. `picture_tracks` takes video tracks, and `sound_tracks` takes sounds (`sound_part`) at each clip's sound length.
   - Each track keeps its dissolves. `render::expanded` conforms cross-rate compounds first and plays those tracks (`inner_layout`).
   - `inner_layout` widens the compound clip to reach each dissolve that it shows a part of. `Shown` limits the track to the frames of the compound clip.
@@ -830,6 +830,8 @@ Import:
   - `ops::compound::nest_range` cuts every track at the two marks, and nests what is between them. The lowest track with clips in the range becomes inner V1 or A1.
   - `pool_range` makes a `Compound` on a clone of the project, so the timeline does not change. `remove_pooled` marks it removed while placements still use it.
   - `place_pooled` puts a copy on a video track and on the audio track of its number. `Place` tells how. `compound_preview` gives the requests of a drag.
+  - `edit.copy` and `edit.cut` include transitive compound definitions (`copied_compounds`). `edit.paste` restores missing definitions as removed (`restore_copied`).
+  - `ops::conform::clip` keeps conformed compound clips within their compound's frame limit (`fit_compound`).
   - `ops::compound::unnest` conforms `Compound::tracks` when needed and restores all tracks for tied blocks, or only one part when alone.
   - `ops::compound::target` gives the track of each inner track, for a compound clip made here and for an imported one.
   - `ops::compound::open_clip` and `ops::compound::open_pooled` check out a compound's inner tracks and `Compound::markers` into the editor sheet, refusing an already open sequence id.

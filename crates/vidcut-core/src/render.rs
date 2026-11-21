@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
-    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, DuckDetect,
+    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, Compound, DuckDetect,
     Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, MotionPath, PathSample,
     Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
     SmoothMode, TimelineColors, Title, Track, TrackKind, Transition, Upscale,
@@ -2599,9 +2599,13 @@ fn whole<'a>(nest: Option<&'a Nest>, c: &'a Clip) -> &'a Clip {
     nest.and_then(|n| n.flat.as_deref()).unwrap_or(c)
 }
 
-fn hollow(p: &Project, c: &Clip) -> Clip {
+fn hollow(p: &Project, c: &Clip, hollows: &HashMap<String, String>) -> Clip {
     let mut hollow = c.clone();
-    hollow.compound = c.compound.as_ref().map(|_| String::new());
+    hollow.compound = c
+        .compound
+        .as_deref()
+        .and_then(|id| hollows.get(id))
+        .cloned();
     let mode = mode_at(p, c, c.end() - 1);
     if mode != CompositeMode::Normal {
         hollow.picture.get_or_insert_default().composite_mode = Some(mode);
@@ -2689,13 +2693,39 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
     for k in &mut compounds {
         if let Some(r) = crate::ops::conform::Rates::new(k.fps, host_fps) {
             for t in &mut k.tracks {
-                crate::ops::conform::track(&out, t, r);
+                crate::ops::conform::track(p, t, r);
             }
             k.frames = r.frame(k.frames);
             k.fps = host_fps;
         }
     }
     out.compounds = compounds;
+    let mut hollows = HashMap::new();
+    let existing: Vec<_> = out
+        .compounds
+        .iter()
+        .filter(|k| !k.tracks.is_empty())
+        .map(|k| (k.id.clone(), k.fps, k.drop_frame, k.start_tc, k.frames))
+        .collect();
+    for (cid, fps, drop_frame, start_tc, frames) in existing {
+        let hid = out.alloc_compound_id();
+        out.compounds.push(Compound {
+            id: hid.clone(),
+            name: String::new(),
+            bin: String::new(),
+            removed: true,
+            sequence_id: None,
+            fps,
+            drop_frame,
+            start_tc,
+            frames,
+            tracks: Vec::new(),
+            marks: Default::default(),
+            markers: Vec::new(),
+            kept_otio: None,
+        });
+        hollows.insert(cid, hid);
+    }
     let mut within: Within = out
         .tracks
         .iter()
@@ -2728,7 +2758,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 if !c.enabled {
                     continue;
                 }
-                host.clips.push(hollow(&out, c));
+                host.clips.push(hollow(&out, c, &hollows));
                 opened += 1;
                 let own = c.picture.clone().unwrap_or_default();
                 let edges = edges.get(&c.id).cloned().unwrap_or_default();
@@ -5460,5 +5490,68 @@ mod tests {
             }
         ));
         assert_eq!(plan.name, "2");
+    }
+
+    #[test]
+    fn edge_dissolve_on_compound_clip_applies_ramps_to_both_sides() {
+        let mut f = fixture();
+        let a = f.append("m1", 0, 60);
+        req(&mut f, "edit.compound", json!({"clips": [a]}));
+        let comp = f.editor.project().tracks[0].clips[0].id.clone();
+        req(
+            &mut f,
+            "edit.trim",
+            json!({"clip": comp, "edge": "tail", "to": "50f", "ripple": true}),
+        );
+        f.append("m2", 10, 60);
+        let right = f.editor.project().tracks[0].clips[1].id.clone();
+        let p = dissolve(&f, Some(&comp), Some(&right), 5, 5);
+        let plan = flatten(&p, 0, 100).unwrap();
+        assert_eq!(plan.video.len(), 3);
+        let VideoPiece::Mix { under, over } = &plan.video[1] else {
+            panic!("expected mix across edge dissolve");
+        };
+        let mut pieces: Vec<&VideoPiece> = vec![under.as_ref()];
+        pieces.extend(over.iter().map(|o| &o.piece));
+        assert!(pieces.iter().any(|p| {
+            matches!(p, VideoPiece::Source { media, .. } if media == "m1")
+                && p.placed()
+                    .iter()
+                    .any(|x| x.ramp.is_some_and(|r| r.falling && (r.at, r.of) == (0, 10)))
+        }));
+        assert!(over.iter().any(|o| {
+            matches!(&o.piece, VideoPiece::Source { media, .. } if media == "m2")
+                && o.ramp
+                    .is_some_and(|r| !r.falling && (r.at, r.of) == (0, 10))
+        }));
+    }
+
+    #[test]
+    fn smooth_cut_on_compound_clip_keeps_smooth_transition() {
+        let mut f = fixture();
+        let a = f.append("m1", 0, 60);
+        req(&mut f, "edit.compound", json!({"clips": [a]}));
+        let comp = f.editor.project().tracks[0].clips[0].id.clone();
+        req(
+            &mut f,
+            "edit.trim",
+            json!({"clip": comp, "edge": "tail", "to": "50f", "ripple": true}),
+        );
+        f.append("m2", 10, 60);
+        req(
+            &mut f,
+            "edit.dissolve",
+            json!({
+                "track": "V1",
+                "at": 50,
+                "before": 5,
+                "after": 5,
+                "transition": {"type": "smooth_cut"},
+            }),
+        );
+        let plan = flatten(f.editor.project(), 45, 55).unwrap();
+        assert!(plan.video.iter().any(|v| {
+            matches!(v, VideoPiece::Mix { over, .. } if over.iter().any(|o| o.smooth.is_some()))
+        }));
     }
 }
