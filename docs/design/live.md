@@ -425,7 +425,8 @@ The bar and the Jobs button:
 **The Color page** (`Workspace::primaries_panel`).
 
 - The palette shows the current node of the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
-  - Primaries and Key at the top select the palette (`Palette`). The Key palette draws the Key Output of the node (`key_output`).
+  - Primaries and Key at the top select the palette (`GradePalette`). The Key palette draws the Key Output of the node (`key_output`).
+  - The palette and the mode of the Primaries palette (`PrimariesView`) are in `EffectsPage`. A click sends `gui.page` with `palette` or `primaries`.
   - A change in the Key palette changes the `key` of the node in the dragged grade. The sent `grade.set` has `key_gain`, `key_offset` or `key_invert`.
   - Reset in a palette sends `grade.clear` with the `palette` of that palette.
   - The other palettes, and the line for a mixer, keep the height of the last Primaries palette (`primaries_panel`). Thus the page does not move when the palette changes.
