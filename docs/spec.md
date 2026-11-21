@@ -3241,7 +3241,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Transform: Size, Aspect, Pan, Tilt, Rotate and Opacity. Size, Aspect, Pan and Tilt are 50 at first. Rotate is 0 (p. 3270).
   - A larger Aspect makes the window wider. A larger Tilt moves it up. A larger Rotate turns it clockwise (p. 3270).
   - Opacity sets the share of the window in the key of the node (p. 3270).
-  - Softness: Soft 1 for a circle and a gradient, Soft 1 to 4 for a linear window, Inside and Outside for a polygon and a curve (p. 3272).
+  - Softness: a circle and a gradient have Soft 1. A linear window has Soft 1 to 4. A polygon and a curve have Inside and Outside (p. 3272).
 - Measured in Resolve Studio 21.2 with float renders at 1920×1080, 3840×2160 and 1080×1920:
   - S(t) is smoothstep of t, clamped to 0..1. U(a, b) = (8m − 1) / 7, with m = max(a, b) + 0.5 max(0, 0.5 − |a − b|)². U is not clamped.
   - The place of a window is in pixels of the timeline frame, from its middle, with y up. Each pixel is at its index.
@@ -3272,7 +3272,8 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
 - vidcut:
   - `grade.window.add` adds a window at its usual values, at the end of the window list. `grade.window.set` changes a window, and `grade.window.remove` removes it.
   - `grade.get` gives the windows of each corrector. The values are those of the palette.
-  - The windows work as measured, in the viewer, the export and the node thumbnails. vidcut renders the 81 measured cases within 3.5e-5.
+  - The windows work as measured in the viewer and the export. vidcut renders the 81 measured cases within 3.5e-5.
+  - Not measured in Resolve: the thumbnail of a node with windows. vidcut uses the key of each pixel as k of the thumbnail.
   - The grade of a clip works after Edit Sizing ([§13](#13-order-of-operations-pp-287296-3407)). Thus a window keeps its place in the frame when the clip moves.
   - A circle made in Resolve with Toggle Display Mode on has no radius ([gotchas](gotchas.md#resolves-renders)). vidcut does not copy this fault.
   - A locked node refuses a change of its windows ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
