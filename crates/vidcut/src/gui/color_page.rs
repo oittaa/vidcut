@@ -66,6 +66,44 @@ const ADDS: [(Action, GradeAdd); 5] = [
     (Action::AppendNode, GradeAdd::Append),
 ];
 
+#[derive(Debug, Clone, Copy)]
+enum NodesItem {
+    Key(Action),
+    Act(NodeAct),
+}
+
+const NODES_MENU: [&[(&str, NodesItem)]; 5] = [
+    &[
+        ("Previous Node", NodesItem::Key(Action::PreviousNode)),
+        ("Next Node", NodesItem::Key(Action::NextNode)),
+    ],
+    &[
+        ("Add Serial Node", NodesItem::Key(Action::AddSerialNode)),
+        (
+            "Add Serial Before Current",
+            NodesItem::Key(Action::AddNodeBefore),
+        ),
+        ("Add Parallel Node", NodesItem::Key(Action::AddParallelNode)),
+        ("Add Layer Node", NodesItem::Key(Action::AddLayerNode)),
+        ("Append a Node", NodesItem::Key(Action::AppendNode)),
+    ],
+    &[
+        (
+            "Enable/Disable Selected Nodes",
+            NodesItem::Key(Action::SwitchSelectedNodes),
+        ),
+        (
+            "Enable/Disable All Nodes",
+            NodesItem::Key(Action::SwitchAllNodes),
+        ),
+    ],
+    &[
+        ("Extract Current Node", NodesItem::Key(Action::ExtractNode)),
+        ("Delete Current Node", NodesItem::Act(NodeAct::Delete)),
+    ],
+    &[("Label Selected Node", NodesItem::Act(NodeAct::Label))],
+];
+
 const ADD_MENU: [(GradeAdd, &str); 5] = [
     (GradeAdd::Serial, "Add Serial"),
     (GradeAdd::Before, "Add Before Current"),
@@ -1446,8 +1484,62 @@ impl Workspace {
                 });
             });
         }
+        ui.separator();
+        ui.add_enabled_ui(page, |ui| {
+            ui.menu_button("Nodes", |ui| self.nodes_menu(ui));
+        });
         if !page {
             super::dialog::why(ui, "open the Color page");
+        }
+    }
+
+    fn nodes_menu(&mut self, ui: &mut Ui) {
+        let shown = self.grade_shown().map(|(of, _, g)| (of, g));
+        if let Some((of, g)) = &shown {
+            self.settle_grade(of, g);
+        }
+        let g = shown.as_ref().map(|(_, g)| g);
+        let n = g.and_then(|g| self.current_grade_node(g));
+        let current = g.zip(n).and_then(|(g, n)| g.node(n));
+        let corrector = current.filter(|d| !d.tool.is_mixer());
+        let can = |item: NodesItem| match item {
+            NodesItem::Key(Action::PreviousNode | Action::NextNode) => {
+                g.is_some_and(|g| correctors(g).next().is_some())
+            }
+            NodesItem::Key(Action::AppendNode) => g.is_some(),
+            NodesItem::Key(
+                Action::AddNodeBefore | Action::AddParallelNode | Action::AddLayerNode,
+            ) => corrector.is_some(),
+            NodesItem::Key(Action::SwitchAllNodes) => g.is_some_and(|g| !g.nodes.is_empty()),
+            NodesItem::Key(Action::ExtractNode) => {
+                corrector.is_some_and(|d| d.inputs.iter().any(Option::is_some))
+            }
+            NodesItem::Act(NodeAct::Label) => corrector.is_some(),
+            NodesItem::Key(_) | NodesItem::Act(_) => current.is_some(),
+        };
+        let mut picked = None;
+        for (i, group) in NODES_MENU.iter().enumerate() {
+            if i > 0 {
+                ui.separator();
+            }
+            for &(text, item) in *group {
+                let key = match item {
+                    NodesItem::Key(a) => self.snap.bindings.first(a).unwrap_or_default(),
+                    NodesItem::Act(_) => String::new(),
+                };
+                let button = egui::Button::new(text).shortcut_text(key);
+                if ui.add_enabled(can(item), button).clicked() {
+                    picked = Some(item);
+                    ui.close();
+                }
+            }
+        }
+        match (picked, shown, n) {
+            (Some(NodesItem::Key(a)), _, _) => self.grade_keys_struck(&[a]),
+            (Some(NodesItem::Act(act)), Some((of, g)), Some(n)) => {
+                self.grade_node_act(&of, &g, (act, n));
+            }
+            _ => {}
         }
     }
 
@@ -1541,6 +1633,10 @@ impl Workspace {
                 keep(own.or_else(app))
             })
         });
+        self.grade_keys_struck(&mine);
+    }
+
+    fn grade_keys_struck(&mut self, mine: &[Action]) {
         let struck = |a: Action| mine.contains(&a);
         for (action, add) in ADDS {
             if struck(action) {
