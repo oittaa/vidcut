@@ -88,7 +88,7 @@ pub(super) struct EffectsPage {
     pub(super) palette: GradePalette,
     pub(super) primaries: PrimariesView,
     pub(super) window: usize,
-    pub(super) window_name: Option<(usize, String)>,
+    pub(super) window_name: Option<super::color_page::WindowName>,
     pub(super) grade_nodes: Vec<u32>,
     pub(super) grade_seen: Option<(String, GradeOf, Option<String>)>,
     pub(super) grade_left: Lru<(String, GradeOf), u32, GRADES_LEFT_KEPT>,
@@ -635,6 +635,7 @@ impl Workspace {
             self.effects_page.leave();
         }
         self.effects_page.graded = None;
+        self.effects_page.window_name = None;
         self.effects_page.page = page;
         self.sync_grade_preview();
         self.sync_bounds();
