@@ -4,7 +4,7 @@ use crate::window_key::{
     CIRCLE_RADIUS, CURVE_HANDLE, PAN_STEP, aspect_shrink, circle_scale, linear_scale, linear_scales,
 };
 
-use super::grade::{GradeOf, edited, unlocked};
+use super::grade::{GradeOf, edited, no_node, stored, unlocked};
 
 pub const POLYGON_LEAST: usize = 3;
 pub const POLYGON_MOST: usize = 128;
@@ -238,6 +238,65 @@ pub fn set(p: &mut Project, of: &GradeOf, n: u32, i: usize, c: &WindowChange) ->
         return Err(Error::usage("give a value to change"));
     }
     edited(p, of, |g| changed(window(corrector(g, n)?, n, i)?, c))
+}
+
+pub fn copy(p: &Project, of: &GradeOf, n: u32, i: usize) -> Result<GradeWindow> {
+    let g = stored(p, of)?;
+    let d = g.node(n).ok_or_else(|| no_node(n))?;
+    if d.tool.is_mixer() {
+        return Err(Error::invalid(format!(
+            "node {n} is a mixer, which has no windows"
+        )));
+    }
+    let count = d.windows.len();
+    d.windows.get(i).cloned().ok_or_else(|| {
+        Error::not_found(format!(
+            "node {n} has {count} windows: there is no window {i}"
+        ))
+    })
+}
+
+pub fn paste(
+    p: &mut Project,
+    of: &GradeOf,
+    n: u32,
+    (to, append): (Option<usize>, bool),
+    copied: &GradeWindow,
+) -> Result<usize> {
+    checked(copied)?;
+    let mut made = 0;
+    edited(p, of, |g| {
+        let d = corrector(g, n)?;
+        let onto = match (append, to) {
+            (true, _) => None,
+            (false, Some(i)) => Some(i),
+            (false, None) => {
+                return Err(Error::usage(
+                    "give `window`, the window that takes the copy, or `append`",
+                ));
+            }
+        };
+        if let Some(i) = onto {
+            let w = window(d, n, i)?;
+            if w.shape.kind() == copied.shape.kind() {
+                *w = GradeWindow {
+                    on: w.on,
+                    name: std::mem::take(&mut w.name),
+                    ..copied.clone()
+                };
+                made = i;
+                return Ok(());
+            }
+        }
+        d.windows.push(GradeWindow {
+            on: true,
+            name: String::new(),
+            ..copied.clone()
+        });
+        made = d.windows.len() - 1;
+        Ok(())
+    })?;
+    Ok(made)
 }
 
 pub fn remove(p: &mut Project, of: &GradeOf, n: u32, i: usize) -> Result<()> {

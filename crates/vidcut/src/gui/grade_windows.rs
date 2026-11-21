@@ -72,6 +72,8 @@ pub(super) enum WindowAct {
     Mask(usize, bool),
     Rename(usize, String),
     ResetWindow,
+    Copy,
+    Paste(bool),
     Convert,
     Value(usize, Field, f64),
 }
@@ -264,6 +266,7 @@ pub(super) fn window_palette(
     ui: &mut Ui,
     (windows, current, usual): (&[GradeWindow], usize, Option<&GradeWindow>),
     (editing, locked): (&mut Option<(usize, String)>, bool),
+    copied: Option<WindowKind>,
 ) -> Vec<WindowAct> {
     let mut acts = Vec::new();
     ui.horizontal(|ui| {
@@ -281,6 +284,28 @@ pub(super) fn window_palette(
                 acts.push(WindowAct::ResetWindow);
                 ui.close();
             }
+            ui.separator();
+            let any = windows.get(current).is_some();
+            let items = [
+                ("Copy Window", any, WindowAct::Copy),
+                (
+                    "Paste Window",
+                    any && copied.is_some(),
+                    WindowAct::Paste(false),
+                ),
+                (
+                    "Paste Append Window",
+                    copied.is_some(),
+                    WindowAct::Paste(true),
+                ),
+            ];
+            for (text, on, act) in items {
+                if ui.add_enabled(on, egui::Button::new(text)).clicked() {
+                    acts.push(act);
+                    ui.close();
+                }
+            }
+            ui.separator();
             let convertible = windows.get(current).is_some_and(|w| {
                 matches!(
                     w.shape,

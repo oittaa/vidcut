@@ -1477,7 +1477,7 @@ impl Workspace {
         let locked = grade.node(n).is_some_and(|d| d.locked);
         if locked {
             changes.clear();
-            window_acts.retain(|a| matches!(a, WindowAct::Pick(_)));
+            window_acts.retain(|a| matches!(a, WindowAct::Pick(_) | WindowAct::Copy));
         }
         for act in window_acts {
             self.window_act(&of, &grade, (n, frame, at), act);
@@ -1577,7 +1577,8 @@ impl Workspace {
         let mut editing = (self.effects_page.window_name.take())
             .filter(|e| e.of == *of && e.node == n && e.index < windows.len() && !locked)
             .map(|e| (e.index, e.text));
-        let acts = grade_windows::window_palette(ui, shown, (&mut editing, locked));
+        let copied = self.snap.window_clipboard;
+        let acts = grade_windows::window_palette(ui, shown, (&mut editing, locked), copied);
         self.effects_page.window_name = editing.map(|(index, text)| WindowName {
             of: of.clone(),
             node: n,
@@ -1651,6 +1652,26 @@ impl Workspace {
                         send(self, "grade.window.set", params);
                     }
                 }
+            }
+            WindowAct::Copy => {
+                let params = Map::from_iter([
+                    (field.clone(), target.clone()),
+                    ("node".to_string(), json!(n)),
+                    ("window".to_string(), json!(current)),
+                ]);
+                self.send("grade.window.copy", Value::Object(params));
+            }
+            WindowAct::Paste(append) => {
+                let copied = self.snap.window_clipboard;
+                let onto = windows.get(current).map(|w| w.shape.kind());
+                if append || onto != copied {
+                    self.effects_page.window = windows.len();
+                }
+                let params = match append {
+                    true => Map::from_iter([("append".to_string(), json!(true))]),
+                    false => Map::from_iter([("window".to_string(), json!(current))]),
+                };
+                send(self, "grade.window.paste", params);
             }
             WindowAct::Convert => {
                 self.effects_page.window = match current < WindowKind::ALL.len() {

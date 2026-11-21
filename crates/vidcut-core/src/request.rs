@@ -10,8 +10,8 @@ use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     BlendMode, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect, DuckDetect,
     DynamicZoom, Ease, EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind,
-    GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind, GrainComposite, GrainPreset, Handle,
-    LowerThirdLine, Node, PathSample, PictureTool, PictureTransition, Place, Subject,
+    GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GrainComposite, GrainPreset,
+    Handle, LowerThirdLine, Node, PathSample, PictureTool, PictureTransition, Place, Subject,
     SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay,
     VignetteMode, VignetteShape, WindowKind, ZoomBox,
 };
@@ -3204,6 +3204,48 @@ pub enum Request {
         node: u32,
         /// The number of the window in the window list, from 0.
         window: usize,
+    },
+    /// Copy a window of a corrector of the grade of a clip, or with
+    /// `timeline` of the timeline grade (Copy Window in the Window
+    /// palette). Returns it as `settings`, ready for `grade.window.paste`.
+    /// The GUI also keeps it on its clipboard.
+    #[serde(rename = "grade.window.copy")]
+    GradeWindowCopy {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// The number of the corrector, from 1.
+        node: u32,
+        /// The number of the window in the window list, from 0.
+        window: usize,
+    },
+    /// Paste a copied window into a corrector of the grade of a clip, or
+    /// with `timeline` of the timeline grade (Paste Window and Paste
+    /// Append Window). Onto a window of the same shape, that window takes
+    /// the copy; its name and whether it is on stay. Else, or with
+    /// `append`, the copy goes last in the window list, on, with no name.
+    /// Returns the `window` number that took it. Default: the GUI's
+    /// clipboard.
+    #[serde(rename = "grade.window.paste")]
+    GradeWindowPaste {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        /// The number of the corrector, from 1.
+        node: u32,
+        /// The window that takes the copy, from 0. Needed without
+        /// `append`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<usize>,
+        /// Add the copy at the end of the window list.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        append: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        settings: Option<GradeWindow>,
     },
     /// Remove a window that `grade.window.add` added to a corrector of the
     /// grade of a clip, or with `timeline` of the timeline grade. The
@@ -6917,6 +6959,7 @@ impl Request {
                     | Self::KeyframesList { .. }
                     | Self::KeyframesCopy { .. }
                     | Self::GradeCopy { .. }
+                    | Self::GradeWindowCopy { .. }
                     | Self::MarkersList { .. }
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }

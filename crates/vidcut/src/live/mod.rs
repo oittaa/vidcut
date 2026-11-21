@@ -586,6 +586,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         clipboard: 0,
         key_clipboard: 0,
         node_clipboard: false,
+        window_clipboard: None,
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashSet::new()),
         missing: Arc::new(HashSet::new()),
@@ -682,6 +683,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         compound_clipboard: Vec::new(),
         key_clipboard: Vec::new(),
         node_clipboard: None,
+        window_clipboard: None,
         cue_clipboard: Vec::new(),
         clipboard_fps: None,
         log: VecDeque::new(),
@@ -977,6 +979,7 @@ struct Live {
     compound_clipboard: Vec<vidcut_core::model::Compound>,
     key_clipboard: Vec<vidcut_core::request::CopiedKey>,
     node_clipboard: Option<vidcut_core::request::CopiedNode>,
+    window_clipboard: Option<vidcut_core::model::GradeWindow>,
     cue_clipboard: Vec<vidcut_core::model::TrackCue>,
     clipboard_fps: Option<vidcut_core::time::Rational>,
     log: VecDeque<LogEntry>,
@@ -1659,6 +1662,7 @@ impl Live {
             clipboard: self.clipboard.len(),
             key_clipboard: self.key_clipboard.len(),
             node_clipboard: self.node_clipboard.is_some(),
+            window_clipboard: (self.window_clipboard.as_ref()).map(|w| w.shape.kind()),
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
@@ -3769,6 +3773,12 @@ impl Live {
                 }
                 *settings = self.node_clipboard.clone();
             }
+            Request::GradeWindowPaste { settings, .. } if settings.is_none() => {
+                if self.window_clipboard.is_none() {
+                    return Err(Error::usage("the clipboard has no window"));
+                }
+                *settings = self.window_clipboard.clone();
+            }
             Request::MediaMarksSet {
                 media,
                 mark_in,
@@ -3874,6 +3884,11 @@ impl Live {
                 Request::GradeCopy { .. } => {
                     if let Ok(node) = serde_json::from_value(r.result["settings"].clone()) {
                         self.node_clipboard = Some(node);
+                    }
+                }
+                Request::GradeWindowCopy { .. } => {
+                    if let Ok(w) = serde_json::from_value(r.result["settings"].clone()) {
+                        self.window_clipboard = Some(w);
                     }
                 }
                 Request::KeyframesCopy { .. } | Request::KeyframesCut { .. } => {
@@ -5335,6 +5350,7 @@ impl Live {
             "clipboard": self.clipboard.len(),
             "keyframe_clipboard": self.key_clipboard.len(),
             "node_clipboard": self.node_clipboard.is_some(),
+            "window_clipboard": (self.window_clipboard.as_ref()).map(|w| w.shape.kind()),
             "cue_clipboard": self.cue_clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
         })
