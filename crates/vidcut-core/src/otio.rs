@@ -1237,6 +1237,10 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
     let frames = inner.max(source_end);
     let markers: Vec<crate::model::Marker> =
         serde_json::from_value(item["metadata"][VIDCUT]["markers"].clone()).unwrap_or_default();
+    let start_tc = item["metadata"][VIDCUT]["start_tc"]
+        .as_i64()
+        .filter(|&n| n >= 0)
+        .unwrap_or(0);
     let mut stack = item.clone();
     if let Some(o) = stack.as_object_mut() {
         for key in ["source_range", "effects", "markers"] {
@@ -1254,6 +1258,7 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         .and_then(Value::as_object_mut)
     {
         m.remove("markers");
+        m.remove("start_tc");
     }
     Compound {
         stack: stack.into(),
@@ -1261,6 +1266,7 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         tracks: Vec::new(),
         made_from: Vec::new(),
         markers,
+        start_tc,
     }
 }
 
@@ -1319,6 +1325,9 @@ fn compound_item(
     }
     if !k.markers.is_empty() {
         v["metadata"][VIDCUT]["markers"] = json!(k.markers);
+    }
+    if k.start_tc != 0 {
+        v["metadata"][VIDCUT]["start_tc"] = json!(k.start_tc);
     }
     v
 }

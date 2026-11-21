@@ -1,6 +1,6 @@
 use crate::model::{
-    Clip, Compound, Cue, Effects, Generator, Marker, Marks, PooledCompound, Project, Track,
-    TrackClip, TrackCue, Transition,
+    Clip, Compound, Cue, Effects, Generator, Marker, Marks, PooledCompound, Project, Settings,
+    Track, TrackClip, TrackCue, Transition,
 };
 use crate::time::{Rational, rescale};
 
@@ -76,8 +76,27 @@ fn transition(x: &mut Transition, r: Rates) {
     crate::otio::transitions::scale_curve(x.otio.make_mut(), |f| r.frame(f), r.ratio());
 }
 
+pub(crate) fn relabel_start(from: &Settings, to: &Settings, start_tc: i64) -> i64 {
+    if start_tc == 0 || (from.fps == to.fps && from.counts_drop_frame() == to.counts_drop_frame()) {
+        return start_tc;
+    }
+    to.relabel(start_tc, from)
+}
+
 pub(crate) fn compound(p: &Project, k: &mut Compound, r: Rates) {
     k.frames = r.frame(k.frames);
+    let base = p.flat_settings();
+    let from = Settings {
+        fps: r.from,
+        drop_frame: base.drop_frame && r.from.has_drop_frame(),
+        ..base.clone()
+    };
+    let to = Settings {
+        fps: r.to,
+        drop_frame: base.drop_frame && r.to.has_drop_frame(),
+        ..base
+    };
+    k.start_tc = relabel_start(&from, &to, k.start_tc);
     for m in &mut k.markers {
         marker(m, r);
     }

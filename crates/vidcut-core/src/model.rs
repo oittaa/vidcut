@@ -6395,6 +6395,10 @@ pub struct Compound {
     /// Timeline markers inside the compound clip. Left out when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<Marker>,
+    /// Starting timecode of the compound clip, as frames from 00:00:00:00.
+    /// Left out at 0.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub start_tc: i64,
 }
 
 /// Where an open compound clip writes its edits back when closed.
@@ -6429,6 +6433,8 @@ pub struct OpenCompound {
     pub marks: Marks,
     #[serde(default)]
     pub markers: Vec<Marker>,
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub start_tc: i64,
 }
 
 #[derive(Serialize)]
@@ -6444,6 +6450,8 @@ struct OpenCompoundOut<'a> {
     marks: &'a Marks,
     #[serde(skip_serializing_if = "<[Marker]>::is_empty")]
     markers: &'a [Marker],
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    start_tc: i64,
 }
 
 impl<'a> OpenCompoundOut<'a> {
@@ -6457,6 +6465,7 @@ impl<'a> OpenCompoundOut<'a> {
             tracks: s.tracks,
             marks: s.marks,
             markers: s.markers,
+            start_tc: c.start_tc,
         }
     }
 }
@@ -6532,6 +6541,13 @@ impl PooledCompound {
 
     pub fn sequence_id(&self) -> Option<&str> {
         self.blocks().find_map(crate::otio::sequence_id)
+    }
+
+    pub fn start_tc(&self) -> i64 {
+        self.picture
+            .as_ref()
+            .or(self.sound.as_ref())
+            .map_or(0, |k| k.start_tc)
     }
 }
 
@@ -7991,8 +8007,8 @@ impl Project {
     }
 
     pub fn start_tc(&self) -> i64 {
-        if !self.compound_path.is_empty() {
-            return 0;
+        if let Some(c) = self.open_compound() {
+            return c.start_tc;
         }
         self.timeline()
             .map_or_else(|| self.settings.first_hour(), |t| t.start_tc)
@@ -8006,7 +8022,8 @@ impl Project {
     }
 
     pub fn set_start_tc(&mut self, frames: i64) {
-        if !self.compound_path.is_empty() {
+        if let Some(c) = self.compound_path.last_mut() {
+            c.start_tc = frames;
             return;
         }
         if let Some(t) = self.timeline_mut() {

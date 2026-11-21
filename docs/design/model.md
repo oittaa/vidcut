@@ -159,7 +159,7 @@ Timelines (spec §3):
 - In memory, the open timeline is checked out: its `tracks`, `marks`, `markers` and `subtitles` are the fields of `Project` with these names. Its entry in `timelines` has empty lists.
   - Why: the code that edits, plays and exports a timeline reads these fields. It does not change for many timelines.
   - `Project::check_in` puts them back into the entry, and `Project::check_out` takes them out. `Project::open_timeline` does both.
-  - `Project::compound_path` holds open compound clips (`OpenCompound`, outermost first) with their `CompoundTarget`. An `OpenCompound` holds `tracks`, `marks` and `markers`, with no subtitles, and `Project::start_tc` gives `0` while one is open.
+  - `Project::compound_path` holds open compound clips (`OpenCompound`, outermost first) with their `CompoundTarget`. An `OpenCompound` holds `tracks`, `marks`, `markers` and `start_tc`, with no subtitles, and `Project::start_tc` gives `OpenCompound::start_tc` while one is open.
   - `Project::checked_out_timeline` and `Project::sheet_key` name what is checked out. Exports while open export that compound clip with no `project` metadata, and `steps::since` reads `sheets_of` including open compounds.
   - The file and the history hold each timeline and open compound with its contents (`Project::whole_timeline`, `Project::sheets`). Thus a diff names the sheet that changed.
 - `TimelineSettings` (`own`) gives a timeline its own frame rate, size, drop-frame and color space. Without it, the timeline uses the project's.

@@ -2594,6 +2594,7 @@ fn hollow(p: &Project, c: &Clip) -> Clip {
         tracks: Vec::new(),
         made_from: Vec::new(),
         markers: Vec::new(),
+        start_tc: k.start_tc,
     });
     let mode = mode_at(p, c, c.end() - 1);
     if mode != CompositeMode::Normal {

@@ -3043,6 +3043,25 @@ fn mutate(
             (Some(_), Some(_)) => return Err(Error::usage("give `clip` or `compound`, not both")),
         },
         Request::CompoundClose { to } => ops::compound::close(p, *to)?,
+        Request::CompoundSet {
+            clip,
+            compound,
+            start_tc,
+        } => match (clip, compound) {
+            (Some(clip), None) => {
+                let id = resolve_clip(p, clip, playhead)?;
+                ops::compound::set_start_tc(p, ops::compound::SetTarget::Clip(&id), start_tc)?
+            }
+            (None, Some(compound)) => ops::compound::set_start_tc(
+                p,
+                ops::compound::SetTarget::Pooled(compound),
+                start_tc,
+            )?,
+            (None, None) => {
+                ops::compound::set_start_tc(p, ops::compound::SetTarget::Open, start_tc)?
+            }
+            (Some(_), Some(_)) => return Err(Error::usage("give `clip` or `compound`, not both")),
+        },
         Request::BinsAdd { path } => {
             ops::add_bin(p, path)?;
             Value::Null
@@ -5584,22 +5603,55 @@ fn mutate(
             },
             env,
         )?,
-        Request::EditCompound { clips, name, bin } => {
+        Request::EditCompound {
+            clips,
+            name,
+            bin,
+            start_tc,
+        } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let nested =
-                ops::compound::nest(p, &ids, name.as_deref(), bin.as_deref().unwrap_or(""))?;
+            let start_tc = match start_tc {
+                Some(tc) => p.flat_settings().start_frames(tc)?,
+                None => 0,
+            };
+            let nested = ops::compound::nest(
+                p,
+                &ids,
+                name.as_deref(),
+                bin.as_deref().unwrap_or(""),
+                start_tc,
+            )?;
             json!({ "clips": nested.clips, "warnings": nested.warnings })
         }
-        Request::EditCompoundRange { range, name, bin } => {
+        Request::EditCompoundRange {
+            range,
+            name,
+            bin,
+            start_tc,
+        } => {
             let span = marked_span(p, playhead, range.as_ref())?;
             let bin = bin.as_deref().unwrap_or("");
-            let nested = ops::compound::nest_range(p, span, name.as_deref(), bin)?;
+            let start_tc = match start_tc {
+                Some(tc) => p.flat_settings().start_frames(tc)?,
+                None => 0,
+            };
+            let nested = ops::compound::nest_range(p, span, name.as_deref(), bin, start_tc)?;
             json!({ "clips": nested.clips, "warnings": nested.warnings })
         }
-        Request::MediaCompound { range, name, bin } => {
+        Request::MediaCompound {
+            range,
+            name,
+            bin,
+            start_tc,
+        } => {
             let span = marked_span(p, playhead, range.as_ref())?;
             let bin = bin.as_deref().unwrap_or("");
-            let (id, warnings) = ops::compound::pool_range(p, span, name.as_deref(), bin)?;
+            let start_tc = match start_tc {
+                Some(tc) => p.flat_settings().start_frames(tc)?,
+                None => 0,
+            };
+            let (id, warnings) =
+                ops::compound::pool_range(p, span, name.as_deref(), bin, start_tc)?;
             json!({ "compound": id, "warnings": warnings })
         }
         Request::MediaCompoundRemove { compound } => {
@@ -6584,6 +6636,7 @@ fn place_imported(
                 tracks: Vec::new(),
                 made_from: Vec::new(),
                 markers: k.markers.clone(),
+                start_tc: k.start_tc,
             });
             let title = c
                 .title_from
@@ -7948,6 +8001,7 @@ fn set_drop_frame(p: &mut Project, on: bool) -> Result<()> {
     for t in p.timelines.iter_mut().filter(|t| t.own.is_none()) {
         t.start_tc = p.settings.relabel(t.start_tc, &was);
     }
+    ops::compound::relabel_start_tc(p, &was);
     Ok(())
 }
 

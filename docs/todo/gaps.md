@@ -11,7 +11,6 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - CEA-608 and EAS708 captions, and MXF files (pp. 1247–1248)
 - Export and import of a subtitle preset as a `.preset` file (pp. 1239–1240)
 - KeyKode in the timecode menu of the viewer (pp. 713–714)
-- Starting Timecode of a compound clip, in New Compound Clip and from the Media Pool (pp. 1052, 1054; [§8.18](../spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
 - Subtitle tracks inside a compound clip ([§8.18](../spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
 - Timeline grade on the Color page while a compound clip is open ([§8.18](../spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
 - The Solo icon of a track header, between Lock and Mute ([§5](../spec.md#5-dual-timeline-pp-66-643646-689692-716718))

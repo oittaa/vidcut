@@ -308,7 +308,7 @@ const GROUPS: &[(&str, &str)] = &[
         "timeline",
         "The timeline: clips and gaps, edit points, the Boring Detector, OTIO import",
     ),
-    ("compound", "Open and close compound clips in the timeline"),
+    ("compound", "Open, close and configure compound clips"),
     ("track", "Tracks: their header and mixer settings"),
     (
         "viewer",
@@ -611,6 +611,11 @@ const EXAMPLES: &[(&str, &str)] = &[
         "compound.close",
         "vidcut compound close\n  \
          vidcut compound close 0",
+    ),
+    (
+        "compound.set",
+        "vidcut compound set --start-tc 01:00:00:00\n  \
+         vidcut compound set --compound k1 --start-tc 01:02:03:04",
     ),
     (
         "storyboard.render",
