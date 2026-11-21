@@ -1621,6 +1621,14 @@ impl Workspace {
                     }
                 }
             }
+            WindowAct::Convert => {
+                self.effects_page.window = match current < WindowKind::ALL.len() {
+                    true => windows.len(),
+                    false => windows.len() - 1,
+                };
+                let params = Map::from_iter([("window".to_string(), json!(current))]);
+                send(self, "grade.window.convert", params);
+            }
             WindowAct::Value(i, f, v) => {
                 let mut next = grade.clone();
                 let at_window = next.node_mut(n).and_then(|d| d.windows.get_mut(i));

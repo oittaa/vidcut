@@ -4928,6 +4928,15 @@ fn mutate(
             ops::grade_windows::remove(p, &of, *node, *window)?;
             Value::Null
         }
+        Request::GradeWindowConvert {
+            clip,
+            timeline,
+            node,
+            window,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            json!({ "window": ops::grade_windows::convert(p, &of, *node, *window)? })
+        }
         Request::EffectsAdd { clips, kind } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             ops::effect::add(p, &ids, *kind)?

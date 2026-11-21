@@ -778,6 +778,12 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A corrector with a window that is on gets a `Key` pass first. It draws the key of the windows into a texture (`Key::Map`). The `Correct`, `Layer` and tap passes of the corrector read it.
   - The key texture comes from the same `Registers` as the pictures. It is free again after its last use (`Registers::used`).
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
+  - A curve goes to the GPU as two closed paths of lines: the inner and the outer path (`flattened`, `mitred`).
+    - `flatten_into` halves each Bezier segment until its handles are within `FLAT_ERROR` pixel of the chord, `FLAT_DEPTH` times at most.
+  - A curve with Soft 1 needs a blur of its hard key. `curves_blurred` draws up to `CURVE_CHANNELS` such keys into the channels of one texture (`fs_window_curves`).
+    - It blurs each channel with its own sigma, as the Gaussian blur of an effect. `texel_spread` gives the sigma in texels.
+  - With more soft curves, `key_runs` splits the windows into runs. Each run is one draw of `fs_window_key`.
+    - A run passes the state of the join to the next run in a texture of the `KEY_SLOTS`. The last run writes the key.
   - The grade works on textures of the render size. `texel_map` maps each fragment to a pixel of the timeline frame.
   - `texel_map` gives `back` the index of the texel, not its middle. Why: Edit Sizing acts on a window about the pixel W/2, H/2 ([spec §8.23](../spec.md#823-windows-pp-32653279)).
   - `back` of `Work::Grade` maps a pixel of the work texture to the timeline frame. A clip chains its placement and its fit. The timeline grade uses `frame_back`, and a thumbnail `shot_back`.
@@ -797,7 +803,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 - `Graded::tapped` makes the same passes for the node thumbnails ([gpu](gpu.md#the-node-thumbnails)). Each `Tap` names the texture with the output of a corrector, after its passes.
   - A corrector that a Layer Mixer reads, with a key above 0 and below 1, then always gets two textures (`Uses::twice`). One holds its output for the thumbnail.
   - A corrector that is off taps the texture of its input, with a key of 1. Thus the later thumbnails do not show its change.
-- `graded_into` runs the passes. Each texture past 0 has the size of the picture. They stay between draws in the spare textures, in the slots after `GRADE_SLOTS`. One limit holds all spare textures (`SPARE_TEXTURES`).
+- `graded_into` runs the passes. Each texture past 0 has the size of the picture. They stay between draws in the spare textures, in the slots after `KEY_SLOTS`. One limit holds all spare textures (`SPARE_TEXTURES`).
 - `fs_grade_mix` makes a `Parallel` or a `Layer` pass in a scratch texture. A copy then takes it back.
   - `Layer` uses `mixed`, the composite of the timeline, on the colors without their alpha. Thus a Layer Mixer and a track give the same mix.
   - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.

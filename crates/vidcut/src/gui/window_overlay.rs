@@ -1,14 +1,14 @@
 use std::f64::consts::TAU;
 
 use eframe::egui::{self, Color32, CursorIcon, PointerButton, Pos2, Response, Shape, Stroke, Vec2};
-use vidcut_core::model::{Grade, GradeWindow, WindowShape};
+use vidcut_core::model::{CurvePoint, Grade, GradeWindow, WindowShape};
 use vidcut_core::ops::grade::GradeOf;
 use vidcut_core::ops::grade_windows::{POLYGON_LEAST, POLYGON_MOST};
 use vidcut_core::place::{ahead, apply};
 use vidcut_core::request::{GradePalette, Page};
 use vidcut_core::window_key::{
     CIRCLE_RADIUS, GRADIENT_SOFT_STEP, Outline, PAN_STEP, SOFT_STEP, Shaped, circle_scale,
-    circle_size, linear_scale, origin, shaped,
+    circle_size, linear_scale, origin, shaped, traced,
 };
 
 use super::grade_windows::{PERCENT, TURN};
@@ -22,6 +22,7 @@ const TURN_REACH: f64 = 0.125;
 const GRADIENT_REACH: f64 = 1.0 / 6.0;
 const ROUND: usize = 96;
 const FAR: f64 = 1e5;
+const SPLIT_STEPS: usize = 64;
 const SELECTED: Color32 = Color32::WHITE;
 const RIM: Color32 = Color32::from_rgb(60, 130, 235);
 const SOFTNESS: Color32 = Color32::from_rgb(235, 60, 225);
@@ -104,6 +105,8 @@ enum Grip {
     Side(usize),
     Corner(usize),
     Point(usize),
+    Tangent(usize, usize, bool),
+    Pull(usize),
     Arrow,
 }
 
@@ -112,6 +115,7 @@ enum Look {
     Handle,
     Softness,
     Middle,
+    Tangent,
     Arrow,
 }
 
@@ -120,6 +124,12 @@ struct Drawn {
     closed: bool,
     guides: Vec<Vec<[f64; 2]>>,
     grips: Vec<(Grip, Look, [f64; 2])>,
+}
+
+pub(super) struct Drawing {
+    of: GradeOf,
+    node: u32,
+    index: usize,
 }
 
 pub(super) struct WindowGrab {
@@ -182,7 +192,7 @@ fn holds_point(points: &[[f64; 2]], [x, y]: [f64; 2]) -> bool {
     inside
 }
 
-fn drawn(w: &GradeWindow, s: &Shaped, [fw, fh]: [f64; 2], gap: f64) -> Drawn {
+fn drawn(w: &GradeWindow, s: &Shaped, ([fw, fh], gap, open): ([f64; 2], f64, bool)) -> Drawn {
     let local = Local::of(s);
     let at = |uv: [f64; 2]| local.frame(uv);
     let middle = (Grip::Move, Look::Middle, s.middle);
@@ -291,6 +301,39 @@ fn drawn(w: &GradeWindow, s: &Shaped, [fw, fh]: [f64; 2], gap: f64) -> Drawn {
                 grips,
             }
         }
+        Outline::Curve {
+            controls,
+            path,
+            inner,
+            outer,
+            ..
+        } => {
+            let ring = |o: &Vec<[f64; 2]>| [&o[..], &o[..1]].concat();
+            let mut guides: Vec<Vec<[f64; 2]>> = ([inner, outer].into_iter())
+                .filter(|o| *o != path && !o.is_empty())
+                .map(ring)
+                .collect();
+            let mut grips = Vec::new();
+            for (i, c) in controls.iter().enumerate() {
+                grips.push((Grip::Point(i), Look::Handle, c[1]));
+                for side in [0, 2].into_iter().filter(|side| c[*side] != c[1]) {
+                    guides.push(vec![c[1], c[side]]);
+                    grips.push((Grip::Tangent(i, side, false), Look::Tangent, c[side]));
+                }
+            }
+            if !controls.is_empty() {
+                grips.push(middle);
+            }
+            Drawn {
+                outline: match open {
+                    true => traced(controls, controls.len().saturating_sub(1)),
+                    false => path.clone(),
+                },
+                closed: !open,
+                guides,
+                grips,
+            }
+        }
         Outline::Gradient { soft } => {
             let half = GRADIENT_REACH * fw;
             let tip = at([0.0, -soft.max(gap)]);
@@ -316,6 +359,7 @@ fn holds(s: &Shaped, q: [f64; 2]) -> bool {
             holds_point(corners, [u / scale[0], v / scale[1]])
         }
         Outline::Polygon { points, .. } => points.len() >= POLYGON_LEAST && holds_point(points, q),
+        Outline::Curve { path, .. } => path.len() >= POLYGON_LEAST && holds_point(path, q),
         Outline::Gradient { .. } => false,
     }
 }
@@ -363,10 +407,90 @@ fn moved_corners(
     }))
 }
 
-fn polygon_point(w: &GradeWindow, s: &Shaped, frame: [f64; 2], q: [f64; 2]) -> [f64; 2] {
+fn model_point(w: &GradeWindow, s: &Shaped, frame: [f64; 2], q: [f64; 2]) -> [f64; 2] {
     let k = linear_scale(w.size);
     let [u, v] = Local::of(s).local(q);
     [u / (frame[0] * k), v / (frame[1] * k)]
+}
+
+fn turned_with(a: [f64; 2], (from, to): ([f64; 2], [f64; 2]), o: [f64; 2]) -> [f64; 2] {
+    let (f, t) = (
+        [from[0] - a[0], from[1] - a[1]],
+        [to[0] - a[0], to[1] - a[1]],
+    );
+    let long = f[0] * f[0] + f[1] * f[1];
+    if long < 1e-12 {
+        return o;
+    }
+    let z = [
+        (t[0] * f[0] + t[1] * f[1]) / long,
+        (t[1] * f[0] - t[0] * f[1]) / long,
+    ];
+    let r = [o[0] - a[0], o[1] - a[1]];
+    [
+        a[0] + z[0] * r[0] - z[1] * r[1],
+        a[1] + z[0] * r[1] + z[1] * r[0],
+    ]
+}
+
+fn lerp(a: [f64; 2], b: [f64; 2], t: f64) -> [f64; 2] {
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+}
+
+fn segment(controls: &[CurvePoint], i: usize) -> [[f64; 2]; 4] {
+    let (a, b) = (controls[i], controls[(i + 1) % controls.len()]);
+    [a[1], a[2], b[0], b[1]]
+}
+
+fn split_at(c: [[f64; 2]; 4], t: f64) -> ([[f64; 2]; 4], [[f64; 2]; 4]) {
+    let (ab, bc, cd) = (
+        lerp(c[0], c[1], t),
+        lerp(c[1], c[2], t),
+        lerp(c[2], c[3], t),
+    );
+    let (abc, bcd) = (lerp(ab, bc, t), lerp(bc, cd, t));
+    let m = lerp(abc, bcd, t);
+    ([c[0], ab, abc, m], [m, bcd, cd, c[3]])
+}
+
+fn bezier_at(c: [[f64; 2]; 4], t: f64) -> [f64; 2] {
+    split_at(c, t).0[3]
+}
+
+fn curve_split(controls: &[CurvePoint], framing: &Framing, p: Pos2) -> Option<(usize, f64)> {
+    (0..controls.len())
+        .flat_map(|i| {
+            let c = segment(controls, i);
+            (1..SPLIT_STEPS).map(move |k| {
+                let t = k as f64 / SPLIT_STEPS as f64;
+                (i, t, framing.screen(bezier_at(c, t)).distance(p))
+            })
+        })
+        .filter(|(_, _, d)| *d <= GRIP)
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(i, t, _)| (i, t))
+}
+
+fn curve_inserted(
+    w: &GradeWindow,
+    s: &Shaped,
+    frame: [f64; 2],
+    (i, t): (usize, f64),
+) -> Option<Vec<CurvePoint>> {
+    let (Outline::Curve { controls, .. }, WindowShape::Curve { points, .. }) =
+        (&s.outline, &w.shape)
+    else {
+        return None;
+    };
+    let n = controls.len();
+    let (left, right) = split_at(segment(controls, i), t);
+    let model = |q: [f64; 2]| model_point(w, s, frame, q);
+    let mut next = points.clone();
+    next[i][2] = model(left[1]);
+    let after = (i + 1) % n;
+    next[after][0] = model(right[2]);
+    next.insert(i + 1, [left[2], left[3], right[1]].map(model));
+    Some(next)
 }
 
 fn dragged(
@@ -438,11 +562,37 @@ fn dragged(
             let pair = [i, (i + 1) % 4];
             *points = moved_corners(w, &s, frame, (&pair, by)).unwrap_or(*points);
         }
+        (Grip::Point(i), Outline::Curve { controls, .. }, WindowShape::Curve { points, .. }) => {
+            if let (Some(c), Some(t)) = (controls.get(i), points.get_mut(i)) {
+                *t = c.map(|q| model_point(w, &s, frame, [q[0] + by[0], q[1] + by[1]]));
+            }
+        }
+        (
+            Grip::Tangent(i, side, alone),
+            Outline::Curve { controls, .. },
+            WindowShape::Curve { points, .. },
+        ) => {
+            if let (Some(c), Some(t)) = (controls.get(i), points.get_mut(i)) {
+                let mut next = *c;
+                next[side] = [c[side][0] + by[0], c[side][1] + by[1]];
+                if !alone {
+                    next[2 - side] = turned_with(c[1], (c[side], next[side]), c[2 - side]);
+                }
+                *t = next.map(|q| model_point(w, &s, frame, q));
+            }
+        }
+        (Grip::Pull(i), Outline::Curve { controls, .. }, WindowShape::Curve { points, .. }) => {
+            if let (Some(c), Some(t)) = (controls.get(i), points.get_mut(i)) {
+                let a = c[1];
+                let next = [[2.0 * a[0] - to[0], 2.0 * a[1] - to[1]], a, to];
+                *t = next.map(|q| model_point(w, &s, frame, q));
+            }
+        }
         (Grip::Point(i), Outline::Polygon { .. }, WindowShape::Polygon { points, .. }) => {
             if let Some(p) = points.get(i).copied() {
                 let k = linear_scale(w.size);
                 let q = local.frame([p[0] * frame[0] * k, p[1] * frame[1] * k]);
-                points[i] = polygon_point(w, &s, frame, [q[0] + by[0], q[1] + by[1]]);
+                points[i] = model_point(w, &s, frame, [q[0] + by[0], q[1] + by[1]]);
             }
         }
         _ => {}
@@ -469,18 +619,23 @@ struct Seen {
     drawn: Drawn,
 }
 
+fn grips_at<'a>(
+    seen: impl Iterator<Item = &'a Seen>,
+    framing: &Framing,
+    p: Pos2,
+) -> Option<(usize, Grip)> {
+    seen.flat_map(|s| {
+        (s.drawn.grips.iter()).map(move |(g, _, q)| (s.index, *g, framing.screen(*q).distance(p)))
+    })
+    .filter(|(_, _, d)| *d <= GRIP)
+    .min_by(|a, b| a.2.total_cmp(&b.2))
+    .map(|(i, g, _)| (i, g))
+}
+
 fn target(seen: &[Seen], current: usize, framing: &Framing, p: Pos2) -> Option<(usize, Grip)> {
     let order = (seen.iter().filter(|s| s.index == current))
         .chain(seen.iter().rev().filter(|s| s.index != current));
-    let grip = order
-        .clone()
-        .flat_map(|s| {
-            (s.drawn.grips.iter())
-                .map(move |(g, _, q)| (s.index, *g, framing.screen(*q).distance(p)))
-        })
-        .filter(|(_, _, d)| *d <= GRIP)
-        .min_by(|a, b| a.2.total_cmp(&b.2))
-        .map(|(i, g, _)| (i, g));
+    let grip = grips_at(order.clone(), framing, p);
     let q = framing.window(p);
     grip.or_else(|| {
         order
@@ -523,6 +678,12 @@ fn paint(painter: &egui::Painter, framing: &Framing, seen: &Seen, current: bool)
             (Look::Middle, _) => {
                 painter.circle_filled(at, DOT, line.color);
             }
+            (Look::Tangent, true) => {
+                painter.circle_filled(at, DOT, SELECTED);
+            }
+            (Look::Tangent, false) => {
+                painter.circle_filled(at, DOT, OTHER_HANDLE);
+            }
             (Look::Arrow, _) => {
                 let from = screen(&seen.shaped.middle);
                 let way = (at - from).normalized();
@@ -539,6 +700,25 @@ fn paint(painter: &egui::Painter, framing: &Framing, seen: &Seen, current: bool)
     }
 }
 
+fn curve_points(grade: &mut Grade, n: u32, index: usize) -> Option<&mut Vec<CurvePoint>> {
+    match grade
+        .node_mut(n)
+        .and_then(|d| d.windows.get_mut(index))
+        .map(|w| &mut w.shape)
+    {
+        Some(WindowShape::Curve { points, .. }) => Some(points),
+        _ => None,
+    }
+}
+
+fn with_points(grade: &Grade, n: u32, index: usize, points: Vec<CurvePoint>) -> Grade {
+    let mut next = grade.clone();
+    if let Some(to) = curve_points(&mut next, n, index) {
+        *to = points;
+    }
+    next
+}
+
 impl Workspace {
     pub(super) fn window_controls(
         &mut self,
@@ -549,6 +729,7 @@ impl Workspace {
         if self.effects_page.page != Page::Color
             || self.effects_page.palette != GradePalette::Window
         {
+            self.effects_page.window_drawing = None;
             return false;
         }
         let Some((of, _, stored)) = self.grade_shown() else {
@@ -570,12 +751,27 @@ impl Workspace {
             .window
             .min(windows.len().saturating_sub(1));
         let frame = framing.frame;
+        let curve = windows
+            .get(current)
+            .filter(|w| w.on)
+            .and_then(|w| match &w.shape {
+                WindowShape::Curve { points, .. } => Some(points.len()),
+                _ => None,
+            });
+        let drawing = curve.is_some()
+            && (self.effects_page.window_drawing.as_ref())
+                .is_some_and(|d| d.of == of && d.node == n && d.index == current);
+        if !drawing {
+            self.effects_page.window_drawing = None;
+        }
+        let adding = !locked && (drawing || curve == Some(0));
         let mut seen: Vec<Seen> = (windows.iter().enumerate())
             .filter(|(_, w)| w.on)
             .map(|(index, w)| {
                 let shaped = shaped(w, frame);
                 let gap = SOFT_GAP * framing.per_screen(shaped.middle);
-                let drawn = drawn(w, &shaped, frame, gap);
+                let open = drawing && index == current;
+                let drawn = drawn(w, &shaped, (frame, gap, open));
                 Seen {
                     index,
                     shaped,
@@ -588,33 +784,83 @@ impl Workspace {
         for s in &seen {
             paint(&painter, &framing, s, s.index == current);
         }
+        let own = |p: Pos2| grips_at(seen.iter().filter(|s| s.index == current), &framing, p);
         let hover = ui
             .input(|i| i.pointer.hover_pos())
             .filter(|p| resp.rect.contains(*p));
         let grabbed = self.effects_page.window_grab.is_some();
-        if let Some((_, grip)) = hover.and_then(|p| target(&seen, current, &framing, p)) {
+        let hovered = match adding {
+            true => hover.map(|p| own(p).map(|(_, g)| g)),
+            false => hover
+                .and_then(|p| target(&seen, current, &framing, p))
+                .map(|(_, g)| Some(g)),
+        };
+        if let Some(grip) = hovered {
             ui.ctx().set_cursor_icon(match (grip, grabbed) {
                 (_, true) => CursorIcon::Grabbing,
-                (Grip::Move, false) => CursorIcon::Move,
-                (_, false) => CursorIcon::Grab,
+                (None, false) => CursorIcon::Crosshair,
+                (Some(Grip::Move), false) => CursorIcon::Move,
+                (Some(_), false) => CursorIcon::Grab,
             });
         }
+        let alt = ui.input(|i| i.modifiers.alt);
         let press = ui.input(|i| i.pointer.press_origin());
+        let pointer = ui.input(|i| i.pointer.interact_pos());
         if resp.drag_started_by(PointerButton::Primary)
             && let Some(p) = press
-            && let Some((index, grip)) = target(&seen, current, &framing, p)
         {
-            self.effects_page.window = index;
-            self.effects_page.window_grab = (!locked).then(|| WindowGrab {
-                of: of.clone(),
-                node: n,
-                index,
-                grip,
-                grade: grade.clone(),
-                from: framing.window(p),
-            });
+            let hit = match adding {
+                true => own(p),
+                false => target(&seen, current, &framing, p),
+            };
+            let corner = |index: usize, i: usize| {
+                matches!(windows.get(index).map(|w| &w.shape),
+                    Some(WindowShape::Curve { points, .. })
+                        if points.get(i).is_some_and(|t| t[0] == t[1] && t[2] == t[1]))
+            };
+            let (index, grip, start) = match hit {
+                Some((index, Grip::Point(0))) if drawing && curve.unwrap_or(0) >= 2 => {
+                    self.effects_page.window_drawing = None;
+                    (index, Grip::Pull(0), grade.clone())
+                }
+                Some((index, Grip::Point(i))) if alt && corner(index, i) => {
+                    (index, Grip::Pull(i), grade.clone())
+                }
+                Some((index, Grip::Tangent(i, side, _))) => {
+                    (index, Grip::Tangent(i, side, alt), grade.clone())
+                }
+                Some((index, grip)) => (index, grip, grade.clone()),
+                None if adding => {
+                    let w = &windows[current];
+                    let point = model_point(w, &shaped(w, frame), frame, framing.window(p));
+                    let mut next = grade.clone();
+                    let mut made = 0;
+                    if let Some(points) = curve_points(&mut next, n, current) {
+                        points.push([point; 3]);
+                        made = points.len() - 1;
+                    }
+                    self.effects_page.window_drawing = Some(Drawing {
+                        of: of.clone(),
+                        node: n,
+                        index: current,
+                    });
+                    self.hold_grade(&of, n, next.clone());
+                    (current, Grip::Pull(made), next)
+                }
+                None => (current, Grip::Move, grade.clone()),
+            };
+            if hit.is_some() || adding {
+                self.effects_page.window = index;
+                self.effects_page.window_grab = (!locked).then(|| WindowGrab {
+                    of: of.clone(),
+                    node: n,
+                    index,
+                    grip,
+                    grade: start,
+                    from: framing.window(p),
+                });
+            }
         }
-        let pointer = ui.input(|i| i.pointer.interact_pos());
         if resp.dragged_by(PointerButton::Primary)
             && let Some(to) = pointer
             && let Some(g) = &self.effects_page.window_grab
@@ -636,24 +882,110 @@ impl Workspace {
         if resp.clicked_by(PointerButton::Primary)
             && let Some(p) = pointer
         {
-            let on_grip = target(&seen, current, &framing, p).filter(|(_, g)| *g != Grip::Move);
-            let edge = (seen.iter())
-                .find(|s| s.index == current)
-                .filter(|s| {
-                    matches!(s.shaped.outline, Outline::Polygon { .. }) && on_grip.is_none()
-                })
-                .and_then(|s| {
+            match adding {
+                true => self.curve_click(&of, n, (&grade, current), (own(p), p, &framing)),
+                false => self.window_click(&of, n, (&grade, current, locked), (&seen, p, &framing)),
+            }
+        }
+        if resp.double_clicked()
+            && alt
+            && !locked
+            && let Some(p) = pointer
+            && let Some((index, Grip::Point(i))) = target(&seen, current, &framing, p)
+            && let Some(WindowShape::Curve { points, .. }) = windows.get(index).map(|w| &w.shape)
+            && let Some(t) = points.get(i)
+        {
+            let mut next = points.clone();
+            next[i] = [t[1]; 3];
+            self.effects_page.window = index;
+            self.hold_grade(&of, n, with_points(&grade, n, index, next));
+        }
+        if resp.clicked_by(PointerButton::Middle)
+            && !locked
+            && let Some(p) = pointer
+            && let Some((index, Grip::Point(i))) = target(&seen, current, &framing, p)
+        {
+            let mut next = grade.clone();
+            let shape = (next.node_mut(n))
+                .and_then(|d| d.windows.get_mut(index))
+                .map(|w| &mut w.shape);
+            let removed = match shape {
+                Some(WindowShape::Polygon { points, .. }) if points.len() > POLYGON_LEAST => {
+                    points.remove(i);
+                    true
+                }
+                Some(WindowShape::Curve { points, .. }) if i < points.len() => {
+                    points.remove(i);
+                    true
+                }
+                _ => false,
+            };
+            if removed {
+                self.effects_page.window = index;
+                self.hold_grade(&of, n, next);
+            }
+        }
+        true
+    }
+
+    fn curve_click(
+        &mut self,
+        of: &GradeOf,
+        n: u32,
+        (grade, current): (&Grade, usize),
+        (hit, p, framing): (Option<(usize, Grip)>, Pos2, &Framing),
+    ) {
+        let Some(w) = grade.node(n).and_then(|d| d.windows.get(current)) else {
+            return;
+        };
+        let WindowShape::Curve { points, .. } = &w.shape else {
+            return;
+        };
+        match hit {
+            Some((_, Grip::Point(0))) if points.len() >= 2 => {
+                self.effects_page.window_drawing = None;
+            }
+            Some(_) => {}
+            None => {
+                let frame = framing.frame;
+                let point = model_point(w, &shaped(w, frame), frame, framing.window(p));
+                let mut next = points.clone();
+                next.push([point; 3]);
+                self.effects_page.window_drawing = Some(Drawing {
+                    of: of.clone(),
+                    node: n,
+                    index: current,
+                });
+                self.hold_grade(of, n, with_points(grade, n, current, next));
+            }
+        }
+    }
+
+    fn window_click(
+        &mut self,
+        of: &GradeOf,
+        n: u32,
+        (grade, current, locked): (&Grade, usize, bool),
+        (seen, p, framing): (&[Seen], Pos2, &Framing),
+    ) {
+        let frame = framing.frame;
+        let windows = grade.node(n).map_or(&[][..], |d| &d.windows[..]);
+        let on_grip = target(seen, current, framing, p).filter(|(_, g)| *g != Grip::Move);
+        let mine = seen
+            .iter()
+            .find(|s| s.index == current)
+            .filter(|_| on_grip.is_none() && !locked);
+        if let Some(s) = mine
+            && let Some(w) = windows.get(s.index)
+        {
+            match (&s.shaped.outline, &w.shape) {
+                (Outline::Polygon { .. }, WindowShape::Polygon { points, .. })
+                    if points.len() < POLYGON_MOST =>
+                {
                     let shown: Vec<Pos2> =
                         s.drawn.outline.iter().map(|q| framing.screen(*q)).collect();
-                    near_edge(&shown, p).map(|i| (s, i))
-                });
-            match edge {
-                Some((s, i)) if !locked => {
-                    let w = &windows[s.index];
-                    if let WindowShape::Polygon { points, .. } = &w.shape
-                        && points.len() < POLYGON_MOST
-                    {
-                        let point = polygon_point(w, &s.shaped, frame, framing.window(p));
+                    if let Some(i) = near_edge(&shown, p) {
+                        let point = model_point(w, &s.shaped, frame, framing.window(p));
                         let mut next = grade.clone();
                         if let Some(WindowShape::Polygon { points, .. }) = (next.node_mut(n))
                             .and_then(|d| d.windows.get_mut(s.index))
@@ -661,33 +993,23 @@ impl Workspace {
                         {
                             points.insert(i + 1, point);
                         }
-                        self.hold_grade(&of, n, next);
+                        self.hold_grade(of, n, next);
+                        return;
                     }
                 }
-                _ => {
-                    if let Some((index, _)) = target(&seen, current, &framing, p) {
-                        self.effects_page.window = index;
+                (Outline::Curve { controls, .. }, WindowShape::Curve { .. }) => {
+                    if let Some(at) = curve_split(controls, framing, p)
+                        && let Some(next) = curve_inserted(w, &s.shaped, frame, at)
+                    {
+                        self.hold_grade(of, n, with_points(grade, n, s.index, next));
+                        return;
                     }
                 }
+                _ => {}
             }
         }
-        if resp.clicked_by(PointerButton::Middle)
-            && !locked
-            && let Some(p) = pointer
-            && let Some((index, Grip::Point(i))) = target(&seen, current, &framing, p)
-            && let Some(WindowShape::Polygon { points, .. }) = windows.get(index).map(|w| &w.shape)
-            && points.len() > POLYGON_LEAST
-        {
-            let mut next = grade.clone();
-            if let Some(WindowShape::Polygon { points, .. }) = (next.node_mut(n))
-                .and_then(|d| d.windows.get_mut(index))
-                .map(|w| &mut w.shape)
-            {
-                points.remove(i);
-            }
+        if let Some((index, _)) = target(seen, current, framing, p) {
             self.effects_page.window = index;
-            self.hold_grade(&of, n, next);
         }
-        true
     }
 }

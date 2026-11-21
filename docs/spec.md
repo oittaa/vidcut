@@ -3254,14 +3254,23 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - A larger Aspect makes the window wider. A larger Tilt moves it up. A larger Rotate turns it clockwise (p. 3271).
   - Opacity sets the share of the window in the key of the node (p. 3271).
   - Softness: a circle and a gradient have Soft 1. A linear window has Soft 1 to 4. A polygon and a curve have Inside and Outside (p. 3273).
+  - A curve window has no points when it goes on. A click in the viewer adds a point (p. 3273).
+  - A click adds a corner. A click and a drag add a point with Bezier handles.
+  - A click on the first point closes the curve with a corner. A drag on the first point closes it with handles.
+  - A click on the curve adds a point. A drag of a point moves it, also before the curve is closed (p. 3274).
+  - A drag of a Bezier handle also moves the opposite handle. Option and a drag move one handle only.
+  - Option and a double-click make a point a corner. Option and a drag on a corner pull out handles.
+  - A middle-click removes a point of a polygon or a curve.
+  - Shift and a drag select the points in a box. Then a drag moves them, and the box scales them.
+  - The magenta softness points of a curve set the inside and outside softness at each point (p. 3273).
 - Measured in Resolve Studio 21.2 with float renders at 1920×1080, 3840×2160 and 1080×1920:
   - S(t) is smoothstep of t, clamped to 0..1. U(a, b) = (8m − 1) / 7, with m = max(a, b) + 0.5 max(0, 0.5 − |a − b|)². U is not clamped.
   - The place of a window is in pixels of the timeline frame, from its middle, with y up. Each pixel is at its index.
   - Pan and Tilt move the window by 81.92 pixels a step from 50. This is the same at each frame size.
   - Rotate R turns the window clockwise: u = x cos R − y sin R and v = x sin R + y cos R.
-  - Size scales a linear window and a polygon by 0.025 + 0.975 S/50 up to 50, and by 1 + 0.06 (S − 50) above.
+  - Size scales a linear window, a polygon and a curve by 0.025 + 0.975 S/50 up to 50, and by 1 + 0.06 (S − 50) above.
   - Size scales a circle by 0.002 + 0.998 S/50 up to 50, and by 1 + 0.08 (S − 50) above.
-  - Aspect A above 50 multiplies the width by 50/(100 − A). Below 50, it multiplies the height by 50/A. A polygon has no Aspect.
+  - Aspect A above 50 multiplies the width by 50/(100 − A). Below 50, it multiplies the height by 50/A. A polygon and a curve have no Aspect.
   - Aspect 0 makes a circle a band of width 2r, up and down the whole frame. Aspect 100 makes a band across it.
   - The Aspect field takes 0 to 100. A typed 150 gives 100, and a typed −20 gives 0.
   - A linear window clamps the scale of each axis to 4.
@@ -3276,9 +3285,20 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Polygon: the width w of a side is this value, but 0.25 pixel at least. Thus Inside 0 or Outside 0 gives an edge of 0.25 pixel.
   - Polygon: d is the distance from the outline, above 0 inside, clamped at −1000 pixels. key = S(0.5 + d / (2w)), with the w of that side.
   - Polygon: a pixel on the outline gets 0.5.
+  - Curve: the outline is a closed cubic Bezier path. Each point has an in handle and an out handle.
+  - Curve: with no softness, the key is 0 or 1. A pixel is in when (x, y + 0.5) is inside the path, with y down.
+  - Curve: the edge strays from the exact path by up to 0.30 pixel at Size 50, and by up to 0.44 pixel at Size 60.
+  - Curve: Inside and Outside move the path in and out, with mitred corners.
+  - Curve: at 1920×1080 and 3840×2160, Inside gives 0.001414 of the frame width a step. Outside gives three times that.
+  - Curve: between the two moved paths, key = S(dₒ / (dₒ + dᵢ)). dₒ and dᵢ are the distances to the outer and the inner path.
+  - Curve: this ramp fits best at (x − 0.5, y − 0.5) ([gotchas](gotchas.md#resolves-renders)). Near the corners it differs by up to 0.0055.
+  - Curve: Soft 1 is a blur of the key, close to a Gaussian, within 0.018. Sigma is Soft 1 × 0.005 of the frame height.
+  - Curve: Size does not change the sigma of Soft 1.
+  - Curve: Size and Rotate act about a pivot that the grade keeps.
   - Gradient: Soft 1 gives s = 100 pixels a step. key = S((s + v) / s), with v the distance above the line.
   - A new circle has Soft 1 = 0.015 of the frame diagonal / 16. A new linear window has Soft 1.25 on each side, and a new gradient Soft 2.
   - A new polygon has its corners at 0.25 of the frame width and height, and no softness.
+  - A new curve has no points and no softness.
   - Each window key first takes its Invert, 1 − w. Then Opacity multiplies it.
   - The add windows of one shape join with U, in list order, into a group A. The mask windows of one shape join in the same way into a group M.
   - With one group in the node, the key is A of that group, or 1 − M.
@@ -3290,7 +3310,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Measured in Resolve Studio 21.2: the window list of a new node has a linear, a circle, a polygon, a curve and a gradient row. These windows are off.
   - Measured: these first rows stay. Delete on one of them gives a warning, and the list does not change.
   - Measured: an added window goes to the end of the list, after the earlier adds. It is on.
-  - vidcut: a corrector has a linear, a circle, a polygon and a gradient window first, off at first. Curve windows come later.
+  - vidcut: a corrector has the same five windows first, off at first.
   - `grade.window.add` adds a window at its usual values, at the end of the window list. `grade.window.set` changes a window.
   - `grade.window.remove` removes an added window. It refuses the first windows: `on` turns them off.
   - Delete in the Window palette on a first window shows a warning line in the status bar.
@@ -3300,7 +3320,8 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut renders the 16 measured linear windows with a moved corner within 2.2e-4, except one pixel at 6.3e-4.
   - vidcut keeps no separate center: it is always the mean of the corners. Resolve keeps it as a separate value, which a DRX file can set.
   - Not measured: whether a drag of a side of a linear window changes that center in Resolve.
-  - `grade.window.set` with `points` sets the four corners of a linear window.
+  - `grade.window.set` with `points` sets the four corners of a linear window, or the corners of a polygon.
+  - For a curve, `points` has three points for each point: the in handle, the point and the out handle.
   - Measured: the thumbnail of a node uses the window key of each pixel. vidcut uses it as k of the thumbnail.
   - Measured: a window moves with the Edit Sizing of its clip: position, zoom, rotation, flips, pitch, yaw and Dynamic Zoom.
   - Measured: its outline in the viewer moves with the position and the zoom.
@@ -3319,6 +3340,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - A double-click on the name edits it. Enter sets the name.
     - The fields show the values of the current window. They are dim when the window is off.
     - A circle and a linear window use all six Transform fields. A polygon uses all but Aspect. A gradient uses Pan, Tilt, Rotate and Opacity.
+    - A curve uses all Transform fields but Aspect. Its softness fields are Soft 1, Inside and Outside.
     - A typed value goes to the nearest end. Rotate takes −180 to 180. The other fields take 0 to 100.
     - An added window is current. After a Delete, the first window of the same shape is current.
     - Reset Selected Window gives the current window the values of a new window, with Invert off. It keeps the name and Mask, and the window stays on.
@@ -3341,9 +3363,34 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut: the same. A drag of a corner or a side keeps the other corners where they are in the viewer. A polygon keeps three corners at least.
     - Not measured: how far the rotate handle of a polygon is from its middle. vidcut uses the rule of a linear window.
     - Not measured: what a drag of the arrow of a gradient changes. In vidcut it turns the gradient and changes Soft 1.
-  - Curve windows, window keyframes, and Copy and Paste Window come later ([todo](todo/color-page.md)).
+  - Measured: Convert to Bezier in the option menu, with a circle current, gives a curve with four points.
+    - The points are at the top, the right, the bottom and the left of the circle.
+    - The handles are 0.5519 of the radius. Pan and Tilt stay. The softness is 0. The circle row turns off.
+  - Measured: Convert to Bezier of an added polygon removes its row. A curve with its corners goes to the end of the list.
+    - The curve is on and current. Soft 1, Inside and Outside are 0. The viewer shows the same shape.
+  - vidcut: Convert to Bezier works on a circle, a linear window and a polygon. `grade.window.convert` does it.
+    - The curve has the same shape and goes to the end of the list, on and current. Its softness is 0.
+    - A first row turns off, and an added row goes away.
+    - The curve keeps Size, Rotate, Opacity, Invert and Mask.
+    - A circle gives four points about its middle. A polygon keeps its corners.
+    - A linear window gives its corners about their mean. Pan and Tilt move to that mean.
+    - Not measured: Convert to Bezier of a linear window or a first polygon, and of a circle at another Aspect, Size or Rotate.
+    - Not measured: whether the curve keeps Size, Rotate, Opacity, Invert and Mask.
+  - vidcut: the points of a curve are from its Pan and Tilt point, as the corners of a polygon. Size and Rotate act about that point.
+    - Not measured: how Resolve sets the pivot of a curve. For a drawn curve, it is not the mean of the points.
+  - vidcut: a pixel reads the curve at (x, y + 0.5), also for the Inside and Outside ramp ([gotchas](gotchas.md#resolves-renders)).
+    - The edge of vidcut is within 0.1 pixel of the exact path.
+    - Not measured: Inside and Outside on a frame of another shape. vidcut uses the frame width.
+  - vidcut renders the 8 measured soft curves within 0.023. The largest differences come from the place where a pixel reads the ramp.
+    - In the 3 measured hard curves, up to 637 pixels differ. They are within 0.44 pixel of the path, where the edge of Resolve strays.
+  - vidcut: drawing works as the manual says. A click in the viewer adds a point while the current curve is on and has no points.
+    - Until the curve is closed, the outline is open, and the key fills the points that are there.
+    - A middle-click removes any point of a curve.
+    - The viewer shows the outline, thin lines at the inner and the outer path, the points, the Bezier handles and a middle dot.
+    - Not measured: the look of a curve in the viewer of Resolve, and its key before the curve is closed.
+  - Window keyframes, Copy and Paste Window, the softness points of a curve and the Shift box come later ([todo](todo/color-page.md)).
 
-Requests: `grade.window.add`, `grade.window.set` and `grade.window.remove`.
+Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove` and `grade.window.convert`.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
