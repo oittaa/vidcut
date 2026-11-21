@@ -2537,6 +2537,12 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A free track is used as it is, and no track is added.
   - Where a clip is in the way, a new track goes in at the target. The clip in the way and all higher tracks move up.
   - This is the same on video tracks and on audio tracks.
+  - The settings of the compound clip itself are dropped (measured in Resolve Studio 21.2):
+    - Transform, Crop, Opacity, Composite, Dynamic Zoom and their keyframes.
+    - Its effects, its grade and its volume.
+  - Each clip keeps its time and its source frames.
+  - A compound clip with a speed change has no Decompose in Place item.
+  - vidcut: `edit.decompose` also breaks up a compound clip with a speed change. The clips inside take that speed.
 - **A transition at an edge of a compound clip** (measured in Resolve Studio 21.2.0):
   - A Cross Dissolve, a wipe, a Push, a Slide and a sound fade at an edge act as on a plain clip.
   - The dissolve uses the frames that a trim hides in the compound clip.
@@ -5323,7 +5329,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip with any keyframes shows a mark on its timeline bar.
     - Flips, the composite mode and Dynamic Zoom have no keyframes.
     - A speed change keeps each keyframe at its frame of the clip, as volume does (D81).
-    - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
     - That picture has the size of the frame, and it is made first. These facts follow (measured in Resolve Studio 21.2.0):
@@ -5366,10 +5371,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A title inside it keeps its own place, zoom and rotation in the frame of the compound clip.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
-    - `edit.decompose` gives the picture of the compound clip to each of its clips that has no picture of its own and fills the frame.
-    - With a Dynamic Zoom, a clip takes the picture only when it spans all of the compound clip.
-    - Thus each of these clips stays where it was in the compound clip, with the same size, crop and zoom.
-    - The other clips do not take the picture. A warning names them.
   - An export fits a placed picture at the size it shows, up to the size of the source. Thus a punch-in keeps the detail of the source.
   - The viewer draws it from the decoded picture with the same sums.
   - Titles keep their own place.
