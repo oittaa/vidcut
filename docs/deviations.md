@@ -1505,6 +1505,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - A pan of 1 pixel, a zoom of 0.99, a crop of 1 pixel or a rotation of 0.1°.
     - An opacity of 50% on the picture inside.
   - A title alone does not act in this way. Its mode mixes with the tracks below.
+  - A Vignette on the compound clip also keeps the mode. A Sharpen keeps it only with one of those changes.
 - **vidcut:**
   - The mode of one picture always mixes with the tracks below.
 - **Why:**

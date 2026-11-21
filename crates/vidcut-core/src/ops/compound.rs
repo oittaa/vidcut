@@ -868,7 +868,7 @@ fn check_cycle_from<'a>(
     Ok(())
 }
 
-fn same_compound(a: &Compound, b: &Compound) -> bool {
+fn same_compound(p: &Project, a: &Compound, b: &Compound) -> bool {
     match (&a.sequence_id, &b.sequence_id) {
         (Some(x), Some(y)) => x == y,
         (None, None) => {
@@ -878,7 +878,7 @@ fn same_compound(a: &Compound, b: &Compound) -> bool {
                 && a.start_tc == b.start_tc
                 && a.frames == b.frames
                 && a.kept_otio == b.kept_otio
-                && a.tracks == b.tracks
+                && p.compound_tracks(a) == b.tracks.as_slice()
         }
         _ => false,
     }
@@ -900,8 +900,8 @@ pub(crate) fn restore_copied(
         }
         let existing = p
             .compound(&k.id)
-            .filter(|e| same_compound(e, k))
-            .or_else(|| p.compounds.iter().find(|e| same_compound(e, k)));
+            .filter(|e| same_compound(p, e, k))
+            .or_else(|| p.compounds.iter().find(|e| same_compound(p, e, k)));
         if let Some(e) = existing {
             remap.insert(k.id.clone(), e.id.clone());
             continue;
@@ -3214,5 +3214,49 @@ mod tests {
         assert_eq!(p.compounds.len(), 1);
         assert_eq!(p.clip(&c1).unwrap().compound, p.clip(&c2).unwrap().compound);
         assert_eq!(crate::validate::everywhere(p), Vec::<String>::new());
+    }
+
+    #[test]
+    fn pasting_copied_foreign_compound_into_itself_while_open_is_refused() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 40);
+        nest(&mut f, &[&a]);
+        let mut doc = crate::otio::export(
+            f.editor.project(),
+            "T1",
+            None,
+            crate::otio::Locations::Absolute,
+        )
+        .unwrap();
+        doc.as_object_mut().unwrap().remove("metadata");
+        for track in doc["tracks"]["children"].as_array_mut().unwrap() {
+            for item in track["children"].as_array_mut().unwrap() {
+                if let Some(meta) = item["metadata"].as_object_mut() {
+                    meta.remove("vidcut");
+                    if let Some(ed) = meta.get_mut("Resolve_OTIO").and_then(Value::as_object_mut) {
+                        ed.remove("Sequence ID");
+                    }
+                }
+            }
+        }
+        let mut f2 = Fixture::new(&[(4.0, true)]);
+        f2.ok(req("timeline.import", json!({"otio": doc})));
+        let imported = f2.editor.project().tracks[0].clips[0].id.clone();
+        assert!(f2.editor.project().compounds[0].sequence_id.is_none());
+        let copied = f2.ok(req("edit.copy", json!({"clips": [imported]})));
+        f2.ok(req("compound.open", json!({"clip": imported})));
+        let err = f2.err(req(
+            "edit.paste",
+            json!({
+                "clips": copied.result["clips"],
+                "compounds": copied.result["compounds"],
+                "fps": copied.result["fps"],
+                "at": 0,
+            }),
+        ));
+        assert!(err.message.contains("cannot hold itself"));
+        let p2 = f2.editor.project();
+        assert_eq!(p2.compounds.len(), 1);
+        assert_eq!(crate::validate::everywhere(p2), Vec::<String>::new());
     }
 }
