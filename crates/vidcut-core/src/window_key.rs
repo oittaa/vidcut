@@ -16,7 +16,7 @@ pub enum Outline {
     Circle {
         radius: f64,
         soft: f64,
-        axes: [f64; 2],
+        shrink: [f64; 2],
     },
     Linear {
         half: [f64; 2],
@@ -74,14 +74,14 @@ pub fn circle_scale(size: f64) -> f64 {
     }
 }
 
-pub fn aspect_axes(aspect: f64) -> [f64; 2] {
+pub fn aspect_shrink(aspect: f64) -> [f64; 2] {
     [
         if aspect > 50.0 {
-            50.0 / (100.0 - aspect)
+            (100.0 - aspect) / 50.0
         } else {
             1.0
         },
-        if aspect < 50.0 { 50.0 / aspect } else { 1.0 },
+        if aspect < 50.0 { aspect / 50.0 } else { 1.0 },
     ]
 }
 
@@ -122,12 +122,15 @@ fn shaped(window: &GradeWindow, [w, h]: [f64; 2]) -> Shaped {
             Outline::Circle {
                 radius: CIRCLE_RADIUS * w * k,
                 soft: SOFT_STEP * soft * k,
-                axes: aspect_axes(window.aspect),
+                shrink: aspect_shrink(window.aspect),
             }
         }
         WindowShape::Linear { soft } => {
             let k = linear_scale(window.size);
-            let [ax, ay] = aspect_axes(window.aspect).map(|a| (k * a).min(LINEAR_MOST));
+            let [ax, ay] = aspect_shrink(window.aspect).map(|s| match s * LINEAR_MOST > k {
+                true => k / s,
+                false => LINEAR_MOST,
+            });
             let axis = [ax, ay, ax, ay];
             Outline::Linear {
                 half: [LINEAR_HALF * w * ax, LINEAR_HALF * h * ay],
@@ -169,50 +172,17 @@ fn shaped(window: &GradeWindow, [w, h]: [f64; 2]) -> Shaped {
     }
 }
 
-fn inverse(m: [f64; 9]) -> [f64; 9] {
-    let [a, b, c, d, e, f, g, h, i] = m;
-    let (x, y, z) = (e * i - f * h, f * g - d * i, d * h - e * g);
-    let det = a * x + b * y + c * z;
+pub fn texel_map(back: &[f64; 8], [w, h]: [f64; 2]) -> [f64; 9] {
+    let [a, b, e, c, d, f, g, k] = *back;
     [
-        x / det,
-        (c * h - b * i) / det,
-        (b * f - c * e) / det,
-        y / det,
-        (a * i - c * g) / det,
-        (c * d - a * f) / det,
-        z / det,
-        (b * g - a * h) / det,
-        (a * e - b * d) / det,
+        w * a,
+        w * b,
+        w * (e - 0.5 * (a + b)),
+        h * c,
+        h * d,
+        h * (f - 0.5 * (c + d)),
+        g,
+        k,
+        1.0 - 0.5 * (g + k),
     ]
-}
-
-fn times(m: [f64; 9], n: [f64; 9]) -> [f64; 9] {
-    std::array::from_fn(|k| {
-        let (r, c) = (k / 3, k % 3);
-        (0..3).map(|j| m[3 * r + j] * n[3 * j + c]).sum()
-    })
-}
-
-pub fn texel_map(
-    back: &[f64; 8],
-    texture: [f64; 2],
-    render: [f64; 2],
-    frame: [f64; 2],
-) -> [f64; 9] {
-    let [a, b, e, c, d, f, g, h] = *back;
-    let ahead = inverse([a, b, e, c, d, f, g, h, 1.0]);
-    let to_uv = [
-        1.0 / texture[0],
-        0.0,
-        0.0,
-        0.0,
-        1.0 / texture[1],
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-    ];
-    let (sx, sy) = (frame[0] / render[0], frame[1] / render[1]);
-    let to_pixels = [sx, 0.0, -0.5, 0.0, sy, -0.5, 0.0, 0.0, 1.0];
-    times(to_pixels, times(ahead, to_uv))
 }

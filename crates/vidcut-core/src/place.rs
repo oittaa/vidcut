@@ -1154,8 +1154,12 @@ impl Placing {
             .iter()
             .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
             .collect();
+        let [fx, fy, fw, fh] = fitted;
+        let (cw, ch) = frame;
+        let fitted_frame = [fw / cw, 0.0, fx / cw, 0.0, fh / ch, fy / ch, 0.0, 0.0];
+        let windows = chain(&own.back, &fitted_frame);
         let graded = (p.picture.grade.as_ref())
-            .and_then(|g| Working::graded(&g.at(p.source as f64), own.back));
+            .and_then(|g| Working::graded(&g.at(p.source as f64), windows));
         effects.extend(graded);
         let [u0, v0, u1, v1] = own.edge;
         let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&own.back, c));

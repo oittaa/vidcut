@@ -791,11 +791,9 @@ struct Spot {
 }
 
 impl Spot {
-    fn of(back: &[f64; 8], texture: &Texture, frame: [f64; 2]) -> Self {
-        let size = texture.texture.size();
-        let at = [f64::from(size.width), f64::from(size.height)];
+    fn of(back: &[f64; 8], frame: [f64; 2]) -> Self {
         Self {
-            map: texel_map(back, at, at, frame),
+            map: texel_map(back, frame),
             frame,
         }
     }
@@ -1315,9 +1313,11 @@ fn key_into(
             s.middle[1],
         ]);
         let (kind, shape): (f64, &[f64]) = match &s.outline {
-            WindowOutline::Circle { radius, soft, axes } => {
-                (0.0, &[*radius, *soft, axes[0], axes[1]])
-            }
+            WindowOutline::Circle {
+                radius,
+                soft,
+                shrink,
+            } => (0.0, &[*radius, *soft, shrink[0], shrink[1]]),
             WindowOutline::Linear { half, soft } => {
                 (1.0, &[half[0], half[1], soft[0], soft[1], soft[2], soft[3]])
             }
@@ -1512,7 +1512,7 @@ pub(super) fn tapped_into(
     (atlas, places): (&wgpu::Texture, &[(u32, u32)]),
     encoder: &mut wgpu::CommandEncoder,
 ) {
-    let spot = Spot::of(back, own, frame);
+    let spot = Spot::of(back, frame);
     let size = own.texture.size();
     let size = (size.width, size.height);
     let taken = registers_taken(gpu, spare, size, graded.registers);
@@ -1703,7 +1703,7 @@ fn effects_into(
                 continue;
             }
             Work::Grade { graded, back } => {
-                let spot = Spot::of(back, own, worked.frame);
+                let spot = Spot::of(back, worked.frame);
                 let room = (scratch, &mut worked.spare);
                 graded_into(gpu, own, room, (graded.as_ref(), effect, &spot), encoder);
                 continue;

@@ -779,8 +779,9 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - The key texture comes from the same `Registers` as the pictures. It is free again after its last use (`Registers::used`).
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
   - The grade works on textures of the render size. `texel_map` maps each fragment to a pixel of the timeline frame.
-  - The map comes from `back` of `Work::Grade`: the placement of the clip, `frame_back` for the timeline grade, and `shot_back` for a thumbnail.
-  - Why: the grade of a clip works after Edit Sizing ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)). Thus a window stays at its place in the frame when the clip moves.
+  - `texel_map` gives `back` the index of the texel, not its middle. Why: Edit Sizing acts on a window about the pixel W/2, H/2 ([spec §8.23](../spec.md#823-windows-pp-32653279)).
+  - `back` of `Work::Grade` maps a pixel of the work texture to the timeline frame. A clip chains its placement and its fit. The timeline grade uses `frame_back`, and a thumbnail `shot_back`.
+  - Why: a window moves with the Edit Sizing of its clip, but the grade works after Edit Sizing ([spec §8.23](../spec.md#823-windows-pp-32653279)).
   - A corrector with the key 0 also takes the texture of its input. A Layer Mixer that reads it gives it no `Layer` pass.
   - A `Parallel` pass adds the change of one input: mix + input − base.
   - `grade::base` finds the base: the nearest node that each path to each input goes through. An input counts for its own path.

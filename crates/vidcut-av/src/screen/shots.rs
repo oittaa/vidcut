@@ -43,25 +43,20 @@ pub(super) struct Source {
     pub(super) grade: Grade,
 }
 
-fn shot_back(
-    [x, y, fw, fh]: [f64; 4],
-    (w, h): (f64, f64),
-    [fx, fy]: [f64; 2],
-    aspect: f64,
-) -> [f64; 8] {
+fn shot_back([x, y, fw, fh]: [f64; 4], [fx, fy]: [f64; 2], aspect: f64) -> [f64; 8] {
     let (pw, ph) = match fx / fy > aspect {
         true => (fy * aspect, fy),
         false => (fx, fx / aspect),
     };
     let (px, py) = ((fx - pw) / 2.0, (fy - ph) / 2.0);
-    let (kx, ky) = (fw / pw, fh / ph);
+    let (kx, ky) = (pw / fw, ph / fh);
     [
-        kx * fx / (w * w),
+        kx / fx,
         0.0,
-        (x - px * kx) / w,
+        (px - 0.5 + (0.5 - x) * kx) / fx,
         0.0,
-        ky * fy / (h * h),
-        (y - py * ky) / h,
+        ky / fy,
+        (py - 0.5 + (0.5 - y) * ky) / fy,
         0.0,
         0.0,
     ]
@@ -165,7 +160,7 @@ impl Shots {
             .collect();
         let room_parts = (&room.scratch, &mut room.spare);
         let into = (&atlas.wide.texture, &places[..]);
-        let back = shot_back(fit, (bw, bh), source.frame, source.aspect);
+        let back = shot_back(fit, source.frame, source.aspect);
         let how = (&graded, &back, source.frame);
         blur::tapped_into(gpu, &room.own, room_parts, how, into, encoder);
         {

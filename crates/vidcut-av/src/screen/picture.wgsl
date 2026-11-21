@@ -1915,7 +1915,7 @@ fn window_one(b: u32, q: vec2<f32>) -> f32 {
     let p = vec4<f32>(window_cell(b, 7u), window_cell(b, 8u), window_cell(b, 9u), window_cell(b, 10u));
     switch kind {
         case 0u: {
-            let d = length(vec2<f32>(u / p.z, v / p.w));
+            let d = length(vec2<f32>(u * p.z, v * p.w));
             if p.y <= 0.0 {
                 return select(0.0, 1.0, d <= p.x);
             }

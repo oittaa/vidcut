@@ -3233,15 +3233,15 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
 ### 8.23 Windows (pp. 3265–3279)
 
 - The manual:
-  - A window limits the grade of its node to a part of the picture. All windows of a node work together (p. 3267).
-  - There are five shapes: Linear, Circular, Polygonal, Curve and Gradient (pp. 3268–3269).
-  - Each row of the window list has an On/Off button with the shape, a name field, Invert and Mask (p. 3268).
-  - Mask off adds the window to the other windows. Mask on takes it away from them (p. 3268).
-  - p. 3275 names the two states of Mask the other way round. The measurements agree with p. 3268.
-  - Transform: Size, Aspect, Pan, Tilt, Rotate and Opacity. Size, Aspect, Pan and Tilt are 50 at first. Rotate is 0 (p. 3270).
-  - A larger Aspect makes the window wider. A larger Tilt moves it up. A larger Rotate turns it clockwise (p. 3270).
-  - Opacity sets the share of the window in the key of the node (p. 3270).
-  - Softness: a circle and a gradient have Soft 1. A linear window has Soft 1 to 4. A polygon and a curve have Inside and Outside (p. 3272).
+  - A window limits the grade of its node to a part of the picture. All windows of a node work together (p. 3268).
+  - There are five shapes: Linear, Circular, Polygonal, Curve and Gradient (pp. 3269–3270).
+  - Each row of the window list has an On/Off button with the shape, a name field, Invert and Mask (p. 3269).
+  - Mask off adds the window to the other windows. Mask on takes it away from them (p. 3269).
+  - p. 3276 names the two states of Mask the other way round. The measurements agree with p. 3269.
+  - Transform: Size, Aspect, Pan, Tilt, Rotate and Opacity. Size, Aspect, Pan and Tilt are 50 at first. Rotate is 0 (p. 3271).
+  - A larger Aspect makes the window wider. A larger Tilt moves it up. A larger Rotate turns it clockwise (p. 3271).
+  - Opacity sets the share of the window in the key of the node (p. 3271).
+  - Softness: a circle and a gradient have Soft 1. A linear window has Soft 1 to 4. A polygon and a curve have Inside and Outside (p. 3273).
 - Measured in Resolve Studio 21.2 with float renders at 1920×1080, 3840×2160 and 1080×1920:
   - S(t) is smoothstep of t, clamped to 0..1. U(a, b) = (8m − 1) / 7, with m = max(a, b) + 0.5 max(0, 0.5 − |a − b|)². U is not clamped.
   - The place of a window is in pixels of the timeline frame, from its middle, with y up. Each pixel is at its index.
@@ -3250,6 +3250,8 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Size scales a linear window and a polygon by 0.025 + 0.975 S/50 up to 50, and by 1 + 0.06 (S − 50) above.
   - Size scales a circle by 0.002 + 0.998 S/50 up to 50, and by 1 + 0.08 (S − 50) above.
   - Aspect A above 50 multiplies the width by 50/(100 − A). Below 50, it multiplies the height by 50/A. A polygon has no Aspect.
+  - Aspect 0 makes a circle a band of width 2r, up and down the whole frame. Aspect 100 makes a band across it.
+  - The Aspect field takes 0 to 100. A typed 150 gives 100, and a typed −20 gives 0.
   - A linear window clamps the scale of each axis to 4.
   - Circle: the radius r is 0.15 of the frame width, times the scale. Soft 1 gives s = 16 pixels a step, times the scale.
   - Circle: key = S((r + s − d) / (2s)), with d the distance from the middle in the axes of the Aspect. With Soft 0, a pixel at d = r is in.
@@ -3273,9 +3275,12 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
 - vidcut:
   - `grade.window.add` adds a window at its usual values, at the end of the window list. `grade.window.set` changes a window, and `grade.window.remove` removes it.
   - `grade.get` gives the windows of each corrector. The values are those of the palette.
-  - The windows work as measured in the viewer and the export. vidcut renders the 124 measured cases within 1.6e-4.
+  - The windows work as measured in the viewer and the export. vidcut renders the 133 measured cases within 1.6e-4.
   - Measured: the thumbnail of a node uses the window key of each pixel. vidcut uses it as k of the thumbnail.
-  - The grade of a clip works after Edit Sizing ([§13](#13-order-of-operations-pp-287296-3407)). Thus a window keeps its place in the frame when the clip moves.
+  - Measured: a window moves with the Edit Sizing of its clip: the position, the zoom, the rotation and the flips. Its outline in the viewer moves with it.
+  - Measured: a window is in pixels of the timeline frame, on the clip as fitted. A 3840×2160 clip in a 1920×1080 timeline gets the window of a 1920×1080 clip.
+  - Measured: the zoom, the rotation and the flips act on the window about the pixel at W/2, H/2. The picture turns about the middle of the frame, half a pixel away.
+  - vidcut: the same. The grade itself works after Edit Sizing ([§13](#13-order-of-operations-pp-287296-3407)). vidcut renders the 8 measured moved clips within 3.4e-4.
   - A circle made in Resolve with Toggle Display Mode on has no radius ([gotchas](gotchas.md#resolves-renders)). vidcut does not copy this fault.
   - A locked node refuses a change of its windows ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
   - Measured: Reset Node Grade turns each window off at its usual values, with Invert and Mask off. The rows and their names stay.
