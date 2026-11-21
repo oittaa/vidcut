@@ -297,11 +297,13 @@ fn keep_copy(p: &mut Project, nested: &Nested, bin: &str) {
         .unwrap_or_default();
     let id = p.alloc_pooled_compound_id();
     let fps = p.fps();
+    let drop_frame = p.counts_drop_frame();
     p.compounds.push(PooledCompound {
         id,
         name,
         bin: bin.to_string(),
         fps,
+        drop_frame,
         picture,
         sound,
     });
@@ -426,8 +428,17 @@ pub fn place_pooled(
     if item.frames() < 1 {
         return Err(Error::invalid("compound clip is empty"));
     }
-    if let Some(r) = super::conform::Rates::new(item.fps, p.fps()) {
+    let from_df = item.counts_drop_frame();
+    let to_df = p.counts_drop_frame();
+    if let Some(r) = super::conform::Rates::with_drop(item.fps, from_df, p.fps(), to_df) {
         super::conform::pooled(p, &mut item, r);
+    } else if from_df != to_df {
+        let base = p.flat_settings();
+        let from = settings_with(&base, item.fps, from_df);
+        let to = settings_with(&base, p.fps(), to_df);
+        for b in item.blocks_mut() {
+            super::conform::relabel_compound(b, &from, &to);
+        }
     }
     if let Some(t) = track {
         ensure_track(p, t)?;
@@ -974,6 +985,7 @@ struct OpenData {
     name: String,
     target: CompoundTarget,
     fps: Rational,
+    drop_frame: bool,
     sequence_id: Option<String>,
     tracks: Vec<Track>,
     markers: Vec<Marker>,
@@ -988,6 +1000,7 @@ fn push_open(p: &mut Project, data: OpenData) {
         name: data.name,
         target: data.target,
         fps: data.fps,
+        drop_frame: data.drop_frame,
         sequence_id: data.sequence_id,
         tracks,
         marks: Marks::default(),
@@ -1046,27 +1059,41 @@ pub fn open_clip(
             .find(|x| x.sequence_id() == Some(sid) && x.fps != p.fps())
             .cloned()
     });
-    let (open_fps, start_tc, raw_tracks, raw_markers) = if let Some(pool) = pooled_other_fps {
-        let tc = pool.start_tc();
-        let (ts, ms) = extract_pooled_tracks(&pool);
-        (pool.fps, tc, ts, ms)
-    } else if !k.made_from.is_empty() {
-        (p.fps(), k.start_tc, k.made_from.clone(), k.markers.clone())
-    } else if let Some((ts, ms)) = imported {
-        (p.fps(), k.start_tc, ts, ms)
-    } else {
-        let fallback = combined_tracks(&k, partner.as_ref());
-        if fallback.is_empty() && otio_has_items(&k.stack) {
-            return Err(Error::invalid(format!("{lead_id}'s clips weren't found")));
-        }
-        (p.fps(), k.start_tc, fallback, k.markers.clone())
-    };
+    let (open_fps, open_df, start_tc, raw_tracks, raw_markers) =
+        if let Some(pool) = pooled_other_fps {
+            let tc = pool.start_tc();
+            let (ts, ms) = extract_pooled_tracks(&pool);
+            (pool.fps, pool.counts_drop_frame(), tc, ts, ms)
+        } else if !k.made_from.is_empty() {
+            (
+                p.fps(),
+                p.counts_drop_frame(),
+                k.start_tc,
+                k.made_from.clone(),
+                k.markers.clone(),
+            )
+        } else if let Some((ts, ms)) = imported {
+            (p.fps(), p.counts_drop_frame(), k.start_tc, ts, ms)
+        } else {
+            let fallback = combined_tracks(&k, partner.as_ref());
+            if fallback.is_empty() && otio_has_items(&k.stack) {
+                return Err(Error::invalid(format!("{lead_id}'s clips weren't found")));
+            }
+            (
+                p.fps(),
+                p.counts_drop_frame(),
+                k.start_tc,
+                fallback,
+                k.markers.clone(),
+            )
+        };
     push_open(
         p,
         OpenData {
             name,
             target: CompoundTarget::Clip { clip: lead_id },
             fps: open_fps,
+            drop_frame: open_df,
             sequence_id: seq_id,
             tracks: raw_tracks,
             markers: raw_markers,
@@ -1094,6 +1121,7 @@ pub fn open_pooled(p: &mut Project, query: &str) -> Result<Value> {
     }
     let start_tc = found.start_tc();
     let seq_id = found.sequence_id().map(str::to_string);
+    let drop_frame = found.counts_drop_frame();
     let (raw_tracks, raw_markers) = extract_pooled_tracks(&found);
     push_open(
         p,
@@ -1101,6 +1129,7 @@ pub fn open_pooled(p: &mut Project, query: &str) -> Result<Value> {
             name: found.name,
             target: CompoundTarget::Pooled { compound: found.id },
             fps: found.fps,
+            drop_frame,
             sequence_id: seq_id,
             tracks: raw_tracks,
             markers: raw_markers,
@@ -1163,30 +1192,36 @@ fn strip_follows(tracks: &mut [Track]) {
 fn conform_compound(
     p: &mut Project,
     k: &mut Compound,
-    from: Rational,
-    to: Rational,
+    from: (Rational, bool),
+    to: (Rational, bool),
     name: &str,
     seq_id: Option<&str>,
 ) -> Result<()> {
-    let Some(r) = super::conform::Rates::new(from, to) else {
-        return Ok(());
-    };
-    super::conform::compound(p, k, r);
-    let source = if k.made_from.is_empty() {
-        &k.tracks
-    } else {
-        &k.made_from
-    };
-    let frames = end_of(source);
-    k.frames = k.frames.max(frames);
-    k.stack = stack_of_with_id(p, source, name, frames, to, seq_id)?;
+    let (from_fps, from_df) = (from.0, from.1 && from.0.has_drop_frame());
+    let (to_fps, to_df) = (to.0, to.1 && to.0.has_drop_frame());
+    if let Some(r) = super::conform::Rates::with_drop(from_fps, from_df, to_fps, to_df) {
+        super::conform::compound(p, k, r);
+        let source = if k.made_from.is_empty() {
+            &k.tracks
+        } else {
+            &k.made_from
+        };
+        let frames = end_of(source);
+        k.frames = k.frames.max(frames);
+        k.stack = stack_of_with_id(p, source, name, frames, to_fps, seq_id)?;
+    } else if from_df != to_df {
+        let base = p.flat_settings();
+        let from_s = settings_with(&base, from_fps, from_df);
+        let to_s = settings_with(&base, to_fps, to_df);
+        super::conform::relabel_compound(k, &from_s, &to_s);
+    }
     Ok(())
 }
 
 struct Replacement<'a> {
     sid: &'a str,
     name: &'a str,
-    from: Rational,
+    from: (Rational, bool),
     pic: &'a Compound,
     snd: &'a Compound,
 }
@@ -1195,14 +1230,14 @@ fn updated_clip_compound(
     p: &mut Project,
     c: &Clip,
     rep: &Replacement,
-    host_fps: Rational,
+    host: (Rational, bool),
 ) -> Result<Compound> {
     let mut k = if c.video {
         rep.pic.clone()
     } else {
         rep.snd.clone()
     };
-    conform_compound(p, &mut k, rep.from, host_fps, rep.name, Some(rep.sid))?;
+    conform_compound(p, &mut k, rep.from, host, rep.name, Some(rep.sid))?;
     let old_frames = c.compound.as_ref().map_or(0, |old| old.frames);
     k.frames = k.frames.max(c.shown().1).max(old_frames);
     Ok(k)
@@ -1211,7 +1246,7 @@ fn updated_clip_compound(
 fn pooled_blocks(
     p: &mut Project,
     rep: &Replacement,
-    pool_fps: Rational,
+    pool: (Rational, bool),
     old_frames: i64,
 ) -> Result<(Option<Compound>, Option<Compound>)> {
     let mut pic = (!rep.pic.tracks.is_empty()).then(|| rep.pic.clone());
@@ -1222,7 +1257,7 @@ fn pooled_blocks(
     for k in pic.iter_mut().chain(&mut snd) {
         strip_follows(&mut k.tracks);
         strip_follows(&mut k.made_from);
-        conform_compound(p, k, rep.from, pool_fps, rep.name, Some(rep.sid))?;
+        conform_compound(p, k, rep.from, pool, rep.name, Some(rep.sid))?;
         k.frames = k.frames.max(old_frames);
     }
     Ok((pic, snd))
@@ -1233,7 +1268,7 @@ fn propagate_in_compound(
     k: &mut Compound,
     video: bool,
     shown_end: i64,
-    host_fps: Rational,
+    host: (Rational, bool),
     rep: &Replacement,
     visited: &mut HashSet<String>,
 ) -> Result<bool> {
@@ -1248,60 +1283,47 @@ fn propagate_in_compound(
         .unwrap_or("Compound Clip")
         .to_string();
     let old_frames = k.frames;
-    let res = if !k.made_from.is_empty() {
-        let mut whole = std::mem::take(&mut k.made_from);
-        let hit = propagate_in_tracks(p, &mut whole, host_fps, rep, None, visited);
-        let out = match hit {
-            Ok(true) => {
-                let frames = end_of(&whole);
-                k.tracks = if video {
-                    picture_tracks(&whole)
-                } else {
-                    sound_tracks(&whole)
-                };
-                k.frames = old_frames.max(frames).max(shown_end);
-                stack_of_with_id(
-                    p,
-                    &whole,
-                    &outer_name,
-                    frames,
-                    host_fps,
-                    outer_sid.as_deref(),
-                )
-                .map(|stack| {
-                    k.stack = stack;
-                    true
-                })
-            }
-            other => other,
+    let res =
+        if !k.made_from.is_empty() {
+            let mut whole = std::mem::take(&mut k.made_from);
+            let hit = propagate_in_tracks(p, &mut whole, host, rep, None, visited);
+            let out = match hit {
+                Ok(true) => {
+                    let frames = end_of(&whole);
+                    k.tracks = if video {
+                        picture_tracks(&whole)
+                    } else {
+                        sound_tracks(&whole)
+                    };
+                    k.frames = old_frames.max(frames).max(shown_end);
+                    stack_of_with_id(p, &whole, &outer_name, frames, host.0, outer_sid.as_deref())
+                        .map(|stack| {
+                            k.stack = stack;
+                            true
+                        })
+                }
+                other => other,
+            };
+            k.made_from = whole;
+            out
+        } else {
+            let mut inner = std::mem::take(&mut k.tracks);
+            let hit = propagate_in_tracks(p, &mut inner, host, rep, None, visited);
+            let out = match hit {
+                Ok(true) => {
+                    let frames = end_of(&inner);
+                    k.frames = old_frames.max(frames).max(shown_end);
+                    stack_of_with_id(p, &inner, &outer_name, frames, host.0, outer_sid.as_deref())
+                        .map(|stack| {
+                            k.stack = stack;
+                            true
+                        })
+                }
+                other => other,
+            };
+            k.tracks = inner;
+            out
         };
-        k.made_from = whole;
-        out
-    } else {
-        let mut inner = std::mem::take(&mut k.tracks);
-        let hit = propagate_in_tracks(p, &mut inner, host_fps, rep, None, visited);
-        let out = match hit {
-            Ok(true) => {
-                let frames = end_of(&inner);
-                k.frames = old_frames.max(frames).max(shown_end);
-                stack_of_with_id(
-                    p,
-                    &inner,
-                    &outer_name,
-                    frames,
-                    host_fps,
-                    outer_sid.as_deref(),
-                )
-                .map(|stack| {
-                    k.stack = stack;
-                    true
-                })
-            }
-            other => other,
-        };
-        k.tracks = inner;
-        out
-    };
     if let Some(sid) = outer_sid.as_deref() {
         visited.remove(sid);
     }
@@ -1311,7 +1333,7 @@ fn propagate_in_compound(
 fn propagate_in_tracks(
     p: &mut Project,
     tracks: &mut [Track],
-    host_fps: Rational,
+    host: (Rational, bool),
     rep: &Replacement,
     skip_ids: Option<&HashSet<String>>,
     visited: &mut HashSet<String>,
@@ -1325,7 +1347,7 @@ fn propagate_in_tracks(
                     .and_then(otio::sequence_id)
                     .is_some_and(|s| s == rep.sid)
             {
-                let mut updated = updated_clip_compound(p, c, rep, host_fps)?;
+                let mut updated = updated_clip_compound(p, c, rep, host)?;
                 strip_follows(&mut updated.tracks);
                 strip_follows(&mut updated.made_from);
                 c.compound = Some(updated);
@@ -1334,7 +1356,7 @@ fn propagate_in_tracks(
             }
             let (video, shown_end) = (c.video, c.shown().1);
             if let Some(k) = c.compound.as_mut()
-                && propagate_in_compound(p, k, video, shown_end, host_fps, rep, visited)?
+                && propagate_in_compound(p, k, video, shown_end, host, rep, visited)?
             {
                 changed = true;
             }
@@ -1357,6 +1379,7 @@ fn close_one(p: &mut Project) -> Result<()> {
     let inner_frames = end_of(&whole);
     let pic_tracks = picture_tracks(&whole);
     let snd_tracks = sound_tracks(&whole);
+    let open_rate = (open.fps, open.counts_drop_frame());
     let stack = stack_of_with_id(
         p,
         &whole,
@@ -1388,7 +1411,7 @@ fn close_one(p: &mut Project) -> Result<()> {
     let rep = Replacement {
         sid: open.sequence_id.as_deref().unwrap_or(&sid),
         name: &open.name,
-        from: open.fps,
+        from: open_rate,
         pic: &pic_base,
         snd: &snd_base,
     };
@@ -1399,11 +1422,11 @@ fn close_one(p: &mut Project) -> Result<()> {
         CompoundTarget::Clip { clip } => {
             let mut ids = vec![clip.clone()];
             ids.extend(otio::tied(p, clip));
-            let host_fps = p.fps();
+            let host = (p.fps(), p.counts_drop_frame());
             for tid in ids {
                 if let Some((ti, ci)) = p.find_clip(&tid) {
                     let c = p.tracks[ti].clips[ci].clone();
-                    let k = updated_clip_compound(p, &c, &rep, host_fps)?;
+                    let k = updated_clip_compound(p, &c, &rep, host)?;
                     p.tracks[ti].clips[ci].compound = Some(k);
                     updated_targets.insert(tid);
                 }
@@ -1411,9 +1434,9 @@ fn close_one(p: &mut Project) -> Result<()> {
         }
         CompoundTarget::Pooled { compound } => {
             if let Some(i) = p.compounds.iter().position(|x| &x.id == compound) {
-                let pool_fps = p.compounds[i].fps;
+                let pool = (p.compounds[i].fps, p.compounds[i].counts_drop_frame());
                 let old_frames = p.compounds[i].frames();
-                let (pic, snd) = pooled_blocks(p, &rep, pool_fps, old_frames)?;
+                let (pic, snd) = pooled_blocks(p, &rep, pool, old_frames)?;
                 p.compounds[i].picture = pic;
                 p.compounds[i].sound = snd;
                 updated_pooled = Some(compound.clone());
@@ -1431,30 +1454,30 @@ fn close_one(p: &mut Project) -> Result<()> {
             if updated_pooled.as_deref() == Some(item.id.as_str()) {
                 continue;
             }
+            let pool = (item.fps, item.counts_drop_frame());
             if item.sequence_id() == Some(old_sid) {
                 let old_frames = item.frames();
-                let (pic, snd) = pooled_blocks(p, &rep, item.fps, old_frames)?;
+                let (pic, snd) = pooled_blocks(p, &rep, pool, old_frames)?;
                 item.picture = pic;
                 item.sound = snd;
                 continue;
             }
-            let fps = item.fps;
             for (video, slot) in [(true, &mut item.picture), (false, &mut item.sound)] {
                 if let Some(k) = slot.as_mut() {
                     let mut visited = HashSet::new();
-                    propagate_in_compound(p, k, video, 0, fps, &rep, &mut visited)?;
+                    propagate_in_compound(p, k, video, 0, pool, &rep, &mut visited)?;
                 }
             }
         }
         p.compounds = compounds;
 
-        let host_fps = p.fps();
+        let host = (p.fps(), p.counts_drop_frame());
         let mut tracks = std::mem::take(&mut p.tracks);
         let mut visited = HashSet::new();
         propagate_in_tracks(
             p,
             &mut tracks,
-            host_fps,
+            host,
             &rep,
             Some(&updated_targets),
             &mut visited,
@@ -1463,21 +1486,24 @@ fn close_one(p: &mut Project) -> Result<()> {
 
         let checked_out_tl = p.checked_out_timeline().map(str::to_string);
         let project_fps = p.settings.fps;
+        let project_df = p.settings.drop_frame;
         let mut timelines = std::mem::take(&mut p.timelines);
         for t in &mut timelines {
             if checked_out_tl.as_deref() == Some(t.id.as_str()) {
                 continue;
             }
             let fps = t.own.map_or(project_fps, |o| o.fps);
+            let df = t.own.map_or(project_df, |o| o.drop_frame) && fps.has_drop_frame();
             let mut visited = HashSet::new();
-            propagate_in_tracks(p, &mut t.tracks, fps, &rep, None, &mut visited)?;
+            propagate_in_tracks(p, &mut t.tracks, (fps, df), &rep, None, &mut visited)?;
         }
         p.timelines = timelines;
 
         let mut path = std::mem::take(&mut p.compound_path);
         for oc in &mut path {
+            let oc_rate = (oc.fps, oc.counts_drop_frame());
             let mut visited = HashSet::new();
-            propagate_in_tracks(p, &mut oc.tracks, oc.fps, &rep, None, &mut visited)?;
+            propagate_in_tracks(p, &mut oc.tracks, oc_rate, &rep, None, &mut visited)?;
         }
         p.compound_path = path;
     }
@@ -1499,10 +1525,6 @@ fn settings_with(base: &Settings, fps: Rational, drop_frame: bool) -> Settings {
     }
 }
 
-fn settings_for_rate(p: &Project, fps: Rational) -> Settings {
-    settings_with(&p.flat_settings(), fps, p.format().drop_frame)
-}
-
 fn propagate_tracks_start_tc(
     tracks: &mut [Track],
     sid: &str,
@@ -1516,6 +1538,7 @@ fn propagate_tracks_start_tc(
             if otio::sequence_id(k) == Some(sid) {
                 k.start_tc = target;
             }
+            otio::patch_stack_start_tc(k, sid, target);
             propagate_tracks_start_tc(&mut k.tracks, sid, from, to, frames);
             propagate_tracks_start_tc(&mut k.made_from, sid, from, to, frames);
         }
@@ -1527,19 +1550,19 @@ fn propagate_start_tc(p: &mut Project, sid: &str, from: &Settings, frames: i64) 
     let project_fps = p.settings.fps;
     let project_df = p.settings.drop_frame;
     for item in &mut p.compounds {
-        let item_fps = item.fps;
-        let item_to = settings_with(&base, item_fps, base.drop_frame);
+        let item_to = settings_with(&base, item.fps, item.counts_drop_frame());
         let target = super::conform::relabel_start(from, &item_to, frames);
         let item_match = item.sequence_id() == Some(sid);
         for b in item.blocks_mut() {
             if item_match {
                 b.start_tc = target;
             }
+            otio::patch_stack_start_tc(b, sid, target);
             propagate_tracks_start_tc(&mut b.tracks, sid, from, &item_to, frames);
             propagate_tracks_start_tc(&mut b.made_from, sid, from, &item_to, frames);
         }
     }
-    let active_to = settings_with(&base, p.fps(), base.drop_frame);
+    let active_to = p.flat_settings();
     let mut tracks = std::mem::take(&mut p.tracks);
     propagate_tracks_start_tc(&mut tracks, sid, from, &active_to, frames);
     p.tracks = tracks;
@@ -1559,7 +1582,7 @@ fn propagate_start_tc(p: &mut Project, sid: &str, from: &Settings, frames: i64) 
 
     let mut path = std::mem::take(&mut p.compound_path);
     for oc in &mut path {
-        let oc_to = settings_with(&base, oc.fps, base.drop_frame);
+        let oc_to = settings_with(&base, oc.fps, oc.counts_drop_frame());
         let target = super::conform::relabel_start(from, &oc_to, frames);
         if oc.sequence_id.as_deref() == Some(sid) {
             oc.start_tc = target;
@@ -1589,7 +1612,11 @@ pub fn set_start_tc(p: &mut Project, target: SetTarget<'_>, tc: &TimeSpec) -> Re
                 .position(|x| x.id == query)
                 .or_else(|| p.compounds.iter().position(|x| x.name == query))
                 .ok_or_else(|| Error::not_found(format!("no compound clip {query:?}")))?;
-            let fmt = settings_for_rate(p, p.compounds[idx].fps);
+            let fmt = settings_with(
+                &p.settings,
+                p.compounds[idx].fps,
+                p.compounds[idx].counts_drop_frame(),
+            );
             let frames = fmt.start_frames(tc)?;
             let id = p.compounds[idx].id.clone();
             let sid = p.compounds[idx].sequence_id().map(str::to_string);
@@ -1640,31 +1667,14 @@ pub fn set_start_tc(p: &mut Project, target: SetTarget<'_>, tc: &TimeSpec) -> Re
 fn relabel_nested_compounds(tracks: &mut [Track], new: &Settings, old: &Settings) {
     for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
         if let Some(k) = c.compound.as_mut() {
-            if k.start_tc != 0 {
-                k.start_tc = new.relabel(k.start_tc, old);
-            }
-            relabel_nested_compounds(&mut k.tracks, new, old);
-            relabel_nested_compounds(&mut k.made_from, new, old);
+            super::conform::relabel_compound(k, old, new);
         }
     }
 }
 
 pub fn relabel_start_tc(p: &mut Project, was: &Settings) {
     let now = p.settings.clone();
-    for item in &mut p.compounds {
-        if item.fps != was.fps {
-            continue;
-        }
-        for b in item.blocks_mut() {
-            if b.start_tc != 0 {
-                b.start_tc = now.relabel(b.start_tc, was);
-            }
-            relabel_nested_compounds(&mut b.tracks, &now, was);
-            relabel_nested_compounds(&mut b.made_from, &now, was);
-        }
-    }
-    let active_inherits = p.timeline().is_none_or(|t| t.own.is_none());
-    if active_inherits && p.compound_path.last().is_none_or(|oc| oc.fps == was.fps) {
+    if p.compound_path.is_empty() && p.timeline().is_none_or(|t| t.own.is_none()) {
         relabel_nested_compounds(&mut p.tracks, &now, was);
     }
     let checked_out = p.checked_out_timeline().map(str::to_string);
@@ -1673,16 +1683,6 @@ pub fn relabel_start_tc(p: &mut Project, was: &Settings) {
             continue;
         }
         relabel_nested_compounds(&mut t.tracks, &now, was);
-    }
-    if active_inherits {
-        for oc in &mut p.compound_path {
-            if oc.fps == was.fps {
-                if oc.start_tc != 0 {
-                    oc.start_tc = now.relabel(oc.start_tc, was);
-                }
-                relabel_nested_compounds(&mut oc.tracks, &now, was);
-            }
-        }
     }
 }
 
@@ -2859,31 +2859,61 @@ mod tests {
         assert_eq!(f.editor.project().timecode(0), "03:00:00:00");
     }
 
+    fn ntsc_fixture(drop_frame: bool) -> Fixture {
+        let mut f = Fixture::new(&[]);
+        let ntsc = crate::time::Rational::new(30000, 1001).unwrap();
+        let info = crate::test_support::media_info(4.0, ntsc, true);
+        f.env = crate::test_support::FakeEnv::default().with("/media/ntsc.mp4", info);
+        f.ok(req(
+            "timeline.set",
+            json!({"own": {"fps": "30000/1001", "drop_frame": drop_frame}}),
+        ));
+        f.ok(req("media.add", json!({"paths": ["/media/ntsc.mp4"]})));
+        f
+    }
+
     #[test]
-    fn compound_set_from_media_pool_updates_placed_copies_and_keeps_trims() {
+    fn compound_set_from_media_pool_updates_placed_copies() {
         let mut f = Fixture::new(&[(4.0, true)]);
         let a = f.append("m1", 0, 50);
         nest(&mut f, &[&a]);
         let kid = f.editor.project().compounds[0].id.clone();
-        f.ok(req(
+        let placed = f.ok(req(
             "edit.place_compound",
             json!({"compound": kid, "at": 60}),
         ));
-        let placed_id = f.editor.project().tracks[0].clips[1].id.clone();
-        f.ok(req(
-            "edit.trim",
-            json!({"clip": &placed_id, "edge": "head", "by": 10, "ripple": false}),
-        ));
+        let placed_id = placed.result["clips"][0].as_str().unwrap().to_string();
         let r = f.ok(req(
             "compound.set",
             json!({"compound": kid, "start_tc": "05:00:00:00"}),
         ));
         assert_eq!(r.result["start_tc"], json!("05:00:00:00"));
         assert_eq!(f.editor.project().compounds[0].start_tc(), 450_000);
-        assert_eq!(f.editor.project().tracks[0].clips[1].start, 70);
-        assert_eq!(f.editor.project().tracks[0].clips[1].source_in, 10);
-        f.ok(req("compound.open", json!({"clip": &placed_id})));
+        f.ok(req("compound.open", json!({"clip": placed_id})));
         assert_eq!(f.editor.project().timecode(0), "05:00:00:00");
+    }
+
+    #[test]
+    fn compound_set_keeps_placed_position_and_trim() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        let placed = f.ok(req(
+            "edit.place_compound",
+            json!({"compound": kid, "at": 60}),
+        ));
+        let placed_id = placed.result["clips"][0].as_str().unwrap().to_string();
+        f.ok(req(
+            "edit.trim",
+            json!({"clip": &placed_id, "edge": "head", "by": 10, "ripple": false}),
+        ));
+        f.ok(req(
+            "compound.set",
+            json!({"compound": kid, "start_tc": "05:00:00:00"}),
+        ));
+        let clip = f.editor.project().clip(&placed_id).unwrap();
+        assert_eq!((clip.start, clip.source_in), (70, 10));
     }
 
     #[test]
@@ -2938,15 +2968,7 @@ mod tests {
 
     #[test]
     fn compound_start_tc_accepts_drop_frame_labels_at_ntsc() {
-        let mut f = Fixture::new(&[]);
-        let ntsc = crate::time::Rational::new(30000, 1001).unwrap();
-        let info = crate::test_support::media_info(4.0, ntsc, true);
-        f.env = crate::test_support::FakeEnv::default().with("/media/ntsc.mp4", info);
-        f.ok(req(
-            "timeline.set",
-            json!({"own": {"fps": "30000/1001", "drop_frame": true}}),
-        ));
-        f.ok(req("media.add", json!({"paths": ["/media/ntsc.mp4"]})));
+        let mut f = ntsc_fixture(true);
         let a = f.append("m1", 0, 30);
         let hosts = f
             .ok(req(
@@ -2985,6 +3007,217 @@ mod tests {
             f.editor
                 .project()
                 .clip(&clip_id)
+                .unwrap()
+                .compound
+                .as_ref()
+                .unwrap()
+                .start_tc,
+            108_000
+        );
+    }
+
+    #[test]
+    fn compound_set_updates_nested_compound_start_tc_in_parent_otio_stack() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 30);
+        let inner_hosts = nest(&mut f, &[&a]);
+        let inner_kid = f.editor.project().compounds[0].id.clone();
+        nest(&mut f, &[&inner_hosts[0]]);
+        f.ok(req(
+            "compound.set",
+            json!({"compound": inner_kid, "start_tc": "02:00:00:00"}),
+        ));
+        let doc = crate::otio::export(
+            f.editor.project(),
+            "T1",
+            None,
+            crate::otio::Locations::Absolute,
+        )
+        .unwrap();
+        let mut f2 = Fixture::new(&[(4.0, true)]);
+        f2.ok(req("timeline.import", json!({"otio": doc})));
+        let outer_id = f2.editor.project().tracks[0].clips[0].id.clone();
+        f2.ok(req("compound.open", json!({"clip": outer_id})));
+        let imported_inner = f2.editor.project().tracks[0].clips[0].id.clone();
+        f2.ok(req("compound.open", json!({"clip": imported_inner})));
+        assert_eq!(f2.editor.project().timecode(0), "02:00:00:00");
+    }
+
+    #[test]
+    fn compound_set_updates_nested_start_tc_inside_imported_otio_compound() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 30);
+        let inner_hosts = nest(&mut f, &[&a]);
+        let inner_kid = f.editor.project().compounds[0].id.clone();
+        nest(&mut f, &[&inner_hosts[0]]);
+        f.ok(req("edit.place_compound", json!({"compound": inner_kid})));
+        let doc = crate::otio::export(
+            f.editor.project(),
+            "T1",
+            None,
+            crate::otio::Locations::Absolute,
+        )
+        .unwrap();
+        let mut f2 = Fixture::new(&[(4.0, true)]);
+        f2.ok(req("timeline.import", json!({"otio": doc})));
+        let outer_id = f2.editor.project().tracks[0].clips[0].id.clone();
+        let copy_id = f2.editor.project().tracks[0].clips[1].id.clone();
+        assert!(
+            f2.editor
+                .project()
+                .clip(&outer_id)
+                .unwrap()
+                .compound
+                .as_ref()
+                .unwrap()
+                .made_from
+                .is_empty()
+        );
+        f2.ok(req(
+            "compound.set",
+            json!({"clip": copy_id, "start_tc": "02:30:00:00"}),
+        ));
+        f2.ok(req("compound.open", json!({"clip": outer_id})));
+        let inner_id = f2.editor.project().tracks[0].clips[0].id.clone();
+        f2.ok(req("compound.open", json!({"clip": inner_id})));
+        assert_eq!(f2.editor.project().timecode(0), "02:30:00:00");
+    }
+
+    #[test]
+    fn pooled_drop_frame_compound_opens_as_drop_frame_from_non_drop_timeline() {
+        let mut f = ntsc_fixture(true);
+        let a = f.append("m1", 0, 30);
+        f.ok(req(
+            "edit.compound",
+            json!({"clips": [a], "start_tc": "01:00:00;00"}),
+        ));
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "NDF", "own": {"fps": "30000/1001", "drop_frame": false}}),
+        ));
+        f.ok(req("compound.open", json!({"compound": kid})));
+        assert_eq!(f.editor.project().timecode(0), "01:00:00;00");
+    }
+
+    #[test]
+    fn placing_drop_frame_compound_on_non_drop_same_fps_relabels_start_tc() {
+        let mut f = ntsc_fixture(true);
+        let a = f.append("m1", 0, 30);
+        f.ok(req(
+            "edit.compound",
+            json!({"clips": [a], "start_tc": "01:00:00;00"}),
+        ));
+        let kid = f.editor.project().compounds[0].id.clone();
+        assert_eq!(f.editor.project().compounds[0].start_tc(), 107_892);
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "NDF", "own": {"fps": "30000/1001", "drop_frame": false}}),
+        ));
+        let r = f.ok(req("edit.place_compound", json!({"compound": kid})));
+        let cid = r.result["clips"][0].as_str().unwrap().to_string();
+        assert_eq!(
+            f.editor
+                .project()
+                .clip(&cid)
+                .unwrap()
+                .compound
+                .as_ref()
+                .unwrap()
+                .start_tc,
+            108_000
+        );
+    }
+
+    #[test]
+    fn placing_drop_frame_compound_on_different_fps_relabels_from_drop_frame() {
+        let mut f = ntsc_fixture(true);
+        let a = f.append("m1", 0, 30);
+        f.ok(req(
+            "edit.compound",
+            json!({"clips": [a], "start_tc": "01:00:00;00"}),
+        ));
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "PAL", "own": {"fps": "25"}}),
+        ));
+        let r = f.ok(req("edit.place_compound", json!({"compound": kid})));
+        let cid = r.result["clips"][0].as_str().unwrap().to_string();
+        assert_eq!(
+            f.editor
+                .project()
+                .clip(&cid)
+                .unwrap()
+                .compound
+                .as_ref()
+                .unwrap()
+                .start_tc,
+            90_000
+        );
+    }
+
+    #[test]
+    fn closing_drop_frame_compound_relabels_copy_on_non_drop_timeline() {
+        let mut f = ntsc_fixture(false);
+        let a = f.append("m1", 0, 30);
+        let t1_hosts = f
+            .ok(req(
+                "edit.compound",
+                json!({"clips": [a], "start_tc": "01:00:00:00"}),
+            ))
+            .result["clips"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        let kid = f.editor.project().compounds[0].id.clone();
+        let t1_id = f.editor.project().open_id().unwrap().to_string();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "DF", "own": {"fps": "30000/1001", "drop_frame": true}}),
+        ));
+        let placed = f.ok(req("edit.place_compound", json!({"compound": kid})));
+        let t2_clip = placed.result["clips"][0].as_str().unwrap().to_string();
+        f.ok(req("compound.open", json!({"clip": t2_clip})));
+        f.ok(req("compound.close", json!({})));
+        assert_eq!(f.editor.project().compounds[0].start_tc(), 108_000);
+        f.ok(req("timeline.open", json!({"timeline": t1_id})));
+        assert_eq!(
+            f.editor
+                .project()
+                .clip(&t1_hosts[0])
+                .unwrap()
+                .compound
+                .as_ref()
+                .unwrap()
+                .start_tc,
+            108_000
+        );
+    }
+
+    #[test]
+    fn compound_set_from_pool_uses_compounds_own_drop_frame() {
+        let mut f = ntsc_fixture(true);
+        let a = f.append("m1", 0, 30);
+        nest(&mut f, &[&a]);
+        let kid = f.editor.project().compounds[0].id.clone();
+        f.ok(req(
+            "timeline.new",
+            json!({"name": "NDF", "own": {"fps": "30000/1001", "drop_frame": false}}),
+        ));
+        let placed = f.ok(req("edit.place_compound", json!({"compound": kid})));
+        let ndf_clip = placed.result["clips"][0].as_str().unwrap().to_string();
+        f.ok(req(
+            "compound.set",
+            json!({"compound": kid, "start_tc": "01:00:00;00"}),
+        ));
+        assert_eq!(f.editor.project().compounds[0].start_tc(), 107_892);
+        assert_eq!(
+            f.editor
+                .project()
+                .clip(&ndf_clip)
                 .unwrap()
                 .compound
                 .as_ref()

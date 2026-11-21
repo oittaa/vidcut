@@ -191,13 +191,26 @@ mod tests {
     use super::parse_start_tc;
 
     #[test]
-    fn parse_start_tc_accepts_valid_and_rejects_dropped_frame() {
+    fn parse_start_tc_reads_non_drop_timecode() {
         let fps_24 = Rational::new(24, 1).unwrap();
         assert_eq!(parse_start_tc("01:02:03:04", fps_24, false), Some(89356));
-        assert_eq!(parse_start_tc("-00:00:01:00", fps_24, false), None);
+    }
 
+    #[test]
+    fn parse_start_tc_rejects_negative_timecode() {
+        let fps_24 = Rational::new(24, 1).unwrap();
+        assert_eq!(parse_start_tc("-00:00:01:00", fps_24, false), None);
+    }
+
+    #[test]
+    fn parse_start_tc_reads_drop_frame_timecode() {
         let ntsc = Rational::new(30000, 1001).unwrap();
         assert_eq!(parse_start_tc("01:01:00;02", ntsc, true), Some(109_692));
+    }
+
+    #[test]
+    fn parse_start_tc_rejects_skipped_drop_frame_label() {
+        let ntsc = Rational::new(30000, 1001).unwrap();
         assert_eq!(parse_start_tc("01:01:00;00", ntsc, true), None);
     }
 }

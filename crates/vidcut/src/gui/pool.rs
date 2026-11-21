@@ -775,7 +775,7 @@ impl Workspace {
                     }
                     ui.separator();
                     if ui.button("Starting Timecode…").clicked() {
-                        let drop = p.format().drop_frame && k.fps.has_drop_frame();
+                        let drop = k.counts_drop_frame();
                         let tc = vidcut_core::time::format_timecode(0, k.fps, k.start_tc(), drop);
                         self.compound_tc = Some(super::compound::CompoundStartTc::new(
                             &k.id, &k.name, tc, k.fps, drop,

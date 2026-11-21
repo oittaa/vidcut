@@ -267,6 +267,9 @@ pub fn violations(p: &Project) -> Vec<String> {
         if !k.bin.is_empty() && !p.bins.contains(&k.bin) {
             v.push(format!("{} is in unknown bin {:?}", k.id, k.bin));
         }
+        if k.drop_frame && !k.fps.has_drop_frame() {
+            v.push(format!("compound {} counts drop-frame at {}", k.id, k.fps));
+        }
         for block in k.blocks() {
             compound_media(block, &pool, &mut v);
         }
@@ -419,6 +422,12 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
                 c.name
             ));
         }
+        if c.drop_frame && !c.fps.has_drop_frame() {
+            v.push(format!(
+                "open compound {} counts drop-frame at {}",
+                c.name, c.fps
+            ));
+        }
         if c.id != c.target.key() {
             v.push(format!("open compound {} has id {}", c.name, c.id));
         }
@@ -542,6 +551,20 @@ mod tests {
         assert_eq!(
             violations(&p),
             vec!["compound clip starts before 00:00:00:00".to_string()]
+        );
+    }
+
+    #[test]
+    fn pooled_compound_drop_frame_at_non_drop_fps_is_reported() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 60);
+        f.ok(json!({"method": "media.compound", "params": {"range": "10f..40f"}}));
+        let mut p = f.editor.project().clone();
+        p.compounds[0].drop_frame = true;
+        assert!(
+            violations(&p)
+                .iter()
+                .any(|e| e.contains("counts drop-frame"))
         );
     }
 }

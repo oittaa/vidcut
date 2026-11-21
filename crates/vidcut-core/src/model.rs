@@ -6426,6 +6426,8 @@ pub struct OpenCompound {
     pub name: String,
     pub target: CompoundTarget,
     pub fps: Rational,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drop_frame: bool,
     #[serde(default)]
     pub sequence_id: Option<String>,
     pub tracks: Vec<Track>,
@@ -6443,6 +6445,8 @@ struct OpenCompoundOut<'a> {
     name: &'a str,
     target: &'a CompoundTarget,
     fps: Rational,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    drop_frame: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     sequence_id: Option<&'a str>,
     tracks: &'a [Track],
@@ -6461,6 +6465,7 @@ impl<'a> OpenCompoundOut<'a> {
             name: &c.name,
             target: &c.target,
             fps: c.fps,
+            drop_frame: c.drop_frame,
             sequence_id: c.sequence_id.as_deref(),
             tracks: s.tracks,
             marks: s.marks,
@@ -6477,6 +6482,10 @@ impl Serialize for OpenCompound {
 }
 
 impl OpenCompound {
+    pub fn counts_drop_frame(&self) -> bool {
+        self.drop_frame && self.fps.has_drop_frame()
+    }
+
     pub fn sheet(&self) -> Sheet<'_> {
         Sheet {
             tracks: &self.tracks,
@@ -6501,6 +6510,9 @@ pub struct PooledCompound {
     /// it was made in. In a timeline at another rate, it plays at the same
     /// speed, and its frames are counted again by time.
     pub fps: Rational,
+    /// Count drop-frame timecode (`01:00:00;00`) at 29.97, 59.94 and 119.88.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drop_frame: bool,
     /// The picture block. Left out when it holds only sound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture: Option<Compound>,
@@ -6520,6 +6532,10 @@ impl Compound {
 }
 
 impl PooledCompound {
+    pub fn counts_drop_frame(&self) -> bool {
+        self.drop_frame && self.fps.has_drop_frame()
+    }
+
     pub fn frames(&self) -> i64 {
         self.picture
             .as_ref()
@@ -7981,7 +7997,7 @@ impl Project {
             .unwrap_or_else(|| TimelineSettings::of(&self.settings));
         if let Some(c) = self.compound_path.last() {
             f.fps = c.fps;
-            f.drop_frame &= f.fps.has_drop_frame();
+            f.drop_frame = c.counts_drop_frame();
         }
         f
     }

@@ -1398,6 +1398,79 @@ pub(crate) fn stack_holds_any(v: &Value, ids: &std::collections::HashSet<String>
         .any(|ch| stack_holds_any(ch, ids))
 }
 
+fn is_compound_node(v: &Value) -> bool {
+    schema(v).starts_with("Stack.") && !is_multicam(v)
+}
+
+fn any_descendant_stack(v: &Value, pred: &impl Fn(&Value) -> bool) -> bool {
+    v["children"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|ch| (is_compound_node(ch) && pred(ch)) || any_descendant_stack(ch, pred))
+}
+
+fn walk_descendant_stacks(v: &mut Value, visit: &impl Fn(&mut Value)) {
+    let Some(children) = v.get_mut("children").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for ch in children {
+        if is_compound_node(ch) {
+            visit(ch);
+        }
+        walk_descendant_stacks(ch, visit);
+    }
+}
+
+fn set_stack_start_tc(v: &mut Value, start_tc: i64) {
+    if start_tc != 0 {
+        v["metadata"][VIDCUT]["start_tc"] = json!(start_tc);
+    } else if let Some(m) = v
+        .pointer_mut(&format!("/metadata/{VIDCUT}"))
+        .and_then(Value::as_object_mut)
+    {
+        m.remove("start_tc");
+    }
+}
+
+pub(crate) fn patch_stack_start_tc(k: &mut Compound, sid: &str, start_tc: i64) {
+    let needs = |v: &Value| {
+        v["metadata"][EDITOR]["Sequence ID"].as_str() == Some(sid)
+            && v["metadata"][VIDCUT]["start_tc"].as_i64().unwrap_or(0) != start_tc
+    };
+    if !any_descendant_stack(&k.stack, &needs) {
+        return;
+    }
+    walk_descendant_stacks(k.stack.make_mut(), &|v| {
+        if v["metadata"][EDITOR]["Sequence ID"].as_str() == Some(sid) {
+            set_stack_start_tc(v, start_tc);
+        }
+    });
+}
+
+pub(crate) fn relabel_stack_start_tc(k: &mut Compound, map: &impl Fn(i64) -> i64) {
+    let needs = |v: &Value| {
+        v["metadata"][VIDCUT]["start_tc"]
+            .as_i64()
+            .filter(|&n| n > 0)
+            .is_some_and(|n| map(n) != n)
+    };
+    if !any_descendant_stack(&k.stack, &needs) {
+        return;
+    }
+    walk_descendant_stacks(k.stack.make_mut(), &|v| {
+        if let Some(n) = v["metadata"][VIDCUT]["start_tc"]
+            .as_i64()
+            .filter(|&n| n > 0)
+        {
+            let next = map(n);
+            if next != n {
+                set_stack_start_tc(v, next);
+            }
+        }
+    });
+}
+
 fn stack_id(stack: &Value) -> String {
     let h = crate::fingerprint::short_digest(stack.to_string().as_bytes());
     format!(

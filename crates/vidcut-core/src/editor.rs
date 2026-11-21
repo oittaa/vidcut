@@ -2708,6 +2708,7 @@ fn touches_timelines(request: &Request) -> bool {
             | Request::TimelineImport { .. }
             | Request::CompoundOpen { .. }
             | Request::CompoundClose { .. }
+            | Request::CompoundSet { .. }
             | Request::BinsRemove { .. }
             | Request::BinsRename { .. }
             | Request::MediaMove { .. }
@@ -4211,7 +4212,9 @@ fn mutate(
                 Some(t) => resolve(p, t, playhead)?,
                 None => need(playhead, "at")?,
             };
-            let rates = fps.and_then(|f| ops::conform::Rates::new(f, p.fps()));
+            let drop_frame = p.counts_drop_frame();
+            let rates = fps
+                .and_then(|f| ops::conform::Rates::with_drop(f, drop_frame, p.fps(), drop_frame));
             if let Some(cues) = cues {
                 if clips.is_some() || *insert || duration.is_some() {
                     return Err(Error::usage(

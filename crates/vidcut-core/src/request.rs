@@ -994,10 +994,13 @@ pub enum Request {
     /// clip.
     #[serde(rename = "compound.set")]
     CompoundSet {
+        /// A copy on the timeline (by clip id, label, or `playhead`).
         #[serde(default)]
         clip: Option<ClipRef>,
+        /// A compound clip in the Media tab (by id or name).
         #[serde(default)]
         compound: Option<String>,
+        /// The new starting timecode (`HH:MM:SS:FF`, frames, or seconds).
         start_tc: TimeSpec,
     },
 
