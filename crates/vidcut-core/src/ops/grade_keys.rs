@@ -134,12 +134,14 @@ pub fn add(
                         .corrector_at(frame as f64)
                         .ok_or_else(|| no_node(k))?
                         .into_owned();
+                    let key = d.key_output_at(frame as f64);
                     d.put_key(GradeKey {
                         frame,
                         kind,
                         start: profile.start,
                         end: profile.end,
                         values,
+                        key,
                     });
                 }
             }

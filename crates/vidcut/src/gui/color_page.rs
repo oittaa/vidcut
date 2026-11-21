@@ -153,6 +153,10 @@ fn key_at(g: &Grade, n: u32, frame: i64) -> Option<usize> {
     g.node(n)?.changed_key(frame)
 }
 
+fn key_output_held(g: &Grade, n: u32, frame: i64) -> Option<KeyOutput> {
+    g.node(n)?.key_output_changed_at(frame)
+}
+
 fn correctors(g: &Grade) -> impl DoubleEndedIterator<Item = u32> + '_ {
     (g.nodes.iter().enumerate())
         .filter(|(_, d)| !d.tool.is_mixer())
@@ -200,7 +204,13 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
         ),
         (changed.iter().any(log), icon::CIRCLE_HALF, "Log"),
         (d.is_animated(), icon::DIAMOND, "Keyframes"),
-        (!d.key.is_usual(), icon::SQUARE_HALF, "Key"),
+        (
+            std::iter::once(&d.key)
+                .chain(d.keys.iter().map(|k| &k.key))
+                .any(|k| !k.is_usual()),
+            icon::SQUARE_HALF,
+            "Key",
+        ),
     ]
     .into_iter()
     .filter(|(on, ..)| *on)
@@ -1319,7 +1329,7 @@ impl Workspace {
         if let Some(l) = picked {
             self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
         }
-        let key_now = grade.node(n).map(|d| d.key).unwrap_or_default();
+        let key_now = key_output_held(&grade, n, frame).unwrap_or_default();
         let point = match palette {
             Palette::Key => {
                 key_output(ui, &mut changes, key_now);
@@ -1350,7 +1360,7 @@ impl Workspace {
                 .fold(g, |g, c| changed_corrector(&g, c.field, c.value));
             let mut next = with_corrector(&grade, n, frame, c);
             if let Some(d) = next.node_mut(n) {
-                d.key = keys.iter().fold(d.key, keyed);
+                d.change_key_output_at(frame, |k| keys.iter().fold(k, keyed));
             }
             self.effects_page.graded = Some(Graded {
                 of: of.clone(),
@@ -1369,8 +1379,12 @@ impl Workspace {
                     (Some(a), Some(b)) => differences(a, b),
                     _ => Map::new(),
                 };
-                if let (Some(a), Some(b)) = (stored.node(n), h.grade.node(n)) {
-                    params.extend(key_changes(a.key, b.key));
+                let keys = (
+                    key_output_held(&stored, n, frame),
+                    key_output_held(&h.grade, n, frame),
+                );
+                if let (Some(a), Some(b)) = keys {
+                    params.extend(key_changes(a, b));
                 }
                 Some(params)
             }

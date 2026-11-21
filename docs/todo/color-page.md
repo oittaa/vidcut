@@ -34,7 +34,7 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - The thumbnails (p. 3390), also in the rows of List View.
 - Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3394). They need windows.
 - The Nodes submenu of the Color menu (pp. 3392, 3394). The order of its items needs a measurement.
-- The key input and output of each node, the Key Mixer, and the keyframes of the Key Output. Measured in Resolve Studio 21.2 with float renders:
+- The key input and output of each node, and the Key Mixer. Measured in Resolve Studio 21.2 with float renders:
   - smax(a, b) = max(a, b) + 0.5 max(0, 0.5 − |a − b|)². L(x) = (8x − 1) / 7. U(a, b) = L(smax(a, b)). Q(x) = U(0, x).
   - Key Mixer input i with key kᵢ: xᵢ = gᵢ kᵢ + oᵢ (Gain and Offset of the input). Invert gives 1 − xᵢ.
   - The Mask inputs go first, in input order: acc = U(acc, xᵢ), from acc = 0. Then each Matte input: acc = 1 − U(1 − acc, 1 − xᵢ).
@@ -43,7 +43,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
   - A corrector key input with no window gives clamp(Q(x)), with x = ig k + io. With a window w in the node, a = Q(w): Matte gives clamp(1 − U(1 − a, 1 − x)), Mask gives clamp(U(a, x)).
   - Key Output Gain kg and Key Output Offset ko of a node act last on its key E: clamp(kg E + ko).
   - The errors are below 8.2e-7. The record is in `fixtures/color/NOTES.md` of the test data.
-  - The Key Output has a keyframe track of its own, apart from the Color Corrector values.
 - Lock Node and Remove One Input in the menu of a mixer. Measure first what each one does. List View then shows the lock.
 - Measure in Resolve, then match:
   - Remove One Input: which input goes, and the least number of inputs.
