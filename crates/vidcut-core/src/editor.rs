@@ -1392,7 +1392,15 @@ fn tracks_markers_change(
     tracks: (&mut Vec<Track>, &mut Vec<Track>),
     markers: (&mut Vec<Marker>, &mut Vec<Marker>),
     rest: Option<Change>,
+    skip_empty_tracks: bool,
 ) -> Option<Change> {
+    let tracks_change = if skip_empty_tracks {
+        listed(tracks.0, tracks.1, |a, b| {
+            Change::of_items(a, b, |t| &t.id, track_change)
+        })
+    } else {
+        Change::of_items(tracks.0, tracks.1, |t| &t.id, track_change)
+    };
     let markers_change = listed(markers.0, markers.1, |a, b| {
         Change::of_items(
             a,
@@ -1401,13 +1409,7 @@ fn tracks_markers_change(
             |a, b| moved_only(a, b, |k| &mut k.at, "at"),
         )
     });
-    let lists = [
-        (
-            "tracks",
-            Change::of_items(tracks.0, tracks.1, |t| &t.id, track_change),
-        ),
-        ("markers", markers_change),
-    ];
+    let lists = [("tracks", tracks_change), ("markers", markers_change)];
     joined(rest, lists)
 }
 
@@ -1425,6 +1427,7 @@ fn timeline_change(a: &mut Timeline, b: &mut Timeline) -> Option<Change> {
         (&mut tracks.0, &mut tracks.1),
         (&mut markers.0, &mut markers.1),
         rest,
+        false,
     );
     (a.tracks, b.tracks) = tracks;
     (a.markers, b.markers) = markers;
@@ -1445,6 +1448,7 @@ fn compound_change(a: &mut Compound, b: &mut Compound) -> Option<Change> {
         (&mut tracks.0, &mut tracks.1),
         (&mut markers.0, &mut markers.1),
         rest,
+        true,
     );
     (a.tracks, b.tracks) = tracks;
     (a.markers, b.markers) = markers;
@@ -6708,11 +6712,8 @@ fn register_imported_compound(
         }
         return id;
     }
-    let key = ic
-        .sequence_id
-        .clone()
-        .unwrap_or_else(|| otio::stack_id(&ic.stack));
-    if let Some(id) = seen.get(&key).cloned() {
+    let key = &ic.sequence_id;
+    if let Some(id) = seen.get(key).cloned() {
         if let Some(k) = p.compound_mut(&id) {
             k.frames = k.frames.max(frames);
         }
@@ -6734,7 +6735,7 @@ fn register_imported_compound(
         markers: ic.markers.clone(),
         kept_otio: Some(ic.stack.clone()),
     });
-    seen.insert(key, id.clone());
+    seen.insert(key.clone(), id.clone());
     id
 }
 
@@ -6742,7 +6743,7 @@ fn seeded_compounds(p: &Project) -> HashMap<String, String> {
     p.compounds
         .iter()
         .filter(|k| k.removed)
-        .filter_map(|k| Some((k.sequence_id.clone()?, k.id.clone())))
+        .map(|k| (k.sequence_id.clone(), k.id.clone()))
         .collect()
 }
 
