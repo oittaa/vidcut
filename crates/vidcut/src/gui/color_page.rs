@@ -458,11 +458,10 @@ fn kind(tool: &GradeTool) -> &'static str {
     }
 }
 
-fn shot_of(shots: &NodeShots, n: u32, d: &GradeNode) -> Shot {
+fn shot_of(shots: &NodeShots, n: u32) -> Shot {
     let cell = shots.cells.iter().find(|(k, ..)| *k == n);
     Shot {
         picture: cell.and_then(|&(_, uv, size)| Some((shots.texture?, uv, size))),
-        veiled: !d.on,
     }
 }
 
@@ -497,7 +496,7 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
             GradeTool::Corrector(_) => (
                 format!("{n:02}"),
                 vec![input(0, "RGB Input".into())],
-                shots.map(|s| shot_of(s, n, d)),
+                shots.map(|s| shot_of(s, n)),
             ),
             tool => (
                 kind(tool).to_string(),

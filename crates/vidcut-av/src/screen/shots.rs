@@ -104,8 +104,14 @@ impl Shots {
         let h = source.height;
         let wide = f64::from(h) * f64::from(SHOT_ASPECT.0) / f64::from(SHOT_ASPECT.1);
         let w = (wide.round() as u32).max(1);
-        let tall = f64::from(w) / source.aspect;
-        let fit = ((f64::from(h) - tall) / 2.0, tall);
+        let (bw, bh) = (f64::from(w), f64::from(h));
+        let fit = if bw / bh > source.aspect {
+            let wide = bh * source.aspect;
+            [(bw - wide) / 2.0, 0.0, wide, bh]
+        } else {
+            let tall = bw / source.aspect;
+            [0.0, (bh - tall) / 2.0, bw, tall]
+        };
         if self.room.as_ref().is_none_or(|r| r.size != (w, h)) {
             self.room = Some(Room {
                 size: (w, h),

@@ -423,7 +423,7 @@ What they read:
 How the GPU makes them (`shots::Shots::draw`):
 
 - `fs_shot` shrinks the source into a box of `SHOT_ASPECT`. Each pixel is a mean of a grid of reads, up to `SHOT_TAPS` across.
-  - The picture fills the width of the box. The bars above and below it are black.
+  - The picture fits inside the box, at the middle. The bars at its sides, or above and below it, are black.
   - The height comes from the page, from `SMALLEST` to `LARGEST`.
 - `Graded::tapped` makes the passes of the grade with a `Tap` for each corrector. `tapped_into` runs them on the small picture.
 - At each tap, `tap_into` fills a scratch texture with `THUMBNAIL_GRAY`. A `Layer` pass in Normal with the key of the node puts the output of the node over it.

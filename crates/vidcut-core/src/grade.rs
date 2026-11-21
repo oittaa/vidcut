@@ -644,8 +644,8 @@ impl Uses {
 
     fn twice(&self, node: &GradeNode, c: &Corrector, k: usize) -> bool {
         let key = node.key.of(1.0);
-        let used = self.over[k] > 0 || self.tapped;
-        node.on && !c.is_usual() && used && self.kept(k) > 0 && key > 0.0 && key < 1.0
+        let seen = self.kept(k) > 0 || self.tapped;
+        node.on && !c.is_usual() && self.over[k] > 0 && seen && key > 0.0 && key < 1.0
     }
 }
 
@@ -678,14 +678,13 @@ fn corrected(
             key,
         });
         r.hold(k, mix, uses.kept(k));
-        if uses.over[k] == 0 {
-            r.free.push(on);
-        } else {
-            let whole = uses.all.len() + k;
-            r.hold(whole, on, uses.over[k]);
-            uses.whole[k] = whole;
+        if uses.kept(k) == 0 {
+            r.free.push(mix);
         }
-        Some(on)
+        let whole = uses.all.len() + k;
+        r.hold(whole, on, uses.over[k]);
+        uses.whole[k] = whole;
+        Some(mix)
     } else {
         let on = r.take(x, passes);
         let key = if uses.over[k] == 0 { key } else { 1.0 };
@@ -796,7 +795,7 @@ impl Graded {
                         node: number,
                         after: passes.len(),
                         from,
-                        key: node.key.of(1.0),
+                        key: if node.on { node.key.of(1.0) } else { 1.0 },
                     }));
                 }
                 GradeTool::ParallelMixer => {

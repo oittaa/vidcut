@@ -447,7 +447,7 @@ The bar and the Jobs button:
   - With thumbnails on, the page asks the viewer for them each frame (`Workspace::shots_want`, `ShotsWanted`). The height follows the zoom of the editor and the pixels per point.
   - `Viewer::sync_shots` gives the wish to the viewer thread and takes back the atlas ([gpu](gpu.md#the-node-thumbnails)). It registers the atlas as a native texture, as for the scopes.
   - `NodeShots` holds that texture and the cell of each node. Each corrector tile then has a `Shot`.
-  - A tile with a `Shot` is taller. Its number is at the top left, and the thumbnail is under it (`paint_shot`). An off corrector has a grey veil over the right half.
+  - A tile with a `Shot` is taller. The thumbnail is at its top (`paint_shot`), and the number and the badges are under it. An off corrector shows at 40 %, with its thumbnail too.
   - With Disable Thumbnail Refresh During Playback on, `ShotsWanted::refresh` is false while the timeline plays. The viewer then keeps the last thumbnails.
   - Previous Node and Next Node step through the correctors in number order and wrap. They send `gui.grade_nodes`.
   - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.

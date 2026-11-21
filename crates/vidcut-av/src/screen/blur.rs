@@ -1309,7 +1309,7 @@ fn graded_into(
 pub(super) fn shot_source(
     gpu: &Gpu,
     (from, size, turn): (&wgpu::TextureView, (u32, u32), u16),
-    (top, tall): (f64, f64),
+    [left, top, wide, tall]: [f64; 4],
     own: &Texture,
     encoder: &mut wgpu::CommandEncoder,
 ) {
@@ -1319,7 +1319,7 @@ pub(super) fn shot_source(
         _ => size,
     };
     let reach = f64::max(
-        f64::from(upright.0) / f64::from(out.width),
+        f64::from(upright.0) / wide.max(1.0),
         f64::from(upright.1) / tall.max(1.0),
     );
     let taps = (reach.ceil() as u32).clamp(1, SHOT_TAPS);
@@ -1328,10 +1328,10 @@ pub(super) fn shot_source(
         f64::from(out.height),
         f64::from(taps),
         f64::from(turn / 90 % 4),
+        left,
         top,
+        wide.max(1.0),
         tall.max(1.0),
-        0.0,
-        0.0,
     ]);
     let step = (&gpu.blur.shot, &bytes[..]);
     draw_step(gpu, step, Views::same(from), &own.view, encoder);

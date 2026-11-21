@@ -16,8 +16,6 @@ const SHOT_BOX: Vec2 = vec2(104.0, 66.0);
 const STRIP: f32 = 16.0;
 const SHOT_MARGIN: f32 = 4.0;
 const ROW_SHOT: Vec2 = vec2(46.0, 22.0);
-const VEILED: f32 = 0.5;
-const VEIL: Color32 = Color32::from_rgba_premultiplied(80, 80, 80, 160);
 pub(super) const SHOT_HEIGHT: f32 = SHOT_BOX.y - STRIP - SHOT_MARGIN;
 const MARGIN: Vec2 = vec2(40.0, 40.0);
 const KNOT: f32 = 5.0;
@@ -28,7 +26,7 @@ const ROW: f32 = 26.0;
 const ROUND: f64 = 100.0;
 const WIRE_HIT: f32 = 6.0;
 const STEPS: usize = 24;
-const FADED: f32 = 0.45;
+const FADED: f32 = 0.4;
 const NOTE: Vec2 = vec2(140.0, 18.0);
 const LIT: Color32 = Color32::from_rgb(110, 170, 255);
 const CURRENT_ROW: Color32 = super::viewer::ACTIVE_ANGLE;
@@ -68,7 +66,6 @@ pub(super) struct Outlet {
 
 pub(super) struct Shot {
     pub(super) picture: Option<(TextureId, Rect, Vec2)>,
-    pub(super) veiled: bool,
 }
 
 pub(super) struct Tile<K> {
@@ -324,19 +321,15 @@ fn shots_in<K>(tiles: &[Tile<K>]) -> bool {
     tiles.iter().any(|t| t.shot.is_some())
 }
 
-fn paint_shot(painter: &egui::Painter, area: Rect, shot: &Shot) {
+fn paint_shot(painter: &egui::Painter, area: Rect, shot: &Shot, fade: f32) {
     painter.rect_filled(area, CornerRadius::same(2), theme::colors().panel_dark);
     let Some((texture, uv, pixels)) = shot.picture else {
         return;
     };
     let scale = (area.width() / pixels.x).min(area.height() / pixels.y);
     let shown = Rect::from_center_size(area.center(), pixels * scale);
-    painter.image(texture, shown, uv, Color32::WHITE);
-    if shot.veiled {
-        let left = shown.right() - shown.width() * VEILED;
-        let veil = Rect::from_min_max(pos2(left, shown.top()), shown.max);
-        painter.rect_filled(veil, CornerRadius::ZERO, VEIL);
-    }
+    let tint = Color32::from_gray((255.0 * fade).round() as u8);
+    painter.image(texture, shown, uv, tint);
 }
 
 fn outlet_at<K>(r: Rect, t: &Tile<K>) -> Pos2 {
@@ -521,7 +514,7 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
                 let at = pos2(left, r.center().y - ROW_SHOT.y / 2.0);
                 let area = Rect::from_min_size(at, ROW_SHOT);
                 if let Some(shot) = &t.shot {
-                    paint_shot(&painter, area, shot);
+                    paint_shot(&painter, area, shot, fade);
                 }
                 left = area.right() + 6.0;
             }
@@ -748,12 +741,12 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         let edge = match (active, selected) {
             (true, _) => Stroke::new(2.0, graph.active),
             (false, true) => Stroke::new(1.5, Color32::WHITE),
-            _ => Stroke::new(1.0, c.text_dim.gamma_multiply(0.6)),
+            _ => Stroke::new(1.0, c.text_dim.gamma_multiply(0.6 * fade)),
         };
         painter.rect_stroke(r, CornerRadius::same(4), edge, StrokeKind::Inside);
         let (at, align, line) = match &t.shot {
             Some(_) => {
-                let line = r.top() + STRIP * z / 2.0;
+                let line = r.bottom() - STRIP * z / 2.0;
                 (
                     pos2(r.left() + 2.0 * KNOT * z, line),
                     Align2::LEFT_CENTER,
@@ -770,12 +763,13 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             c.text.gamma_multiply(fade),
         );
         if let Some(shot) = &t.shot {
-            let top = vec2(SHOT_MARGIN, STRIP) * z;
-            let inset = vec2(SHOT_MARGIN, SHOT_MARGIN) * z;
+            let top = vec2(SHOT_MARGIN, SHOT_MARGIN) * z;
+            let inset = vec2(SHOT_MARGIN, STRIP) * z;
             paint_shot(
                 &painter,
                 Rect::from_min_max(r.min + top, r.max - inset),
                 shot,
+                fade,
             );
         }
         let mark = FontId::proportional(10.0 * z.clamp(0.6, 1.4));

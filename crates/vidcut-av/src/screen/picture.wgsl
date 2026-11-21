@@ -1875,8 +1875,8 @@ fn fs_shot(in: Out) -> @location(0) vec4<f32> {
     for (var j = 0; j < n; j++) {
         for (var i = 0; i < n; i++) {
             let p = cell + (vec2<f32>(f32(i), f32(j)) + 0.5) / f32(n);
-            let u = vec2<f32>(p.x / shooting.size.x, (p.y - shooting.fit.x) / shooting.fit.y);
-            if u.y < 0.0 || u.y >= 1.0 {
+            let u = (p - shooting.fit.xy) / shooting.fit.zw;
+            if any(u < vec2<f32>(0.0)) || any(u >= vec2<f32>(1.0)) {
                 sum += vec4<f32>(0.0, 0.0, 0.0, 1.0);
                 continue;
             }
