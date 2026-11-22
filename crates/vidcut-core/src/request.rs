@@ -4071,11 +4071,13 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         alone: Option<bool>,
     },
-    /// Set the In and/or Out of the Multi Source viewer, or of a generator
-    /// open as the source. `out` is exclusive. In the Multi Source viewer they
-    /// are frames of its scroll area and hold for each camera. The files' own
-    /// source marks do not change. A change of bin clears them. A generator's
-    /// marks last until another source opens, and they are not in the project.
+    /// Set the In and/or Out of the Multi Source viewer, of a generator open
+    /// as the source, or of a compound clip open in the Source viewer. `out`
+    /// is exclusive. In the Multi Source viewer they are frames of its scroll
+    /// area and hold for each camera. The files' own source marks do not
+    /// change. A change of bin clears them. A generator's marks last until
+    /// another source opens, and they are not in the project. A compound
+    /// clip's marks are in the project, as `media.marks.set` sets them.
     #[serde(rename = "viewer.marks.set")]
     ViewerMarksSet {
         #[serde(rename = "in", default)]
@@ -4088,8 +4090,8 @@ pub enum Request {
         #[serde(default)]
         duration: Option<DurationSpec>,
     },
-    /// Clear the In and Out of the Multi Source viewer, or of a generator open
-    /// as the source.
+    /// Clear the In and Out of the Multi Source viewer, of a generator open as
+    /// the source, or of a compound clip open in the Source viewer.
     #[serde(rename = "viewer.marks.clear")]
     ViewerMarksClear {},
     /// Viewer framing and safe-area guides (decision D90). Stored in
@@ -5853,8 +5855,8 @@ pub struct SourceParams {
     #[serde(default)]
     pub media: String,
     /// A compound clip of the Media tab (by id or name) as the source. It goes
-    /// in as a picture and a sound clip, linked. Its marks (`viewer.marks`)
-    /// pick the part, as for a media item.
+    /// in as a picture and a sound clip, linked. Its marks (`media.marks.set`
+    /// with `compound`) pick the part, as for a media item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compound: Option<String>,
     /// Edit the Source Tape In–Out span instead of one media item. Both marks
