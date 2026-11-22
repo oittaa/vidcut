@@ -12,12 +12,13 @@ use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, ClipRetime, CompositeMode,
-    Composition, Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue,
-    FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
-    GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, Node, Pattern,
-    Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject, Tool, ToolType, TrackKind,
-    Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, ClipRetime,
+    CompositeMode, Composition, Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind,
+    EffectType, EffectValue, FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow,
+    GlowAlpha, GlowFraming, GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe,
+    MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project, Retime,
+    Sharpen, Speed, Subject, Tool, ToolType, TrackKind, Upscaler, Vignette, VignetteMode,
+    VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -1213,14 +1214,22 @@ fn node_speed(v: EffectValue) -> f64 {
         | EffectValue::ZRotation
         | EffectValue::XRotation
         | EffectValue::YRotation => 0.5,
-        EffectValue::Blend => 0.005,
+        EffectValue::Blend
+        | EffectValue::SubtractiveAdditive
+        | EffectValue::AlphaGain
+        | EffectValue::BurnIn => 0.005,
         _ => 0.002,
     }
 }
 
 fn node_usual(v: EffectValue) -> f64 {
     match v {
-        EffectValue::Size | EffectValue::YSize | EffectValue::Level | EffectValue::Blend => 1.0,
+        EffectValue::Size
+        | EffectValue::YSize
+        | EffectValue::Level
+        | EffectValue::Blend
+        | EffectValue::SubtractiveAdditive
+        | EffectValue::AlphaGain => 1.0,
         EffectValue::Width | EffectValue::Height | EffectValue::Center => 0.5,
         _ => 0.0,
     }
@@ -1534,6 +1543,41 @@ fn node_rows(
                 );
             }
             knob(ui, i, (slot, Knob::Blend), &e, acts);
+        }
+        Tool::Merge(m) => {
+            center_row(ui, i, (slot, n), trackers, acts);
+            value(ui, acts, V::Size, "Size");
+            value(ui, acts, V::Angle, "Angle");
+            let flip = (slot, "Flip Horizontal", m.flip_horizontal, false);
+            check(ui, flip, "flip_horizontal", acts);
+            let flip = (slot, "Flip Vertical", m.flip_vertical, false);
+            check(ui, flip, "flip_vertical", acts);
+            let modes = (
+                &ApplyMode::ALL[..],
+                ApplyMode::label as fn(ApplyMode) -> &'static str,
+            );
+            let mode = (m.mode(), ApplyMode::default());
+            choice_row(ui, (slot, "Apply Mode", "apply_mode"), mode, modes, acts);
+            if m.mode().has_operator() {
+                let ops = (
+                    &MergeOperator::ALL[..],
+                    MergeOperator::label as fn(MergeOperator) -> &'static str,
+                );
+                let op = (m.operator(), MergeOperator::default());
+                choice_row(ui, (slot, "Operator", "operator"), op, ops, acts);
+            }
+            value(ui, acts, V::SubtractiveAdditive, "Subtractive/Additive");
+            value(ui, acts, V::AlphaGain, "Alpha Gain");
+            value(ui, acts, V::BurnIn, "Burn In");
+            value(ui, acts, V::Blend, "Blend");
+            let edges = (
+                &MergeEdges::ALL[..],
+                MergeEdges::label as fn(MergeEdges) -> &'static str,
+            );
+            let edge = (m.edges(), MergeEdges::default());
+            choice_row(ui, (slot, "Edges", "edges"), edge, edges, acts);
+            let invert = (slot, "Invert Transform", m.invert_transform, false);
+            check(ui, invert, "invert_transform", acts);
         }
         t => {
             let Some(m) = t.mask() else {

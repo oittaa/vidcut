@@ -678,6 +678,11 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - A grade file with both keyframes written in full gives the same.
   - In the same grade, the Output Gain of the Key Mixer blends. The Key Input Gain of a corrector also blends.
   - vidcut does not copy this fault. `KeyMix::blended` blends the Gain and the Offset of each input ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
+- **The Merge tool of the Fusion page gives wrong values in three cases.**
+  - Screen with the Conjoint or the Disjoint operator: two opaque pictures give an alpha of 1.8. The colors follow no rule for each channel.
+  - Hue: a background with an HSL lightness of exactly 1, and a maximum above its minimum, gives NaN. This occurs at each alpha of the foreground, also at 0.
+  - Saturation: the red and the blue of the result change places. Thus the hue becomes 240 − hue.
+  - vidcut does not copy these faults. `merge_operated` gives Screen the same sums with each operator. `merge_hue` and `merge_saturation` keep the hue ([spec §8.19](spec.md#the-merge)).
 - **A Cross Dissolve from a gap into a zoomed adjustment clip jumps at its end** (measured in Resolve Studio 21.2).
   - With Zoom below 1 over a lower video clip, the outer area keeps the unzoomed picture until the last dissolve frame.
   - On the next frame, that outer area snaps from full brightness to black.

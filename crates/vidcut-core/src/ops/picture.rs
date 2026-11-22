@@ -5,11 +5,11 @@ use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode, Composition,
-    Crop, DynamicZoom, Effect, EffectKeys, EffectKind, EffectValue, FillMethod, FilmGrain,
-    GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, MosaicBlur, Node,
-    Pattern, Picture, PictureTool, Project, Sharpen, Tool, TrackKind, Tracker, Vignette,
-    VignetteMode, VignetteShape, ZoomBox,
+    ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode,
+    Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind, EffectValue, FillMethod,
+    FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, Merge,
+    MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project, Sharpen,
+    Tool, TrackKind, Tracker, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput};
 
@@ -563,6 +563,7 @@ fn plain_node_checked(n: &Node) -> Result<Node> {
         Tool::Rectangle(m) => Tool::Rectangle(mask_checked(m, "rectangle")?),
         Tool::Polygon(m) => Tool::Polygon(mask_checked(m, "polygon")?),
         Tool::Tracker(t) => Tool::Tracker(tracker_checked(t)?),
+        Tool::Merge(m) => Tool::Merge(merge_checked(m)?),
         t => t.clone(),
     };
     Ok(Node {
@@ -589,6 +590,42 @@ fn blur_checked(b: &Blur) -> Result<Blur> {
         clipping: b.clipping.filter(|c| *c != BlurClipping::default()),
         channels: b.channels.filter(|c| *c != Blur::ALL),
         ..b.clone()
+    })
+}
+
+fn merge_checked(m: &Merge) -> Result<Merge> {
+    for v in m.center.into_iter().flatten() {
+        let why = "a merge's center is two fractions, each from -10 to 10";
+        within(Some(v), Mask::PLACES, why)?;
+    }
+    within(m.size, Mask::SIZES, "a merge's size is from 0 to 1000000")?;
+    within(
+        m.angle,
+        Mask::TURNS,
+        "a merge's angle is from -1000000 to 1000000 degrees",
+    )?;
+    let slides = [
+        ("subtractive/additive", m.subtractive_additive),
+        ("alpha gain", m.alpha_gain),
+        ("burn in", m.burn_in),
+    ];
+    for (what, v) in slides {
+        within(
+            v,
+            Merge::SLIDES,
+            &format!("a merge's {what} is from 0 to 1"),
+        )?;
+    }
+    Ok(Merge {
+        size: m.size.filter(|v| *v != Merge::SIZE),
+        angle: m.angle.filter(|v| *v != 0.0),
+        edges: m.edges.filter(|e| *e != MergeEdges::default()),
+        apply_mode: m.apply_mode.filter(|a| *a != ApplyMode::default()),
+        operator: m.operator.filter(|o| *o != MergeOperator::default()),
+        subtractive_additive: m.subtractive_additive.filter(|v| *v != 1.0),
+        alpha_gain: m.alpha_gain.filter(|v| *v != 1.0),
+        burn_in: m.burn_in.filter(|v| *v != 0.0),
+        ..m.clone()
     })
 }
 

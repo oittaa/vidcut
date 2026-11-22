@@ -1,9 +1,9 @@
 use crate::effect_keys::Keyed;
 use crate::model::{
-    BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Composition,
-    Effect, EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha, GlowFraming,
-    GlowOutput, Mask, Media, MosaicBlur, Node, Pattern, Picture, Sharpen, Tool, Vignette,
-    VignetteMode, VignetteShape,
+    ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode,
+    Composition, Effect, EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha,
+    GlowFraming, GlowOutput, Mask, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
+    Pattern, Picture, Sharpen, Tool, Vignette, VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -921,6 +921,72 @@ pub struct Stage {
 pub enum Op {
     Clear,
     Work(Working),
+    Merge(Merging),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Merging {
+    pub back: Option<[f64; 6]>,
+    pub edges: MergeEdges,
+    pub mode: ApplyMode,
+    pub operator: MergeOperator,
+    pub additive: f64,
+    pub gain: f64,
+    pub burn: f64,
+    pub blend: f64,
+    pub masks: Vec<Shaping>,
+}
+
+impl Merging {
+    pub fn of(m: &Merge, blend: f64, (w, h): (f64, f64), masks: Vec<Shaping>) -> Self {
+        Self {
+            back: m.lookup((w, h)),
+            edges: m.edges(),
+            mode: m.mode(),
+            operator: m.operator(),
+            additive: m.additive(),
+            gain: m.gain(),
+            burn: m.burn(),
+            blend,
+            masks,
+        }
+    }
+}
+
+impl Merge {
+    pub fn lookup(&self, (w, h): (f64, f64)) -> Option<[f64; 6]> {
+        let s = self.scale();
+        if s <= 0.0 || !s.is_finite() {
+            return None;
+        }
+        let [cx, cy] = self.middle();
+        let c = [cx * w, (1.0 - cy) * h];
+        let m = [w / 2.0, h / 2.0];
+        let (sin, cos) = self.turn().to_radians().sin_cos();
+        let [fx, fy] =
+            [self.flip_horizontal, self.flip_vertical].map(|f| if f { -1.0 } else { 1.0 });
+        let (a, from, to) = match self.invert_transform {
+            false => (
+                [[fx * cos / s, -fx * sin / s], [fy * sin / s, fy * cos / s]],
+                c,
+                m,
+            ),
+            true => (
+                [[fx * cos * s, fy * sin * s], [-fx * sin * s, fy * cos * s]],
+                m,
+                c,
+            ),
+        };
+        let row = |k: usize| {
+            [
+                a[k][0],
+                a[k][1],
+                to[k] - a[k][0] * from[0] - a[k][1] * from[1],
+            ]
+        };
+        let [x, y] = [row(0), row(1)];
+        Some([x[0], x[1], x[2], y[0], y[1], y[2]])
+    }
 }
 
 impl Program {
@@ -977,6 +1043,12 @@ impl Registers {
         })
     }
 
+    fn freed(&mut self, r: usize, last: bool) {
+        if last {
+            self.free.push(r);
+        }
+    }
+
     fn written(&mut self, from: usize) -> usize {
         match self.read(from) {
             true => from,
@@ -999,6 +1071,17 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
         canvas: [w, h],
         back: frame_back((w, h)),
     };
+    let masks = |n: &Node| -> Vec<Shaping> {
+        c.masks_of(n)
+            .into_iter()
+            .filter(|m| !m.pass_through)
+            .filter_map(|m| {
+                let mask = m.tool.mask()?;
+                let bases = MaskBase::all(m, c, (w, h), areas);
+                Some(Shaping::of(mask, &m.tool, (w, h), &bases))
+            })
+            .collect()
+    };
     let work = |n: &Node| {
         let mut working = match &n.tool {
             _ if n.pass_through => return None,
@@ -1018,16 +1101,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
             }
             _ => return None,
         };
-        working.masks = c
-            .masks_of(n)
-            .into_iter()
-            .filter(|m| !m.pass_through)
-            .filter_map(|m| {
-                let mask = m.tool.mask()?;
-                let bases = MaskBase::all(m, c, (w, h), areas);
-                Some(Shaping::of(mask, &m.tool, (w, h), &bases))
-            })
-            .collect();
+        working.masks = masks(n);
         Some(working)
     };
     let media = order.iter().any(|&i| c.nodes[i].tool == Tool::MediaIn);
@@ -1050,6 +1124,29 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                 None
             }
             t if !t.gives_from(&gives) => None,
+            Tool::Merge(m) => first.map(|b| match came.get(1).copied().flatten() {
+                Some(f) if !n.pass_through => {
+                    let last = [regs.read(b), regs.read(f)];
+                    let to = regs.taken();
+                    let merging = Merging::of(m, n.mixed(), (w, h), masks(n));
+                    stages.push(Stage {
+                        op: Op::Merge(merging),
+                        from: vec![b, f],
+                        to,
+                    });
+                    regs.freed(b, last[0] && f != b);
+                    regs.freed(f, last[1]);
+                    to
+                }
+                other => {
+                    regs.read(b);
+                    if let Some(f) = other {
+                        let last = regs.read(f);
+                        regs.freed(f, last && f != b);
+                    }
+                    b
+                }
+            }),
             _ => first.map(|r| match work(n) {
                 None => {
                     regs.read(r);

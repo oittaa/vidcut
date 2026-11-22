@@ -1001,6 +1001,7 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - Register 0 holds the clip's own picture at the start. The program ends with its result in the register `Program::out`.
   - `Composition::picture_order` gives the nodes that feed the MediaOut node, each before the nodes that take its picture. It also counts the nodes that take each picture.
   - A node that passes its picture on (a Tracker, a tool with `pass_through`, a tool with no work) gives the register of its input. A tool works in place on the register of its input when no later node reads that register. Else it writes a free register.
+  - A Merge reads two registers and writes a free register. A register goes back to the free list after its last read (`Registers::freed`).
   - A node gives no picture when its picture input has none (`Tool::gives_from`). When the MediaOut node gets no picture, or the joins make a loop, the program is one `Op::Clear`. The clip then shows nothing, and `RenderPlan::broken_composition` stops an export (`Composition::shows`).
   - It works in the pixels of the picture, upright. A size in the composition follows these pixels, not the frame.
 - `Working::of_blur` gives the work of a Blur tool:
@@ -1009,7 +1010,10 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - Clipping Mode None gives the black border. Frame and Domain give the replicate border.
 - An effect tool gives the work of its clip effect, through `Working::of`. Its sizes follow the picture, as on a frame of the same size (`place::OnFrame`).
   - With `blur_alpha` off, a Gaussian Blur has no sigma on the alpha.
-- `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out.
+- A Merge with a foreground gives an `Op::Merge`, which holds a `place::Merging`. Without a foreground, it gives the register of its background.
+  - `Merge::lookup` gives the affine map from a pixel of the output to a pixel of the foreground. It holds the flip, Size, Angle, Center and Invert Transform.
+  - The mode, the operator, the edges and the sliders go to the shader as they are.
+- `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.
   - `place::Shaping` holds one mask in the pixels of the picture: a `place::Figure` for each place of the mask, its border, Solid, Level and Invert.
   - Its `place::Softening` is the blur of its soft edge.
   - A `place::Figure` holds a `place::Outline` and its middle.
@@ -1027,6 +1031,8 @@ The draw:
 - `Slot::prepare_with` runs the composition on the converted picture, before its smaller copies:
   - `fs_composed_in` makes the upright picture with premultiplied colors and its alpha, in the picture of a `blur::Composer`. That picture is register 0.
   - `blur::run` runs the stages. The other registers are textures of the same size, which the `blur::Composer` keeps for the next frame. `blur::effects_into` runs the work of a stage, as it runs the effects of a layer.
+  - `fs_merge` draws an `Op::Merge`. `merge_fore` reads the foreground through the map, with a bilinear filter and the edges. `merge_mode` gives the sum of the mode and the operator.
+  - The masks of a Merge go into one picture before the draw (`mask_room`, `mask_made`). `fs_merge` then mixes the background and the result by the mask and Blend.
   - `fs_composed_out` writes the result back into the converted picture, at its stored turn.
 - The converted picture then holds the alpha. Its parameters say so (`COMPOSED_ALPHA`, `COMPOSED_MODE`). Then `opacity` reads the alpha from it, and `placed` takes the colors as premultiplied.
 - `Slot.converted_from` also holds the work. Thus a change of the composition draws the picture again.

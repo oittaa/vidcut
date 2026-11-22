@@ -6,7 +6,7 @@ use crate::keyframes::{
 };
 use crate::model::{
     Blur, Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FilmGrain, GaussianBlur, Glow,
-    Keyframe, Mask, MosaicBlur, Node, Sharpen, Tool, Vignette,
+    Keyframe, Mask, Merge, MosaicBlur, Node, Sharpen, Tool, Vignette,
 };
 
 type Range = (f64, f64);
@@ -248,7 +248,7 @@ fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
 }
 
 impl EffectValue {
-    pub const ALL: [EffectValue; 83] = [
+    pub const ALL: [EffectValue; 86] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -332,6 +332,9 @@ impl EffectValue {
         EffectValue::ZRotation,
         EffectValue::XRotation,
         EffectValue::YRotation,
+        EffectValue::SubtractiveAdditive,
+        EffectValue::AlphaGain,
+        EffectValue::BurnIn,
     ];
 
     pub fn name(self) -> String {
@@ -676,23 +679,40 @@ fn mask_slot(tool: &mut Tool, value: EffectValue) -> Slot<'_> {
     })
 }
 
+fn merge_slot(m: &mut Merge, value: EffectValue) -> Slot<'_> {
+    use EffectValue as V;
+    Some(match value {
+        V::Size => (m.size.get_or_insert(Merge::SIZE), Mask::SIZES),
+        V::Angle => (m.angle.get_or_insert(0.0), Mask::TURNS),
+        V::SubtractiveAdditive => (m.subtractive_additive.get_or_insert(1.0), Merge::SLIDES),
+        V::AlphaGain => (m.alpha_gain.get_or_insert(1.0), Merge::SLIDES),
+        V::BurnIn => (m.burn_in.get_or_insert(0.0), Merge::SLIDES),
+        _ => return None,
+    })
+}
+
 fn node_slot(tool: &mut Tool, value: EffectValue) -> Slot<'_> {
     match tool {
         Tool::Blur(b) => blur_slot(b, value),
         Tool::Effect(kind) => slot(kind, value),
+        Tool::Merge(m) => merge_slot(m, value),
         t if t.is_mask() => mask_slot(t, value),
         _ => None,
     }
 }
 
 fn node_point(tool: &mut Tool, value: EffectValue) -> Point<'_> {
-    match tool {
-        Tool::Effect(kind) => point_slot(kind, value),
-        t if value == EffectValue::Center => t
-            .mask_mut()
-            .map(|m| (m.center.get_or_insert(Mask::MIDDLE), Mask::PLACES)),
-        _ => None,
+    if let Tool::Effect(kind) = tool {
+        return point_slot(kind, value);
     }
+    if value != EffectValue::Center {
+        return None;
+    }
+    let center = match tool {
+        Tool::Merge(m) => &mut m.center,
+        t => &mut t.mask_mut()?.center,
+    };
+    Some((center.get_or_insert(Mask::MIDDLE), Mask::PLACES))
 }
 
 impl Keyed for Node {

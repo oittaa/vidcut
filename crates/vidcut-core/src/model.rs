@@ -4627,10 +4627,14 @@ pub struct Node {
     pub name: String,
     #[serde(flatten)]
     pub tool: Tool,
-    /// The node whose picture comes in, for a tool and for `media_out`.
-    /// Left out, nothing comes in.
+    /// The node whose picture comes in, for a tool and for `media_out`. The
+    /// picture of a `merge` goes over it. Left out, nothing comes in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<String>,
+    /// The node whose picture a `merge` puts over the picture on its
+    /// `input`. Left out, a merge passes on its `input`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreground: Option<String>,
     /// The mask node on its effect mask input. A tool then works only where
     /// the mask is. A mask adds its own shape to the masks that come in.
     /// Left out, a tool works on the whole picture.
@@ -4640,8 +4644,8 @@ pub struct Node {
     /// in, and a mask passes on the masks that come in. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pass_through: bool,
-    /// How much of a `blur` or an `effect` shows, from 0 (the picture as it
-    /// comes in) to 1 (all of the tool). Usual: 1.
+    /// How much of a `blur`, an `effect` or a `merge` shows, from 0 (the
+    /// picture on its `input`) to 1 (all of the tool). Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<f64>,
     /// Off, a Gaussian Blur `effect` does not blur the alpha. Usual: on.
@@ -4691,6 +4695,8 @@ pub enum Tool {
     /// frame. The center of a node can follow a pattern (`connect`). The
     /// picture on its `input` goes on as it comes in.
     Tracker(Tracker),
+    /// The picture on its `foreground` over the picture on its `input`.
+    Merge(Merge),
 }
 
 /// The patterns of a tracker, in their order. A mask names a pattern by its
@@ -4751,6 +4757,171 @@ pub struct Connect {
     pub size: bool,
 }
 
+/// A merge of the picture on the `foreground` of its node over the
+/// picture on its `input`, the background. The result has the size of the
+/// background. First the foreground is flipped, sized, turned and moved,
+/// about its middle, and filtered linearly. A field left out is at its
+/// usual value. Its numbers can have keyframes, in the `keys` of its node.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Merge {
+    /// Where the middle of the foreground goes, `[x, y]` as fractions of
+    /// the background from its bottom left, each from -10 to 10. Usual:
+    /// `[0.5, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// The size of the foreground, from 0 to 1000000. At 1, a pixel of the
+    /// foreground is a pixel of the background. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// Degrees the foreground is turned counterclockwise. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
+    /// On, the foreground is mirrored left to right. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip_horizontal: bool,
+    /// On, the foreground is mirrored top to bottom. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip_vertical: bool,
+    /// On, the foreground moves, turns and sizes the other way: the merge
+    /// undoes its `center`, `angle` and `size`. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invert_transform: bool,
+    /// What lies around the foreground. Usual: `canvas`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edges: Option<MergeEdges>,
+    /// The math that puts the foreground on the background. Usual: `normal`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_mode: Option<ApplyMode>,
+    /// Which parts of the two pictures a `normal` or a `screen` merge
+    /// keeps. Usual: `over`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator: Option<MergeOperator>,
+    /// From 0 to 1. At 0, the colors of the foreground are multiplied by
+    /// its alpha first: a foreground with straight colors. At 1, they are
+    /// used as they are: premultiplied colors. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtractive_additive: Option<f64>,
+    /// What the alpha of the foreground is multiplied by, from 0 to 1. At
+    /// 0, the foreground is added to the background. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha_gain: Option<f64>,
+    /// How much less the alpha of the foreground covers the background,
+    /// from 0 to 1. The foreground is still added in full. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub burn_in: Option<f64>,
+}
+
+/// What lies around the foreground of a `merge`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeEdges {
+    /// Clear black.
+    #[default]
+    Canvas,
+    /// The foreground again, in a grid.
+    Wrap,
+    /// The pixels of its edges, repeated.
+    Duplicate,
+    /// The foreground again, in a grid, each other copy mirrored.
+    Mirror,
+}
+
+/// The math of a `merge`. F and B are the colors of the foreground and the
+/// background, with their alphas multiplied in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyMode {
+    /// F × x + B × y, with x and y from the `operator`.
+    #[default]
+    Normal,
+    /// As `normal`, with each color of F and B, up to 1, as its alpha.
+    Screen,
+    /// As `normal` with `over`.
+    Dissolve,
+    /// The darker of the two colors.
+    Darken,
+    /// The two colors multiplied.
+    Multiply,
+    /// The background darker by the foreground.
+    ColorBurn,
+    /// The sum of the colors less 1.
+    LinearBurn,
+    /// The whole color with the lower luma.
+    DarkerColor,
+    /// The lighter of the two colors.
+    Lighten,
+    /// The background lighter by the foreground.
+    ColorDodge,
+    /// The sum of the colors, up to 1.
+    LinearDodge,
+    /// The whole color with the higher luma.
+    LighterColor,
+    /// Multiply or screen, by the background.
+    Overlay,
+    /// A soft darker or lighter, by the foreground.
+    SoftLight,
+    /// Multiply or screen, by the foreground.
+    HardLight,
+    /// Color burn or color dodge, by the foreground.
+    VividLight,
+    /// Linear burn or linear dodge, by the foreground.
+    LinearLight,
+    /// Darken or lighten, by the foreground.
+    PinLight,
+    /// 0 or 1, by the sum of the colors.
+    HardMix,
+    /// The difference of the colors.
+    Difference,
+    /// As `difference`, with less contrast.
+    Exclusion,
+    /// The hue of the foreground, with the saturation and the lightness of
+    /// the background.
+    Hue,
+    /// The saturation of the foreground, with the hue and the lightness of
+    /// the background.
+    Saturation,
+    /// The hue and the saturation of the foreground, with the luma of the
+    /// background.
+    Color,
+    /// The luma of the foreground, with the hue and the saturation of the
+    /// background.
+    Luminosity,
+    /// √(F² + B²), alpha too.
+    Hypotenuse,
+    /// 2 × F × B ÷ (F + B), alpha too.
+    Geometric,
+}
+
+/// Which parts of the two pictures a `normal` or `screen` merge keeps, as
+/// x and y of F × x + B × y. fa and ba are the alphas of the foreground and
+/// the background.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeOperator {
+    /// x = 1, y = 1 - fa.
+    #[default]
+    Over,
+    /// x = ba, y = 0.
+    In,
+    /// x = 1 - ba, y = 0.
+    HeldOut,
+    /// x = ba, y = 1 - fa.
+    Atop,
+    /// x = 1 - ba, y = 1 - fa.
+    #[serde(rename = "xor")]
+    XOr,
+    /// x = 1. Where fa is less than ba, y = 1 - fa ÷ ba, else 0.
+    Conjoint,
+    /// x = 1. Where fa + ba is less than 1, y = 1, else (1 - fa) ÷ ba.
+    Disjoint,
+    /// x = 0, y = fa.
+    Mask,
+    /// x = 0, y = 1 - fa.
+    Stencil,
+    /// x = 1 - ba, y = 1.
+    Under,
+}
+
 /// The tools that a composition takes: `blur`, the kinds of effect, the
 /// masks, and the picture coming in and going out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -4767,6 +4938,7 @@ pub enum ToolType {
     Rectangle,
     Polygon,
     Tracker,
+    Merge,
     MediaIn,
     MediaOut,
 }
@@ -5039,6 +5211,9 @@ pub enum EffectValue {
     ZRotation,
     XRotation,
     YRotation,
+    SubtractiveAdditive,
+    AlphaGain,
+    BurnIn,
 }
 
 /// What an effect does, with its own values.
