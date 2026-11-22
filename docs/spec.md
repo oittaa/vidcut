@@ -3229,7 +3229,12 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a key link is blue. A node cannot drop into a key link.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
   - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
-  - vidcut: the Key Input and the Key Mixer have no keyframes yet ([todo](todo/color-page.md)).
+  - vidcut: each keyframe of a corrector holds its Key Input. Thus the Key Input has no track of its own ([todo](todo/gaps.md)).
+  - vidcut: each keyframe of a Key Mixer holds the values of its inputs and its Key Output. The Keyframes panel has a track for each Key Mixer.
+  - vidcut: Gain, Offset, Blur Radius and Blur H/V blend as the values do. Invert, Matte and Mask change on the frame of the next keyframe.
+    - Not measured: the blend of the Key Input and of a Key Mixer.
+  - vidcut: a change goes to a keyframe by the rule of the values. The Key palette shows the values of that keyframe.
+  - vidcut: a new input of a Key Mixer gets the usual values in each keyframe. Remove One Input removes the input from each keyframe.
   - Not measured: a key link from a corrector that is off into a Key Mixer. vidcut mixes that key as when the corrector is on.
   - Not measured: the Key Output of a Key Mixer with no linked input.
   - Not measured: a Key Mixer with one linked input after a delete. vidcut keeps it.
@@ -3250,8 +3255,8 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
   - The Keyframe Timeline mode sets the tracks that get a new keyframe: All, Color or Sizing (p. 3455).
   - All is the default. It adds a keyframe to every track. An orange bar marks the master track.
   - Color adds a keyframe to the current node only. A green bar marks its track.
-  - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector.
-  - vidcut: a mixer has no track, and it takes no keyframes.
+  - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector and each Key Mixer.
+  - vidcut: a Parallel Mixer and a Layer Mixer have no track, and they take no keyframes.
   - vidcut: an All and Color switch at the top of the panel sets the mode. All is the default.
 - **Dynamic and Static keyframes** (pp. 3456–3459):
   - Mark > Add Keyframe (Command-[) adds a Dynamic keyframe at the playhead (p. 3456).

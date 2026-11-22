@@ -3854,10 +3854,10 @@ pub struct GradeNode {
     /// none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub label: String,
-    /// The keyframes of a corrector, in the order of their frames, one at
-    /// most on a frame. Each holds every value of the corrector and its Key
-    /// Output. Before the first keyframe, the corrector has its own values
-    /// and `key`. Left out when it has none.
+    /// The keyframes of a corrector or a key mixer, in the order of their
+    /// frames, one at most on a frame. Each holds every value of the node.
+    /// Before the first keyframe, the node has its own values. Left out
+    /// when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<GradeKey>,
     /// Its keyframes have held different values since its first keyframe
@@ -3935,17 +3935,26 @@ impl GradeNode {
         matches!(self.tool, GradeTool::KeyMixer { .. })
     }
 
+    pub fn takes_keyframes(&self) -> bool {
+        matches!(
+            self.tool,
+            GradeTool::Corrector(_) | GradeTool::KeyMixer { .. }
+        )
+    }
+
     pub fn is_animated(&self) -> bool {
-        match &self.tool {
-            GradeTool::Corrector(c) => {
-                !self.keys.is_empty()
-                    && (self.animated
-                        || (self.keys.iter()).any(|k| {
-                            k.values != **c || k.key != self.key || k.windows != self.windows
-                        }))
-            }
+        let own = |k: &GradeKey| match &self.tool {
+            GradeTool::Corrector(c) => k.values != **c,
+            GradeTool::KeyMixer { mix } => k.mix != *mix,
             _ => false,
-        }
+        };
+        let changes = |k: &GradeKey| {
+            own(k)
+                || k.key != self.key
+                || k.key_input != self.key_input
+                || k.windows != self.windows
+        };
+        !self.keys.is_empty() && (self.animated || self.keys.iter().any(changes))
     }
 }
 
@@ -4263,8 +4272,8 @@ impl KeyMix {
     }
 }
 
-/// A keyframe of a corrector: every value of the corrector, its Key Output
-/// and its windows on one frame.
+/// A keyframe of a corrector or a key mixer: every value of the node on
+/// one frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GradeKey {
     /// On a clip, the source frame, counted as the `frame` of a `Keyframe`
@@ -4279,21 +4288,36 @@ pub struct GradeKey {
     /// values up to the next keyframe. 1 ends at one speed. 2 to 6 end
     /// slowly, and 7 to 10 end fast.
     pub end: u8,
-    /// The values of the corrector on this frame.
+    /// The values of a corrector on this frame. Left out at their usual
+    /// values, and on a key mixer.
+    #[serde(default, skip_serializing_if = "Corrector::is_usual")]
     pub values: Corrector,
-    /// The Key Output of the corrector on this frame. Gain and offset blend
-    /// as the values do. Invert changes on the frame of the next keyframe.
+    /// The Key Output of the node on this frame. Gain and offset blend as
+    /// the values do. Invert changes on the frame of the next keyframe.
     /// Left out at its usual value.
     #[serde(default, skip_serializing_if = "KeyOutput::is_usual")]
     pub key: KeyOutput,
-    /// The windows of the corrector on this frame, in the order of the
+    /// The Key Input of a corrector on this frame. Gain, offset and the
+    /// blur blend as the values do. Invert and mask change on the frame of
+    /// the next keyframe. Left out at its usual value, and on a key mixer.
+    #[serde(default, skip_serializing_if = "KeyInput::is_usual")]
+    pub key_input: KeyInput,
+    /// How each input of a key mixer takes its key on this frame, in the
+    /// order of the inputs. Gain and offset blend as the values do. Invert
+    /// and matte change on the frame of the next keyframe. A corrector
+    /// leaves it out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mix: Vec<KeyMix>,
+    /// The windows of a corrector on this frame, in the order of the
     /// `windows` of the node. The numbers blend as the values do. `on`,
     /// `invert`, `mask` and `name` change on the frame of the next
-    /// keyframe, and so do the points of a list of another length.
+    /// keyframe, and so do the points of a list of another length. A key
+    /// mixer leaves it out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<GradeWindow>,
 }
 
-/// What a keyframe of a corrector does up to the next keyframe.
+/// What a keyframe does up to the next keyframe.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GradeKeyKind {
