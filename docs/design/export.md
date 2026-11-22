@@ -611,6 +611,10 @@ A compound clip ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions))
   - `blur::canvas_bind` maps it and covers it by `Mix.placing`: transform, edges, soft edges and opacity. The shader reads it as `made` 6.
   - With effects, `blur::Blurred::canvas_effects` places it with no opacity (`bared`), then runs the effects. The grid pictures of a Glow come from the same `Spare`. `blur::shown_bind` then shows it with the opacity.
   - The outer pass mixes it with the tracks below, by the mode of `Mix.placing`.
+- Each layer has a `place::Extent`: the rectangle of its picture on the frame, and its grid of source pixels.
+  - `Level::keeps` tells if a level leaves its picture where it was, with no crop. Then the extent goes up to the next level (`kept`).
+  - A `place::Mix` with one part crops in the extent of that part (`Placing::within`). A `place::Mix` with more parts crops in the frame (`Extent::whole`).
+  - The viewer draws the crop of a compound clip in the same extent (`extent_of`).
 - One part alone gives its composite mode to the `place::Mix` (`parts_of`). A mode on the compound clip replaces it. A transition inside gives no mode (`run_mode`).
 - A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded. A Smooth Cut with a flat side keeps them (`Smooth::clear`).
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
