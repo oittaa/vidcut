@@ -101,7 +101,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
             println!("  on       {track}");
         }
         if method == "motion.add" {
-            println!("  pattern  {} of {}", r.result["pattern"], r.result["node"]);
+            println!(
+                "  pattern  {} of {}",
+                r.result["pattern"],
+                r.result["node"].as_str().unwrap_or_default()
+            );
         }
         if method == "motion.find" {
             found_paths(&r.result);

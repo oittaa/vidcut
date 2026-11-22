@@ -275,7 +275,7 @@ const GROUPS: &[(&str, &str)] = &[
     ),
     (
         "motion",
-        "Motion paths of clips: where things in the picture are",
+        "The motion paths of the patterns of trackers: where things in the picture are",
     ),
     (
         "picture",
