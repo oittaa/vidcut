@@ -362,10 +362,10 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - Markup in the text of a title styles words: `<b>`, `<i>`, `<u>` and `<font color face size>`.
   - The B, I, U, Color, Size, Font and Plain buttons of the Title section put this markup around the selected words.
   - The Position, Zoom, Rotation and Opacity of a title take keyframes ([todo](todo/keyframes.md#titles)). Its shadow and background do not.
-  - A title clip has no Transform, Cropping, Speed or blend modes.
+  - A title clip has no Speed.
 - **Why:**
-  - Text+ and Fusion titles are Fusion compositions with text tools. The compositions of vidcut have no text tool (spec §8.19). Blend modes are out (spec §1).
-  - The place, zoom, rotation and opacity of a title do what Transform and the opacity of Composite would do. The speed of a scroll comes from the length of its clip.
+  - Text+ and Fusion titles are Fusion compositions with text tools. The compositions of vidcut have no text tool (spec §8.19).
+  - The speed of a scroll comes from the length of its clip.
   - Markup in the text is what a script writes and reads.
 
 ## X55. A scroll rises over the whole clip, its lines spaced as other titles'
