@@ -971,6 +971,24 @@ impl Runtime {
     pub fn present(&self, dir: &Path) -> bool {
         self.home(dir).join(self.library).is_file()
     }
+
+    pub fn older(&self, dir: &Path) -> Vec<PathBuf> {
+        let now = runtime_version(TRANSCRIBE_CPP);
+        let older = |name: &str| {
+            let v = name.strip_prefix("transcribe-").and_then(runtime_version);
+            v.is_some_and(|v| now.as_ref().is_some_and(|now| v < *now))
+        };
+        let entries = std::fs::read_dir(dir).into_iter().flatten().flatten();
+        entries
+            .filter(|e| e.file_name().to_str().is_some_and(older))
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect()
+    }
+}
+
+fn runtime_version(v: &str) -> Option<Vec<u64>> {
+    v.split('.').map(|n| n.parse().ok()).collect()
 }
 
 pub const RUNTIMES: [Runtime; 5] = [
