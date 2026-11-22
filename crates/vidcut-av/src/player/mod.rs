@@ -7,7 +7,7 @@ mod ring;
 mod scrub;
 mod store;
 mod subtitles;
-mod titles;
+pub(crate) mod titles;
 mod video;
 
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -15,7 +15,6 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use vidcut_core::model::Title;
 use vidcut_core::render::RenderPlan;
 
 pub(crate) use frame::AlphaUse;
@@ -27,10 +26,9 @@ pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
 };
-pub(crate) use plan::{placed_of, scales_of, titles_of};
+pub(crate) use plan::{placed_of, scales_of};
 pub use subtitles::SubtitleView;
 pub(crate) use subtitles::Subtitles;
-pub(crate) use titles::Titles;
 pub(crate) use video::picture;
 
 use crate::error::{Error, Result};
@@ -326,7 +324,6 @@ pub(crate) struct Shared {
     copies: Arc<crate::copies::Copies>,
     heard_epoch: std::sync::atomic::AtomicU64,
     levels: Mutex<std::collections::VecDeque<Level>>,
-    pub(crate) titles: titles::Titles,
     pub(crate) subtitles: subtitles::Subtitles,
     placing: Mutex<Vec<(String, vidcut_core::model::Picture)>>,
     grading: Mutex<Option<vidcut_core::model::Grade>>,
@@ -847,7 +844,6 @@ impl Player {
             copies: Arc::default(),
             heard_epoch: std::sync::atomic::AtomicU64::new(0),
             levels: Mutex::new(std::collections::VecDeque::new()),
-            titles: titles::Titles::default(),
             subtitles: subtitles::Subtitles::default(),
             placing: Mutex::new(Vec::new()),
             grading: Mutex::new(None),
@@ -1107,10 +1103,7 @@ impl Player {
                 true => g.at(pos as f64).into_owned(),
                 false => g,
             });
-        let (mut titles, titled) = self.shared.titles.shown(&plan, pos, &placing);
-        let (cues, cued) = self.shared.subtitles.shown(&plan, pos);
-        titles.extend(cues);
-        let drawn = titled && cued;
+        let (titles, drawn) = self.shared.subtitles.shown(&plan, pos);
         let picture = self.shared.store.get(&id);
         let landed = lock(&self.shared.landed).clone();
         let mut p = lock(&self.shared.presenter);
@@ -1315,13 +1308,6 @@ impl Player {
 
     pub fn preview_grade(&self, grade: Option<vidcut_core::model::Grade>) {
         *lock(&self.shared.grading) = grade;
-    }
-
-    pub fn preview_title(&self, title: Option<(String, Title)>) {
-        if self.shared.titles.preview(title) {
-            self.shared.prepared();
-            self.shared.changed.notify_all();
-        }
     }
 
     pub fn set_subtitles(&self, view: Option<SubtitleView>) {

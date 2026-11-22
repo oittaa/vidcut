@@ -378,7 +378,7 @@ impl Decoder {
         let store = &self.shared.store;
         let missing = |t: i64| !store.contains(&plan.id(t));
         let focus = snap.focus;
-        if self.shared.titles.hold(&plan, focus) | self.shared.subtitles.hold(&plan, focus) {
+        if self.shared.subtitles.hold(&plan, focus) {
             self.shared.drew_titles();
             return Ok(true);
         }
@@ -599,7 +599,6 @@ impl Decoder {
             return Ok(false);
         }
         crate::debug!("player", "prepare {t} of the plan played next");
-        self.shared.titles.draw(plan, *t);
         self.shared.subtitles.draw(plan, *t);
         let picture = (|| {
             let mut frames = self.new_reader(&plan.plan);
@@ -776,7 +775,6 @@ impl Decoder {
                     seek_keeps = Some(t - self.chunk() + 1);
                 }
                 let id = plan.id(i);
-                self.shared.titles.draw(&plan, i);
                 self.shared.subtitles.draw(&plan, i);
                 self.shared.store.put(id.clone(), Arc::new(picture));
                 if i == snap.focus {

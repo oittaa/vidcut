@@ -1,244 +1,160 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use vidcut_core::lru::Lru;
-use vidcut_core::model::{Picture, Title, TitleKind, TitleLine, TitlePart};
-use vidcut_core::render::ShownTitle;
+use vidcut_core::model::{Hdr, Title, TitlePart};
+use vidcut_core::render::{Run, ShownTitle};
 
-use super::frame::{TitleOver, TitlePicture};
-use super::lock;
-use super::plan::Plan;
-use super::store::{self, HeldTitles, TitleKey, TitlePictures};
+use super::frame::TitlePicture;
+use super::store::{self, TitleKey, TitlePictures};
+use crate::ffmpeg::{format, frame};
 
-const LAST_KEPT: usize = 16;
+pub(crate) type Key = (Title, (u32, u32), u32);
 
-type Preview = Option<(String, Title)>;
+pub(crate) type Placing = (Key, Option<Hdr>, Option<Run>);
 
-pub(crate) type Key = (Title, (u32, u32), u32, bool);
+const PIXEL: usize = 16;
 
-fn steady(t: &Title, size: (u32, u32)) -> Title {
-    let bare = Title {
-        position: None,
-        rotation: None,
-        opacity: None,
-        upper: t.upper.clone().map(|u| TitleLine {
-            position: None,
-            rotation: None,
-            ..u
-        }),
-        ..t.clone()
-    };
-    let cut = t.shape_past_edge(size) || bare.shape_past_edge(size);
-    Title {
-        position: t.position.filter(|_| cut),
-        ..bare
+const PLANES: [usize; 4] = [1, 2, 0, 3];
+
+const WIDE: [[f32; 3]; 3] = [
+    [0.6274, 0.3293, 0.0433],
+    [0.0691, 0.9195, 0.0114],
+    [0.0164, 0.0880, 0.8956],
+];
+
+const PQ_M1: f32 = 0.159_301_76;
+const PQ_M2: f32 = 78.843_75;
+const PQ_C1: f32 = 0.835_937_5;
+const PQ_C2: f32 = 18.851_563;
+const PQ_C3: f32 = 18.6875;
+const HLG_A: f32 = 0.178_832_77;
+const HLG_B: f32 = 0.284_668_92;
+const HLG_C: f32 = 0.559_910_7;
+const WHITE_NITS: f32 = 203.0;
+
+fn pictures(key: &Key) -> TitlePictures {
+    let whole = TitleKey::Title(Box::new(key.clone()));
+    let global = store::global();
+    if let Some(pictures) = global.title_pictures(&whole) {
+        return pictures;
+    }
+    let pictures = drawn(key);
+    global.keep_titles(whole, pictures.clone());
+    pictures
+}
+
+pub(crate) fn placing(
+    shown: &ShownTitle,
+    size: (u32, u32),
+    timeline: u32,
+    colors: Option<Hdr>,
+) -> Placing {
+    let title = shown.title.sampled(shown.frame());
+    let run = title.moves().then_some(shown.run);
+    ((title, size, timeline), colors, run)
+}
+
+fn places(pictures: &TitlePictures, (t, (_, h), _): &Key, run: Option<Run>) -> Vec<[i32; 2]> {
+    pictures
+        .iter()
+        .zip(t.blocks())
+        .filter_map(|(p, b)| Some((p.as_ref()?, b.part)))
+        .map(|(p, part)| match run.filter(|_| part != TitlePart::Shape) {
+            Some(run) => {
+                let top = run.top(0, f64::from(*h), f64::from(p.height)) + f64::from(p.lift);
+                [p.left, top.round() as i32]
+            }
+            None => [p.left, p.top],
+        })
+        .collect()
+}
+
+fn encoded(c: f32, hdr: Hdr) -> f32 {
+    let c = c.max(0.0);
+    match hdr {
+        Hdr::Pq => {
+            let y = (c * WHITE_NITS / 10000.0).powf(PQ_M1);
+            ((PQ_C1 + PQ_C2 * y) / (1.0 + PQ_C3 * y)).powf(PQ_M2)
+        }
+        Hdr::Hlg => {
+            let l = (c * WHITE_NITS / 1000.0).powf(1.0 / 1.2);
+            match l <= 1.0 / 12.0 {
+                true => (3.0 * l).sqrt(),
+                false => HLG_A * (12.0 * l - HLG_B).max(1e-30).ln() + HLG_C,
+            }
+        }
     }
 }
 
-fn level(t: &Title, s: &ShownTitle) -> f64 {
-    t.opaque() * s.fade.map_or(1.0, |r| r.level(0))
+fn widened(rgb: [f32; 3], hdr: Hdr) -> [f32; 3] {
+    let lin = rgb.map(|s| {
+        let s = s.clamp(0.0, 1.0);
+        match s <= 0.04045 {
+            true => s / 12.92,
+            false => ((s + 0.055) / 1.055).powf(2.4),
+        }
+    });
+    WIDE.map(|row| {
+        encoded(row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2], hdr).clamp(0.0, 1.0)
+    })
 }
 
-fn key_of(t: &Title, s: &ShownTitle, size: (u32, u32), timeline: u32) -> Key {
-    if t.kind == TitleKind::LowerThird && level(t, s) < 1.0 {
-        let whole = Title {
-            opacity: None,
-            ..t.clone()
-        };
-        return (whole, size, timeline, true);
-    }
-    (steady(t, size), size, timeline, false)
-}
-
-fn wanted(preview: &Preview, s: &ShownTitle) -> Title {
-    match preview {
-        Some((clip, t)) if *clip == s.clip => t.sampled(s.frame()),
-        _ => s.title.clone(),
+fn color(p: &TitlePicture, i: usize) -> [f32; 4] {
+    match p.float {
+        true => read(&p.rgba.as_chunks::<PIXEL>().0[i]),
+        false => p.rgba.as_chunks::<4>().0[i].map(|v| f32::from(v) / 255.0),
     }
 }
 
-#[derive(Default)]
-struct Kept {
-    held: HeldTitles,
-    last: Lru<String, Key, LAST_KEPT>,
+fn over(under: [f32; 4], top: [f32; 4]) -> [f32; 4] {
+    let keep = 1.0 - top[3];
+    std::array::from_fn(|c| top[c] + under[c] * keep)
 }
 
-impl Kept {
-    fn pictures(&self, key: &Key) -> Option<TitlePictures> {
-        self.held.get(&TitleKey::Title(Box::new(key.clone())))
-    }
+fn read(cell: &[u8; PIXEL]) -> [f32; 4] {
+    let (floats, _) = cell.as_chunks::<4>();
+    std::array::from_fn(|c| f32::from_le_bytes(floats[c]))
 }
 
-#[derive(Default)]
-pub(crate) struct Titles {
-    kept: Mutex<Kept>,
-    preview: Mutex<Preview>,
-}
-
-impl Titles {
-    pub(crate) fn preview(&self, p: Preview) -> bool {
-        let mut held = lock(&self.preview);
-        let changed = *held != p;
-        *held = p;
-        changed
-    }
-
-    pub(crate) fn shown(
-        &self,
-        plan: &Plan,
-        t: i64,
-        placing: &[(String, Picture)],
-    ) -> (Vec<TitleOver>, bool) {
-        let size = plan.size();
-        self.shown_at(&plan.titles_at(t), size, size.1, placing)
-    }
-
-    pub(crate) fn shown_at(
-        &self,
-        at: &[(usize, ShownTitle)],
-        size: (u32, u32),
-        timeline: u32,
-        placing: &[(String, Picture)],
-    ) -> (Vec<TitleOver>, bool) {
-        let preview = lock(&self.preview).clone();
-        let (w, h) = (f64::from(size.0), f64::from(size.1));
-        let mut kept = lock(&self.kept);
-        let mut out = Vec::new();
-        let mut all = true;
-        for (above, shown) in at {
-            let to = wanted(&preview, shown);
-            let exact = key_of(&to, shown, size, timeline);
-            let (key, pictures) = match kept.pictures(&exact) {
-                Some(pictures) => (exact, pictures),
-                None => {
-                    all = false;
-                    let last = kept.last.get(&shown.clip).cloned();
-                    let found = last
-                        .filter(|k| k.1 == size)
-                        .and_then(|k| kept.pictures(&k).map(|p| (k, p)));
-                    match found {
-                        Some(found) => found,
-                        None => continue,
-                    }
-                }
-            };
-            let alpha = level(&to, shown) as f32;
-            if key.3 {
-                out.extend(pictures.iter().flatten().map(|p| TitleOver {
-                    above: *above,
-                    picture: p.clone(),
-                    dx: 0,
-                    dy: 0,
-                    turn: [0.0, 0.0, 1.0, 0.0],
-                    alpha,
-                    placed: super::plan::previewed(&shown.placed, placing),
-                    nth: 0,
-                }));
-                kept.last.insert(shown.clip.clone(), key);
+pub(crate) fn frame((key, colors, run): &Placing) -> frame::Video {
+    let pictures = pictures(key);
+    let at = places(&pictures, key, *run);
+    let (w, h) = key.1;
+    let shown: Vec<_> = pictures.iter().flatten().zip(at).collect();
+    let mut f = frame::Video::new(format::Pixel::GBRAPF32LE, w, h);
+    let mut row = vec![[0.0f32; 4]; w as usize];
+    for y in 0..h as i32 {
+        row.fill([0.0; 4]);
+        for (p, [left, top]) in &shown {
+            if y < *top || y >= top + p.height as i32 {
                 continue;
             }
-            for ((picture, from), now) in pictures.iter().zip(key.0.blocks()).zip(to.blocks()) {
-                let Some(p) = picture.clone() else {
-                    continue;
-                };
-                let [x0, y0] = from.pivot;
-                let [x, y] = now.pivot;
-                let boxes = (now.part == TitlePart::Shape)
-                    .then(|| key.0.shape_pixels(from.pivot, (w, h)))
-                    .flatten()
-                    .zip(to.shape_pixels(now.pivot, (w, h)));
-                let (dx, dy) = match boxes {
-                    Some((a, b)) => ((b[0] - a[0]) as i32, (b[1] - a[1]) as i32),
-                    None if to.moves() => {
-                        let top = shown.run.top(0, h, f64::from(p.height)) + f64::from(p.lift);
-                        (((x - x0) * w).round() as i32, top.round() as i32 - p.top)
-                    }
-                    None => (
-                        ((x * w).round() - (x0 * w).round()) as i32,
-                        ((y * h).round() - (y0 * h).round()) as i32,
-                    ),
-                };
-                out.push(TitleOver {
-                    above: *above,
-                    picture: p,
-                    dx,
-                    dy,
-                    turn: [
-                        (x * w) as f32,
-                        (y * h) as f32,
-                        (now.zoom / from.zoom) as f32,
-                        (now.turn - from.turn).to_radians() as f32,
-                    ],
-                    alpha,
-                    placed: super::plan::previewed(&shown.placed, placing),
-                    nth: 0,
-                });
+            let from = (y - top) as usize * p.width as usize;
+            for x in (*left).max(0)..(left + p.width as i32).min(w as i32) {
+                let cell = &mut row[x as usize];
+                *cell = over(*cell, color(p, from + (x - left) as usize));
             }
-            kept.last.insert(shown.clip.clone(), key);
         }
-        (out, all)
-    }
-
-    pub(crate) fn draw(&self, plan: &Plan, t: i64) -> bool {
-        let size = plan.size();
-        self.pictures_at(&plan.titles_at(t), size, size.1).0
-    }
-
-    pub(crate) fn hold(&self, plan: &Plan, t: i64) -> bool {
-        let size = plan.size();
-        self.hold_at(&plan.titles_at(t), size, size.1)
-    }
-
-    pub(crate) fn hold_at(
-        &self,
-        at: &[(usize, ShownTitle)],
-        size: (u32, u32),
-        timeline: u32,
-    ) -> bool {
-        let (drew, held) = self.pictures_at(at, size, timeline);
-        lock(&self.kept).held = HeldTitles::new(held);
-        drew
-    }
-
-    fn pictures_at(
-        &self,
-        at: &[(usize, ShownTitle)],
-        size: (u32, u32),
-        timeline: u32,
-    ) -> (bool, Vec<(TitleKey, TitlePictures)>) {
-        let preview = lock(&self.preview).clone();
-        let mut drew = false;
-        let mut out: Vec<(TitleKey, TitlePictures)> = Vec::new();
-        for (_, shown) in at {
-            let key = key_of(&wanted(&preview, shown), shown, size, timeline);
-            let whole = TitleKey::Title(Box::new(key.clone()));
-            if out.iter().any(|(k, _)| *k == whole) {
-                continue;
+        if let Some(hdr) = *colors {
+            for cell in row.iter_mut().filter(|c| c[3] > 0.0) {
+                let [r, g, b, a] = *cell;
+                let [r, g, b] = widened([r / a, g / a, b / a], hdr);
+                *cell = [r * a, g * a, b * a, a];
             }
-            let found = lock(&self.kept).pictures(&key);
-            let pictures = found.unwrap_or_else(|| {
-                let pictures = drawn(&key);
-                lock(&self.kept).last.insert(shown.clip.clone(), key);
-                store::global().keep_titles(whole.clone(), pictures.clone());
-                drew = true;
-                pictures
-            });
-            out.push((whole, pictures));
         }
-        (drew, out)
+        for (plane, c) in PLANES.into_iter().enumerate() {
+            let start = y as usize * f.stride(plane);
+            let data = &mut f.data_mut(plane)[start..start + w as usize * 4];
+            for (cell, v) in data.as_chunks_mut::<4>().0.iter_mut().zip(&row) {
+                *cell = v[c].to_le_bytes();
+            }
+        }
     }
+    crate::screen::held::tag(&mut f, *colors);
+    f
 }
 
-fn drawn((t, (width, height), timeline, whole): &Key) -> TitlePictures {
-    let (width, height, timeline) = (*width, *height, *timeline);
-    let sprites = if *whole {
-        crate::burn::title(t, width, height, timeline)
-            .into_iter()
-            .map(Some)
-            .collect()
-    } else {
-        crate::burn::title_blocks(t, width, height, timeline)
-    };
-    sprites
+fn drawn((t, (width, height), timeline): &Key) -> TitlePictures {
+    crate::burn::title_blocks(t, *width, *height, *timeline)
         .into_iter()
         .map(|sprite| {
             sprite.map(|sprite| {
@@ -248,7 +164,7 @@ fn drawn((t, (width, height), timeline, whole): &Key) -> TitlePictures {
                     width: sprite.width,
                     height: sprite.height,
                     lift: sprite.lift,
-                    frame: (width, height),
+                    frame: (*width, *height),
                     float: sprite.float,
                     rgba: sprite.premultiplied(),
                 })

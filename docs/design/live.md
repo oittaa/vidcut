@@ -387,8 +387,7 @@ The bar and the Jobs button:
 - The Title section (`TitleDialog`) works out the title of its fields (`title_of`). When the user leaves a field, the changes go as one `titles.set`. A change on each line of a lower third goes as one `titles.set` for each line.
 - The onscreen controls (`onscreen::Grab`, `Workspace::title_controls`) box each title from one upright drawing of `burn::title`. They send one `titles.set` when a drag ends.
 - `Workspace::title_wanted` gives the one title to preview: the dragged title, else the changed title of the Title section, else a title just sent (`tools::landing`).
-- `Workspace::sync_title_preview` hands the preview to the core (`Handle::preview_title`), and the core to the player. Thus the viewer draws it as an export does, without a new plan.
-  - The core first loads a plan that it still owes. Why: the player does not show an older title.
+- `Workspace::sync_title_preview` hands the preview to the core (`Handle::preview_title`). The core puts it into a new plan of the timeline. Thus the viewer draws it as an export does.
 - The Titles tab (`title_browser::Browser`) draws its cards with `burn::title`. A dragged card (`Gesture::Title`) drops as `titles.add`.
 - The Inspector shows a selected transition with `Workspace::transition_form`. A change of length or alignment sends the type again (`fades::kind`), as `edit.dissolve` makes a new transition.
   - The Transition Curve row edits the curve at the playhead with `transitions::put_progress`, `toggle_key` and `reset_curve`. The row sends the whole type with `edit.transition`.

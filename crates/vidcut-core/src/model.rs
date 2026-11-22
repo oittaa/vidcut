@@ -2112,9 +2112,10 @@ pub struct Clip {
     /// media (`media` is empty) and no audio, and any length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generator: Option<Generator>,
-    /// A title (decision D65): its text drawn over the picture of the
-    /// tracks below it, on a video track. It has no media (`media` is
-    /// empty) and no audio, and any length.
+    /// A title (decision D65): its text drawn on a clear picture of the
+    /// timeline's size, on a video track. Its `picture` places that picture
+    /// over the tracks below it. It has no media (`media` is empty) and no
+    /// audio, and any length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<Title>,
     /// An adjustment clip: it has no media and no sound, and applies its
@@ -2820,8 +2821,8 @@ impl Generator {
     }
 }
 
-/// A title: text drawn over the picture (decision D65). A field left out
-/// keeps the usual look.
+/// A title: text drawn on a clear picture of the timeline's size (decision
+/// D65). A field left out keeps the usual look.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Title {
     /// `text`, one block of text, `lower_third`, two lines at the bottom
@@ -2896,14 +2897,6 @@ pub struct Title {
     /// rotation has no keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rotation_keys: Vec<Keyframe>,
-    /// How opaque the whole title is, from 0 to 1. Usual: 1. With
-    /// `opacity_keys`, the opacity at a frame is that curve.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opacity: Option<f64>,
-    /// Opacity keyframes, on the clip's source frames. Left out when the
-    /// opacity has no keyframes.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub opacity_keys: Vec<Keyframe>,
     /// A lower third's upper line, when it goes apart from the lower line.
     /// `position`, `zoom` and `rotation` and their keyframes above are then
     /// the lower line's alone. `anchor` above is always the lower line's. Left
@@ -3254,8 +3247,6 @@ impl Title {
             zoom_keys: Vec::new(),
             rotation: None,
             rotation_keys: Vec::new(),
-            opacity: None,
-            opacity_keys: Vec::new(),
             upper: None,
         }
     }
@@ -3466,10 +3457,6 @@ impl Title {
 
     pub fn turn(&self) -> f64 {
         self.rotation.unwrap_or(0.0)
-    }
-
-    pub fn opaque(&self) -> f64 {
-        self.opacity.unwrap_or(1.0)
     }
 
     pub fn lower_line(&self) -> f64 {
@@ -8964,18 +8951,12 @@ impl Hash for Title {
             position,
             zoom,
             rotation,
-            opacity,
             upper,
             ..
         } = self;
         (kind, align, anchor, text, style).hash(h);
         pair_bits(*position).hash(h);
-        (
-            floats_bits(*zoom),
-            floats_bits(*rotation),
-            floats_bits(*opacity),
-        )
-            .hash(h);
+        (floats_bits(*zoom), floats_bits(*rotation)).hash(h);
         upper
             .as_ref()
             .map(|u| {

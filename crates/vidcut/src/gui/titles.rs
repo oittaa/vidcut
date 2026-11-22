@@ -107,7 +107,6 @@ pub struct TitleDialog {
     case: TitleCase,
     line: LineFields,
     upper: LineFields,
-    title_opacity: String,
     error: String,
     families: Vec<String>,
     shown: Option<Title>,
@@ -154,7 +153,6 @@ impl TitleDialog {
             case: TitleCase::Mixed,
             line: LineFields::default(),
             upper: LineFields::default(),
-            title_opacity: String::new(),
             error: String::new(),
             families: vidcut_av::burn::families(),
             selection: (0, 0),
@@ -188,7 +186,6 @@ impl TitleDialog {
         self.base = Some(t.clone());
         self.line = LineFields::of(t, self.size);
         self.upper = LineFields::of_upper(t, self.size);
-        self.title_opacity = percent(t.opacity);
         self.loaded = true;
     }
 }
@@ -328,8 +325,6 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         zoom_keys: stored.zoom_keys.clone(),
         rotation: lower.rotation,
         rotation_keys: stored.rotation_keys.clone(),
-        opacity: kept(&d.title_opacity, stored.opacity, "title opacity")?,
-        opacity_keys: stored.opacity_keys.clone(),
         upper: (lines && apart).then_some(upper),
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
@@ -404,9 +399,6 @@ fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Vec<Value> {
     }
     if line_changes(&mut params, t, stored, TitlePart::Lower) && t.upper.is_some() {
         params["line"] = json!(LowerThirdLine::Lower);
-    }
-    if t.opacity != stored.opacity {
-        params["opacity"] = json!(t.opaque());
     }
     let mut out = Vec::new();
     if params.as_object().is_some_and(|o| o.len() > 1) {
@@ -585,16 +577,25 @@ impl Workspace {
             None => ui.label(dim("Adding…")),
         };
         if let Some(s) = stored.as_ref() {
-            let current = title_of(&d, s).map(|t| Styled::Titles(TitleLook::of(&t)));
+            let opacity = found.and_then(|(_, c, _)| c.picture.as_ref().map(|p| p.opaque()));
+            let current = title_of(&d, s).map(|t| Styled::Titles(TitleLook::of(&t, opacity)));
             let mut picker = d.picker.take().unwrap_or_else(|| {
                 Picker::new(
                     LookKind::Titles,
                     self.looks.of(LookKind::Titles),
-                    &Styled::Titles(TitleLook::of(s)),
+                    &Styled::Titles(TitleLook::of(s, opacity)),
                 )
             });
             if let Some(Styled::Titles(l)) = self.look_picker(ui, &mut picker, current) {
                 d.load(&l.on(&d.text));
+                if l.opacity.unwrap_or(1.0) != opacity.unwrap_or(1.0) {
+                    let to = json!({
+                        "clips": d.clip,
+                        "opacity": l.opacity.unwrap_or(1.0),
+                        "at": d.at,
+                    });
+                    self.send("picture.set", to);
+                }
                 changed = true;
             }
             d.picker = Some(picker);
@@ -793,9 +794,6 @@ impl Workspace {
             } else {
                 changed |= line_rows(ui, &mut d.line, None);
             }
-            changed |= row(ui, "Title opacity", &mut d.title_opacity, "100%");
-            keys(ui, PictureValue::Opacity, None);
-            ui.end_row();
         });
         ui.label(dim(match d.kind {
             TitleKind::LowerThird => "X and Y: each line's anchor, in pixels from the bottom left.",

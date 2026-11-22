@@ -1003,9 +1003,16 @@ pub fn drop_channel(
 }
 
 impl Title {
+    pub fn owns(v: PictureValue) -> bool {
+        matches!(
+            v,
+            PictureValue::Position | PictureValue::Zoom | PictureValue::Rotation
+        )
+    }
+
     pub fn takes_keys(&self, v: PictureValue) -> bool {
         match v {
-            PictureValue::Position | PictureValue::Opacity => true,
+            PictureValue::Position => true,
             PictureValue::Zoom | PictureValue::Rotation => self.kind != TitleKind::Scroll,
             _ => false,
         }
@@ -1016,7 +1023,6 @@ impl Title {
             PictureValue::Position => &self.position_keys,
             PictureValue::Zoom => &self.zoom_keys,
             PictureValue::Rotation => &self.rotation_keys,
-            PictureValue::Opacity => &self.opacity_keys,
             _ => &[],
         }
     }
@@ -1133,8 +1139,6 @@ impl Title {
             zoom_y: self.zoom_keys.iter().map(|k| k.value).collect(),
             rotation: self.rotation,
             rotation_keys: self.rotation_keys.clone(),
-            opacity: self.opacity,
-            opacity_keys: self.opacity_keys.clone(),
             ..Picture::default()
         }
     }
@@ -1150,8 +1154,6 @@ impl Title {
         self.zoom_keys.clone_from(&p.zoom_keys);
         self.rotation = p.rotation;
         self.rotation_keys.clone_from(&p.rotation_keys);
-        self.opacity = p.opacity;
-        self.opacity_keys.clone_from(&p.opacity_keys);
     }
 
     pub fn sampled(&self, frame: f64) -> Title {

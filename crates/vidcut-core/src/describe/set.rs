@@ -519,9 +519,6 @@ impl Words<'_> {
         s.usual("rotation", "Rotation", &degrees, json!(0.0), |t| {
             json!(t.rotation)
         });
-        s.usual("opacity", "Title Opacity", &percent, json!(1.0), |t| {
-            json!(t.opacity)
-        });
         s.told("look", "Look", &text);
         s.f.text()
     }

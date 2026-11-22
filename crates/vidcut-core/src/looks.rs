@@ -80,7 +80,7 @@ pub struct TitleLook {
     /// Degrees turned counterclockwise. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
-    /// From 0 to 1. Usual: 1.
+    /// The opacity of the clip's Composite, from 0 to 1. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     #[serde(default, skip_serializing_if = "TitleStyle::is_empty")]
@@ -88,7 +88,7 @@ pub struct TitleLook {
 }
 
 impl TitleLook {
-    pub fn of(t: &Title) -> Self {
+    pub fn of(t: &Title, opacity: Option<f64>) -> Self {
         Self {
             kind: t.kind,
             align: t.align,
@@ -96,7 +96,7 @@ impl TitleLook {
             position: t.position,
             zoom: t.zoom,
             rotation: t.rotation,
-            opacity: t.opacity,
+            opacity: opacity.filter(|o| *o != 1.0),
             style: t.style.clone(),
         }
     }
@@ -110,7 +110,6 @@ impl TitleLook {
             position: self.position,
             zoom: self.zoom,
             rotation: self.rotation,
-            opacity: self.opacity,
             ..Title::new(text)
         }
     }
@@ -372,9 +371,14 @@ pub fn checked(styled: &Styled) -> Result<Styled> {
                 style: crate::ops::subtitles::checked_style(&l.style)?,
             }))
         }
-        Styled::Titles(l) => Ok(Styled::Titles(TitleLook::of(&crate::ops::titles::checked(
-            &l.on(""),
-        )?))),
+        Styled::Titles(l) => {
+            let faded = crate::ops::titles::faded(l.opacity)?;
+            let title = crate::ops::titles::checked(&l.on(""))?;
+            Ok(Styled::Titles(TitleLook::of(
+                &title,
+                faded.and_then(|p| p.opacity),
+            )))
+        }
     }
 }
 

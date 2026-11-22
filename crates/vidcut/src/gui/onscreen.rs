@@ -218,7 +218,6 @@ impl Workspace {
                 position: None,
                 zoom: None,
                 rotation: None,
-                opacity: None,
                 upper: None,
                 ..title.clone()
             };

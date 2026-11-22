@@ -357,6 +357,12 @@ fn grades(p: &Project, ti: usize, c: &Clip) -> Result<()> {
             c.id
         )));
     }
+    if c.title.is_some() {
+        return Err(Error::invalid(format!(
+            "{} is a title, which takes no grade",
+            c.id
+        )));
+    }
     Ok(())
 }
 

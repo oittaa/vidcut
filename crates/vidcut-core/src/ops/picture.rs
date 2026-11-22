@@ -845,20 +845,14 @@ fn zoom_checked(z: &DynamicZoom) -> Result<()> {
 }
 
 pub fn has_picture(c: &Clip) -> bool {
-    c.video && c.title.is_none() && (c.generator.is_none() || c.draws())
+    c.video && (c.generator.is_none() || c.draws())
 }
 
 pub fn takes_effects(c: &Clip) -> bool {
-    has_picture(c) && c.generator.is_none()
+    has_picture(c) && c.generator.is_none() && c.title.is_none()
 }
 
 pub(super) fn takes(p: &Project, ti: usize, c: &Clip) -> Result<()> {
-    if c.title.is_some() {
-        return Err(Error::invalid(format!(
-            "{} is a title, placed by its own position, zoom and rotation (titles.set)",
-            c.id
-        )));
-    }
     if c.generator.is_some() && !c.draws() {
         return Err(Error::invalid(format!(
             "{} is a block from another editor's file, which plays as a gap",
@@ -1306,6 +1300,15 @@ pub fn violation(p: &Project, ti: usize, c: &Clip) -> Option<String> {
     }
     if c.generator.is_some() && picture.composition.is_some() {
         return Some(format!("{} is a generator, which has no composition", c.id));
+    }
+    if c.title.is_some() && picture.composition.is_some() {
+        return Some(format!("{} is a title, which has no composition", c.id));
+    }
+    if c.title.is_some() && !picture.effects.is_empty() {
+        return Some(format!("{} is a title, which takes no effects", c.id));
+    }
+    if c.title.is_some() && picture.grade.is_some() {
+        return Some(format!("{} is a title, which takes no grade", c.id));
     }
     checked(picture)
         .err()

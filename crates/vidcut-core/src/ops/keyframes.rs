@@ -695,19 +695,21 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                     json!({ "clip": c.id, "track": t.id, "param": "speed", "keyframes": keys }),
                 );
             }
-            if let Some(picture) = &held_picture(c) {
-                let rows = listed_values(p, c, &t.id, picture);
-                let apart = c.title.as_ref().is_some_and(|t| t.upper.is_some());
-                clips.extend(if apart {
-                    with_line(rows, "lower")
-                } else {
-                    rows
+            if let Some(title) = &c.title {
+                let rows = listed_values(p, c, &t.id, &title.as_picture(), Title::owns);
+                clips.extend(match title.upper {
+                    Some(_) => with_line(rows, "lower"),
+                    None => rows,
                 });
+                if title.upper.is_some() {
+                    let picture = title.upper_view().as_picture();
+                    let rows = listed_values(p, c, &t.id, &picture, Title::owns);
+                    clips.extend(with_line(rows, "upper"));
+                }
             }
-            if let Some(title) = c.title.as_ref().filter(|t| t.upper.is_some()) {
-                let picture = title.upper_view().as_picture();
-                let rows = with_line(listed_values(p, c, &t.id, &picture), "upper");
-                clips.extend(rows.into_iter().filter(|r| r["param"] != "opacity"));
+            if let Some(picture) = &c.picture {
+                let own = |v: PictureValue| c.title.is_none() || !Title::owns(v);
+                clips.extend(listed_values(p, c, &t.id, picture, own));
             }
         }
     }
@@ -716,7 +718,7 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
             if ids.is_none_or(|ids| ids.contains(&q.id))
                 && let Some(picture) = &q.picture
             {
-                clips.extend(listed_values(p, &q.as_clip(), &t.id, picture));
+                clips.extend(listed_values(p, &q.as_clip(), &t.id, picture, |_| true));
             }
         }
     }
@@ -729,7 +731,7 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
 }
 
 fn with_line(mut rows: Vec<Value>, line: &str) -> Vec<Value> {
-    for row in rows.iter_mut().filter(|r| r["param"] != "opacity") {
+    for row in &mut rows {
         row["param"] = json!(format!("{line}_{}", row["param"].as_str().unwrap_or("")));
     }
     rows
@@ -755,10 +757,16 @@ fn of_line(c: &Clip, line: Option<LowerThirdLine>) -> Clip {
     c
 }
 
-fn listed_values(p: &Project, c: &Clip, track: &str, picture: &Picture) -> Vec<Value> {
+fn listed_values(
+    p: &Project,
+    c: &Clip,
+    track: &str,
+    picture: &Picture,
+    shown: impl Fn(PictureValue) -> bool,
+) -> Vec<Value> {
     PictureValue::ALL
         .into_iter()
-        .filter(|v| picture.has_keys(*v))
+        .filter(|v| shown(*v) && picture.has_keys(*v))
         .map(|v| {
             json!({
                 "clip": c.id,
@@ -791,8 +799,8 @@ fn picture_only(p: &Project, ids: &[String], param: KeyParam) -> Result<()> {
 fn keys_of(c: &Clip, param: KeyParam) -> &[Keyframe] {
     match (param, picture_param(param), &c.title) {
         (KeyParam::Speed, _, _) => &[],
-        (_, Some(v), Some(t)) => t.keys_of(v),
-        (_, Some(v), None) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
+        (_, Some(v), Some(t)) if Title::owns(v) => t.keys_of(v),
+        (_, Some(v), _) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
         (_, None, _) => Number::of(param).keys(c),
     }
 }
@@ -896,7 +904,7 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
     for (param, frames) in picks {
         let (plain, line) = param.on_line();
         let c = &of_line(whole, line);
-        let held = held_picture(c);
+        let held = picture_param(plain).and_then(|v| picture_of(c, v));
         let keys = keys_of(c, plain);
         for (i, k) in keys
             .iter()
@@ -1057,14 +1065,14 @@ fn numbers(v: PictureValue, value: KeyValue) -> Result<[f64; 2]> {
 }
 
 fn holds(c: &Clip) -> bool {
-    super::picture::has_picture(c) || c.title.is_some()
+    super::picture::has_picture(c)
 }
 
-fn held_picture(c: &Clip) -> Option<Picture> {
-    c.title
-        .as_ref()
-        .map(crate::model::Title::as_picture)
-        .or_else(|| c.picture.clone())
+fn picture_of(c: &Clip, v: PictureValue) -> Option<Picture> {
+    match &c.title {
+        Some(t) if Title::owns(v) => Some(t.as_picture()),
+        _ => c.picture.clone(),
+    }
 }
 
 fn owned_picture(p: &Project, id: &str, v: PictureValue) -> Result<(Picture, Clip)> {
@@ -1078,7 +1086,7 @@ fn owned_picture(p: &Project, id: &str, v: PictureValue) -> Result<(Picture, Cli
     }
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
-    if let Some(t) = &c.title {
+    if let Some(t) = c.title.as_ref().filter(|_| Title::owns(v)) {
         if !t.takes_keys(v) {
             return Err(Error::invalid(format!(
                 "{id} ({}) has no {} keyframes",
@@ -1117,7 +1125,7 @@ fn ease_path(p: &mut Project, id: &str, frames: impl IntoIterator<Item = i64>, e
     }
 }
 
-fn save(p: &mut Project, id: &str, picture: &Picture) -> Result<()> {
+fn save(p: &mut Project, id: &str, v: PictureValue, picture: &Picture) -> Result<()> {
     if let Some((ti, ci)) = p.find_cue(id) {
         super::subtitles::unlocked(p, ti)?;
         p.subtitles[ti].cues[ci].picture = super::picture::checked(picture)?;
@@ -1125,7 +1133,7 @@ fn save(p: &mut Project, id: &str, picture: &Picture) -> Result<()> {
     }
     let (ti, ci) = locate(p, id)?;
     let c = &mut p.tracks[ti].clips[ci];
-    let Some(mut t) = c.title.clone() else {
+    let Some(mut t) = c.title.clone().filter(|_| Title::owns(v)) else {
         c.picture = super::picture::checked(picture)?;
         return Ok(());
     };
@@ -1181,7 +1189,7 @@ fn add_picture(
         if let Some(e) = ease.filter(|_| !path) {
             picture.mark_ease(v, frame, e);
         }
-        save(p, id, &picture)?;
+        save(p, id, v, &picture)?;
         if let Some(e) = ease.filter(|_| path) {
             ease_path(p, id, [frame], e);
         }
@@ -1255,7 +1263,7 @@ fn set_picture(
                 picture.set_handle(v, *frame, false, h);
             }
         }
-        save(p, id, &picture)?;
+        save(p, id, v, &picture)?;
         if let Some(e) = change.ease.filter(|_| path) {
             ease_path(p, id, chosen, e);
         }
@@ -1315,7 +1323,7 @@ fn shift_picture(
         {
             t.move_handles(|f| if chosen.contains(&f) { moved(f) } else { f });
         }
-        save(p, id, &picture)?;
+        save(p, id, v, &picture)?;
     }
     Ok(())
 }
@@ -1331,7 +1339,7 @@ fn remove_picture(p: &mut Project, ids: &[String], v: PictureValue, pick: &Pick)
         }
         let chosen = picked_name(&c, picture.keys_of(v), pick, v)?;
         picture.drop_chosen(v, &chosen);
-        save(p, id, &picture)?;
+        save(p, id, v, &picture)?;
     }
     Ok(())
 }

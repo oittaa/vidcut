@@ -21,6 +21,11 @@ pub fn add(p: &mut Project, ids: &[String], kind: EffectType) -> Result<Value> {
                 "{id} is a generator, which takes no effects"
             )));
         }
+        if p.tracks[ti].clips[ci].title.is_some() {
+            return Err(Error::invalid(format!(
+                "{id} is a title, which takes no effects"
+            )));
+        }
         let picture = p.tracks[ti].clips[ci]
             .picture
             .get_or_insert_with(Default::default);

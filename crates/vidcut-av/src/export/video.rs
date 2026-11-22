@@ -11,7 +11,7 @@ use vidcut_core::model::{
     AlphaMode, ColorSpace, Grade, Hdr, Retime, SubtitleStyle, Upscale, Upscaler,
 };
 use vidcut_core::place::Placing;
-use vidcut_core::render::{Image, Placed, Shape, Smooth, VideoPiece, WHOLE};
+use vidcut_core::render::{Generated, Image, Placed, Shape, ShownTitle, Smooth, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -114,6 +114,8 @@ impl Drawings {
 type Drawn = Lru<Option<i64>, Drawings, 2>;
 
 const GENERATED_KEPT: usize = 2;
+
+const TITLES_KEPT: usize = 2;
 
 enum Fed {
     Rgb(frame::Video),
@@ -1885,7 +1887,7 @@ pub struct VideoFrames {
     out: (format::Pixel, Option<Hdr>),
     timeline: Option<Hdr>,
     drawn_in: Option<Hdr>,
-    titles: crate::player::Titles,
+    titled: Lru<crate::player::titles::Placing, frame::Video, TITLES_KEPT>,
     subtitles: crate::player::Subtitles,
     timeline_height: u32,
     drawer: Option<Drawer>,
@@ -2229,7 +2231,7 @@ impl VideoFrames {
             out: (pixel, target),
             timeline: None,
             drawn_in: None,
-            titles: Default::default(),
+            titled: Lru::new(),
             subtitles: Default::default(),
             timeline_height: height,
             drawer: None,
@@ -2511,16 +2513,10 @@ impl VideoFrames {
             let now = g.at((self.graded_from + j) as f64);
             drawer.screen.set_timeline_grade(Some(&now));
         }
-        let at = piece
-            .as_ref()
-            .map(|p| crate::player::titles_of(p, k))
-            .unwrap_or_default();
         let timeline = self.timeline_height;
-        self.titles.hold_at(&at, (w, h), timeline);
-        let (mut titles, _) = self.titles.shown_at(&at, (w, h), timeline, &[]);
         let fps = self.fps.as_f64();
         self.subtitles.hold_at(fps, (w, h), timeline, j);
-        titles.extend(self.subtitles.shown_at(fps, (w, h), timeline, j).0);
+        let titles = self.subtitles.shown_at(fps, (w, h), timeline, j).0;
         let placed = piece
             .as_ref()
             .filter(|_| !self.colors)
@@ -2655,8 +2651,14 @@ impl VideoFrames {
                 else {
                     if take == Take::Picture {
                         let (frame, how) = match layer {
+                            VideoPiece::Generated {
+                                picture: Generated::Title(t),
+                                ..
+                            } => (self.title_frame(&t.after(k))?, Made::Generated),
                             VideoPiece::Generated { picture, .. } => {
-                                let pattern = picture.at(k);
+                                let pattern = picture
+                                    .at(k)
+                                    .ok_or_else(|| Error::Invalid("no pattern".into()))?;
                                 let how = match pattern {
                                     Pattern::SolidColor(color) => Made::Solid(color),
                                     _ => Made::Generated,
@@ -2692,7 +2694,11 @@ impl VideoFrames {
                                 cached: None,
                             }),
                             alpha_mode: match layer {
-                                VideoPiece::Flat { .. } => AlphaMode::Premultiplied,
+                                VideoPiece::Flat { .. }
+                                | VideoPiece::Generated {
+                                    picture: Generated::Title(_),
+                                    ..
+                                } => AlphaMode::Premultiplied,
                                 _ => AlphaMode::Straight,
                             },
                             alpha_use: AlphaUse::Shown,
@@ -2890,6 +2896,19 @@ impl VideoFrames {
                 frame_ref(self.generated.get(&pattern).expect("just set"))?
             }
         };
+        self.black_metadata(&mut out)?;
+        Ok(out)
+    }
+
+    fn title_frame(&mut self, shown: &ShownTitle) -> Result<frame::Video> {
+        let (w, h, _) = self.maker.out();
+        let placing =
+            crate::player::titles::placing(shown, (w, h), self.timeline_height, self.drawn_in);
+        if !self.titled.contains(&placing) {
+            let made = crate::player::titles::frame(&placing);
+            self.titled.insert(placing.clone(), made);
+        }
+        let mut out = frame_ref(self.titled.get(&placing).expect("just set"))?;
         self.black_metadata(&mut out)?;
         Ok(out)
     }
@@ -3663,7 +3682,7 @@ impl VideoFrames {
         let k = (self.k - 1).max(0);
         match layer {
             VideoPiece::Source { .. } => self.reading.get(i).copied().flatten().map(Side::File),
-            VideoPiece::Generated { picture, .. } => Some(Side::Made(picture.at(k))),
+            VideoPiece::Generated { picture, .. } => picture.at(k).map(Side::Made),
             VideoPiece::Flat { pieces, .. } => {
                 let mut hash = std::hash::DefaultHasher::new();
                 format!("{pieces:?}").hash(&mut hash);

@@ -1,7 +1,7 @@
 use std::sync::{Arc, OnceLock};
 
 use vidcut_core::model::Retime;
-use vidcut_core::render::{Image, Placed, RenderPlan, Run, ShownTitle, VideoPiece};
+use vidcut_core::render::{Generated, Image, Placed, RenderPlan, Run, VideoPiece};
 use vidcut_core::time::Rational;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -199,15 +199,6 @@ impl Plan {
         }
     }
 
-    pub(crate) fn titles_at(&self, t: i64) -> Vec<(usize, ShownTitle)> {
-        let (i, k) = self.locate(t);
-        self.plan
-            .video
-            .get(i)
-            .map(|p| titles_of(p, k))
-            .unwrap_or_default()
-    }
-
     pub(crate) fn placed_at(
         &self,
         t: i64,
@@ -376,6 +367,14 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
         VideoPiece::Adjustment { .. } => {
             format!("adjustment|{}x{}", plan.width, plan.height).into()
         }
+        VideoPiece::Generated {
+            picture: Generated::Title(t),
+            ..
+        } if !t.title.is_keyed() && !t.title.moves() => format!(
+            "title|{}x{}|{:?}|{:?}",
+            plan.width, plan.height, plan.colors, t.title
+        )
+        .into(),
         VideoPiece::Generated { picture, .. } => format!(
             "generated|{}x{}|{:?}|{picture:?}",
             plan.width, plan.height, plan.colors
@@ -386,9 +385,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             plan.width, plan.height, plan.colors
         )
         .into(),
-        VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => {
-            format!("black|{}x{}", plan.width, plan.height).into()
-        }
+        VideoPiece::Mix { .. } => format!("black|{}x{}", plan.width, plan.height).into(),
     }
 }
 
@@ -427,14 +424,6 @@ pub(crate) fn frame_of(fps: Rational, sample: i64, rate: u32) -> i64 {
         frame += 1;
     }
     frame
-}
-
-pub(crate) fn titles_of(piece: &VideoPiece, k: i64) -> Vec<(usize, ShownTitle)> {
-    piece
-        .titles()
-        .into_iter()
-        .map(|(n, s)| (n, s.after(k).sampled()))
-        .collect()
 }
 
 pub(crate) fn placed_of(

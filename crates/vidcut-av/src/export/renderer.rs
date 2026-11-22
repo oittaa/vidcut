@@ -139,7 +139,7 @@ pub(crate) fn window(
 pub(crate) fn at(piece: &VideoPiece, pos: i64, frames: i64) -> VideoPiece {
     let mut p = piece.clone();
     match &mut p {
-        VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => return piece.part(0, frames),
+        VideoPiece::Mix { .. } => return piece.part(0, frames),
         VideoPiece::Source {
             source_frame,
             frames: n,

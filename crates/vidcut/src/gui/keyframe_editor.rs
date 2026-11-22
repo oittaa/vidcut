@@ -1234,6 +1234,9 @@ fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
             if v == PictureValue::Anchor && is_cue(clip) {
                 continue;
             }
+            if clip.title.is_some() && Title::owns(v) {
+                continue;
+            }
             if !keyed_only || picture.has_keys(v) {
                 out.push(lane_from(&picture, v));
             }
@@ -1263,8 +1266,7 @@ fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
         for (view, line) in lines {
             let picture = view.as_picture();
             for v in PictureValue::ALL {
-                let whole = v == PictureValue::Opacity && line == Some(LowerThirdLine::Upper);
-                if !whole && view.takes_keys(v) && (!keyed_only || picture.has_keys(v)) {
+                if view.takes_keys(v) && (!keyed_only || picture.has_keys(v)) {
                     let mut lane = lane_from(&picture, v);
                     if v == PictureValue::Zoom {
                         lane.extra.clear();

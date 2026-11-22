@@ -37,7 +37,7 @@ flowchart TD
 ## The plan
 
 - `render::flatten_lanes` makes the `RenderPlan` of the timeline: video pieces, audio lanes, and a `LaneTrack` for each lane.
-  - A dissolve or a placed picture is a `VideoPiece::Mix`. A title is a `VideoPiece::Titled`. An adjustment clip is a `VideoPiece::Adjustment` whose `Placed` holds `Placed::adjustment`.
+  - A dissolve or a placed picture is a `VideoPiece::Mix`. A title is a `VideoPiece::Generated` that holds a `Generated::Title`. An adjustment clip is a `VideoPiece::Adjustment` whose `Placed` holds `Placed::adjustment`.
   - A dip to color is one clip at a time and a `Generated::SolidColor` of its color. They add up in a `place::Mix`, as the two sides of a dissolve do.
   - A Push or a Slide is one `place::Mix` that holds a `place::Mix` for each side: the outgoing side, then the incoming side. The `render::Move` holds the way, the values and the keys of the progress (`transitions::course_played`).
     - At a gap, the missing side has no layer.
@@ -177,33 +177,28 @@ flowchart TD
 
 **Titles and subtitles**
 
-- Titles and subtitles are not in the kept pictures. Thus an edit of a title or a cue keeps the frames decoded.
-- `player::titles` draws each `TitleBlock` of each title of the plan at the size of the plan, with `burn::title_blocks`, on the decoding thread. Then it wakes the viewer.
-  - It draws before it keeps a frame under the title, for the prepared frame, and for the frame at the playhead.
+- A title is a layer of the kept picture of its frame, as a generator is ([export](export.md#titles)). `VideoFrames::title_frame` makes it on the decoding thread.
+  - A title with no keyframes and no scroll has one key for all of its frames (`source_key`). Thus it does not change the `Id` of a frame.
+  - An edit of a title gives its frames a new `Id`. Thus the player makes them again.
+- Subtitles are not in the kept pictures. Thus an edit of a cue keeps the frames decoded.
+- `player::titles` draws each `TitleBlock` of a title at the size of the plan, with `burn::title_blocks`.
   - One store keeps the drawings for all engines and exports (`Store::keep_titles`, a `ByBytes`).
   - The drawings take at most a part of the memory budget (`TITLES_PART`). Past that part, the least recently used drawings go.
   - When the budget falls, for example for an AI upscaler, the drawings go at once. A frame that needs one draws it again. The render cache does not hold them.
-  - Each engine and export holds the drawings of its frame (`HeldTitles`). The frame at the playhead and the frame of an export keep them over the budget.
-  - Why: with no hold, a small budget makes the engine draw them again without end, and an export can lose a title.
-  - Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
-  - A title whose box goes past the picture's edge keeps its place in the drawing, because that edge cuts the box before it turns (`Title::shape_past_edge`).
-  - A lower third with a level under 1 is one drawing of all its blocks (`burn::title`), with their places. Thus text over the box does not show the box. A new place of a line draws it again.
+  - A drawing holds the place, zoom and rotation of the text. Thus a title with keyframes is drawn again on each frame.
+  - All blocks of a title go into one picture before its opacity. Thus text at half opacity over the box does not show the box.
   - `burn` draws the letters of a Text title or a lower third one at a time on a `Canvas`. The exact place comes from `Title::seated_left` ([spec D65](../spec.md)).
-  - A drawing's top is on a whole pixel. A moved block goes by whole pixels between the rounded middles. Thus it lands on the same row as a new drawing at that place.
-- `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
-- `Player::present` hands each block of a title of a frame as a `TitleOver`:
-  - the picture, in premultiplied RGBA, and how many layers go under it. A picture larger than the largest texture of the GPU goes in parts (`LetterTile`), for example a long scroll.
-    - The picture is 8-bit. With its `float` field set, it is in 32-bit floats (`TitlePicture`, [export](export.md#titles)).
-  - its move from how it was drawn: its place, zoom and rotation, or the `Run::top` of a scroll. The viewer's shader does the transform.
-  - For a turned title, the shader first cuts the picture at the edges of the frame (`Lettering`).
-  - its level, from a fade or its opacity (`Lettering`)
-  - the pictures of the compound clips around it (`ShownTitle::placed`)
-- Titles with the same drawing share one `TitlePicture`. The screen keeps one `Letters` for each use (`TitleOver::nth`), because each use has its own place and level.
-- Until a title is drawn, the newest drawing of its clip shows, moved to its place. Thus a drag, a new color or new text does not blink. The frame is not exact until then.
+  - A drawing's top is on a whole pixel. A scroll moves by whole pixels.
+- The live core puts a title that the user changes into the plan of the timeline (`Msg::PreviewTitle`). Thus the viewer shows it as an export does.
+- Each engine and export holds the drawings of the subtitles of its frame (`HeldTitles`). The frame at the playhead and the frame of an export keep them over the budget.
+  - Why: with no hold, a small budget makes the engine draw them again without end, and an export can lose a subtitle.
+- `Player::present` hands each subtitle picture of a frame as a `TitleOver`, over all layers (`TitleOver::SUBTITLES`).
+  - The picture is in premultiplied RGBA. A picture larger than the largest texture of the GPU goes in parts (`LetterTile`).
+  - The picture is 8-bit. With its `float` field set, it is in 32-bit floats (`TitlePicture`, [export](export.md#titles)).
 - `Player::set_subtitles` takes the shown track (`SubtitleView`), each cue with its color set (`Speakers::color_of`).
-- `player::subtitles` draws what shows at a frame with `burn::draw`, at the times when titles draw. It keeps the drawings by what they show (`subtitles::shown`), in the store of the titles.
-- `Player::present` hands the subtitles with the titles, above each layer. A subtitle that is not drawn yet shows the newest drawing.
-- A cue with a `picture` is drawn alone, because the shader places it apart from the other cues. Its `TitleOver` holds one `Placed`, and the shader does the transform as for a title in a compound clip. Thus a keyframe does not draw it again.
+- `player::subtitles` draws what shows at a frame with `burn::draw`, on the decoding thread. It keeps the drawings by what they show (`subtitles::shown`), in the store of the titles.
+- A subtitle that is not drawn yet shows the newest drawing.
+- A cue with a `picture` is drawn alone, because the shader places it apart from the other cues. Its `TitleOver` holds one `Placed`, and the shader does the transform (`place::lettered`). Thus a keyframe does not draw it again.
 
 ## The clock
 
@@ -237,7 +232,7 @@ flowchart TD
 - `Shared::clock_frame` chains `Heard::counter_at`, `Markers::sample_at` and the plan into the frame heard at this moment.
 - Until the sound of a play request is heard, the clock stands at its start. When the ring runs dry, the clock stops.
 - `Player::present` returns the kept picture of that frame. Until it is decoded, it returns the newest picture that a seek landed on, or the last picture shown.
-  - That result is not exact. Its placement, titles and subtitles are still those of this frame.
+  - That result is not exact. Its placement and subtitles are still those of this frame.
 - `Player::next_change` tells when the next frame is due.
 - Without a device, the silent `PacedOutput` pulls the ring in real time. Thus the clock runs.
 
@@ -263,9 +258,9 @@ The audio device:
 - Each turn calls `Player::present`, then `Screen::draw` into an RGBA target the size of the viewer's picture in physical pixels.
 - With an SDR timeline and one layer, one render pass of `crates/vidcut-av/src/screen/picture.wgsl` draws it all.
 - With an HDR timeline, the passes draw into a picture of 32-bit floats (`Wide`), in the PQ or HLG code values of the timeline.
-  - Each layer, title and subtitle goes to linear light, to BT.2020, and to the curve of the timeline.
+  - Each layer and subtitle goes to linear light, to BT.2020, and to the curve of the timeline.
   - Then `fs_screen` converts that picture to the target: BT.709, tone-mapped.
-  - Thus the layers, titles and subtitles mix in the code values of the timeline.
+  - Thus the layers and subtitles mix in the code values of the timeline.
 - With an SDR timeline and more than one layer or a composite mode, the passes also draw into `Wide`, in SDR code values. Thus a color above 1 or below 0 stays between the layers and in the composite modes. `fs_screen` then clips each value.
 - An export, a proxy and a thumbnail draw with the same `Screen`, always into `Wide` (`Screen::for_export`). They write the planes of the output from there ([export](export.md#timeline-colors)).
 - The drawing:
@@ -301,8 +296,7 @@ The audio device:
   - Contiguous mask layers directly below a Foreground layer pair (`mask_run`). `fs_matte_first` and `fs_matte_more` build `mattes`, and `fs_matte_fg` composites the Foreground layer. Unpaired matte layers draw as Normal.
   - A compound clip mixes its tracks first, in a picture of its own ([export](export.md#placed-pictures)).
   - The two sides of a transition add into a picture of their own (`place::Mix`). Thus a mix below 0 is not clipped before it goes over.
-  - A title on a side of a transition adds in the same way (`lettering_adding`).
-  - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
+  - The subtitles are one more draw after the layers (`fs_title`). The `Lettering` of a placed cue holds one affine map back to the drawing (`place::lettered`, `Placing::inner`).
   - The two sides of a wipe, a Push or a Slide draw into two pictures of their own (`Moves`), each over transparent.
     - `fs_motion` then lays them over the canvas, premultiplied. `Moving::shift` gives where each side is, in pixels of the frame.
     - For a wipe, `Moving::shift` gives the way of the edge and the middle of its band along that way (`Shift::wipe`).
@@ -317,7 +311,7 @@ The audio device:
     - The motion blur is a box along the move, with one tap for each pixel of its length, up to 512. Taps past the frame repeat its edge pixels.
     - A Push blurs the whole result. A Slide mixes the blur in by the part of the box that the moving side covers.
     - Why: these rules give Resolve's renders within about 1 pixel ([gotchas](../gotchas.md#resolves-otio-files)).
-  - With an output LUT, the draw also uses `Wide`, and `fs_lut` runs on the whole canvas after the last layer and title (`Screen::set_output_lut`, `Shown`).
+  - With an output LUT, the draw also uses `Wide`, and `fs_lut` runs on the whole canvas after the last layer and the subtitles (`Screen::set_output_lut`, `Shown`).
     - `Plan::output_lut` loads the file when a plan first needs it.
     - A gap goes through the output LUT. Before the first picture, the viewer draws no LUT.
   - With a timeline grade, the draw also uses `Wide`. The grade runs on the whole canvas before the subtitles and `fs_lut` (`Screen::set_timeline_grade`, [export](export.md#the-grade)).
@@ -441,8 +435,6 @@ What it renders:
 - A clip set to `ClipCache::Off` gives no `Reason::Media` and no `Reason::Upscale`. Its other reasons stay (spec D98).
 - An `Effect` with `render_cache` on gives `Reason::Effect`. An effect that is off gives none.
   - A layer takes it only from its own picture (`checked_on_own`). The effects of a compound clip can work on its mix, at the draw.
-  - A `Placed` around a title under another track gives it. The cache file holds that title.
-  - A `Placed` around a title on top of all tracks gives none. The cache file does not hold that title.
 - Each `VideoPiece::Source`, `VideoPiece::Generated` and `VideoPiece::Adjustment` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
   - In User mode, an excluded piece gives no `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime`, `Reason::Transition`, `Reason::Opacity` or `Reason::Composite`.
 - Slow media (`Reason::Media`) are of two kinds:
