@@ -2498,6 +2498,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             }
             let (mut effects, speed) = effects::read(item);
             let reference = media_reference_of(item);
+            let adjustment = generators::is_adjustment(item, reference);
             let block =
                 stack || plain.is_some() || schema(reference).starts_with("GeneratorReference");
             let mut speed = speed_of(speed, item, fps, !block || stack, &mut notes);
@@ -2513,6 +2514,13 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if stack {
                     c.compound = Some(compound_of(item, fps));
                     c.picture = our_picture(item);
+                } else if adjustment {
+                    c.adjustment = true;
+                    c.picture = our_picture(item);
+                    c.speed = None;
+                    if c.name == crate::model::Clip::ADJUSTMENT_CLIP {
+                        c.name.clear();
+                    }
                 } else if plain.is_some() {
                     c.generator = plain;
                 } else if let Some(mut t) =
@@ -2533,15 +2541,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         c.title_from = Some(reference.clone());
                     }
                     c.title = Some(t);
-                } else if reference["generator_kind"].as_str()
-                    == Some(crate::model::Clip::ADJUSTMENT_CLIP)
-                {
-                    c.adjustment = true;
-                    c.picture = our_picture(item);
-                    c.speed = None;
-                    if c.name == crate::model::Clip::ADJUSTMENT_CLIP {
-                        c.name.clear();
-                    }
                 } else {
                     if generators::read(reference, 0).is_some() {
                         c.picture = our_picture(item);

@@ -4289,19 +4289,7 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
         .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
         .clone();
     let mut alone = p.clone();
-    let owner = c
-        .adjustment
-        .then(|| {
-            alone
-                .tracks
-                .iter()
-                .position(|t| t.clips.iter().any(|x| x.id == c.id))
-        })
-        .flatten();
-    for (ti, t) in alone.tracks.iter_mut().enumerate() {
-        if owner.is_some_and(|at| ti < at && t.kind == TrackKind::Video) {
-            continue;
-        }
+    for t in &mut alone.tracks {
         t.clips.retain(|x| x.id == c.id);
         t.transitions.clear();
         for x in &mut t.clips {
@@ -4316,7 +4304,6 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     plan.name = c
         .name
         .clone()
-        .or_else(|| c.adjustment.then(|| Clip::ADJUSTMENT_CLIP.to_string()))
         .or_else(|| p.media(&c.media).map(|m| stem(&m.name)))
         .unwrap_or_else(|| c.id.clone());
     Ok(plan)
@@ -5603,7 +5590,7 @@ mod tests {
     }
 
     #[test]
-    fn composition_alone_and_flatten_clip_keep_below_for_adjustment() {
+    fn composition_alone_keeps_below_for_adjustment() {
         let mut f = fixture();
         f.append("m1", 0, 100);
         req(
@@ -5615,10 +5602,5 @@ mod tests {
         let alone = composition_alone(f.editor.project(), &id).unwrap();
         assert_eq!(alone.range, (20, 50));
         assert_eq!(shown(&alone), vec!["adjustment+30 over m1@20+30"]);
-
-        let per = flatten_clip(f.editor.project(), &id).unwrap();
-        assert_eq!(per.name, "Adjustment Clip");
-        assert_eq!(per.range, (20, 50));
-        assert_eq!(shown(&per), vec!["adjustment+30 over m1@20+30"]);
     }
 }

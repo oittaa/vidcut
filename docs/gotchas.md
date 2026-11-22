@@ -605,6 +605,11 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - The tracks below do not move, and the motion blur does not blur them.
   - The mode of the outgoing clip applies to the two moved pictures. The mode of the incoming clip has no effect during the transition.
   - Measured with a gray clip in Add mode over a picture that codes the position of each pixel, with and without motion blur.
+- **Resolve does not read back its own OTIO file of an adjustment clip** (measured in Resolve Studio 21.2).
+  - Its export has a `MissingReference.1` and an effect of `Type` 74 ([spec §8.24](spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)).
+  - Its import makes an offline clip of that, with the Inspector title "Adjustment Clip".
+  - It reads a `GeneratorReference.1` with `generator_kind` "Adjustment Clip" as an adjustment clip that works.
+  - Thus `otio::generators::adjustment_reference` writes that form, and `otio::generators::is_adjustment` reads both.
 - **Resolve writes a Smooth Cut as a `Custom_Transition` with the effect `Morph Dissolve`.**
   - Its name and `Transition Type` are `Smooth Cut`. The `Type` of the effect is 39.
   - `smooth cut mode` (`UInt`) is the Mode: 0 Faster, 1 Better. Better is the default.

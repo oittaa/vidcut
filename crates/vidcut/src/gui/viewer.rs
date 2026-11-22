@@ -658,7 +658,7 @@ impl Workspace {
             let texture = piece
                 .and_then(|piece| players.show(i, p, &piece, speed))
                 .zip(self.screens.as_mut())
-                .and_then(|(g, s)| s.draw(i, &g.picture, pixels));
+                .and_then(|(g, s)| s.draw(i, (&g.picture, &[]), pixels));
             if let Some(texture) = texture {
                 painter.image(
                     texture,
@@ -935,7 +935,7 @@ impl Workspace {
                 let texture = got
                     .as_ref()
                     .zip(self.screens.as_mut())
-                    .and_then(|(g, s)| s.draw(i, &g.picture, size));
+                    .and_then(|(g, s)| s.draw(i, (&g.picture, &[]), size));
                 if let Some(texture) = texture {
                     painter.image(
                         texture,

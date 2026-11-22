@@ -6,7 +6,7 @@ use eframe::egui_wgpu::RenderState;
 use eframe::wgpu;
 use vidcut_av::player::{Config, ManualOutput, Picture, Player, Shown};
 use vidcut_core::model::Project;
-use vidcut_core::render::{RenderPlan, VideoPiece};
+use vidcut_core::render::{Placed, RenderPlan, VideoPiece};
 
 use vidcut_av::screen::{Drawn, Gpu, Screen};
 
@@ -219,7 +219,7 @@ impl Screens {
     pub fn draw(
         &mut self,
         i: usize,
-        picture: &Arc<Picture>,
+        (picture, placed): (&Arc<Picture>, &[Vec<Placed>]),
         size: [u32; 2],
     ) -> Option<egui::TextureId> {
         if self.screens.len() <= i {
@@ -230,7 +230,7 @@ impl Screens {
             &self.gpu,
             Some(picture),
             &[],
-            (&[], &[], None),
+            (placed, &[], None),
             size[0],
             size[1],
         );

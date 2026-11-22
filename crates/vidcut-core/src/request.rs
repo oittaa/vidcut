@@ -2846,12 +2846,12 @@ pub enum Request {
         at: Option<TimeSpec>,
     },
     /// Change one node of the grade of clips: footage, stills, image
-    /// sequences and compound clips. The grade works after their effects
-    /// and before their composite mode and opacity. With `timeline` in place
-    /// of `clips`, change the timeline grade. It works on the picture of all
-    /// tracks after they mix, before the subtitles. Each value given
-    /// replaces its own. The values of the Primaries palette go to a
-    /// corrector, and `mode` and `mixer` go to a mixer.
+    /// sequences, compound clips and adjustment clips. The grade works after
+    /// their effects and before their composite mode and opacity. With
+    /// `timeline` in place of `clips`, change the timeline grade. It works on
+    /// the picture of all tracks after they mix, before the subtitles. Each
+    /// value given replaces its own. The values of the Primaries palette go
+    /// to a corrector, and `mode` and `mixer` go to a mixer.
     ///
     /// On a corrector or a key mixer with keyframes, the values go to the
     /// keyframe at `at`, or the last one before it. Before the first
@@ -3329,10 +3329,10 @@ pub enum Request {
         window: usize,
     },
     /// Add an effect at its usual values after the effects of clips:
-    /// footage, stills, image sequences and compound clips. A generator takes
-    /// no effects. The effects work in their order, on the picture as its
-    /// transform and its crop put it in the frame, before its composite mode
-    /// and its opacity.
+    /// footage, stills, image sequences, compound clips and adjustment clips.
+    /// A generator takes no effects. The effects work in their order, on the
+    /// picture as its transform and its crop put it in the frame, before its
+    /// composite mode and its opacity.
     /// Returns each clip with the place of its new effect, counted from 0.
     #[serde(rename = "effects.add")]
     EffectsAdd {

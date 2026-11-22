@@ -3606,7 +3606,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 ### 8.24 Adjustment clips (pp. 1145, 1154, 3375–3376; measured in Resolve Studio 21.2)
 
 - **Library and length** (measured in Resolve Studio 21.2):
-  - The Effects section under Effects > Video holds Adjustment Clip on both the Cut page and the Edit page.
+  - On the Cut page, it is in the Effects section of Effects > Video.
+  - On the Edit page, it is in Effects > Toolbox > Effects.
   - Its default length is 5 seconds (`120` frames at 24 fps, `150` frames at 30 fps).
   - Double-clicking it on the Cut page Smart Inserts it on V1 at the edit point nearest the playhead. It moves later clips right and moves the playhead to its end.
   - Double-clicking it on the Edit page inserts it at the playhead on V1 and splits any clip there.
@@ -3636,7 +3637,13 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Resolve has a fault when a Cross Dissolve leads from a gap into a zoomed-out adjustment clip ([Resolve's renders](gotchas.md#resolves-renders)). vidcut blends smoothly across every frame.
   - An adjustment clip inside a compound clip still reads what lies below that compound clip when placed on an upper track.
 - **OpenTimelineIO interchange** (measured in Resolve Studio 21.2):
-  - Resolve exports an adjustment clip as a `Clip.2` with a `GeneratorReference.1` (`generator_kind: "Adjustment Clip"` and `Resolve_OTIO."Generator Type": "Adjustment Clip"`).
+  - Resolve exports an adjustment clip as a `Clip.2` with a `MissingReference.1`.
+    - Its first effect is an `Effect.1` with `Resolve_OTIO` `"Type": 74`, `"Effect Name": "Effect"` and no parameters.
+    - Resolve reads this file back as an offline clip ([gotchas](gotchas.md#resolves-otio-files)).
+  - Resolve reads a `GeneratorReference.1` with `generator_kind` "Adjustment Clip" as an adjustment clip.
+    - It works as an adjustment clip: at Zoom 0.5, the picture below is half size on black.
+    - Its Inspector title is "Generator - Adjustment Clip", and the timeline shows it in the color of a generator.
+  - **vidcut:** it writes the `GeneratorReference.1` form. It reads both forms.
   - Transform, Crop, Composite and Retime/Scaling effects export with the same metadata keys as on a regular video clip.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
