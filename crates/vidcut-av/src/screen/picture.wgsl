@@ -324,7 +324,8 @@ fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
     let gu = length(du);
     let gv = length(dv);
     let edges = vec4<f32>((uv.x - s.x) / gu, (s.z - uv.x) / gu, (uv.y - s.y) / gv, (s.w - uv.y) / gv);
-    let e = clamp(edges + 0.5, vec4<f32>(0.0), vec4<f32>(1.0));
+    let raw = edges + 0.5;
+    let e = clamp(select(raw, vec4<f32>(0.0), raw < vec4<f32>(5e-4)), vec4<f32>(0.0), vec4<f32>(1.0));
     return vec3<f32>(uv, e.x * e.y * e.z * e.w);
 }
 
@@ -343,12 +344,16 @@ fn faded_edge(inner: vec4<f32>, reach: vec4<f32>, uv: vec2<f32>) -> f32 {
 var<private> shown_hit: bool = true;
 
 fn shown_scale() -> f32 {
-    let bare = (p.made.x > 2.5 && p.made.x < 3.5) || (p.made.x > 4.5 && p.made.x < 5.5);
+    let bare = (p.made.x > 2.5 && p.made.x < 3.5) || (p.made.x > 4.5 && p.made.x < 5.5) || p.made.x > 6.5;
     return select(p.levels[4].z * p.placed.y, p.placed.y, bare);
 }
 
 fn sample_shown(px: vec2<f32>) -> vec4<f32> {
     shown_hit = true;
+    if p.made.x > 6.5 {
+        let c = textureLoad(halved, vec2<i32>(px), 0);
+        return vec4<f32>(c.rgb, 1.0);
+    }
     if p.made.x > 2.5 && p.made.x < 3.5 {
         let c = textureLoad(halved, vec2<i32>(px), 0);
         if c.a <= 0.0 {

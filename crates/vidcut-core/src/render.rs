@@ -246,6 +246,14 @@ pub enum VideoPiece {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         excluded: bool,
     },
+    /// An adjustment clip: processes the composited picture strictly below it.
+    Adjustment {
+        frames: i64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        placed: Vec<Placed>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        excluded: bool,
+    },
     /// A compound clip as one picture of the frame size, for a Smooth Cut.
     /// Frame `k` is frame `skip + k` of its `pieces`. Past their end, their
     /// last frame stays.
@@ -506,6 +514,7 @@ impl Smooth {
             moving: None,
             followed: Followed::default(),
             clock: Default::default(),
+            adjustment: false,
         }));
     }
 
@@ -582,6 +591,9 @@ pub struct Placed {
     /// whose file has the rate of the timeline.
     #[serde(default, skip_serializing_if = "FileClock::is_plain")]
     pub clock: FileClock,
+    /// True when this placement belongs to an adjustment clip.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub adjustment: bool,
 }
 
 fn zero_i64(n: &i64) -> bool {
@@ -800,6 +812,7 @@ impl Placed {
             moving: None,
             followed,
             clock: FileClock::default(),
+            adjustment: clip.adjustment,
         }
     }
 
@@ -820,6 +833,7 @@ impl Placed {
             moving: None,
             followed,
             clock: FileClock::default(),
+            adjustment: clip.adjustment,
         }
     }
 
@@ -845,6 +859,7 @@ impl Placed {
             moving: self.moving.clone(),
             followed: self.followed.clone(),
             clock: self.clock.clone(),
+            adjustment: self.adjustment,
         }
     }
 
@@ -1336,6 +1351,7 @@ impl VideoPiece {
             Self::Source { frames, .. }
             | Self::Black { frames, .. }
             | Self::Generated { frames, .. }
+            | Self::Adjustment { frames, .. }
             | Self::Flat { frames, .. } => *frames,
             Self::Mix { under, .. } | Self::Titled { under, .. } => under.frames(),
         }
@@ -1345,6 +1361,7 @@ impl VideoPiece {
         match self {
             Self::Source { placed, .. }
             | Self::Generated { placed, .. }
+            | Self::Adjustment { placed, .. }
             | Self::Flat { placed, .. } => placed,
             _ => &[],
         }
@@ -1534,6 +1551,13 @@ impl VideoPiece {
                 placed: placed.iter().map(|p| p.after(k)).collect(),
                 excluded: *excluded,
             },
+            Self::Adjustment {
+                placed, excluded, ..
+            } => Self::Adjustment {
+                frames,
+                placed: placed.iter().map(|p| p.after(k)).collect(),
+                excluded: *excluded,
+            },
             Self::Flat {
                 pieces,
                 skip,
@@ -1584,6 +1608,22 @@ impl VideoPiece {
             ) => {
                 picture.after(*frames) == *p2
                     && excluded == e2
+                    && placed.len() == l2.len()
+                    && placed.iter().zip(l2).all(|(a, b)| a.after(*frames) == *b)
+            }
+            (
+                Self::Adjustment {
+                    frames,
+                    placed,
+                    excluded,
+                },
+                Self::Adjustment {
+                    placed: l2,
+                    excluded: e2,
+                    ..
+                },
+            ) => {
+                excluded == e2
                     && placed.len() == l2.len()
                     && placed.iter().zip(l2).all(|(a, b)| a.after(*frames) == *b)
             }
@@ -1664,6 +1704,7 @@ impl VideoPiece {
             Self::Source { frames, .. }
             | Self::Black { frames, .. }
             | Self::Generated { frames, .. }
+            | Self::Adjustment { frames, .. }
             | Self::Flat { frames, .. } => *frames += more,
             Self::Mix { under, over } => {
                 under.lengthen(more);
@@ -1994,7 +2035,9 @@ impl VideoPiece {
                 pace,
                 ..
             } => shown_frame(*per_frame, *source_frame as f64 + phase + pace.exact(k)),
-            VideoPiece::Black { .. } | VideoPiece::Generated { .. } => 0,
+            VideoPiece::Black { .. }
+            | VideoPiece::Generated { .. }
+            | VideoPiece::Adjustment { .. } => 0,
             VideoPiece::Flat { pieces, skip, .. } => {
                 let last = pieces.iter().map(VideoPiece::frames).sum::<i64>() - 1;
                 (skip + k).min(last).max(0)
@@ -2011,7 +2054,9 @@ impl VideoPiece {
                 pace,
                 ..
             } => *source_frame as f64 + phase + pace.exact(k),
-            VideoPiece::Black { .. } | VideoPiece::Generated { .. } => 0.0,
+            VideoPiece::Black { .. }
+            | VideoPiece::Generated { .. }
+            | VideoPiece::Adjustment { .. } => 0.0,
             VideoPiece::Flat { .. } => self.position(k) as f64,
             VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.exact(k),
         }
@@ -2313,7 +2358,7 @@ pub const NESTED: usize = 8;
 type Nesting<'a> = (Option<&'a Nest>, &'a [Placed]);
 
 fn visible(t: &Track, c: &Clip) -> bool {
-    t.video_enabled && c.enabled && c.video && (!c.is_block() || c.draws())
+    t.video_enabled && c.enabled && c.video && (!c.is_block() || c.draws() || c.adjustment)
 }
 
 fn titled(t: &Track, c: &Clip) -> bool {
@@ -2408,6 +2453,7 @@ fn crossing(d: &transitions::Playing, inside: bool) -> Option<Placed> {
         moving,
         followed: Followed::default(),
         clock: Default::default(),
+        adjustment: false,
     })
 }
 
@@ -3504,7 +3550,11 @@ fn cuts_of(p: &Project, lanes: &[VideoLane], (a, b): (i64, i64)) -> Vec<i64> {
 }
 
 fn covers(piece: &VideoPiece) -> bool {
-    piece.placed().is_empty() && !matches!(piece, VideoPiece::Flat { .. })
+    piece.placed().is_empty()
+        && !matches!(
+            piece,
+            VideoPiece::Flat { .. } | VideoPiece::Adjustment { .. }
+        )
 }
 
 fn piece_of(stack: Vec<Layer>, frames: i64) -> VideoPiece {
@@ -3544,6 +3594,13 @@ impl VideoPlan<'_> {
     }
 
     fn picture(&self, c: &Clip, (nest, crossed): Nesting, x: i64, y: i64) -> Result<VideoPiece> {
+        if c.adjustment {
+            return Ok(VideoPiece::Adjustment {
+                frames: y - x,
+                placed: placed_of(c, nest, false, crossed, x),
+                excluded: false,
+            });
+        }
         let (pool, s) = (&self.pool, &self.p.flat_settings());
         let fills = self.fills(c);
         let drawn = c.generator.as_ref();
@@ -3616,8 +3673,9 @@ impl<'a> Span<'a> {
 
     fn laid(&self, c: &Clip, nest: Option<&Nest>, crossed: &[Placed]) -> Result<VideoPiece> {
         let mut piece = self.plan.picture(c, (nest, crossed), self.x, self.y)?;
-        if let VideoPiece::Source { excluded: e, .. } | VideoPiece::Generated { excluded: e, .. } =
-            &mut piece
+        if let VideoPiece::Source { excluded: e, .. }
+        | VideoPiece::Generated { excluded: e, .. }
+        | VideoPiece::Adjustment { excluded: e, .. } = &mut piece
         {
             *e = !self.lane.track.render_cache;
         }
@@ -4175,16 +4233,30 @@ fn alone(p: &Project, clip: &str, cut: Option<&str>) -> Result<RenderPlan> {
         alone.settings.fps = v.fps;
     }
     let length = frames.last - frames.first + 1;
-    for t in &mut alone.tracks {
+    let owner = c
+        .adjustment
+        .then(|| {
+            alone
+                .tracks
+                .iter()
+                .position(|t| t.clips.iter().any(|x| x.id == c.id))
+        })
+        .flatten();
+    for (ti, t) in alone.tracks.iter_mut().enumerate() {
+        if owner.is_some_and(|at| ti < at && t.kind == TrackKind::Video) {
+            continue;
+        }
         t.clips.retain(|x| x.id == c.id);
         t.transitions.clear();
         t.video_enabled = true;
         for x in &mut t.clips {
             x.enabled = true;
-            x.start = 0;
-            x.duration = length;
-            x.source_in = frames.zero + frames.first;
-            x.speed = None;
+            if !c.adjustment {
+                x.start = 0;
+                x.duration = length;
+                x.source_in = frames.zero + frames.first;
+                x.speed = None;
+            }
             x.audio = None;
             x.picture = x
                 .picture
@@ -4201,7 +4273,11 @@ fn alone(p: &Project, clip: &str, cut: Option<&str>) -> Result<RenderPlan> {
                 });
         }
     }
-    let mut plan = flatten(&alone, 0, length)?;
+    let (from, to) = match c.adjustment {
+        true => (c.start, c.end()),
+        false => (0, length),
+    };
+    let mut plan = flatten(&alone, from, to)?;
     plan.audio.clear();
     plan.colors = timeline_colors(p);
     Ok(plan)
@@ -4213,7 +4289,19 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
         .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
         .clone();
     let mut alone = p.clone();
-    for t in &mut alone.tracks {
+    let owner = c
+        .adjustment
+        .then(|| {
+            alone
+                .tracks
+                .iter()
+                .position(|t| t.clips.iter().any(|x| x.id == c.id))
+        })
+        .flatten();
+    for (ti, t) in alone.tracks.iter_mut().enumerate() {
+        if owner.is_some_and(|at| ti < at && t.kind == TrackKind::Video) {
+            continue;
+        }
         t.clips.retain(|x| x.id == c.id);
         t.transitions.clear();
         for x in &mut t.clips {
@@ -4228,6 +4316,7 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     plan.name = c
         .name
         .clone()
+        .or_else(|| c.adjustment.then(|| Clip::ADJUSTMENT_CLIP.to_string()))
         .or_else(|| p.media(&c.media).map(|m| stem(&m.name)))
         .unwrap_or_else(|| c.id.clone());
     Ok(plan)
@@ -4245,6 +4334,7 @@ pub fn generator_tape(p: &Project, generator: &Generator, a: i64, b: i64) -> Res
         (0, b),
         None,
         Some(generator.clone()),
+        false,
     );
     alone
         .track_mut(crate::ops::MAIN)
@@ -5154,6 +5244,7 @@ mod tests {
                 } => format!("{media}@{source_frame}+{frames}"),
                 VideoPiece::Black { frames, .. } => format!("black+{frames}"),
                 VideoPiece::Generated { frames, .. } => format!("generated+{frames}"),
+                VideoPiece::Adjustment { frames, .. } => format!("adjustment+{frames}"),
                 VideoPiece::Flat { frames, .. } => format!("flat+{frames}"),
                 VideoPiece::Mix { under, over } => {
                     let over: Vec<String> = over
@@ -5341,6 +5432,7 @@ mod tests {
                 } => (format!("{media}@{source_frame}"), *frames),
                 VideoPiece::Black { frames, .. } => ("black".into(), *frames),
                 VideoPiece::Generated { frames, .. } => ("generated".into(), *frames),
+                VideoPiece::Adjustment { frames, .. } => ("adjustment".into(), *frames),
                 VideoPiece::Flat { frames, .. } => ("flat".into(), *frames),
                 VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => ("mix".into(), v.frames()),
             })
@@ -5469,5 +5561,64 @@ mod tests {
         assert!(plan.video.iter().any(|v| {
             matches!(v, VideoPiece::Mix { over, .. } if over.iter().any(|o| o.smooth.is_some()))
         }));
+    }
+
+    #[test]
+    fn flatten_layers_adjustment_over_video_and_gap_and_skips_disabled() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        req(
+            &mut f,
+            "adjustment.add",
+            json!({"at": "25f", "duration": "50f", "track": "V2"}),
+        );
+        req(
+            &mut f,
+            "adjustment.add",
+            json!({"at": "25f", "duration": "25f", "track": "V3"}),
+        );
+        let plan = flatten(f.editor.project(), 0, 75).unwrap();
+        assert_eq!(
+            shown(&plan),
+            vec![
+                "m1@0+25",
+                "adjustment+25, adjustment+25 over m1@25+25",
+                "adjustment+25 over black+25",
+            ]
+        );
+        let VideoPiece::Mix { over, .. } = &plan.video[1] else {
+            panic!("mix");
+        };
+        assert_eq!(over[0].piece.placed().len(), 1);
+        assert!(over[0].piece.placed()[0].adjustment);
+
+        req(&mut f, "clip.set", json!({"clips": "c3", "enabled": false}));
+        req(
+            &mut f,
+            "track.set",
+            json!({"track": "V2", "video_enabled": false}),
+        );
+        let off = flatten(f.editor.project(), 0, 75).unwrap();
+        assert_eq!(shown(&off), vec!["m1@0+50", "black+25"]);
+    }
+
+    #[test]
+    fn composition_alone_and_flatten_clip_keep_below_for_adjustment() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        req(
+            &mut f,
+            "adjustment.add",
+            json!({"at": "20f", "duration": "30f", "track": "V2"}),
+        );
+        let id = f.editor.project().track("V2").unwrap().clips[0].id.clone();
+        let alone = composition_alone(f.editor.project(), &id).unwrap();
+        assert_eq!(alone.range, (20, 50));
+        assert_eq!(shown(&alone), vec!["adjustment+30 over m1@20+30"]);
+
+        let per = flatten_clip(f.editor.project(), &id).unwrap();
+        assert_eq!(per.name, "Adjustment Clip");
+        assert_eq!(per.range, (20, 50));
+        assert_eq!(shown(&per), vec!["adjustment+30 over m1@20+30"]);
     }
 }

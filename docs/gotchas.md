@@ -673,6 +673,10 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - A grade file with both keyframes written in full gives the same.
   - In the same grade, the Output Gain of the Key Mixer blends. The Key Input Gain of a corrector also blends.
   - vidcut does not copy this fault. `KeyMix::blended` blends the Gain and the Offset of each input ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
+- **A Cross Dissolve from a gap into a zoomed adjustment clip jumps at its end** (measured in Resolve Studio 21.2).
+  - With Zoom below 1 over a lower video clip, the outer area keeps the unzoomed picture until the last dissolve frame.
+  - On the next frame, that outer area snaps from full brightness to black.
+  - vidcut blends smoothly across every frame ([spec §8.24](spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)).
 
 ## transcribe.cpp and its models
 

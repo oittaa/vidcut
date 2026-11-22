@@ -1204,8 +1204,13 @@ impl Placing {
         let unzoomed = p
             .zoomed()
             .map_or(Picture::MIDDLE, |b| flipped(&p.picture, b.center));
+        let zoom_scale = if p.adjustment {
+            1.0
+        } else {
+            (zx * zy).abs().sqrt()
+        };
         let on = OnFrame {
-            width: frame.0 * (zx * zy).abs().sqrt(),
+            width: frame.0 * zoom_scale,
             size: [fitted[2] * zx.abs(), fitted[3] * zy.abs()],
             middle: ahead(&own.back, unzoomed),
             turn: p.picture.turn_at(p.source as f64),
@@ -1708,6 +1713,7 @@ mod tests {
             moving: None,
             followed: Default::default(),
             clock: Default::default(),
+            adjustment: false,
         };
         let frame = (1920.0, 1080.0);
         let level = Placing::whole(&[placed], frame).level;
@@ -1743,6 +1749,7 @@ mod tests {
             moving: None,
             followed: Default::default(),
             clock: Default::default(),
+            adjustment: false,
         };
         let placing = Placing::whole(&[placed], (1920.0, 1080.0));
         let Work::Blur(b) = &placing.effects[0].work else {
@@ -1784,6 +1791,7 @@ mod tests {
             moving: None,
             followed: Default::default(),
             clock: Default::default(),
+            adjustment: false,
         };
         assert_eq!(detail(&[placed]), 0.4);
     }
@@ -1846,5 +1854,46 @@ mod tests {
             ..Picture::default()
         };
         assert_eq!(landing(p, [1.0, 1.0]), [2880.0, 1620.0]);
+    }
+
+    #[test]
+    fn adjustment_blur_width_ignores_clip_zoom() {
+        let mut effect = crate::model::EffectType::GaussianBlur.made();
+        effect.kind = crate::model::EffectKind::GaussianBlur(crate::model::GaussianBlur {
+            strength: Some(0.4),
+            vertical_strength: Some(0.4),
+            ..Default::default()
+        });
+        let base = Placed {
+            clip: "c1".into(),
+            picture: Picture {
+                zoom: Some([0.5, 0.5]),
+                effects: vec![effect],
+                ..Picture::default()
+            },
+            run: None,
+            source: 0,
+            frame: 0,
+            start: 0,
+            ready: true,
+            ramp: None,
+            crossing: false,
+            moving: None,
+            followed: Default::default(),
+            clock: Default::default(),
+            adjustment: false,
+        };
+        let adj = Placed {
+            adjustment: true,
+            ..base.clone()
+        };
+        let Work::Blur(b_clip) = &Placing::whole(&[base], (640.0, 360.0)).effects[0].work else {
+            panic!("a blur");
+        };
+        let Work::Blur(b_adj) = &Placing::whole(&[adj], (640.0, 360.0)).effects[0].work else {
+            panic!("a blur");
+        };
+        assert_eq!((b_clip.across[0] * 100.0).round(), 288.0);
+        assert_eq!((b_adj.across[0] * 100.0).round(), 576.0);
     }
 }

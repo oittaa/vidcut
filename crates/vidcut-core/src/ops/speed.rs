@@ -10,6 +10,8 @@ fn clip_of(p: &Project, id: &str) -> Result<Clip> {
         .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
     let why = if c.title.is_some() {
         "a title"
+    } else if c.adjustment {
+        "an adjustment clip"
     } else if c.is_generator() {
         "a generator"
     } else {

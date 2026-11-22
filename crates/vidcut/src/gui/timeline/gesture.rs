@@ -118,6 +118,9 @@ pub enum Gesture {
         label: String,
         len: i64,
     },
+    Adjustment {
+        len: i64,
+    },
     Transition {
         kind: PictureTransition,
         label: &'static str,
@@ -413,6 +416,9 @@ impl Drag {
                 let mut params = json!(settings);
                 params["kind"] = json!(kind);
                 block_preview(ctx, pos, *len, "generators.add", params)
+            }
+            Gesture::Adjustment { len } => {
+                block_preview(ctx, pos, *len, "adjustment.add", json!({}))
             }
             Gesture::Transition { kind, .. } => transition_preview(ctx, pos, kind),
             Gesture::Effect { kind, .. } => effect_preview(ctx, pos, *kind),
@@ -1664,6 +1670,7 @@ mod tests {
             effects: None,
             generator: None,
             title: None,
+            adjustment: false,
             picture: None,
             compound: None,
             speed: None,

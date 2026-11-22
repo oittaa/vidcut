@@ -2117,6 +2117,11 @@ pub struct Clip {
     /// empty) and no audio, and any length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<Title>,
+    /// An adjustment clip: it has no media and no sound, and applies its
+    /// own picture settings, effects, composition and grade to the tracks
+    /// below it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub adjustment: bool,
     /// Where its picture goes over the frame: moved, zoomed, turned,
     /// flipped and cropped. Left out, it fills the frame as it always has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -7099,6 +7104,8 @@ impl VoiceIsolation {
 }
 
 impl Clip {
+    pub const ADJUSTMENT_CLIP: &str = "Adjustment Clip";
+
     pub fn shown_color<'a>(&'a self, media: Option<&'a Media>) -> Option<&'a str> {
         self.color
             .as_deref()
@@ -7106,7 +7113,7 @@ impl Clip {
     }
 
     pub fn is_generator(&self) -> bool {
-        self.generator.is_some() || self.title.is_some()
+        self.generator.is_some() || self.title.is_some() || self.adjustment
     }
 
     pub fn is_block(&self) -> bool {
@@ -7945,6 +7952,7 @@ impl Cue {
             effects: None,
             generator: None,
             title: None,
+            adjustment: false,
             picture: self.picture.clone(),
             compound: None,
             speed: None,
@@ -8088,6 +8096,7 @@ impl Project {
         c.name
             .clone()
             .filter(|n| !n.is_empty())
+            .or_else(|| c.adjustment.then(|| Clip::ADJUSTMENT_CLIP.to_string()))
             .or_else(|| self.clip_compound(c).map(|k| k.name.clone()))
             .or_else(|| self.media(&c.media).map(|m| m.name.clone()))
     }

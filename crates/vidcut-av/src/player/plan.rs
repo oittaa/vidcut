@@ -373,6 +373,9 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             .into()
         }
         VideoPiece::Black { .. } => format!("black|{}x{}", plan.width, plan.height).into(),
+        VideoPiece::Adjustment { .. } => {
+            format!("adjustment|{}x{}", plan.width, plan.height).into()
+        }
         VideoPiece::Generated { picture, .. } => format!(
             "generated|{}x{}|{:?}|{picture:?}",
             plan.width, plan.height, plan.colors
@@ -522,6 +525,7 @@ mod tests {
                 moving: None,
                 followed: Default::default(),
                 clock: Default::default(),
+                adjustment: false,
             }],
             cache: Default::default(),
             excluded: false,

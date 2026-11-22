@@ -133,6 +133,7 @@ A clip skips each step that it does not use. The steps run in this order:
   - Titles are draws in that same pass (`fs_title`, [export](export.md#titles)).
   - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, `fs_vignette`, `fs_sharpen`, [export](export.md#effects)).
   - The grade of a clip works on that picture after its effects (`fs_grade`, [export](export.md#the-grade)).
+  - An adjustment clip (`VideoPiece::Adjustment`, `Blurred::adjust`) copies the composited canvas below, runs its composition, placement, effects and grade in order, and mixes back over the canvas.
 - The timeline grade works on the whole canvas after the last layer and title (`fs_grade`, [export](export.md#the-grade)).
 - The burned subtitles then go on the canvas (`fs_title`, [export](export.md#subtitles)).
 - `fs_lut` runs the output LUT of the project on the whole canvas, after the titles and subtitles.
@@ -169,7 +170,7 @@ The [spec](../spec.md#the-lut-tables) gives the math of a table. vidcut reads a 
   - too few rows, or a row that is not three finite numbers.
 - `Editor` reads the file when a request sets the path (`checked_lut`). Thus a request cannot put a broken file into the project.
 - `media.set` refuses an input LUT on a media item with no pictures (`ops::set_media_input_lut`).
-- A generator, a title and a compound clip have no media item. Thus they have no input LUT.
+- A generator, a title, a compound clip and an adjustment clip have no media item. Thus they have no input LUT.
 - The source viewer shows a picture with no input LUT. No measurement tells what it shows in the Cut page ([todo](../todo/luts.md)).
 - A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.
 - `fs_lut` works on colors that are not premultiplied. It leaves a pixel with no alpha as it is.

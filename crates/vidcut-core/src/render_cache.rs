@@ -418,6 +418,7 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
                 layer,
                 VideoPiece::Generated { excluded: true, .. }
                     | VideoPiece::Flat { excluded: true, .. }
+                    | VideoPiece::Adjustment { excluded: true, .. }
             );
             let mixed = !(user && excluded);
             let placed = layer.placed();
@@ -493,6 +494,9 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String, one: bool
         }
         VideoPiece::Black { .. } => {}
         VideoPiece::Generated {
+            placed, excluded, ..
+        }
+        | VideoPiece::Adjustment {
             placed, excluded, ..
         } => {
             *excluded = false;
@@ -1396,6 +1400,7 @@ mod tests {
                     moving: None,
                     followed: Default::default(),
                     clock: Default::default(),
+                    adjustment: false,
                 }],
             }],
         }

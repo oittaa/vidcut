@@ -2392,6 +2392,7 @@ impl Workspace {
                 | Gesture::Compound { .. }
                 | Gesture::Title { .. }
                 | Gesture::Generator { .. }
+                | Gesture::Adjustment { .. }
                 | Gesture::Transition { .. }
                 | Gesture::Effect { .. }
                 | Gesture::Look { .. }
@@ -3401,6 +3402,15 @@ impl Workspace {
         });
     }
 
+    pub(crate) fn start_adjustment_drag(&mut self, len: i64, press: Pos2) {
+        self.timeline.snap_flipped = false;
+        self.timeline.drag = Some(ActiveDrag {
+            drag: Drag::new(Gesture::Adjustment { len }, press),
+            upper: false,
+            preview: Preview::default(),
+        });
+    }
+
     pub(crate) fn start_transition_drag(
         &mut self,
         (kind, label): (vidcut_core::model::PictureTransition, &'static str),
@@ -3471,6 +3481,10 @@ impl Workspace {
             Gesture::Compound { name, len, .. } => (name.clone(), Some((0, *len))),
             Gesture::Title { template, len } => (template.label.clone(), Some((0, *len))),
             Gesture::Generator { label, len, .. } => (label.clone(), Some((0, *len))),
+            Gesture::Adjustment { len } => (
+                vidcut_core::model::Clip::ADJUSTMENT_CLIP.to_string(),
+                Some((0, *len)),
+            ),
             Gesture::Transition { label, kind } => (
                 (*label).to_string(),
                 Some((
@@ -4474,6 +4488,7 @@ mod tests {
             effects: None,
             generator: None,
             title: None,
+            adjustment: false,
             picture: None,
             compound: None,
             speed: None,

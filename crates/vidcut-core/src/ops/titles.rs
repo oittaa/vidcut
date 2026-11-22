@@ -271,7 +271,32 @@ pub fn add(
     title: &Title,
 ) -> Result<(String, String)> {
     let title = checked(title)?;
-    add_block(p, "title", track, (start, duration), Some(title), None)
+    add_block(
+        p,
+        "a title",
+        track,
+        (start, duration),
+        Some(title),
+        None,
+        false,
+    )
+}
+
+pub fn add_adjustment(
+    p: &mut Project,
+    track: Option<&str>,
+    start: i64,
+    duration: i64,
+) -> Result<(String, String)> {
+    add_block(
+        p,
+        "an adjustment clip",
+        track,
+        (start, duration),
+        None,
+        None,
+        true,
+    )
 }
 
 pub(super) fn add_block(
@@ -281,12 +306,13 @@ pub(super) fn add_block(
     (start, duration): (i64, i64),
     title: Option<Title>,
     generator: Option<Generator>,
+    adjustment: bool,
 ) -> Result<(String, String)> {
     if start < 0 {
-        return Err(Error::invalid(format!("a {what} can't start before 0")));
+        return Err(Error::invalid(format!("{what} can't start before 0")));
     }
     if duration < 1 {
-        return Err(Error::invalid(format!("a {what} lasts at least one frame")));
+        return Err(Error::invalid(format!("{what} lasts at least one frame")));
     }
     let end = start + duration;
     let ti = match track {
@@ -294,7 +320,7 @@ pub(super) fn add_block(
             let ti = tracks::resolve(p, id)?;
             if p.tracks[ti].kind != TrackKind::Video {
                 return Err(Error::invalid(format!(
-                    "a {what} goes on a video track, not {id}"
+                    "{what} goes on a video track, not {id}"
                 )));
             }
             ti
@@ -317,7 +343,7 @@ pub(super) fn add_block(
     place(
         p,
         ti,
-        block_clip(id.clone(), (start, duration), title, generator),
+        block_clip(id.clone(), (start, duration), title, generator, adjustment),
     );
     fix_audio(p, ti);
     Ok((id, p.tracks[ti].id.clone()))

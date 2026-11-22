@@ -785,6 +785,7 @@ fn export_with(
                         titles::reference(t, p.height(), &drawn(t), source.round() as i64)
                     }
                     (None, Some(g)) => generators::reference(g, source.round() as i64),
+                    (None, None) if c.adjustment => generators::adjustment_reference(),
                     (None, None) => Value::Null,
                 },
             ),
@@ -1697,6 +1698,7 @@ pub struct ImportedClip {
     pub generator: Option<Value>,
     pub title: Option<Title>,
     pub title_from: Option<Value>,
+    pub adjustment: bool,
     pub picture: Option<Picture>,
     pub motion: Vec<MotionPath>,
     pub compound: Option<ImportedCompound>,
@@ -1731,16 +1733,20 @@ impl ImportedClip {
     }
 
     pub fn is_block(&self) -> bool {
-        self.generator.is_some() || self.title.is_some() || self.compound.is_some()
+        self.generator.is_some()
+            || self.title.is_some()
+            || self.compound.is_some()
+            || self.adjustment
     }
 
     pub fn has_picture(&self) -> bool {
         self.video
             && self.title.is_none()
-            && self
-                .generator
-                .as_ref()
-                .is_none_or(|r| generators::read(r, 0).is_some())
+            && (self.adjustment
+                || self
+                    .generator
+                    .as_ref()
+                    .is_none_or(|r| generators::read(r, 0).is_some()))
     }
 
     fn has_no_media(&self) -> bool {
@@ -1790,6 +1796,7 @@ impl ImportedClip {
             generator: None,
             title: None,
             title_from: None,
+            adjustment: false,
             picture: None,
             motion: Vec::new(),
             compound: None,
@@ -2526,6 +2533,15 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         c.title_from = Some(reference.clone());
                     }
                     c.title = Some(t);
+                } else if reference["generator_kind"].as_str()
+                    == Some(crate::model::Clip::ADJUSTMENT_CLIP)
+                {
+                    c.adjustment = true;
+                    c.picture = our_picture(item);
+                    c.speed = None;
+                    if c.name == crate::model::Clip::ADJUSTMENT_CLIP {
+                        c.name.clear();
+                    }
                 } else {
                     if generators::read(reference, 0).is_some() {
                         c.picture = our_picture(item);
@@ -2589,6 +2605,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         generator: None,
                         title: None,
                         title_from: None,
+                        adjustment: false,
                         picture: our_picture(item),
                         motion: our_motion(item),
                         compound: None,
@@ -2821,6 +2838,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 generator: None,
                 title: None,
                 title_from: None,
+                adjustment: false,
                 picture: None,
                 motion: Vec::new(),
                 compound: None,

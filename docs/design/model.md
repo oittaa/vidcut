@@ -55,7 +55,7 @@ classDiagram
   }
   class Clip {
     id, name, color
-    media
+    media, adjustment
     start, duration, source_in
     video, enabled, retime, render_cache
   }
@@ -584,9 +584,16 @@ Writing:
 - `render::generator_tape` plans a generator alone on V1. Why: the source viewer and `frame.render` then draw it by the path of a clip on the timeline.
 - `ops::keyframes` keeps the keyframes of a volume and of a center on one path (`Number`).
 
+## Adjustment clips
+
+- `Clip::adjustment` marks an adjustment clip ([spec §8.24](../spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)): no media, no audio, no speed, no motion paths, on a video track.
+- `Clip::ADJUSTMENT_CLIP` is its display name and OTIO generator kind (`otio::generators::adjustment_reference`). `Project::clip_name` returns it when `Clip::name` is absent.
+- `ops::titles::add_adjustment` shares `ops::titles::add_block` and `ops::block_clip` with titles and generators, backing `adjustment.add` and `edit.*` adjustment sources.
+- `ops::picture::has_picture` and `ops::picture::takes_effects` accept it, while `ops::speed` and `ops::motion::takes` refuse it.
+
 ## Pictures
 
-- A clip of footage, a still, an image sequence, a compound clip or a generator that draws can carry a `Picture` ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)):
+- A clip of footage, a still, an image sequence, a compound clip, a drawing generator or an adjustment clip can carry a `Picture` ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)):
   - `position`: where the middle of the whole picture goes, before the zoom and the rotation
   - its `zoom` across and down, and its `rotation`
   - its `anchor`: the point that the zoom and the turn work about (`Picture::pivot`)

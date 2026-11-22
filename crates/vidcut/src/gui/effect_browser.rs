@@ -3,7 +3,7 @@ use eframe::egui::{
     vec2,
 };
 use serde_json::json;
-use vidcut_core::model::EffectType;
+use vidcut_core::model::{Clip, EffectType};
 
 use super::theme;
 use super::workspace::{Workspace, dim};
@@ -142,6 +142,60 @@ fn paint(painter: &Painter, rect: Rect, kind: EffectType) {
     }
 }
 
+fn paint_adjustment(painter: &Painter, rect: Rect) {
+    let colors = theme::colors();
+    painter.rect_filled(rect, 0.0, colors.track);
+    let inset = rect.shrink2(vec2(rect.width() * 0.24, rect.height() * 0.22));
+    let below = inset.translate(vec2(-6.0, 5.0));
+    let above = inset.translate(vec2(6.0, -5.0));
+    let dim_fill =
+        Color32::from_rgba_unmultiplied(colors.text.r(), colors.text.g(), colors.text.b(), 35);
+    let top_fill = Color32::from_rgba_unmultiplied(
+        colors.accent.r(),
+        colors.accent.g(),
+        colors.accent.b(),
+        70,
+    );
+    painter.rect_filled(below, 2.0, dim_fill);
+    painter.rect_stroke(
+        below,
+        2.0,
+        Stroke::new(1.0, colors.text_dim),
+        StrokeKind::Inside,
+    );
+    painter.rect_filled(above, 2.0, top_fill);
+    painter.rect_stroke(
+        above,
+        2.0,
+        Stroke::new(1.2, colors.accent),
+        StrokeKind::Inside,
+    );
+}
+
+fn card_frame(
+    ui: &mut egui::Ui,
+    cell: egui::Vec2,
+    label: &str,
+    draw: impl FnOnce(&Painter, Rect),
+) -> egui::Response {
+    ui.allocate_ui_with_layout(cell, Layout::top_down(Align::Min), |ui| {
+        let (rect, resp) =
+            ui.allocate_exact_size(vec2(CARD_WIDTH, CARD_HEIGHT), Sense::click_and_drag());
+        draw(ui.painter(), rect);
+        if resp.hovered() {
+            ui.painter().rect_stroke(
+                rect,
+                2.0,
+                Stroke::new(1.5, theme::colors().accent),
+                StrokeKind::Inside,
+            );
+        }
+        ui.label(label);
+        resp
+    })
+    .inner
+}
+
 impl Workspace {
     fn pictured_selection(&self) -> Vec<String> {
         let Some(p) = self.project() else {
@@ -187,52 +241,77 @@ impl Workspace {
             CARD_HEIGHT + ui.spacing().item_spacing.y + ui.text_style_height(&TextStyle::Body),
         );
         let selected = self.pictured_selection();
+        let mut adj_grab = None;
+        let mut adj_smart = false;
+        let mut adj_top = false;
         let mut grabbed = None;
         let mut added = None;
         let mut doubled = None;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                ui.label(RichText::new("Effects").strong());
+                ui.horizontal_wrapped(|ui| {
+                    let resp = card_frame(ui, cell, Clip::ADJUSTMENT_CLIP, paint_adjustment);
+                    if resp.drag_started()
+                        && let Some(press) = ui.input(|i| i.pointer.press_origin())
+                    {
+                        adj_grab = Some(press);
+                    }
+                    if resp.double_clicked() {
+                        adj_smart = true;
+                    }
+                    resp.context_menu(|ui| {
+                        if ui.button("Smart Insert").clicked() {
+                            adj_smart = true;
+                            ui.close();
+                        }
+                        if ui.button("Place On Top").clicked() {
+                            adj_top = true;
+                            ui.close();
+                        }
+                    });
+                });
+                ui.add_space(6.0);
                 for (group, cards) in GROUPS {
                     ui.label(RichText::new(group).strong());
                     ui.horizontal_wrapped(|ui| {
                         for (label, kind) in cards {
-                            ui.allocate_ui_with_layout(cell, Layout::top_down(Align::Min), |ui| {
-                                let (rect, resp) = ui.allocate_exact_size(
-                                    vec2(CARD_WIDTH, CARD_HEIGHT),
-                                    Sense::click_and_drag(),
-                                );
-                                paint(ui.painter(), rect, *kind);
-                                if resp.hovered() {
-                                    ui.painter().rect_stroke(
-                                        rect,
-                                        2.0,
-                                        Stroke::new(1.5, theme::colors().accent),
-                                        StrokeKind::Inside,
-                                    );
+                            let resp = card_frame(ui, cell, label, |painter, rect| {
+                                paint(painter, rect, *kind);
+                            });
+                            if resp.drag_started()
+                                && let Some(press) = ui.input(|i| i.pointer.press_origin())
+                            {
+                                grabbed = Some(((*kind, *label), press));
+                            }
+                            if resp.double_clicked() {
+                                doubled = Some(*kind);
+                            }
+                            resp.context_menu(|ui| {
+                                let item = egui::Button::new("Add to Selected Clips");
+                                if ui.add_enabled(!selected.is_empty(), item).clicked() {
+                                    added = Some(*kind);
+                                    ui.close();
                                 }
-                                ui.label(*label);
-                                if resp.drag_started()
-                                    && let Some(press) = ui.input(|i| i.pointer.press_origin())
-                                {
-                                    grabbed = Some(((*kind, *label), press));
-                                }
-                                if resp.double_clicked() {
-                                    doubled = Some(*kind);
-                                }
-                                resp.context_menu(|ui| {
-                                    let item = egui::Button::new("Add to Selected Clips");
-                                    if ui.add_enabled(!selected.is_empty(), item).clicked() {
-                                        added = Some(*kind);
-                                        ui.close();
-                                    }
-                                });
                             });
                         }
                     });
                     ui.add_space(6.0);
                 }
             });
+        if let Some(press) = adj_grab {
+            let len = self
+                .project()
+                .map_or(150, vidcut_core::ops::titles::default_length);
+            self.start_adjustment_drag(len, press);
+        }
+        if adj_smart {
+            self.send("edit.smart_insert", json!({ "adjustment": true }));
+        }
+        if adj_top {
+            self.send("edit.place_on_top", json!({ "adjustment": true }));
+        }
         if let Some((card, press)) = grabbed {
             self.start_effect_drag(card, press);
         }

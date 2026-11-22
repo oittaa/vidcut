@@ -57,6 +57,7 @@ pub struct Source {
     pub compound: Option<String>,
     pub decompose: bool,
     pub inner_tracks: BTreeMap<String, Option<String>>,
+    pub adjustment: bool,
 }
 
 #[derive(
@@ -260,6 +261,7 @@ pub(crate) fn block_clip(
     (start, duration): (i64, i64),
     title: Option<Title>,
     generator: Option<Generator>,
+    adjustment: bool,
 ) -> Clip {
     Clip {
         id,
@@ -275,6 +277,7 @@ pub(crate) fn block_clip(
         effects: None,
         generator,
         title,
+        adjustment,
         picture: None,
         compound: None,
         speed: None,
@@ -291,6 +294,19 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             "an edit can't be both Video Only and Audio Only",
         ));
     }
+    if src.adjustment {
+        if src.audio_only {
+            return Err(Error::invalid("an adjustment clip has no audio"));
+        }
+        let (a, b) = src.range;
+        if a < 0 || a >= b {
+            return Err(Error::invalid(format!(
+                "source range {a}..{b} of an adjustment clip is empty"
+            )));
+        }
+        let id = p.alloc_clip_id();
+        return Ok(block_clip(id, (0, b - a), None, None, true));
+    }
     if let Some(generator) = &src.generator {
         if src.audio_only {
             return Err(Error::invalid("a generator has no audio"));
@@ -302,7 +318,13 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             )));
         }
         let id = p.alloc_clip_id();
-        return Ok(block_clip(id, (0, b - a), None, Some(generator.clone())));
+        return Ok(block_clip(
+            id,
+            (0, b - a),
+            None,
+            Some(generator.clone()),
+            false,
+        ));
     }
     if let Some(cid) = &src.compound {
         return compound_clip(p, src, cid);
@@ -364,6 +386,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         effects: None,
         generator: None,
         title: None,
+        adjustment: false,
         picture: None,
         compound: None,
         speed: None,
@@ -394,7 +417,7 @@ fn compound_clip(p: &mut Project, src: &Source, cid: &str) -> Result<Clip> {
             k.name
         )));
     }
-    let mut c = block_clip(p.alloc_clip_id(), (0, b - a), None, None);
+    let mut c = block_clip(p.alloc_clip_id(), (0, b - a), None, None, false);
     c.source_in = a;
     c.video = video;
     c.compound = Some(cid.to_string());
@@ -409,6 +432,12 @@ fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
     };
     if p.tracks[ti].kind == TrackKind::Audio {
         for clip in clips.iter_mut().filter(|c| c.video) {
+            if clip.adjustment {
+                return Err(Error::invalid(format!(
+                    "an adjustment clip goes on a video track, not {}",
+                    p.tracks[ti].id
+                )));
+            }
             if clip.generator.is_some() {
                 return Err(Error::invalid(format!(
                     "a generator goes on a video track, not {}",
@@ -2003,6 +2032,11 @@ pub fn change_speed(
         if c.title.is_some() {
             return Err(Error::invalid(format!(
                 "{id} is a title: it has no speed to change"
+            )));
+        }
+        if c.adjustment {
+            return Err(Error::invalid(format!(
+                "{id} is an adjustment clip: it has no speed to change"
             )));
         }
         if c.is_generator() {

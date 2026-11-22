@@ -41,6 +41,19 @@ pub fn no_media() -> Value {
     })
 }
 
+pub fn adjustment_reference() -> Value {
+    let kind = crate::model::Clip::ADJUSTMENT_CLIP;
+    json!({
+        "OTIO_SCHEMA": "GeneratorReference.1",
+        "metadata": { EDITOR: { "Generator Type": kind } },
+        "name": kind,
+        "available_range": null,
+        "available_image_bounds": null,
+        "generator_kind": kind,
+        "parameters": { EDITOR: [] },
+    })
+}
+
 pub fn keep_ties(reference: &mut Value, editor: &Value) {
     for (key, from) in [(CHANNELS, "Channels"), (LINK, "Link Group ID")] {
         if !editor[from].is_null() {

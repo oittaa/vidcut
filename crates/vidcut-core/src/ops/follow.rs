@@ -49,6 +49,7 @@ impl Mapper<'_> {
             n.media == c.media
                 && n.generator == c.generator
                 && n.compound == c.compound
+                && n.adjustment == c.adjustment
                 && c.in_step(n)
                 && n.content_at(n.start) <= u
                 && u < n.content_at(n.end())

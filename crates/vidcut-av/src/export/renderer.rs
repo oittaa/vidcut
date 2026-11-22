@@ -152,6 +152,7 @@ pub(crate) fn at(piece: &VideoPiece, pos: i64, frames: i64) -> VideoPiece {
         }
         VideoPiece::Black { frames: n, .. }
         | VideoPiece::Generated { frames: n, .. }
+        | VideoPiece::Adjustment { frames: n, .. }
         | VideoPiece::Flat { frames: n, .. } => *n = frames,
     }
     p
