@@ -379,6 +379,15 @@ pub struct Settings {
     /// subtitles, before each output's colors. Left out when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_lut: Option<PathBuf>,
+    /// The `.cube` file that the monitored picture goes through after every
+    /// other step. It is only for monitoring: no export gets it. Left out
+    /// when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_monitor_lut: Option<PathBuf>,
+    /// The LUT that the viewer of the Color page goes through after every
+    /// other step. Left out while it follows `video_monitor_lut`.
+    #[serde(default, skip_serializing_if = "ViewerLut::follows")]
+    pub color_viewer_lut: ViewerLut,
     /// The `start` and `end` that each new keyframe of a grade gets. Left
     /// out at 1 and 1.
     #[serde(default, skip_serializing_if = "DynamicsProfile::is_usual")]
@@ -404,8 +413,29 @@ impl Default for Settings {
             render_cache: RenderCache::Off,
             input_lut: None,
             output_lut: None,
+            video_monitor_lut: None,
+            color_viewer_lut: ViewerLut::VideoMonitor,
             dynamics_profile: DynamicsProfile::default(),
         }
+    }
+}
+
+/// The LUT of the viewer of the Color page.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerLut {
+    /// The Video Monitor LUT of the project.
+    #[default]
+    VideoMonitor,
+    /// No LUT.
+    None,
+    /// This `.cube` file.
+    File(PathBuf),
+}
+
+impl ViewerLut {
+    pub fn follows(&self) -> bool {
+        matches!(self, Self::VideoMonitor)
     }
 }
 
@@ -440,6 +470,14 @@ impl Format {
 
 impl Settings {
     pub const MOST_CHANNELS: u16 = 24;
+
+    pub fn viewer_lut(&self) -> Option<&Path> {
+        match &self.color_viewer_lut {
+            ViewerLut::VideoMonitor => self.video_monitor_lut.as_deref(),
+            ViewerLut::None => None,
+            ViewerLut::File(path) => Some(path),
+        }
+    }
 
     pub fn with_format(fps: Option<&str>, size: Option<(u32, u32)>) -> crate::error::Result<Self> {
         let mut s = Self::default();
@@ -1200,6 +1238,10 @@ impl Proxy {
 }
 
 impl Media {
+    pub fn input_lut_in<'a>(&'a self, settings: &'a Settings) -> Option<&'a Path> {
+        self.input_lut.as_deref().or(settings.input_lut.as_deref())
+    }
+
     pub fn opaque(&self) -> bool {
         self.info
             .video

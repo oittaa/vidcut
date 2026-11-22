@@ -4358,7 +4358,7 @@ pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
             cache: Default::default(),
             excluded: false,
             made: None,
-            input_lut: None,
+            input_lut: m.input_lut_in(&p.settings).map(Path::to_path_buf),
         },
         None => VideoPiece::black(1),
     }
@@ -4459,7 +4459,7 @@ pub fn camera_tape(
                 cache: Default::default(),
                 excluded: false,
                 made: None,
-                input_lut: None,
+                input_lut: m.input_lut_in(&p.settings).map(Path::to_path_buf),
             },
         );
         push_audio(&mut lane, sound_of(p, m, from, fps, samples));
@@ -4608,7 +4608,7 @@ fn laid_out(p: &Project, media: &[String], fps: Rational) -> Result<(RenderPlan,
                     cache: Default::default(),
                     excluded: false,
                     made: None,
-                    input_lut: None,
+                    input_lut: m.input_lut_in(&p.settings).map(Path::to_path_buf),
                 },
             );
         } else {

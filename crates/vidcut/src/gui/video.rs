@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -13,7 +14,7 @@ use super::workspace::{NodeShots, ScopePictures};
 use crate::live::stats::{PlayerStats, ViewerStats};
 use crate::live::{Capture, Presented};
 use vidcut_av::screen::Gate;
-use vidcut_av::screen::{Drawn, Gpu, Screen, ShotsShown, ShotsWanted};
+use vidcut_av::screen::{Drawn, Gpu, Lut, Screen, ShotsShown, ShotsWanted};
 use vidcut_core::model::Hdr;
 use vidcut_core::preferences::{Scope, ScopeScale};
 
@@ -42,6 +43,8 @@ struct State {
     scope_targets: Vec<(Scope, Target)>,
     shots: Option<ShotsWanted>,
     shots_shown: Option<ShotsShown>,
+    display_lut: Option<PathBuf>,
+    display_why: Option<String>,
     colors: Option<Hdr>,
     has_frame: bool,
     stats: ViewerStats,
@@ -211,6 +214,19 @@ impl Viewer {
         (self.texture.map(|(_, t)| t), has_frame)
     }
 
+    pub fn show_lut(&self, path: Option<&Path>) {
+        let mut s = self.shared.lock();
+        if s.display_lut.as_deref() != path {
+            s.display_lut = path.map(Path::to_path_buf);
+            s.woken = true;
+            self.shared.wake.notify_all();
+        }
+    }
+
+    pub fn lut_failed(&self) -> Option<String> {
+        self.shared.lock().display_why.take()
+    }
+
     pub fn sync_scopes(
         &mut self,
         render: &RenderState,
@@ -357,12 +373,46 @@ impl Drop for Viewer {
     }
 }
 
+#[derive(Default)]
+struct DisplayLut {
+    asked: Option<PathBuf>,
+    kept: Option<(String, Lut)>,
+    shown: Option<Lut>,
+}
+
+impl DisplayLut {
+    fn ask(&mut self, path: Option<PathBuf>) -> Option<String> {
+        if self.asked == path {
+            return None;
+        }
+        self.asked = path;
+        self.shown = None;
+        let path = self.asked.as_deref()?;
+        let stamp = vidcut_core::cube::stamp(path);
+        if let Some((kept, lut)) = &self.kept
+            && *kept == stamp
+        {
+            self.shown = Some(lut.clone());
+            return None;
+        }
+        match vidcut_av::screen::load_lut(path) {
+            Ok(lut) => {
+                self.kept = Some((stamp, lut.clone()));
+                self.shown = Some(lut);
+                None
+            }
+            Err(e) => Some(e.to_string()),
+        }
+    }
+}
+
 fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     let mut screen = Screen::new();
+    let mut display = DisplayLut::default();
     let mut generation = 0u64;
     let mut next: Option<Instant> = None;
     loop {
-        let (tasks, engine, want, upscale, scopes, scale, shots) = {
+        let (tasks, engine, want, upscale, scopes, scale, shots, lut) = {
             let mut s = shared.lock();
             while !s.woken && !s.stop {
                 let wait = next.map_or(IDLE, |n| n.saturating_duration_since(Instant::now()));
@@ -387,8 +437,12 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
                 s.scopes.clone(),
                 s.scale,
                 s.shots.clone(),
+                s.display_lut.clone(),
             )
         };
+        if let Some(why) = display.ask(lut) {
+            shared.lock().display_why = Some(why);
+        }
         let now = Instant::now();
         let shown = engine.as_ref().and_then(|e| e.present(now));
         let [w, h] = want;
@@ -406,6 +460,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             })
             .unwrap_or_default();
         screen.set_output_lut(shown.as_ref().and_then(|s| s.output_lut.clone()));
+        screen.set_display_lut(display.shown.clone());
         screen.set_timeline_grade(shown.as_ref().and_then(|s| s.timeline_grade.as_ref()));
         screen.set_frame_size(shown.as_ref().map(|s| s.size));
         screen.scoping(!scopes.is_empty());

@@ -529,8 +529,10 @@ The bar and the Jobs button:
 - On the Color page, Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the grade (`Workspace::grade_key_cmd`). `Workspace::grade_key_cmd_why` gives the next step.
   - Mark > Make Static Keyframe is on the Color page only (`Workspace::static_key_item`). Its key is `Action::AddStaticKeyframe`.
 - The Dynamics Profile row of the Project Settings window sends `project.set` with `dynamics_profile`.
-- The Input LUT and Output LUT rows of the Project Settings window (`LutRow`) set `input_lut` and `output_lut` of `project.set`.
+- The Input LUT, Output LUT and Video Monitor LUT rows of the Project Settings window (`LutRow`) set `input_lut`, `output_lut` and `video_monitor_lut` of `project.set`.
   - Each row is one dropdown of the LUT list (`luts::combo`). No LUT selected sends an empty path.
+  - The Color Viewer LUT row has the same list after one more entry, Use video monitoring selection (`luts::viewer_combo`).
+  - That entry sends `color_viewer_follows`. The others send `color_viewer_lut`.
   - Update Lists sends `luts.list` again (`Workspace::update_luts`).
   - Open LUT Folder makes the LUT folder of vidcut when it is missing, and opens it (`Workspace::open_lut_folder`).
 - The LUT Locations row of the General page of the Preferences window sends `preferences.set` with the whole list of `luts.folders`. Add… adds a folder, and Remove removes the selected one.
@@ -680,8 +682,11 @@ The bar and the Jobs button:
 - The filmstrips of the Trim Editor use the same tiles (`vidcut_core::ops::filmstrip`, `TrimAnchor`).
 - The pictures of the pool use the same tiles and the same limit (`Workspace::pool_picture`). Why: pictures of media share one `Lru`.
 - The aspect of a tile comes from the media's probe (`media_aspect`). Thus a thumbnail has its shape before its first picture is decoded.
-- A change of the file, the input color space, the Alpha Mode or the subclip range of a media removes its tiles from memory (`Seen`).
-- The names of the tile files on disk hold the input color space and the Alpha Mode (`thumbcache::tile_block`). Thus a media does not read tiles of an earlier color space or Alpha Mode.
+- The tiles show the input LUT of the media, else the input LUT of the project (`Media::input_lut_in`, `render::media_frame`).
+- A change of a media removes its tiles from memory (`Seen`). The change can be of the file, the input color space, the Alpha Mode, the input LUT or the subclip range.
+- The names of the tile files on disk hold the input color space, the Alpha Mode and the input LUT (`thumbcache::look`, `thumbcache::tile_block`).
+  - The LUT part is a digest of the path, the size and the time of the file (`cube::stamp`).
+  - Thus a media does not read tiles of an earlier color space, Alpha Mode or LUT.
 - The pool asks for some pictures ahead (`Workspace::preload`, `Workspace::preload_strip`):
   - Each media that shows, or is within one screen of the view, asks for its small pictures (`Tiles::thumbs`, in the next item).
   - A thumbnail within one screen of the visible ones asks for its poster (`poster_frame`).
@@ -694,7 +699,7 @@ The bar and the Jobs button:
 - Each video media has a file of 24 small pictures on disk (`thumbcache::thumbs_file`, `THUMBS`, `THUMB_SIZE`):
   - `vidcut-worker-N` makes the file once for each version of the media (`make_thumbs`). It does this only while `thumbnails.disk_cache` is on.
   - A fast decode makes the pictures (`vidcut_av::thumbs::filmstrip`). It decodes only reference frames.
-  - The pictures follow the input color space and the Alpha Mode of the media, as the viewer does.
+  - The pictures follow the input color space, the Alpha Mode and the input LUT of the media, as the viewer does.
   - The Alpha Mode counts only for a file with an alpha channel (`thumbcache::drawn_alpha`). Why: the other Alpha Modes give the same picture without alpha.
   - The file keeps the time of the frame that each picture shows. The first picture is the first reference frame at or after the poster frame.
   - The `Snapshot` lists the media whose file is on disk (`Snapshot::thumbs`).

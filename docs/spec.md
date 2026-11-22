@@ -34,13 +34,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - adjustment clips (§8.24)
 - compositions of nodes on the Effects page: Blur, the six effects, and Ellipse, Rectangle and Polygon masks (§8.19)
 - the input LUT of a media item and of the project, and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
+- the Video Monitor LUT and the Color Viewer LUT ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
 **Later (later):**
 - other effects, other transitions, other titles, other generators
 - keyframes other than Transform, Crop, Composite, speed, the clip volume, effect values and the Position, Zoom, Rotation and Opacity of a title
 - color ([todo](todo/auto-color.md)), the Fusion tools that §8.19 does not have
-- the display LUT, and LUT files other than `.cube` ([todo](todo/luts.md))
+- the Scopes LUT, and LUT files other than `.cube` ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
@@ -6257,7 +6258,7 @@ Then the compositing of the Fusion page.
 
 The display LUT of the Color page is on a branch after Data Burn-In. The output of the Deliver page does not get it.
 
-vidcut runs the timeline grade, then the burned-in subtitles, then the output LUT. [§8.20](#820-primaries-palette-pp-118-31413159) gives the measured facts of the timeline grade.
+vidcut runs the timeline grade, then the burned-in subtitles, then the output LUT. The viewer of the Color page then runs the display LUT on its own branch ([the display LUTs](#the-lut-tables)). [§8.20](#820-primaries-palette-pp-118-31413159) gives the measured facts of the timeline grade.
 
 **Sizing:**
 
@@ -6301,7 +6302,8 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 **The Input LUT of a clip**, measured in Resolve Studio 21.2:
 
 - The Media Pool menu of a compound clip has no LUT item. vidcut has none either.
-- The viewer of the Media page shows the Input LUT. vidcut does not yet ([todo](todo/luts.md)).
+- The viewer of the Media page shows the Input LUT. The Source Viewer of the Edit page shows the source LUTs too (p. 811).
+  - The source viewer of vidcut shows it.
 - A subclip made after its parent gets an Input LUT copies that LUT. A subclip made before keeps none.
   - After that, each one keeps its own. A change on the parent or on a subclip does not change the others.
   - vidcut does the same: `create_subclip` copies the media item with its LUT.
@@ -6316,7 +6318,8 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 
 - A grid of values gives the same picture as the Output LUT of the project.
 - It applies to clips. A gap stays black.
-- The viewer of the Media page and the thumbnails of the Media Pool show it. vidcut does not yet ([todo](todo/luts.md)).
+- The viewer of the Media page and the thumbnails of the Media Pool show it.
+  - The source viewer and the thumbnails of the pool of vidcut show it.
 - It does not apply to a Solid Color generator, a Text title or a Text+ title.
 - On a compound clip, it applies once, to the clip inside. It does not apply again to the compound clip.
   - A clip inside at Zoom 0.5 gets it. The uncovered part of the compound clip stays black, not `T(0)`.
@@ -6345,6 +6348,20 @@ A script gets no error for a broken file, and the window shows no message:
 - `LUT_3D_SIZE 1` gives a black picture.
 - vidcut refuses these files ([X131](deviations.md#x131-a-broken-cube-file-is-refused)).
 
+**The Video Monitor LUT and the Color Viewer LUT** (pp. 152, 811):
+
+- The Video Monitor LUT works on the picture after every other step. It is only for monitoring. A render and the output of the Deliver page do not get it (p. 152).
+- The Color Viewer LUT works on the viewer on the computer display. By default, it follows the Video Monitor LUT (p. 152).
+- The Color Viewer LUT changes only the viewer of the Color page. The viewers of the Edit page do not get it (p. 811).
+- The scopes analyze the data as it is. The Scopes LUT can make them use the Video Monitor LUT or another LUT (p. 152).
+
+In vidcut:
+
+- `project.set` sets `video_monitor_lut` and `color_viewer_lut`. `color_viewer_follows` makes the Color Viewer LUT follow the Video Monitor LUT again.
+- The viewer of the Color page runs its LUT after the output LUT, on its own branch. The viewers of the other pages do not get it.
+- An export, the render cache, a proxy and the scopes do not get it.
+- The Video Monitor LUT shows only in the viewer of the Color page, while the Color Viewer LUT follows it. Why: vidcut sends no picture to a video monitor.
+
 **The LUT menus**, measured in Resolve Studio 21.2 (pp. 152, 3479–3480):
 
 - The right-click menu of a Media Pool clip has one `LUT` item with a submenu.
@@ -6371,7 +6388,8 @@ In vidcut:
 - vidcut lists the `.cube` files of these folders and of their subfolders, in the order of their paths in their folders, by character code.
   - It reads the folders at start, on `Update Lists`, and when the LUT Locations change. `luts.list` gives the list to a script.
 - The `LUT` submenu of the pool and the Input LUT row of the Inspector set the Input LUT of media items.
-- The Project Settings window has an Input LUT row and an Output LUT row, each one dropdown. It also has `Update Lists` and `Open LUT Folder`.
+- The Project Settings window has the rows Input LUT, Output LUT, Video Monitor LUT and Color Viewer LUT, each one dropdown. It also has `Update Lists` and `Open LUT Folder`.
+  - The list of the Color Viewer LUT starts with `Use video monitoring selection`, the default. Then come the entries of the other rows.
 - A LUT that is set but not in the list shows by its file name, with its check mark.
 - `media.set` and `project.set` take the path of any `.cube` file. Thus a script can give a file outside the LUT folders.
 

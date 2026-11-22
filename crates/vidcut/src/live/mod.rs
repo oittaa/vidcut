@@ -896,9 +896,13 @@ fn thumbs_on() -> bool {
         .disk_cache
 }
 
-fn make_thumbs(media: &vidcut_core::model::Media) -> std::result::Result<bool, String> {
+fn make_thumbs(
+    media: &vidcut_core::model::Media,
+    lut: Option<&Path>,
+) -> std::result::Result<bool, String> {
     let origin = paths::media_origin(media);
-    let file = crate::thumbcache::thumbs_file(media, &origin);
+    let look = crate::thumbcache::look(media, lut);
+    let file = crate::thumbcache::thumbs_file(media, &origin, &look);
     if crate::thumbcache::has_thumbs(&file) {
         return Ok(true);
     }
@@ -906,7 +910,11 @@ fn make_thumbs(media: &vidcut_core::model::Media) -> std::result::Result<bool, S
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     let decoder = decoder.as_ref();
     let (count, (w, h)) = (crate::thumbcache::THUMBS, crate::thumbcache::THUMB_SIZE);
-    let look = (media.color_space, crate::thumbcache::drawn_alpha(media));
+    let look = (
+        media.color_space,
+        crate::thumbcache::drawn_alpha(media),
+        lut,
+    );
     let (images, times) = match media.sequence.as_ref().map(|s| s.count) {
         Some(pictures) => {
             vidcut_av::thumbs::filmstrip_pictures(&input, pictures, count, w, h, decoder, look)
@@ -4165,14 +4173,18 @@ impl Live {
         self.refresh_transcribed(false);
         let Some(open) = &self.project else { return };
         let media: Vec<_> = open.project().media.clone();
-        let channels = open.project().settings.channels;
+        let settings = open.project().settings.clone();
+        let channels = settings.channels;
         self.forget_removed(&media);
         for m in media {
             let version = media_version(&m);
+            let lut = m.input_lut_in(&settings).map(Path::to_path_buf);
             let pictures = format!(
-                "{version}|{}|{}",
+                "{version}|{}|{}|{}",
                 m.color_space.key(),
-                crate::thumbcache::drawn_alpha(&m).title()
+                crate::thumbcache::drawn_alpha(&m).title(),
+                lut.as_deref()
+                    .map_or(String::new(), |l| l.display().to_string())
             );
             if self.thumbs_on
                 && m.info.video.is_some()
@@ -4188,7 +4200,7 @@ impl Live {
                     let _ = tx.send(Msg::Thumbs {
                         media: id,
                         wanted,
-                        result: make_thumbs(&media),
+                        result: make_thumbs(&media, lut.as_deref()),
                     });
                 });
             }

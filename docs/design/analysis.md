@@ -463,7 +463,7 @@ flowchart TD
 
 | What | Where | Key |
 |---|---|---|
-| tiles of the timeline and the pool, 24 pool pictures of each video media | `thumbs` (`thumbcache`) | origin, size, frames or picture count, input color space, Alpha Mode of a file with alpha |
+| tiles of the timeline and the pool, 24 pool pictures of each video media | `thumbs` (`thumbcache`) | origin, size, frames or picture count, input color space, Alpha Mode of a file with alpha, input LUT |
 | waveforms | `waveforms` | origin, channels |
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
 | the boxes of the faces of a range | `analysis` (`AvEnv`) | origin, the model and its sizes, the `Look` |

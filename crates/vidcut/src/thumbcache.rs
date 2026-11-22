@@ -14,13 +14,12 @@ pub fn dir() -> PathBuf {
     Kind::Thumbs.dir()
 }
 
-pub fn thumbs_file(media: &Media, origin: &Origin) -> PathBuf {
+pub fn thumbs_file(media: &Media, origin: &Origin, look: &str) -> PathBuf {
     let pictures = media
         .sequence
         .as_ref()
         .map(|s| format!("-{}", s.count))
         .unwrap_or_default();
-    let look = look_of(media);
     let (w, h) = THUMB_SIZE;
     Kind::Thumbs.file(origin, &format!("s{THUMBS}-{w}x{h}{pictures}{look}.thumbs"))
 }
@@ -44,8 +43,7 @@ pub fn store_thumbs(path: &Path, origin: &Origin, images: &[Image], times: &[f64
 
 pub const TILE_BLOCK: i64 = 64;
 
-pub fn tile_block(origin: &Origin, height: u32, block: i64, media: &Media) -> PathBuf {
-    let look = look_of(media);
+pub fn tile_block(origin: &Origin, height: u32, block: i64, look: &str) -> PathBuf {
     Kind::Thumbs.file(origin, &format!("t{height}-b{block}{look}.thumbs"))
 }
 
@@ -56,7 +54,7 @@ pub fn drawn_alpha(media: &Media) -> AlphaMode {
     }
 }
 
-fn look_of(media: &Media) -> String {
+pub fn look(media: &Media, lut: Option<&Path>) -> String {
     let space = match media.color_space {
         ColorSpace::Tagged => String::new(),
         s => format!("-{}", s.key()),
@@ -65,7 +63,14 @@ fn look_of(media: &Media) -> String {
         AlphaMode::Straight => String::new(),
         a => format!("-alpha-{}", a.title().to_lowercase()),
     };
-    format!("{space}{alpha}")
+    let lut = lut.map_or(String::new(), |path| {
+        let stamp = vidcut_core::cube::stamp(path);
+        format!(
+            "-lut-{}",
+            vidcut_core::fingerprint::short_digest(stamp.as_bytes())
+        )
+    });
+    format!("{space}{alpha}{lut}")
 }
 
 pub fn load_tiles(path: &Path, origin: &Origin) -> Option<Vec<(i64, Image)>> {

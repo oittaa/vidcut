@@ -297,8 +297,10 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - The `Source` keeps the last two enlarged pictures (`Source::ai_picture`). Thus the later picture of one pair is the earlier picture of the next.
 - An AI upscaler takes the colors of a picture with no alpha in them. Why: its model has three channels.
   - The draw enlarges the alpha of the source frame to the size of the enlarged picture (`Matte`). This occurs at each speed (`VideoFrames::shown`).
-  - The layer goes over the layers below as Straight, or as Premultiplied when its media has that Alpha Mode.
-  - Two enlarged pictures of a pair mix with no alpha in them ([todo](../todo/upscale.md)). Where the alpha changes between the two frames, the edge is then darker or brighter than the pair with no upscaler.
+  - With no Retime Process, the layer goes over the layers below as Straight, or as Premultiplied when its media has that Alpha Mode.
+  - With a Retime Process, the draw of each enlarged picture of a pair takes that enlarged alpha (`Source::matted_from`, `Look::matted`).
+    - Thus the colors of the pair have the alpha in them, as with no upscaler. An input LUT in that draw gives `T(clamp(C / A)) * A` in Premultiplied.
+    - The draw makes the alpha only for an enlarged picture that it does not keep yet. Why: the alpha and the gray picture of a frame share one entry (`Drawings`).
 - With the frame rate conversion of macOS, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
   - The draw puts both frames into P416 VideoToolbox frames in the timeline color space first (`Source::frame_of`). They are sized and placed as the RGB pair is.
 - The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).

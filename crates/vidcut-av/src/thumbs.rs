@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use vidcut_core::model::{AlphaMode, ColorSpace};
 
 use crate::decode::Decoder as _;
@@ -27,7 +29,7 @@ pub fn filmstrip(
     max_w: u32,
     max_h: u32,
     decoder: Option<&crate::hw::GpuDecoder>,
-    look: (ColorSpace, AlphaMode),
+    look: Look<'_>,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
     filmstrip_inner(source, count, max_w, max_h, None, decoder, look)
 }
@@ -39,7 +41,7 @@ pub fn filmstrip_pictures(
     max_w: u32,
     max_h: u32,
     decoder: Option<&crate::hw::GpuDecoder>,
-    look: (ColorSpace, AlphaMode),
+    look: Look<'_>,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
     filmstrip_inner(source, count, max_w, max_h, Some(pictures), decoder, look)
 }
@@ -51,7 +53,7 @@ fn filmstrip_inner(
     max_h: u32,
     pictures: Option<u64>,
     gpu: Option<&crate::hw::GpuDecoder>,
-    look: (ColorSpace, AlphaMode),
+    look: Look<'_>,
 ) -> Result<(Vec<Image>, Vec<f64>)> {
     if gpu.is_some()
         && let Ok(Some(strip)) = strip_on(source, (count, max_w, max_h), pictures, gpu, look)
@@ -66,11 +68,12 @@ fn strip_on(
     (count, max_w, max_h): (usize, u32, u32),
     pictures: Option<u64>,
     gpu: Option<&crate::hw::GpuDecoder>,
-    (space, alpha): (ColorSpace, AlphaMode),
+    (space, alpha, lut): Look<'_>,
 ) -> Result<Option<(Vec<Image>, Vec<f64>)>> {
     if pictures == Some(0) {
         return Ok(Some((Vec::new(), Vec::new())));
     }
+    let lut = lut.map(crate::screen::load_lut).transpose()?;
     let path = source.path();
     let mut input = source.open()?;
     let stream = input
@@ -113,6 +116,7 @@ fn strip_on(
         drawn: None,
         space,
         alpha,
+        lut,
         path: path.to_path_buf(),
     };
 
@@ -222,10 +226,13 @@ fn keep(
     Ok(())
 }
 
+pub type Look<'a> = (ColorSpace, AlphaMode, Option<&'a Path>);
+
 struct Fit {
     drawn: Option<crate::export::video::Single>,
     space: ColorSpace,
     alpha: AlphaMode,
+    lut: Option<crate::screen::Lut>,
     path: std::path::PathBuf,
 }
 
@@ -253,7 +260,7 @@ impl Fit {
             (tw, th),
             format::Pixel::RGBA,
             &self.path,
-            self.alpha,
+            (self.alpha, self.lut.as_ref()),
         )?;
         Ok(Image::of(&out))
     }

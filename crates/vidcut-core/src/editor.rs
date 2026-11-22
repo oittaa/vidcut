@@ -8443,6 +8443,24 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     if let Some(path) = &set.output_lut {
         p.settings.output_lut = checked_lut(env, path)?;
     }
+    if let Some(path) = &set.video_monitor_lut {
+        p.settings.video_monitor_lut = checked_lut(env, path)?;
+    }
+    match (&set.color_viewer_lut, set.color_viewer_follows) {
+        (Some(_), true) => {
+            return Err(Error::usage(
+                "give color_viewer_lut or color_viewer_follows, not both",
+            ));
+        }
+        (Some(path), false) => {
+            p.settings.color_viewer_lut = match checked_lut(env, path)? {
+                Some(path) => crate::model::ViewerLut::File(path),
+                None => crate::model::ViewerLut::None,
+            };
+        }
+        (None, true) => p.settings.color_viewer_lut = crate::model::ViewerLut::VideoMonitor,
+        (None, false) => {}
+    }
     if let Some(profile) = set.dynamics_profile {
         let last = crate::grade_keys::LAST_PROFILE;
         if profile.start > last || profile.end > last {

@@ -6070,6 +6070,24 @@ pub struct ProjectSet {
     /// empty path clears it.
     #[serde(default)]
     pub output_lut: Option<PathBuf>,
+    /// Video Monitor LUT: a `.cube` file that the monitored picture goes
+    /// through after every other step. It is only for monitoring: no export,
+    /// render cache or proxy gets it. The viewer of the Color page shows it
+    /// while the Color Viewer LUT follows it. A file that can't be read is
+    /// refused, with the reason. An empty path clears it.
+    #[serde(default)]
+    pub video_monitor_lut: Option<PathBuf>,
+    /// Color Viewer LUT: a `.cube` file that the viewer of the Color page
+    /// goes through after every other step, in place of the Video Monitor
+    /// LUT. The other viewers and the exports do not get it. An empty path
+    /// gives that viewer no LUT. A file that can't be read is refused, with
+    /// the reason.
+    #[serde(default)]
+    pub color_viewer_lut: Option<PathBuf>,
+    /// The Color Viewer LUT follows the Video Monitor LUT again, as in a new
+    /// project. Not with `color_viewer_lut`.
+    #[serde(default)]
+    pub color_viewer_follows: bool,
     /// The `start` and `end` that each new keyframe of a grade gets, each
     /// from 0 to 10. Usual: 1 and 1.
     #[serde(default)]
@@ -7219,6 +7237,8 @@ impl Request {
                 .input_lut
                 .iter_mut()
                 .chain(set.output_lut.iter_mut())
+                .chain(set.video_monitor_lut.iter_mut())
+                .chain(set.color_viewer_lut.iter_mut())
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect(),
             _ => Vec::new(),

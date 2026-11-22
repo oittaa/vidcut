@@ -331,6 +331,10 @@ fn files(project: &mut Project) -> Vec<&mut PathBuf> {
     }
     out.extend(settings.input_lut.as_mut());
     out.extend(settings.output_lut.as_mut());
+    out.extend(settings.video_monitor_lut.as_mut());
+    if let crate::model::ViewerLut::File(path) = &mut settings.color_viewer_lut {
+        out.push(path);
+    }
     out
 }
 
