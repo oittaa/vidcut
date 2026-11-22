@@ -3027,6 +3027,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Layer node does the same with a Layer Mixer. Alt+L at the corrector on input 1 of a Layer Mixer added a corrector on input 2.
   - Measured: Alt+P and Alt+L at a corrector that feeds a Layer Mixer each add a new last input to that mixer. The new corrector takes the source.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
+  - Measured in Resolve Studio 21.2: the numbers do not follow p. 3395.
+    - Nodes 1, 2 and 4 are in series. Nodes 1 and 2 give their keys to Key Mixer 3, and it gives its key to node 4.
+    - Alt+S at node 1 then gives a new node 3. The old node 2 becomes 5, and the mixer becomes 2.
+    - The 5 measured cases fit one rule: a walk from the source, one step of links at a time. The links of each node go in the order in which they were made.
+  - vidcut: a new node gets the next number, as the manual says ([todo](todo/color-page.md)).
   - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append`, `outside`, `corrector` or `key_mixer`. The menus of the Node Editor have each one.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
@@ -3135,6 +3140,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Parallel Mixer that is off gives the same result as when it is on.
   - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
   - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
+  - Measured: the menu of a Parallel Mixer has no Reset Node Grade either.
+  - Not measured: the other items of the menu of a Parallel Mixer.
   - vidcut: the menu of a mixer has these items in this order.
   - Measured in Resolve Studio 21.2: Remove One Input removes the last input with no link. The inputs after it move up one.
   - Measured: thus with an empty last input, that input goes. Else an empty input in the middle goes.
@@ -3252,6 +3259,9 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Alt+S and Shift+S do nothing on a Key Mixer.
   - vidcut: a key link is blue. A node cannot drop into a key link.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
+  - Measured in Resolve Studio 21.2: a link from a key output to an RGB input gives the key as a gray picture. R, G and B are the key.
+  - Measured: a link from an RGB output to a key input gives the Rec. 709 luma, 0.2126 R + 0.7152 G + 0.0722 B. The key input then acts on it as on a key.
+    - With Invert on, a luma of −0.23 gave a key of 1, and a luma of 1.42 gave 0. A luma clamped to 0..1 gives the same keys.
   - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
   - vidcut: each keyframe of a corrector holds its Key Input. Thus the Key Input has no track of its own ([todo](todo/gaps.md)).
   - vidcut: each keyframe of a Key Mixer holds the values of its inputs and its Key Output. The Keyframes panel has a track for each Key Mixer.
@@ -3264,9 +3274,13 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a change goes to a keyframe by the rule of the values. The Key palette shows the values of that keyframe.
   - vidcut: a new input of a Key Mixer gets the usual values in each keyframe. Remove One Input removes the input from each keyframe.
   - Not measured: the Key Output of a Key Mixer with no linked input.
-  - Not measured: a Key Mixer with one linked input after a delete. vidcut keeps it.
+  - Measured: a delete of the node on an input of a Key Mixer keeps the mixer. That input stays, with no link.
+  - vidcut: the same.
   - Not measured: Reset in the Key palette with Matte or the Key Output Invert on. vidcut resets them.
-  - Not measured: Add Serial and Add Serial Before on a Key Mixer.
+  - Measured: Add Serial on a Key Mixer puts a corrector between the mixer and the node that it feeds.
+    - The key of the mixer goes to the RGB input of the corrector. The RGB output of the corrector goes to the key input of that node.
+  - Measured: Add Serial Before on a Key Mixer puts a corrector on input 0 of the mixer.
+    - The key of the node on that input goes to the RGB input of the corrector. The RGB output of the corrector goes to the mixer.
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.
@@ -3520,6 +3534,11 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - A middle-click removes any point of a curve.
     - The viewer shows the outline, thin lines at the inner and the outer path, the points, the Bezier handles and a middle dot.
     - Not measured: the look of a curve in the viewer of Resolve, and its key before the curve is closed.
+  - Measured in Resolve Studio 21.2: Shift and a drag box fill the points in the box. A dashed box with 8 handles stays around them.
+    - A drag of a selected point moves all the selected points and the box.
+    - A drag of a side handle scales the selected points about the opposite side.
+    - Delete with two selected points removed one of them. A second Delete removed nothing.
+  - vidcut: Shift and a drag box are not there yet ([todo](todo/color-page.md)).
   - Each point of a curve has a magenta inside and outside softness point. A drag moves each one alone (p. 3273).
   - Measured in Resolve Studio 21.2: a curve keeps an inner and an outer path, each with a point for each point of the curve.
     - With no drag, the two paths are the curve moved by Inside and Outside, with mitred corners.
