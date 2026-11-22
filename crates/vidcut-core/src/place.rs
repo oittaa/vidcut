@@ -99,7 +99,7 @@ pub struct Placing {
     pub level: Level,
     pub mode: CompositeMode,
     pub effects: Vec<Working>,
-    pub composed: Vec<Working>,
+    pub composed: Program,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -343,7 +343,6 @@ impl Shaping {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Work {
-    Clear,
     Boxes(Boxing),
     Blur(Blurring),
     Mosaic(Tiling),
@@ -905,9 +904,90 @@ impl Working {
     }
 }
 
-pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) -> Vec<Working> {
-    let Some(chain) = c.chain() else {
-        return vec![Working::plain(Work::Clear, 1.0)];
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Program {
+    pub stages: Vec<Stage>,
+    pub out: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stage {
+    pub op: Op,
+    pub from: Vec<usize>,
+    pub to: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Op {
+    Clear,
+    Work(Working),
+}
+
+impl Program {
+    pub fn clear() -> Self {
+        Self {
+            stages: vec![Stage {
+                op: Op::Clear,
+                from: Vec::new(),
+                to: 0,
+            }],
+            out: 0,
+        }
+    }
+
+    pub fn is_plain(&self) -> bool {
+        self.stages.is_empty() && self.out == 0
+    }
+
+    pub fn registers(&self) -> usize {
+        let used = self
+            .stages
+            .iter()
+            .flat_map(|s| s.from.iter().chain([&s.to]));
+        used.chain([&self.out]).max().map_or(1, |r| r + 1)
+    }
+}
+
+struct Registers {
+    left: Vec<usize>,
+    free: Vec<usize>,
+}
+
+impl Registers {
+    fn new(media: bool) -> Self {
+        Self {
+            left: vec![0],
+            free: if media { Vec::new() } else { vec![0] },
+        }
+    }
+
+    fn hold(&mut self, r: usize, uses: usize) {
+        self.left[r] += uses;
+    }
+
+    fn read(&mut self, r: usize) -> bool {
+        self.left[r] = self.left[r].saturating_sub(1);
+        self.left[r] == 0
+    }
+
+    fn taken(&mut self) -> usize {
+        self.free.pop().unwrap_or_else(|| {
+            self.left.push(0);
+            self.left.len() - 1
+        })
+    }
+
+    fn written(&mut self, from: usize) -> usize {
+        match self.read(from) {
+            true => from,
+            false => self.taken(),
+        }
+    }
+}
+
+pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) -> Program {
+    let Some((order, uses)) = c.picture_order() else {
+        return Program::clear();
     };
     let on = OnFrame {
         width: 4.0 / 3.0 * (w * h).sqrt(),
@@ -919,40 +999,82 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
         canvas: [w, h],
         back: frame_back((w, h)),
     };
-    chain
-        .into_iter()
-        .filter(|n| !n.pass_through)
-        .filter_map(|n| {
-            let mut working = match &n.tool {
-                Tool::Blur(b) => Working::of_blur(b, n.mixed(), w)?,
-                Tool::Effect(kind) => {
-                    let effect = Effect {
-                        kind: kind.clone(),
-                        blend: n.blend,
-                        ..EffectType::of(kind).made()
-                    };
-                    let mut working = Working::of(&effect, &on)?;
-                    if let (Work::Blur(b), false) = (&mut working.work, n.blur_alpha) {
-                        b.across[3] = 0.0;
-                        b.down[3] = 0.0;
-                    }
-                    working
+    let work = |n: &Node| {
+        let mut working = match &n.tool {
+            _ if n.pass_through => return None,
+            Tool::Blur(b) => Working::of_blur(b, n.mixed(), w)?,
+            Tool::Effect(kind) => {
+                let effect = Effect {
+                    kind: kind.clone(),
+                    blend: n.blend,
+                    ..EffectType::of(kind).made()
+                };
+                let mut working = Working::of(&effect, &on)?;
+                if let (Work::Blur(b), false) = (&mut working.work, n.blur_alpha) {
+                    b.across[3] = 0.0;
+                    b.down[3] = 0.0;
                 }
-                _ => return None,
-            };
-            working.masks = c
-                .masks_of(n)
-                .into_iter()
-                .filter(|m| !m.pass_through)
-                .filter_map(|m| {
-                    let mask = m.tool.mask()?;
-                    let bases = MaskBase::all(m, c, (w, h), areas);
-                    Some(Shaping::of(mask, &m.tool, (w, h), &bases))
-                })
-                .collect();
-            Some(working)
-        })
-        .collect()
+                working
+            }
+            _ => return None,
+        };
+        working.masks = c
+            .masks_of(n)
+            .into_iter()
+            .filter(|m| !m.pass_through)
+            .filter_map(|m| {
+                let mask = m.tool.mask()?;
+                let bases = MaskBase::all(m, c, (w, h), areas);
+                Some(Shaping::of(mask, &m.tool, (w, h), &bases))
+            })
+            .collect();
+        Some(working)
+    };
+    let media = order.iter().any(|&i| c.nodes[i].tool == Tool::MediaIn);
+    let mut regs = Registers::new(media);
+    let mut made: Vec<Option<usize>> = vec![None; c.nodes.len()];
+    let mut stages = Vec::new();
+    let mut out = None;
+    for i in order {
+        let n = &c.nodes[i];
+        let came: Vec<Option<usize>> = n
+            .pictures()
+            .map(|from| from.and_then(|name| c.index(name)).and_then(|j| made[j]))
+            .collect();
+        let first = came.first().copied().flatten();
+        let gives: Vec<bool> = came.iter().map(Option::is_some).collect();
+        let result = match &n.tool {
+            Tool::MediaIn => Some(0),
+            Tool::MediaOut => {
+                out = first;
+                None
+            }
+            t if !t.gives_from(&gives) => None,
+            _ => first.map(|r| match work(n) {
+                None => {
+                    regs.read(r);
+                    r
+                }
+                Some(working) => {
+                    let to = regs.written(r);
+                    stages.push(Stage {
+                        op: Op::Work(working),
+                        from: vec![r],
+                        to,
+                    });
+                    to
+                }
+            }),
+        };
+        if let Some(r) = result {
+            regs.hold(r, uses[i]);
+        }
+        made[i] = result;
+    }
+    match out {
+        Some(out) => Program { stages, out },
+        None => Program::clear(),
+    }
 }
 
 pub fn flipped(p: &Picture, [x, y]: [f64; 2]) -> [f64; 2] {
@@ -1216,12 +1338,16 @@ impl Placing {
         if u0 < u1 && v0 < v1 && own.soft == Soft::default() && no_bars(quad, frame) {
             own.edge = [-1.0, -1.0, 2.0, 2.0];
         }
-        let composed = p.picture.composition.as_ref().map_or(Vec::new(), |c| {
-            let frame = p.clock.frame(p.source);
-            let sampled = c.sampled((frame - c.start) as f64, frame as f64);
-            let areas = |pattern: &Pattern| pattern.area_at(frame as f64);
-            composed(&sampled, pixels, p.frame, &areas)
-        });
+        let composed = p
+            .picture
+            .composition
+            .as_ref()
+            .map_or_else(Program::default, |c| {
+                let frame = p.clock.frame(p.source);
+                let sampled = c.sampled((frame - c.start) as f64, frame as f64);
+                let areas = |pattern: &Pattern| pattern.area_at(frame as f64);
+                composed(&sampled, pixels, p.frame, &areas)
+            });
         Self {
             level: own,
             mode: placing_mode(p),

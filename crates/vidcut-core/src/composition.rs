@@ -7,6 +7,7 @@ use crate::model::{
 };
 use crate::motion::Area;
 use crate::render::FileClock;
+use crate::request::NodeInput;
 
 pub const MEDIA_IN: &str = "MediaIn1";
 pub const MEDIA_OUT: &str = "MediaOut1";
@@ -313,12 +314,40 @@ impl Tool {
         matches!(self, Tool::Blur(_) | Tool::Effect(_))
     }
 
-    pub fn flows(&self) -> bool {
-        self.works() || matches!(self, Tool::Tracker(_))
+    pub fn inputs(&self) -> &'static [NodeInput] {
+        match self {
+            Tool::MediaIn => &[],
+            Tool::MediaOut | Tool::Tracker(_) => &[NodeInput::Input],
+            Tool::Blur(_) | Tool::Effect(_) => &[NodeInput::Input, NodeInput::EffectMask],
+            Tool::Ellipse(_) | Tool::Rectangle(_) | Tool::Polygon(_) => &[NodeInput::EffectMask],
+        }
     }
 
-    pub fn takes_input(&self) -> bool {
-        self.flows() || matches!(self, Tool::MediaOut)
+    pub fn takes(&self, input: NodeInput) -> bool {
+        self.inputs().contains(&input)
+    }
+
+    pub fn gives_picture(&self) -> bool {
+        !matches!(self, Tool::MediaOut) && !self.is_mask()
+    }
+
+    pub fn flows(&self) -> bool {
+        self.gives_picture() && self.takes(NodeInput::Input)
+    }
+
+    pub fn gives_from(&self, came: &[bool]) -> bool {
+        match self {
+            Tool::MediaIn => true,
+            t if !t.gives_picture() => false,
+            _ => came.first().copied().unwrap_or(false),
+        }
+    }
+
+    pub fn feeds(&self, input: NodeInput) -> bool {
+        match input.carries_picture() {
+            true => self.gives_picture(),
+            false => self.is_mask(),
+        }
     }
 
     pub fn tracker(&self) -> Option<&Tracker> {
@@ -333,10 +362,6 @@ impl Tool {
             Tool::Tracker(t) => Some(t),
             _ => None,
         }
-    }
-
-    pub fn takes_mask(&self) -> bool {
-        self.works() || self.is_mask()
     }
 
     pub fn mask(&self) -> Option<&Mask> {
@@ -419,8 +444,45 @@ impl Node {
         }
     }
 
+    pub fn join(&self, input: NodeInput) -> Option<&str> {
+        match input {
+            NodeInput::Input => self.input.as_deref(),
+            NodeInput::EffectMask => self.effect_mask.as_deref(),
+        }
+    }
+
+    pub fn join_mut(&mut self, input: NodeInput) -> &mut Option<String> {
+        match input {
+            NodeInput::Input => &mut self.input,
+            NodeInput::EffectMask => &mut self.effect_mask,
+        }
+    }
+
     pub fn joins(&self, name: &str) -> bool {
-        self.input.as_deref() == Some(name) || self.effect_mask.as_deref() == Some(name)
+        NodeInput::ALL.iter().any(|i| self.join(*i) == Some(name))
+    }
+
+    pub fn pictures(&self) -> impl Iterator<Item = Option<&str>> {
+        let inputs = self.tool.inputs().iter().filter(|i| i.carries_picture());
+        inputs.map(|i| self.join(*i))
+    }
+}
+
+impl NodeInput {
+    pub const ALL: [NodeInput; 2] = [NodeInput::Input, NodeInput::EffectMask];
+
+    pub fn carries_picture(self) -> bool {
+        match self {
+            NodeInput::Input => true,
+            NodeInput::EffectMask => false,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            NodeInput::Input => "picture input",
+            NodeInput::EffectMask => "effect mask input",
+        }
     }
 }
 
@@ -580,7 +642,12 @@ impl Composition {
             if !kept.insert(name) {
                 continue;
             }
-            next.extend(n.input.iter().chain(&n.effect_mask).cloned());
+            next.extend(
+                NodeInput::ALL
+                    .iter()
+                    .filter_map(|i| n.join(*i))
+                    .map(str::to_string),
+            );
             next.extend(n.connect.as_ref().map(|c| c.tracker.clone()));
         }
         self.nodes
@@ -642,23 +709,57 @@ impl Composition {
         }
     }
 
-    pub fn chain(&self) -> Option<Vec<&Node>> {
-        let mut seen = HashSet::new();
-        let mut at = self.node(self.out()?.input.as_deref()?)?;
-        let mut tools = Vec::new();
-        loop {
-            if !seen.insert(at.name.as_str()) {
-                return None;
+    pub fn shows(&self) -> bool {
+        let Some((order, _)) = self.picture_order() else {
+            return false;
+        };
+        let mut gives = vec![false; self.nodes.len()];
+        for i in order {
+            let n = &self.nodes[i];
+            let came: Vec<bool> = n
+                .pictures()
+                .map(|from| {
+                    from.and_then(|name| self.index(name))
+                        .is_some_and(|j| gives[j])
+                })
+                .collect();
+            if n.tool == Tool::MediaOut {
+                return came.first().copied().unwrap_or(false);
             }
-            match &at.tool {
-                Tool::MediaIn => break,
-                t if t.flows() => tools.push(at),
-                _ => return None,
-            }
-            at = self.node(at.input.as_deref()?)?;
+            gives[i] = n.tool.gives_from(&came);
         }
-        tools.reverse();
-        Some(tools)
+        false
+    }
+
+    pub fn picture_order(&self) -> Option<(Vec<usize>, Vec<usize>)> {
+        if self.loops().is_some() {
+            return None;
+        }
+        let out = self.nodes.iter().position(|n| n.tool == Tool::MediaOut)?;
+        let mut uses = vec![0; self.nodes.len()];
+        let mut seen = vec![false; self.nodes.len()];
+        let mut order = Vec::new();
+        let mut stack = vec![(out, false)];
+        while let Some((i, done)) = stack.pop() {
+            if done {
+                order.push(i);
+                continue;
+            }
+            if seen[i] {
+                continue;
+            }
+            seen[i] = true;
+            stack.push((i, true));
+            let from = self.nodes[i]
+                .pictures()
+                .flatten()
+                .filter_map(|n| self.index(n));
+            for j in from.collect::<Vec<_>>().into_iter().rev() {
+                uses[j] += 1;
+                stack.push((j, false));
+            }
+        }
+        Some((order, uses))
     }
 
     pub fn masks_of(&self, node: &Node) -> Vec<&Node> {
@@ -682,10 +783,7 @@ impl Composition {
             let mut stack = vec![start.name.as_str()];
             while let Some(name) = stack.pop() {
                 let Some(n) = self.node(name) else { continue };
-                for next in [n.input.as_deref(), n.effect_mask.as_deref()]
-                    .into_iter()
-                    .flatten()
-                {
+                for next in NodeInput::ALL.iter().filter_map(|i| n.join(*i)) {
                     if next == start.name {
                         return Some(start.name.as_str());
                     }

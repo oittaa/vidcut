@@ -1655,12 +1655,7 @@ impl RenderPlan {
             .iter()
             .flat_map(VideoPiece::layers)
             .flat_map(|(layer, _)| layer.placed())
-            .find(|p| {
-                p.picture
-                    .composition
-                    .as_ref()
-                    .is_some_and(|c| c.chain().is_none())
-            })
+            .find(|p| p.picture.composition.as_ref().is_some_and(|c| !c.shows()))
             .map(|p| p.clip.as_str())
     }
 

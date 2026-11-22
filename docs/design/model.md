@@ -636,7 +636,8 @@ Writing:
   - `Tool::MediaIn` is the clip's own picture. `Tool::MediaOut` is the picture that the clip shows.
   - `Tool::Blur` holds a `Blur`. `Tool::Effect` holds an `EffectKind`, one of the kinds of the clip effects.
   - `Tool::Ellipse`, `Tool::Rectangle` and `Tool::Polygon` hold a `Mask`.
-  - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values. `Tool::flows` gives the tools that pass a picture on, and the Tracker is one of them.
+  - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values.
+  - `Tool::inputs` lists the inputs of each tool (`NodeInput`). `Tool::gives_picture` tells whether a tool gives a picture, and `Tool::feeds` whether it fits an input. Each check of a join reads them. Thus a new tool sets its inputs in one place.
   - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
   - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).
     - `Composition::sampled` writes the value of each connected Center on a frame: the middle of the pattern plus its offset (`Pattern::offset_position_at`). Thus each tool reads its Center in one way.
@@ -651,7 +652,7 @@ Writing:
   - `Frames::time` and `Frames::at` take a frame of the composition to the timeline and back.
 - The joins are names, not places in the list. Why: a request, the GUI and the OTIO metadata then name a node in one way, and a removal moves no other join.
 - The module `composition` reads a composition:
-  - `Composition::chain` follows the inputs from the MediaOut node back to the MediaIn node. It gives the tools in their order, or none when it does not get to the MediaIn node.
+  - `Composition::picture_order` follows the picture inputs from the MediaOut node back. It gives the nodes in the order that they run, and how many nodes take the picture of each.
   - `Composition::masks_of` follows the effect masks of a node back. It gives the masks in their order.
   - `Composition::loops` finds a loop of joins.
   - `Composition::plain` is the composition of a clip without one: `MediaIn1` joined to `MediaOut1`.

@@ -10,7 +10,7 @@ use crate::player::{AlphaUse, Layout, Picture, Sampling, TitleOver, TitlePicture
 use crate::thumbs::Image;
 use vidcut_core::model::{AlphaMode, CompositeMode, Grade, Hdr};
 use vidcut_core::place::{
-    Extent, Level, Mix, MixPart, Mixes, Placing, Working, chain, frame_back, lettered,
+    Extent, Level, Mix, MixPart, Mixes, Placing, Program, Working, chain, frame_back, lettered,
 };
 use vidcut_core::preferences::{Scope, ScopeScale};
 use vidcut_core::render::{Moving, Placed, Shift};
@@ -1565,9 +1565,9 @@ impl<'a> MixDraw<'a, '_> {
     ) -> wgpu::BindGroup {
         let canvases = self.canvases;
         let canvas = &canvases[depth];
-        if !mix.placing.composed.is_empty() {
-            let works = &mix.placing.composed;
-            self.blurred.composed(self.gpu, canvas, works, encoder);
+        if !mix.placing.composed.is_plain() {
+            let program = &mix.placing.composed;
+            self.blurred.composed(self.gpu, canvas, program, encoder);
         }
         let mut placing = mix.placing.clone();
         let (effects, factor) = bared(&mut placing, &mut 1.0);
@@ -1796,7 +1796,7 @@ struct Slot {
     rgb: Option<wgpu::Buffer>,
     rgb_matte: Option<wgpu::Buffer>,
     converted: Option<(wgpu::Texture, (u32, u32, u32))>,
-    converted_from: Option<(std::sync::Weak<Picture>, Option<Hdr>, Vec<Working>)>,
+    converted_from: Option<(std::sync::Weak<Picture>, Option<Hdr>, Program)>,
     composer: Option<blur::Composer>,
     composed_params: Option<wgpu::Buffer>,
     own: Option<wgpu::Texture>,
@@ -2444,7 +2444,7 @@ impl Screen {
                 view: w.view.clone(),
             };
             let works = std::slice::from_ref(work);
-            self.blurred.composed(gpu, &canvas, works, &mut encoder);
+            self.blurred.worked(gpu, &canvas, works, &mut encoder);
         }
         if n > 0 && !titles.is_empty() {
             let mut pass = begin(&mut encoder, canvas, None);
@@ -2676,14 +2676,15 @@ impl Slot {
         let bytes = params_of(picture, size, gpu.wide, cover, how, (halvings, alpha));
         gpu.queue.write_buffer(params, 0, &bytes);
         let params: &wgpu::Buffer = params;
-        let plan: &[Working] = match (how.0, picture.sampling()) {
-            (_, Sampling::Placed { .. }) | (None, _) => &[],
+        let plain = Program::default();
+        let plan = match (how.0, picture.sampling()) {
+            (_, Sampling::Placed { .. }) | (None, _) => &plain,
             (Some((placing, _)), _) => &placing.composed,
         };
-        if plan.is_empty() {
+        if plan.is_plain() {
             self.composer = None;
         }
-        let composed = match plan.is_empty() {
+        let composed = match plan.is_plain() {
             true => None,
             false => {
                 let buffer = self.composed_params.get_or_insert_with(|| {
@@ -2886,7 +2887,7 @@ impl Slot {
             }
             None => convert(encoder, &level(0), &bind(&gpu.blank)),
         }
-        if !plan.is_empty() {
+        if !plan.is_plain() {
             let (w, h) = (wanted.0, wanted.1);
             let upright = match picture.rotation() / 90 % 2 {
                 1 => (h, w),
@@ -2902,7 +2903,7 @@ impl Slot {
         for k in 1..wanted.2 {
             draw(encoder, &level(k), &gpu.halving, &bind(&level(k - 1)));
         }
-        self.converted_from = Some((Arc::downgrade(picture), how.2, plan.to_vec()));
+        self.converted_from = Some((Arc::downgrade(picture), how.2, plan.clone()));
         shown(&converted.create_view(&Default::default()))
     }
 

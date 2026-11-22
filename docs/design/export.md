@@ -996,9 +996,12 @@ The passes:
 
 The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500), [model](model.md#compositions)):
 
-- `Placing::new` samples each node at the frame of the composition that the picture shows (`Placed.clock`, `Composition::start`). Then `place::composed` gives the work of the composition (`Placing.composed`).
-  - It takes the tools of `Composition::chain`, in their order. A tool with `pass_through` is left out.
-  - Without a chain, it gives one `Work::Clear`. The clip then shows nothing.
+- `Placing::new` samples each node at the frame of the composition that the picture shows (`Placed.clock`, `Composition::start`). Then `place::composed` makes the composition into a `place::Program` (`Placing.composed`).
+  - A program is a list of `place::Stage` values. Each stage runs one `place::Op` on numbered registers: it reads the registers of its inputs and writes one register.
+  - Register 0 holds the clip's own picture at the start. The program ends with its result in the register `Program::out`.
+  - `Composition::picture_order` gives the nodes that feed the MediaOut node, each before the nodes that take its picture. It also counts the nodes that take each picture.
+  - A node that passes its picture on (a Tracker, a tool with `pass_through`, a tool with no work) gives the register of its input. A tool works in place on the register of its input when no later node reads that register. Else it writes a free register.
+  - A node gives no picture when its picture input has none (`Tool::gives_from`). When the MediaOut node gets no picture, or the joins make a loop, the program is one `Op::Clear`. The clip then shows nothing, and `RenderPlan::broken_composition` stops an export (`Composition::shows`).
   - It works in the pixels of the picture, upright. A size in the composition follows these pixels, not the frame.
 - `Working::of_blur` gives the work of a Blur tool:
   - Fast Gaussian and Gaussian give a `place::Blurring` for `fs_blur`. A channel that is off has a sigma of 0.
@@ -1022,8 +1025,8 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
 The draw:
 
 - `Slot::prepare_with` runs the composition on the converted picture, before its smaller copies:
-  - `fs_composed_in` makes the upright picture with premultiplied colors and its alpha, in the picture of a `blur::Composer`.
-  - `blur::effects_into` runs the work there, as it runs the effects of a layer.
+  - `fs_composed_in` makes the upright picture with premultiplied colors and its alpha, in the picture of a `blur::Composer`. That picture is register 0.
+  - `blur::run` runs the stages. The other registers are textures of the same size, which the `blur::Composer` keeps for the next frame. `blur::effects_into` runs the work of a stage, as it runs the effects of a layer.
   - `fs_composed_out` writes the result back into the converted picture, at its stored turn.
 - The converted picture then holds the alpha. Its parameters say so (`COMPOSED_ALPHA`, `COMPOSED_MODE`). Then `opacity` reads the alpha from it, and `placed` takes the colors as premultiplied.
 - `Slot.converted_from` also holds the work. Thus a change of the composition draws the picture again.
