@@ -373,11 +373,7 @@ pub fn set_marks(
         .pooled_compound(id)
         .ok_or_else(|| Error::not_found(format!("no compound clip {id}")))?;
     let open = p.checked_out_compound() == Some(id);
-    let frames = if open {
-        k.frames.max(p.end())
-    } else {
-        k.frames
-    };
+    let frames = length(p, k);
     let held = p.compound_sheet(k).marks;
     let marks = super::merged_marks(held, mark_in, mark_out, frames, &k.name)?;
     match open {
@@ -387,11 +383,19 @@ pub fn set_marks(
     Ok(marks)
 }
 
+pub fn length(p: &Project, k: &Compound) -> i64 {
+    match p.checked_out_compound() == Some(k.id.as_str()) {
+        true => k.frames.max(p.end()),
+        false => k.frames,
+    }
+}
+
 pub fn marked(p: &Project, k: &Compound) -> (i64, i64) {
     let marks = p.compound_sheet(k).marks;
+    let len = length(p, k);
     (
-        marks.mark_in.unwrap_or(0),
-        marks.mark_out.unwrap_or(k.frames),
+        marks.mark_in.unwrap_or(0).min(len),
+        marks.mark_out.unwrap_or(len).min(len),
     )
 }
 
@@ -1140,13 +1144,6 @@ fn prepare_open_tracks(
         t.sort();
     }
     for t in &mut out {
-        for c in &mut t.clips {
-            if let Some(f) = c.title.as_mut().and_then(|x| x.follows.as_mut())
-                && let Some(new) = renamed_clips.get(&f.clip)
-            {
-                f.clip.clone_from(new);
-            }
-        }
         for x in &mut t.transitions {
             for side in [&mut x.from, &mut x.to].into_iter().flatten() {
                 if let Some(new) = renamed_clips.get(side) {
@@ -1295,7 +1292,6 @@ fn close_one(p: &mut Project) -> Result<()> {
     let inner_frames = end_of(&whole);
     let empty = whole.is_empty();
     p.tracks = whole;
-    p.marks = Marks::default();
     p.subtitles.clear();
     if let Some(k) = p.compound_mut(&cid) {
         k.frames = k.frames.max(inner_frames);

@@ -2807,16 +2807,6 @@ impl Generator {
     }
 }
 
-/// The motion path that a title follows: a path of another clip of the same
-/// timeline.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-pub struct Follow {
-    /// The clip that has the path, for example `c3`.
-    pub clip: String,
-    /// The id of the path on that clip, for example `p2`.
-    pub path: String,
-}
-
 /// A title: text drawn over the picture (decision D65). A field left out
 /// keeps the usual look.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -2907,15 +2897,6 @@ pub struct Title {
     /// out when the two lines go together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper: Option<TitleLine>,
-    /// The motion path that it follows (`motion.follow`). Each `position` of
-    /// the title then counts from the middle of the thing on that path:
-    /// `[0.5, 0.5]` puts the `anchor` on that middle. Before the first sample
-    /// of the path and after its last, the thing is where that sample has it.
-    /// Before and after the clip of the path, it is where the first or the
-    /// last frame of that clip has it. A scroll follows no path. Left out
-    /// when it follows none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub follows: Option<Follow>,
 }
 
 /// One line of a lower third: `upper` or `lower`.
@@ -3263,7 +3244,6 @@ impl Title {
             opacity: None,
             opacity_keys: Vec::new(),
             upper: None,
-            follows: None,
         }
     }
 
@@ -3542,20 +3522,6 @@ impl Title {
         let [x, y] = Self::usual_position(self.kind, self.align());
         t.position.get_or_insert([x, y + Self::UPPER_DROP]);
         t
-    }
-
-    pub fn moved(&mut self, [dx, dy]: [f64; 2]) {
-        let [x, y] = self.place();
-        let [ux, uy] = Self::usual_position(self.kind, self.align());
-        self.position = Some([x + dx, y + dy]);
-        self.position_keys.iter_mut().for_each(|k| k.value += dx);
-        self.position_y.iter_mut().for_each(|v| *v += dy);
-        if let Some(upper) = self.upper.as_mut() {
-            let [x, y] = upper.position.unwrap_or([ux, uy + Self::UPPER_DROP]);
-            upper.position = Some([x + dx, y + dy]);
-            upper.position_keys.iter_mut().for_each(|k| k.value += dx);
-            upper.position_y.iter_mut().for_each(|v| *v += dy);
-        }
     }
 
     pub fn each_line(&mut self, mut change: impl FnMut(&mut Title)) {
@@ -3854,10 +3820,10 @@ pub struct GradeNode {
     /// none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub label: String,
-    /// The keyframes of a corrector, in the order of their frames, one at
-    /// most on a frame. Each holds every value of the corrector and its Key
-    /// Output. Before the first keyframe, the corrector has its own values
-    /// and `key`. Left out when it has none.
+    /// The keyframes of a corrector or a key mixer, in the order of their
+    /// frames, one at most on a frame. Each holds every value of the node.
+    /// Before the first keyframe, the node has its own values. Left out
+    /// when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<GradeKey>,
     /// Its keyframes have held different values since its first keyframe
@@ -3935,15 +3901,26 @@ impl GradeNode {
         matches!(self.tool, GradeTool::KeyMixer { .. })
     }
 
+    pub fn takes_keyframes(&self) -> bool {
+        matches!(
+            self.tool,
+            GradeTool::Corrector(_) | GradeTool::KeyMixer { .. }
+        )
+    }
+
     pub fn is_animated(&self) -> bool {
-        match &self.tool {
-            GradeTool::Corrector(c) => {
-                !self.keys.is_empty()
-                    && (self.animated
-                        || (self.keys.iter()).any(|k| k.values != **c || k.key != self.key))
-            }
+        let own = |k: &GradeKey| match &self.tool {
+            GradeTool::Corrector(c) => k.values != **c,
+            GradeTool::KeyMixer { mix } => k.mix != *mix,
             _ => false,
-        }
+        };
+        let changes = |k: &GradeKey| {
+            own(k)
+                || k.key != self.key
+                || k.key_input != self.key_input
+                || k.windows != self.windows
+        };
+        !self.keys.is_empty() && (self.animated || self.keys.iter().any(changes))
     }
 }
 
@@ -4039,6 +4016,15 @@ pub enum WindowShape {
         /// The softness outside the edge: 0.004243 of the frame width a
         /// step. Usual: 0.
         outside: f64,
+        /// The inner softness point of each point, as a move `[x, y]` from
+        /// that point, in the units of `points`. Left out while `inside`
+        /// gives the inner edge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inner: Option<Vec<[f64; 2]>>,
+        /// The outer softness point of each point, as `inner`. Left out
+        /// while `outside` gives the outer edge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outer: Option<Vec<[f64; 2]>>,
     },
     /// A line through the middle of the window. The key is 1 above it and
     /// goes to 0 below it.
@@ -4102,6 +4088,8 @@ impl GradeWindow {
                 soft: 0.0,
                 inside: 0.0,
                 outside: 0.0,
+                inner: None,
+                outer: None,
             },
             WindowKind::Gradient => WindowShape::Gradient { soft: 2.0 },
         };
@@ -4250,8 +4238,8 @@ impl KeyMix {
     }
 }
 
-/// A keyframe of a corrector: every value of the corrector and its Key
-/// Output on one frame.
+/// A keyframe of a corrector or a key mixer: every value of the node on
+/// one frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GradeKey {
     /// On a clip, the source frame, counted as the `frame` of a `Keyframe`
@@ -4266,16 +4254,36 @@ pub struct GradeKey {
     /// values up to the next keyframe. 1 ends at one speed. 2 to 6 end
     /// slowly, and 7 to 10 end fast.
     pub end: u8,
-    /// The values of the corrector on this frame.
+    /// The values of a corrector on this frame. Left out at their usual
+    /// values, and on a key mixer.
+    #[serde(default, skip_serializing_if = "Corrector::is_usual")]
     pub values: Corrector,
-    /// The Key Output of the corrector on this frame. Gain and offset blend
-    /// as the values do. Invert changes on the frame of the next keyframe.
+    /// The Key Output of the node on this frame. Gain and offset blend as
+    /// the values do. Invert changes on the frame of the next keyframe.
     /// Left out at its usual value.
     #[serde(default, skip_serializing_if = "KeyOutput::is_usual")]
     pub key: KeyOutput,
+    /// The Key Input of a corrector on this frame. Gain, offset and the
+    /// blur blend as the values do. Invert and mask change on the frame of
+    /// the next keyframe. Left out at its usual value, and on a key mixer.
+    #[serde(default, skip_serializing_if = "KeyInput::is_usual")]
+    pub key_input: KeyInput,
+    /// How each input of a key mixer takes its key on this frame, in the
+    /// order of the inputs. Gain and offset blend as the values do. Invert
+    /// and matte change on the frame of the next keyframe. A corrector
+    /// leaves it out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mix: Vec<KeyMix>,
+    /// The windows of a corrector on this frame, in the order of the
+    /// `windows` of the node. The numbers blend as the values do. `on`,
+    /// `invert`, `mask` and `name` change on the frame of the next
+    /// keyframe, and so do the points of a list of another length. A key
+    /// mixer leaves it out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<GradeWindow>,
 }
 
-/// What a keyframe of a corrector does up to the next keyframe.
+/// What a keyframe does up to the next keyframe.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GradeKeyKind {
@@ -8918,10 +8926,9 @@ impl Hash for Title {
             rotation,
             opacity,
             upper,
-            follows,
             ..
         } = self;
-        (kind, align, anchor, text, style, follows).hash(h);
+        (kind, align, anchor, text, style).hash(h);
         pair_bits(*position).hash(h);
         (
             floats_bits(*zoom),

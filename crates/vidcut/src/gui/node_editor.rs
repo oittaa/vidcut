@@ -103,6 +103,7 @@ pub(super) struct Graph<'a, K> {
     pub(super) tiles: Vec<Tile<K>>,
     pub(super) wires: Vec<Wire<K>>,
     pub(super) selected: &'a [K],
+    pub(super) current: Option<&'a K>,
     pub(super) active: Color32,
 }
 
@@ -493,7 +494,7 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
             let fade = if t.faded { FADED } else { 1.0 };
             painter.rect_filled(r.shrink(1.0), CornerRadius::same(3), c.panel);
             let edge = match (
-                graph.selected.last() == Some(&t.key),
+                graph.current == Some(&t.key),
                 graph.selected.contains(&t.key),
             ) {
                 (true, _) => Stroke::new(2.0, CURRENT_ROW),
@@ -777,7 +778,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         let id = ui.scope_id().with((&graph.salt, &t.key));
         let mut node_resp = ui.interact(r, id, Sense::click_and_drag());
         let selected = graph.selected.contains(&t.key);
-        let active = graph.selected.last() == Some(&t.key);
+        let active = graph.current == Some(&t.key);
         let fade = if t.faded { FADED } else { 1.0 };
         painter.rect_filled(r, CornerRadius::same(4), c.panel.gamma_multiply(fade));
         let edge = match (active, selected) {

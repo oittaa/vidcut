@@ -144,14 +144,16 @@ pub(super) fn with_value(w: &GradeWindow, f: Field, v: f64) -> GradeWindow {
                 | WindowShape::Curve { soft, .. }
                 | WindowShape::Gradient { soft },
             ) => *soft = v,
-            (
-                Field::Inside,
-                WindowShape::Polygon { inside, .. } | WindowShape::Curve { inside, .. },
-            ) => *inside = v,
-            (
-                Field::Outside,
-                WindowShape::Polygon { outside, .. } | WindowShape::Curve { outside, .. },
-            ) => *outside = v,
+            (Field::Inside, WindowShape::Polygon { inside, .. }) => *inside = v,
+            (Field::Outside, WindowShape::Polygon { outside, .. }) => *outside = v,
+            (Field::Inside, WindowShape::Curve { inside, inner, .. }) => {
+                *inside = v;
+                *inner = None;
+            }
+            (Field::Outside, WindowShape::Curve { outside, outer, .. }) => {
+                *outside = v;
+                *outer = None;
+            }
             _ => {}
         },
     }
@@ -236,16 +238,28 @@ pub(super) fn window_changes(from: &GradeWindow, to: &GradeWindow) -> Map<String
                 soft: a,
                 inside: ai,
                 outside: ao,
+                inner: an,
+                outer: au,
             },
             WindowShape::Curve {
                 points: bp,
                 soft: b,
                 inside: bi,
                 outside: bo,
+                inner: bn,
+                outer: bu,
             },
         ) => {
-            for (name, x, y) in [("inside", ai, bi), ("outside", ao, bo)] {
-                if x != y {
+            for (name, x, y) in [("inner", an, bn), ("outer", au, bu)] {
+                if let Some(y) = y.as_ref().filter(|_| x != y) {
+                    m.insert(name.into(), json!(y));
+                }
+            }
+            for (name, x, y, cleared) in [
+                ("inside", ai, bi, an.is_some() && bn.is_none()),
+                ("outside", ao, bo, au.is_some() && bu.is_none()),
+            ] {
+                if x != y || cleared {
                     m.insert(name.into(), json!(y));
                 }
             }

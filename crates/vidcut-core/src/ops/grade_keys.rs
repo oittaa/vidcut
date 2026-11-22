@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
@@ -57,7 +58,7 @@ impl Clock {
 fn targets(g: &Grade, n: Option<u32>) -> Result<Vec<u32>> {
     match n {
         Some(n) => match g.node(n) {
-            Some(d) if d.tool.is_mixer() => Err(Error::invalid(format!(
+            Some(d) if !d.takes_keyframes() => Err(Error::invalid(format!(
                 "node {n} is a mixer, which takes no keyframes"
             ))),
             Some(d) if d.locked => Err(locked(n)),
@@ -66,12 +67,12 @@ fn targets(g: &Grade, n: Option<u32>) -> Result<Vec<u32>> {
         },
         None => {
             let all: Vec<u32> = (g.nodes.iter().zip(1..))
-                .filter(|(d, _)| !d.tool.is_mixer() && !d.locked)
+                .filter(|(d, _)| d.takes_keyframes() && !d.locked)
                 .map(|(_, k)| k)
                 .collect();
             match all.is_empty() {
                 true => Err(Error::invalid(
-                    "the grade has no corrector that is not locked",
+                    "the grade has no corrector or key mixer that is not locked",
                 )),
                 false => Ok(all),
             }
@@ -133,18 +134,18 @@ pub fn add(
             match d.keys.iter_mut().find(|key| key.frame == frame) {
                 Some(key) => key.kind = kind,
                 None => {
-                    let values = d
-                        .corrector_at(frame as f64)
-                        .ok_or_else(|| no_node(k))?
-                        .into_owned();
-                    let key = d.key_output_at(frame as f64);
+                    let at = frame as f64;
+                    let values = d.corrector_at(at).map(Cow::into_owned);
                     d.put_key(GradeKey {
                         frame,
                         kind,
                         start: profile.start,
                         end: profile.end,
-                        values,
-                        key,
+                        values: values.unwrap_or_default(),
+                        key: d.key_output_at(at),
+                        key_input: d.key_input_at(at),
+                        mix: d.mix_at(at).map_or_else(Vec::new, Cow::into_owned),
+                        windows: d.windows_at(at).into_owned(),
                     });
                 }
             }

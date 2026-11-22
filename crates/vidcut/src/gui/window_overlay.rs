@@ -105,6 +105,7 @@ enum Grip {
     Side(usize),
     Corner(usize),
     Point(usize),
+    Spread(usize, usize),
     Tangent(usize, usize, bool),
     Pull(usize),
     Arrow,
@@ -307,6 +308,8 @@ fn drawn(w: &GradeWindow, s: &Shaped, ([fw, fh], gap, open): ([f64; 2], f64, boo
             path,
             inner,
             outer,
+            spread,
+            bends,
             ..
         } => {
             let ring = |o: &Vec<[f64; 2]>| [&o[..], &o[..1]].concat();
@@ -320,6 +323,25 @@ fn drawn(w: &GradeWindow, s: &Shaped, ([fw, fh], gap, open): ([f64; 2], f64, boo
                 for side in [0, 2].into_iter().filter(|side| c[*side] != c[1]) {
                     guides.push(vec![c[1], c[side]]);
                     grips.push((Grip::Tangent(i, side, false), Look::Tangent, c[side]));
+                }
+            }
+            if !open {
+                for (i, (c, (at, bend))) in
+                    controls.iter().zip(spread.iter().zip(bends)).enumerate()
+                {
+                    let long = bend[0].hypot(bend[1]);
+                    for (side, sign) in [(0, -1.0), (1, 1.0)] {
+                        let q = at[side];
+                        let spot = match (q[0] - c[1][0]).hypot(q[1] - c[1][1]) < gap && long > 0.0
+                        {
+                            true => [
+                                c[1][0] + sign * gap * bend[0] / long,
+                                c[1][1] + sign * gap * bend[1] / long,
+                            ],
+                            false => q,
+                        };
+                        grips.push((Grip::Spread(i, side), Look::Softness, spot));
+                    }
                 }
             }
             if !controls.is_empty() {
@@ -477,12 +499,13 @@ fn curve_inserted(
     s: &Shaped,
     frame: [f64; 2],
     (i, t): (usize, f64),
-) -> Option<Vec<CurvePoint>> {
+) -> Option<WindowShape> {
     let (Outline::Curve { controls, .. }, WindowShape::Curve { points, .. }) =
         (&s.outline, &w.shape)
     else {
         return None;
     };
+    let mut shape = w.shape.clone();
     let n = controls.len();
     let (left, right) = split_at(segment(controls, i), t);
     let model = |q: [f64; 2]| model_point(w, s, frame, q);
@@ -491,7 +514,20 @@ fn curve_inserted(
     let after = (i + 1) % n;
     next[after][0] = model(right[2]);
     next.insert(i + 1, [left[2], left[3], right[1]].map(model));
-    Some(next)
+    if let WindowShape::Curve {
+        points,
+        inner,
+        outer,
+        ..
+    } = &mut shape
+    {
+        *points = next;
+        for moves in [inner, outer].into_iter().flatten() {
+            let (a, b) = (moves[i % n], moves[after % n]);
+            moves.insert(i + 1, [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]);
+        }
+    }
+    Some(shape)
 }
 
 fn outward(i: usize, [u, v]: [f64; 2]) -> f64 {
@@ -586,6 +622,33 @@ fn dragged(
                     next[2 - side] = turned_with(c[1], (c[side], next[side]), c[2 - side]);
                 }
                 *t = next.map(|q| model_point(w, &s, frame, q));
+            }
+        }
+        (
+            Grip::Spread(i, side),
+            Outline::Curve { spread, .. },
+            WindowShape::Curve {
+                points,
+                inner,
+                outer,
+                ..
+            },
+        ) => {
+            let model = |q: [f64; 2], p: &CurvePoint| {
+                let m = model_point(w, &s, frame, q);
+                [m[0] - p[1][0], m[1] - p[1][1]]
+            };
+            let list = match side {
+                0 => inner,
+                _ => outer,
+            };
+            let moves = list.get_or_insert_with(|| {
+                (points.iter().zip(spread.iter()))
+                    .map(|(p, at)| model(at[side], p))
+                    .collect()
+            });
+            if let (Some(m), Some(at), Some(p)) = (moves.get_mut(i), spread.get(i), points.get(i)) {
+                *m = model([at[side][0] + by[0], at[side][1] + by[1]], p);
             }
         }
         (Grip::Pull(i), Outline::Curve { controls, .. }, WindowShape::Curve { points, .. }) => {
@@ -707,23 +770,33 @@ fn paint(painter: &egui::Painter, framing: &Framing, seen: &Seen, current: bool)
     }
 }
 
-fn curve_points(grade: &mut Grade, n: u32, index: usize) -> Option<&mut Vec<CurvePoint>> {
-    match grade
-        .node_mut(n)
-        .and_then(|d| d.windows.get_mut(index))
-        .map(|w| &mut w.shape)
-    {
-        Some(WindowShape::Curve { points, .. }) => Some(points),
-        _ => None,
-    }
-}
-
-fn with_points(grade: &Grade, n: u32, index: usize, points: Vec<CurvePoint>) -> Grade {
+fn with_window(
+    grade: &Grade,
+    n: u32,
+    (frame, index): (i64, usize),
+    change: impl FnOnce(&mut GradeWindow),
+) -> Grade {
     let mut next = grade.clone();
-    if let Some(to) = curve_points(&mut next, n, index) {
-        *to = points;
+    if let Some(d) = next.node_mut(n) {
+        d.change_window_at(frame, index, |w| {
+            let mut w = w.clone();
+            change(&mut w);
+            w
+        });
     }
     next
+}
+
+fn with_shape(grade: &Grade, n: u32, at: (i64, usize), shape: WindowShape) -> Grade {
+    with_window(grade, n, at, |w| w.shape = shape)
+}
+
+fn with_points(grade: &Grade, n: u32, at: (i64, usize), points: Vec<CurvePoint>) -> Grade {
+    with_window(grade, n, at, |w| {
+        if let WindowShape::Curve { points: to, .. } = &mut w.shape {
+            *to = points;
+        }
+    })
 }
 
 impl Workspace {
@@ -755,7 +828,8 @@ impl Workspace {
         let Some(framing) = self.window_framing(&of, picture) else {
             return true;
         };
-        let (windows, locked) = (node.windows.clone(), node.locked);
+        let keyed = self.grade_frame(&of);
+        let (windows, locked) = (node.windows_changed_at(keyed).to_vec(), node.locked);
         let current = self
             .effects_page
             .window
@@ -843,12 +917,13 @@ impl Workspace {
                 None if adding => {
                     let w = &windows[current];
                     let point = model_point(w, &shaped(w, frame), frame, framing.window(p));
-                    let mut next = grade.clone();
                     let mut made = 0;
-                    if let Some(points) = curve_points(&mut next, n, current) {
-                        points.push([point; 3]);
-                        made = points.len() - 1;
-                    }
+                    let next = with_window(&grade, n, (keyed, current), |w| {
+                        if let WindowShape::Curve { points, .. } = &mut w.shape {
+                            points.push([point; 3]);
+                            made = points.len() - 1;
+                        }
+                    });
                     self.effects_page.window_drawing = Some(Drawing {
                         of: of.clone(),
                         node: n,
@@ -876,14 +951,11 @@ impl Workspace {
             && let Some(g) = &self.effects_page.window_grab
             && g.of == of
             && g.node == n
-            && let Some(start) = g.grade.node(n).and_then(|d| d.windows.get(g.index))
+            && let Some(start) =
+                (g.grade.node(n)).and_then(|d| d.windows_changed_at(keyed).get(g.index))
         {
             let next_window = dragged(start, g.grip, (g.from, framing.window(to)), frame);
-            let mut next = g.grade.clone();
-            let index = g.index;
-            if let Some(w) = next.node_mut(n).and_then(|d| d.windows.get_mut(index)) {
-                *w = next_window;
-            }
+            let next = with_window(&g.grade, n, (keyed, g.index), |w| *w = next_window);
             self.hold_grade(&of, n, next);
         }
         if resp.drag_stopped() {
@@ -911,28 +983,37 @@ impl Workspace {
             let mut next = points.clone();
             next[i] = [t[1]; 3];
             self.effects_page.window = index;
-            self.hold_grade(&of, n, with_points(&grade, n, index, next));
+            self.hold_grade(&of, n, with_points(&grade, n, (keyed, index), next));
         }
         if resp.clicked_by(PointerButton::Middle)
             && !locked
             && let Some(p) = pointer
             && let Some((index, Grip::Point(i))) = target(&seen, current, &framing, p)
         {
-            let mut next = grade.clone();
-            let shape = (next.node_mut(n))
-                .and_then(|d| d.windows.get_mut(index))
-                .map(|w| &mut w.shape);
-            let removed = match shape {
-                Some(WindowShape::Polygon { points, .. }) if points.len() > POLYGON_LEAST => {
-                    points.remove(i);
-                    true
+            let mut removed = false;
+            let next = with_window(&grade, n, (keyed, index), |w| {
+                removed = match &mut w.shape {
+                    WindowShape::Polygon { points, .. } if points.len() > POLYGON_LEAST => {
+                        points.remove(i);
+                        true
+                    }
+                    WindowShape::Curve {
+                        points,
+                        inner,
+                        outer,
+                        ..
+                    } if i < points.len() => {
+                        points.remove(i);
+                        for moves in [inner, outer].into_iter().flatten() {
+                            if i < moves.len() {
+                                moves.remove(i);
+                            }
+                        }
+                        true
+                    }
+                    _ => false,
                 }
-                Some(WindowShape::Curve { points, .. }) if i < points.len() => {
-                    points.remove(i);
-                    true
-                }
-                _ => false,
-            };
+            });
             if removed {
                 self.effects_page.window = index;
                 self.hold_grade(&of, n, next);
@@ -954,7 +1035,11 @@ impl Workspace {
         (grade, current): (&Grade, usize),
         (hit, p, framing): (Option<(usize, Grip)>, Pos2, &Framing),
     ) {
-        let Some(w) = grade.node(n).and_then(|d| d.windows.get(current)) else {
+        let keyed = self.grade_frame(of);
+        let Some(w) = grade
+            .node(n)
+            .and_then(|d| d.windows_changed_at(keyed).get(current))
+        else {
             return;
         };
         let WindowShape::Curve { points, .. } = &w.shape else {
@@ -975,7 +1060,7 @@ impl Workspace {
                     node: n,
                     index: current,
                 });
-                self.hold_grade(of, n, with_points(grade, n, current, next));
+                self.hold_grade(of, n, with_points(grade, n, (keyed, current), next));
             }
         }
     }
@@ -988,7 +1073,10 @@ impl Workspace {
         (seen, p, framing): (&[Seen], Pos2, &Framing),
     ) {
         let frame = framing.frame;
-        let windows = grade.node(n).map_or(&[][..], |d| &d.windows[..]);
+        let keyed = self.grade_frame(of);
+        let windows = grade
+            .node(n)
+            .map_or(&[][..], |d| d.windows_changed_at(keyed));
         let on_grip = target(seen, current, framing, p).filter(|(_, g)| *g != Grip::Move);
         let mine = seen
             .iter()
@@ -1005,13 +1093,11 @@ impl Workspace {
                         s.drawn.outline.iter().map(|q| framing.screen(*q)).collect();
                     if let Some(i) = near_edge(&shown, p) {
                         let point = model_point(w, &s.shaped, frame, framing.window(p));
-                        let mut next = grade.clone();
-                        if let Some(WindowShape::Polygon { points, .. }) = (next.node_mut(n))
-                            .and_then(|d| d.windows.get_mut(s.index))
-                            .map(|w| &mut w.shape)
-                        {
-                            points.insert(i + 1, point);
-                        }
+                        let next = with_window(grade, n, (keyed, s.index), |w| {
+                            if let WindowShape::Polygon { points, .. } = &mut w.shape {
+                                points.insert(i + 1, point);
+                            }
+                        });
                         self.hold_grade(of, n, next);
                         return;
                     }
@@ -1020,7 +1106,7 @@ impl Workspace {
                     if let Some(at) = curve_split(controls, framing, p)
                         && let Some(next) = curve_inserted(w, &s.shaped, frame, at)
                     {
-                        self.hold_grade(of, n, with_points(grade, n, s.index, next));
+                        self.hold_grade(of, n, with_shape(grade, n, (keyed, s.index), next));
                         return;
                     }
                 }

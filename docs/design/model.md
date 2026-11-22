@@ -184,7 +184,7 @@ Timelines (spec §3):
 - A timeline in the project locks the project's frame rate and drop-frame (`project_set`). A timeline with its own settings changes them only while it has no clips (`ops::timelines::set`).
   - Its markers, cues and In/Out marks then keep their time (`ops::conform`).
 - `ops::timelines` holds the requests: `new`, `open`, `rename`, `duplicate`, `delete` and `set`, and `list`.
-  - `duplicate` gives the copy new ids for its clips, transitions, markers and cues. A title that follows a clip of the source follows the copy of that clip.
+  - `duplicate` gives the copy new ids for its clips, transitions, markers and cues.
   - `delete` opens the timeline made before the deleted one, else the one after. A project can have no timeline.
   - An edit into a project with no timeline makes one first (`Editor::apply`).
     - `Project::keep_sheet` makes "Timeline 1" from the open tracks.
@@ -674,7 +674,7 @@ Writing:
   - `ops::motion::takes` tells which clips take them: not titles, generators, compound clips or sound.
 - A `MotionPath` tells where one thing of the source picture is on the frames of the file of the clip: its box. It has an id, a name and its samples.
   - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). `motion.find` with `replace` takes off the paths of that subject.
-    - A path that a pattern or a title has stays (`followed`).
+    - A path that a pattern has stays (`followed`).
     - A found thing that such a path already follows gets no second path (`same_thing`). Its samples go into that path (`merged`).
     - Between the first and the last new sample, the path keeps only the new samples. Outside them, it keeps its old samples.
     - Thus a second find adds the new things, and a kept path follows its thing on the frames of the new find.
@@ -701,23 +701,10 @@ Writing:
 - A pattern of a Tracker can have a path ([compositions](#compositions)). `ops::motion::violation` refuses a pattern with a path that the clip does not have.
   - `motion.remove` refuses a path that a pattern has.
   - A path with `tracked` goes when nothing else uses it (`ops::motion::unused`). This occurs at a removal of its pattern, its Tracker or the composition. A trim of all its samples does the same.
-- A title can follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)). `Title.follows` holds a `Follow`: the id of that clip and the id of the path.
-  - `ops::motion::follow` sets it for `motion.follow`. It names the clip that `under` gives, as `ops::motion::settle` does.
-    - It puts the title on the thing: the position becomes the middle. `Title::moved` moves the upper line of a lower third by the same amount.
-    - It refuses a title with keyframes on its position.
-  - `motion.remove` refuses a path that a title follows (`led`).
-  - `ops::motion::settle` runs after each request:
-    - A title whose clip or path is gone follows no path, with a warning.
-    - The clip of the path can play on no frame of the title. Another clip there can have the same samples under that path id, from the same media. The title then follows that clip (`under`).
-      - Why: a split gives the second part a new id, and a paste gives each clip a new id.
-    - A title inside a compound clip follows no path, with a warning. Why: `Project::clip` finds only the clips of the timeline.
-  - `ops::motion::follow_violation` is the check of `validate::violations`.
-  - `otio::titles::read` gives a title no `follows`. Why: an import can give the clips new ids.
-  - The [export design](export.md#titles) tells how the plan places such a title.
 - An OTIO file keeps the paths of a clip in the `vidcut` metadata of its video item, on the same frames of the file.
   - An import reads them back only when `motion::problem` accepts them (`our_motion`).
   - An import at another frame rate keeps the samples as they are. Why: the frames of a file do not change with the frame rate of the timeline.
-  - `our_picture` reads a mask with no `follows` when the file does not hold that path.
+  - `our_picture` reads a pattern with no path when the file does not hold that path.
 
 ## Ducking
 
@@ -839,6 +826,10 @@ Import:
   - A pooled compound clip is a source of the edits (`Source::compound`), as a media item is.
     - `ops::compound::placeable` refuses a compound clip inside itself, an empty one, and one shorter than a frame of the timeline.
     - `marked` gives the part between its marks, and `host_span` converts that part to the timeline's frames.
+    - `length` gives the length of a compound clip: `Compound::frames`, or the end of its timeline while it is open.
+      - `marked`, `set_marks`, `compound_context`, `render::compound_tape` and the Source viewer use it.
+      - `marked` keeps the marks inside that length. Why: a timeline that grew while open can be cut back before the close.
+    - `close_one` keeps the marks of the open timeline in `Compound::marks`. Why: they are the source marks of the compound clip.
     - `ops::make_clip` makes the picture block. `with_sound` adds the sound block on the audio track of the same number, after the edit.
     - Why: then each edit, its ripple and its track rules come from one implementation for files and compound clips.
     - Each edit ends with `compound::landed`. Without `Source::decompose`, it calls `with_sound`.

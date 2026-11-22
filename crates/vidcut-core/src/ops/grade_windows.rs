@@ -4,7 +4,7 @@ use crate::window_key::{
     CIRCLE_RADIUS, CURVE_HANDLE, PAN_STEP, aspect_shrink, circle_scale, linear_scale, linear_scales,
 };
 
-use super::grade::{GradeOf, edited, no_node, stored, unlocked};
+use super::grade::{GradeOf, changed_node, edited, frame_of, no_node, stored, unlocked};
 
 pub const POLYGON_LEAST: usize = 3;
 pub const POLYGON_MOST: usize = 128;
@@ -25,6 +25,8 @@ pub struct WindowChange {
     pub inside: Option<f64>,
     pub outside: Option<f64>,
     pub points: Option<Vec<[f64; 2]>>,
+    pub inner: Option<Vec<[f64; 2]>>,
+    pub outer: Option<Vec<[f64; 2]>>,
 }
 
 fn corrector(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
@@ -51,7 +53,9 @@ pub fn add(p: &mut Project, of: &GradeOf, n: u32, kind: WindowKind) -> Result<us
     let mut made = 0;
     edited(p, of, |g| {
         let d = corrector(g, n)?;
-        d.windows.push(GradeWindow::new(kind, frame));
+        for list in d.window_lists_mut() {
+            list.push(GradeWindow::new(kind, frame));
+        }
         made = d.windows.len() - 1;
         Ok(())
     })?;
@@ -120,6 +124,12 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
     if c.points.iter().flatten().flatten().any(|v| !v.is_finite()) {
         return Err(Error::invalid("each point takes two numbers"));
     }
+    let curve = matches!(w.shape, WindowShape::Curve { .. });
+    for (field, given) in [("inner", c.inner.is_some()), ("outer", c.outer.is_some())] {
+        if given && !curve {
+            return Err(wrong(field));
+        }
+    }
     match &mut w.shape {
         WindowShape::Polygon {
             points,
@@ -145,13 +155,17 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
             points,
             inside,
             outside,
+            inner,
+            outer,
             ..
         } => {
             if let Some(v) = c.inside {
                 *inside = in_range("inside", v, soft_range)?;
+                *inner = None;
             }
             if let Some(v) = c.outside {
                 *outside = in_range("outside", v, soft_range)?;
+                *outer = None;
             }
             if let Some(given) = &c.points {
                 if given.len() % 3 != 0 {
@@ -160,6 +174,26 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
                     ));
                 }
                 *points = given.as_chunks::<3>().0.to_vec();
+            }
+            for (name, given, to) in [("inner", &c.inner, inner), ("outer", &c.outer, outer)] {
+                if let Some(given) = given {
+                    if given.iter().flatten().any(|v| !v.is_finite()) {
+                        return Err(Error::invalid(format!(
+                            "each `{name}` move takes two numbers"
+                        )));
+                    }
+                    *to = Some(given.clone());
+                }
+                if to.as_ref().is_some_and(|m| m.len() != points.len()) {
+                    match given {
+                        Some(_) => {
+                            return Err(Error::invalid(format!(
+                                "`{name}` takes one move for each point of the curve"
+                            )));
+                        }
+                        None => *to = None,
+                    }
+                }
             }
         }
         WindowShape::Linear { points, .. } => {
@@ -210,12 +244,17 @@ pub(super) fn checked(w: &GradeWindow) -> Result<()> {
             soft,
             inside,
             outside,
+            ..
         } => (
             Some(vec![*soft]),
             Some(*inside),
             Some(*outside),
             Some(points.iter().flatten().copied().collect()),
         ),
+    };
+    let (inner, outer) = match &w.shape {
+        WindowShape::Curve { inner, outer, .. } => (inner.clone(), outer.clone()),
+        _ => (None, None),
     };
     let all = WindowChange {
         size: Some(w.size),
@@ -228,19 +267,48 @@ pub(super) fn checked(w: &GradeWindow) -> Result<()> {
         inside,
         outside,
         points,
+        inner,
+        outer,
         ..WindowChange::default()
     };
     changed(&mut w.clone(), &all)
 }
 
-pub fn set(p: &mut Project, of: &GradeOf, n: u32, i: usize, c: &WindowChange) -> Result<()> {
+fn keyed(
+    g: &mut Grade,
+    (n, i): (u32, usize),
+    frame: Option<i64>,
+    change: impl FnOnce(&mut GradeWindow) -> Result<()>,
+) -> Result<()> {
+    window(corrector(g, n)?, n, i)?;
+    let (d, frame) = changed_node(g, n, frame)?;
+    let mut now = d.windows_changed_at(frame)[i].clone();
+    change(&mut now)?;
+    d.change_window_at(frame, i, |_| now)
+        .ok_or_else(|| no_node(n))
+}
+
+pub fn set(
+    p: &mut Project,
+    of: &GradeOf,
+    (n, i): (u32, usize),
+    c: &WindowChange,
+    at: Option<i64>,
+) -> Result<()> {
     if *c == WindowChange::default() {
         return Err(Error::usage("give a value to change"));
     }
-    edited(p, of, |g| changed(window(corrector(g, n)?, n, i)?, c))
+    let frame = at.map(|t| frame_of(p, of, t)).transpose()?;
+    edited(p, of, |g| keyed(g, (n, i), frame, |w| changed(w, c)))
 }
 
-pub fn copy(p: &Project, of: &GradeOf, n: u32, i: usize) -> Result<GradeWindow> {
+pub fn copy(
+    p: &Project,
+    of: &GradeOf,
+    (n, i): (u32, usize),
+    at: Option<i64>,
+) -> Result<GradeWindow> {
+    let frame = at.map(|t| frame_of(p, of, t)).transpose()?;
     let g = stored(p, of)?;
     let d = g.node(n).ok_or_else(|| no_node(n))?;
     if d.tool.is_mixer() {
@@ -249,7 +317,8 @@ pub fn copy(p: &Project, of: &GradeOf, n: u32, i: usize) -> Result<GradeWindow> 
         )));
     }
     let count = d.windows.len();
-    d.windows.get(i).cloned().ok_or_else(|| {
+    let shown = frame.map_or(&d.windows[..], |f| d.windows_changed_at(f));
+    shown.get(i).cloned().ok_or_else(|| {
         Error::not_found(format!(
             "node {n} has {count} windows: there is no window {i}"
         ))
@@ -262,8 +331,10 @@ pub fn paste(
     n: u32,
     (to, append): (Option<usize>, bool),
     copied: &GradeWindow,
+    at: Option<i64>,
 ) -> Result<usize> {
     checked(copied)?;
+    let frame = at.map(|t| frame_of(p, of, t)).transpose()?;
     let mut made = 0;
     edited(p, of, |g| {
         let d = corrector(g, n)?;
@@ -276,23 +347,26 @@ pub fn paste(
                 ));
             }
         };
-        if let Some(i) = onto {
-            let w = window(d, n, i)?;
-            if w.shape.kind() == copied.shape.kind() {
+        if let Some(i) = onto
+            && window(d, n, i)?.shape.kind() == copied.shape.kind()
+        {
+            made = i;
+            return keyed(g, (n, i), frame, |w| {
                 *w = GradeWindow {
                     on: w.on,
                     name: std::mem::take(&mut w.name),
                     ..copied.clone()
                 };
-                made = i;
-                return Ok(());
-            }
+                Ok(())
+            });
         }
-        d.windows.push(GradeWindow {
-            on: true,
-            name: String::new(),
-            ..copied.clone()
-        });
+        for list in d.window_lists_mut() {
+            list.push(GradeWindow {
+                on: true,
+                name: String::new(),
+                ..copied.clone()
+            });
+        }
         made = d.windows.len() - 1;
         Ok(())
     })?;
@@ -308,7 +382,9 @@ pub fn remove(p: &mut Project, of: &GradeOf, n: u32, i: usize) -> Result<()> {
                 "window {i} is one of the first windows of node {n}, which stay: turn it off with `on`"
             )));
         }
-        d.windows.remove(i);
+        for list in d.window_lists_mut() {
+            list.remove(i);
+        }
         Ok(())
     })
 }
@@ -359,29 +435,38 @@ pub fn convert(p: &mut Project, of: &GradeOf, n: u32, i: usize) -> Result<usize>
     let mut made = 0;
     edited(p, of, |g| {
         let d = corrector(g, n)?;
-        let w = window(d, n, i)?.clone();
-        let (points, [dx, dy]) = curve_points(&w, frame)?;
-        let curve = GradeWindow {
-            shape: WindowShape::Curve {
-                points,
-                soft: 0.0,
-                inside: 0.0,
-                outside: 0.0,
-            },
-            on: true,
-            name: String::new(),
-            aspect: GradeWindow::new(WindowKind::Curve, frame).aspect,
-            pan: w.pan + dx / PAN_STEP,
-            tilt: w.tilt + dy / PAN_STEP,
-            ..w
+        window(d, n, i)?;
+        let curve = |w: &GradeWindow| -> Result<GradeWindow> {
+            let (points, [dx, dy]) = curve_points(w, frame)?;
+            Ok(GradeWindow {
+                shape: WindowShape::Curve {
+                    points,
+                    soft: 0.0,
+                    inside: 0.0,
+                    outside: 0.0,
+                    inner: None,
+                    outer: None,
+                },
+                on: true,
+                name: String::new(),
+                aspect: GradeWindow::new(WindowKind::Curve, frame).aspect,
+                pan: w.pan + dx / PAN_STEP,
+                tilt: w.tilt + dy / PAN_STEP,
+                ..w.clone()
+            })
         };
-        match i < WindowKind::ALL.len() {
-            true => d.windows[i].on = false,
-            false => {
-                d.windows.remove(i);
+        let curves: Vec<GradeWindow> = (d.window_lists_mut())
+            .map(|list| curve(&list[i]))
+            .collect::<Result<_>>()?;
+        for (list, curve) in d.window_lists_mut().zip(curves) {
+            match i < WindowKind::ALL.len() {
+                true => list[i].on = false,
+                false => {
+                    list.remove(i);
+                }
             }
+            list.push(curve);
         }
-        d.windows.push(curve);
         made = d.windows.len() - 1;
         Ok(())
     })?;

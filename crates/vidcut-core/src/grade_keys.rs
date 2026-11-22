@@ -1,6 +1,10 @@
 use std::borrow::Cow;
 
-use crate::model::{Corrector, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, KeyOutput};
+use crate::model::{
+    Corrector, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
+    KeyOutput, WindowShape,
+};
+use crate::window_key::{circle_scale, circle_size, linear_scale, linear_size};
 
 pub const LAST_PROFILE: u8 = 10;
 
@@ -9,6 +13,8 @@ const STEPS: u32 = 1024;
 const HALVINGS: u32 = 60;
 
 type Ease = (f64, f64);
+
+type Scale = fn(f64) -> f64;
 
 fn ease(profile: u8) -> Option<Ease> {
     Some(match profile {
@@ -238,6 +244,294 @@ impl KeyOutput {
     }
 }
 
+impl KeyInput {
+    pub fn blended(&self, to: &KeyInput, w: f64) -> KeyInput {
+        let one = |a: f64, b: f64| a + (b - a) * w;
+        KeyInput {
+            gain: one(self.gain, to.gain),
+            offset: one(self.offset, to.offset),
+            blur: one(self.blur, to.blur),
+            blur_ratio: one(self.blur_ratio, to.blur_ratio),
+            ..*self
+        }
+    }
+
+    pub fn carried(&self, was: &KeyInput, now: &KeyInput) -> KeyInput {
+        KeyInput {
+            invert: pick(&self.invert, &was.invert, &now.invert),
+            mask: pick(&self.mask, &was.mask, &now.mask),
+            gain: pick(&self.gain, &was.gain, &now.gain),
+            offset: pick(&self.offset, &was.offset, &now.offset),
+            blur: pick(&self.blur, &was.blur, &now.blur),
+            blur_ratio: pick(&self.blur_ratio, &was.blur_ratio, &now.blur_ratio),
+        }
+    }
+}
+
+impl KeyMix {
+    pub fn blended(&self, to: &KeyMix, w: f64) -> KeyMix {
+        KeyMix {
+            gain: self.gain + (to.gain - self.gain) * w,
+            offset: self.offset + (to.offset - self.offset) * w,
+            ..*self
+        }
+    }
+
+    pub fn carried(&self, was: &KeyMix, now: &KeyMix) -> KeyMix {
+        KeyMix {
+            invert: pick(&self.invert, &was.invert, &now.invert),
+            matte: pick(&self.matte, &was.matte, &now.matte),
+            gain: pick(&self.gain, &was.gain, &now.gain),
+            offset: pick(&self.offset, &was.offset, &now.offset),
+        }
+    }
+}
+
+fn pick<T: PartialEq + Clone>(own: &T, was: &T, now: &T) -> T {
+    match was == now {
+        true => own.clone(),
+        false => now.clone(),
+    }
+}
+
+fn each<T: PartialEq + Clone>(own: &[T], was: &[T], now: &[T]) -> Vec<T> {
+    match own.len() == now.len() && was.len() == now.len() {
+        true => (own.iter().zip(was).zip(now))
+            .map(|((o, w), n)| pick(o, w, n))
+            .collect(),
+        false => now.to_vec(),
+    }
+}
+
+fn mixed_list<const N: usize>(a: &[[f64; N]], b: &[[f64; N]], w: f64) -> Vec<[f64; N]> {
+    match a.len() == b.len() {
+        true => a.iter().zip(b).map(|(p, q)| mixed(p, q, w)).collect(),
+        false => a.to_vec(),
+    }
+}
+
+fn mixed_curve(a: &[[[f64; 2]; 3]], b: &[[[f64; 2]; 3]], w: f64) -> Vec<[[f64; 2]; 3]> {
+    match a.len() == b.len() {
+        true => (a.iter().zip(b))
+            .map(|(p, q)| std::array::from_fn(|i| mixed(&p[i], &q[i], w)))
+            .collect(),
+        false => a.to_vec(),
+    }
+}
+
+fn mixed_moves(
+    a: &Option<Vec<[f64; 2]>>,
+    b: &Option<Vec<[f64; 2]>>,
+    w: f64,
+) -> Option<Vec<[f64; 2]>> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(mixed_list(a, b, w)),
+        _ => a.clone(),
+    }
+}
+
+fn each_moves(
+    own: &Option<Vec<[f64; 2]>>,
+    was: &Option<Vec<[f64; 2]>>,
+    now: &Option<Vec<[f64; 2]>>,
+    count: usize,
+) -> Option<Vec<[f64; 2]>> {
+    let moves = match (own, was, now) {
+        (Some(o), Some(w), Some(n)) => Some(each(o, w, n)),
+        _ => pick(own, was, now),
+    };
+    moves.filter(|m| m.len() == count)
+}
+
+impl GradeWindow {
+    pub fn blended(&self, to: &GradeWindow, w: f64) -> GradeWindow {
+        let one = |a: f64, b: f64| a + (b - a) * w;
+        let (scale, size): (Scale, Scale) = match self.shape {
+            WindowShape::Circle { .. } => (circle_scale, circle_size),
+            _ => (linear_scale, linear_size),
+        };
+        let shape = match (&self.shape, &to.shape) {
+            (
+                WindowShape::Linear { soft: a, points: p },
+                WindowShape::Linear { soft: b, points: q },
+            ) => WindowShape::Linear {
+                soft: mixed(a, b, w),
+                points: std::array::from_fn(|i| mixed(&p[i], &q[i], w)),
+            },
+            (WindowShape::Circle { soft: a }, WindowShape::Circle { soft: b }) => {
+                WindowShape::Circle { soft: one(*a, *b) }
+            }
+            (
+                WindowShape::Polygon {
+                    points: p,
+                    inside: a,
+                    outside: c,
+                },
+                WindowShape::Polygon {
+                    points: q,
+                    inside: b,
+                    outside: d,
+                },
+            ) => WindowShape::Polygon {
+                points: mixed_list(p, q, w),
+                inside: one(*a, *b),
+                outside: one(*c, *d),
+            },
+            (
+                WindowShape::Curve {
+                    points: p,
+                    soft: s,
+                    inside: a,
+                    outside: c,
+                    inner: i,
+                    outer: o,
+                },
+                WindowShape::Curve {
+                    points: q,
+                    soft: t,
+                    inside: b,
+                    outside: d,
+                    inner: j,
+                    outer: u,
+                },
+            ) => WindowShape::Curve {
+                points: mixed_curve(p, q, w),
+                soft: one(*s, *t),
+                inside: one(*a, *b),
+                outside: one(*c, *d),
+                inner: mixed_moves(i, j, w).filter(|m| m.len() == p.len()),
+                outer: mixed_moves(o, u, w).filter(|m| m.len() == p.len()),
+            },
+            (WindowShape::Gradient { soft: a }, WindowShape::Gradient { soft: b }) => {
+                WindowShape::Gradient { soft: one(*a, *b) }
+            }
+            _ => self.shape.clone(),
+        };
+        GradeWindow {
+            shape,
+            on: self.on,
+            name: self.name.clone(),
+            invert: self.invert,
+            mask: self.mask,
+            size: match self.size == to.size {
+                true => self.size,
+                false => size(one(scale(self.size), scale(to.size))),
+            },
+            aspect: one(self.aspect, to.aspect),
+            pan: one(self.pan, to.pan),
+            tilt: one(self.tilt, to.tilt),
+            rotate: one(self.rotate, to.rotate),
+            opacity: one(self.opacity, to.opacity),
+        }
+    }
+
+    pub fn carried(&self, was: &GradeWindow, now: &GradeWindow) -> GradeWindow {
+        let one = |own: f64, was: f64, now: f64| if was == now { own } else { now };
+        let shape = match (&self.shape, &was.shape, &now.shape) {
+            (
+                WindowShape::Linear { soft, points },
+                WindowShape::Linear {
+                    soft: ws,
+                    points: wp,
+                },
+                WindowShape::Linear {
+                    soft: ns,
+                    points: np,
+                },
+            ) => WindowShape::Linear {
+                soft: moved(soft, ws, ns),
+                points: std::array::from_fn(|i| moved(&points[i], &wp[i], &np[i])),
+            },
+            (
+                WindowShape::Circle { soft },
+                WindowShape::Circle { soft: ws },
+                WindowShape::Circle { soft: ns },
+            ) => WindowShape::Circle {
+                soft: one(*soft, *ws, *ns),
+            },
+            (
+                WindowShape::Polygon {
+                    points,
+                    inside,
+                    outside,
+                },
+                WindowShape::Polygon {
+                    points: wp,
+                    inside: wi,
+                    outside: wo,
+                },
+                WindowShape::Polygon {
+                    points: np,
+                    inside: ni,
+                    outside: no,
+                },
+            ) => WindowShape::Polygon {
+                points: each(points, wp, np),
+                inside: one(*inside, *wi, *ni),
+                outside: one(*outside, *wo, *no),
+            },
+            (
+                WindowShape::Curve {
+                    points,
+                    soft,
+                    inside,
+                    outside,
+                    inner,
+                    outer,
+                },
+                WindowShape::Curve {
+                    points: wp,
+                    soft: ws,
+                    inside: wi,
+                    outside: wo,
+                    inner: wn,
+                    outer: wu,
+                },
+                WindowShape::Curve {
+                    points: np,
+                    soft: ns,
+                    inside: ni,
+                    outside: no,
+                    inner: nn,
+                    outer: nu,
+                },
+            ) => {
+                let points = each(points, wp, np);
+                let count = points.len();
+                WindowShape::Curve {
+                    points,
+                    soft: one(*soft, *ws, *ns),
+                    inside: one(*inside, *wi, *ni),
+                    outside: one(*outside, *wo, *no),
+                    inner: each_moves(inner, wn, nn, count),
+                    outer: each_moves(outer, wu, nu, count),
+                }
+            }
+            (
+                WindowShape::Gradient { soft },
+                WindowShape::Gradient { soft: ws },
+                WindowShape::Gradient { soft: ns },
+            ) => WindowShape::Gradient {
+                soft: one(*soft, *ws, *ns),
+            },
+            _ => pick(&self.shape, &was.shape, &now.shape),
+        };
+        GradeWindow {
+            shape,
+            on: pick(&self.on, &was.on, &now.on),
+            name: pick(&self.name, &was.name, &now.name),
+            invert: pick(&self.invert, &was.invert, &now.invert),
+            mask: pick(&self.mask, &was.mask, &now.mask),
+            size: one(self.size, was.size, now.size),
+            aspect: one(self.aspect, was.aspect, now.aspect),
+            pan: one(self.pan, was.pan, now.pan),
+            tilt: one(self.tilt, was.tilt, now.tilt),
+            rotate: one(self.rotate, was.rotate, now.rotate),
+            opacity: one(self.opacity, was.opacity, now.opacity),
+        }
+    }
+}
+
 impl GradeKey {
     pub fn is_static(&self) -> bool {
         self.kind == GradeKeyKind::Static
@@ -272,6 +566,23 @@ impl GradeNode {
         }
     }
 
+    fn keyed_change<T: Clone>(
+        &mut self,
+        frame: i64,
+        part: impl Fn(&mut Self, Option<usize>) -> Option<&mut T>,
+        change: impl FnOnce(&T) -> T,
+        carried: fn(&T, &T, &T) -> T,
+    ) -> Option<()> {
+        let key = self.changed_key(frame);
+        let was = part(self, key)?.clone();
+        let now = change(&was);
+        if let Some(other) = self.paired_key(key).and_then(|k| part(self, k)) {
+            *other = carried(other, &was, &now);
+        }
+        *part(self, key)? = now;
+        Some(())
+    }
+
     fn values_mut(&mut self, key: Option<usize>) -> Option<&mut Corrector> {
         match (key, &mut self.tool) {
             (Some(i), GradeTool::Corrector(_)) => Some(&mut self.keys[i].values),
@@ -280,20 +591,62 @@ impl GradeNode {
         }
     }
 
-    fn key_output_mut(&mut self, key: Option<usize>) -> Option<&mut KeyOutput> {
+    fn windows_mut(&mut self, key: Option<usize>) -> Option<&mut Vec<GradeWindow>> {
         match key {
             _ if self.tool.is_mixer() => None,
+            Some(i) => Some(&mut self.keys[i].windows),
+            None => Some(&mut self.windows),
+        }
+    }
+
+    pub fn window_lists_mut(&mut self) -> impl Iterator<Item = &mut Vec<GradeWindow>> {
+        std::iter::once(&mut self.windows).chain(self.keys.iter_mut().map(|k| &mut k.windows))
+    }
+
+    pub fn windows_changed_at(&self, frame: i64) -> &[GradeWindow] {
+        self.changed_key(frame)
+            .map_or(&self.windows, |i| &self.keys[i].windows)
+    }
+
+    pub fn change_window_at(
+        &mut self,
+        frame: i64,
+        i: usize,
+        change: impl FnOnce(&GradeWindow) -> GradeWindow,
+    ) -> Option<()> {
+        self.keyed_change(
+            frame,
+            |d, k| d.windows_mut(k).and_then(|w| w.get_mut(i)),
+            change,
+            GradeWindow::carried,
+        )
+    }
+
+    pub fn windows_at(&self, frame: f64) -> Cow<'_, [GradeWindow]> {
+        match self.span(frame) {
+            None => Cow::Borrowed(&self.windows),
+            Some((k, Some((n, w)))) => Cow::Owned(
+                (k.windows.iter().zip(&n.windows))
+                    .map(|(a, b)| a.blended(b, w))
+                    .collect(),
+            ),
+            Some((k, None)) => Cow::Borrowed(&k.windows),
+        }
+    }
+
+    fn key_output_mut(&mut self, key: Option<usize>) -> Option<&mut KeyOutput> {
+        match key {
+            _ if !self.takes_keyframes() => None,
             Some(i) => Some(&mut self.keys[i].key),
             None => Some(&mut self.key),
         }
     }
 
     pub fn key_output_changed_at(&self, frame: i64) -> Option<KeyOutput> {
-        self.own()?;
-        Some(
-            self.changed_key(frame)
-                .map_or(self.key, |i| self.keys[i].key),
-        )
+        let key = self
+            .changed_key(frame)
+            .map_or(self.key, |i| self.keys[i].key);
+        self.takes_keyframes().then_some(key)
     }
 
     pub fn change_key_output_at(
@@ -301,14 +654,93 @@ impl GradeNode {
         frame: i64,
         change: impl FnOnce(KeyOutput) -> KeyOutput,
     ) -> Option<()> {
-        let key = self.changed_key(frame);
-        let was = self.key_output_changed_at(frame)?;
-        let now = change(was);
-        if let Some(other) = self.paired_key(key).and_then(|k| self.key_output_mut(k)) {
-            *other = other.carried(&was, &now);
+        let change = |k: &KeyOutput| change(*k);
+        self.keyed_change(frame, Self::key_output_mut, change, KeyOutput::carried)
+    }
+
+    fn key_input_mut(&mut self, key: Option<usize>) -> Option<&mut KeyInput> {
+        match key {
+            _ if self.tool.is_mixer() => None,
+            Some(i) => Some(&mut self.keys[i].key_input),
+            None => Some(&mut self.key_input),
         }
-        *self.key_output_mut(key)? = now;
-        Some(())
+    }
+
+    pub fn key_input_changed_at(&self, frame: i64) -> Option<KeyInput> {
+        let input = (self.changed_key(frame)).map_or(self.key_input, |i| self.keys[i].key_input);
+        self.own().map(|_| input)
+    }
+
+    pub fn change_key_input_at(
+        &mut self,
+        frame: i64,
+        change: impl FnOnce(KeyInput) -> KeyInput,
+    ) -> Option<()> {
+        let change = |k: &KeyInput| change(*k);
+        self.keyed_change(frame, Self::key_input_mut, change, KeyInput::carried)
+    }
+
+    pub fn key_input_at(&self, frame: f64) -> KeyInput {
+        match self.span(frame) {
+            None => self.key_input,
+            Some((k, Some((n, w)))) => k.key_input.blended(&n.key_input, w),
+            Some((k, None)) => k.key_input,
+        }
+    }
+
+    fn mix_mut(&mut self, key: Option<usize>) -> Option<&mut Vec<KeyMix>> {
+        match (key, &mut self.tool) {
+            (Some(i), GradeTool::KeyMixer { .. }) => Some(&mut self.keys[i].mix),
+            (None, GradeTool::KeyMixer { mix }) => Some(mix),
+            _ => None,
+        }
+    }
+
+    pub fn mix_lists_mut(&mut self) -> impl Iterator<Item = &mut Vec<KeyMix>> {
+        let own = match &mut self.tool {
+            GradeTool::KeyMixer { mix } => Some(mix),
+            _ => None,
+        };
+        own.into_iter()
+            .chain(self.keys.iter_mut().map(|k| &mut k.mix))
+    }
+
+    pub fn mix_changed_at(&self, frame: i64) -> &[KeyMix] {
+        match (self.changed_key(frame), &self.tool) {
+            (Some(i), GradeTool::KeyMixer { .. }) => &self.keys[i].mix,
+            (None, GradeTool::KeyMixer { mix }) => mix,
+            _ => &[],
+        }
+    }
+
+    pub fn change_mix_at(
+        &mut self,
+        frame: i64,
+        i: usize,
+        change: impl FnOnce(KeyMix) -> KeyMix,
+    ) -> Option<()> {
+        let change = |m: &KeyMix| change(*m);
+        self.keyed_change(
+            frame,
+            |d, k| d.mix_mut(k).and_then(|m| m.get_mut(i)),
+            change,
+            KeyMix::carried,
+        )
+    }
+
+    pub fn mix_at(&self, frame: f64) -> Option<Cow<'_, [KeyMix]>> {
+        let GradeTool::KeyMixer { mix } = &self.tool else {
+            return None;
+        };
+        Some(match self.span(frame) {
+            None => Cow::Borrowed(mix),
+            Some((k, Some((n, w)))) => Cow::Owned(
+                (k.mix.iter().zip(&n.mix))
+                    .map(|(a, b)| a.blended(b, w))
+                    .collect(),
+            ),
+            Some((k, None)) => Cow::Borrowed(&k.mix),
+        })
     }
 
     pub fn changed_at(&self, frame: i64) -> Option<&Corrector> {
@@ -324,14 +756,7 @@ impl GradeNode {
         frame: i64,
         change: impl FnOnce(&Corrector) -> Corrector,
     ) -> Option<()> {
-        let key = self.changed_key(frame);
-        let was = self.changed_at(frame)?.clone();
-        let now = change(&was);
-        if let Some(other) = self.paired_key(key).and_then(|k| self.values_mut(k)) {
-            *other = other.carried(&was, &now);
-        }
-        *self.values_mut(key)? = now;
-        Some(())
+        self.keyed_change(frame, Self::values_mut, change, Corrector::carried)
     }
 
     fn span(&self, frame: f64) -> Option<(&GradeKey, Option<(&GradeKey, f64)>)> {
@@ -387,7 +812,12 @@ impl Grade {
             if let (GradeTool::Corrector(c), Some(now)) = (&mut d.tool, from.corrector_at(frame)) {
                 **c = now.into_owned();
             }
+            if let (GradeTool::KeyMixer { mix }, Some(now)) = (&mut d.tool, from.mix_at(frame)) {
+                *mix = now.into_owned();
+            }
             d.key = from.key_output_at(frame);
+            d.key_input = from.key_input_at(frame);
+            d.windows = from.windows_at(frame).into_owned();
             d.keys.clear();
             d.animated = false;
         }

@@ -7,6 +7,8 @@ pub const POLYGON_SOFT_STEP: f64 = 1.0 / 25.0;
 pub const CIRCLE_RADIUS: f64 = 0.15;
 pub const CIRCLE_LEAST: f64 = 0.002;
 pub const CIRCLE_GROWTH: f64 = 0.08;
+pub const LINEAR_LEAST: f64 = 0.025;
+pub const LINEAR_GROWTH: f64 = 0.06;
 pub const LINEAR_MOST: f64 = 4.0;
 pub const FAR_OUTSIDE: f64 = 1000.0;
 pub const EVEN: f64 = 1e-6;
@@ -43,6 +45,8 @@ pub enum Outline {
         path: Vec<[f64; 2]>,
         inner: Vec<[f64; 2]>,
         outer: Vec<[f64; 2]>,
+        spread: Vec<[[f64; 2]; 2]>,
+        bends: Vec<[f64; 2]>,
         blur: f64,
     },
     Gradient {
@@ -81,8 +85,15 @@ fn joined_first(w: &GradeWindow) -> (bool, u8) {
 
 pub fn linear_scale(size: f64) -> f64 {
     match size <= 50.0 {
-        true => 0.025 + 0.975 * size / 50.0,
-        false => 1.0 + 0.06 * (size - 50.0),
+        true => LINEAR_LEAST + (1.0 - LINEAR_LEAST) * size / 50.0,
+        false => 1.0 + LINEAR_GROWTH * (size - 50.0),
+    }
+}
+
+pub fn linear_size(scale: f64) -> f64 {
+    match scale <= 1.0 {
+        true => (scale - LINEAR_LEAST) / (1.0 - LINEAR_LEAST) * 50.0,
+        false => 50.0 + (scale - 1.0) / LINEAR_GROWTH,
     }
 }
 
@@ -203,6 +214,8 @@ pub fn shaped(window: &GradeWindow, [w, h]: [f64; 2]) -> Shaped {
             soft,
             inside,
             outside,
+            inner,
+            outer,
         } => {
             let k = linear_scale(window.size);
             let placed = |[px, py]: [f64; 2]| {
@@ -212,9 +225,36 @@ pub fn shaped(window: &GradeWindow, [w, h]: [f64; 2]) -> Shaped {
             };
             let controls: Vec<CurvePoint> = points.iter().map(|p| p.map(placed)).collect();
             let path = flattened(&controls);
+            let bends = bends(&controls);
+            let edge = |moves: &Option<Vec<[f64; 2]>>, by: f64| match moves {
+                Some(m) if m.len() == points.len() => {
+                    let moved = |(p, d): (&CurvePoint, &[f64; 2])| {
+                        p.map(|[x, y]| placed([x + d[0], y + d[1]]))
+                    };
+                    let edge: Vec<CurvePoint> = points.iter().zip(m).map(moved).collect();
+                    let at = edge.iter().map(|c| c[1]).collect();
+                    (flattened(&edge), at)
+                }
+                _ => {
+                    let at = (controls.iter().zip(&bends))
+                        .map(|(c, b)| [c[1][0] + by * b[0], c[1][1] + by * b[1]])
+                        .collect();
+                    (mitred(&path, by), at)
+                }
+            };
+            let (inner, inner_at): (_, Vec<[f64; 2]>) =
+                edge(inner, -inside * CURVE_INSIDE_STEP * w);
+            let (outer, outer_at): (_, Vec<[f64; 2]>) =
+                edge(outer, outside * CURVE_OUTSIDE_STEP * w);
             Outline::Curve {
-                inner: mitred(&path, -inside * CURVE_INSIDE_STEP * w),
-                outer: mitred(&path, outside * CURVE_OUTSIDE_STEP * w),
+                inner,
+                outer,
+                spread: inner_at
+                    .into_iter()
+                    .zip(outer_at)
+                    .map(|(a, b)| [a, b])
+                    .collect(),
+                bends,
                 path,
                 controls,
                 blur: soft * CURVE_BLUR_STEP * h,
@@ -294,6 +334,46 @@ fn area(path: &[[f64; 2]]) -> f64 {
         })
         .sum::<f64>()
         / 2.0
+}
+
+pub fn bends(controls: &[CurvePoint]) -> Vec<[f64; 2]> {
+    let n = controls.len();
+    if n < 2 {
+        return vec![[0.0; 2]; n];
+    }
+    let path = flattened(controls);
+    let turn = if area(&path) < 0.0 { -1.0 } else { 1.0 };
+    let apart = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) >= SAME_POINT;
+    let normal = |[ex, ey]: [f64; 2]| {
+        let long = ex.hypot(ey);
+        match long < SAME_POINT {
+            true => [0.0, 0.0],
+            false => [turn * ey / long, -turn * ex / long],
+        }
+    };
+    (0..n)
+        .map(|i| {
+            let (before, c, after) = (
+                controls[(i + n - 1) % n],
+                controls[i],
+                controls[(i + 1) % n],
+            );
+            let p = c[1];
+            let back = [c[0], before[2], before[1]]
+                .into_iter()
+                .find(|q| apart(*q, p));
+            let ahead = [c[2], after[0], after[1]]
+                .into_iter()
+                .find(|q| apart(*q, p));
+            let a = back.map_or([0.0; 2], |q| normal([p[0] - q[0], p[1] - q[1]]));
+            let b = ahead.map_or([0.0; 2], |q| normal([q[0] - p[0], q[1] - p[1]]));
+            let along = 1.0 + a[0] * b[0] + a[1] * b[1];
+            match along > 2.0 / (MITER_MOST * MITER_MOST) {
+                true => [(a[0] + b[0]) / along, (a[1] + b[1]) / along],
+                false => b,
+            }
+        })
+        .collect()
 }
 
 pub fn mitred(path: &[[f64; 2]], by: f64) -> Vec<[f64; 2]> {

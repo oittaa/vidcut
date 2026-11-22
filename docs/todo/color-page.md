@@ -24,7 +24,7 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - With the Window palette open, the viewer shows the outlines and the handles of the windows (`window_overlay.rs`).
 - It also draws the Node Editor of the grade, at the right of the viewer. `crates/vidcut/src/gui/node_editor.rs` is the editor of the Color page and of the Effects page.
 - Each corrector in the Node Editor and in List View shows its thumbnail (`Shot`, [live.md](../design/live.md)).
-- On the Color page, the keys of the nodes (`Panel::Color`) go before the keys of the other pages. Thus Shift+S, Ctrl+D, Alt+D and Delete act on the nodes there.
+- On the Color page, the keys of the nodes (`Panel::Color`) go before the keys of the other pages. Thus Shift+S, Alt+B, Ctrl+D, Alt+D and Delete act on the nodes there.
 - A Clip and Timeline switch at the top right selects the grade that the palette shows (pp. 3404–3405). It sends `gui.page` with `grade`.
 - In the bars, each Offset bar has a Plus and a Minus button. Each button moves its channel by one printer point (pp. 3157, 3159).
 - The page puts the palette at the bottom and the timeline above it, at its smallest height. The viewer gets the rest.
@@ -36,18 +36,12 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 **To do:**
 
 - The windows ([spec §8.23](../spec.md#823-windows-pp-32653279)):
-  - Window keyframes.
-  - The magenta softness points of a curve (p. 3273). Each point then has its own inside and outside softness.
   - Shift and a drag box select points of a curve, to move, delete or scale them together (p. 3274).
-- Add Serial Node + CPW, LPW, PPW and PCW (p. 3395).
 - Switch to Node Layer in the Nodes submenu, with the Node Stack Layers (pp. 3400–3401). Add Splitter Combiner Node (Option-Y, p. 3441).
 - Links from a key output to an RGB input, and from an RGB output to a key input (p. 3420).
 - The Qualifier controls of the Key palette (p. 3436).
 - Measure in Resolve, then match:
-  - Delete after a drag box that does not hold the current node: does the current node go too.
-  - A Ctrl-click on a node that is selected already.
   - The keys of the nodes ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)):
     - A key link from a node that is off into a Key Mixer.
     - A Key Mixer with one linked input after a delete.
     - Add Serial and Add Serial Before in the menu of a Key Mixer.
-- Keyframes of the Key Input, on the Defocus track, and of a Key Mixer, on its Color Corrector track ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).

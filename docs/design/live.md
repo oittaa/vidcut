@@ -386,9 +386,6 @@ The bar and the Jobs button:
 
 - The Title section (`TitleDialog`) works out the title of its fields (`title_of`). When the user leaves a field, the changes go as one `titles.set`. A change on each line of a lower third goes as one `titles.set` for each line.
 - The onscreen controls (`onscreen::Grab`, `Workspace::title_controls`) box each title from one upright drawing of `burn::title`. They send one `titles.set` when a drag ends.
-  - A title that follows a motion path has its box where the plan draws it.
-    - `lead_at` gives the move of the frame (`Lead::spot`), and `drawn_at` adds it.
-    - A drag stores the own position of the title: the place under the pointer less that move.
 - `Workspace::title_wanted` gives the one title to preview: the dragged title, else the changed title of the Title section, else a title just sent (`tools::landing`).
 - `Workspace::sync_title_preview` hands the preview to the core (`Handle::preview_title`), and the core to the player. Thus the viewer draws it as an export does, without a new plan.
   - The core first loads a plan that it still owes. Why: the player does not show an older title.
@@ -446,6 +443,7 @@ The bar and the Jobs button:
   - A click on a polygon edge adds a corner, and a middle-click removes one. Both go through the same copy.
   - Copy Window sends `grade.window.copy`. The live core keeps its answer (`window_clipboard`) for `grade.window.paste`. The snapshot gives the shape of the copy, so the palette knows which window becomes current.
   - A curve has a handle at each point (`Grip::Point`) and at each Bezier handle (`Grip::Tangent`).
+  - Each point of a closed curve also has an inner and an outer softness handle (`Grip::Spread`). `bends` gives their even place.
   - A click on a curve adds a point with `curve_split`. `curve_inserted` cuts the Bezier segment there, so the shape stays.
   - While the current curve is on and has no points, a click adds a point. `Drawing` then keeps the curve open until a click on its first point.
   - A drag from a new point pulls its handles out (`Grip::Pull`). Alt and a drag on a corner do the same.
@@ -455,7 +453,9 @@ The bar and the Jobs button:
   - A corrector has an RGB input and a key input at its left (`Inlet`). It has an RGB output and a key output at its right (`Outlet`).
   - A key mixer has a key input for each input, and a key output.
   - The key ports and the key links are blue (`MASK_KNOT`). A link knows the outlet that it leaves (`Wire::out`).
-  - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.
+  - `EffectsPage::grade_nodes` holds the selection, and `gui.grade_nodes` sets it. The last one is the current node.
+  - With `EffectsPage::grade_loose`, the current node is not selected (`EffectsPage::picked_grade`). A drag box that leaves out the current node sets it.
+  - Thus `Graph` takes the selected nodes and the current node apart (`Graph::current`). Delete and a drag of the selected nodes leave out a current node that is not selected. Ctrl+D acts on it too.
   - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
   - In List View, the current row has a red outline (`CURRENT_ROW`). It is the red of the active angle (`ACTIVE_ANGLE`).
   - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.
@@ -505,6 +505,9 @@ The bar and the Jobs button:
   - On a corrector with keyframes, the palette shows the keyframe that a change at the playhead goes to (`GradeNode::changed_at`).
   - The dragged grade changes that keyframe and the other keyframe of its pair, as `grade.set` does (`GradeNode::change_at`).
   - The Key palette does the same with the Key Output (`GradeNode::key_output_changed_at`, `GradeNode::change_key_output_at`).
+  - The Key palette does the same with the Key Input (`GradeNode::key_input_changed_at`, `GradeNode::change_key_input_at`).
+  - The Key Mixer palette does the same with the mix and the Key Output (`GradeNode::mix_changed_at`, `GradeNode::change_mix_at`).
+  - The Window palette and the window overlay do the same with the windows (`GradeNode::windows_changed_at`, `GradeNode::change_window_at`).
   - The dragged grade (`Graded`) stays until the playhead comes to a frame that picks a different keyframe (`GradeNode::changed_key`).
 - After that, the palette shows the sent grade until the project has it. If the request fails, the palette shows the project again after a short time.
 - A drag in a wheel moves the puck by the move of the pointer (manual p. 3144):
@@ -515,9 +518,9 @@ The bar and the Jobs button:
 - A Plus or Minus button of the bars sends `grade.printer` with the current node (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) does the same.
   - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.
 - The Keyframes panel is at the right of the palette (`Workspace::grade_keys_panel`). Its height follows the palette, and it scrolls by itself. `GradeKeys` holds its mode, the selected keyframe and a drag.
-  - It has a ruler, a Master track and a track for each corrector. A click or a drag in the ruler moves the playhead.
+  - It has a ruler, a Master track and a track for each corrector and each Key Mixer. A click or a drag in the ruler moves the playhead.
   - A Dynamic keyframe is a diamond, and a Static keyframe is a dot. On the Master track, a frame is a diamond when one of its keyframes is Dynamic.
-  - The All and Color switch (`KeyMode`) sets the correctors that get a new keyframe: each one, or the current node. A bar at the left marks that track.
+  - The All and Color switch (`KeyMode`) sets the nodes that get a new keyframe: each one with a track, or the current node. A bar at the left marks that track.
   - A drag of a keyframe sends `grade.keys.move` with `by`. The drag picks the keyframe at the press, and `by` is the move of the pointer from the press. The menus of a track and of a keyframe send `grade.keys.add`, `grade.keys.set` and `grade.keys.remove`.
   - Change Dynamic Attributes opens a window with the Start and End sliders and the curve of `Dissolve`.
   - Another clip or another grade mode clears the selection (`GradeKeys::forget`).
@@ -528,7 +531,6 @@ The bar and the Jobs button:
 **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`).
 
 - It is a tab of the left panel (`LeftTab`). It draws the open Title, Subtitle and Subtitle Track sections (`Workspace::title_form`, `Workspace::cue_form`, `Workspace::track_form`).
-  - Follow in the Title section lists the motion paths of the clips that play under the title (`leads`, `follow_row`). A choice sends `motion.follow`, and the title goes onto the thing.
 - With a clip selected, it has three tabs (`Tab`): Video, Audio and Effects. The name of the clip and the tabs stay above the sections when they scroll.
   - Video shows the Title, Generator and picture sections and the Speed section.
   - Audio shows the sound sections and the Speed section.

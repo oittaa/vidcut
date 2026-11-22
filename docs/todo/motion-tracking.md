@@ -10,12 +10,15 @@ In this file, a path is never a track of the timeline.
 **Why:**
 
 - A blur over a face or a number plate must follow it.
-- A title or a picture that points at a thing must follow it.
+- A picture that points at a thing must follow it.
 - Without a motion path, the user sets a keyframe by hand at each move.
 
 **What the manual says:**
 
 - A search of the Cut page chapters (pp. 635–791) finds the Tracker palette only under Stabilization (pp. 738, 770).
+- The Edit page names its tracker only under Stabilization (pp. 923, 1209).
+- On the Fusion page, the Center of a text connects to a Tracker. The text then goes onto the tracked path (p. 1804).
+  - The X and Y Offset of the Tracker move the text away from the path (p. 1805).
 - The Tracker palette of the Color page has three modes: Window, Stabilizer and FX (p. 3308).
   - Window mode moves a Power Window with a feature of the frame.
   - Stabilizer mode uses the same technology to steady the whole frame.
@@ -44,7 +47,7 @@ In this file, a path is never a track of the timeline.
   - The values of a mask have keyframes ([model](../design/model.md#compositions)).
 - `motion.find` finds the faces, the text, the people and the vehicles of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
 - `motion.track` tracks a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
-- `motion.follow` makes a title follow a path of another clip ([deviation X169](../deviations.md#x169-a-title-follows-a-motion-path)).
+- A title follows no motion path. A composition has no text node.
 - No request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
 
@@ -121,14 +124,6 @@ In this file, a path is never a track of the timeline.
   - The Options tab: the names of the patterns, enlarge on drag and the search scale.
 - **The Tracker in the app:** run each track button, Stop Tracking, Find, Blur, Connect To and Follow Size. Take a find that asks for the download of its model.
 - **A clip follows a path** of another clip: a picture in a picture, or a sticker.
-- **A title that follows a path, what is left:**
-  - Try Follow in the app: the menu, a drag of a title that follows a path, and its zoom and turn handles.
-  - The size and the angle of the thing do not move the title.
-  - A title inside a compound clip follows no path.
-  - An OpenTimelineIO file does not keep what a title follows.
-  - Measure on the Fusion page where a connected node stays after the last frame of a track.
-  - Measure on the Fusion page what a connection does to a Center with keyframes. Until then, `motion.follow` refuses a title with keyframes on its position.
-  - Measure on the Fusion page where a node goes when its connection to a tracker is removed. Until then, a title that stops following keeps its numbers.
 - **A subject with its matte:** with [subject masks](subject-masks.md).
 - **Resolve measurement:**
   - Measure the lines of the manual above in Resolve. The manual and the application can differ.

@@ -856,7 +856,6 @@ impl Editor {
         if dropped > 0 {
             warnings.push(otio::transitions::dropped(dropped));
         }
-        warnings.extend(ops::motion::settle(&mut working));
         drop_unused_removed(&mut working);
         let problems = match touches_timelines(&request) {
             true => validate::everywhere(&working),
@@ -1127,7 +1126,6 @@ impl Editor {
         if dropped > 0 {
             warnings.push(otio::transitions::dropped(dropped));
         }
-        warnings.extend(ops::motion::settle(&mut working));
         drop_unused_removed(&mut working);
         let problems = validate::everywhere(&working);
         if !problems.is_empty() {
@@ -2613,7 +2611,12 @@ pub fn compound_context(p: &Project, k: &Compound, playhead: Option<i64>) -> Tim
     TimeContext {
         fps: k.fps,
         drop_frame: k.counts_drop_frame(),
-        ..source_context(p, k.frames, p.compound_sheet(k).marks, playhead)
+        ..source_context(
+            p,
+            ops::compound::length(p, k),
+            p.compound_sheet(k).marks,
+            playhead,
+        )
     }
 }
 
@@ -2876,7 +2879,15 @@ fn compound_source(p: &Project, params: &SourceParams, query: &str) -> Result<So
     ops::compound::placeable(p, &id)?;
     let k = p.pooled_compound(&id).expect("placeable finds it");
     let (a, b) = match &params.range {
-        None => ops::compound::marked(p, k),
+        None => match ops::compound::marked(p, k) {
+            (a, b) if a >= b => {
+                return Err(Error::invalid(format!(
+                    "the In of {} is past its end",
+                    k.name
+                )));
+            }
+            ab => ab,
+        },
         Some(r) => compound_context(p, k, None).range(r)?,
     };
     let range = ops::compound::host_span(p, k, (a, b));
@@ -4914,9 +4925,10 @@ fn mutate(
             add,
             node,
             place,
+            window,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
-            ops::grade::add(p, &of, *add, *node, *place)?
+            ops::grade::add(p, &of, *add, (*node, *place), *window)?
         }
         Request::GradeRemove {
             clip,
@@ -5069,8 +5081,12 @@ fn mutate(
             inside,
             outside,
             points,
+            inner,
+            outer,
+            at,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let change = ops::grade_windows::WindowChange {
                 on: *on,
                 name: name.clone(),
@@ -5086,8 +5102,10 @@ fn mutate(
                 inside: *inside,
                 outside: *outside,
                 points: points.clone(),
+                inner: inner.clone(),
+                outer: outer.clone(),
             };
-            ops::grade_windows::set(p, &of, *node, *window, &change)?;
+            ops::grade_windows::set(p, &of, (*node, *window), &change, at)?;
             Value::Null
         }
         Request::GradeWindowRemove {
@@ -5116,12 +5134,14 @@ fn mutate(
             window,
             append,
             settings,
+            at,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let copied = settings.as_ref().ok_or_else(|| {
                 Error::usage("give `settings`, a window from `grade.window.copy`")
             })?;
-            let to = ops::grade_windows::paste(p, &of, *node, (*window, *append), copied)?;
+            let to = ops::grade_windows::paste(p, &of, *node, (*window, *append), copied, at)?;
             json!({ "window": to })
         }
         Request::EffectsAdd { clips, kind } => {
@@ -5409,20 +5429,6 @@ fn mutate(
             out["backward"] = json!(stops.0);
             out["forward"] = json!(stops.1);
             out
-        }
-        Request::MotionFollow { clip, of, path } => {
-            let id = resolve_clip(p, clip, playhead)?;
-            let to = match (of, path) {
-                (Some(of), Some(path)) => Some((resolve_clip(p, of, playhead)?, path.clone())),
-                (None, None) => None,
-                _ => {
-                    return Err(Error::usage(
-                        "motion.follow needs `of` (--of) and `path` (--path) together, or neither",
-                    ));
-                }
-            };
-            let to = to.as_ref().map(|(of, path)| (of.as_str(), path.as_str()));
-            ops::motion::follow(p, &id, to)?
         }
         Request::SubtitlesSet {
             cue,
@@ -8736,9 +8742,11 @@ pub fn query(
             timeline,
             node,
             window,
+            at,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
-            json!({ "settings": ops::grade_windows::copy(p, &of, *node, *window)? })
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
+            json!({ "settings": ops::grade_windows::copy(p, &of, (*node, *window), at)? })
         }
         Request::GradeGet { clip, timeline, at } => {
             let of = grade_of(p, clip, *timeline, playhead)?;

@@ -566,13 +566,6 @@ Cancel:
   - Its kind aligns it, and title safe wraps it. It has one box behind the block, and its anchor places it.
 - Each title in the plan carries its clip, and where the piece is in that clip (`ShownTitle`, its `Run`). `Run::top` places a scrolling title on each frame.
 - `titles_of` gives a title with keyframes the values of its frame (`ShownTitle::sampled`). Thus the viewer and the export get plain values.
-- A title that follows a motion path carries the picture of the clip of that path (`ShownTitle::lead`, a `Lead`) ([model](model.md#motion-paths)).
-  - A `Lead` holds the `Placed` of that clip, the path, the fit of its picture and the frames on which it plays.
-  - `Lead::spot` gives the middle of the thing on a frame, as fractions of the frame of the project.
-    - `Followed::held` reads the path. Before its first sample and after its last, it gives that sample.
-    - `place::level` puts the point through the transform of that clip. Outside the frames of that clip, `Lead::spot` takes its first or its last frame.
-  - `ShownTitle::led` moves the title by that spot less the middle of the frame (`Title::moved`). `ShownTitle::sampled` calls it after the keyframes.
-  - `plain_title` works the move out for a piece of one frame. Thus the key of that piece in the render cache does not hold the whole path.
 - A title in a dissolve at the edge of its clip fades by the `Ramp` of the dissolve (`fade`), on both sides of the edge. `ShownTitle::alpha` gives its level, with its opacity.
 - A title in a wipe, a Push or a Slide has no level. It draws into the picture of its side, and `fs_motion` shows that side.
 - The player's `Titles` draws a title once for the size of the output, and keeps it while it shows. The shader moves and fades it.
@@ -673,6 +666,7 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - The width of the canvas, multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it.
   - The size of the picture on the frame: its fitted size, multiplied by each Zoom X and each Zoom Y.
   - The middle of the picture on the frame, through the levels. A Dynamic Zoom box does not move it.
+  - The rotation of the picture (`OnFrame.turn`).
 - `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas, and the border.
   - The sigma is that of `GaussianBlur::spreads` at that width.
   - A blur with no sigma and Use Alpha on is left out.
@@ -681,6 +675,7 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - It also holds Blur Alpha and Whole Cells Only.
   - The size of a cell comes from the area of the picture on the frame (`MosaicBlur::CELL`).
   - The origin is the middle of the picture on the frame, moved by Position and the offsets.
+    - Position is a point of the picture. Thus it turns with the picture. The offsets and the cells keep the directions of the frame.
   - Its sizes are in samples. Antialias Result gives two samples for each pixel.
   - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
 - `place::Glowing` holds what `fs_glow` needs for a Glow.
@@ -768,7 +763,8 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
 - `Graded::of` makes the tree into a list of passes on numbered textures (`grade::Pass`). A grade with only copies is no grade.
   - `grade::complete` tells if the grade works. Else the grade does nothing, as in the spec (§8.21).
-  - It works when something goes out, each input of a corrector has a link, each mixer has a link, and each node goes somewhere. A node that gives only its key goes somewhere.
+  - It works when something goes out, each input of a corrector has a link, and each node goes somewhere.
+  - It also needs a link on each Parallel Mixer and Layer Mixer. A Key Mixer with no link gives a key of 1. A node that gives only its key goes somewhere.
   - `grade::order` puts each node after the nodes on its inputs.
   - Texture 0 is the picture of the clip. A node writes on the texture of its first input when no other node reads it later. Else a `Copy` pass first gives it a new texture (`Registers`).
   - Why: most trees then need no texture more than the picture.
@@ -783,12 +779,16 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
     - The last step clamps the key and applies the Key Output.
   - `shape_of` tells if the key of a node is one value for all pixels (`Shape::Flat`) or a texture (`Shape::Map`). Flat keys fold on the CPU and cost no pass.
   - A `KeyFold` pass folds a texture key with `fs_key_fold`. A node with windows and no key input keeps its one `Key` pass.
-  - A key on a key input with a Blur Radius above 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
+  - A key on a key input with a Blur Radius other than 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
+    - A Blur Radius below 0 then adds a `KeySharpen` pass. It gives twice the key minus its blur, as measured (spec §8.21).
+  - `cut_off` tells if a corrector takes its key input from a corrector that is off. Its key is then 0, and it reads no key from its links.
   - `Uses::counts` counts the readers of each key, from the last node back. A node counts its own key only when it is on and needs it. Only then do the keys on its links count.
   - Why: each key texture is then free after its last reader, and a key that nothing reads costs no pass.
   - A key mixer makes no picture. `grade::passed` and the counts of the pictures skip it.
+  - A corrector whose picture no node reads gives only its key. It gets no `Correct` pass, except in `Graded::tapped`, where its thumbnail shows its picture.
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
   - A curve goes to the GPU as two closed paths of lines: the inner and the outer path (`flattened`, `mitred`).
+  - A curve with dragged softness points gets each path from its own points: the curve points with their moves (`inner`, `outer`).
     - `flatten_into` halves each Bezier segment until its handles are within `FLAT_ERROR` pixel of the chord, `FLAT_DEPTH` times at most.
   - A curve with Soft 1 needs a blur of its hard key. `curves_blurred` draws up to `CURVE_CHANNELS` such keys into the channels of one texture (`fs_window_curves`).
     - It blurs each channel with its own sigma, as the Gaussian blur of an effect. `texel_spread` gives the sigma in texels.
@@ -879,10 +879,15 @@ The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline
 
 The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes panel of the Color page):
 
-- `GradeNode::keys` holds the keyframes of a corrector, in the order of their frames. A mixer has none.
-  - Each `GradeKey` holds every value of the corrector, its `KeyOutput`, its `GradeKeyKind`, and its `start` and `end`.
+- `GradeNode::keys` holds the keyframes of a corrector or a Key Mixer (`GradeNode::takes_keyframes`), in the order of their frames.
+  - The other mixers have none.
+  - Each `GradeKey` holds every value of the node, its `GradeKeyKind`, and its `start` and `end`.
+  - The values of a corrector are its `Corrector` values, its `KeyInput`, its `KeyOutput` and its windows.
+  - The values of a Key Mixer are a `KeyMix` for each input and its `KeyOutput`.
+  - The window list of each keyframe has the shapes of the window list of the node. `ops::grade::checked` refuses other lists.
+  - The mix list of each keyframe has one `KeyMix` for each input of the node. `ops::grade::checked` refuses other lists.
   - A keyframe of a clip grade is on a source frame, as a `Keyframe` of an effect is. A keyframe of the timeline grade is on a timeline frame.
-  - `ops::grade::checked` refuses keyframes on a mixer, frames out of order, two keyframes on one frame, and a `start` or `end` past `LAST_PROFILE`.
+  - `ops::grade::checked` refuses keyframes on the other mixers, frames out of order, two keyframes on one frame, and a `start` or `end` past `LAST_PROFILE`.
 - `GradeNode::corrector_at` gives the values on a frame:
   - Before the first keyframe, they are the values of the corrector itself.
   - After a Static keyframe, or after the last keyframe, the values of that keyframe hold.
@@ -890,23 +895,36 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - Why linear: the renders of the spec equal a grade with no keyframes at the blended values (spec §8.22).
 - `GradeNode::key_output_at` gives the Key Output on a frame in the same way (`KeyOutput::blended`).
   - Invert cannot blend. It keeps the value of the keyframe before the frame.
+- `GradeNode::windows_at` gives the windows on a frame in the same way (`GradeWindow::blended`).
+  - The Size blends by its scale (`circle_scale`, `linear_scale`), and `circle_size` or `linear_size` gives the Size back.
+  - Why: on a circle, the radius moves in a straight line (spec §8.23).
+  - On, Invert, Mask, the name, and a point list of another length keep the value of the keyframe before the frame.
+- `GradeNode::key_input_at` and `GradeNode::mix_at` give the Key Input and the mix of a Key Mixer in the same way (`KeyInput::blended`, `KeyMix::blended`).
+  - Invert, Mask and Matte keep the value of the keyframe before the frame.
 - `Dissolve::of` finds the joints of the curve once: where the straight line touches the start curve and the end curve.
   - `root` scans `STEPS` points for a change of sign, and then halves the step `HALVINGS` times.
   - Where no line touches both curves, the joint is where the slopes of the two curves are equal.
   - There, a line touches the curve that is farther from w = u. It ends where it meets the other curve.
-- `Grade::at` gives the grade of one frame, with no keyframes and the Key Output of that frame. Each path that draws a frame takes it:
+- `Grade::at` gives the grade of one frame, with no keyframes and the values of that frame. Each path that draws a frame takes it:
   - `Placing::new` gives `Working::graded` the clip grade at the source frame of the placement. `Picture::sampled` does the same.
   - The player gives the viewer the timeline grade at the playhead (`Shown`).
   - `VideoFrames::grading_from` gives an export the timeline frame of its first frame. Each drawn frame then sets the timeline grade of its own frame.
   - `frame.render` and the storyboard give `Finish` the timeline grade of their frame.
 - `ops::grade_keys` changes the keyframes for `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`.
   - `at` is a timeline time. On a clip, `Clip::content_at` gives its source frame (`ops::grade::frame_of`).
-  - A new keyframe takes the values of `corrector_at` and `key_output_at` on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
+  - A new keyframe takes the values of the node on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
 - `grade.set` and `grade.printer` change the values with `GradeNode::change_at`:
   - The keyframe on or before `at` changes (`GradeNode::changed_key`). Before the first keyframe, the corrector itself changes.
   - A Static keyframe, or the corrector itself, and the Dynamic keyframe right after it are a pair.
   - The other keyframe of the pair takes only the values that changed (`Corrector::carried`). Each channel of a wheel is one value.
 - `key_gain`, `key_offset` and `key_invert` change the Key Output in the same way (`GradeNode::change_key_output_at`, `KeyOutput::carried`).
+- `grade.window.set` changes a window in the same way (`GradeNode::change_window_at`, `GradeWindow::carried`).
+  - Each point of a polygon or a curve is one value, and so is each softness move of a curve.
+  - `grade.window.add`, `grade.window.remove`, `grade.window.convert` and a paste at the end change each window list (`GradeNode::window_lists_mut`).
+- The `key_input_` fields of `grade.set` change the Key Input in the same way (`GradeNode::change_key_input_at`, `KeyInput::carried`).
+- The `mix_` fields change an input of a Key Mixer in the same way (`GradeNode::change_mix_at`, `KeyMix::carried`).
+  - `grade.connect` and `grade.input.remove` change each mix list (`GradeNode::mix_lists_mut`).
+- All of these changes use one rule (`GradeNode::keyed_change`).
 - `grade.clear` with `node` or `keep_nodes` puts these values back to the usual values in the same way. The keyframes stay.
 - Each of these changes, and a change of the keyframes, refuses a locked node (`ops::grade::unlocked`). Requests for all nodes skip it.
   - It also puts back `KeyOutput::default`. With `palette`, only the values of that palette go back (`GradePalette`).

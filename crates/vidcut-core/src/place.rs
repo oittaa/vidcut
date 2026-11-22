@@ -691,6 +691,7 @@ struct OnFrame {
     width: f64,
     size: [f64; 2],
     middle: [f64; 2],
+    turn: f64,
     frame: i64,
     fit: [f64; 4],
     canvas: [f64; 2],
@@ -714,9 +715,12 @@ impl Tiling {
         };
         let [px, py] = m.place();
         let [dx, dy] = m.offsets();
+        let (ax, ay) = ((px - 0.5) * w, (0.5 - py) * h);
+        let (sin, cos) = on.turn.to_radians().sin_cos();
+        let (x, y) = (mx + cos * ax + sin * ay, my - sin * ax + cos * ay);
         let origin = [
-            (samples * (mx + (px - 0.5) * w) + dx * 0.5 * cell[0]).rem_euclid(2.0 * step),
-            (samples * (my + (0.5 - py) * h) - dy * 0.5 * cell[1]).rem_euclid(2.0 * cell[1]),
+            (samples * x + dx * 0.5 * cell[0]).rem_euclid(2.0 * step),
+            (samples * y - dy * 0.5 * cell[1]).rem_euclid(2.0 * cell[1]),
         ];
         let reach = cell.map(|c| (m.box_size() * c / 2.0 + 1e-9).min(Self::MOST_REACH) as u32);
         Self {
@@ -902,6 +906,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
         width: 4.0 / 3.0 * (w * h).sqrt(),
         size: [w, h],
         middle: [w / 2.0, h / 2.0],
+        turn: 0.0,
         frame,
         fit: [0.0, 0.0, w, h],
         canvas: [w, h],
@@ -958,12 +963,7 @@ fn whole_pixels(part: f64, pixels: f64) -> f64 {
     (part * pixels + 1e-6).floor() / pixels.max(1.0)
 }
 
-pub(crate) fn level(
-    placed: &Placed,
-    frame: (f64, f64),
-    fitted: [f64; 4],
-    (pw, ph): (f64, f64),
-) -> Level {
+fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], (pw, ph): (f64, f64)) -> Level {
     let sampled = placed.picture.sampled(placed.source as f64);
     let p = &sampled;
     let [_, _, fw, fh] = fitted;
@@ -1147,6 +1147,7 @@ impl Placing {
             width: frame.0 * (zx * zy).abs().sqrt(),
             size: [fitted[2] * zx.abs(), fitted[3] * zy.abs()],
             middle: ahead(&own.back, unzoomed),
+            turn: p.picture.turn_at(p.source as f64),
             frame: p.frame,
             fit: fitted,
             canvas: [frame.0, frame.1],
