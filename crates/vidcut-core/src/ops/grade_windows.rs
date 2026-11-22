@@ -25,6 +25,8 @@ pub struct WindowChange {
     pub inside: Option<f64>,
     pub outside: Option<f64>,
     pub points: Option<Vec<[f64; 2]>>,
+    pub inner: Option<Vec<[f64; 2]>>,
+    pub outer: Option<Vec<[f64; 2]>>,
 }
 
 fn corrector(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
@@ -120,6 +122,12 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
     if c.points.iter().flatten().flatten().any(|v| !v.is_finite()) {
         return Err(Error::invalid("each point takes two numbers"));
     }
+    let curve = matches!(w.shape, WindowShape::Curve { .. });
+    for (field, given) in [("inner", c.inner.is_some()), ("outer", c.outer.is_some())] {
+        if given && !curve {
+            return Err(wrong(field));
+        }
+    }
     match &mut w.shape {
         WindowShape::Polygon {
             points,
@@ -145,13 +153,17 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
             points,
             inside,
             outside,
+            inner,
+            outer,
             ..
         } => {
             if let Some(v) = c.inside {
                 *inside = in_range("inside", v, soft_range)?;
+                *inner = None;
             }
             if let Some(v) = c.outside {
                 *outside = in_range("outside", v, soft_range)?;
+                *outer = None;
             }
             if let Some(given) = &c.points {
                 if given.len() % 3 != 0 {
@@ -160,6 +172,26 @@ fn changed(w: &mut GradeWindow, c: &WindowChange) -> Result<()> {
                     ));
                 }
                 *points = given.as_chunks::<3>().0.to_vec();
+            }
+            for (name, given, to) in [("inner", &c.inner, inner), ("outer", &c.outer, outer)] {
+                if let Some(given) = given {
+                    if given.iter().flatten().any(|v| !v.is_finite()) {
+                        return Err(Error::invalid(format!(
+                            "each `{name}` move takes two numbers"
+                        )));
+                    }
+                    *to = Some(given.clone());
+                }
+                if to.as_ref().is_some_and(|m| m.len() != points.len()) {
+                    match given {
+                        Some(_) => {
+                            return Err(Error::invalid(format!(
+                                "`{name}` takes one move for each point of the curve"
+                            )));
+                        }
+                        None => *to = None,
+                    }
+                }
             }
         }
         WindowShape::Linear { points, .. } => {
@@ -210,12 +242,17 @@ pub(super) fn checked(w: &GradeWindow) -> Result<()> {
             soft,
             inside,
             outside,
+            ..
         } => (
             Some(vec![*soft]),
             Some(*inside),
             Some(*outside),
             Some(points.iter().flatten().copied().collect()),
         ),
+    };
+    let (inner, outer) = match &w.shape {
+        WindowShape::Curve { inner, outer, .. } => (inner.clone(), outer.clone()),
+        _ => (None, None),
     };
     let all = WindowChange {
         size: Some(w.size),
@@ -228,6 +265,8 @@ pub(super) fn checked(w: &GradeWindow) -> Result<()> {
         inside,
         outside,
         points,
+        inner,
+        outer,
         ..WindowChange::default()
     };
     changed(&mut w.clone(), &all)
@@ -367,6 +406,8 @@ pub fn convert(p: &mut Project, of: &GradeOf, n: u32, i: usize) -> Result<usize>
                 soft: 0.0,
                 inside: 0.0,
                 outside: 0.0,
+                inner: None,
+                outer: None,
             },
             on: true,
             name: String::new(),

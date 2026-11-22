@@ -4945,6 +4945,8 @@ fn mutate(
             inside,
             outside,
             points,
+            inner,
+            outer,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
             let change = ops::grade_windows::WindowChange {
@@ -4962,6 +4964,8 @@ fn mutate(
                 inside: *inside,
                 outside: *outside,
                 points: points.clone(),
+                inner: inner.clone(),
+                outer: outer.clone(),
             };
             ops::grade_windows::set(p, &of, *node, *window, &change)?;
             Value::Null
