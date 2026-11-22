@@ -8360,6 +8360,27 @@ fn checked_lut(env: &dyn Env, path: &Path) -> Result<Option<PathBuf>> {
     Ok(Some(path.to_path_buf()))
 }
 
+fn monitor_lut(
+    env: &dyn Env,
+    (path, follows): (Option<&Path>, bool),
+    (lut_key, follow_key): (&str, &str),
+) -> Result<Option<crate::model::MonitorLut>> {
+    use crate::model::MonitorLut;
+    Ok(match (path, follows) {
+        (Some(_), true) => {
+            return Err(Error::usage(format!(
+                "give {lut_key} or {follow_key}, not both"
+            )));
+        }
+        (Some(path), false) => Some(match checked_lut(env, path)? {
+            Some(path) => MonitorLut::File(path),
+            None => MonitorLut::None,
+        }),
+        (None, true) => Some(MonitorLut::VideoMonitor),
+        (None, false) => None,
+    })
+}
+
 fn set_drop_frame(p: &mut Project, on: bool) -> Result<()> {
     let was = p.settings.clone();
     p.settings.set_drop_frame(on)?;
@@ -8446,20 +8467,13 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     if let Some(path) = &set.video_monitor_lut {
         p.settings.video_monitor_lut = checked_lut(env, path)?;
     }
-    match (&set.color_viewer_lut, set.color_viewer_follows) {
-        (Some(_), true) => {
-            return Err(Error::usage(
-                "give color_viewer_lut or color_viewer_follows, not both",
-            ));
-        }
-        (Some(path), false) => {
-            p.settings.color_viewer_lut = match checked_lut(env, path)? {
-                Some(path) => crate::model::ViewerLut::File(path),
-                None => crate::model::ViewerLut::None,
-            };
-        }
-        (None, true) => p.settings.color_viewer_lut = crate::model::ViewerLut::VideoMonitor,
-        (None, false) => {}
+    let viewer = (set.color_viewer_lut.as_deref(), set.color_viewer_follows);
+    if let Some(lut) = monitor_lut(env, viewer, ("color_viewer_lut", "color_viewer_follows"))? {
+        p.settings.color_viewer_lut = lut;
+    }
+    let scopes = (set.scopes_lut.as_deref(), set.scopes_follow);
+    if let Some(lut) = monitor_lut(env, scopes, ("scopes_lut", "scopes_follow"))? {
+        p.settings.scopes_lut = lut;
     }
     if let Some(profile) = set.dynamics_profile {
         let last = crate::grade_keys::LAST_PROFILE;

@@ -34,14 +34,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - adjustment clips (§8.24)
 - compositions of nodes on the Effects page: Blur, the six effects, and Ellipse, Rectangle and Polygon masks (§8.19)
 - the input LUT of a media item and of the project, and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
-- the Video Monitor LUT and the Color Viewer LUT ([§13](#the-lut-tables))
+- the Video Monitor LUT, the Color Viewer LUT and the Scopes LUT ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
 **Later (later):**
 - other effects, other transitions, other titles, other generators
 - keyframes other than Transform, Crop, Composite, speed, the clip volume, effect values and the Position, Zoom, Rotation and Opacity of a title
 - color ([todo](todo/auto-color.md)), the Fusion tools that §8.19 does not have
-- the Scopes LUT, and LUT files other than `.cube` ([todo](todo/luts.md))
+- LUT files other than `.cube` ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
@@ -6348,7 +6348,7 @@ A script gets no error for a broken file, and the window shows no message:
 - `LUT_3D_SIZE 1` gives a black picture.
 - vidcut refuses these files ([X131](deviations.md#x131-a-broken-cube-file-is-refused)).
 
-**The Video Monitor LUT and the Color Viewer LUT** (pp. 152, 811):
+**The Video Monitor LUT, the Color Viewer LUT and the Scopes LUT** (pp. 152, 811):
 
 - The Video Monitor LUT works on the picture after every other step. It is only for monitoring. A render and the output of the Deliver page do not get it (p. 152).
 - The Color Viewer LUT works on the viewer on the computer display. By default, it follows the Video Monitor LUT (p. 152).
@@ -6357,10 +6357,12 @@ A script gets no error for a broken file, and the window shows no message:
 
 In vidcut:
 
-- `project.set` sets `video_monitor_lut` and `color_viewer_lut`. `color_viewer_follows` makes the Color Viewer LUT follow the Video Monitor LUT again.
+- `project.set` sets `video_monitor_lut`, `color_viewer_lut` and `scopes_lut`.
+  - `color_viewer_follows` makes the Color Viewer LUT follow the Video Monitor LUT again.
+  - `scopes_follow` makes the scopes use the Video Monitor LUT.
 - The viewer of the Color page runs its LUT after the output LUT, on its own branch. The viewers of the other pages do not get it.
-- An export, the render cache, a proxy and the scopes do not get it.
-- The Video Monitor LUT shows only in the viewer of the Color page, while the Color Viewer LUT follows it. Why: vidcut sends no picture to a video monitor.
+- The scopes read the picture through the Scopes LUT, on all pages. With none, they read the data as it is.
+- An export, the render cache and a proxy get neither LUT.
 
 **The LUT menus**, measured in Resolve Studio 21.2 (pp. 152, 3479–3480):
 
@@ -6388,8 +6390,10 @@ In vidcut:
 - vidcut lists the `.cube` files of these folders and of their subfolders, in the order of their paths in their folders, by character code.
   - It reads the folders at start, on `Update Lists`, and when the LUT Locations change. `luts.list` gives the list to a script.
 - The `LUT` submenu of the pool and the Input LUT row of the Inspector set the Input LUT of media items.
-- The Project Settings window has the rows Input LUT, Output LUT, Video Monitor LUT and Color Viewer LUT, each one dropdown. It also has `Update Lists` and `Open LUT Folder`.
-  - The list of the Color Viewer LUT starts with `Use video monitoring selection`, the default. Then come the entries of the other rows.
+- The Project Settings window has the rows Input LUT, Output LUT, Video Monitor LUT, Color Viewer LUT and Scopes LUT, each one dropdown. It also has `Update Lists` and `Open LUT Folder`.
+  - The lists of the Color Viewer LUT and the Scopes LUT have `Use video monitoring selection` after `No LUT selected`.
+  - The default of the Color Viewer LUT is `Use video monitoring selection`. The default of the Scopes LUT is `No LUT selected`.
+  - `Update Lists` also reads the LUT files of the viewer, the scopes and the thumbnails again. Thus a file that changed in place shows its new look.
 - A LUT that is set but not in the list shows by its file name, with its check mark.
 - `media.set` and `project.set` take the path of any `.cube` file. Thus a script can give a file outside the LUT folders.
 

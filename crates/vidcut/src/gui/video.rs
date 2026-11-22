@@ -9,6 +9,7 @@ use eframe::wgpu;
 use eframe::wgpu::FilterMode::{Linear, Nearest};
 use vidcut_av::player::Player;
 use vidcut_core::Error;
+use vidcut_core::lru::Lru;
 
 use super::workspace::{NodeShots, ScopePictures};
 use crate::live::stats::{PlayerStats, ViewerStats};
@@ -43,8 +44,8 @@ struct State {
     scope_targets: Vec<(Scope, Target)>,
     shots: Option<ShotsWanted>,
     shots_shown: Option<ShotsShown>,
-    display_lut: Option<PathBuf>,
-    display_why: Option<String>,
+    luts: Asked,
+    lut_why: Option<String>,
     colors: Option<Hdr>,
     has_frame: bool,
     stats: ViewerStats,
@@ -214,17 +215,19 @@ impl Viewer {
         (self.texture.map(|(_, t)| t), has_frame)
     }
 
-    pub fn show_lut(&self, path: Option<&Path>) {
+    pub fn show_luts(&self, (display, scopes): (Option<&Path>, Option<&Path>), checked: u64) {
         let mut s = self.shared.lock();
-        if s.display_lut.as_deref() != path {
-            s.display_lut = path.map(Path::to_path_buf);
+        let ([d, sc], c) = &s.luts;
+        if d.as_deref() != display || sc.as_deref() != scopes || *c != checked {
+            let paths = [display, scopes].map(|p| p.map(Path::to_path_buf));
+            s.luts = (paths, checked);
             s.woken = true;
             self.shared.wake.notify_all();
         }
     }
 
     pub fn lut_failed(&self) -> Option<String> {
-        self.shared.lock().display_why.take()
+        self.shared.lock().lut_why.take()
     }
 
     pub fn sync_scopes(
@@ -373,46 +376,52 @@ impl Drop for Viewer {
     }
 }
 
+type Asked = ([Option<PathBuf>; 2], u64);
+
+const MONITOR_LUTS_KEPT: usize = 2;
+
 #[derive(Default)]
-struct DisplayLut {
-    asked: Option<PathBuf>,
-    kept: Option<(String, Lut)>,
-    shown: Option<Lut>,
+struct MonitorLuts {
+    asked: Asked,
+    kept: Lru<String, Lut, MONITOR_LUTS_KEPT>,
+    shown: [Option<Lut>; 2],
 }
 
-impl DisplayLut {
-    fn ask(&mut self, path: Option<PathBuf>) -> Option<String> {
-        if self.asked == path {
+impl MonitorLuts {
+    fn ask(&mut self, asked: Asked) -> Option<String> {
+        if self.asked == asked {
             return None;
         }
-        self.asked = path;
-        self.shown = None;
-        let path = self.asked.as_deref()?;
-        let stamp = vidcut_core::cube::stamp(path);
-        if let Some((kept, lut)) = &self.kept
-            && *kept == stamp
-        {
-            self.shown = Some(lut.clone());
-            return None;
-        }
-        match vidcut_av::screen::load_lut(path) {
-            Ok(lut) => {
-                self.kept = Some((stamp, lut.clone()));
-                self.shown = Some(lut);
-                None
+        let mut why = None;
+        let names = ["Color Viewer LUT", "Scopes LUT"];
+        for ((path, shown), name) in asked.0.iter().zip(&mut self.shown).zip(names) {
+            *shown = None;
+            let Some(path) = path else { continue };
+            let stamp = vidcut_core::cube::stamp(path);
+            if let Some(lut) = self.kept.get(&stamp) {
+                *shown = Some(lut.clone());
+                continue;
             }
-            Err(e) => Some(e.to_string()),
+            match vidcut_av::screen::load_lut(path) {
+                Ok(lut) => {
+                    self.kept.insert(stamp, lut.clone());
+                    *shown = Some(lut);
+                }
+                Err(e) => why = Some(format!("{name}: {e}")),
+            }
         }
+        self.asked = asked;
+        why
     }
 }
 
 fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     let mut screen = Screen::new();
-    let mut display = DisplayLut::default();
+    let mut luts = MonitorLuts::default();
     let mut generation = 0u64;
     let mut next: Option<Instant> = None;
     loop {
-        let (tasks, engine, want, upscale, scopes, scale, shots, lut) = {
+        let (tasks, engine, want, upscale, scopes, scale, shots, asked) = {
             let mut s = shared.lock();
             while !s.woken && !s.stop {
                 let wait = next.map_or(IDLE, |n| n.saturating_duration_since(Instant::now()));
@@ -437,11 +446,11 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
                 s.scopes.clone(),
                 s.scale,
                 s.shots.clone(),
-                s.display_lut.clone(),
+                s.luts.clone(),
             )
         };
-        if let Some(why) = display.ask(lut) {
-            shared.lock().display_why = Some(why);
+        if let Some(why) = luts.ask(asked) {
+            shared.lock().lut_why = Some(why);
         }
         let now = Instant::now();
         let shown = engine.as_ref().and_then(|e| e.present(now));
@@ -460,7 +469,9 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             })
             .unwrap_or_default();
         screen.set_output_lut(shown.as_ref().and_then(|s| s.output_lut.clone()));
-        screen.set_display_lut(display.shown.clone());
+        let [display, scoped] = luts.shown.clone();
+        screen.set_display_lut(display);
+        screen.set_scopes_lut(scoped);
         screen.set_timeline_grade(shown.as_ref().and_then(|s| s.timeline_grade.as_ref()));
         screen.set_frame_size(shown.as_ref().map(|s| s.size));
         screen.scoping(!scopes.is_empty());

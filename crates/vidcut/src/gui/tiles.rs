@@ -178,6 +178,22 @@ impl Tiles {
         self.disk = prefs.disk_cache;
     }
 
+    pub fn check_luts(&mut self, p: &Project) {
+        for m in &p.media {
+            let Some(lut) = m.input_lut_in(&p.settings) else {
+                continue;
+            };
+            let Some(seen) = self.versions.get(&m.id) else {
+                continue;
+            };
+            if !seen.is(m, Some(lut)) || seen.look == thumbcache::look(m, Some(lut)) {
+                continue;
+            }
+            self.versions.insert(m.id.clone(), Seen::of(m, Some(lut)));
+            self.forget(&m.id);
+        }
+    }
+
     pub fn begin_frame(&mut self, ctx: &egui::Context, p: Option<&Project>) {
         if !self.started {
             self.started = true;

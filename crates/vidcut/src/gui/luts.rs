@@ -6,7 +6,7 @@ use egui_phosphor::regular::CHECK;
 use serde_json::json;
 use vidcut_core::Error;
 use vidcut_core::luts::{Lut, LutList};
-use vidcut_core::model::ViewerLut;
+use vidcut_core::model::MonitorLut;
 use vidcut_core::request::Page;
 
 use super::export::Ask;
@@ -22,6 +22,7 @@ pub(super) struct Luts {
     ask: Option<Ask>,
     asked: bool,
     folders: Arc<Vec<PathBuf>>,
+    checked: u64,
 }
 
 impl Workspace {
@@ -45,14 +46,22 @@ impl Workspace {
 
     pub(super) fn update_luts(&mut self, ctx: &egui::Context) {
         self.luts.asked = true;
+        self.luts.checked += 1;
+        if let (Some(tiles), Some(p)) = (&mut self.tiles, self.snap.project()) {
+            tiles.check_luts(p);
+        }
         self.luts.ask = Some(Ask::send(&self.live, ctx, "luts.list", json!({})));
     }
 
-    pub(super) fn display_lut(&self) -> Option<&Path> {
-        if self.effects_page.page != Page::Color {
-            return None;
-        }
-        self.project()?.settings.viewer_lut()
+    pub(super) fn monitor_luts(&self) -> ((Option<&Path>, Option<&Path>), u64) {
+        let Some(p) = self.project() else {
+            return ((None, None), self.luts.checked);
+        };
+        let display = match self.effects_page.page {
+            Page::Color => p.settings.viewer_lut_file(),
+            _ => None,
+        };
+        ((display, p.settings.scopes_lut_file()), self.luts.checked)
     }
 
     pub(super) fn open_lut_folder(&mut self) {
@@ -157,23 +166,25 @@ pub(super) fn combo(
         .selected_text(shown(list, now))
         .width(width)
         .truncate()
-        .show_ui(ui, |ui| entries(ui, list, (now, now.is_none()), &mut pick));
+        .show_ui(ui, |ui| {
+            entries(ui, list, (now, now.is_none()), None, &mut pick);
+        });
     (r.response, pick)
 }
 
-pub(super) fn viewer_combo(
+pub(super) fn monitor_combo(
     ui: &mut egui::Ui,
     id: &str,
     list: &LutList,
-    now: &ViewerLut,
+    now: &MonitorLut,
     width: f32,
-) -> (egui::Response, Option<ViewerLut>) {
+) -> (egui::Response, Option<MonitorLut>) {
     let file = match now {
-        ViewerLut::File(path) => Some(path.as_path()),
-        ViewerLut::VideoMonitor | ViewerLut::None => None,
+        MonitorLut::File(path) => Some(path.as_path()),
+        MonitorLut::VideoMonitor | MonitorLut::None => None,
     };
     let text = match now {
-        ViewerLut::VideoMonitor => FOLLOW.to_string(),
+        MonitorLut::VideoMonitor => FOLLOW.to_string(),
         _ => shown(list, file),
     };
     let (mut follow, mut pick) = (false, None);
@@ -182,14 +193,13 @@ pub(super) fn viewer_combo(
         .width(width)
         .truncate()
         .show_ui(ui, |ui| {
-            follow = ui.selectable_label(now.follows(), FOLLOW).clicked();
-            let none = matches!(now, ViewerLut::None);
-            entries(ui, list, (file, none), &mut pick);
+            let following = Some((now.follows(), &mut follow));
+            entries(ui, list, (file, now.is_none()), following, &mut pick);
         });
     let picked = match (follow, pick) {
-        (true, _) => Some(ViewerLut::VideoMonitor),
-        (false, Some(Some(path))) => Some(ViewerLut::File(path)),
-        (false, Some(None)) => Some(ViewerLut::None),
+        (true, _) => Some(MonitorLut::VideoMonitor),
+        (false, Some(Some(path))) => Some(MonitorLut::File(path)),
+        (false, Some(None)) => Some(MonitorLut::None),
         (false, None) => None,
     };
     (r.response, picked)
@@ -199,10 +209,14 @@ fn entries(
     ui: &mut egui::Ui,
     list: &LutList,
     (now, none): (Option<&Path>, bool),
+    follow: Option<(bool, &mut bool)>,
     pick: &mut Option<Option<PathBuf>>,
 ) {
     if ui.selectable_label(none, NONE).clicked() {
         *pick = Some(None);
+    }
+    if let Some((on, clicked)) = follow {
+        *clicked = ui.selectable_label(on, FOLLOW).clicked();
     }
     if let Some(path) = now.filter(|p| list.find(p).is_none())
         && ui.selectable_label(true, file_name(path)).clicked()

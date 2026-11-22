@@ -1058,6 +1058,9 @@ pub struct Screen {
     display_lut: Option<Lut>,
     drawn_display_lut: Option<Lut>,
     displayed: Option<Wide>,
+    scopes_lut: Option<Lut>,
+    drawn_scopes_lut: Option<Lut>,
+    scoped: Option<Wide>,
     timeline_grade: Option<Grade>,
     drawn_timeline_grade: Option<Grade>,
     frame: Option<(u32, u32)>,
@@ -1893,6 +1896,10 @@ impl Screen {
         self.display_lut = lut;
     }
 
+    pub fn set_scopes_lut(&mut self, lut: Option<Lut>) {
+        self.scopes_lut = lut;
+    }
+
     pub fn set_timeline_grade(&mut self, grade: Option<&Grade>) {
         self.timeline_grade = grade.filter(|g| g.is_active()).cloned();
         self.shots.timeline = grade.cloned();
@@ -1944,6 +1951,7 @@ impl Screen {
                 && self.drawn_colors == colors
                 && self.drawn_output_lut == self.output_lut
                 && self.drawn_display_lut == self.display_lut
+                && self.drawn_scopes_lut == self.scopes_lut
                 && self.drawn_timeline_grade == self.timeline_grade
                 && self.drawn_scoping == self.scoping
                 && !self.shots.stale();
@@ -2270,15 +2278,11 @@ impl Screen {
         } else if self.looked_up.as_ref().is_none_or(|l| l.size != size) {
             self.looked_up = Some(lut::LookedUp::new(gpu, size));
         }
-        if self.display_lut.is_none() || self.exported {
-            self.displayed = None;
-        } else if self
-            .displayed
-            .as_ref()
-            .is_none_or(|d| d.size != size || d.hdr != colors)
-        {
-            self.displayed = Some(Wide::new(gpu, size, colors));
-        }
+        let displaying = self.display_lut.is_some() && !self.exported;
+        keep_canvas(&mut self.displayed, displaying, gpu, (size, colors));
+        let shares = displaying && self.scopes_lut == self.display_lut;
+        let scoping = self.scopes_lut.is_some() && self.scoping && !self.exported && !shares;
+        keep_canvas(&mut self.scoped, scoping, gpu, (size, colors));
         let target = self.target.as_ref().expect("made above");
         let wide = self.wide.as_ref();
         let canvas = wide.map_or(&target.view, |w| &w.view);
@@ -2528,14 +2532,7 @@ impl Screen {
         if let (Some(w), Some(table), Some(out), true) =
             (wide, &self.output_lut, &self.looked_up, n > 0)
         {
-            let table = gpu.luts().table(gpu, table);
-            {
-                let mut pass = begin(&mut encoder, &out.view, Some(wgpu::Color::TRANSPARENT));
-                pass.set_pipeline(&gpu.luts().timeline);
-                pass.set_bind_group(0, &w.bind, &[]);
-                pass.set_bind_group(1, &table, &[]);
-                pass.draw(0..3, 0..1);
-            }
+            looked_up(gpu, &mut encoder, (&w.bind, table), &out.view);
             encoder.copy_texture_to_texture(
                 out.texture.as_image_copy(),
                 w.texture.as_image_copy(),
@@ -2546,14 +2543,12 @@ impl Screen {
             && n > 0
             && !self.exported
         {
+            if let (Some(table), Some(s)) = (&self.scopes_lut, &self.scoped) {
+                looked_up(gpu, &mut encoder, (&w.bind, table), &s.view);
+            }
             let shown = match (&self.display_lut, &self.displayed) {
                 (Some(table), Some(d)) => {
-                    let table = gpu.luts().table(gpu, table);
-                    let mut pass = begin(&mut encoder, &d.view, Some(wgpu::Color::TRANSPARENT));
-                    pass.set_pipeline(&gpu.luts().timeline);
-                    pass.set_bind_group(0, &w.bind, &[]);
-                    pass.set_bind_group(1, &table, &[]);
-                    pass.draw(0..3, 0..1);
+                    looked_up(gpu, &mut encoder, (&w.bind, table), &d.view);
                     &d.bind
                 }
                 _ => &w.bind,
@@ -2595,11 +2590,42 @@ impl Screen {
         self.drawn_colors = colors;
         self.drawn_output_lut = self.output_lut.clone();
         self.drawn_display_lut = self.display_lut.clone();
+        self.drawn_scopes_lut = self.scopes_lut.clone();
         self.drawn_timeline_grade = self.timeline_grade.clone();
         self.drawn_scoping = self.scoping;
         self.draws += 1;
         drawn
     }
+}
+
+fn keep_canvas(
+    kept: &mut Option<Wide>,
+    on: bool,
+    gpu: &Gpu,
+    (size, colors): ((u32, u32), Option<Hdr>),
+) {
+    if !on {
+        *kept = None;
+    } else if kept
+        .as_ref()
+        .is_none_or(|d| d.size != size || d.hdr != colors)
+    {
+        *kept = Some(Wide::new(gpu, size, colors));
+    }
+}
+
+fn looked_up(
+    gpu: &Gpu,
+    encoder: &mut wgpu::CommandEncoder,
+    (from, table): (&wgpu::BindGroup, &Lut),
+    to: &wgpu::TextureView,
+) {
+    let table = gpu.luts().table(gpu, table);
+    let mut pass = begin(encoder, to, Some(wgpu::Color::TRANSPARENT));
+    pass.set_pipeline(&gpu.luts().timeline);
+    pass.set_bind_group(0, from, &[]);
+    pass.set_bind_group(1, &table, &[]);
+    pass.draw(0..3, 0..1);
 }
 
 fn clip_shot(
@@ -3706,7 +3732,11 @@ impl Screen {
         let Some(target) = self.target.as_ref() else {
             return false;
         };
-        let canvas = self.wide.as_ref().map_or(&target.view, |w| &w.view);
+        let canvas = match (&self.scoped, &self.displayed, &self.drawn_scopes_lut) {
+            (Some(s), _, _) => &s.view,
+            (None, Some(d), Some(_)) => &d.view,
+            _ => self.wide.as_ref().map_or(&target.view, |w| &w.view),
+        };
         self.plots.paint(
             gpu,
             (canvas, target.size),

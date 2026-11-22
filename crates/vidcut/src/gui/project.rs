@@ -6,8 +6,8 @@ use serde_json::{Value, json};
 use vidcut_core::Project;
 use vidcut_core::luts::LutList;
 use vidcut_core::model::{
-    DynamicsProfile, Hdr, ProjectRetime, ProjectUpscaler, TimelineColors, TimelineSettings,
-    ViewerLut,
+    DynamicsProfile, Hdr, MonitorLut, ProjectRetime, ProjectUpscaler, TimelineColors,
+    TimelineSettings,
 };
 use vidcut_core::time::{Rational, STANDARD_RATES, TimeSpec};
 
@@ -43,7 +43,8 @@ pub(super) struct Format {
     input_lut: Option<PathBuf>,
     output_lut: Option<PathBuf>,
     video_monitor_lut: Option<PathBuf>,
-    color_viewer_lut: ViewerLut,
+    color_viewer_lut: MonitorLut,
+    scopes_lut: MonitorLut,
     dynamics: DynamicsProfile,
 }
 
@@ -85,7 +86,8 @@ impl Default for Format {
             input_lut: None,
             output_lut: None,
             video_monitor_lut: None,
-            color_viewer_lut: ViewerLut::VideoMonitor,
+            color_viewer_lut: MonitorLut::VideoMonitor,
+            scopes_lut: MonitorLut::None,
             dynamics: DynamicsProfile::default(),
         }
     }
@@ -123,6 +125,7 @@ impl Format {
             output_lut: p.settings.output_lut.clone(),
             video_monitor_lut: p.settings.video_monitor_lut.clone(),
             color_viewer_lut: p.settings.color_viewer_lut.clone(),
+            scopes_lut: p.settings.scopes_lut.clone(),
             dynamics: p.settings.dynamics_profile,
         }
     }
@@ -299,15 +302,19 @@ impl Format {
                     }
                     ui.end_row();
                 }
-                let name = "Color Viewer LUT";
-                let label = ui.label(name);
-                let now = &self.color_viewer_lut;
-                let (r, pick) = super::luts::viewer_combo(ui, name, list, now, 240.0);
-                r.labelled_by(label.id);
-                if let Some(lut) = pick {
-                    self.color_viewer_lut = lut;
+                let monitors = [
+                    ("Color Viewer LUT", &mut self.color_viewer_lut),
+                    ("Scopes LUT", &mut self.scopes_lut),
+                ];
+                for (name, now) in monitors {
+                    let label = ui.label(name);
+                    let (r, pick) = super::luts::monitor_combo(ui, name, list, now, 240.0);
+                    r.labelled_by(label.id);
+                    if let Some(lut) = pick {
+                        *now = lut;
+                    }
+                    ui.end_row();
                 }
-                ui.end_row();
                 ui.label("");
                 ui.horizontal(|ui| {
                     if ui.button("Update Lists").clicked() {
@@ -858,11 +865,24 @@ fn changes(now: &Format, was: &Format) -> Value {
         let path = now.video_monitor_lut.clone().unwrap_or_default();
         set.insert("video_monitor_lut".into(), json!(path));
     }
-    if now.color_viewer_lut != was.color_viewer_lut {
-        match &now.color_viewer_lut {
-            ViewerLut::VideoMonitor => set.insert("color_viewer_follows".into(), json!(true)),
-            ViewerLut::None => set.insert("color_viewer_lut".into(), json!("")),
-            ViewerLut::File(path) => set.insert("color_viewer_lut".into(), json!(path)),
+    let monitors = [
+        (
+            (&now.color_viewer_lut, &was.color_viewer_lut),
+            ("color_viewer_lut", "color_viewer_follows"),
+        ),
+        (
+            (&now.scopes_lut, &was.scopes_lut),
+            ("scopes_lut", "scopes_follow"),
+        ),
+    ];
+    for ((now, was), (lut, follows)) in monitors {
+        if now == was {
+            continue;
+        }
+        match now {
+            MonitorLut::VideoMonitor => set.insert(follows.into(), json!(true)),
+            MonitorLut::None => set.insert(lut.into(), json!("")),
+            MonitorLut::File(path) => set.insert(lut.into(), json!(path)),
         };
     }
     if now.dynamics != was.dynamics {

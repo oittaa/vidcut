@@ -409,7 +409,7 @@ Ranges and resolution:
 
 - `Store` reads and writes the `Project` as pretty JSON (serde).
 - A media path in or under the folder of the project is stored relative to it. Other paths are stored absolute. In memory, media paths are absolute.
-  - The same rule holds for the `input_lut` of a media item, and for the `input_lut`, `output_lut`, `video_monitor_lut` and `color_viewer_lut` of the settings.
+  - The same rule holds for the `input_lut` of a media item, and for the `input_lut`, `output_lut`, `video_monitor_lut`, `color_viewer_lut` and `scopes_lut` of the settings.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-a-project-is-one-file-and-its-media-paths-are-relative)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
 - A save writes a temporary file and renames it over the project (`temp::write`). Thus readers see the old file or the new one, never part of one.

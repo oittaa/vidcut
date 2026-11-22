@@ -6088,6 +6088,16 @@ pub struct ProjectSet {
     /// project. Not with `color_viewer_lut`.
     #[serde(default)]
     pub color_viewer_follows: bool,
+    /// Scopes LUT: a `.cube` file that the scopes read the picture through.
+    /// Nothing else gets it. An empty path makes the scopes read the picture
+    /// as it is, as in a new project. A file that can't be read is refused,
+    /// with the reason.
+    #[serde(default)]
+    pub scopes_lut: Option<PathBuf>,
+    /// The scopes read the picture through the Video Monitor LUT. Not with
+    /// `scopes_lut`.
+    #[serde(default)]
+    pub scopes_follow: bool,
     /// The `start` and `end` that each new keyframe of a grade gets, each
     /// from 0 to 10. Usual: 1 and 1.
     #[serde(default)]
@@ -7239,6 +7249,7 @@ impl Request {
                 .chain(set.output_lut.iter_mut())
                 .chain(set.video_monitor_lut.iter_mut())
                 .chain(set.color_viewer_lut.iter_mut())
+                .chain(set.scopes_lut.iter_mut())
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect(),
             _ => Vec::new(),

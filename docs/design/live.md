@@ -531,9 +531,9 @@ The bar and the Jobs button:
 - The Dynamics Profile row of the Project Settings window sends `project.set` with `dynamics_profile`.
 - The Input LUT, Output LUT and Video Monitor LUT rows of the Project Settings window (`LutRow`) set `input_lut`, `output_lut` and `video_monitor_lut` of `project.set`.
   - Each row is one dropdown of the LUT list (`luts::combo`). No LUT selected sends an empty path.
-  - The Color Viewer LUT row has the same list after one more entry, Use video monitoring selection (`luts::viewer_combo`).
-  - That entry sends `color_viewer_follows`. The others send `color_viewer_lut`.
-  - Update Lists sends `luts.list` again (`Workspace::update_luts`).
+  - The Color Viewer LUT and Scopes LUT rows have one more entry after No LUT selected: Use video monitoring selection (`luts::monitor_combo`).
+  - That entry sends `color_viewer_follows` or `scopes_follow`. The others send `color_viewer_lut` or `scopes_lut`.
+  - Update Lists sends `luts.list` again, and checks the LUT files of the tiles and the viewer (`Workspace::update_luts`, [LUT files](README.md#lut-files)).
   - Open LUT Folder makes the LUT folder of vidcut when it is missing, and opens it (`Workspace::open_lut_folder`).
 - The LUT Locations row of the General page of the Preferences window sends `preferences.set` with the whole list of `luts.folders`. Add… adds a folder, and Remove removes the selected one.
 
@@ -684,6 +684,7 @@ The bar and the Jobs button:
 - The aspect of a tile comes from the media's probe (`media_aspect`). Thus a thumbnail has its shape before its first picture is decoded.
 - The tiles show the input LUT of the media, else the input LUT of the project (`Media::input_lut_in`, `render::media_frame`).
 - A change of a media removes its tiles from memory (`Seen`). The change can be of the file, the input color space, the Alpha Mode, the input LUT or the subclip range.
+  - A LUT file that changes in place removes them on Update Lists (`Tiles::check_luts`).
 - The names of the tile files on disk hold the input color space, the Alpha Mode and the input LUT (`thumbcache::look`, `thumbcache::tile_block`).
   - The LUT part is a digest of the path, the size and the time of the file (`cube::stamp`).
   - Thus a media does not read tiles of an earlier color space, Alpha Mode or LUT.
@@ -700,6 +701,7 @@ The bar and the Jobs button:
   - `vidcut-worker-N` makes the file once for each version of the media (`make_thumbs`). It does this only while `thumbnails.disk_cache` is on.
   - A fast decode makes the pictures (`vidcut_av::thumbs::filmstrip`). It decodes only reference frames.
   - The pictures follow the input color space, the Alpha Mode and the input LUT of the media, as the viewer does.
+  - The version of the media holds the same look as the names of the tile files (`thumbcache::look`). `luts.list` checks the versions again.
   - The Alpha Mode counts only for a file with an alpha channel (`thumbcache::drawn_alpha`). Why: the other Alpha Modes give the same picture without alpha.
   - The file keeps the time of the frame that each picture shows. The first picture is the first reference frame at or after the poster frame.
   - The `Snapshot` lists the media whose file is on disk (`Snapshot::thumbs`).

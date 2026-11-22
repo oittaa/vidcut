@@ -929,21 +929,28 @@ impl Words<'_> {
         s.put("video_monitor_lut", "Video Monitor LUT", &text, |x| {
             json!(x.video_monitor_lut)
         });
-        let viewer = match (&p["color_viewer_lut"], &p["color_viewer_follows"]) {
-            (_, Value::Bool(true)) => json!(crate::model::ViewerLut::VideoMonitor),
-            (Value::String(path), _) if path.is_empty() => json!(crate::model::ViewerLut::None),
-            (Value::String(path), _) => json!(crate::model::ViewerLut::File(path.into())),
+        let monitor = |(lut, follows): (&str, &str)| match (&p[lut], &p[follows]) {
+            (_, Value::Bool(true)) => json!(crate::model::MonitorLut::VideoMonitor),
+            (Value::String(path), _) if path.is_empty() => json!(crate::model::MonitorLut::None),
+            (Value::String(path), _) => json!(crate::model::MonitorLut::File(path.into())),
             _ => Value::Null,
         };
+        let show = |v: &Value| match serde_json::from_value(v.clone()) {
+            Ok(crate::model::MonitorLut::VideoMonitor) => "Video Monitor LUT".to_string(),
+            Ok(crate::model::MonitorLut::None) => "none".to_string(),
+            Ok(crate::model::MonitorLut::File(path)) => text(&json!(path)),
+            Err(_) => raw(v),
+        };
+        let viewer = monitor(("color_viewer_lut", "color_viewer_follows"));
         if !viewer.is_null() {
-            let show = |v: &Value| match serde_json::from_value(v.clone()) {
-                Ok(crate::model::ViewerLut::VideoMonitor) => "Video Monitor LUT".to_string(),
-                Ok(crate::model::ViewerLut::None) => "none".to_string(),
-                Ok(crate::model::ViewerLut::File(path)) => text(&json!(path)),
-                Err(_) => raw(v),
-            };
             s.add("Color Viewer LUT", &viewer, &show, Value::Null, |x| {
                 json!(x.color_viewer_lut)
+            });
+        }
+        let scopes = monitor(("scopes_lut", "scopes_follow"));
+        if !scopes.is_null() {
+            s.add("Scopes LUT", &scopes, &show, Value::Null, |x| {
+                json!(x.scopes_lut)
             });
         }
         let list = |v: &Value| match v.as_array().map(Vec::len) {

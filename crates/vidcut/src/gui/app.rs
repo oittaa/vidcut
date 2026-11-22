@@ -297,9 +297,10 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let gate = self.gate.clone();
         let _open = gate.opened();
-        self.viewer.show_lut(self.ws.display_lut());
+        let (luts, checked) = self.ws.monitor_luts();
+        self.viewer.show_luts(luts, checked);
         if let Some(why) = self.viewer.lut_failed() {
-            self.ws.say(format!("Color Viewer LUT: {why}"));
+            self.ws.say(why);
         }
         let (texture, has_frame) =
             self.viewer

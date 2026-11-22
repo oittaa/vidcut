@@ -900,11 +900,10 @@ fn thumbs_on() -> bool {
 
 fn make_thumbs(
     media: &vidcut_core::model::Media,
-    lut: Option<&Path>,
+    (lut, look): (Option<&Path>, &str),
 ) -> std::result::Result<bool, String> {
     let origin = paths::media_origin(media);
-    let look = crate::thumbcache::look(media, lut);
-    let file = crate::thumbcache::thumbs_file(media, &origin, &look);
+    let file = crate::thumbcache::thumbs_file(media, &origin, look);
     if crate::thumbcache::has_thumbs(&file) {
         return Ok(true);
     }
@@ -2440,6 +2439,9 @@ impl Live {
     }
 
     fn finish(&mut self, job: Job, result: Result<Response>) {
+        if job.method == "luts.list" {
+            self.check_media();
+        }
         let result = result.map(|mut r| {
             r.via = format!("gui:{}", std::process::id());
             r
@@ -4188,13 +4190,8 @@ impl Live {
         for m in media {
             let version = media_version(&m);
             let lut = m.input_lut_in(&settings).map(Path::to_path_buf);
-            let pictures = format!(
-                "{version}|{}|{}|{}",
-                m.color_space.key(),
-                crate::thumbcache::drawn_alpha(&m).title(),
-                lut.as_deref()
-                    .map_or(String::new(), |l| l.display().to_string())
-            );
+            let look = crate::thumbcache::look(&m, lut.as_deref());
+            let pictures = format!("{version}|{look}");
             if self.thumbs_on
                 && m.info.video.is_some()
                 && self.thumbs_wanted.get(&m.id) != Some(&pictures)
@@ -4209,7 +4206,7 @@ impl Live {
                     let _ = tx.send(Msg::Thumbs {
                         media: id,
                         wanted,
-                        result: make_thumbs(&media, lut.as_deref()),
+                        result: make_thumbs(&media, (lut.as_deref(), &look)),
                     });
                 });
             }
