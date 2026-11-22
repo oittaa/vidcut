@@ -942,7 +942,7 @@ pub const PIECES: Pieces = Pieces {
     qwen3_mb_per_second: 21.0,
 };
 
-pub const TRANSCRIBE_CPP: &str = "0.4.1";
+pub const TRANSCRIBE_CPP: &str = "0.4.2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Runtime {
@@ -976,32 +976,32 @@ impl Runtime {
 pub const RUNTIMES: [Runtime; 5] = [
     Runtime {
         lane: "windows-x86_64-cpu-vulkan",
-        bytes: 18_052_295,
-        sha256: "272eb97795048ccb557c85bb9dd44c9e530e1c928443114c39816a8a5f76269d",
+        bytes: 18_052_817,
+        sha256: "6094102cf57b404b050707ceb258b12ce647b92e801b5d46077214e5b030c8aa",
         library: "transcribe.dll",
     },
     Runtime {
         lane: "macos-arm64-metal",
-        bytes: 2_491_746,
-        sha256: "7369e36dc2a5fc5d52eee5766fa03ad22d3f533c8688bf1deccf3ffdc202ea24",
+        bytes: 2_451_560,
+        sha256: "75ea3a705f3edec09942fdbb1b2b5509d7ecd75bda55158a47a3ab1e2d1105b3",
         library: "libtranscribe.dylib",
     },
     Runtime {
         lane: "macos-x86_64-cpu",
-        bytes: 1_619_231,
-        sha256: "513a3976a2f0ebc0666c9670551e96c226e39ed14090a51f2efa0874f41258d8",
+        bytes: 1_597_590,
+        sha256: "ca414e5b28706a2f2ecea1479b3e1c5f47d0f11f43aba86e289ae5c10b1ca40c",
         library: "libtranscribe.dylib",
     },
     Runtime {
         lane: "linux-x86_64-cpu-vulkan",
-        bytes: 22_561_707,
-        sha256: "4b58e80c63d7f2b531b4e844b94c0703593f48a5be6afd829389cdda14a13edf",
+        bytes: 22_562_331,
+        sha256: "4fe87db8919ea34e461db7987713b580f54e6f3ed610457c5d8fb8eac1a15046",
         library: "libtranscribe.so",
     },
     Runtime {
         lane: "linux-aarch64-cpu-vulkan",
-        bytes: 18_137_415,
-        sha256: "3671d8a07e256642d6bb38cc05ad8bbe88c76f814aeb704d1f8b57c61010db02",
+        bytes: 18_137_774,
+        sha256: "5e9cc7b244949fc686d1272e796e965411e80cc768533f1704c3c53e4c7d695e",
         library: "libtranscribe.so",
     },
 ];
