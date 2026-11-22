@@ -1783,7 +1783,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
 - **Clip stages** (p. 763):
-  - Titles and generators have the Transform, Cropping, Speed and Composite controls of a clip (p. 763).
+  - The manual gives titles and generators the Transform, Cropping, Speed and Composite controls of a clip (p. 763).
   - These are measurements in Resolve Studio 21.2, on a Text title, at 1920×1080 and 3840×2160:
     - The title draws its text into a picture of the size of the timeline.
     - The Transform, Cropping, Dynamic Zoom and Composite of the clip then work on that whole picture, as on a media clip.
@@ -1795,7 +1795,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The right-click menu of a title has no Change Clip Speed, no Retime Controls and no Open in Fusion Page.
     - An OTIO import drops a `LinearTimeWarp` on a title.
   - vidcut: a title clip has the Transform, Cropping, Dynamic Zoom and Composite sections of a clip (§8.15). `picture.set` sets them.
-  - vidcut: a title takes a speed and speed keyframes as a media clip does. Its right-click menu has no Change Speed and no Add Speed Point.
+  - vidcut: a title takes no speed, as a generator (§8.17). Its right-click menu has no Change Speed and no Add Speed Point.
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
   - vidcut: the Keyframes tab of a title has the rows of its clip's picture. It also has the rows Text Position, Text Zoom and Text Rotation. The text of a scroll has only Text Position.
@@ -2344,8 +2344,9 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: Speed Change on a generator has a dim dot and does not open. A still acts the same.
   - Measured: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
   - Measured: the scripting API refuses a speed. An import of a time warp on a Solid Color keeps the length and drops the warp.
-  - vidcut: a generator takes a speed and speed keyframes as a media clip does (p. 763). The right-click menu has Change Speed and Add Speed Point on.
-  - vidcut: an import keeps a time warp on a generator.
+  - vidcut: the speed requests refuse a generator. The Speed section of the Inspector is dim and does not open.
+  - vidcut: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
+  - vidcut: an import of a time warp on a generator keeps the length and drops the warp.
 - **Solid Color:**
   - It has one value, Color. Black is the default (measured).
   - `generators.set` and the Color row change it.
@@ -3654,6 +3655,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - **Audio and speed** (measured in Resolve Studio 21.2):
   - An adjustment clip has no sound and no Change Clip Speed command. Its Speed Change section in the Inspector is dimmed.
   - **vidcut:** an adjustment clip goes only on a video track. Speed changes and motion paths are refused, and OTIO import drops any speed effect while keeping its duration.
+  - **vidcut:** its Speed section in the Inspector is dim and does not open.
 - **What it reads and how stacks work** (measured in Resolve Studio 21.2):
   - An adjustment clip reads the composited frame of all enabled tracks strictly below it as an opaque RGB picture.
   - Over an empty gap with nothing below it, the adjustment clip reads opaque black `(0, 0, 0, 1)`.
@@ -5239,6 +5241,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A dissolve at the edge of a title fades it in or out, as Resolve does.
   - The title is drawn through all of the frames of the dissolve, at the level of the dissolve, on both sides of its edge.
   - The opacity of the clip's Composite fades the whole title (§8.14).
+  - A title has no speed.
   - It draws the same in every export, in `frame.render` and in the viewer, whatever the subtitle settings.
   - HDR white is graphics white, as for burned-in subtitles.
 - **D66. Where Add Title goes** (§8.14; p. 763).

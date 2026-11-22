@@ -3106,13 +3106,15 @@ impl Workspace {
             self.timeline.duration_dialog = Some(String::new());
             ui.close();
         }
-        let speed_items = c.title.is_none() && super::keyframe_editor::takes_speed(c);
         let change_speed = bindings.named("Change Speed…", Action::ChangeSpeed);
-        if speed_items && ui.button(change_speed).clicked() {
+        if c.generator.is_some() && !c.takes_speed() {
+            ui.add_enabled(false, egui::Button::new(change_speed));
+            ui.add_enabled(false, egui::Button::new("Add Speed Point"));
+        } else if c.takes_speed() && ui.button(change_speed).clicked() {
             self.open_speed_dialog();
             ui.close();
         }
-        if speed_items {
+        if super::keyframe_editor::takes_speed(c) {
             let play = self.snap.timeline.position;
             let why = super::keyframe_editor::add_speed_key_why(&[c], play);
             let r = ui.add_enabled(why.is_none(), egui::Button::new("Add Speed Point"));

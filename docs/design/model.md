@@ -514,7 +514,7 @@ Writing:
 
 ## Titles
 
-- A clip with a `title` is a title ([spec §8.14](../spec.md#814-titles-pp-762764-11761178)): no media, no audio, any length, on a video track.
+- A clip with a `title` is a title ([spec §8.14](../spec.md#814-titles-pp-762764-11761178)): no media, no audio, no speed, any length, on a video track.
 - `Clip::is_generator` and `Clip::is_block` count it. Thus edits treat it as a generator.
 - Its `Title` holds:
   - a `TitleKind`: `text`, `lower_third` or `scroll`
@@ -553,8 +553,10 @@ Writing:
 
 ## Generators
 
-- A clip with a `generator` makes its own picture ([spec §8.17](../spec.md#817-generators-p-766)): no media, no audio, no effects, any length, on a video track.
+- A clip with a `generator` makes its own picture ([spec §8.17](../spec.md#817-generators-p-766)): no media, no audio, no speed, no effects, any length, on a video track.
 - `Clip::is_generator` and `Clip::is_block` count it.
+- `Clip::takes_speed` is false for a generator, a title and an adjustment clip. The speed requests, the OTIO import, the Inspector and the menus use it.
+  - An offline clip takes a speed. It stands for a media clip.
 - A left trim of a generator changes `source_in`, as on any clip. Its keyframes stay on their source frames.
   - Thus they stay on the same timeline frames, and the picture does not move.
   - An OTIO file counts them from the first frame of the clip (`generators::reference`).

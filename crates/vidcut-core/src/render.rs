@@ -368,14 +368,14 @@ impl Generated {
 }
 
 /// The text of a title clip, with where the piece is in its clip. `run`
-/// and `keys_from` are 0 when the text has no keyframes and does not move.
+/// and `source_in` are 0 when the text has no keyframes and does not move.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ShownTitle {
     pub title: Title,
     pub run: Run,
-    /// The keyframe position of its clip's first frame: its source frame,
-    /// or on a clip with a speed, its frame on the retimed source.
-    pub keys_from: i64,
+    /// The source frame of its clip's first frame, which its keyframes are
+    /// counted from.
+    pub source_in: i64,
 }
 
 /// Where a piece is in its clip, which a moving title and a Dynamic Zoom
@@ -418,12 +418,12 @@ impl ShownTitle {
         Self {
             title: self.title.clone(),
             run: self.run.after(k),
-            keys_from: self.keys_from,
+            source_in: self.source_in,
         }
     }
 
     pub fn frame(&self) -> f64 {
-        (self.keys_from + self.run.at) as f64
+        (self.source_in + self.run.at) as f64
     }
 
     pub fn sampled(self) -> Self {
@@ -3492,7 +3492,7 @@ impl VideoPlan<'_> {
             let shown = ShownTitle {
                 title: title.clone(),
                 run: if keyed { run } else { still },
-                keys_from: if keyed { c.content_at(c.start) } else { 0 },
+                source_in: if keyed { c.source_in } else { 0 },
             };
             return Ok(VideoPiece::Generated {
                 frames: y - x,

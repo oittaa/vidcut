@@ -8,9 +8,9 @@ fn clip_of(p: &Project, id: &str) -> Result<Clip> {
     let c = p
         .clip(id)
         .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-    if c.adjustment {
+    if !c.takes_speed() {
         return Err(Error::invalid(format!(
-            "{id} is an adjustment clip: it has no speed keyframes"
+            "{id} has no source media: it has no speed keyframes"
         )));
     }
     Ok(c.clone())

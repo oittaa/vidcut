@@ -7135,6 +7135,10 @@ impl Clip {
         self.generator.is_some() || self.title.is_some() || self.adjustment
     }
 
+    pub fn takes_speed(&self) -> bool {
+        !self.is_generator() || self.is_offline()
+    }
+
     pub fn generates(&self) -> bool {
         self.draws() || self.title.is_some()
     }

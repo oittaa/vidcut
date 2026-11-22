@@ -2027,9 +2027,9 @@ pub fn change_speed(
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-        if c.adjustment {
+        if !c.takes_speed() {
             return Err(Error::invalid(format!(
-                "{id} is an adjustment clip: it has no speed to change"
+                "{id} has no source media: it has no speed to change"
             )));
         }
     }
@@ -2108,7 +2108,21 @@ fn repaced(p: &mut Project, c: &Clip, mut n: Clip, want: i64, how: &str) -> Resu
             hi = mid;
         }
     }
-    n.retime_keys(c);
+    let keys = n.audio.as_ref().map(|a| {
+        (
+            crate::keyframes::retimed(&a.gain_keys, c, &n),
+            crate::keyframes::retimed(&a.pan_keys, c, &n),
+        )
+    });
+    if let (Some(a), Some((gain, pan))) = (n.audio.as_mut(), keys) {
+        a.gain_keys = gain;
+        a.pan_keys = pan;
+    }
+    if n.picture.as_ref().is_some_and(|pic| pic.is_keyed()) {
+        let mut pic = n.picture.take().expect("keyed");
+        pic.retimed_to(c, &n);
+        n.picture = Some(pic);
+    }
     let (ti, ci) = locate(p, &c.id)?;
     p.tracks[ti].clips[ci] = n;
     Ok(lo)

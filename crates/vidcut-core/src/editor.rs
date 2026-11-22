@@ -7041,6 +7041,9 @@ fn place_imported(
                 color: color(c),
                 render_cache: crate::model::ClipCache::Auto,
             };
+            if !clip.takes_speed() {
+                clip.speed = None;
+            }
             let hi = clip.shown().1;
             if let Some(ic) = c.compound.as_ref() {
                 clip.compound = Some(register_imported_compound(
