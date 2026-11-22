@@ -172,16 +172,14 @@ pub fn violations(p: &Project) -> Vec<String> {
                         v.push(format!("{}: {}", c.id, e.message));
                     }
                 }
-                if c.adjustment {
-                    if t.kind != TrackKind::Video {
-                        v.push(format!(
-                            "{}: an adjustment clip on audio track {}",
-                            c.id, t.id
-                        ));
-                    }
-                    if c.speed.is_some() {
-                        v.push(format!("{}: an adjustment clip has a speed", c.id));
-                    }
+                if c.adjustment && t.kind != TrackKind::Video {
+                    v.push(format!(
+                        "{}: an adjustment clip on audio track {}",
+                        c.id, t.id
+                    ));
+                }
+                if c.speed.is_some() && !c.takes_speed() {
+                    v.push(format!("{}: a clip with no source media has a speed", c.id));
                 }
                 if let Some(Generator::FourColorGradient(g)) = &c.generator
                     && let Some(why) = g.problem()

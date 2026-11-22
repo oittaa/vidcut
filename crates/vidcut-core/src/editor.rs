@@ -4788,10 +4788,15 @@ fn mutate(
                 Some(d) => length(p, d)?,
                 None => ops::titles::default_length(p),
             };
-            let base = match look {
-                Some(l) => crate::looks::title_look(env, l)?.on(text),
+            let look = look
+                .as_deref()
+                .map(|l| crate::looks::title_look(env, l))
+                .transpose()?;
+            let base = match &look {
+                Some(l) => l.on(text),
                 None => Title::new(text.clone()),
             };
+            let faded = opacity.or_else(|| look.and_then(|l| l.opacity));
             let title = ops::titles::changed(
                 &base,
                 &ops::titles::TitleChange {
@@ -4803,12 +4808,11 @@ fn mutate(
                     position: position.map(Some),
                     zoom: *zoom,
                     rotation: *rotation,
-                    opacity: *opacity,
                     look: None,
                     line: None,
                 },
             );
-            let (id, track) = ops::titles::add(p, track.as_deref(), start, frames, &title)?;
+            let (id, track) = ops::titles::add(p, track.as_deref(), start, frames, &title, faded)?;
             json!({ "clip": id, "track": track })
         }
         Request::TitlesSet {
@@ -4821,7 +4825,6 @@ fn mutate(
             position,
             zoom,
             rotation,
-            opacity,
             look,
             line,
             at,
@@ -4840,7 +4843,6 @@ fn mutate(
                 position: position.as_deref().map(ops::titles::position).transpose()?,
                 zoom: *zoom,
                 rotation: *rotation,
-                opacity: *opacity,
                 look: look
                     .as_deref()
                     .map(|l| crate::looks::title_look(env, l))
@@ -7039,6 +7041,9 @@ fn place_imported(
                 color: color(c),
                 render_cache: crate::model::ClipCache::Auto,
             };
+            if !clip.takes_speed() {
+                clip.speed = None;
+            }
             let hi = clip.shown().1;
             if let Some(ic) = c.compound.as_ref() {
                 clip.compound = Some(register_imported_compound(

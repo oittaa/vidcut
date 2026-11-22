@@ -1914,10 +1914,11 @@ pub enum Request {
     /// clip. A speed keyframe goes only inside the clip, after its first
     /// frame. Without a `value`, it takes the value the clip has there. A
     /// keyframe already on that frame takes the value and the ease. With
-    /// its first keyframe, a clip's volume follows its keyframes. A title
-    /// takes position, zoom, rotation and opacity, and a scroll takes
-    /// position and opacity. A title's zoom is one number. The handles of
-    /// its position keys bend its path. `clips` also takes cues, as `q3` or
+    /// its first keyframe, a clip's volume follows its keyframes. On a
+    /// title, position, zoom and rotation are those of its text, and a
+    /// scroll's text takes only position. A title's zoom is one number. The
+    /// handles of its position keys bend its path. The other values of a
+    /// title are those of its clip's picture. `clips` also takes cues, as `q3` or
     /// `S1@10s`. A cue takes every value of a picture except its anchor. Its
     /// frames count from its start. A Four Color Gradient takes `center_x`
     /// and `center_y`. Returns the `clips` with the source `frame` of each
@@ -2519,11 +2520,12 @@ pub enum Request {
         #[serde(default)]
         range: Option<RangeSpec>,
     },
-    /// Add a title clip: `text` drawn over the picture of the tracks below
-    /// it, from `at` (default: the playhead) for `duration` (default: 5 s).
-    /// On `track` (default: the video track above the highest one with
-    /// clips in those frames, made when there is none, or V1 when nothing
-    /// is there), over what is there. Returns its clip id.
+    /// Add a title clip: `text` drawn on a clear picture of the timeline's
+    /// size over the tracks below it, from `at` (default: the playhead) for
+    /// `duration` (default: 5 s). On `track` (default: the video track above
+    /// the highest one with clips in those frames, made when there is none,
+    /// or V1 when nothing is there), over what is there. Returns its clip id.
+    /// `picture.set` places its picture. It takes no effects or grade.
     #[serde(rename = "titles.add")]
     TitlesAdd {
         /// Its lines, separated by a line break: two at most for a lower
@@ -2578,7 +2580,7 @@ pub enum Request {
         /// Degrees turned counterclockwise. Default: 0.
         #[serde(default)]
         rotation: Option<f64>,
-        /// How opaque the whole title is, from 0 to 1. Default: 1.
+        /// The opacity of the clip's Composite, from 0 to 1. Default: 1.
         #[serde(default)]
         opacity: Option<f64>,
         /// A title look's name, built in or yours (`looks.list`): the title
@@ -2632,10 +2634,8 @@ pub enum Request {
         /// Degrees turned counterclockwise; 0 for none.
         #[serde(default)]
         rotation: Option<f64>,
-        /// How opaque the whole title is, from 0 to 1.
-        #[serde(default)]
-        opacity: Option<f64>,
-        /// A title look's name, built in or yours (`looks.list`).
+        /// A title look's name, built in or yours (`looks.list`). Its
+        /// opacity goes to the clip's Composite.
         #[serde(default)]
         look: Option<String>,
         /// The line of a lower third that takes `anchor`, `position`, `zoom`
@@ -2724,11 +2724,12 @@ pub enum Request {
     PictureGet { clip: ClipRef },
     /// Move, zoom, turn, pitch, yaw, flip, crop, mix or fade clips' pictures,
     /// or give them a Dynamic Zoom: footage, stills, image sequences,
-    /// compound clips and generators; a title has its own place
-    /// (`titles.set`). Each field given replaces its own. At its usual values
-    /// a picture is fitted into the frame; the tracks below show wherever it
-    /// doesn't cover the frame: in its bars, around it, where it is cropped
-    /// and through its soft edges and its opacity.
+    /// compound clips, generators and titles. On a title, this is the
+    /// picture of the timeline's size that its text is drawn on; its text
+    /// has its own place (`titles.set`). Each field given replaces its own.
+    /// At its usual values a picture is fitted into the frame; the tracks
+    /// below show wherever it doesn't cover the frame: in its bars, around
+    /// it, where it is cropped and through its soft edges and its opacity.
     #[serde(rename = "picture.set")]
     PictureSet {
         clips: OneOrMany<ClipRef>,
@@ -5185,13 +5186,10 @@ pub enum KeyParam {
     /// The pan of a clip's sound, from -100 to 100.
     Pan,
     /// Position X and Y, one keyframe for both, as fractions of the frame.
-    /// On a lower third: both lines together, or the lower line when the
-    /// lines are apart.
     Position,
     /// Zoom X and Y, one keyframe for both. One number in `value` sets both.
-    /// On a lower third: as `position`.
     Zoom,
-    /// Rotation in degrees. On a lower third: as `position`.
+    /// Rotation in degrees.
     Rotation,
     /// The anchor point X and Y, one keyframe for both, as fractions of
     /// the picture.
@@ -5222,6 +5220,16 @@ pub enum KeyParam {
     /// `keyframes.add` skips a clip that cannot take one at `at`, and
     /// fails only when no clip can.
     Speed,
+    /// The position of a title's text, x and y, one keyframe for both. On a
+    /// lower third: both lines together, or the lower line when the lines
+    /// are apart.
+    TextPosition,
+    /// The zoom of a title's text, one number. On a lower third: as
+    /// `text_position`.
+    TextZoom,
+    /// The rotation of a title's text in degrees. On a lower third: as
+    /// `text_position`.
+    TextRotation,
     /// The position of the upper line of a lower third. The lines go apart.
     UpperPosition,
     /// The zoom of the upper line of a lower third. The lines go apart.
@@ -5250,7 +5258,7 @@ pub enum KeyParam {
 }
 
 impl KeyParam {
-    pub const ALL: [KeyParam; 23] = [
+    pub const ALL: [KeyParam; 26] = [
         KeyParam::Volume,
         KeyParam::Pan,
         KeyParam::Position,
@@ -5266,6 +5274,9 @@ impl KeyParam {
         KeyParam::CropSoftness,
         KeyParam::Opacity,
         KeyParam::Speed,
+        KeyParam::TextPosition,
+        KeyParam::TextZoom,
+        KeyParam::TextRotation,
         KeyParam::UpperPosition,
         KeyParam::UpperZoom,
         KeyParam::UpperRotation,
@@ -5278,26 +5289,42 @@ impl KeyParam {
 
     pub fn on_line(self) -> (KeyParam, Option<LowerThirdLine>) {
         match self {
-            KeyParam::UpperPosition => (KeyParam::Position, Some(LowerThirdLine::Upper)),
-            KeyParam::UpperZoom => (KeyParam::Zoom, Some(LowerThirdLine::Upper)),
-            KeyParam::UpperRotation => (KeyParam::Rotation, Some(LowerThirdLine::Upper)),
-            KeyParam::LowerPosition => (KeyParam::Position, Some(LowerThirdLine::Lower)),
-            KeyParam::LowerZoom => (KeyParam::Zoom, Some(LowerThirdLine::Lower)),
-            KeyParam::LowerRotation => (KeyParam::Rotation, Some(LowerThirdLine::Lower)),
+            KeyParam::UpperPosition => (KeyParam::TextPosition, Some(LowerThirdLine::Upper)),
+            KeyParam::UpperZoom => (KeyParam::TextZoom, Some(LowerThirdLine::Upper)),
+            KeyParam::UpperRotation => (KeyParam::TextRotation, Some(LowerThirdLine::Upper)),
+            KeyParam::LowerPosition => (KeyParam::TextPosition, Some(LowerThirdLine::Lower)),
+            KeyParam::LowerZoom => (KeyParam::TextZoom, Some(LowerThirdLine::Lower)),
+            KeyParam::LowerRotation => (KeyParam::TextRotation, Some(LowerThirdLine::Lower)),
             whole => (whole, None),
         }
     }
 
     pub fn for_line(self, line: LowerThirdLine) -> KeyParam {
         match (self, line) {
-            (KeyParam::Position, LowerThirdLine::Upper) => KeyParam::UpperPosition,
-            (KeyParam::Zoom, LowerThirdLine::Upper) => KeyParam::UpperZoom,
-            (KeyParam::Rotation, LowerThirdLine::Upper) => KeyParam::UpperRotation,
-            (KeyParam::Position, LowerThirdLine::Lower) => KeyParam::LowerPosition,
-            (KeyParam::Zoom, LowerThirdLine::Lower) => KeyParam::LowerZoom,
-            (KeyParam::Rotation, LowerThirdLine::Lower) => KeyParam::LowerRotation,
+            (KeyParam::TextPosition, LowerThirdLine::Upper) => KeyParam::UpperPosition,
+            (KeyParam::TextZoom, LowerThirdLine::Upper) => KeyParam::UpperZoom,
+            (KeyParam::TextRotation, LowerThirdLine::Upper) => KeyParam::UpperRotation,
+            (KeyParam::TextPosition, LowerThirdLine::Lower) => KeyParam::LowerPosition,
+            (KeyParam::TextZoom, LowerThirdLine::Lower) => KeyParam::LowerZoom,
+            (KeyParam::TextRotation, LowerThirdLine::Lower) => KeyParam::LowerRotation,
             (whole, _) => whole,
         }
+    }
+
+    pub fn of_text(v: crate::keyframes::PictureValue) -> Option<KeyParam> {
+        match v {
+            crate::keyframes::PictureValue::Position => Some(KeyParam::TextPosition),
+            crate::keyframes::PictureValue::Zoom => Some(KeyParam::TextZoom),
+            crate::keyframes::PictureValue::Rotation => Some(KeyParam::TextRotation),
+            _ => None,
+        }
+    }
+
+    pub fn on_text(self) -> bool {
+        matches!(
+            self.on_line().0,
+            KeyParam::TextPosition | KeyParam::TextZoom | KeyParam::TextRotation
+        )
     }
 }
 
@@ -5363,11 +5390,11 @@ pub struct CopiedKey {
     /// The Out handle, when the keyframe has one.
     #[serde(rename = "out", default, skip_serializing_if = "Option::is_none")]
     pub out_handle: Option<Handle>,
-    /// On a title's position: the handle toward the keyframe before it, a
+    /// On `text_position`: the handle toward the keyframe before it, a
     /// point in the picture. A paste on a title keeps it as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub in_point: Option<[f64; 2]>,
-    /// On a title's position: the handle toward the keyframe after it, a
+    /// On `text_position`: the handle toward the keyframe after it, a
     /// point in the picture. A paste on a title keeps it as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out_point: Option<[f64; 2]>,

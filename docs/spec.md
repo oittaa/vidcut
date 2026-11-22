@@ -1781,11 +1781,24 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A scroll has its own motion and line spacing (X55).
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
+- **Clip stages** (p. 763):
+  - The manual gives titles and generators the Transform, Cropping, Speed and Composite controls of a clip (p. 763).
+  - These are measurements in Resolve Studio 21.2, on a Text title, at 1920×1080 and 3840×2160:
+    - The title draws its text into a picture of the size of the timeline.
+    - The Transform, Cropping, Dynamic Zoom and Composite of the clip then work on that whole picture, as on a media clip.
+    - The crop comes first. A Zoom of 2 doubles the distance of the text from the center of the frame, or from the anchor point.
+    - The composite modes and the opacity mix the title with the picture below by the sums of a media clip.
+    - The keyframes of the Transform play as on a media clip.
+    - An OTIO file holds the Transform, Cropping, Dynamic Zoom and Composite of a title in the effects of its clip, as on a media clip. Resolve reads them back.
+    - The scripting API adds no OpenFX effect to a title.
+    - The right-click menu of a title has no Change Clip Speed, no Retime Controls and no Open in Fusion Page.
+    - An OTIO import drops a `LinearTimeWarp` on a title.
+  - vidcut: a title clip has the Transform, Cropping, Dynamic Zoom and Composite sections of a clip (§8.15). `picture.set` sets them.
+  - vidcut: a title takes no speed, as a generator (§8.17). Its right-click menu has no Change Speed and no Add Speed Point.
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
-  - vidcut: the Keyframes tab of a title has the rows Position, Zoom, Rotation and Opacity. A scroll has only Position and Opacity.
-    - A lower third with its lines apart has the rows Upper Position, Upper Zoom, Upper Rotation, Lower Position, Lower Zoom, Lower Rotation and Opacity.
-    - A title has no rows for Transform and Cropping, because a title has no such values.
+  - vidcut: the Keyframes tab of a title has the rows of its clip's picture. It also has the rows Text Position, Text Zoom and Text Rotation. The text of a scroll has only Text Position.
+    - A lower third with its lines apart has the text rows Upper Position, Upper Zoom, Upper Rotation, Lower Position, Lower Zoom and Lower Rotation.
   - Its Position keyframes take handles. The title moves at one speed along the cubic path between two keys. The details are in the [todo](todo/keyframes.md#titles).
   - A right-click on a key of Position, Zoom, Rotation or Opacity opens a menu of eases, by the place of the key:
     - The first key has Linear and Ease Out. The last key has Linear and Ease In.
@@ -1793,11 +1806,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A check mark is on the current item.
     - On Position, the handles are an eighth of the difference between the two neighbors of the key. They stay when a value changes.
     - On Zoom, Rotation and Opacity, a handle is flat and a third of the gap to the neighbor.
-  - vidcut: the Across, Zoom, Rotation and Title opacity rows of the Title section have the Keyframe button.
+  - vidcut: the Across, Zoom and Rotation rows of the Title section have the Keyframe button. The Opacity row of the Composite section has it too.
   - vidcut: the Across button holds the keyframes of Across and Down.
 - **Later** (X53):
   - Text+ and Fusion titles (p. 1178)
-  - Transform, Cropping, Speed and the blend modes of Composite on titles (pp. 763, 1176)
   - animation
   - keyframes of the shadow and the background
   - Safe area overlays in the viewer are in §4.5 (D90).
@@ -2331,8 +2343,9 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: Speed Change on a generator has a dim dot and does not open. A still acts the same.
   - Measured: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
   - Measured: the scripting API refuses a speed. An import of a time warp on a Solid Color keeps the length and drops the warp.
-  - vidcut: the speed requests refuse a generator. The right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
-  - vidcut: an import of a time warp on a Solid Color keeps the length and drops the warp.
+  - vidcut: the speed requests refuse a generator. The Speed section of the Inspector is dim and does not open.
+  - vidcut: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
+  - vidcut: an import of a time warp on a generator keeps the length and drops the warp.
 - **Solid Color:**
   - It has one value, Color. Black is the default (measured).
   - `generators.set` and the Color row change it.
@@ -3641,6 +3654,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 - **Audio and speed** (measured in Resolve Studio 21.2):
   - An adjustment clip has no sound and no Change Clip Speed command. Its Speed Change section in the Inspector is dimmed.
   - **vidcut:** an adjustment clip goes only on a video track. Speed changes and motion paths are refused, and OTIO import drops any speed effect while keeping its duration.
+  - **vidcut:** its Speed section in the Inspector is dim and does not open.
 - **What it reads and how stacks work** (measured in Resolve Studio 21.2):
   - An adjustment clip reads the composited frame of all enabled tracks strictly below it as an opaque RGB picture.
   - Over an empty gap with nothing below it, the adjustment clip reads opaque black `(0, 0, 0, 1)`.
@@ -5205,7 +5219,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - For a lower third, they work on each line about its own point (D67).
   - Each line of a lower third has its own `position`, `zoom`, `rotation` and keyframes (p. 1178):
     - `line` in `titles.set` names the line.
-    - In the `keyframes` requests, these values name the line: `upper_position`, `upper_zoom`, `upper_rotation`, `lower_position`, `lower_zoom` and `lower_rotation`.
+    - In the `keyframes` requests, `text_position`, `text_zoom` and `text_rotation` name the values of the text.
+    - These values name the line: `upper_position`, `upper_zoom`, `upper_rotation`, `lower_position`, `lower_zoom` and `lower_rotation`.
     - The Title section has Across, Down, Zoom and Rotation under Upper Line and under Lower Line.
     - The two lines go together until a request names a line. Each line then keeps its values and goes apart.
     - A request that names no line then changes the lower line.
@@ -5224,7 +5239,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - They rise at a steady speed (X55). At the first frame of the clip, they are just below the picture. At its last frame, they are just above it.
   - A dissolve at the edge of a title fades it in or out, as Resolve does.
   - The title is drawn through all of the frames of the dissolve, at the level of the dissolve, on both sides of its edge.
-  - The `opacity` of a title fades the whole title. It is Composite's Opacity in Resolve.
+  - The opacity of the clip's Composite fades the whole title (§8.14).
   - A title has no speed.
   - It draws the same in every export, in `frame.render` and in the viewer, whatever the subtitle settings.
   - HDR white is graphics white, as for burned-in subtitles.
@@ -5296,7 +5311,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `shadow` is its blur: a Gaussian whose sigma is that many 3370ths of the picture height.
     - `shadow opacity` is in percent, and `shadow color` is its color.
     - No shadow is an offset of 0, which Resolve does not draw.
-  - **Opacity:**
+  - **The picture of the clip:**
+    - The Transform, Cropping, Dynamic Zoom and Composite of a title clip are in the effects of the clip, as on a media clip (§8.14, D75).
     - The opacity of a title is the `opacity` of the clip's `Composite` effect, in percent.
     - Resolve draws it (checked at 50%).
     - A `Cross Dissolve` at its edge fades it there, as in vidcut (checked frame by frame).
@@ -5310,6 +5326,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - a background with its `shape`, from a `backgroundWidth` and a `backgroundHeight` above 0
     - a drop shadow, from an offset other than 0
     - the place, the zoom (X), the rotation and the keyframes of its Text group, or of each line of a lower third
+    - the Transform, Cropping, Dynamic Zoom and Composite of its clip, from the effects of the clip
   - The lines of a lower third go apart when the place, zoom, rotation or keyframes of their two groups are different.
   - Resolve's own lower thirds are different: the upper line stands at 20% from the bottom, and the lower line hangs from 22%.
   - The first group of a lower third is its upper line, and the second group is its lower line. A lone group is the lower line.
@@ -5390,6 +5407,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A subtitle look holds the style of a track, and the characters per line and lines that Create Subtitles from Audio uses with it.
   - When a subtitle look gives no characters and lines, they are 42 and one.
   - A title look holds all of a title except its text: its kind, alignment, style, place, zoom, rotation and opacity.
+    - The opacity of a look goes to the Composite of the clip.
   - Built in for subtitles: Plain, Pop, Highlight, Reveal and Word (D69).
   - Built in for titles:
     - Plain: the usual title (D65)
@@ -5556,7 +5574,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - One mask clip gives `m = s` for Alpha or Lum, and `1 − c(s)` for Inverted Alpha or Inverted Lum.
       - Each mask clip has hole `u = 1 − s`, or `s` when inverted. Stacking sets `u = smin(u_next, c(u))` and `m = 1 − u`.
       - The Foreground clip composites premultiplied over the tracks below with alpha `a = smin(m, 1 − c(1 − fg_alpha))`.
-    - In an export, a title between layers cuts them ([todo](todo/composite-masks.md)).
+    - A title between layers does not cut their sum (measured in Resolve Studio 21.1.2).
+      - V2 is at Add over V1, V3 has a title, and V4 is 50% gray at Multiply.
+      - Outside the title, the frame is (V1 + V2) × 0.5. The sum is not cut at 1.
   - **Units** (vidcut's):
     - `position` is where the middle of the picture goes before the zoom and the turn: `[x, y]` in fractions of the frame from its top left.
     - Each value of `position` is from −3.5 to 4.5: 4 frames either way from the middle. `[0.5, 0.5]` leaves the picture in place.
@@ -6137,8 +6157,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - With a checked effect, or with a Retime Process while it plays forward, it stays at the timeline level. Why: its file holds only the colors of the placed clip.
       - With another codec, it stays at the timeline level.
   - The timeline level keeps the frame after the tracks mix. It holds the other reasons.
-    - Titles on top of all tracks stay out of it. Thus an edit of their text keeps the cache.
-    - A checked effect on a compound clip around such a title does not make a cache part.
     - A part that moves keeps its cache when the tracks under it stay the same.
     - An edit that changes the frames of a part renders it again.
   - The background render starts after a time without activity: 5 s, unless set (`render_cache.after_secs`). The time goes from 1 to 30 s (measured in Resolve Studio 21.1.2).

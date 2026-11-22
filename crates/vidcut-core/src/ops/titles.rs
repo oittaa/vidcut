@@ -17,7 +17,6 @@ const PLACE: &str =
     "a title's position is two fractions of the picture, from -4 to 4 across and -3 to 5 down";
 const ZOOMED: &str = "a title's zoom is from 1/4 to 4";
 const TURNED: &str = "a title's rotation is degrees, from -100000 to 100000";
-const FADED: &str = "a title's opacity is from 0 to 1";
 const SPACED: &str = "a title's line spacing is from -4096 to 4096";
 const TRACKED: &str = "a title's tracking is from -4096 to 4096";
 const SHAPED: &str = "a background shape needs a background";
@@ -45,10 +44,6 @@ fn zooms(z: f64) -> bool {
 
 fn turns(r: f64) -> bool {
     r.abs() <= Picture::TURNS
-}
-
-fn fades(o: f64) -> bool {
-    o.is_finite() && (0.0..=1.0).contains(&o)
 }
 
 fn all_in(keys: &[Keyframe], ok: fn(f64) -> bool, why: &str) -> Result<()> {
@@ -94,8 +89,7 @@ fn checked_keys(t: &Title) -> Result<()> {
         return Err(Error::invalid(PLACE));
     }
     all_in(&t.zoom_keys, zooms, ZOOMED)?;
-    all_in(&t.rotation_keys, turns, TURNED)?;
-    all_in(&t.opacity_keys, fades, FADED)
+    all_in(&t.rotation_keys, turns, TURNED)
 }
 
 pub fn checked(t: &Title) -> Result<Title> {
@@ -121,11 +115,6 @@ pub fn checked(t: &Title) -> Result<Title> {
     let rotation = match t.rotation {
         Some(r) if turns(r) => (r != 0.0).then_some(r),
         Some(_) => return Err(Error::invalid(TURNED)),
-        None => None,
-    };
-    let opacity = match t.opacity {
-        Some(o) if fades(o) => (o != 1.0).then_some(o),
-        Some(_) => return Err(Error::invalid(FADED)),
         None => None,
     };
     checked_keys(t)?;
@@ -188,8 +177,6 @@ pub fn checked(t: &Title) -> Result<Title> {
         zoom_keys: t.zoom_keys.clone(),
         rotation,
         rotation_keys: t.rotation_keys.clone(),
-        opacity,
-        opacity_keys: t.opacity_keys.clone(),
         upper,
     })
 }
@@ -263,15 +250,24 @@ pub fn default_length(p: &Project) -> i64 {
     p.fps().secs_to_frames(DEFAULT_SECS).max(1)
 }
 
+pub fn faded(opacity: Option<f64>) -> Result<Option<Picture>> {
+    super::picture::checked(&Picture {
+        opacity,
+        ..Picture::default()
+    })
+}
+
 pub fn add(
     p: &mut Project,
     track: Option<&str>,
     start: i64,
     duration: i64,
     title: &Title,
+    opacity: Option<f64>,
 ) -> Result<(String, String)> {
     let title = checked(title)?;
-    add_block(
+    let picture = faded(opacity)?;
+    let (id, track) = add_block(
         p,
         "a title",
         track,
@@ -279,7 +275,10 @@ pub fn add(
         Some(title),
         None,
         false,
-    )
+    )?;
+    let (ti, ci) = locate(p, &id)?;
+    p.tracks[ti].clips[ci].picture = picture;
+    Ok((id, track))
 }
 
 pub fn add_adjustment(
@@ -359,7 +358,6 @@ pub struct TitleChange {
     pub position: Option<Option<[f64; 2]>>,
     pub zoom: Option<f64>,
     pub rotation: Option<f64>,
-    pub opacity: Option<f64>,
     pub look: Option<TitleLook>,
     pub line: Option<LowerThirdLine>,
 }
@@ -372,7 +370,6 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
             position_handles: old.position_handles.clone(),
             zoom_keys: old.zoom_keys.clone(),
             rotation_keys: old.rotation_keys.clone(),
-            opacity_keys: old.opacity_keys.clone(),
             upper: old.upper.clone(),
             ..l.on(&old.text)
         },
@@ -419,9 +416,6 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
     if let Some(r) = change.rotation {
         t.rotation = Some(r);
     }
-    if let Some(o) = change.opacity {
-        t.opacity = Some(o);
-    }
     t
 }
 
@@ -431,7 +425,6 @@ impl TitleChange {
             PictureValue::Position => self.position.is_some(),
             PictureValue::Zoom => self.zoom.is_some(),
             PictureValue::Rotation => self.rotation.is_some(),
-            PictureValue::Opacity => self.opacity.is_some(),
             _ => false,
         }
     }
@@ -505,7 +498,15 @@ fn set_values(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) 
         next.take_picture(&picture);
     }
     let t = checked(&next)?;
-    p.tracks[ti].clips[ci].title = Some(t);
+    let c = &mut p.tracks[ti].clips[ci];
+    if let Some(l) = &change.look {
+        let picture = Picture {
+            opacity: l.opacity,
+            ..c.picture.clone().unwrap_or_default()
+        };
+        c.picture = super::picture::checked(&picture)?;
+    }
+    c.title = Some(t);
     Ok(())
 }
 

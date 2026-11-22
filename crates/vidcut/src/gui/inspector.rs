@@ -2851,6 +2851,15 @@ fn field_rest(
     ui.end_row();
 }
 
+fn shut_group(ui: &mut egui::Ui, name: &str) {
+    ui.add_enabled_ui(false, |ui| {
+        let id = ui.make_persistent_id(("inspector-shut", name));
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+            .show_header(ui, |ui| ui.label(RichText::new(name).strong()))
+            .body(|_| {});
+    });
+}
+
 fn group<R>(
     ui: &mut egui::Ui,
     name: &str,
@@ -4169,9 +4178,7 @@ impl Workspace {
             .clips
             .iter()
             .filter_map(|id| {
-                let c = p
-                    .clip(id)
-                    .filter(|c| !c.is_generator() && c.title.is_none())?;
+                let c = p.clip(id).filter(|c| c.takes_speed())?;
                 let at = position.clamp(c.start, c.end() - 1);
                 let stored = (c.speed_at(at), c.duration);
                 let shown = retimed
@@ -5619,6 +5626,8 @@ impl Workspace {
                     let state = (&self.inspector, &**p, dropped);
                     let at = self.snap.timeline.position;
                     speed_section(ui, state, (&paced, at), ripple, &mut acts);
+                } else if tab == Tab::Video && !first.takes_speed() {
+                    shut_group(ui, "Speed");
                 }
                 if tab == Tab::Audio && !sounds.is_empty() {
                     let ids: Vec<String> = sounds.iter().map(|s| s.id.clone()).collect();

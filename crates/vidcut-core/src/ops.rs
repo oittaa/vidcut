@@ -2027,19 +2027,9 @@ pub fn change_speed(
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-        if c.title.is_some() {
+        if !c.takes_speed() {
             return Err(Error::invalid(format!(
-                "{id} is a title: it has no speed to change"
-            )));
-        }
-        if c.adjustment {
-            return Err(Error::invalid(format!(
-                "{id} is an adjustment clip: it has no speed to change"
-            )));
-        }
-        if c.is_generator() {
-            return Err(Error::invalid(format!(
-                "{id} is a generator: it has no speed to change"
+                "{id} has no source media: it has no speed to change"
             )));
         }
     }

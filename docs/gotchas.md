@@ -447,7 +447,6 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - A Composite with a code above 31, or with keyframes on its mode, stays a clip effect.
   - A clip writes one Composite (`otio::picture::joined`). Such a kept Composite gives its mode to the Composite of the picture, unless the picture has a mode.
   - Thus a keyed mode from the file stays when vidcut changes only the opacity.
-  - A title's opacity is in a Composite of the same form (`otio::titles`).
 - **The manual's words for some composite modes do not match Resolve's renders.**
   - Subtract takes the top layer from the bottom layer. The manual says the reverse.
   - Hardlight switches on the top layer, and multiplies at 50% and below. The manual names the bottom layer, and says the reverse.

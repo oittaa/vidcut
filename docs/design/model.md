@@ -523,9 +523,11 @@ Writing:
   - its lines, with markup that `rich::spans` reads into `Span`s
   - a `TitleStyle`
   - an optional `position`: the point that its anchor goes to (`Title::place`, [spec D65](../spec.md#12-decisions-on-gaps-and-contradictions))
-  - `position_keys` with `position_y`, `zoom_keys`, `rotation_keys` and `opacity_keys`: `Keyframe`s on source frames, beside the plain values
+  - `position_keys` with `position_y`, `zoom_keys` and `rotation_keys`: `Keyframe`s on source frames, beside the plain values
   - `position_handles`: the `PositionHandles` of the position keys that have any, each with the frame of its key
 - `Title::takes_keys` tells which values take keyframes. A scroll has no zoom or rotation.
+- The `Picture` of the clip places the picture that the text is drawn on ([pictures](#pictures)). Its opacity is the opacity of the title.
+- `KeyParam::on_text` tells which values of the `keyframes` requests are those of the text: its position, zoom and rotation, and those of each line. The other values are those of the clip's `Picture`, as on every clip.
 - `Title::as_picture` gives a `Picture` with these values, and `Title::take_picture` takes them back. Thus `ops::keyframes` and the sampling use the code of `Picture`.
 - `Title::sampled` gives the title of one frame, without keyframes.
 - The upper line of a lower third can go apart from its lower line:
@@ -553,6 +555,8 @@ Writing:
 
 - A clip with a `generator` makes its own picture ([spec §8.17](../spec.md#817-generators-p-766)): no media, no audio, no speed, no effects, any length, on a video track.
 - `Clip::is_generator` and `Clip::is_block` count it.
+- `Clip::takes_speed` is false for a generator, a title and an adjustment clip. The speed requests, the OTIO import, the Inspector and the menus use it.
+  - An offline clip takes a speed. It stands for a media clip.
 - A left trim of a generator changes `source_in`, as on any clip. Its keyframes stay on their source frames.
   - Thus they stay on the same timeline frames, and the picture does not move.
   - An OTIO file counts them from the first frame of the clip (`generators::reference`).
@@ -587,7 +591,7 @@ Writing:
 
 ## Pictures
 
-- A clip of footage, a still, an image sequence, a compound clip, a drawing generator or an adjustment clip can carry a `Picture` ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)):
+- Footage, a still, an image sequence, a compound clip, a drawing generator, a title or an adjustment clip can carry a `Picture`. A `Picture` holds ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)):
   - `position`: where the middle of the whole picture goes, before the zoom and the rotation
   - its `zoom` across and down, and its `rotation`
   - its `anchor`: the point that the zoom and the turn work about (`Picture::pivot`)
@@ -605,8 +609,8 @@ Writing:
   - A handle `value` moves X. Y keeps the handle `frames`, with a value offset of 0 (`value_paired`).
 - `ops::picture` holds the edits:
   - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share.
-  - `ops::picture::has_picture` tells which clips take a picture: not titles, sound or generators that do not draw.
-  - `ops::picture::takes_effects` tells which of them take effects: not generators ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
+  - `ops::picture::has_picture` tells which clips take a picture: not sound or generators that do not draw.
+  - `ops::picture::takes_effects` tells which of them take effects: not generators and not titles ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
   - `ops::picture::clear` puts back one `PictureTool`, or all of them. `ops::picture::cleared` is the reset of one `PictureTool`, which the Inspector also uses.
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
   - `ops::picture::effect_checked` checks an effect. It is part of `ops::picture::checked`.

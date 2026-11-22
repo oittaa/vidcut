@@ -41,7 +41,7 @@ const RGB48: usize = 6;
 
 fn pattern_of(kind: GeneratorKind) -> Option<Pattern> {
     let g = made(kind, &GeneratorSettings::default()).ok()?;
-    Some(Generated::of(&g, 0)?.at(0))
+    Generated::of(&g, 0)?.at(0)
 }
 
 fn eight(word: &[u8; 2]) -> u8 {

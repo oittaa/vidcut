@@ -112,6 +112,7 @@ pub enum Sampling {
         part: [f64; 4],
         placed: Arc<[vidcut_core::render::Placed]>,
     },
+    Within(Arc<vidcut_core::render::Placed>),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -395,7 +396,7 @@ impl Picture {
     pub fn placed_in(&self, size: (u32, u32)) -> ((f64, f64), [f64; 4], (f64, f64)) {
         let own = Fit::of(&self.frame, self.rotation);
         let (frame, fit) = match &self.sampling {
-            Sampling::Own | Sampling::Rounded => (size, own),
+            Sampling::Own | Sampling::Rounded | Sampling::Within(_) => (size, own),
             Sampling::Colors { frame, .. } => (*frame, own),
             Sampling::Placed { fit, .. } => (size, *fit),
         };
