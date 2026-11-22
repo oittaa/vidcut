@@ -446,6 +446,7 @@ The bar and the Jobs button:
   - A click on a polygon edge adds a corner, and a middle-click removes one. Both go through the same copy.
   - Copy Window sends `grade.window.copy`. The live core keeps its answer (`window_clipboard`) for `grade.window.paste`. The snapshot gives the shape of the copy, so the palette knows which window becomes current.
   - A curve has a handle at each point (`Grip::Point`) and at each Bezier handle (`Grip::Tangent`).
+  - Each point of a closed curve also has an inner and an outer softness handle (`Grip::Spread`). `bends` gives their even place.
   - A click on a curve adds a point with `curve_split`. `curve_inserted` cuts the Bezier segment there, so the shape stays.
   - While the current curve is on and has no points, a click adds a point. `Drawing` then keeps the curve open until a click on its first point.
   - A drag from a new point pulls its handles out (`Grip::Pull`). Alt and a drag on a corner do the same.
@@ -455,7 +456,9 @@ The bar and the Jobs button:
   - A corrector has an RGB input and a key input at its left (`Inlet`). It has an RGB output and a key output at its right (`Outlet`).
   - A key mixer has a key input for each input, and a key output.
   - The key ports and the key links are blue (`MASK_KNOT`). A link knows the outlet that it leaves (`Wire::out`).
-  - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.
+  - `EffectsPage::grade_nodes` holds the selection, and `gui.grade_nodes` sets it. The last one is the current node.
+  - With `EffectsPage::grade_loose`, the current node is not selected (`EffectsPage::picked_grade`). A drag box that leaves out the current node sets it.
+  - Thus `Graph` takes the selected nodes and the current node apart (`Graph::current`). Delete, Ctrl+D and a drag of the selected nodes leave out a current node that is not selected.
   - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
   - In List View, the current row has a red outline (`CURRENT_ROW`). It is the red of the active angle (`ACTIVE_ANGLE`).
   - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.

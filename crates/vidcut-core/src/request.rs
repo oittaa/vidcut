@@ -2928,6 +2928,9 @@ pub enum Request {
         /// Its place in the node editor, for `corrector`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         place: Option<[f64; 2]>,
+        /// The first window of this kind of the new corrector is on.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<WindowKind>,
     },
     /// Take a node out of the grade of a clip, or with `timeline` of the
     /// timeline grade. A corrector or the output that took the picture of
@@ -3212,6 +3215,15 @@ pub enum Request {
         /// the out handle.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         points: Option<Vec<[f64; 2]>>,
+        /// A curve only: the inner softness point of each point, as a move
+        /// from that point. `inside` puts them back on an even edge, and so
+        /// does a new number of `points` without `inner`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inner: Option<Vec<[f64; 2]>>,
+        /// A curve only: the outer softness point of each point, as
+        /// `inner`. `outside` puts them back on an even edge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outer: Option<Vec<[f64; 2]>>,
     },
     /// Turn a circle, a linear window or a polygon of a corrector into a
     /// curve of the same shape, with no softness. The curve goes last in
@@ -4426,10 +4438,16 @@ pub enum Request {
         wide: Option<bool>,
     },
     /// Select nodes in the node editor of the color page, by number. The
-    /// palette then shows the last one. An empty list selects none.
-    /// Answers what `gui.state` does.
+    /// palette then shows the last one, or `current`. An empty list selects
+    /// none. Answers what `gui.state` does.
     #[serde(rename = "gui.grade_nodes")]
-    GuiGradeNodes { nodes: Vec<u32> },
+    GuiGradeNodes {
+        nodes: Vec<u32>,
+        /// The current node, when it is not one of `nodes`. The palette
+        /// shows it, and a delete of the selected nodes keeps it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current: Option<u32>,
+    },
     /// The playhead of the effects page. It moves over the whole source of
     /// the clip: the head before its In and the tail after its Out too.
     /// `at` moves it, in frames from the In (negative: in the head).

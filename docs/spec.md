@@ -1993,10 +1993,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - These rows change between renders. Two renders of Aspect 2 at Pixel Frequency 25 differ on 1211 pixels, by up to 9.22/255. Renders at 0.132 and 0.566 of a step repeat exactly.
     - vidcut takes the box at the middle of the pixel's own triangle, clamped into the frame, at each distance.
   - Only the Fusion page gave renders of Blur Alpha off and Whole Cells Only. Only the default Pixel Frequency has Edit page renders on other sizes and Zooms ([todo](todo/effects-library.md)).
+  - Measured in Resolve Studio 21.2, with a 1280×720 source on timelines of 1280×720 and 1920×1080, at Position 0.3, 0.62:
+    - Position counts in fractions of the picture on the frame. A Zoom scales the grid, and a Pan moves it.
+    - On a rotated clip, the Position point turns with the picture. The cells keep the directions of the frame.
+    - A crop does not change the size or the place of the cells.
+    - On a compound clip, the effect gives the same picture as on a plain clip with the same values.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
-    - A Position away from the middle, on a picture with a Zoom or a Pan, counts in fractions of the picture on the frame.
-    - On a rotated clip, the cells keep the directions of the frame, as Gaussian Blur does.
-    - A crop and a Dynamic Zoom box do not change the size or the place of the cells.
+    - A Dynamic Zoom box does not change the size or the place of the cells.
     - The Zoom of each compound clip around the picture multiplies the size on the frame.
     - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
     - Whole Cells Only tests each sample's cell, with each Cell Shape and each Aliasing.
@@ -2964,8 +2967,12 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: does the same. Same Node also keeps the current node, because the timeline grade has that number. This part is not measured in Resolve.
   - Measured in Resolve Studio 21.2: a drag box from the empty Node Editor selects the nodes in the box.
   - Measured: a click on the empty Node Editor keeps the current node.
-  - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
-  - vidcut: a Ctrl-click adds a node to the selection, and a drag box adds the nodes in the box. The current node stays.
+  - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node. With `current`, the current node need not be selected.
+  - vidcut: a Ctrl-click adds a node to the selection. A drag box selects the nodes in the box in place of the selection. The current node stays.
+  - Measured in Resolve Studio 21.2: a Ctrl-click on a selected node takes it out of the selection.
+  - vidcut: does the same. A Ctrl-click on the current node does nothing. This part is not measured in Resolve.
+  - vidcut: after a drag box that leaves out the current node, that node stays current but is not selected. Thus Delete keeps it, as measured.
+  - vidcut: `gui.state` gives the selected nodes in `grade_nodes` and the current node in `grade_node`.
   - Measured: a click on the empty Node Editor clears the other selected nodes. The current node stays.
   - vidcut: does the same.
 - **Labels and badges** (pp. 3390–3391):
@@ -3033,6 +3040,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - The Forward-Delete key deletes the selected node (p. 3395).
   - After a delete, each node after it gets one number less.
   - Measured in Resolve Studio 21.2: the Delete key deletes the current node. With two nodes selected by a drag box, it deletes both.
+  - Measured: after a drag box that leaves out the current node, Delete deletes only the nodes in the box.
   - Measured: a mixer input that took a deleted corrector stays, with no connection. Thus the mixer keeps all its inputs.
   - Measured: in node 1 to node 2 to a mixer input, the delete of node 2 leaves that input with no connection.
   - Measured: a delete that leaves a mixer with one linked input removes the mixer too. The node on that input takes the place of the mixer at its output.
@@ -3042,7 +3050,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: the menu of a mixer shows Shift+Backspace at Delete Node.
   - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
-  - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. The last corrector then becomes the current node.
+  - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. A current node that is not selected stays. The last corrector then becomes the current node.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
@@ -3060,7 +3068,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. The items show their keys as measured.
   - vidcut: Delete Current Node deletes the current node. Label Selected Node edits the label of the current corrector in place.
   - vidcut: the submenu comes after the printer submenus. Its place in the Color menu of Resolve is not measured.
-  - vidcut: Switch to Node Layer, Add Splitter Combiner Node and the window items are not in the submenu ([todo](todo/color-page.md)).
+  - Measured in Resolve Studio 21.2: Alt+C, Alt+Q, Alt+G and Alt+B add a serial node with its circle, linear, polygon or curve window on (p. 3395).
+  - vidcut: `grade.add` with `window` turns that first window of the new corrector on. The four items and their keys do the same.
+  - vidcut: the curve of Alt+B has no points ([§8.23](#823-windows-pp-32653279)).
+  - vidcut: on the Color page, Alt+B adds a node and does not make a subclip ([§11](#11-keyboard-shortcuts)).
+  - vidcut: Switch to Node Layer and Add Splitter Combiner Node are not in the submenu ([todo](todo/color-page.md)).
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.
@@ -3498,6 +3510,16 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - A middle-click removes any point of a curve.
     - The viewer shows the outline, thin lines at the inner and the outer path, the points, the Bezier handles and a middle dot.
     - Not measured: the look of a curve in the viewer of Resolve, and its key before the curve is closed.
+  - Each point of a curve has a magenta inside and outside softness point. A drag moves each one alone (p. 3273).
+  - Measured in Resolve Studio 21.2: a curve keeps an inner and an outer path, each with a point for each point of the curve.
+    - With no drag, the two paths are the curve moved by Inside and Outside, with mitred corners.
+    - A drag of one outer softness point moves that point and its handles only. The other points keep their place.
+    - A new Outside value puts all the outer points back on the even outer path.
+  - vidcut: `inner` and `outer` of a curve hold the moves of the softness points from their points. A drag of a magenta point sets them.
+    - The first drag starts from the even path. Inside or Outside then puts that path back, as measured.
+    - A softness point keeps its move when its point moves. A new point between two points gets the mean of their moves.
+    - The viewer shows the magenta points of a closed curve. A point with no softness has its handles a short way in and out.
+    - Not measured: Inside, and what a move of a curve point, Size or Rotate does to a dragged softness point.
   - Measured in the Window palette of Resolve Studio 21.2: Copy Window in the option menu copies the current window.
     - Paste Window with a window of the same shape current gives it the copied values. It adds no row.
     - Paste Window with a window of another shape current adds a copy at the end, on and current. The other window does not change.
@@ -3506,7 +3528,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - The copy has the shape, the softness, the Transform values, Invert and Mask.
     - A window that takes a copy keeps its name, and stays on or off. A copy at the end has no name.
     - Not measured: the name, Invert, Mask and the on state after a paste.
-  - Window keyframes, the softness points of a curve and the Shift box come later ([todo](todo/color-page.md)).
+  - Window keyframes and the Shift box come later ([todo](todo/color-page.md)).
 
 Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.window.convert`, `grade.window.copy` and `grade.window.paste`.
 
@@ -3631,13 +3653,23 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Band 6 starts off. It is a Lo-Pass filter at 19000 Hz.
   - Renders of noise at 48 kHz give these curves (measured):
     - Each filter is a biquad filter. With all gains at 0 dB, the sound does not change.
-    - A Bell filter has its gain at its frequency, and the given Q.
+    - A Bell filter has its gain at its frequency f. Its width comes from its Q and from the sample rate r:
+      - The scale of the filter is `t(x) = tan(π · x / r)` for a frequency x.
+      - The lower point of the band is `f − f / (2 · Q)`.
+      - The band has the width of the Q value `t(f) / (2 · (t(f) − t(f − f / (2 · Q))))`.
+      - With that Q value, the filter is the peaking filter of the Audio EQ Cookbook.
+      - Thus Q 0.5 puts the lower point at 0 Hz, and keeps its width at all frequencies.
+      - Above Q 0.5, the band is wider than its Q value. The difference increases with the frequency and with the Q.
+      - At 16000 Hz, Q 1 gives the width of Q 0.75, and Q 4 gives the width of Q 2.02.
+      - The renders have bands at 1000 to 20000 Hz, with Q 0.5 to 8 and gains of −12, 6 and 12 dB.
+      - All of them agree with this rule to 0.000001 dB.
+      - A Q below 0.5 and other sample rates are not measured.
     - A Lo-Shelf or Hi-Shelf filter has a fixed Q of 0.75.
     - The corner of a shelf is 10^(|gain| / 80) times away from the given frequency. A Lo-Shelf moves down and a Hi-Shelf moves up.
     - Thus a Hi-Shelf of 12 dB at 1000 Hz has about 2.5 dB at 1000 Hz.
     - A Hi-Pass or Lo-Pass filter has 12 dB per octave and a fixed Q of 1. It has 0 dB at its frequency.
     - Thus the curve has a peak of 1.25 dB beside the frequency. A Hi-Pass at 1000 Hz has it at 1414 Hz, and a Lo-Pass at 1000 Hz has it at 707 Hz.
-    - The curve in the Inspector shows a Notch filter, but a render does not change the sound.
+    - The curve in the Inspector shows a Notch filter, but a render does not change the sound ([gotchas](gotchas.md#resolves-renders)).
   - An OTIO export writes the effect `Fairlight Clip Equaliser`, `Type` 64, and six effects `Fairlight Equaliser Band`, `Type` 63 (measured):
     - The `Enabled` of the first effect is the switch of the equalizer. The `Enabled` of a band is the switch of that band.
     - The parameter `eq band index` of a band goes from 0 to 5.
@@ -3661,7 +3693,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut: `clip.set` sets `equalizer`. Its `on` is the switch.
     - On a clip with no equalizer, a change makes a flat one. It is on, unless `on` is false.
     - null makes the equalizer off again, with the usual values. Reset sends it.
-  - vidcut: a Notch band makes a cut in the sound. A Bell band keeps the width of its Q value ([X170](deviations.md#x170-the-equalizer-notch-and-bell-width)).
+  - vidcut: a Notch band makes a cut in the sound ([gotchas](gotchas.md#resolves-renders)).
+  - vidcut: a Bell band uses the same rule for a Q below 0.5 and at all sample rates.
   - vidcut: an OTIO export writes `Fairlight Clip Equaliser` and its six `Fairlight Equaliser Band` effects when the equalizer is on or off its usual values.
   - vidcut: an import reads those effects when they have no keyframes, and keeps keyed or unsupported ones carried.
   - vidcut: an equalizer that is off does not change the sound, also after an import.
@@ -3946,8 +3979,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
-  - The Color page has its own level too. There, its keys go first. Thus Shift+S, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
-  - On the other pages, these four keys keep the actions of the table.
+  - The Color page has its own level too. There, its keys go first. Thus Shift+S, Alt+B, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
+  - On the other pages, these five keys keep the actions of the table.
   - On the Color page, Ctrl+[, Alt+] and the Mark menu act on the keyframes of the grade ([§8.22](#822-color-page-keyframes-pp-34533465)).
   - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
 - These keys and gestures do not change:

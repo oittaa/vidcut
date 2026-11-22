@@ -74,6 +74,13 @@ const ADDS: [(Action, GradeAdd); 6] = [
     (Action::AddOutsideNode, GradeAdd::Outside),
 ];
 
+const WINDOW_ADDS: [(Action, WindowKind); 4] = [
+    (Action::AddCircleNode, WindowKind::Circle),
+    (Action::AddLinearNode, WindowKind::Linear),
+    (Action::AddPolygonNode, WindowKind::Polygon),
+    (Action::AddCurveNode, WindowKind::Curve),
+];
+
 const KEY_PORT: usize = 1;
 
 #[derive(Debug, Clone, Copy)]
@@ -82,7 +89,7 @@ enum NodesItem {
     Act(NodeAct),
 }
 
-const NODES_MENU: [&[(&str, NodesItem)]; 5] = [
+const NODES_MENU: [&[(&str, NodesItem)]; 6] = [
     &[
         ("Previous Node", NodesItem::Key(Action::PreviousNode)),
         ("Next Node", NodesItem::Key(Action::NextNode)),
@@ -99,6 +106,24 @@ const NODES_MENU: [&[(&str, NodesItem)]; 5] = [
         (
             "Add Outside Node",
             NodesItem::Act(NodeAct::Add(GradeAdd::Outside)),
+        ),
+    ],
+    &[
+        (
+            "Add Serial Node + CPW",
+            NodesItem::Key(Action::AddCircleNode),
+        ),
+        (
+            "Add Serial Node + LPW",
+            NodesItem::Key(Action::AddLinearNode),
+        ),
+        (
+            "Add Serial Node + PPW",
+            NodesItem::Key(Action::AddPolygonNode),
+        ),
+        (
+            "Add Serial Node + PCW",
+            NodesItem::Key(Action::AddCurveNode),
         ),
     ],
     &[
@@ -950,6 +975,17 @@ fn grade_links(g: &Grade, of: &GradeOf, l: &Link<Port>) -> Vec<Value> {
         out.extend(connect(g, of, (d, s), Some(src)));
     }
     out
+}
+
+fn grade_pick(mut picked: Vec<u32>, current: Option<u32>) -> (Vec<u32>, bool) {
+    let Some(c) = current else {
+        return (picked, false);
+    };
+    let held = picked.contains(&c);
+    picked.retain(|n| *n != c);
+    let loose = !held && !picked.is_empty();
+    picked.push(c);
+    (picked, loose)
 }
 
 fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeAct>) {
@@ -2170,9 +2206,14 @@ impl Workspace {
                 g.is_some_and(|g| correctors(g).next().is_some())
             }
             NodesItem::Key(Action::AppendNode) => g.is_some(),
-            NodesItem::Key(Action::AddSerialNode | Action::AddNodeBefore) => {
-                current.is_some_and(|d| !d.takes_keys())
-            }
+            NodesItem::Key(
+                Action::AddSerialNode
+                | Action::AddNodeBefore
+                | Action::AddCircleNode
+                | Action::AddLinearNode
+                | Action::AddPolygonNode
+                | Action::AddCurveNode,
+            ) => current.is_some_and(|d| !d.takes_keys()),
             NodesItem::Key(Action::AddParallelNode | Action::AddLayerNode) => corrector.is_some(),
             NodesItem::Act(NodeAct::Add(_)) => corrector.is_some(),
             NodesItem::Key(Action::SwitchAllNodes) => g.is_some_and(|g| !g.nodes.is_empty()),
@@ -2222,7 +2263,7 @@ impl Workspace {
                 page.grade_left.insert((t, o), n);
             }
             let kept = page.grade_left.get(&(open.clone(), of.clone())).copied();
-            page.grade_nodes = vec![switched_to(g, switching, kept, was)];
+            page.pick_grade(vec![switched_to(g, switching, kept, was)], false);
             page.grade_seen = Some((open, of.clone(), clip));
             page.grade_coming = None;
             page.grade_view.stop();
@@ -2231,7 +2272,7 @@ impl Workspace {
         } else if seen.is_some_and(|(_, _, c)| *c != clip) {
             let n = switched_to(g, switching, was, was);
             if Some(n) != was {
-                page.grade_nodes = vec![n];
+                page.pick_grade(vec![n], false);
             }
             page.grade_seen = Some((open, of.clone(), clip));
         }
@@ -2240,15 +2281,19 @@ impl Workspace {
         }
         let coming = page.grade_coming.map(|(n, _)| n);
         let before = page.grade_nodes.len();
+        let last = page.grade_nodes.last().copied();
         page.grade_nodes
             .retain(|n| g.node(*n).is_some() || Some(*n) == coming);
+        if page.grade_nodes.last().copied() != last || page.grade_nodes.len() < 2 {
+            page.grade_loose = false;
+        }
         if page.grade_nodes.is_empty() && before > 0 {
-            page.grade_nodes = last_corrector(g, |_| true).into_iter().collect();
+            page.pick_grade(last_corrector(g, |_| true).into_iter().collect(), false);
         }
     }
 
     fn select_coming(&mut self, n: u32) {
-        self.effects_page.grade_nodes = vec![n];
+        self.effects_page.pick_grade(vec![n], false);
         self.effects_page.grade_coming = Some((n, Instant::now()));
     }
 
@@ -2257,12 +2302,16 @@ impl Workspace {
         g.node(n).map(|_| n)
     }
 
-    pub(super) fn pick_grade_nodes(&mut self, nodes: Vec<u32>) -> Result<(), String> {
+    pub(super) fn pick_grade_nodes(
+        &mut self,
+        nodes: Vec<u32>,
+        current: Option<u32>,
+    ) -> Result<(), String> {
         let (of, _, g) = self.grade_shown().ok_or(match self.effects_page.grading {
             GradeLevel::Clip => "There is no clip at the playhead",
             GradeLevel::Timeline => "There is no timeline",
         })?;
-        if let Some(missing) = nodes.iter().find(|n| g.node(**n).is_none()) {
+        if let Some(missing) = (nodes.iter().chain(&current)).find(|n| g.node(**n).is_none()) {
             return Err(format!("the grade has no node {missing}"));
         }
         let mut kept: Vec<u32> = Vec::new();
@@ -2271,7 +2320,9 @@ impl Workspace {
             kept.push(n);
         }
         self.settle_grade(&of, &g);
-        self.effects_page.grade_nodes = kept;
+        let current = current.or(kept.last().copied());
+        let (kept, loose) = grade_pick(kept, current);
+        self.effects_page.pick_grade(kept, loose);
         Ok(())
     }
 
@@ -2305,7 +2356,12 @@ impl Workspace {
         let struck = |a: Action| mine.contains(&a);
         for (action, add) in ADDS {
             if struck(action) {
-                self.add_grade_node(add);
+                self.add_grade_node(add, None);
+            }
+        }
+        for (action, kind) in WINDOW_ADDS {
+            if struck(action) {
+                self.add_grade_node(GradeAdd::Serial, Some(kind));
             }
         }
         if struck(Action::AddStaticKeyframe) {
@@ -2337,14 +2393,14 @@ impl Workspace {
             }
         }
         if struck(Action::DeleteNode) {
-            let picked: Vec<u32> = (self.effects_page.grade_nodes.iter())
+            let picked: Vec<u32> = (self.effects_page.picked_grade().iter())
                 .copied()
                 .filter(|n| g.node(*n).is_some())
                 .collect();
             self.delete_grade_nodes(&of, &g, &picked);
         }
         if struck(Action::SwitchSelectedNodes) {
-            let picked = self.effects_page.grade_nodes.clone();
+            let picked = self.effects_page.picked_grade().to_vec();
             let label = "Enable/Disable Selected Nodes";
             self.switch_grade_nodes(&of, &g, Some(&picked), label);
         }
@@ -2374,7 +2430,7 @@ impl Workspace {
             .map(|(d, n)| (n, d.on))
             .collect();
         let to = match picked {
-            Some(_) => match self.current_grade_node(g).and_then(|n| g.node(n)) {
+            Some(p) => match p.last().and_then(|n| g.node(*n)) {
                 Some(d) => !d.on,
                 None => return,
             },
@@ -2420,12 +2476,13 @@ impl Workspace {
             }
         }
         let last = last_corrector(&left, |_| true);
-        self.effects_page.grade_nodes = last.into_iter().collect();
+        self.effects_page
+            .pick_grade(last.into_iter().collect(), false);
         self.effects_page.graded = None;
         self.send_all(commands, "Delete Node");
     }
 
-    fn add_grade_node(&mut self, add: GradeAdd) {
+    fn add_grade_node(&mut self, add: GradeAdd, window: Option<WindowKind>) {
         let Some((of, _, g)) = self.grade_shown() else {
             return;
         };
@@ -2439,11 +2496,14 @@ impl Workspace {
         if d.is_some_and(GradeNode::takes_keys) && add != GradeAdd::Append {
             return;
         }
-        let more = match (add, node) {
+        let mut more = match (add, node) {
             (GradeAdd::Append, _) => json!({ "add": add }),
             (_, Some(n)) => json!({ "add": add, "node": n }),
             (_, None) => return,
         };
+        if let Some(w) = window {
+            more["window"] = json!(w);
+        }
         self.select_coming(g.last() + 1);
         self.send("grade.add", params(&of, "clip", more));
     }
@@ -2491,8 +2551,8 @@ impl Workspace {
         };
         match act {
             NodeAct::Add(add) => {
-                self.effects_page.grade_nodes = vec![n];
-                self.add_grade_node(add);
+                self.effects_page.pick_grade(vec![n], false);
+                self.add_grade_node(add, None);
                 return;
             }
             NodeAct::Delete => {
@@ -2570,7 +2630,7 @@ impl Workspace {
                 ("grade.clear", json!({ "keep_nodes": true, "at": at }))
             }
             FieldAct::ResetAll => {
-                self.effects_page.grade_nodes = vec![1];
+                self.effects_page.pick_grade(vec![1], false);
                 ("grade.clear", json!({}))
             }
         };
@@ -2663,9 +2723,10 @@ impl Workspace {
             GradeOf::Clip(id) => format!("grade-node-{id}"),
             GradeOf::Timeline => "grade-node-timeline".to_string(),
         };
-        let selected: Vec<Port> = (self.effects_page.grade_nodes.iter())
+        let selected: Vec<Port> = (self.effects_page.picked_grade().iter())
             .map(|n| Port::Node(*n))
             .collect();
+        let current = self.effects_page.grade_nodes.last().map(|n| Port::Node(*n));
         let graph = Graph {
             salt,
             tiles: tiles(
@@ -2674,6 +2735,7 @@ impl Workspace {
             ),
             wires: wires(&stored),
             selected: &selected,
+            current: current.as_ref(),
             active: CURRENT,
         };
         let mut node_act: Option<(NodeAct, u32)> = None;
@@ -2704,15 +2766,13 @@ impl Workspace {
                     _ => None,
                 })
                 .collect();
-            let mut nodes = self.effects_page.grade_nodes.clone();
-            let current = nodes.last().copied();
-            if off {
-                nodes.retain(|n| !inside.contains(n) || Some(*n) == current);
-            } else {
-                let others = inside.into_iter().filter(|n| Some(*n) != current);
-                nodes = others.chain(current).collect();
+            let current = self.effects_page.grade_nodes.last().copied();
+            let mut picked = self.effects_page.picked_grade().to_vec();
+            match off {
+                true => picked.retain(|n| !inside.contains(n) || Some(*n) == current),
+                false => picked = inside,
             }
-            self.send("gui.grade_nodes", json!({ "nodes": nodes }));
+            self.send_grade_pick(picked, current);
         }
         if let Some(at) = done.spot {
             self.effects_page.grade_spot = Some(at);
@@ -2739,7 +2799,7 @@ impl Workspace {
             self.grade_dropped(&of, d);
         }
         if let Some(Port::Node(n)) = done.pointed {
-            self.effects_page.grade_nodes = vec![n];
+            self.effects_page.pick_grade(vec![n], false);
         }
         if let Some(Port::Node(n)) = done.switched {
             node_act = Some((NodeAct::Toggle, n));
@@ -2757,23 +2817,40 @@ impl Workspace {
         if let Some(act) = field_act {
             self.grade_field_act(&of, &stored, act);
         }
-        let mut nodes = self.effects_page.grade_nodes.clone();
+        let mut current = self.effects_page.grade_nodes.last().copied();
+        let mut picked = self.effects_page.picked_grade().to_vec();
         match done.picked {
             Some((Port::Node(n), Pick::Active)) => {
-                nodes.retain(|k| *k != n);
-                nodes.push(n);
+                picked.push(n);
+                current = Some(n);
             }
-            Some((Port::Node(n), Pick::Toggle)) if !nodes.contains(&n) => {
-                nodes.insert(nodes.len().saturating_sub(1), n);
+            Some((Port::Node(n), Pick::Toggle)) if Some(n) == current && picked.contains(&n) => {
+                return;
             }
-            Some((Port::Node(n), Pick::Only)) => nodes = vec![n],
-            None if done.clicked && done.unlink.is_none() => {
-                nodes = nodes.last().copied().into_iter().collect();
+            Some((Port::Node(n), Pick::Toggle)) if picked.contains(&n) => {
+                picked.retain(|k| *k != n);
             }
+            Some((Port::Node(n), Pick::Toggle)) => picked.push(n),
+            Some((Port::Node(n), Pick::Only)) => {
+                picked = vec![n];
+                current = Some(n);
+            }
+            None if done.clicked && done.unlink.is_none() => picked = current.into_iter().collect(),
             _ => return,
         }
-        if nodes != self.effects_page.grade_nodes {
-            self.send("gui.grade_nodes", json!({ "nodes": nodes }));
+        self.send_grade_pick(picked, current);
+    }
+
+    fn send_grade_pick(&mut self, picked: Vec<u32>, current: Option<u32>) {
+        let (nodes, loose) = grade_pick(picked, current);
+        let page = &self.effects_page;
+        if nodes == page.grade_nodes && loose == page.grade_loose {
+            return;
         }
+        let p = match nodes.split_last() {
+            Some((c, held)) if loose => json!({ "nodes": held, "current": c }),
+            _ => json!({ "nodes": nodes }),
+        };
+        self.send("gui.grade_nodes", p);
     }
 }

@@ -3662,6 +3662,9 @@ fn mutate(
                     "Source Overwrite picks its own track; leave out `track`",
                 ));
             }
+            if src.compound.is_some() {
+                return Err(Error::usage("Source Overwrite takes a media item"));
+            }
             if *grid && src.range.is_none() {
                 return Err(Error::usage("`grid` needs `range`"));
             }
@@ -4879,9 +4882,10 @@ fn mutate(
             add,
             node,
             place,
+            window,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
-            ops::grade::add(p, &of, *add, *node, *place)?
+            ops::grade::add(p, &of, *add, (*node, *place), *window)?
         }
         Request::GradeRemove {
             clip,
@@ -5034,6 +5038,8 @@ fn mutate(
             inside,
             outside,
             points,
+            inner,
+            outer,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
             let change = ops::grade_windows::WindowChange {
@@ -5051,6 +5057,8 @@ fn mutate(
                 inside: *inside,
                 outside: *outside,
                 points: points.clone(),
+                inner: inner.clone(),
+                outer: outer.clone(),
             };
             ops::grade_windows::set(p, &of, *node, *window, &change)?;
             Value::Null

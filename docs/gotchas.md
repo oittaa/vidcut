@@ -637,7 +637,7 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
 
 ## Resolve's renders
 
-These facts come from float renders in Resolve Studio 21.2, without color management.
+These facts come from renders in Resolve Studio 21.2. The picture renders are float, without color management.
 
 - **Resolve reads some curve tables of the Color page half a step off.**
   - Shadows, Highlights and Midtone Detail share one table. In 0..1, it moves a value by up to 1/1023 where the curve makes no change.
@@ -662,6 +662,12 @@ These facts come from float renders in Resolve Studio 21.2, without color manage
   - With the viewer hidden, the grade of a new circle has no base radius.
   - The circle then renders about 30 pixels wide. The viewer draws the usual oval.
   - vidcut does not copy this fault. At Size 50, the radius of a circle is 0.15 of the frame width (`CIRCLE_RADIUS`, [spec §8.23](spec.md#823-windows-pp-32653279)).
+- **The Equalizer of a clip does not apply a Notch band to the sound.**
+  - The graph in the Inspector shows a cut at the frequency of a Notch band.
+  - Renders of noise at 48 kHz show no cut. From 30 Hz to 20 kHz, each 2 Hz band stays within 0.12 dB of the source.
+  - A gain of 0 dB or −12 dB on the Notch band gives the same render.
+  - In the same clip, a Hi-Pass band and a Bell band change the sound.
+  - vidcut does not copy this fault. A Notch band cuts its frequency, with a fixed width (`NOTCH_Q`, [spec §9](spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
 
 ## transcribe.cpp and its models
 

@@ -92,6 +92,7 @@ pub(super) struct EffectsPage {
     pub(super) window_grab: Option<super::window_overlay::WindowGrab>,
     pub(super) window_drawing: Option<super::window_overlay::Drawing>,
     pub(super) grade_nodes: Vec<u32>,
+    pub(super) grade_loose: bool,
     pub(super) grade_seen: Option<(String, GradeOf, Option<String>)>,
     pub(super) grade_left: Lru<(String, GradeOf), u32, GRADES_LEFT_KEPT>,
     pub(super) grade_coming: Option<(u32, Instant)>,
@@ -131,6 +132,7 @@ impl Default for EffectsPage {
             window_grab: None,
             window_drawing: None,
             grade_nodes: Vec::new(),
+            grade_loose: false,
             grade_seen: None,
             grade_left: Lru::new(),
             grade_coming: None,
@@ -157,6 +159,16 @@ impl Default for EffectsPage {
 impl EffectsPage {
     pub(super) fn picked(&self) -> Option<&str> {
         self.nodes.last().map(String::as_str)
+    }
+
+    pub(super) fn pick_grade(&mut self, nodes: Vec<u32>, loose: bool) {
+        self.grade_loose = loose && nodes.len() > 1;
+        self.grade_nodes = nodes;
+    }
+
+    pub(super) fn picked_grade(&self) -> &[u32] {
+        let held = self.grade_nodes.len() - usize::from(self.grade_loose);
+        &self.grade_nodes[..held]
     }
 
     pub(super) fn leave(&mut self) {
@@ -1988,6 +2000,7 @@ impl Workspace {
             tiles: comp.nodes.iter().map(tile).collect(),
             wires: joins(&comp),
             selected: &self.effects_page.nodes,
+            current: self.effects_page.nodes.last(),
             active: theme::colors().accent,
         };
         let done = node_editor::show(

@@ -968,7 +968,7 @@ fn corrected(
         r.hold(whole, on, uses.over[k]);
         uses.whole[k] = whole;
         Some(mix)
-    } else if uses.all[k] == 0 {
+    } else if uses.all[k] == 0 && !uses.tapped {
         r.done(x);
         r.used(&key);
         None
