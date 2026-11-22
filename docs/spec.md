@@ -3243,6 +3243,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
   - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
   - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node, Add One Input and Remove One Input. The Add Node submenu comes later ([todo](todo/color-page.md)).
+  - vidcut: Alt+S and Shift+S do nothing on a Key Mixer.
   - vidcut: a key link is blue. A node cannot drop into a key link.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
   - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
