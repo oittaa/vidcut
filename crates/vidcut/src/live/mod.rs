@@ -684,6 +684,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         skipping: None,
         free_title: None,
         free_pictures: Vec::new(),
+        title_preview: None,
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
@@ -991,6 +992,7 @@ struct Live {
     skipping: Option<Vec<ClipSpans>>,
     free_title: Option<FreeTitle>,
     free_pictures: Vec<(String, vidcut_core::model::Picture)>,
+    title_preview: Option<(String, Title)>,
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
@@ -1188,10 +1190,11 @@ impl Live {
             Msg::PreviewTitle(title) => {
                 self.render.touch();
                 changed = false;
-                if self.timeline_due.take().is_some() {
-                    self.refresh_timeline();
+                if self.title_preview != title {
+                    self.title_preview = title;
+                    self.schedule_timeline();
+                    (self.notify)();
                 }
-                self.player.preview_title(title);
             }
             Msg::PreviewPictures(pictures) => {
                 self.render.touch();
@@ -4010,6 +4013,7 @@ impl Live {
         self.player.end_audition();
         self.free_title = None;
         self.free_pictures.clear();
+        self.title_preview = None;
         self.thumbs = Arc::new(HashSet::new());
         self.thumbs_wanted.clear();
         self.waveforms = Arc::new(HashMap::new());
@@ -4517,7 +4521,13 @@ impl Live {
                 p.tracks[t].clips[c].picture = (!picture.is_usual()).then(|| picture.clone());
             }
         }
-        let mut scrolled: Option<(String, (i64, i64), i64)> = None;
+        if let Some((id, title)) = &self.title_preview
+            && let Some((t, c)) = p.find_clip(id)
+            && p.tracks[t].clips[c].title.is_some()
+        {
+            p.tracks[t].clips[c].title = Some(title.clone());
+        }
+        let mut scrolled: Option<(Title, (i64, i64), i64)> = None;
         if let Some(FreeTitle {
             title,
             at,
@@ -4525,13 +4535,12 @@ impl Live {
         }) = &self.free_title
         {
             let len = vidcut_core::ops::titles::default_length(&p);
-            if let Ok((id, _)) = vidcut_core::ops::titles::add(&mut p, None, *at, len, title)
-                && let Some(c) = p
-                    .clip(&id)
-                    .filter(|c| c.title.as_ref().is_some_and(Title::moves))
+            if let Ok((id, _)) = vidcut_core::ops::titles::add(&mut p, None, *at, len, title, None)
+                && let Some(c) = p.clip(&id)
+                && let Some(shown) = c.title.as_ref().filter(|t| t.moves())
             {
                 let off = (fraction * len as f64).round() as i64 - (at - c.start);
-                scrolled = Some((id.clone(), (c.start, c.end()), off));
+                scrolled = Some((shown.clone(), (c.start, c.end()), off));
             }
         }
         let end = p.end();
@@ -4546,12 +4555,12 @@ impl Live {
                 return None;
             }
         };
-        if let Some((id, (a, b), off)) = &scrolled {
+        if let Some((shown, (a, b), off)) = &scrolled {
             let mut from = 0;
             for piece in &mut plan.video {
                 let frames = piece.frames();
                 if from < *b && from + frames > *a {
-                    scroll_by(piece, id, *off);
+                    scroll_by(piece, shown, *off);
                 }
                 from += frames;
             }
@@ -5633,21 +5642,16 @@ fn job_notes(tx: &Sender<Msg>, id: &str) -> vidcut_av::progress::Noting {
     }))
 }
 
-fn scroll_by(piece: &mut render::VideoPiece, clip: &str, off: i64) {
-    match piece {
-        render::VideoPiece::Titled { under, titles } => {
-            for s in titles.iter_mut().filter(|s| s.clip == clip) {
-                s.run.at += off;
-            }
-            scroll_by(under, clip, off);
+fn scroll_by(piece: &mut render::VideoPiece, title: &Title, off: i64) {
+    for layer in piece.layers_mut() {
+        if let render::VideoPiece::Generated {
+            picture: render::Generated::Title(s),
+            ..
+        } = layer
+            && s.title == *title
+        {
+            s.run.at += off;
         }
-        render::VideoPiece::Mix { under, over } => {
-            scroll_by(under, clip, off);
-            for o in over {
-                scroll_by(&mut o.piece, clip, off);
-            }
-        }
-        _ => {}
     }
 }
 

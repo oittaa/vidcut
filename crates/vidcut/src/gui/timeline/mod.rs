@@ -3107,10 +3107,10 @@ impl Workspace {
             ui.close();
         }
         let change_speed = bindings.named("Change Speed…", Action::ChangeSpeed);
-        if c.generator.is_some() {
+        if c.generator.is_some() && !c.takes_speed() {
             ui.add_enabled(false, egui::Button::new(change_speed));
             ui.add_enabled(false, egui::Button::new("Add Speed Point"));
-        } else if !c.is_generator() && ui.button(change_speed).clicked() {
+        } else if c.takes_speed() && ui.button(change_speed).clicked() {
             self.open_speed_dialog();
             ui.close();
         }

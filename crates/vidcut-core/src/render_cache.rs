@@ -11,7 +11,7 @@ use crate::model::{
     Upscaler,
 };
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
-use crate::render::{CacheFrames, Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
+use crate::render::{CacheFrames, Image, Placed, RenderPlan, Shape, VideoPiece};
 
 pub type Key = [u8; 16];
 
@@ -135,7 +135,7 @@ impl Setup<'_> {
 
     fn levels(&self, piece: &VideoPiece) -> (bool, Vec<bool>) {
         let user = self.mode == RenderCache::User;
-        let mut whole = titled(piece) && self.kept(&Reason::Effect);
+        let mut whole = false;
         let clips = piece
             .layers()
             .iter()
@@ -262,7 +262,7 @@ impl Setup<'_> {
     }
 
     fn piece_name(&self, piece: &VideoPiece, plan: &RenderPlan) -> Key {
-        let mut whole = bare(piece).clone();
+        let mut whole = piece.clone();
         plain(&mut whole, &|m: &str, p: &Path| self.name(m, p), false);
         let whole = serde_json::to_vec(&whole).unwrap_or_default();
         digest(&[self.stem(plan).as_bytes(), &whole])
@@ -369,15 +369,8 @@ fn checked_on_own(placed: &[Placed]) -> bool {
     checked(placed.get(..1).unwrap_or_default())
 }
 
-fn titled(piece: &VideoPiece) -> bool {
-    bare(piece).titles().iter().any(|(_, t)| checked(&t.placed))
-}
-
 pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<Reason> {
     let mut out: Vec<Reason> = layered(piece, slow, user).into_iter().flatten().collect();
-    if titled(piece) {
-        out.push(Reason::Effect);
-    }
     out.sort_unstable();
     out.dedup();
     out
@@ -465,13 +458,6 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
     out
 }
 
-pub fn bare(piece: &VideoPiece) -> &VideoPiece {
-    match piece {
-        VideoPiece::Titled { under, .. } => under,
-        other => other,
-    }
-}
-
 fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String, one: bool) {
     match piece {
         VideoPiece::Source {
@@ -520,16 +506,7 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String, one: bool
                 plain(&mut o.piece, name, one);
             }
         }
-        VideoPiece::Titled { under, titles } => {
-            plain(under, name, one);
-            titles.iter_mut().for_each(|t| plain_title(t, one));
-        }
     }
-}
-
-fn plain_title(t: &mut ShownTitle, one: bool) {
-    t.clip.clear();
-    t.placed.iter_mut().for_each(|p| plain_placed(p, one));
 }
 
 fn plain_placed(p: &mut Placed, one: bool) {
@@ -640,16 +617,15 @@ impl Cache {
     }
 
     pub fn keys(&mut self, piece: &VideoPiece, setup: &Setup, plan: &RenderPlan) -> Arc<[Key]> {
-        let bare = bare(piece);
         let stem = setup.stem(plan);
         let name = |m: &str, p: &Path| setup.name(m, p);
         let memo = setup.piece_name(piece, plan);
         if let Some(keys) = self.keys.get(&memo) {
             return keys;
         }
-        let keys: Arc<[Key]> = (0..bare.frames())
+        let keys: Arc<[Key]> = (0..piece.frames())
             .map(|k| {
-                let mut one = bare.part(k, 1);
+                let mut one = piece.part(k, 1);
                 plain(&mut one, &name, true);
                 let json = serde_json::to_vec(&one).unwrap_or_default();
                 digest(&[stem.as_bytes(), &json])
@@ -917,7 +893,7 @@ impl Cache {
                     && let Some((f, i)) = found(&keys[k])
                 {
                     let m = index.run(&f, i, &keys[k..]);
-                    video.push(cached(&piece.part(k as i64, m as i64), &f, i, m as i64));
+                    video.push(cached(&f, i, m as i64));
                     k += m;
                     continue;
                 }
@@ -976,9 +952,9 @@ pub struct Job {
     pub alpha: bool,
 }
 
-fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
+fn cached(file: &Path, at: u32, frames: i64) -> VideoPiece {
     crate::disk_cache::used(file);
-    let source = VideoPiece::Source {
+    VideoPiece::Source {
         media: String::new(),
         path: file.to_path_buf(),
         origin: 0.0,
@@ -997,13 +973,6 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
         excluded: false,
         made: None,
         input_lut: None,
-    };
-    match part {
-        VideoPiece::Titled { titles, .. } => VideoPiece::Titled {
-            under: Box::new(source),
-            titles: titles.clone(),
-        },
-        _ => source,
     }
 }
 
@@ -1082,7 +1051,7 @@ pub fn segment(plan: &RenderPlan, look: &Look, start: i64, frames: i64) -> Rende
         let n = piece.frames();
         let (a, b) = (start.max(t), (start + frames).min(t + n));
         if a < b {
-            video.push(bare(&piece.part(a - t, b - a)).clone());
+            video.push(piece.part(a - t, b - a));
         }
         t += n;
     }
@@ -1351,109 +1320,11 @@ fn is_lower_hex(text: &str, len: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cache, Index, Look, Reason, Setup, bare, is_cache_file, is_cache_video, reasons};
-    use crate::model::{
-        Effect, EffectKind, GaussianBlur, Picture, Project, RenderCache, Settings, Title, Upscale,
-    };
+    use super::{Cache, Index, Look, Reason, Setup, is_cache_file, is_cache_video, reasons};
+    use crate::model::{Project, RenderCache, Settings, Upscale};
     use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
-    use crate::render::{Placed, RenderPlan, Run, Shape, ShownTitle, VideoPiece};
+    use crate::render::{Placed, RenderPlan, Shape, VideoPiece};
     use crate::time::Rational;
-
-    fn effect() -> Effect {
-        Effect {
-            on: true,
-            kind: EffectKind::GaussianBlur(GaussianBlur::default()),
-            blend: None,
-            use_alpha: true,
-            render_cache: true,
-            keys: Vec::new(),
-        }
-    }
-
-    fn titled() -> VideoPiece {
-        let mut picture = Picture::default();
-        picture.effects.push(effect());
-        VideoPiece::Titled {
-            under: Box::new(VideoPiece::black(1)),
-            titles: vec![ShownTitle {
-                clip: "c1".into(),
-                title: Title::new("Hello"),
-                run: Run {
-                    at: 0,
-                    of: 1,
-                    held: false,
-                },
-                source_in: 0,
-                fade: None,
-                placed: vec![Placed {
-                    clip: "c1".into(),
-                    picture,
-                    run: None,
-                    source: 0,
-                    frame: 0,
-                    start: 0,
-                    ready: false,
-                    ramp: None,
-                    crossing: false,
-                    moving: None,
-                    clock: Default::default(),
-                    adjustment: false,
-                }],
-            }],
-        }
-    }
-
-    fn plan_of(piece: VideoPiece) -> RenderPlan {
-        let frames = piece.frames();
-        RenderPlan {
-            fps: Rational::new(25, 1).unwrap(),
-            width: 320,
-            height: 180,
-            sample_rate: 48_000,
-            channels: 2,
-            frames,
-            video: vec![piece],
-            audio: Vec::new(),
-            ducking: Vec::new(),
-            range: (0, frames),
-            name: "title".into(),
-            colors: None,
-            output_lut: None,
-            timeline_grade: None,
-        }
-    }
-
-    #[test]
-    fn a_checked_effect_on_a_title_schedules_no_cache() {
-        let piece = titled();
-        assert!(reasons(&piece, &|_| false, false).is_empty());
-        let project = Project::new(Settings::default());
-        let prefs = RenderCachePrefs::default();
-        let look = Look::of(&project, (1920, ProxyCodec::Auto), CacheCodec::Auto);
-        let slow = |_: &str| false;
-        let up = |_: Shape, _: (u32, u32), _: &[Placed], _: Upscale| None;
-        let setup = Setup {
-            mode: RenderCache::Smart,
-            prefs: &prefs,
-            project: &project,
-            slow: &slow,
-            upscaled: &up,
-            look: &look,
-        };
-        let plan = plan_of(piece);
-        assert!(Cache::default().next(&plan, &setup, 0, 8).is_none());
-    }
-
-    #[test]
-    fn a_title_without_a_checked_effect_stays_out_of_the_cache() {
-        let mut piece = titled();
-        let VideoPiece::Titled { titles, .. } = &mut piece else {
-            panic!("title");
-        };
-        titles[0].placed[0].picture.effects[0].render_cache = false;
-        assert!(reasons(&piece, &|_| false, false).is_empty());
-        assert!(matches!(bare(&piece), VideoPiece::Black { .. }));
-    }
 
     #[test]
     fn a_checked_effect_on_a_clip_is_a_cache_reason() {

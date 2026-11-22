@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::effects::{effect, group, handle_point, handle_value, keyed, plain, ranged, rounded};
+use super::effects::{group, handle_point, handle_value, keyed, plain, ranged, rounded};
 use super::picture::{file_curve, read_keys};
 use super::{EDITOR, VIDCUT};
 use crate::model::hex;
@@ -37,10 +37,6 @@ fn parameter<'a>(group: &'a Value, id: &str) -> &'a Value {
         .flatten()
         .find(|p| p["Parameter ID"] == id)
         .unwrap_or(&Value::Null)
-}
-
-fn composite(e: &Value) -> Option<&Value> {
-    (super::effects::name(e) == "Composite").then(|| parameter(&e["metadata"][EDITOR], "opacity"))
 }
 
 fn with_frames(mut p: Value, frames: Option<Value>) -> Value {
@@ -133,48 +129,6 @@ fn point_handles(p: &Value, origin: i64) -> Vec<PositionHandles> {
     out.sort_by_key(|h| h.frame);
     out.dedup_by_key(|h| h.frame);
     out
-}
-
-pub fn with_opacity(t: &Title, effects: Vec<Value>, origin: i64) -> Vec<Value> {
-    let mut out: Vec<Value> = effects
-        .into_iter()
-        .filter(|e| composite(e).is_none())
-        .collect();
-    if t.opacity.is_some() || !t.opacity_keys.is_empty() {
-        out.push(effect(group(
-            "Composite",
-            1,
-            1,
-            vec![ranged(
-                with_frames(
-                    keyed(
-                        "opacity",
-                        json!(rounded(t.opaque() * 100.0)),
-                        json!(100.0),
-                        "Double",
-                    ),
-                    file_curve(&t.opacity_keys, None, origin, |o| rounded(o * 100.0), 100.0),
-                ),
-                0.0,
-                100.0,
-            )],
-        )));
-    }
-    out
-}
-
-pub fn take_opacity(effects: &mut Vec<Value>, origin: i64) -> (Option<f64>, Vec<Keyframe>) {
-    let found = effects.iter().find_map(composite).cloned();
-    effects.retain(|e| composite(e).is_none());
-    let Some(p) = found else {
-        return (None, Vec::new());
-    };
-    let plain = p["Parameter Value"].as_f64().unwrap_or(100.0);
-    let keys = read_keys(&p, origin).unwrap_or_default();
-    (
-        Some(rounded((plain / 100.0).clamp(0.0, 1.0))).filter(|o| *o < 1.0),
-        fitted(&keys, 0.01, 0.0, 1.0),
-    )
 }
 
 fn kind_named(kind: &str) -> Option<(TitleKind, Option<TitleAlign>)> {
@@ -1131,8 +1085,6 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         zoom_keys: Vec::new(),
         rotation: None,
         rotation_keys: Vec::new(),
-        opacity: None,
-        opacity_keys: Vec::new(),
         upper: None,
     };
     crate::ops::titles::checked(&title).ok()
@@ -1244,8 +1196,6 @@ pub fn read(item: &Value, reference: &Value, height: u32, origin: i64) -> Option
 
 pub fn with_keys_of(mut t: Title, read: &Title) -> Title {
     take_keys(&mut t, read);
-    t.opacity = read.opacity;
-    t.opacity_keys.clone_from(&read.opacity_keys);
     if read.upper.is_some() {
         t.part_lines();
         t.swap_lines();
@@ -1411,8 +1361,6 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         zoom_keys: Vec::new(),
         rotation,
         rotation_keys: Vec::new(),
-        opacity: None,
-        opacity_keys: Vec::new(),
         upper: None,
     };
     let [x, from_bottom] = at;

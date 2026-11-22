@@ -8,18 +8,12 @@ fn clip_of(p: &Project, id: &str) -> Result<Clip> {
     let c = p
         .clip(id)
         .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-    let why = if c.title.is_some() {
-        "a title"
-    } else if c.adjustment {
-        "an adjustment clip"
-    } else if c.is_generator() {
-        "a generator"
-    } else {
-        return Ok(c.clone());
-    };
-    Err(Error::invalid(format!(
-        "{id} is {why}: it has no speed keyframes"
-    )))
+    if !c.takes_speed() {
+        return Err(Error::invalid(format!(
+            "{id} has no source media: it has no speed keyframes"
+        )));
+    }
+    Ok(c.clone())
 }
 
 fn under(p: &Project, id: &str, t: i64) -> Result<Clip> {

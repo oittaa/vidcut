@@ -271,19 +271,11 @@ pub enum VideoPiece {
     },
     /// Pictures over each other: `under`, then each of `over` on top of it,
     /// at its level while a dissolve plays (decision D50), each as long as
-    /// the piece. `under` is a source, a generator's picture, black or a
-    /// titled picture; each of `over` a source, a generator's picture or
-    /// black.
+    /// the piece. `under` is a source, a generator's picture or black; each
+    /// of `over` a source, a generator's picture or black.
     Mix {
         under: Box<VideoPiece>,
         over: Vec<Over>,
-    },
-    /// Titles over a picture (decision D65): `under`, then each of
-    /// `titles` drawn on top of it in order. `under` is a source, black or
-    /// a mix.
-    Titled {
-        under: Box<VideoPiece>,
-        titles: Vec<ShownTitle>,
     },
 }
 
@@ -301,6 +293,8 @@ pub enum Generated {
     /// The picture of a clip whose media is out of the pool: Media Offline
     /// on dark red, in a 16:9 box in the middle of a black frame.
     Offline,
+    /// A title's text, drawn at the size of the timeline on a clear picture.
+    Title(Box<ShownTitle>),
 }
 
 impl Generated {
@@ -316,17 +310,21 @@ impl Generated {
     }
 
     pub fn is_keyed(&self) -> bool {
-        matches!(self, Self::FourColorGradient { gradient, .. } if gradient.is_keyed())
+        match self {
+            Self::FourColorGradient { gradient, .. } => gradient.is_keyed(),
+            Self::Title(t) => t.title.is_keyed() || t.title.moves(),
+            _ => false,
+        }
     }
 
     pub fn after(&self, k: i64) -> Self {
         match self {
-            Self::FourColorGradient { gradient, frame } if gradient.is_keyed() => {
-                Self::FourColorGradient {
-                    gradient: gradient.clone(),
-                    frame: frame + k,
-                }
-            }
+            still if !still.is_keyed() => still.clone(),
+            Self::FourColorGradient { gradient, frame } => Self::FourColorGradient {
+                gradient: gradient.clone(),
+                frame: frame + k,
+            },
+            Self::Title(t) => Self::Title(Box::new(t.after(k))),
             other => other.clone(),
         }
     }
@@ -346,38 +344,39 @@ impl Generated {
                     frame: 0,
                 }
             }
+            Self::Title(t) if self.is_keyed() => Self::Title(Box::new(ShownTitle {
+                run: Run {
+                    held: true,
+                    ..t.run
+                },
+                ..(**t).clone()
+            })),
             other => other.clone(),
         }
     }
 
-    pub fn at(&self, k: i64) -> Pattern {
+    pub fn at(&self, k: i64) -> Option<Pattern> {
         match self {
-            Self::SolidColor { color } => Pattern::SolidColor(*color),
+            Self::SolidColor { color } => Some(Pattern::SolidColor(*color)),
             Self::FourColorGradient { gradient, frame } => {
-                Pattern::of_gradient(gradient, (frame + k) as f64)
+                Some(Pattern::of_gradient(gradient, (frame + k) as f64))
             }
-            Self::Chart { chart } => Pattern::Chart(*chart),
-            Self::Offline => Pattern::Offline,
+            Self::Chart { chart } => Some(Pattern::Chart(*chart)),
+            Self::Offline => Some(Pattern::Offline),
+            Self::Title(_) => None,
         }
     }
 }
 
-/// A title of a [`VideoPiece::Titled`], with where the piece is in its clip.
+/// The text of a title clip, with where the piece is in its clip. `run`
+/// and `source_in` are 0 when the text has no keyframes and does not move.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ShownTitle {
-    pub clip: String,
     pub title: Title,
     pub run: Run,
     /// The source frame of its clip's first frame, which its keyframes are
     /// counted from.
     pub source_in: i64,
-    /// How a dissolve at its clip's edge fades it in or out.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fade: Option<Ramp>,
-    /// Where it goes over the frame: the picture of each compound clip it
-    /// plays inside, outward. Empty, it is drawn over the frame as it is.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub placed: Vec<Placed>,
 }
 
 /// Where a piece is in its clip, which a moving title and a Dynamic Zoom
@@ -418,12 +417,9 @@ impl Run {
 impl ShownTitle {
     pub fn after(&self, k: i64) -> Self {
         Self {
-            clip: self.clip.clone(),
             title: self.title.clone(),
             run: self.run.after(k),
             source_in: self.source_in,
-            fade: self.fade.map(|r| r.after(k)),
-            placed: self.placed.iter().map(|p| p.after(k)).collect(),
         }
     }
 
@@ -436,10 +432,6 @@ impl ShownTitle {
             title: self.title.sampled(self.frame()),
             ..self
         }
-    }
-
-    pub fn alpha(&self) -> f64 {
-        self.title.opaque() * self.fade.map_or(1.0, |r| r.level(0))
     }
 }
 
@@ -1292,7 +1284,7 @@ impl VideoPiece {
             | Self::Generated { frames, .. }
             | Self::Adjustment { frames, .. }
             | Self::Flat { frames, .. } => *frames,
-            Self::Mix { under, .. } | Self::Titled { under, .. } => under.frames(),
+            Self::Mix { under, .. } => under.frames(),
         }
     }
 
@@ -1313,7 +1305,6 @@ impl VideoPiece {
                 .into_iter()
                 .chain(over.iter().map(|o| (&o.piece, o.ramp)))
                 .collect(),
-            Self::Titled { under, .. } => under.layers(),
             _ => vec![(self, None)],
         }
     }
@@ -1325,7 +1316,6 @@ impl VideoPiece {
                 .into_iter()
                 .chain(over.iter_mut().map(|o| &mut o.piece))
                 .collect(),
-            Self::Titled { under, .. } => under.layers_mut(),
             _ => vec![self],
         }
     }
@@ -1361,7 +1351,6 @@ impl VideoPiece {
                 .into_iter()
                 .chain(over.iter().map(|o| o.smooth.as_ref()))
                 .collect(),
-            Self::Titled { under, .. } => under.smooths(),
             _ => vec![None],
         }
     }
@@ -1393,21 +1382,6 @@ impl VideoPiece {
             .collect()
     }
 
-    pub fn titles(&self) -> Vec<(usize, &ShownTitle)> {
-        match self {
-            Self::Mix { under, .. } => under.titles(),
-            Self::Titled { under, titles } => {
-                let below = under.layers().len();
-                under
-                    .titles()
-                    .into_iter()
-                    .chain(titles.iter().map(|t| (below, t)))
-                    .collect()
-            }
-            _ => Vec::new(),
-        }
-    }
-
     fn with_over(self, o: Over) -> VideoPiece {
         match self {
             Self::Mix { under, mut over } => {
@@ -1417,19 +1391,6 @@ impl VideoPiece {
             under => Self::Mix {
                 under: Box::new(under),
                 over: vec![o],
-            },
-        }
-    }
-
-    fn with_title(self, t: ShownTitle) -> VideoPiece {
-        match self {
-            Self::Titled { under, mut titles } => {
-                titles.push(t);
-                Self::Titled { under, titles }
-            }
-            under => Self::Titled {
-                under: Box::new(under),
-                titles: vec![t],
             },
         }
     }
@@ -1520,10 +1481,6 @@ impl VideoPiece {
                         smooth: o.smooth.clone(),
                     })
                     .collect(),
-            },
-            Self::Titled { under, titles } => Self::Titled {
-                under: Box::new(under.part(k, frames)),
-                titles: titles.iter().map(|t| t.after(k)).collect(),
             },
         }
     }
@@ -1624,16 +1581,6 @@ impl VideoPiece {
                             && a.piece.goes_on_as(&b.piece)
                     })
             }
-            (
-                Self::Titled { under, titles },
-                Self::Titled {
-                    under: u2,
-                    titles: t2,
-                },
-            ) => {
-                let k = self.frames();
-                titles.iter().map(|t| t.after(k)).eq(t2.iter().cloned()) && under.goes_on_as(u2)
-            }
             _ => false,
         }
     }
@@ -1651,7 +1598,6 @@ impl VideoPiece {
                     o.piece.lengthen(more);
                 }
             }
-            Self::Titled { under, .. } => under.lengthen(more),
         }
     }
 }
@@ -1998,7 +1944,7 @@ impl VideoPiece {
                 let last = pieces.iter().map(VideoPiece::frames).sum::<i64>() - 1;
                 (skip + k).min(last).max(0)
             }
-            VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.position(k),
+            VideoPiece::Mix { under, .. } => under.position(k),
         }
     }
 
@@ -2014,7 +1960,7 @@ impl VideoPiece {
             | VideoPiece::Generated { .. }
             | VideoPiece::Adjustment { .. } => 0.0,
             VideoPiece::Flat { .. } => self.position(k) as f64,
-            VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.exact(k),
+            VideoPiece::Mix { under, .. } => under.exact(k),
         }
     }
 }
@@ -2314,11 +2260,7 @@ pub const NESTED: usize = 8;
 type Nesting<'a> = (Option<&'a Nest>, &'a [Placed]);
 
 fn visible(t: &Track, c: &Clip) -> bool {
-    t.video_enabled && c.enabled && c.video && (!c.is_block() || c.draws() || c.adjustment)
-}
-
-fn titled(t: &Track, c: &Clip) -> bool {
-    t.video_enabled && c.enabled && c.title.is_some()
+    t.video_enabled && c.enabled && c.video && (!c.is_block() || c.generates() || c.adjustment)
 }
 
 fn pictures_at<'a>(p: &'a Project, c: &Clip, t: i64, depth: usize) -> Vec<&'a Clip> {
@@ -2339,7 +2281,7 @@ fn pictures_at<'a>(p: &'a Project, c: &Clip, t: i64, depth: usize) -> Vec<&'a Cl
 fn shown_inside(p: &Project, n: &Track, x: &Clip, t: i64, depth: usize) -> bool {
     let holds =
         n.video_enabled && x.enabled && !pictures_at(p, x, x.source_at(t), depth - 1).is_empty();
-    visible(n, x) || titled(n, x) || holds
+    visible(n, x) || holds
 }
 
 fn crosses_inside(p: &Project, c: &Clip, t: i64) -> bool {
@@ -3294,7 +3236,6 @@ fn composed_from(own: &crate::model::Speed, u0: f64, v: f64) -> Vec<Section> {
 enum Layer {
     Picture(VideoPiece, Option<Ramp>),
     Smoothed(VideoPiece, Ramp, Smooth),
-    Title(Box<ShownTitle>),
 }
 
 impl Layer {
@@ -3304,8 +3245,7 @@ impl Layer {
                 let placed = piece.placed();
                 placed.len() > outer.len() && placed.ends_with(outer)
             }
-            Layer::Title(t) => !outer.is_empty() && t.placed.ends_with(outer),
-            _ => false,
+            Layer::Smoothed(..) => false,
         }
     }
 }
@@ -3455,9 +3395,7 @@ fn planned_video(
                 now: window.held.unwrap_or(x),
                 held: window.held.is_some(),
             };
-            let mut pictures = span.pictures()?;
-            pictures.layers.extend(span.titles());
-            drawn.push((lane, pictures));
+            drawn.push((lane, span.pictures()?));
         }
         push_video(&mut video, piece_of(uncovered(drawn), y - x));
     }
@@ -3477,7 +3415,7 @@ fn cuts_of(p: &Project, lanes: &[VideoLane], (a, b): (i64, i64)) -> Vec<i64> {
         for c in t
             .clips
             .iter()
-            .filter(|c| c.end() > from && c.start < to && (visible(t, c) || titled(t, c)))
+            .filter(|c| c.end() > from && c.start < to && visible(t, c))
         {
             cuts.push(c.start.max(from));
             cuts.push(c.end().min(to));
@@ -3527,7 +3465,6 @@ fn piece_of(stack: Vec<Layer>, frames: i64) -> VideoPiece {
                 ramp: Some(ramp),
                 smooth: Some(smooth),
             }),
-            Layer::Title(t) => piece.with_title(*t),
         };
     }
     piece
@@ -3558,6 +3495,30 @@ impl VideoPlan<'_> {
         }
         let (pool, s) = (&self.pool, &self.p.flat_settings());
         let fills = self.fills(c);
+        if let Some(title) = &c.title {
+            let keyed = title.is_keyed() || title.moves();
+            let run = nest.and_then(|n| n.run).filter(|r| r.held).unwrap_or(Run {
+                at: x - c.start,
+                of: c.duration,
+                held: false,
+            });
+            let still = Run {
+                at: 0,
+                of: 0,
+                held: false,
+            };
+            let shown = ShownTitle {
+                title: title.clone(),
+                run: if keyed { run } else { still },
+                source_in: if keyed { c.source_in } else { 0 },
+            };
+            return Ok(VideoPiece::Generated {
+                frames: y - x,
+                picture: Generated::Title(Box::new(shown)),
+                placed: placed_of(c, nest, fills, crossed, x),
+                excluded: false,
+            });
+        }
         let drawn = c.generator.as_ref();
         if let Some(picture) = drawn.and_then(|g| Generated::of(g, c.content_at(x))) {
             return Ok(VideoPiece::Generated {
@@ -3885,50 +3846,6 @@ impl<'a> Span<'a> {
             layers: vec![Layer::Picture(piece, None)],
             ..Drawn::default()
         })
-    }
-
-    fn lettered(&self, c: &Clip, fade: Option<Ramp>, crossed: Vec<Placed>) -> Option<ShownTitle> {
-        let x = self.x;
-        let nest = self.nest_of(c);
-        let run = nest.and_then(|n| n.run).filter(|r| r.held).unwrap_or(Run {
-            at: x - c.start,
-            of: c.duration,
-            held: false,
-        });
-        Some(ShownTitle {
-            clip: c.id.clone(),
-            title: c.title.clone()?,
-            run,
-            source_in: c.source_in,
-            fade,
-            placed: crossed.into_iter().chain(outer_at(nest, x)).collect(),
-        })
-    }
-
-    fn titles(&self) -> Vec<Layer> {
-        let (t, now) = (self.lane.track, self.now);
-        let sides = match self.playing() {
-            Some(d) => sides_at(d, now)
-                .into_iter()
-                .map(|(c, falling)| {
-                    let (fade, crossed) = self.sided(d, falling);
-                    (c, fade, crossed)
-                })
-                .collect(),
-            None => vec![(
-                t.clip_covering(now).map(|ci| &t.clips[ci]),
-                None,
-                Vec::new(),
-            )],
-        };
-        sides
-            .into_iter()
-            .filter_map(|(c, fade, crossed)| {
-                let c = c.filter(|c| titled(t, c))?;
-                self.lettered(c, fade, crossed)
-            })
-            .map(|s| Layer::Title(Box::new(s)))
-            .collect()
     }
 }
 
@@ -5198,7 +5115,6 @@ mod tests {
                         .collect();
                     format!("{} over {}", over.join(", "), one(under))
                 }
-                VideoPiece::Titled { under, .. } => one(under),
             }
         }
         plan.video.iter().map(one).collect()
@@ -5373,7 +5289,7 @@ mod tests {
                 VideoPiece::Generated { frames, .. } => ("generated".into(), *frames),
                 VideoPiece::Adjustment { frames, .. } => ("adjustment".into(), *frames),
                 VideoPiece::Flat { frames, .. } => ("flat".into(), *frames),
-                VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => ("mix".into(), v.frames()),
+                VideoPiece::Mix { .. } => ("mix".into(), v.frames()),
             })
             .collect();
         assert_eq!(kinds, vec![("m1@0".into(), 100), ("black".into(), 100)]);

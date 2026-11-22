@@ -1928,7 +1928,7 @@ impl Screen {
         gpu: &Gpu,
         picture: Option<&Arc<Picture>>,
         titles: &[TitleOver],
-        (placed, kernels, colors): Layers<'_>,
+        (given, kernels, colors): Layers<'_>,
         width: u32,
         height: u32,
     ) -> Drawn {
@@ -1946,7 +1946,7 @@ impl Screen {
                 (Some(None), None) => true,
                 _ => false,
             } && same_titles(&self.drawn_titles, titles)
-                && self.drawn_placed == placed
+                && self.drawn_placed == given
                 && self.drawn_kernels == kernels
                 && self.drawn_colors == colors
                 && self.drawn_output_lut == self.output_lut
@@ -1973,6 +1973,7 @@ impl Screen {
                     .map(|o| (&o.picture, Some(f64::from(o.level()))))
             }))
             .collect();
+        let placed = &within(&layers, given);
         if self.slots.len() < layers.len() {
             self.slots.resize_with(layers.len(), Slot::default);
         }
@@ -2585,7 +2586,7 @@ impl Screen {
         self.slots.truncate(keep);
         self.drawn = Some(picture.cloned());
         self.drawn_titles = titles.to_vec();
-        self.drawn_placed = placed.to_vec();
+        self.drawn_placed = given.to_vec();
         self.drawn_kernels = kernels.to_vec();
         self.drawn_colors = colors;
         self.drawn_output_lut = self.output_lut.clone();
@@ -2626,6 +2627,21 @@ fn looked_up(
     pass.set_bind_group(0, from, &[]);
     pass.set_bind_group(1, &table, &[]);
     pass.draw(0..3, 0..1);
+}
+
+fn within(layers: &[(&Arc<Picture>, Option<f64>)], given: &[Vec<Placed>]) -> Vec<Vec<Placed>> {
+    let n = layers.len().max(given.len());
+    (0..n)
+        .map(|i| {
+            let own = layers.get(i).and_then(|(p, _)| match p.sampling() {
+                Sampling::Within(placed) => Some((**placed).clone()),
+                _ => None,
+            });
+            own.into_iter()
+                .chain(given.get(i).into_iter().flatten().cloned())
+                .collect()
+        })
+        .collect()
 }
 
 fn clip_shot(
@@ -4294,7 +4310,7 @@ fn halvings(
     let origin = match picture.sampling() {
         Sampling::Placed { .. } => return 0,
         Sampling::Colors { origin, .. } => (f64::from(origin.0), f64::from(origin.1)),
-        Sampling::Own | Sampling::Rounded => (0.0, 0.0),
+        Sampling::Own | Sampling::Rounded | Sampling::Within(_) => (0.0, 0.0),
     };
     let (sw, sh) = (f64::from(picture.width()), f64::from(picture.height()));
     let upright = if picture.rotation() % 180 == 90 {
@@ -4587,7 +4603,7 @@ fn params_of(
         adds,
     ];
     let (made, part) = match picture.sampling() {
-        Sampling::Own | Sampling::Rounded => ([0.0; 4], [0.0; 4]),
+        Sampling::Own | Sampling::Rounded | Sampling::Within(_) => ([0.0; 4], [0.0; 4]),
         Sampling::Colors { origin, .. } => (
             [1.0, 0.0, 0.0, 0.0],
             [f64::from(origin.0), f64::from(origin.1), 0.0, 0.0],

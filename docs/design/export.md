@@ -547,11 +547,27 @@ Cancel:
 
 ## Titles
 
-- A title is in the plan as `VideoPiece::Titled`: a picture and the titles over it, in track order ([spec D65](../spec.md#12-decisions-on-gaps-and-contradictions)).
-  - The picture is a source, black, or a `VideoPiece::Mix`.
-  - A clip that fades in or out above a title nests the other way: its `Mix` is over the titled picture.
-  - `VideoPiece::titles` tells how many of the `VideoPiece::layers` each title goes over.
-- `Screen::draw` lays the layers under a title, then the title, then the layers over it, and then the subtitles.
+- A title is a generated picture in the plan: a `VideoPiece::Generated` that holds a `Generated::Title` ([spec D65](../spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Its `ShownTitle` holds the clip, the title and where the piece is in that clip (`Run`). `Run::top` places a scrolling title on each frame.
+  - Its `placed` pictures are those of a generator ([placed pictures](#placed-pictures)). Thus the Transform, Cropping, Dynamic Zoom and Composite of its clip work on the whole picture of the title.
+  - A title never fills the frame. Thus the tracks below it show through its clear parts.
+  - A title takes the path of the other pictures through a dissolve, a wipe, a Push, a Slide and a compound clip.
+- `player::titles::laid` gives the key of the drawing of a title at one frame, and the move of its text (`Move`).
+  - The key holds the title with the values of that frame (`ShownTitle::sampled`), the size and the colors.
+  - The key has no position and no rotation of the text (`steady`). Thus a scroll and keys of the position or rotation of the text keep one drawing.
+  - Keys of the zoom of the text change the key. Thus such a title is drawn again on each frame.
+  - The move holds the whole pixels that the text moves, and its turn about its pivot. `Run::top` gives the move of a scroll.
+- `player::titles::frame` draws the drawing. It is a clear picture the size of its blocks, premultiplied, in 32-bit floats.
+  - Each block of the title goes over the blocks before it, at its place.
+  - In an HDR timeline, it converts the colors as for burned-in subtitles.
+- `player::titles::placed` gives the `Placed` that puts the drawing at its place in the frame, with the move.
+  - The layer of the title holds it (`Sampling::Within`). The screen puts it before the `placed` pictures of the clip.
+  - Thus the GPU moves the text. The Transform, Cropping, Dynamic Zoom and Composite of the clip then work on the moved text.
+  - The `Placed` has no crop. The screen draws the moved text into a picture of the frame size (`Mixes`), and the edge of that picture cuts it after the turn.
+- `laid` gives no move in these cases. Then the drawing holds the place of the text at that frame, cut to the frame. It is drawn again on each frame.
+  - The blocks of the title move by different amounts. An example is a lower third whose two lines have different keys.
+  - The drawing is larger than `LARGEST` pixels on a side.
+- `VideoFrames::title_frame` keeps the last drawings of titles in an `Lru` (`TITLES_KEPT`). Thus a title that does not change is drawn once.
 - `burn::title_blocks` draws each `TitleBlock` of a title with the code of the burn-in (`lay_out`). `burn::title` merges the blocks into one `Sprite`.
   - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Look`, its `bare` field).
     - The rows of the upper line (`Laid`, its `above` field) stand above the point of the lower line.
@@ -566,18 +582,7 @@ Cancel:
   - `Edge` holds its width in pixels of the picture. `burn::title` and `burn::paint` take the timeline height for this, because a width is in pixels of the timeline.
   - A title has spans, each with its own face, size, weight, slant, underline and color.
   - Its kind aligns it, and title safe wraps it. It has one box behind the block, and its anchor places it.
-- Each title in the plan carries its clip, and where the piece is in that clip (`ShownTitle`, its `Run`). `Run::top` places a scrolling title on each frame.
-- `titles_of` gives a title with keyframes the values of its frame (`ShownTitle::sampled`). Thus the viewer and the export get plain values.
-- A title in a dissolve at the edge of its clip fades by the `Ramp` of the dissolve (`fade`), on both sides of the edge. `ShownTitle::alpha` gives its level, with its opacity.
-- A title in a wipe, a Push or a Slide has no level. It draws into the picture of its side, and `fs_motion` shows that side.
-- The player's `Titles` draws a title once for the size of the output, and keeps it while it shows. The shader moves and fades it.
-  - Each new zoom of a title with zoom keyframes draws it again. The viewer scales the last drawing until the new one is ready.
 - Titles draw in each export and in `frame.render`, whatever the subtitle settings are.
-
-Titles in a compound clip:
-
-- `render::flatten_lanes` gives a title the pictures of the compound clips that it plays inside (`ShownTitle::placed`). `place::Mixes` thus makes the title a part of each of them.
-- The shader maps each pixel of the picture of the compound clip back to the drawing with one affine map. The map goes through the scroll, turn and zoom of the title (`place::lettered`).
 
 ## Placed pictures
 
@@ -888,7 +893,7 @@ The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline
 
 - It has the math of the grade of a clip. `Working::graded` makes the same `Work::Grade` for both.
 - `RenderPlan::timeline_grade` holds the grade of the open timeline. A plan of a source, of a generator or of the render cache has none.
-- `Screen::draw` runs it on the whole canvas after the last layer and title (`Screen::set_timeline_grade`, `Blurred::composed`).
+- `Screen::draw` runs it on the whole canvas after the last layer (`Screen::set_timeline_grade`, `Blurred::composed`).
   - The canvas is then `Wide`. Thus the grade gets float colors.
   - A gap and the bars around a smaller picture get the grade. The filter of the tone stage reads them, as in the spec (§8.20).
   - A gap is a black layer of the draw (`VideoFrames::solid_frame`), in the player, the export, `frame.render` and the storyboard. Thus it takes the same route as a picture.

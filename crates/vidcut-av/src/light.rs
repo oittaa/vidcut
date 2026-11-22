@@ -160,8 +160,7 @@ pub fn sampled(piece: &VideoPiece, fps: Rational) -> impl Iterator<Item = f64> +
         | VideoPiece::Generated { .. }
         | VideoPiece::Adjustment { .. }
         | VideoPiece::Flat { .. }
-        | VideoPiece::Mix { .. }
-        | VideoPiece::Titled { .. } => (false, 0),
+        | VideoPiece::Mix { .. } => (false, 0),
     };
     let piece = piece.clone();
     (0..n).filter_map(move |k| match still {

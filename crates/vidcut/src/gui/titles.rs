@@ -6,6 +6,7 @@ use vidcut_core::model::{
     Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine,
     TitlePart,
 };
+use vidcut_core::request::KeyParam;
 
 use super::export::Ask;
 use super::inspector::{KeyClick, key_buttons, mark, next_key};
@@ -107,7 +108,6 @@ pub struct TitleDialog {
     case: TitleCase,
     line: LineFields,
     upper: LineFields,
-    title_opacity: String,
     error: String,
     families: Vec<String>,
     shown: Option<Title>,
@@ -122,6 +122,7 @@ pub struct TitleDialog {
     word_font: String,
     base: Option<Title>,
     picker: Option<Picker>,
+    fade: Option<f64>,
 }
 
 const CASES: [(TitleCase, &str); 5] = [
@@ -154,7 +155,6 @@ impl TitleDialog {
             case: TitleCase::Mixed,
             line: LineFields::default(),
             upper: LineFields::default(),
-            title_opacity: String::new(),
             error: String::new(),
             families: vidcut_av::burn::families(),
             selection: (0, 0),
@@ -169,6 +169,7 @@ impl TitleDialog {
             from: None,
             base: None,
             picker: None,
+            fade: None,
         };
         if let Some(t) = t {
             d.load(t);
@@ -188,7 +189,6 @@ impl TitleDialog {
         self.base = Some(t.clone());
         self.line = LineFields::of(t, self.size);
         self.upper = LineFields::of_upper(t, self.size);
-        self.title_opacity = percent(t.opacity);
         self.loaded = true;
     }
 }
@@ -328,8 +328,6 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         zoom_keys: stored.zoom_keys.clone(),
         rotation: lower.rotation,
         rotation_keys: stored.rotation_keys.clone(),
-        opacity: kept(&d.title_opacity, stored.opacity, "title opacity")?,
-        opacity_keys: stored.opacity_keys.clone(),
         upper: (lines && apart).then_some(upper),
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
@@ -405,9 +403,6 @@ fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Vec<Value> {
     if line_changes(&mut params, t, stored, TitlePart::Lower) && t.upper.is_some() {
         params["line"] = json!(LowerThirdLine::Lower);
     }
-    if t.opacity != stored.opacity {
-        params["opacity"] = json!(t.opaque());
-    }
     let mut out = Vec::new();
     if params.as_object().is_some_and(|o| o.len() > 1) {
         params["at"] = json!(at);
@@ -427,12 +422,23 @@ fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Vec<Value> {
     out
 }
 
+fn commands(d: &TitleDialog, sends: Vec<Value>) -> Vec<Value> {
+    let fade = d.fade.map(|opacity| {
+        let params = json!({ "clips": d.clip, "opacity": opacity, "at": d.at });
+        json!({ "method": "picture.set", "params": params })
+    });
+    let titles = sends
+        .into_iter()
+        .map(|params| json!({ "method": "titles.set", "params": params }));
+    fade.into_iter().chain(titles).collect()
+}
+
 impl Workspace {
     fn title_changes(&self, d: &TitleDialog) -> Option<(String, Vec<Value>, Title)> {
         let c = self.project()?.clip(&d.clip)?;
         let stored = sampled_at(c, c.title.as_ref()?, d.at);
         let t = title_of(d, &stored).ok()?;
-        let sends = changes(&d.clip, &t, &stored, d.at);
+        let sends = commands(d, changes(&d.clip, &t, &stored, d.at));
         (!sends.is_empty()).then(|| (d.clip.clone(), sends, t))
     }
 
@@ -454,11 +460,10 @@ impl Workspace {
             .keys_of(v)
             .iter()
             .map(|k| c.key_time(k.frame).round() as i64);
-        let param = match line {
-            Some(LowerThirdLine::Upper) => format!("upper_{}", v.name()),
-            Some(LowerThirdLine::Lower) => format!("lower_{}", v.name()),
-            None => v.name().to_string(),
+        let Some(text) = KeyParam::of_text(v) else {
+            return;
         };
+        let param = line.map_or(text, |l| text.for_line(l));
         let mut body = json!({ "clips": [c.id], "param": param, "at": at });
         match click {
             KeyClick::Step(dir) => {
@@ -523,10 +528,17 @@ impl Workspace {
             .filter(|d| d.dirty)
             .and_then(|d| self.title_changes(&d))
         {
-            for params in sends {
-                self.send("titles.set", params);
-            }
+            self.send_title(sends);
             self.title_landing(&clip, &t);
+        }
+    }
+
+    fn send_title(&mut self, mut commands: Vec<Value>) {
+        if let [one] = &mut commands[..] {
+            let method = one["method"].as_str().unwrap_or_default().to_string();
+            self.send(&method, one["params"].take());
+        } else {
+            self.send("apply", json!({ "commands": commands }));
         }
     }
 
@@ -585,16 +597,20 @@ impl Workspace {
             None => ui.label(dim("Adding…")),
         };
         if let Some(s) = stored.as_ref() {
-            let current = title_of(&d, s).map(|t| Styled::Titles(TitleLook::of(&t)));
+            let opacity = found.and_then(|(_, c, _)| c.picture.as_ref().map(|p| p.opaque()));
+            let current = title_of(&d, s).map(|t| Styled::Titles(TitleLook::of(&t, opacity)));
             let mut picker = d.picker.take().unwrap_or_else(|| {
                 Picker::new(
                     LookKind::Titles,
                     self.looks.of(LookKind::Titles),
-                    &Styled::Titles(TitleLook::of(s)),
+                    &Styled::Titles(TitleLook::of(s, opacity)),
                 )
             });
             if let Some(Styled::Titles(l)) = self.look_picker(ui, &mut picker, current) {
                 d.load(&l.on(&d.text));
+                if l.opacity.unwrap_or(1.0) != opacity.unwrap_or(1.0) {
+                    d.fade = Some(l.opacity.unwrap_or(1.0));
+                }
                 changed = true;
             }
             d.picker = Some(picker);
@@ -793,9 +809,6 @@ impl Workspace {
             } else {
                 changed |= line_rows(ui, &mut d.line, None);
             }
-            changed |= row(ui, "Title opacity", &mut d.title_opacity, "100%");
-            keys(ui, PictureValue::Opacity, None);
-            ui.end_row();
         });
         ui.label(dim(match d.kind {
             TitleKind::LowerThird => "X and Y: each line's anchor, in pixels from the bottom left.",
@@ -813,13 +826,12 @@ impl Workspace {
         {
             match title_of(&d, s) {
                 Ok(t) => {
-                    let sends = changes(&d.clip, &t, s, d.at);
+                    let sends = commands(&d, changes(&d.clip, &t, s, d.at));
+                    d.fade = None;
                     if sends.is_empty() {
                         d.loaded = false;
                     } else {
-                        for params in sends {
-                            self.send("titles.set", params);
-                        }
+                        self.send_title(sends);
                         self.title_landing(&d.clip, &t);
                     }
                     d.dirty = false;

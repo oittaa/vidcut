@@ -383,12 +383,7 @@ fn extent_of(p: &Project, c: &Clip, at: i64, frame: (f64, f64)) -> Extent {
                 _ => (l.placed(), own("")),
             })
             .collect();
-        let titles: Vec<(usize, &[Placed])> = piece
-            .titles()
-            .into_iter()
-            .map(|(above, t)| (above, t.placed.as_slice()))
-            .collect();
-        let mixes = Mixes::of(&chains, &titles, frame);
+        let mixes = Mixes::of(&chains, &[], frame);
         let outer = mixes.outer.into_iter().find(|o| {
             let (from, to) = o.layers;
             from < to

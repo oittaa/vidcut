@@ -963,10 +963,7 @@ fn export_with(
                         x.written(c.source_at(s), s > c.start, e < c.end())
                     }),
                 );
-                let effects = match &c.title {
-                    Some(t) => titles::with_opacity(t, effects, c.content_at(s)),
-                    None => with_picture(c, &shape_of(p, c, m), effects, g, c.content_at(s)),
-                };
+                let effects = with_picture(c, &shape_of(p, c, m), effects, g, c.content_at(s));
                 let compound = p.clip_compound(c);
                 let mut it = match compound {
                     Some(k) => block(c, k, &label, c.source_at(s), e - s, effects)?,
@@ -1737,7 +1734,6 @@ impl ImportedClip {
 
     pub fn has_picture(&self) -> bool {
         self.video
-            && self.title.is_none()
             && (self.adjustment
                 || self
                     .generator
@@ -2496,20 +2492,15 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 } else if adjustment {
                     c.adjustment = true;
                     c.picture = our_picture(item);
-                    c.speed = None;
                     if c.name == crate::model::Clip::ADJUSTMENT_CLIP {
                         c.name.clear();
                     }
                 } else if plain.is_some() {
                     c.generator = plain;
-                } else if let Some(mut t) =
+                } else if let Some(t) =
                     titles::read(item, reference, titles::UNKNOWN_HEIGHT, c.source_in)
                 {
-                    let (opacity, opacity_keys) = titles::take_opacity(&mut c.effects, c.source_in);
-                    if item["metadata"][VIDCUT].get("title").is_none() {
-                        t.opacity = opacity;
-                        t.opacity_keys = opacity_keys;
-                    }
+                    c.picture = our_picture(item);
                     if c.name == reference["name"].as_str().unwrap_or_default()
                         || c.name == t.label()
                     {
@@ -2523,7 +2514,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 } else {
                     if generators::read(reference, 0).is_some() {
                         c.picture = our_picture(item);
-                        c.speed = None;
                         if c.name == reference["name"].as_str().unwrap_or_default() {
                             c.name.clear();
                         }
@@ -2935,7 +2925,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     if !read_titles.is_empty() {
         warnings.push(format!(
             "titles read without what vidcut's titles lack (tracking, keyframes of the shadow \
-             and the background, the clip's Transform and Cropping): {}",
+             and the background): {}",
             read_titles.join(", ")
         ));
     }
