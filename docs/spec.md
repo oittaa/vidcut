@@ -2528,7 +2528,12 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - A clip inside overwrites what is under it. A gap inside leaves the timeline as it is.
   - A compound clip inside stays a compound clip. Only one level comes apart.
   - The destination controls show one control for each track inside (p. 1055).
+    - Measured with a compound clip that holds clips on V1 and V2. The clip on V1 has sound.
+    - The controls V1, V2 and A1 show at the timeline tracks of the same number. With the option off, only V1 and A1 show.
+    - A drag of the V2 control to Video 3 puts the clip of inner V2 on V3.
+    - A drop of the V2 control on the track of V1 swaps the two controls.
     - With the control of inner V1 off, V1 of the timeline stays as it is. The sound of the clip on inner V1 still goes on A1.
+    - With the control of A1 off, the pictures go in. A1 of the timeline stays as it is.
   - **vidcut:**
     - `preferences.set` with `editing.decompose_on_edit` turns it on. The Edit menu has Edit Options > Decompose Compound Clips On Edit.
     - The edits of [§7.2](#72-edit-functions) and a drag from the Media tab do this.
