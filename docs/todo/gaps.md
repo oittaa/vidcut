@@ -11,8 +11,6 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - CEA-608 and EAS708 captions, and MXF files (pp. 1247–1248)
 - Export and import of a subtitle preset as a `.preset` file (pp. 1239–1240)
 - KeyKode in the timecode menu of the viewer (pp. 713–714)
-- Subtitle tracks inside a compound clip ([§8.18](../spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
-- Timeline grade on the Color page while a compound clip is open ([§8.18](../spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
 - The Solo icon of a track header, between Lock and Mute ([§5](../spec.md#5-dual-timeline-pp-66-643646-689692-716718))
 - The Histogram and the other scopes (pp. 3093, 3097)
 - The Y, CbCr and RGB overlays of the Waveform (p. 3097), and RGB, YRGB and YCbCr in the Parade (p. 3102)
