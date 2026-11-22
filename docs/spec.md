@@ -6393,7 +6393,7 @@ In vidcut:
 - The Project Settings window has the rows Input LUT, Output LUT, Video Monitor LUT, Color Viewer LUT and Scopes LUT, each one dropdown. It also has `Update Lists` and `Open LUT Folder`.
   - The lists of the Color Viewer LUT and the Scopes LUT have `Use video monitoring selection` after `No LUT selected`.
   - The default of the Color Viewer LUT is `Use video monitoring selection`. The default of the Scopes LUT is `No LUT selected`.
-  - `Update Lists` also reads the LUT files of the viewer, the scopes and the thumbnails again. Thus a file that changed in place shows its new look.
+  - `Update Lists` also reads the LUT files of the viewers, the scopes and the thumbnails again. Thus a file that changed in place shows its new look.
 - A LUT that is set but not in the list shows by its file name, with its check mark.
 - `media.set` and `project.set` take the path of any `.cube` file. Thus a script can give a file outside the LUT folders.
 

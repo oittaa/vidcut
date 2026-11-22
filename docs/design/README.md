@@ -194,10 +194,12 @@ The [spec](../spec.md#the-lut-tables) gives the math of a table. vidcut reads a 
   - `Screen::set_display_lut` adds one pass after the output LUT. `fs_lut` draws `Wide` into a second canvas, and that canvas goes to the screen.
   - `Screen::set_scopes_lut` adds one more pass into a third canvas, and the scopes read it. With the same table as the display LUT, the scopes read the second canvas.
   - The node shots read `Wide`. Thus they show the data with no display LUT.
-  - An export, the render cache, a proxy and `frame.render` get neither LUT.
+  - An export, the render cache, a proxy and `frame.render` get neither LUT. `frame.scope` gets the scopes LUT (`gui::frame::scope`).
   - A file that cannot be read gives a message, and the picture goes on with no LUT.
 - Update Lists counts a check of the files (`Workspace::update_luts`). The viewer thread then reads the stamps again, and a changed file gives a new table.
   - `Tiles::check_luts` drops the tiles whose LUT has a new stamp. `luts.list` makes the live core check its small pictures of the pool too (`check_media`).
+  - `luts.list` also makes the live core load the plans of the timeline and of the source viewer again.
+  - The live player keeps the stamps of the LUT files of each plan (`RenderPlan::lut_files`). It loads an equal plan again only when a stamp changed.
   - Why: a file that changes in place gets no other check. vidcut does not read the stamps on each frame.
 - After an AI upscaler, the draw of an enlarged picture takes the alpha of its source frame. Thus an input LUT in that draw also follows the Alpha Mode ([export](export.md#which-source-frame)).
 - A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.

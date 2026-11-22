@@ -1730,6 +1730,23 @@ impl RenderPlan {
                 })
     }
 
+    pub fn lut_files(&self) -> Vec<&Path> {
+        let mut files: Vec<&Path> = self
+            .video
+            .iter()
+            .flat_map(VideoPiece::with_flat_pieces)
+            .flat_map(VideoPiece::layers)
+            .filter_map(|(p, _)| match p {
+                VideoPiece::Source { input_lut, .. } => input_lut.as_deref(),
+                _ => None,
+            })
+            .chain(self.output_lut.as_deref())
+            .collect();
+        files.sort();
+        files.dedup();
+        files
+    }
+
     pub fn samples(&self) -> i64 {
         self.fps.frame_to_sample(self.frames, self.sample_rate)
     }

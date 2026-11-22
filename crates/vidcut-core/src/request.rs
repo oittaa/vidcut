@@ -3752,7 +3752,8 @@ pub enum Request {
         viewer: bool,
     },
     /// Render one scope of the viewer picture as PNG: the timeline at `at`,
-    /// drawn as the viewer draws it, with no window. The answer gives the
+    /// drawn as the viewer draws it, with no window. The scope reads the
+    /// picture through the Scopes LUT of the project. The answer gives the
     /// timeline color space and the marks of the scale.
     #[serde(rename = "frame.scope")]
     FrameScope {

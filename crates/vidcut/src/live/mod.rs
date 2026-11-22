@@ -2441,6 +2441,8 @@ impl Live {
     fn finish(&mut self, job: Job, result: Result<Response>) {
         if job.method == "luts.list" {
             self.check_media();
+            self.schedule_timeline();
+            self.refresh_source();
         }
         let result = result.map(|mut r| {
             r.via = format!("gui:{}", std::process::id());

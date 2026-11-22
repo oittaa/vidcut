@@ -533,7 +533,7 @@ The bar and the Jobs button:
   - Each row is one dropdown of the LUT list (`luts::combo`). No LUT selected sends an empty path.
   - The Color Viewer LUT and Scopes LUT rows have one more entry after No LUT selected: Use video monitoring selection (`luts::monitor_combo`).
   - That entry sends `color_viewer_follows` or `scopes_follow`. The others send `color_viewer_lut` or `scopes_lut`.
-  - Update Lists sends `luts.list` again, and checks the LUT files of the tiles and the viewer (`Workspace::update_luts`, [LUT files](README.md#lut-files)).
+  - Update Lists sends `luts.list` again, and checks the LUT files of the tiles, the viewers and the players (`Workspace::update_luts`, [LUT files](README.md#lut-files)).
   - Open LUT Folder makes the LUT folder of vidcut when it is missing, and opens it (`Workspace::open_lut_folder`).
 - The LUT Locations row of the General page of the Preferences window sends `preferences.set` with the whole list of `luts.folders`. Add… adds a folder, and Remove removes the selected one.
 
