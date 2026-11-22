@@ -2473,7 +2473,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - It opens the same window.
   - It cuts the clips at In and at the frame after Out, on all tracks. The Out frame is inside.
   - Thus In 24 and Out 120 give 97 frames, from 24 up to 121.
-  - A subtitle cue across In is cut there too. Both parts stay on their subtitle track (measured in Resolve Studio 21.2).
+  - A subtitle cue across In or across the frame after Out is cut there too. Both parts stay on their subtitle track (measured in Resolve Studio 21.2).
   - The compound clip goes on the lowest video track and the lowest audio track with clips in the range, linked.
   - The lowest track with clips in the range is inner V1 or A1. A track below it does not go inside.
   - The clips of the other tracks go inside. Those tracks stay on the timeline, empty.
