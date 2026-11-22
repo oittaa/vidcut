@@ -129,6 +129,7 @@ pub struct Workspace {
     pub(super) help: super::help::HelpUi,
     pub(super) history: super::history::HistoryUi,
     pub(super) project_ui: super::project::ProjectUi,
+    pub(super) luts: super::luts::Luts,
     pub(super) timelines_ui: super::timelines::TimelinesUi,
     pub(super) import: super::import::ImportUi,
     pub(super) relink: super::relink::RelinkUi,
@@ -238,6 +239,7 @@ impl Workspace {
             help: Default::default(),
             history: super::history::HistoryUi::default(),
             project_ui: Default::default(),
+            luts: Default::default(),
             timelines_ui: Default::default(),
             import: Default::default(),
             relink: Default::default(),
@@ -2156,6 +2158,7 @@ impl Workspace {
         self.keys_window(&ctx);
         self.help_window(&ctx);
         self.history_frame(&ctx);
+        self.luts_frame(&ctx);
         self.project_windows(&ctx);
         self.timeline_windows(&ctx);
         self.import_window(&ctx);

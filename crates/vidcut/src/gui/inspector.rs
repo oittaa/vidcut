@@ -1,5 +1,4 @@
 use std::ops::RangeInclusive;
-use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
@@ -26,7 +25,6 @@ use vidcut_core::time::TimeSpec;
 use vidcut_core::validate::{GAIN, PAN};
 
 use super::dialog;
-use super::export::Picked;
 use super::isolation::{Isolate, heard};
 use super::placing::{changed, ease_label, mode_label, target};
 use super::theme;
@@ -2320,7 +2318,6 @@ pub struct Inspector {
     commit: bool,
     recolored: Option<Recolored>,
     tinted: Option<Tinted>,
-    lut_pick: Option<(Vec<String>, Picked)>,
     naming: Option<Naming>,
     subject: Subject,
     find_values: [String; 7],
@@ -4860,39 +4857,6 @@ impl Workspace {
         }
     }
 
-    pub(super) fn lut_folder(&self, now: Option<&Path>) -> PathBuf {
-        now.and_then(Path::parent)
-            .map(Path::to_path_buf)
-            .or_else(|| self.project_folder())
-            .unwrap_or_default()
-    }
-
-    pub(super) fn input_lut_picked(&mut self) {
-        let Some((media, picked)) = self.inspector.lut_pick.take() else {
-            return;
-        };
-        match picked.take() {
-            None => self.inspector.lut_pick = Some((media, picked)),
-            Some(None) => {}
-            Some(Some(path)) => {
-                self.send("media.set", json!({ "media": media, "input_lut": path }));
-            }
-        }
-    }
-
-    pub(super) fn ask_input_lut(
-        &mut self,
-        ctx: &egui::Context,
-        media: Vec<String>,
-        now: Option<&Path>,
-    ) {
-        let (dialogs, folder) = (self.dialogs.clone(), self.lut_folder(now));
-        let picked = Picked::ask(ctx, move || {
-            dialogs.pick_file("Input LUT", &folder, &["cube"])
-        });
-        self.inspector.lut_pick = Some((media, picked));
-    }
-
     fn input_lut_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
         let mut media: Vec<String> = chosen
             .iter()
@@ -4909,32 +4873,25 @@ impl Workspace {
         let any = media
             .iter()
             .any(|id| p.media(id).is_some_and(|m| m.input_lut.is_some()));
-        let mut choose = false;
+        let mut pick = None;
         let header = |ui: &mut egui::Ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_enabled(any, egui::Button::new("Reset")).clicked()
             })
             .inner
         };
+        let list = &self.luts.list;
         let cleared = group(ui, "LUT", header, |ui| {
             label(ui, "Input LUT", any);
-            ui.horizontal(|ui| {
-                choose = ui.button("Choose…").clicked();
-                let name = now
-                    .and_then(Path::file_name)
-                    .map_or("None".into(), |n| n.to_string_lossy().into_owned());
-                let shown = ui.add(egui::Label::new(name).truncate());
-                if let Some(path) = now {
-                    shown.on_hover_text(path.display().to_string());
-                }
-            });
+            pick = super::luts::combo(ui, "inspector-input-lut", list, now, 170.0).1;
             ui.end_row();
         });
         if cleared {
-            self.send("media.set", json!({ "media": media, "input_lut": "" }));
+            pick = Some(None);
         }
-        if choose {
-            self.ask_input_lut(ui.ctx(), media, now);
+        if let Some(path) = pick {
+            let path = path.unwrap_or_default();
+            self.send("media.set", json!({ "media": media, "input_lut": path }));
         }
     }
 
@@ -5566,7 +5523,6 @@ impl Workspace {
         i.commit = (focus.is_none() || i.moved) && !ui.input(|i| i.pointer.any_down());
         i.moved &= !i.commit;
         self.follow_selection();
-        self.input_lut_picked();
         let chosen = self.chosen();
         let sounds = self.sounds();
         if sounds.iter().all(|s| s.gain == s.stored) {

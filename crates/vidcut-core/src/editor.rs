@@ -8437,6 +8437,9 @@ fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     if let Some(mode) = set.render_cache {
         p.settings.render_cache = mode;
     }
+    if let Some(path) = &set.input_lut {
+        p.settings.input_lut = checked_lut(env, path)?;
+    }
     if let Some(path) = &set.output_lut {
         p.settings.output_lut = checked_lut(env, path)?;
     }
@@ -9436,6 +9439,7 @@ pub fn query(
         | Request::LooksList { .. }
         | Request::LooksSave { .. }
         | Request::LooksDelete { .. }
+        | Request::LutsList {}
         | Request::EncodersList { .. }
         | Request::DecodersList {}
         | Request::ViewerGuides { .. }

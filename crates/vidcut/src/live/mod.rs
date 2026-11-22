@@ -2438,6 +2438,7 @@ impl Live {
                     | "presets.list"
                     | "presets.get"
                     | "looks.list"
+                    | "luts.list"
                     | "encoders.list"
                     | "jobs.list"
                     | "preferences.get"

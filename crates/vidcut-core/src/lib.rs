@@ -23,6 +23,7 @@ pub mod keyframes;
 pub mod leveler;
 pub mod looks;
 pub mod lru;
+pub mod luts;
 pub mod model;
 pub mod motion;
 pub mod multicam;

@@ -113,7 +113,7 @@ When a GUI has the project open (`vidcut -p FILE` starts one), the commands for 
 - Routing: [design/requests.md](design/requests.md#routing). The side of the GUI: [design/live.md](design/live.md).
 - Without `-p`, a command goes to the only GUI with a project open. When there are several, select one.
 - `vidcut instances` lists the running GUIs: pid, project, socket.
-- The requests that need no project run in the CLI process: `schema`, `doctor`, `reset`, `probe`, `project create`, presets, looks, encoders, decoders, preferences and keys.
+- The requests that need no project run in the CLI process: `schema`, `doctor`, `reset`, `probe`, `project create`, presets, looks, LUTs, encoders, decoders, preferences and keys.
 - Without a GUI, these requests fail with `NO_INSTANCE`:
   - The live-only requests: `player`, `viewer`, `selection`, `pool`, `mixer preview`, `gui`, `jobs`, `cache status`, `cache delete` and `project open`.
   - `export start --background`.
@@ -195,6 +195,9 @@ The schema describes the parameters, not the results. This list gives the result
   - `refused[]`: `kind`, `name`, `path`, `why` (the look files that were left out).
 - `looks save`: `look` and `path` (the file written).
 - `looks delete`: `deleted`, `kind` and `path`.
+- `luts list`:
+  - `folder`: the LUT folder of vidcut. `folders`: `luts.folders` of the preferences.
+  - `luts[]`: `name`, `menu` (the subfolders, the outer one first) and `path`, in the order of the menus.
 - `titles list`: for each title, `clip`, `track`, `start`, `end` (frames), `start_tc`, `end_tc`, `enabled` and `title`.
 - `generators list`: for each generator, `clip`, `track`, `start`, `end` (frames), `start_tc`, `end_tc`, `enabled` and `generator`.
   - `generator` has `kind` (a kind of `generators add`, or `carried`) and `name`.

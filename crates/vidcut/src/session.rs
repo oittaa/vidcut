@@ -214,6 +214,10 @@ pub fn run_with(
         })?),
         Request::PresetsDelete { name } => answer(export::delete_preset(name, envelope.dry_run)?),
         Request::LooksList { kind } => answer(list_looks(*kind)),
+        Request::LutsList {} => {
+            let folders = crate::preferences::load()?.luts.folders;
+            answer(json!(vidcut_core::luts::LutList::read(&folders)))
+        }
         Request::LooksSave {
             name,
             subtitles,

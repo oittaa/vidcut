@@ -370,6 +370,11 @@ pub struct Settings {
     /// What the render cache makes for the viewer; left out when `off`.
     #[serde(default, skip_serializing_if = "RenderCache::is_off")]
     pub render_cache: RenderCache,
+    /// The `.cube` file that the pictures of each clip go through just after
+    /// their conversion into the timeline color space, when its media has no
+    /// input LUT of its own. Left out when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_lut: Option<PathBuf>,
     /// The `.cube` file that the whole timeline goes through after its
     /// subtitles, before each output's colors. Left out when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -397,6 +402,7 @@ impl Default for Settings {
             retime: ProjectRetime::Auto,
             upscaler: ProjectUpscaler::Auto,
             render_cache: RenderCache::Off,
+            input_lut: None,
             output_lut: None,
             dynamics_profile: DynamicsProfile::default(),
         }
@@ -684,7 +690,8 @@ pub struct Media {
     pub color_space: ColorSpace,
     /// The `.cube` file that its pictures go through just after their
     /// conversion into the timeline color space. Each of its clips on the
-    /// timeline gets it. Left out when there is none.
+    /// timeline gets it in place of the project's input LUT. Left out when
+    /// there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_lut: Option<PathBuf>,
     /// How the alpha channel of its pictures is read. Left out while it is

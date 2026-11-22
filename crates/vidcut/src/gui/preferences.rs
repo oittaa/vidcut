@@ -38,6 +38,8 @@ pub(super) struct PreferencesUi {
         Option<std::sync::mpsc::Receiver<Result<Vec<vidcut_av::player::OutputDevice>, String>>>,
     importing: Option<Picked>,
     choosing_folder: Option<(Folder, Picked)>,
+    adding_lut_folder: Option<Picked>,
+    lut_folder: Option<PathBuf>,
     confirm_reset: bool,
     reset_saved: bool,
     reset_keep: bool,
@@ -536,6 +538,14 @@ impl Workspace {
                 patch = Some(which.patch(&path));
             }
         }
+        if let Some(picked) = ui_state.adding_lut_folder.as_ref().and_then(Picked::take) {
+            ui_state.adding_lut_folder = None;
+            let mut folders = lut_folders(ui_state.state.as_ref().unwrap_or(&Value::Null));
+            if let Some(path) = picked.filter(|p| !folders.contains(p)) {
+                folders.push(path);
+                patch = Some(json!({ "luts": { "folders": folders } }));
+            }
+        }
         if let Some(listed) = ui_state.listing.as_ref().and_then(|r| r.try_recv().ok()) {
             ui_state.audio_outputs = Some(listed);
             ui_state.listing = None;
@@ -675,7 +685,7 @@ impl Workspace {
             );
             ui.checkbox(
                 &mut ui_state.reset_saved,
-                "Also delete my presets, themes and looks",
+                "Also delete my presets, themes, looks and LUTs",
             );
             ui.checkbox(
                 &mut ui_state.reset_keep,
@@ -800,6 +810,7 @@ fn general(
                 *patch = Some(json!({ "appearance": { "theme": pick } }));
             }
             ui.end_row();
+            lut_folders_row(ui, state, busy, ui_state, dialogs, patch);
             let path = state["path"].as_str().unwrap_or_default();
             label(ui, "Preferences File");
             ui.horizontal(|ui| {
@@ -837,6 +848,55 @@ fn general(
                 ),
             );
         }
+    });
+}
+
+fn lut_folders(state: &Value) -> Vec<PathBuf> {
+    serde_json::from_value(state["preferences"]["luts"]["folders"].clone()).unwrap_or_default()
+}
+
+fn lut_folders_row(
+    ui: &mut egui::Ui,
+    state: &Value,
+    busy: bool,
+    ui_state: &mut PreferencesUi,
+    dialogs: &std::sync::Arc<dyn super::export::Dialogs>,
+    patch: &mut Option<Value>,
+) {
+    let folders = lut_folders(state);
+    dialog::tall_row(ui, "LUT Locations", |ui| {
+        for folder in &folders {
+            let on = ui_state.lut_folder.as_ref() == Some(folder);
+            let text = folder.display().to_string();
+            if ui
+                .add(egui::Button::selectable(on, text).truncate())
+                .clicked()
+            {
+                ui_state.lut_folder = (!on).then(|| folder.clone());
+            }
+        }
+        ui.horizontal(|ui| {
+            let add = !busy && ui_state.adding_lut_folder.is_none();
+            if ui.add_enabled(add, egui::Button::new("Add…")).clicked() {
+                let dialogs = dialogs.clone();
+                ui_state.adding_lut_folder = Some(Picked::ask(ui.ctx(), move || {
+                    dialogs.pick_folder("Add a LUT Folder", &PathBuf::new())
+                }));
+            }
+            let chosen = ui_state.lut_folder.clone().filter(|f| folders.contains(f));
+            let remove = !busy && chosen.is_some();
+            if ui
+                .add_enabled(remove, egui::Button::new("Remove"))
+                .clicked()
+            {
+                let rest: Vec<&PathBuf> = folders
+                    .iter()
+                    .filter(|f| Some(*f) != chosen.as_ref())
+                    .collect();
+                *patch = Some(json!({ "luts": { "folders": rest } }));
+                ui_state.lut_folder = None;
+            }
+        });
     });
 }
 

@@ -2,7 +2,7 @@
 
 **When:** not decided.
 
-vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../design/README.md#picture-order)). It has no display LUT.
+vidcut has an input LUT of a media item and of the project, and an output LUT, from a `.cube` file ([design](../design/README.md#lut-files)). It has no display LUT.
 
 **Why:**
 
@@ -18,14 +18,19 @@ vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../desi
 - The display LUT, as the viewer's own branch.
 - AI Slow in an HDR timeline, with a Retime Process, gives `T(C)` on a Premultiplied media item with an input LUT.
   - Why: the LUT runs on the enlarged frames, and they have no alpha ([upscale.md](upscale.md)).
-- The Input Lookup Table of the project (manual p. 152). vidcut has an input LUT on a media item only.
-  - The measured facts are in [spec §13](../spec.md#the-lut-tables).
 - The source viewer shows the input LUT of the media item, as the viewer of the Media page does.
 - Measure in Resolve. No script reaches these, so each needs the window of Resolve:
   - The thumbnails of the Media Pool: do they show the input LUT of a clip, and the Input LUT of the project?
   - The Input LUT of the project in the viewer of the Media page.
   - A LUT on the node of a Text+ title. Generators and Text titles take no grade ([spec §8.20](../spec.md#820-primaries-palette-pp-118-31413159)).
   - A gap through the Output LUT of the project, in a render with alpha. vidcut keeps the gap clear.
+  - The `…` button of each row of the Lookup Tables in the Project Settings. vidcut has no such button ([spec §13](../spec.md#the-lut-tables)).
+  - The LUTs of a folder added in LUT Locations: at the top of the submenu, or in a submenu of their own. vidcut puts them at the top.
+  - Whether an added or removed LUT file shows without `Update Lists`.
+  - The check marks of the `LUT` submenu when a clip has no LUT.
+  - The order of all entries of a long folder. Only some pairs are measured.
+- The Lookup Tables rows of the Timeline Settings, with the warning that they show.
+- LUTs that come with vidcut. Resolve installs LUTs, for example in its ACES and Arri folders. The LUT folder of vidcut starts empty.
 
 **Later:**
 
