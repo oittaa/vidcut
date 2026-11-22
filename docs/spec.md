@@ -2509,6 +2509,8 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - The edits of [§7.2](#72-edit-functions) take `compound`. Without `range`, they use its marks, converted to the timeline's frame rate.
     - The sound goes on the audio track with the number of the picture's track.
     - `media.marks.set` and `media.marks.clear` take `compound`.
+    - The marks stay when the compound clip closes.
+    - With an In past the end of the compound clip, an edit refuses and tells why.
     - Source Overwrite lines up a compound clip by its own start timecode ([§7.2](#72-edit-functions)).
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).

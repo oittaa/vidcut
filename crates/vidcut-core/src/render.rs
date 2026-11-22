@@ -4356,12 +4356,12 @@ pub fn generator_tape(p: &Project, generator: &Generator, a: i64, b: i64) -> Res
 }
 
 pub fn compound_tape(p: &Project, id: &str) -> Result<RenderPlan> {
-    let k = p
-        .pooled_compound(id)
-        .ok_or_else(|| Error::not_found(format!("no compound clip {id}")))?;
-    let (frames, name) = (k.frames, k.name.clone());
     let mut alone = p.clone();
     crate::ops::compound::open_pooled(&mut alone, id)?;
+    let k = alone
+        .pooled_compound(id)
+        .ok_or_else(|| Error::not_found(format!("no compound clip {id}")))?;
+    let (frames, name) = (crate::ops::compound::length(&alone, k), k.name.clone());
     let mut plan = flatten(&alone, 0, frames)?;
     plan.timeline_grade = None;
     plan.name = name;
