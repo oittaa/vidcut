@@ -186,7 +186,10 @@ pub fn describe_at(
             id => format!("Open Compound Clip {id}"),
         },
         "compound.close" => "Close Compound Clip".to_string(),
-        "compound.set" => "Set Compound Clip Starting Timecode".to_string(),
+        "compound.set" => match d.params["name"].as_str() {
+            Some(name) => format!("Rename Compound Clip to {name}"),
+            None => "Set Compound Clip Starting Timecode".to_string(),
+        },
         "edit.slide" => format!(
             "Slide {} {}{}",
             d.clips("clip"),
@@ -873,9 +876,7 @@ impl Words<'_> {
             Some(c) => match (&c.name, &c.title) {
                 (Some(n), _) if !n.is_empty() => n.clone(),
                 (_, Some(t)) => quoted(&t.label()),
-                _ => p
-                    .media(&c.media)
-                    .map_or_else(|| id.to_string(), |m| m.name.clone()),
+                _ => p.clip_name(c).unwrap_or_else(|| id.to_string()),
             },
             None => p.cue(id).map_or_else(
                 || id.to_string(),

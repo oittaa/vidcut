@@ -622,7 +622,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "compound.set",
         "vidcut compound set --start-tc 01:00:00:00\n  \
-         vidcut compound set --compound k1 --start-tc 01:02:03:04",
+         vidcut compound set --compound k1 --start-tc 01:02:03:04\n  \
+         vidcut compound set --compound k1 --name Interview",
     ),
     (
         "storyboard.render",

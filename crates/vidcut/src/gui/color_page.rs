@@ -1492,7 +1492,7 @@ impl Workspace {
                 let id = self.color_clip()?;
                 let c = p.clip(&id)?;
                 let stored = c.picture.as_ref().and_then(|pic| pic.grade.clone());
-                let name = c.name.clone().unwrap_or_else(|| id.clone());
+                let name = p.clip_name(c).unwrap_or_else(|| id.clone());
                 let usual = || Grade::usual(p.frame_size());
                 Some((GradeOf::Clip(id), name, stored.unwrap_or_else(usual)))
             }

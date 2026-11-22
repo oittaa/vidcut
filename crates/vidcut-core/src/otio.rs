@@ -885,10 +885,8 @@ fn export_with(
             if m.is_none() && !c.is_block() {
                 return Err(Error::internal(format!("no media {}", c.media)));
             }
-            let label = c
-                .name
-                .clone()
-                .or_else(|| m.map(|m| m.name.clone()))
+            let label = p
+                .clip_name(c)
                 .or_else(|| c.title.as_ref().map(|t| titles::name(t).to_string()))
                 .or_else(|| {
                     c.generator
