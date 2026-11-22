@@ -547,6 +547,9 @@ fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
             (GradeTool::Corrector(_), _) => {
                 return Err(Error::invalid(format!("node {n} is a corrector")));
             }
+            (GradeTool::KeyMixer { .. }, _) => {
+                return Err(Error::invalid(format!("node {n} is a key mixer")));
+            }
             (GradeTool::LayerMixer { .. }, GradeMixer::LayerMixer) => d.tool.clone(),
             (_, GradeMixer::LayerMixer) => GradeTool::LayerMixer {
                 mode: Default::default(),
@@ -582,11 +585,11 @@ pub fn clear(
         edited(p, one, |g| match (n, keep_nodes) {
             (Some(n), _) => cleared(g, n, frame, (palette, size)),
             (None, true) => {
-                let correctors: Vec<u32> = (g.nodes.iter().zip(1..))
-                    .filter(|(d, _)| !d.tool.is_mixer() && !d.locked)
+                let graded: Vec<u32> = (g.nodes.iter().zip(1..))
+                    .filter(|(d, _)| (!d.tool.is_mixer() || d.takes_keys()) && !d.locked)
                     .map(|(_, k)| k)
                     .collect();
-                for k in correctors {
+                for k in graded {
                     cleared(g, k, frame, (None, size))?;
                 }
                 Ok(())

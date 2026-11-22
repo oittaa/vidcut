@@ -2186,6 +2186,14 @@ impl Workspace {
                 g.is_some_and(|g| correctors(g).next().is_some())
             }
             NodesItem::Key(Action::AppendNode) => g.is_some(),
+            NodesItem::Key(
+                Action::AddSerialNode
+                | Action::AddNodeBefore
+                | Action::AddCircleNode
+                | Action::AddLinearNode
+                | Action::AddPolygonNode
+                | Action::AddCurveNode,
+            ) => current.is_some_and(|d| !d.takes_keys()),
             NodesItem::Key(Action::AddParallelNode | Action::AddLayerNode) => corrector.is_some(),
             NodesItem::Act(NodeAct::Add(_)) => corrector.is_some(),
             NodesItem::Key(Action::SwitchAllNodes) => g.is_some_and(|g| !g.nodes.is_empty()),
@@ -2449,10 +2457,12 @@ impl Workspace {
         };
         self.settle_grade(&of, &g);
         let node = self.current_grade_node(&g);
-        let mixer = node
-            .and_then(|n| g.node(n))
-            .is_some_and(|d| d.tool.is_mixer());
+        let d = node.and_then(|n| g.node(n));
+        let mixer = d.is_some_and(|d| d.tool.is_mixer());
         if mixer && !matches!(add, GradeAdd::Serial | GradeAdd::Before | GradeAdd::Append) {
+            return;
+        }
+        if d.is_some_and(GradeNode::takes_keys) && add != GradeAdd::Append {
             return;
         }
         let mut more = match (add, node) {
