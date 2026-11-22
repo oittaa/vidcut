@@ -89,7 +89,7 @@ pub struct Workspace {
     pub(super) new_subclip: Option<super::subclip::NewSubclip>,
     pub(super) new_compound: Option<super::compound::NewCompound>,
     pub(super) compound_tc: Option<super::compound::CompoundStartTc>,
-    pub(super) compound_click: Option<(String, f64)>,
+    pub(super) compound_click: Option<super::compound::CompoundClick>,
     pub(super) compound_rename: Option<super::compound::CompoundRename>,
     pub(super) edit_subclip: Option<super::subclip::EditSubclip>,
     pub(super) hover: Option<(String, i64)>,

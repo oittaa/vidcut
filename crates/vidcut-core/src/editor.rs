@@ -10199,7 +10199,7 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         "id": c.id,
         "track": track,
         "media": c.media,
-        "name": c.name.clone().or_else(|| media.map(|m| m.name.clone())),
+        "name": p.clip_name(c),
         "start": c.start,
         "end": c.end(),
         "duration": c.duration,

@@ -735,6 +735,24 @@ impl Workspace {
                 false => k.name.to_lowercase().contains(&needle),
             })
             .collect();
+        let frame = ui.ctx().cumulative_frame_nr();
+        if self
+            .compound_click
+            .as_ref()
+            .is_some_and(|c| c.frame + 1 < frame || !shown.iter().any(|k| k.id == c.id))
+        {
+            self.compound_click = None;
+        }
+        if let Some(c) = &mut self.compound_click {
+            c.frame = frame;
+        }
+        if self
+            .compound_rename
+            .as_ref()
+            .is_some_and(|e| !shown.iter().any(|k| k.id == e.id))
+        {
+            self.compound_rename = None;
+        }
         if shown.is_empty() {
             return false;
         }
@@ -742,6 +760,7 @@ impl Workspace {
             Some(CompoundTarget::Pooled { compound }) => Some(compound.as_str()),
             _ => None,
         };
+        let mut on_name = false;
         ui.horizontal_wrapped(|ui| {
             for k in shown {
                 if self.compound_rename.as_ref().is_some_and(|e| e.id == k.id) {
@@ -755,14 +774,17 @@ impl Workspace {
                     .selectable_label(on, format!("{}  {length}", k.name))
                     .interact(Sense::click_and_drag());
                 if r.clicked() {
-                    self.compound_name_clicked(ui, k);
+                    on_name = true;
+                    self.compound_name_clicked(ui, k, frame);
                 }
                 if r.double_clicked() {
+                    self.compound_click = None;
                     self.send("compound.open", json!({ "compound": k.id }));
                 }
                 if r.drag_started()
                     && let Some(press) = r.ctx.input(|i| i.pointer.press_origin())
                 {
+                    self.compound_click = None;
                     self.start_compound_drag(&k.id, &k.name, frames, press);
                 }
                 r.context_menu(|ui| {
@@ -797,17 +819,20 @@ impl Workspace {
                 });
             }
         });
+        if !on_name && ui.input(|i| i.pointer.primary_clicked()) {
+            self.compound_click = None;
+        }
         ui.separator();
         true
     }
 
-    fn compound_name_clicked(&mut self, ui: &egui::Ui, k: &Compound) {
+    fn compound_name_clicked(&mut self, ui: &egui::Ui, k: &Compound, frame: u64) {
         let now = ui.input(|i| i.time);
         let quick = ui.ctx().options(|o| o.input_options.max_double_click_delay);
         let again = self
             .compound_click
             .as_ref()
-            .is_some_and(|(id, at)| *id == k.id && now - at > quick);
+            .is_some_and(|c| c.id == k.id && now - c.at > quick);
         if again {
             self.compound_click = None;
             self.compound_rename = Some(super::compound::CompoundRename {
@@ -816,7 +841,11 @@ impl Workspace {
                 focus: true,
             });
         } else {
-            self.compound_click = Some((k.id.clone(), now));
+            self.compound_click = Some(super::compound::CompoundClick {
+                id: k.id.clone(),
+                at: now,
+                frame,
+            });
         }
     }
 
@@ -828,9 +857,14 @@ impl Workspace {
         if edit.focus {
             field.request_focus();
             edit.focus = false;
+            self.compound_rename = Some(edit);
+            return;
+        }
+        if field.has_focus() {
+            self.compound_rename = Some(edit);
+            return;
         }
         if !field.lost_focus() {
-            self.compound_rename = Some(edit);
             return;
         }
         let name = edit.text.trim();
