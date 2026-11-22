@@ -995,19 +995,21 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
     };
     let adds: &[(GradeAdd, &str)] = match &d.tool {
         GradeTool::Corrector(_) => &ADD_MENU,
-        GradeTool::KeyMixer { .. } => &[],
         _ => &MIXER_ADD_MENU,
     };
-    if !adds.is_empty() {
-        ui.menu_button("Add Node", |ui| {
-            for &(add, text) in adds {
-                let action = ADDS.iter().find(|(_, a)| *a == add);
-                let shown = action.map(|(a, _)| key(*a)).unwrap_or_default();
-                let button = egui::Button::new(text).shortcut_text(shown);
-                pick(ui, true, button, NodeAct::Add(add));
-            }
-        });
+    let keyed = d.takes_keys();
+    if keyed {
+        let reset = egui::Button::new("Reset Node Grade");
+        pick(ui, true, reset, NodeAct::Reset);
     }
+    ui.menu_button("Add Node", |ui| {
+        for &(add, text) in adds {
+            let action = ADDS.iter().find(|(_, a)| *a == add && !keyed);
+            let shown = action.map(|(a, _)| key(*a)).unwrap_or_default();
+            let button = egui::Button::new(text).shortcut_text(shown);
+            pick(ui, true, button, NodeAct::Add(add));
+        }
+    });
     let delete = || egui::Button::new("Delete Node").shortcut_text(key(Action::DeleteNode));
     let (morph, to) = match &d.tool {
         GradeTool::Corrector(_) => {
@@ -1033,8 +1035,6 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
             return;
         }
         GradeTool::KeyMixer { .. } => {
-            let reset = egui::Button::new("Reset Node Grade");
-            pick(ui, true, reset, NodeAct::Reset);
             let lock = egui::Button::selectable(d.locked, "Lock Node");
             pick(ui, true, lock, NodeAct::Lock);
             pick(ui, true, delete(), NodeAct::Delete);
@@ -2495,6 +2495,16 @@ impl Workspace {
         if d.is_some_and(GradeNode::takes_keys) && add != GradeAdd::Append {
             return;
         }
+        self.grade_add_sent(&of, &g, (add, node), window);
+    }
+
+    fn grade_add_sent(
+        &mut self,
+        of: &GradeOf,
+        g: &Grade,
+        (add, node): (GradeAdd, Option<u32>),
+        window: Option<WindowKind>,
+    ) {
         let mut more = match (add, node) {
             (GradeAdd::Append, _) => json!({ "add": add }),
             (_, Some(n)) => json!({ "add": add, "node": n }),
@@ -2504,7 +2514,7 @@ impl Workspace {
             more["window"] = json!(w);
         }
         self.select_coming(g.last() + 1);
-        self.send("grade.add", params(&of, "clip", more));
+        self.send("grade.add", params(of, "clip", more));
     }
 
     fn grade_dropped(&mut self, of: &GradeOf, dropped: Dropped<Port>) {
@@ -2550,8 +2560,7 @@ impl Workspace {
         };
         match act {
             NodeAct::Add(add) => {
-                self.effects_page.pick_grade(vec![n], false);
-                self.add_grade_node(add, None);
+                self.grade_add_sent(of, g, (add, Some(n)), None);
                 return;
             }
             NodeAct::Delete => {

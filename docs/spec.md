@@ -3285,8 +3285,9 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
   - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
-  - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node, Add One Input and Remove One Input. The Add Node submenu comes later ([todo](todo/color-page.md)).
-  - vidcut: Alt+S and Shift+S do nothing on a Key Mixer.
+  - vidcut: the menu of a Key Mixer and its Add Node submenu are as measured.
+  - vidcut: Alt+S and Shift+S do nothing on a Key Mixer. Thus its Add Node submenu shows no shortcuts.
+  - Not measured: the shortcuts in the Add Node submenu of a Key Mixer.
   - vidcut: a link from a key output is blue. A node can drop only into a link from an RGB output to an RGB input.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
   - Measured in Resolve Studio 21.2: a link from a key output to an RGB input gives the key as a gray picture. R, G and B are the key.
@@ -3323,6 +3324,10 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - The key of the mixer goes to the RGB input of the corrector. The RGB output of the corrector goes to the key input of that node.
   - Measured: Add Serial Before on a Key Mixer puts a corrector on input 0 of the mixer.
     - The key of the node on that input goes to the RGB input of the corrector. The RGB output of the corrector goes to the mixer.
+  - vidcut: the same. `grade.add` with `serial` or `before` on a Key Mixer adds the corrector.
+  - Not measured: Add Serial on a Key Mixer whose key goes to two or more nodes, to no node or to an RGB input.
+    - vidcut moves each link from the key of the mixer to the RGB output of the corrector.
+  - Not measured: Add Serial Before on a Key Mixer with no link on input 0. vidcut gives the corrector no input link.
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.

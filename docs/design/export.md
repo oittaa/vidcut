@@ -767,6 +767,8 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
   - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
   - A removed or extracted node loses the links from its key output, and the links from its RGB output to key inputs (`unkeyed`). The other links that took its picture move (`retake`).
+  - A serial node after a key mixer takes the key of the mixer. Each link that took that key then takes the picture of the new node (`retake`).
+  - Why: a key mixer has only a key output. The links between key and RGB ports carry the key through the new corrector.
 - `Placing::new` adds the grade after the effects of the clip, as the last `place::Working` (`Work::Grade`).
   - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
   - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
