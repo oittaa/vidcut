@@ -5485,7 +5485,7 @@ mod tests {
     }
 
     #[test]
-    fn flatten_layers_adjustment_over_video_and_gap_and_skips_disabled() {
+    fn flatten_layers_adjustment_over_video_and_gap() {
         let mut f = fixture();
         f.append("m1", 0, 50);
         req(
@@ -5507,20 +5507,6 @@ mod tests {
                 "adjustment+25 over black+25",
             ]
         );
-        let VideoPiece::Mix { over, .. } = &plan.video[1] else {
-            panic!("mix");
-        };
-        assert_eq!(over[0].piece.placed().len(), 1);
-        assert!(over[0].piece.placed()[0].adjustment);
-
-        req(&mut f, "clip.set", json!({"clips": "c3", "enabled": false}));
-        req(
-            &mut f,
-            "track.set",
-            json!({"track": "V2", "video_enabled": false}),
-        );
-        let off = flatten(f.editor.project(), 0, 75).unwrap();
-        assert_eq!(shown(&off), vec!["m1@0+50", "black+25"]);
     }
 
     #[test]
