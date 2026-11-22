@@ -43,12 +43,16 @@ pub struct Editing {
     /// frames of the project (`120f`), from a frame to 17 h 40 min. Stills
     /// already in the pool keep their length. Default `5s`.
     pub still_duration: TimeSpec,
+    /// An edit of a compound clip puts the clips inside it on the timeline,
+    /// in place of the compound clip. Default off.
+    pub decompose_on_edit: bool,
 }
 
 impl Default for Editing {
     fn default() -> Self {
         Self {
             still_duration: TimeSpec::Seconds(5.0),
+            decompose_on_edit: false,
         }
     }
 }
@@ -125,6 +129,9 @@ pub struct EditingPatch {
     /// Seconds (`5s`) or frames (`120f`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub still_duration: Option<TimeSpec>,
+    /// On or off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decompose_on_edit: Option<bool>,
 }
 
 /// How this computer makes the render cache of the project that is open
@@ -1177,6 +1184,9 @@ impl Preferences {
             .and_then(|e| e.still_duration.as_ref())
         {
             p.editing.still_duration = d.clone();
+        }
+        if let Some(on) = patch.editing.as_ref().and_then(|e| e.decompose_on_edit) {
+            p.editing.decompose_on_edit = on;
         }
         if let Some(x) = &patch.color {
             let c = &mut p.color;

@@ -55,6 +55,7 @@ pub struct Source {
     pub track: Option<String>,
     pub generator: Option<Generator>,
     pub compound: Option<String>,
+    pub decompose: bool,
 }
 
 #[derive(
@@ -490,7 +491,7 @@ pub fn append_block(p: &mut Project, srcs: &[Source], lead: i64) -> Result<Vec<S
     let start = p.tracks[ti].end() + lead.max(0);
     let ids = place_block(p, ti, clips, start);
     fix_audio(p, ti);
-    compound::with_sound(p, ids, &srcs[0])
+    compound::landed(p, ids, &srcs[0])
 }
 
 pub fn nearest_edit(p: &Project, playhead: i64) -> i64 {
@@ -552,7 +553,7 @@ pub fn insert_at_block(
         clear_range(p, ti, at + lead, at + lead + len);
         let ids = place_block(p, ti, clips, at + lead);
         fix_audio(p, ti);
-        return compound::with_sound(p, ids, &srcs[0]);
+        return compound::landed(p, ids, &srcs[0]);
     }
     linked::split_main(p, at, &[]);
     let before = Before::of(p);
@@ -573,7 +574,7 @@ pub fn insert_at_block(
             ..Edit::default()
         },
     );
-    compound::with_sound(p, ids, &srcs[0])
+    compound::landed(p, ids, &srcs[0])
 }
 
 fn marked_start(p: &Project, srcs: &[Source], at: i64, lead: Option<i64>) -> (i64, Vec<Source>) {
@@ -656,7 +657,7 @@ pub fn overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<
     clear_range(p, ti, start, start + block_len(&clips));
     let ids = place_block(p, ti, clips, start);
     fix_audio(p, ti);
-    compound::with_sound(p, ids, &srcs[0])
+    compound::landed(p, ids, &srcs[0])
 }
 
 pub fn ripple_overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
@@ -688,7 +689,7 @@ pub fn ripple_overwrite_block(
         clear_range(p, ti, a, b.max(a + lead + len));
         let ids = place_block(p, ti, clips, a + lead);
         fix_audio(p, ti);
-        return compound::with_sound(p, ids, &srcs[0]);
+        return compound::landed(p, ids, &srcs[0]);
     }
     let end = p.tracks[ti].end();
     let (a, b) = if p.settings.ripple_on && a > end {
@@ -712,7 +713,7 @@ pub fn ripple_overwrite_block(
             ..Edit::default()
         },
     );
-    compound::with_sound(p, ids, &srcs[0])
+    compound::landed(p, ids, &srcs[0])
 }
 
 fn busy(t: &Track, start: i64, end: i64) -> bool {
@@ -770,7 +771,7 @@ pub fn place_on_top_block(
     let ids = place_block(p, ti, clips, start);
     fix_audio(p, ti);
     let track = p.tracks[ti].id.clone();
-    Ok((compound::with_sound(p, ids, &srcs[0])?, track))
+    Ok((compound::landed(p, ids, &srcs[0])?, track))
 }
 
 pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<String>> {

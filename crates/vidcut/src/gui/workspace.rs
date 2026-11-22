@@ -1118,6 +1118,16 @@ impl Workspace {
                 ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
                     ui.menu_button("History", |ui| self.history_menu(ui));
                 });
+                ui.menu_button("Edit Options", |ui| {
+                    let mut on = self.snap.decompose_on_edit;
+                    if ui
+                        .checkbox(&mut on, "Decompose Compound Clips On Edit")
+                        .clicked()
+                    {
+                        let editing = json!({ "decompose_on_edit": on });
+                        self.send("preferences.set", json!({ "editing": editing }));
+                    }
+                });
             });
             ui.menu_button("Timeline", |ui| {
                 if ui.button("Keyframes").clicked() {

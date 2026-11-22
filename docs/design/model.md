@@ -841,11 +841,15 @@ Import:
     - `marked` gives the part between its marks, and `host_span` converts that part to the timeline's frames.
     - `ops::make_clip` makes the picture block. `with_sound` adds the sound block on the audio track of the same number, after the edit.
     - Why: then each edit, its ripple and its track rules come from one implementation for files and compound clips.
+    - Each edit ends with `compound::landed`. It calls `with_sound`, and with `Source::decompose` it calls `unnest` with `Lay::OnEdit`.
+      - `Source::decompose` comes from the preference `editing.decompose_on_edit`, through `Env::decompose_on_edit`.
+      - Then the edit puts the clips inside, not the compound clip. The empty audio tracks that `with_sound` made go away.
     - `set_marks` writes the marks to the open sheet when the compound clip is open, else to `Compound::marks`.
   - `edit.copy` and `edit.cut` include transitive compound definitions (`copied_compounds`). `edit.paste` restores missing definitions as removed (`restore_copied`).
   - `ops::conform::clip` keeps conformed compound clips within their compound's frame limit (`fit_compound`).
   - `ops::compound::unnest` conforms `Compound::tracks` when needed and restores all tracks for tied blocks, or only one part when alone.
   - `ops::compound::target` gives the track of each inner track, for a compound clip made here and for an imported one.
+    - `Lay::InPlace` adds a track where a clip is in the way. `Lay::OnEdit` writes over the clips, as an edit does.
   - `ops::compound::open_clip` and `ops::compound::open_pooled` check out a compound's inner tracks and `Compound::markers` into the editor sheet, refusing an already open sequence id.
     - Inner clips, transitions and markers get unique ids against active sheets and other compounds. An audio-only compound gets an empty V1 track while open.
   - `ops::compound::close` and `ops::compound::close_all` normalize tracks and check edits back into `Project::compounds`. Every placement reads that definition with no copy propagation.

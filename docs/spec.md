@@ -2510,6 +2510,25 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - The sound goes on the audio track with the number of the picture's track.
     - `media.marks.set` and `media.marks.clear` take `compound`.
     - Source Overwrite lines up a compound clip by its own start timecode ([§7.2](#72-edit-functions)).
+- **Decompose Compound Clips On Edit** (pp. 1053–1054; measured in Resolve Studio 21.2):
+  - It is in Edit > Edit Options. It is off by default.
+  - It is a preference of the user, not a setting of the project.
+  - With it on, an edit of a compound clip puts the clips inside it on the timeline.
+    - Append, Insert, Smart Insert, Overwrite, Ripple Overwrite, Replace, Place on Top and Source Overwrite do this.
+    - A drag from the Media Pool does this too.
+    - Fit to Fill puts the compound clip itself, with a speed change.
+    - The manual says that Place on Top puts the compound clip itself. Resolve Studio 21.2 puts the clips inside.
+  - The clips go where the compound clip would go.
+    - The marks of the compound clip cut each clip inside.
+    - Inner track n goes on the track of the compound clip plus n − 1, for picture and for sound. A missing track is made.
+    - A clip inside overwrites what is under it. A gap inside leaves the timeline as it is.
+  - A compound clip inside stays a compound clip. Only one level comes apart.
+  - The destination controls show one control for each track inside (p. 1054).
+  - **vidcut:**
+    - `preferences.set` with `editing.decompose_on_edit` turns it on. The Edit menu has Edit Options > Decompose Compound Clips On Edit.
+    - The edits of [§7.2](#72-edit-functions) and a drag from the Media tab do this.
+    - Insert and Smart Insert move other tracks by the rules of D23.
+    - The tracks inside go on the track that the edit picks, and on the tracks above it.
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
   - Double-click the parent name in the bottom-left path bar to close the compound clip (p. 1054).

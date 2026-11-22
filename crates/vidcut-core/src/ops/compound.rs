@@ -312,6 +312,31 @@ pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Res
     Ok(out)
 }
 
+pub(crate) fn landed(p: &mut Project, ids: Vec<String>, src: &Source) -> Result<Vec<String>> {
+    let audio = p.tracks_of(TrackKind::Audio).len();
+    let ids = with_sound(p, ids, src)?;
+    if !src.decompose {
+        return Ok(ids);
+    }
+    let mut made = Vec::new();
+    for id in &ids {
+        if p.clip(id).is_some_and(|c| c.compound.is_some()) {
+            made.extend(unnest(p, id, Lay::OnEdit, &mut Vec::new())?.1);
+        }
+    }
+    while p.tracks_of(TrackKind::Audio).len() > audio
+        && (p.tracks.last()).is_some_and(|t| t.kind == TrackKind::Audio && t.clips.is_empty())
+    {
+        p.tracks.pop();
+    }
+    if made.is_empty() {
+        return Err(Error::invalid(
+            "the marked part of the compound clip holds no clips",
+        ));
+    }
+    Ok(made)
+}
+
 pub fn pooled_id(p: &Project, query: &str) -> Result<String> {
     p.pool_compounds()
         .find(|x| x.id == query)
@@ -533,13 +558,20 @@ pub fn leads(p: &Project, ids: &[String]) -> Vec<String> {
     kept
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Lay {
+    InPlace,
+    OnEdit,
+}
+
 pub(crate) fn target(
     p: &mut Project,
     kind: TrackKind,
     base: &str,
     n: usize,
     span: (i64, i64),
-) -> usize {
+    lay: Lay,
+) -> Result<usize> {
     let at = p
         .tracks_of(kind)
         .iter()
@@ -551,13 +583,23 @@ pub(crate) fn target(
     } else {
         extent
     };
-    if !free(&p.tracks[ti], span, range) {
-        tracks::insert_at(p, kind, ti);
+    match lay {
+        Lay::OnEdit => unlocked(p, ti)?,
+        Lay::InPlace if !free(&p.tracks[ti], span, range) => {
+            tracks::insert_at(p, kind, ti);
+        }
+        Lay::InPlace => {}
     }
-    ti
+    Ok(ti)
 }
 
-fn put_back(p: &mut Project, ti: usize, inner: &Track, block: &Clip, made: &mut Vec<String>) {
+fn put_back(
+    p: &mut Project,
+    (ti, lay): (usize, Lay),
+    inner: &Track,
+    block: &Clip,
+    made: &mut Vec<String>,
+) {
     let mut renamed = HashMap::new();
     let cut = crate::render::stretches(block, TrackKind::Audio);
     let parts = if cut.is_empty() {
@@ -579,6 +621,9 @@ fn put_back(p: &mut Project, ti: usize, inner: &Track, block: &Clip, made: &mut 
             y.id = id;
         }
         made.push(y.id.clone());
+        if lay == Lay::OnEdit {
+            clear_range(p, ti, y.start, y.end());
+        }
         p.tracks[ti].clips.push(y);
     }
     p.tracks[ti].sort();
@@ -635,6 +680,7 @@ fn fit_sound(p: &mut Project, ti: usize, made: &[String]) {
 pub(crate) fn unnest(
     p: &mut Project,
     id: &str,
+    lay: Lay,
     warnings: &mut Vec<String>,
 ) -> Result<(Clip, Vec<String>)> {
     let parts: Vec<String> = std::iter::once(id.to_string())
@@ -671,8 +717,8 @@ pub(crate) fn unnest(
         let Some((base, _)) = hosts.iter().find(|(_, c)| c.video == video) else {
             continue;
         };
-        let ti = target(p, inner.kind, base, number(inner) - 1, span);
-        put_back(p, ti, inner, &block, &mut made);
+        let ti = target(p, inner.kind, base, number(inner) - 1, span, lay)?;
+        put_back(p, (ti, lay), inner, &block, &mut made);
         fit_sound(p, ti, &made);
         fix_audio(p, ti);
     }

@@ -392,7 +392,7 @@ pub fn source_overwrite(
         ids.extend(place_block(p, ti, vec![clip], place(*range)));
     }
     fix_audio(p, ti);
-    let mut ids = compound::with_sound(p, ids, src)?;
+    let mut ids = compound::landed(p, ids, src)?;
     Ok(Placed {
         clip: ids.swap_remove(0),
         track: p.tracks[ti].id.clone(),
