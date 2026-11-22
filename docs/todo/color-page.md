@@ -43,7 +43,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - Links from a key output to an RGB input, and from an RGB output to a key input (p. 3420).
 - The Qualifier controls of the Key palette (p. 3436).
 - Measure in Resolve, then match:
-  - Command-D when the current node is not selected ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
   - The keys of the nodes ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)):
     - A key link from a node that is off into a Key Mixer.
     - A Key Mixer with one linked input after a delete.
