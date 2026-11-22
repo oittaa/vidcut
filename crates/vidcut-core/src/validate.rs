@@ -182,9 +182,6 @@ pub fn violations(p: &Project) -> Vec<String> {
                     if c.speed.is_some() {
                         v.push(format!("{}: an adjustment clip has a speed", c.id));
                     }
-                    if !c.motion.is_empty() {
-                        v.push(format!("{}: an adjustment clip has a motion", c.id));
-                    }
                 }
                 if let Some(Generator::FourColorGradient(g)) = &c.generator
                     && let Some(why) = g.problem()
@@ -706,20 +703,6 @@ mod tests {
             violations(&p)
                 .iter()
                 .any(|e| e.contains("block with media, audio or no place"))
-        );
-
-        let mut p = f.editor.project().clone();
-        p.tracks[v2].clips[0].motion.push(crate::model::MotionPath {
-            id: "mp1".into(),
-            name: None,
-            subject: Some(crate::model::Subject::Face),
-            tracked: false,
-            samples: Vec::new().into(),
-        });
-        assert!(
-            violations(&p)
-                .iter()
-                .any(|e| e.contains("adjustment clip has a motion"))
         );
 
         let mut p = f.editor.project().clone();
