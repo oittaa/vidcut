@@ -371,6 +371,8 @@ fn joins(comp: &Composition) -> Vec<Wire<String>> {
                     to: n.name.clone(),
                     slot: slot(which),
                     from,
+                    out: 0,
+                    drops: true,
                 });
             }
         }
@@ -399,7 +401,8 @@ fn tile(n: &Node) -> Tile<String> {
             name: "Effect Mask".into(),
         });
     }
-    let outlet = (!matches!(n.tool, Tool::MediaOut)).then(|| Outlet {
+    let outlets = (!matches!(n.tool, Tool::MediaOut)).then(|| Outlet {
+        slot: 0,
         name: "Output".into(),
         color: Color32::WHITE,
     });
@@ -413,7 +416,7 @@ fn tile(n: &Node) -> Tile<String> {
         note: String::new(),
         badges: Vec::new(),
         locked: None,
-        outlet,
+        outlets: outlets.into_iter().collect(),
         inlets,
         edge: None,
         shot: None,
@@ -441,15 +444,15 @@ fn join_command(clip: &str, (dst, which): (&str, NodeInput), src: Option<&str>) 
 
 fn linked(comp: &Composition, clip: &str, l: &Link<String>) -> Vec<Value> {
     let new = match (&l.anchor, &l.spot) {
-        (End::Output(src), Spot::Knot(End::Input(dst, s))) => {
+        (End::Output(src, _), Spot::Knot(End::Input(dst, s))) => {
             Some((dst.clone(), which(*s), src.clone()))
         }
-        (End::Output(src), Spot::Tile(dst)) => comp
+        (End::Output(src, _), Spot::Tile(dst)) => comp
             .node(src)
             .zip(comp.node(dst))
             .and_then(|(s, d)| default_input(d, s))
             .map(|w| (dst.clone(), w, src.clone())),
-        (End::Input(dst, s), Spot::Knot(End::Output(src)) | Spot::Tile(src)) => {
+        (End::Input(dst, s), Spot::Knot(End::Output(src, _)) | Spot::Tile(src)) => {
             Some((dst.clone(), which(*s), src.clone()))
         }
         _ => None,

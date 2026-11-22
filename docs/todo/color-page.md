@@ -18,7 +18,8 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 **In the code:**
 
 - `crates/vidcut/src/gui/color_page.rs` draws the Primaries wheels, the Primaries bars and the Log wheels of the current node. It sends `grade.set`, `grade.clear` and `grade.printer` with `node`.
-- Its Key palette has the Key Output of the current node (`KeyOutput`).
+- Its Key palette has the Key Input and the Key Output of the current node (`KeyInput`, `KeyOutput`). A key mixer has its own Key palette.
+- The key ports, the key links, the Key Mixer and the Outside node are in the Node Editor.
 - Its Window palette has the windows of the current node (`grade_windows.rs`). It sends the `grade.window` requests.
 - With the Window palette open, the viewer shows the outlines and the handles of the windows (`window_overlay.rs`).
 - It also draws the Node Editor of the grade, at the right of the viewer. `crates/vidcut/src/gui/node_editor.rs` is the editor of the Color page and of the Effects page.
@@ -38,18 +39,16 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
   - Window keyframes.
   - The magenta softness points of a curve (p. 3273). Each point then has its own inside and outside softness.
   - Shift and a drag box select points of a curve, to move, delete or scale them together (p. 3274).
-- Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3395). They need windows.
+- Add Serial Node + CPW, LPW, PPW and PCW (p. 3395).
 - Switch to Node Layer in the Nodes submenu, with the Node Stack Layers (pp. 3400–3401). Add Splitter Combiner Node (Option-Y, p. 3441).
-- The key input and output of each node, and the Key Mixer. Measured in Resolve Studio 21.2 with float renders:
-  - smax(a, b) = max(a, b) + 0.5 max(0, 0.5 − |a − b|)². L(x) = (8x − 1) / 7. U(a, b) = L(smax(a, b)). Q(x) = U(0, x).
-  - Key Mixer input i with key kᵢ: xᵢ = gᵢ kᵢ + oᵢ (Gain and Offset of the input). Invert gives 1 − xᵢ.
-  - The Mask inputs go first, in input order: acc = U(acc, xᵢ), from acc = 0. Then each Matte input: acc = 1 − U(1 − acc, 1 − xᵢ).
-  - The output is og acc + oo. Output Invert gives 1 − (og acc + oo). There is no clamp between the steps.
-  - A key on a link is clamped to 0..1 first.
-  - A corrector key input with no window gives clamp(Q(x)), with x = ig k + io. With a window w in the node, a = Q(w): Matte gives clamp(1 − U(1 − a, 1 − x)), Mask gives clamp(U(a, x)).
-  - Key Output Gain kg and Key Output Offset ko of a node act last on its key E: clamp(kg E + ko).
-  - The errors are below 8.2e-7. The record is in `fixtures/color/NOTES.md` of the test data.
+- Links from a key output to an RGB input, and from an RGB output to a key input (p. 3420).
+- The Qualifier controls of the Key palette (p. 3436).
 - Remove One Input in the menu of a mixer.
 - Measure in Resolve, then match:
   - Remove One Input: which empty input goes when there are several, and whether it takes the empty input of two. Measured: it removes an empty input, also one in the middle, and does nothing when each input is linked.
   - The menu of a Parallel Mixer.
+  - The keys of the nodes ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)):
+    - A key link from a node that is off into a Key Mixer.
+    - A Key Mixer with one linked input after a delete.
+    - Add Serial and Add Serial Before in the menu of a Key Mixer.
+- Keyframes of the Key Input, on the Defocus track, and of a Key Mixer, on its Color Corrector track ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
