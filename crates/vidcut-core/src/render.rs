@@ -782,8 +782,11 @@ impl Placed {
         Some(z.at(self.run.map_or(0.0, |r| r.share())))
     }
 
-    pub fn unplaced(&self) -> Self {
-        Self {
+    pub fn for_effects(&self) -> std::borrow::Cow<'_, Self> {
+        if !self.adjustment {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        std::borrow::Cow::Owned(Self {
             clip: self.clip.clone(),
             picture: Picture {
                 effects: self.picture.effects.clone(),
@@ -800,7 +803,7 @@ impl Placed {
             moving: None,
             clock: self.clock.clone(),
             adjustment: self.adjustment,
-        }
+        })
     }
 }
 

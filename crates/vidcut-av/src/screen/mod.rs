@@ -2036,7 +2036,8 @@ impl Screen {
                     let chain = placed.get(i).expect("adjustment layer has placement");
                     let mut placing = Placing::whole(chain, frame);
                     placing.effects.clear();
-                    let effects = Placing::whole(&[chain[0].unplaced()], frame).effects;
+                    let worked = chain[0].for_effects();
+                    let effects = Placing::whole(std::slice::from_ref(&*worked), frame).effects;
                     let factor = level.unwrap_or(1.0) * placing.level.opacity;
                     placing.level.opacity = 1.0;
                     let mode = placing.mode.code();

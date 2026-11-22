@@ -2476,8 +2476,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let (mut effects, speed) = effects::read(item);
             let reference = media_reference_of(item);
             let adjustment = generators::is_adjustment(item, reference);
-            let block =
-                stack || plain.is_some() || schema(reference).starts_with("GeneratorReference");
+            let block = stack
+                || adjustment
+                || plain.is_some()
+                || schema(reference).starts_with("GeneratorReference");
             let mut speed = speed_of(speed, item, fps, !block || stack, &mut notes);
             if stack {
                 our_skip(&mut speed, item);

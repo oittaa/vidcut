@@ -901,13 +901,9 @@ impl Workspace {
                 };
                 let fit = content(&p, &c.media, (w, h));
                 let pixels = pixels_of(&p, &c.media, (w, h));
-                let placed = [Placed::at(
-                    c,
-                    c.picture.clone().unwrap_or_default(),
-                    run,
-                    at,
-                )];
-                let level = Placing::new(&placed, (w, h), fit, pixels).level;
+                let placed = Placed::at(c, c.picture.clone().unwrap_or_default(), run, at);
+                let worked = placed.for_effects();
+                let level = Placing::new(std::slice::from_ref(&*worked), (w, h), fit, pixels).level;
                 window_back(&level.back, fit, (w, h))
             }
         };

@@ -134,7 +134,8 @@ A clip skips each step that it does not use. The steps run in this order:
   - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, `fs_vignette`, `fs_sharpen`, [export](export.md#effects)).
   - The grade of a clip works on that picture after its effects (`fs_grade`, [export](export.md#the-grade)).
   - An adjustment clip (`VideoPiece::Adjustment`, `Blurred::adjust`) copies the composited canvas below, runs its composition, placement, effects and grade in order, and mixes back over the canvas.
-    - Its placement moves the canvas. Its effects and grade then work on a picture that fills the frame with no placement (`Placed::unplaced`). Why: the picture that they get is the moved canvas, not the clip.
+    - Its placement moves the canvas. Its effects and grade then work on a picture that fills the frame with no placement (`Placed::for_effects`). Why: the picture that they get is the moved canvas, not the clip.
+    - The outline of a grade window in the viewer uses `Placed::for_effects` too. Thus it is where the window grades.
 - The timeline grade works on the whole canvas after the last layer and title (`fs_grade`, [export](export.md#the-grade)).
 - The burned subtitles then go on the canvas (`fs_title`, [export](export.md#subtitles)).
 - `fs_lut` runs the output LUT of the project on the whole canvas, after the titles and subtitles.
