@@ -6787,6 +6787,15 @@ impl Compound {
         self.drop_frame && self.fps.has_drop_frame()
     }
 
+    pub fn timecode_at(&self, fps: Rational) -> f64 {
+        StartTimecode {
+            count: self.start_tc,
+            rate: self.fps,
+            drop_frame: self.drop_frame,
+        }
+        .frames_at(fps)
+    }
+
     pub fn sheet(&self) -> Sheet<'_> {
         Sheet {
             tracks: &self.tracks,

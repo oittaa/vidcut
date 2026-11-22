@@ -1085,7 +1085,9 @@ pub enum Request {
     /// over the source marks. With neither, the whole file goes in, by the
     /// clip at `at`. Clears the timeline marks. Returns the clip, its track,
     /// the `reference` clip and the `playhead` after the edit. It refuses
-    /// when the file has no timecode in common with the timeline.
+    /// when the file has no timecode in common with the timeline. A compound
+    /// clip counts by its own start timecode, as the source and on the
+    /// timeline.
     #[serde(rename = "edit.source_overwrite")]
     EditSourceOverwrite {
         #[serde(flatten)]

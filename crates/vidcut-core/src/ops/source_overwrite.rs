@@ -1,10 +1,10 @@
 use std::ops::Range;
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Media, Project, SyncGroup, TrackKind, uncovered};
+use crate::model::{Clip, Compound, Media, Project, SyncGroup, TrackKind, uncovered};
 
 use super::titles::default_length;
-use super::{Source, fix_audio, make_clip, place_block, track_above, tracks, unlocked};
+use super::{Source, compound, fix_audio, make_clip, place_block, track_above, tracks, unlocked};
 
 pub struct Placed {
     pub clip: String,
@@ -36,19 +36,47 @@ impl Lining<'_> {
             None => Some(origin(self.p, m)),
         }
     }
+
+    fn timed(&self, c: &Clip) -> Option<Timed<'_>> {
+        match self.p.clip_compound(c) {
+            Some(k) => self.group.is_none().then_some(Timed::Compound(k)),
+            None => (self.p.media(&c.media))
+                .filter(|m| !m.is_still())
+                .map(Timed::Media),
+        }
+    }
+
+    fn start(&self, c: &Clip) -> Option<f64> {
+        match self.timed(c)? {
+            Timed::Media(m) => self.origin(m),
+            Timed::Compound(k) => Some(k.timecode_at(self.p.fps())),
+        }
+    }
+
+    fn placed(&self, c: &Clip) -> Option<f64> {
+        match self.timed(c)? {
+            Timed::Media(m) => place(*self, m),
+            Timed::Compound(k) => Some(k.timecode_at(self.p.settings.fps)),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Timed<'a> {
+    Media(&'a Media),
+    Compound(&'a Compound),
 }
 
 fn shown(l: Lining<'_>, c: &Clip) -> Option<Range<i64>> {
-    let m = l.p.media(&c.media).filter(|m| !m.is_still())?;
+    let o = l.start(c)?.floor() as i64;
     let (a, b) = (c.source_at(c.start), c.source_at(c.end() - 1));
-    let o = l.origin(m)?.floor() as i64;
     Some(o + a.min(b)..o + a.max(b) + 1)
 }
 
 fn exact_start(l: Lining<'_>, c: &Clip) -> Option<f64> {
-    let m = l.p.media(&c.media).filter(|m| !m.is_still())?;
+    let o = l.start(c)?;
     let a = c.source_at(c.start).min(c.source_at(c.end() - 1));
-    Some(l.origin(m)? + a as f64 + c.phase)
+    Some(o + a as f64 + c.phase)
 }
 
 fn meets(l: Lining<'_>, c: &Clip, file: &Range<i64>) -> bool {
@@ -77,11 +105,10 @@ struct Grid {
 impl Grid {
     fn of(l: Lining<'_>, reference: &Clip) -> Self {
         let step = l.p.settings.fps.over(l.p.fps()).as_f64();
-        let media = l.p.media(&reference.media).filter(|m| !m.is_still());
         let first = (reference.source_at(reference.start))
             .min(reference.source_at(reference.end() - 1)) as f64
             + reference.phase;
-        let start = (media.and_then(|m| place(l, m))).map_or(0.0, |x| x + first * step);
+        let start = l.placed(reference).map_or(0.0, |x| x + first * step);
         Self {
             zero: start - reference.start as f64 * step,
             step,
@@ -224,28 +251,39 @@ pub fn source_overwrite(
     playhead: Option<i64>,
     by_group: bool,
 ) -> Result<Placed> {
-    let m = match src.generator {
-        Some(_) => None,
-        None => Some(
+    let k = match &src.compound {
+        Some(id) => Some(
+            p.pooled_compound(id)
+                .ok_or_else(|| Error::not_found(format!("no compound clip {id}")))?,
+        ),
+        None => None,
+    };
+    let m = match (&src.generator, k) {
+        (None, None) => Some(
             p.media(&src.media)
                 .ok_or_else(|| Error::not_found(format!("no media {}", src.media)))?,
         ),
+        _ => None,
     };
     if p.tracks.iter().all(|t| t.clips.is_empty()) {
         return Err(Error::invalid("The timeline is empty"));
     }
-    let group = match (by_group, m) {
-        (false, _) => None,
-        (true, Some(m)) => Some(
+    let group = match (by_group, m, k) {
+        (false, _, _) => None,
+        (true, Some(m), _) => Some(
             p.group_of(&m.id)
                 .ok_or_else(|| Error::invalid(format!("{} is in no synced group", m.name)))?,
         ),
-        (true, None) => return Err(Error::invalid("A generator is in no synced group")),
+        (true, None, Some(_)) => {
+            return Err(Error::invalid("A compound clip is in no synced group"));
+        }
+        (true, None, None) => return Err(Error::invalid("A generator is in no synced group")),
     };
     let l = Lining { p, group };
-    let (o, frames) = match m {
-        Some(m) => (l.origin(m).unwrap_or_default(), p.media_frames(m)),
-        None => (0.0, default_length(p).max(src.range.1)),
+    let (o, frames) = match (m, k) {
+        (Some(m), _) => (l.origin(m).unwrap_or_default(), p.media_frames(m)),
+        (None, Some(k)) => (k.timecode_at(p.fps()), p.compound_frames(k)),
+        (None, None) => (0.0, default_length(p).max(src.range.1)),
     };
     let base = o.floor() as i64;
     let whole = base..base + frames;
@@ -299,7 +337,11 @@ pub fn source_overwrite(
         (a, b) => (a.unwrap_or(file.0), b.unwrap_or(file.1)),
     };
     let a = from.max(0).max(file.0);
-    let b = if m.is_some() { to.min(file.1) } else { to };
+    let b = if src.generator.is_none() {
+        to.min(file.1)
+    } else {
+        to
+    };
     if a >= b {
         return Err(no_common_time());
     }
@@ -350,6 +392,7 @@ pub fn source_overwrite(
         ids.extend(place_block(p, ti, vec![clip], place(*range)));
     }
     fix_audio(p, ti);
+    let mut ids = compound::with_sound(p, ids, src)?;
     Ok(Placed {
         clip: ids.swap_remove(0),
         track: p.tracks[ti].id.clone(),
