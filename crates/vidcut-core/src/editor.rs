@@ -2605,18 +2605,26 @@ pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeC
     }
 }
 
+pub fn compound_context(p: &Project, k: &Compound, playhead: Option<i64>) -> TimeContext {
+    TimeContext {
+        fps: k.fps,
+        drop_frame: k.counts_drop_frame(),
+        ..source_context(p, k.frames, p.compound_sheet(k).marks, playhead)
+    }
+}
+
 fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
     let sources = if params.tape {
-        if !params.media.is_empty() || params.range.is_some() {
+        if !params.media.is_empty() || params.range.is_some() || params.compound.is_some() {
             return Err(Error::usage(
-                "a tape-span edit takes the marked range; leave out media and range",
+                "a tape-span edit takes the marked range; leave out media, compound and range",
             ));
         }
         tape_sources(p, params)?
     } else {
-        if params.media.is_empty() && params.generator.is_none() {
+        if params.media.is_empty() && params.generator.is_none() && params.compound.is_none() {
             return Err(Error::usage(
-                "media or generator is required (or pass tape: true to edit the Source Tape span)",
+                "media, generator or compound is required (or tape: true for the Source Tape span)",
             ));
         }
         vec![source(p, params)?]
@@ -2669,6 +2677,7 @@ fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
             audio_only: params.audio_only,
             track: params.track.clone(),
             generator: None,
+            compound: None,
         })
         .collect())
 }
@@ -2816,6 +2825,7 @@ fn generator_source(p: &Project, params: &SourceParams, generator: Generator) ->
         audio_only: params.audio_only,
         track: params.track.clone(),
         generator: Some(generator),
+        compound: None,
     })
 }
 
@@ -2829,7 +2839,47 @@ fn marked(p: &Project, media: &Media, params: &SourceParams) -> Result<(i64, i64
     }
 }
 
+fn marked_compound(p: &Project, media: &str, compound: Option<&str>) -> Result<Option<String>> {
+    match compound {
+        Some(_) if !media.is_empty() => Err(Error::usage("give media or compound, not both")),
+        Some(q) => ops::compound::pooled_id(p, q).map(Some),
+        None => Ok(None),
+    }
+}
+
+fn compound_source(p: &Project, params: &SourceParams, query: &str) -> Result<Source> {
+    if !params.media.is_empty() || params.generator.is_some() {
+        return Err(Error::usage("give one of media, generator or compound"));
+    }
+    let id = ops::compound::pooled_id(p, query)?;
+    ops::compound::placeable(p, &id)?;
+    let k = p.pooled_compound(&id).expect("placeable finds it");
+    let (a, b) = match &params.range {
+        None => ops::compound::marked(p, k),
+        Some(r) => compound_context(p, k, None).range(r)?,
+    };
+    let range = ops::compound::host_span(p, k, (a, b));
+    if b > a && range.1 <= range.0 {
+        return Err(Error::invalid(
+            "the marked range is shorter than one timeline frame",
+        ));
+    }
+    Ok(Source {
+        media: String::new(),
+        range,
+        phase: 0.0,
+        video_only: params.video_only,
+        audio_only: params.audio_only,
+        track: params.track.clone(),
+        generator: None,
+        compound: Some(id),
+    })
+}
+
 fn source(p: &Project, params: &SourceParams) -> Result<Source> {
+    if let Some(query) = &params.compound {
+        return compound_source(p, params, query);
+    }
     if let Some(generator) = ops::generators::source_of(params.generator, &params.settings)? {
         return generator_source(p, params, generator);
     }
@@ -2852,6 +2902,7 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
         audio_only: params.audio_only,
         track: params.track.clone(),
         generator: None,
+        compound: None,
     })
 }
 
@@ -3187,30 +3238,53 @@ fn mutate(
         Request::ProxyRemove { media } => proxy_remove(p, env, media.as_ref(), dry_run)?,
         Request::MediaMarksSet {
             media,
+            compound,
             mark_in,
             out,
             duration,
         } => {
-            let m = p
-                .pooled(media)
-                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-            let c = media_context(p, m, None);
+            let compound = marked_compound(p, media, compound.as_deref())?;
+            let (c, held) = match &compound {
+                Some(id) => {
+                    let k = p.pooled_compound(id).expect("found above");
+                    (
+                        compound_context(p, k, None),
+                        p.compound_sheet(k).marks.clone(),
+                    )
+                }
+                None => {
+                    let m = p
+                        .pooled(media)
+                        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+                    (media_context(p, m, None), m.marks.clone())
+                }
+            };
             let mut i = mark_in.as_ref().map(|t| c.resolve(t)).transpose()?;
             let mut o = out.as_ref().map(|t| c.resolve(t)).transpose()?;
             if let Some(d) = duration {
-                (i, o) = mark_duration(d, &c, i.or(m.marks.mark_in), o, &m.marks)?;
+                (i, o) = mark_duration(d, &c, i.or(held.mark_in), o, &held)?;
             }
             if i.is_none() && o.is_none() {
                 return Err(Error::usage(
                     "media.marks.set needs `in`, `out` or `duration`",
                 ));
             }
-            ops::set_media_marks(p, media, i.map(Some), o.map(Some))?;
-            let m = p.media(media).expect("exists");
-            json!({ "in": m.marks.mark_in, "out": m.marks.mark_out })
+            let marks = match &compound {
+                Some(id) => ops::compound::set_marks(p, id, i.map(Some), o.map(Some))?,
+                None => {
+                    ops::set_media_marks(p, media, i.map(Some), o.map(Some))?;
+                    p.media(media).expect("exists").marks.clone()
+                }
+            };
+            json!({ "in": marks.mark_in, "out": marks.mark_out })
         }
-        Request::MediaMarksClear { media } => {
-            ops::set_media_marks(p, media, Some(None), Some(None))?;
+        Request::MediaMarksClear { media, compound } => {
+            match marked_compound(p, media, compound.as_deref())? {
+                Some(id) => {
+                    ops::compound::set_marks(p, &id, Some(None), Some(None))?;
+                }
+                None => ops::set_media_marks(p, media, Some(None), Some(None))?,
+            }
             Value::Null
         }
         Request::TapeMarksSet {
@@ -3574,6 +3648,9 @@ fn mutate(
                 return Err(Error::usage(
                     "Source Overwrite picks its own track; leave out `track`",
                 ));
+            }
+            if src.compound.is_some() {
+                return Err(Error::usage("Source Overwrite takes a media item"));
             }
             if *grid && src.range.is_none() {
                 return Err(Error::usage("`grid` needs `range`"));
@@ -5757,19 +5834,6 @@ fn mutate(
         Request::MediaCompoundRemove { compound } => {
             ops::compound::remove_pooled(p, compound)?;
             json!({ "removed": compound })
-        }
-        Request::EditPlaceCompound {
-            compound,
-            at,
-            track,
-            how,
-        } => {
-            let at = at
-                .as_ref()
-                .map(|t| ctx(p, playhead).resolve(t))
-                .transpose()?;
-            let nested = ops::compound::place_pooled(p, compound, at, track.as_deref(), *how)?;
-            json!({ "clips": nested.clips, "warnings": nested.warnings })
         }
         Request::EditDecompose { clips } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;

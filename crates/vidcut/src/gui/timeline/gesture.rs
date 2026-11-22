@@ -905,16 +905,6 @@ fn media_preview(
     under: &Option<String>,
     hovered: &dyn Fn(&str) -> Duration,
 ) -> Preview {
-    let Some(mut dest) = ctx
-        .rows
-        .target(ctx.project, pos.y)
-        .filter(|_| ctx.rows.reaches(pos))
-    else {
-        return Preview::default();
-    };
-    let Some(t) = ctx.v1() else {
-        return Preview::default();
-    };
     let len = match ctx.project.media(media) {
         Some(m) => {
             let ((a, b), _) = ctx.project.on_timeline(m, range);
@@ -927,18 +917,55 @@ fn media_preview(
             .project
             .media(media)
             .is_some_and(|m| m.info.video.is_some());
-    if !has_video && dest.starts_with('V') {
-        let audio = ctx.project.tracks_of(TrackKind::Audio);
-        dest = audio
-            .first()
-            .map_or("A1".to_string(), |&i| ctx.project.tracks[i].id.clone());
-    }
     let mut source = json!({ "media": media, "range": format!("{}f..{}f", range.0, range.1) });
     if video_only {
         source["video_only"] = json!(true);
     }
     if audio_only {
         source["audio_only"] = json!(true);
+    }
+    source_preview(ctx, pos, source, (len, has_video), under, hovered)
+}
+
+fn compound_preview(
+    ctx: &Ctx,
+    pos: Pos2,
+    compound: &str,
+    len: i64,
+    under: &Option<String>,
+    hovered: &dyn Fn(&str) -> Duration,
+) -> Preview {
+    let has_video = ctx
+        .project
+        .pooled_compound(compound)
+        .is_some_and(|k| k.has_picture() || !k.has_sound());
+    let source = json!({ "compound": compound });
+    source_preview(ctx, pos, source, (len, has_video), under, hovered)
+}
+
+fn source_preview(
+    ctx: &Ctx,
+    pos: Pos2,
+    source: Value,
+    (len, has_video): (i64, bool),
+    under: &Option<String>,
+    hovered: &dyn Fn(&str) -> Duration,
+) -> Preview {
+    let Some(mut dest) = ctx
+        .rows
+        .target(ctx.project, pos.y)
+        .filter(|_| ctx.rows.reaches(pos))
+    else {
+        return Preview::default();
+    };
+    let Some(t) = ctx.v1() else {
+        return Preview::default();
+    };
+    if !has_video && dest.starts_with('V') {
+        let audio = ctx.project.tracks_of(TrackKind::Audio);
+        dest = audio
+            .first()
+            .map_or("A1".to_string(), |&i| ctx.project.tracks[i].id.clone());
     }
     let with = |mut v: Value, extra: Value| {
         if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
@@ -1042,83 +1069,6 @@ fn media_preview(
         ghost: Some((at, at + len)),
         row,
         ..Preview::default()
-    }
-}
-
-fn compound_preview(
-    ctx: &Ctx,
-    pos: Pos2,
-    compound: &str,
-    len: i64,
-    under: &Option<String>,
-    hovered: &dyn Fn(&str) -> Duration,
-) -> Preview {
-    let Some(dest) = ctx
-        .rows
-        .target(ctx.project, pos.y)
-        .filter(|_| ctx.rows.reaches(pos))
-    else {
-        return Preview::default();
-    };
-    let Some(t) = ctx.v1() else {
-        return Preview::default();
-    };
-    let row = Some(dest.clone());
-    let place = |extra: Value, target: Target, at: i64| {
-        let mut params = json!({ "compound": compound });
-        if let (Some(o), Some(e)) = (params.as_object_mut(), extra.as_object()) {
-            o.extend(e.clone());
-        }
-        Preview {
-            request: request("edit.place_compound", params),
-            target,
-            ghost: Some((at, at + len)),
-            row: row.clone(),
-            ..Preview::default()
-        }
-    };
-    let snapped = || {
-        let raw = ctx.scale.boundary(pos.x).max(0);
-        let (at, snapped) = match ctx.snap {
-            Some(s) => s.snap_block(raw, len, &ctx.scale, SNAP_PX),
-            None => (raw, None),
-        };
-        (at.max(0), snapped)
-    };
-    if dest != MAIN {
-        let (at, snapped) = snapped();
-        let extra = json!({ "at": at, "track": dest });
-        return Preview {
-            snapped,
-            ..place(extra, Target::Overwrite(at, at + len), at)
-        };
-    }
-    let end = t.end();
-    if t.clips.is_empty() || pos.x > ctx.scale.xf(end) + DROP_EDIT_PX {
-        return place(json!({}), Target::Append, end);
-    }
-    let first = t.clips[0].start;
-    if pos.x < ctx.scale.xf(first) - DROP_EDIT_PX {
-        let extra = json!({ "at": first, "how": "insert" });
-        return place(extra, Target::Insert(first), first);
-    }
-    if let Some(e) = edit_near(t, &ctx.scale, pos.x, DROP_EDIT_PX) {
-        let extra = json!({ "at": e, "how": "insert" });
-        return place(extra, Target::Insert(e), e);
-    }
-    if let Some(id) = under
-        && let Some(c) = ctx
-            .clip(id)
-            .filter(|_| ctx.track_of(id).is_some_and(|t| t.id == MAIN))
-        && hovered(id) < HOVER
-    {
-        let extra = json!({ "at": c.start, "how": "replace" });
-        return place(extra, Target::Replace(id.clone()), c.start);
-    }
-    let (at, snapped) = snapped();
-    Preview {
-        snapped,
-        ..place(json!({ "at": at }), Target::Overwrite(at, at + len), at)
     }
 }
 

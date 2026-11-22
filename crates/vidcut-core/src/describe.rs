@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::model::{GeneratorKind, Media, Project};
+use crate::model::{Compound, GeneratorKind, Media, Project};
 use crate::time::{DurationSpec, Keyword, RangeSpec, TimeSpec};
 
 mod set;
@@ -39,6 +39,17 @@ pub fn describe_at(
         "media.subclip" => format!("Create subclip {} of {}", d.text("name"), d.media("media")),
         "media.subclip_set" => format!("Change the limits of subclip {}", d.media("media")),
         "media.set" => d.media_set(),
+        "media.marks.set" if params["compound"].is_string() => {
+            let k = d.pooled_compound();
+            d.marks_set(
+                format!("Source marks of {}", d.source_name()),
+                k.zip(project).map(|(k, p)| p.compound_sheet(k).marks),
+                None,
+            )
+        }
+        "media.marks.clear" if params["compound"].is_string() => {
+            format!("Clear the source marks of {}", d.source_name())
+        }
         "media.marks.set" => {
             let media = set::source_media(project, &d.list("media"));
             d.marks_set(
@@ -179,7 +190,6 @@ pub fn describe_at(
         "edit.compound_range" => "New Compound Clip of In to Out".to_string(),
         "media.compound" => "Create Compound Clip of In to Out".to_string(),
         "media.compound_remove" => "Delete Compound Clip".to_string(),
-        "edit.place_compound" => "Place Compound Clip".to_string(),
         "edit.decompose" => format!("Decompose {}", d.clips("clips")),
         "compound.open" => match d.text("compound").as_str() {
             "" => format!("Open Compound Clip {}", d.clips("clip")),
@@ -1034,7 +1044,18 @@ impl Words<'_> {
         }
     }
 
+    fn pooled_compound(&self) -> Option<&Compound> {
+        let p = self.project?;
+        let id = crate::ops::compound::pooled_id(p, self.params["compound"].as_str()?).ok()?;
+        p.pooled_compound(&id)
+    }
+
     fn source_name(&self) -> String {
+        if let Some(q) = self.params["compound"].as_str() {
+            return self
+                .pooled_compound()
+                .map_or(q.to_string(), |k| k.name.clone());
+        }
         let made = serde_json::from_value::<GeneratorKind>(self.params["generator"].clone())
             .ok()
             .and_then(|kind| crate::ops::generators::made(kind, &Default::default()).ok());

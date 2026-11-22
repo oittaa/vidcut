@@ -190,7 +190,7 @@ Timelines (spec §3):
     - `Project::keep_sheet` makes "Timeline 1" from the open tracks.
     - `need_timeline` applies the rule after the request, and after each command of a batch. Thus a batch gives the same result as its commands one by one.
 - A pool item counts at the project's rate: a sound file and a still count `Settings::fps` (`Media::rate`). A compound clip keeps its own `Compound::fps` and `Compound::drop_frame`.
-- `ops::conform` converts clips by time from one frame rate to another. `render::expanded`, `ops::compound::unnest`, `place_pooled` and `edit.paste` use it, and `edit.copy` returns the rate of its clips.
+- `ops::conform` converts clips by time from one frame rate to another. `render::expanded`, `ops::compound::unnest` and `edit.paste` use it, and `edit.copy` returns the rate of its clips.
 - Synced groups and the Sync Clips window count frames at the project's rate.
   - The Sync Bin, `multicam.pick` and Source Overwrite line up the files on the frame grid of the project (`ops::synced_at`).
   - `multicam::timeline_frames` converts a frame of a group to the open timeline's rate by time, for the strips of the rows.
@@ -831,7 +831,12 @@ Import:
     - A compound clip on a side of that transition takes the frames and the held frame of the track around it. Thus the side shows on each frame of the frozen clip.
   - `ops::compound::nest_range` cuts every track at the two marks, and nests what is between them. The lowest track with clips in the range becomes inner V1 or A1.
   - `pool_range` makes a `Compound` on a clone of the project, so the timeline does not change. `remove_pooled` marks it removed while placements still use it.
-  - `place_pooled` puts a copy on a video track and on the audio track of its number. `Place` tells how. `compound_preview` gives the requests of a drag.
+  - A pooled compound clip is a source of the edits (`Source::compound`), as a media item is.
+    - `ops::compound::placeable` refuses a compound clip inside itself, an empty one, and one shorter than a frame of the timeline.
+    - `marked` gives the part between its marks, and `host_span` converts that part to the timeline's frames.
+    - `ops::make_clip` makes the picture block. `with_sound` adds the sound block on the audio track of the same number, after the edit.
+    - Why: then each edit, its ripple and its track rules come from one implementation for files and compound clips.
+    - `set_marks` writes the marks to the open sheet when the compound clip is open, else to `Compound::marks`.
   - `edit.copy` and `edit.cut` include transitive compound definitions (`copied_compounds`). `edit.paste` restores missing definitions as removed (`restore_copied`).
   - `ops::conform::clip` keeps conformed compound clips within their compound's frame limit (`fit_compound`).
   - `ops::compound::unnest` conforms `Compound::tracks` when needed and restores all tracks for tied blocks, or only one part when alone.

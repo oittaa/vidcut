@@ -1398,9 +1398,7 @@ fn nested_cross_rate_compounds_round_trip_through_otio() {
         json!({"name": "A24", "own": {"fps": "24"}}),
     ));
     let b_on_24: Vec<String> = serde_json::from_value(
-        f.ok(req("edit.place_compound", json!({"compound": b_id})))
-            .result["clips"]
-            .clone(),
+        f.ok(req("edit.append", json!({"compound": b_id}))).result["clips"].clone(),
     )
     .unwrap();
     f.ok(req("edit.compound", json!({"clips": [&b_on_24[0]]})));
@@ -1417,7 +1415,7 @@ fn nested_cross_rate_compounds_round_trip_through_otio() {
         "timeline.new",
         json!({"name": "H30", "own": {"fps": "30"}}),
     ));
-    f.ok(req("edit.place_compound", json!({"compound": a_id})));
+    f.ok(req("edit.append", json!({"compound": a_id})));
     assert!(!b_hosts.is_empty());
     let doc = written(&f);
 

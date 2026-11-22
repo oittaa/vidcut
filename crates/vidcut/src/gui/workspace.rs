@@ -687,6 +687,9 @@ impl Workspace {
         if let Some(g) = self.snap.open_generator() {
             return vec![g.params()];
         }
+        if let Some(k) = self.snap.open_compound() {
+            return vec![json!({ "compound": k.id })];
+        }
         let Some(p) = self.project() else {
             return Vec::new();
         };

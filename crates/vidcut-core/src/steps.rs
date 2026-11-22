@@ -326,7 +326,6 @@ pub fn category(kind: &str) -> &'static str {
             || k.starts_with("clip.")
             || k == "edit.compound"
             || k == "edit.compound_range"
-            || k == "edit.place_compound"
             || k == "edit.decompose"
             || k == "compound.open"
             || k == "compound.close" =>
