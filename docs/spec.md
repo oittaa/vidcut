@@ -3028,7 +3028,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: Alt+P and Alt+L at a corrector that feeds a Layer Mixer each add a new last input to that mixer. The new corrector takes the source.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
   - Measured in Resolve Studio 21.2: the numbers do not follow p. 3395.
-    - Serial nodes 1, 2 and 4 give their keys to Key Mixer 3, and it gives its key to node 4.
+    - Nodes 1, 2 and 4 are in series. Nodes 1 and 2 give their keys to Key Mixer 3, and it gives its key to node 4.
     - Alt+S at node 1 then gives a new node 3. The old node 2 becomes 5, and the mixer becomes 2.
     - The 5 measured cases fit one rule: a walk from the source, one step of links at a time. The links of each node go in the order in which they were made.
   - vidcut: a new node gets the next number, as the manual says ([todo](todo/color-page.md)).
