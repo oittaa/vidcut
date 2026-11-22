@@ -444,6 +444,19 @@ fn end_sound_at(t: &mut Track, at: i64) {
     }
 }
 
+fn cut_every_track(p: &mut Project, points: [i64; 2]) {
+    for ti in 0..p.tracks.len() {
+        for at in points {
+            split_at(p, ti, at);
+            end_sound_at(&mut p.tracks[ti], at);
+        }
+        fix_audio(p, ti);
+    }
+    for at in points {
+        super::subtitles::cut_all(p, at);
+    }
+}
+
 pub fn nest_range(
     p: &mut Project,
     (a, b): (i64, i64),
@@ -464,13 +477,7 @@ pub fn nest_range(
             unlocked(p, ti)?;
         }
     }
-    for ti in 0..p.tracks.len() {
-        for at in [a, b] {
-            split_at(p, ti, at);
-            end_sound_at(&mut p.tracks[ti], at);
-        }
-        fix_audio(p, ti);
-    }
+    cut_every_track(p, [a, b]);
     let ids: HashSet<String> = p
         .tracks
         .iter()
