@@ -2496,6 +2496,20 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - An append gives a linked picture on V1 and sound on A1.
   - A range of it trims these two, as a clip of a file.
   - A drag follows [§7.3](#73-drag-and-drop-from-the-pool-or-viewer-pp-648-679-694695), as a drag of a file does.
+- **A compound clip in the Source viewer** (measured in Resolve Studio 21.2):
+  - A double-click on a compound clip in the Media Pool opens it in the Source viewer.
+  - In and Out in the Source viewer are the In and Out of its own timeline. The pool item and the open timeline show the same marks.
+  - Overwrite, Insert and Place on Top edit in the part from In to Out, with the Out frame, as for a file.
+  - The picture and the sound go in linked. The left offset of each is the In frame.
+  - With clips on V1 and A1, Place on Top makes a new V2 and a new A2.
+  - **vidcut:**
+    - `viewer.load` takes `compound`. The source viewer plays its tracks at its own frame rate.
+    - The edits of [§7.2](#72-edit-functions) take `compound`. Without `range`, they use its marks, converted to the timeline's frame rate.
+    - The sound goes on the audio track with the number of the picture's track.
+    - `media.marks.set` and `media.marks.clear` take `compound`.
+    - The marks stay when the compound clip closes.
+    - With an In past the end of the compound clip, an edit refuses and tells why.
+    - Source Overwrite refuses a compound clip: [the todo](todo/sync-bin.md).
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
   - Double-click the parent name in the bottom-left path bar to close the compound clip (p. 1054).
@@ -2504,7 +2518,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - Measured: a new compound clip starts at `00:00:00:00`.
   - Measured: in an OTIO file, outer clip markers sit on `Stack.markers`, and Media Pool compound markers do not export.
   - **vidcut:**
-    - A compound clip in the Media tab also opens by double-click or its context menu.
+    - A compound clip in the Media tab also opens from its context menu.
     - Opening a nested compound clip adds one more level to the path bar. Double-clicking any parent steps back to that level.
     - Closing writes edits back to the canonical compound definition, so every placement shows the change.
     - Growing inner tracks unlocks tail trims on placed clips.

@@ -578,10 +578,16 @@ pub enum Request {
     },
     /// Set a media item's source In and/or Out (I/O in a source viewer or over
     /// a pool thumbnail). Source time, `out` exclusive. Edits without a `range`
-    /// use these marks.
+    /// use these marks. With `compound`, the marks of a compound clip of the
+    /// Media tab: the In and Out of its own timeline.
     #[serde(rename = "media.marks.set")]
     MediaMarksSet {
+        /// Media id (`m1`). Omitted when `compound` is set.
+        #[serde(default)]
         media: String,
+        /// A compound clip of the Media tab, by id or name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compound: Option<String>,
         #[serde(rename = "in", default)]
         mark_in: Option<TimeSpec>,
         #[serde(default)]
@@ -592,9 +598,17 @@ pub enum Request {
         #[serde(default)]
         duration: Option<DurationSpec>,
     },
-    /// Clear a media item's source In and Out.
+    /// Clear a media item's source In and Out, or those of a compound clip
+    /// of the Media tab.
     #[serde(rename = "media.marks.clear")]
-    MediaMarksClear { media: String },
+    MediaMarksClear {
+        /// Media id (`m1`). Omitted when `compound` is set.
+        #[serde(default)]
+        media: String,
+        /// A compound clip of the Media tab, by id or name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compound: Option<String>,
+    },
     /// Set Source Tape In and/or Out. `in` and `out` are tape frames of `order`
     /// (the media ids in tape order); `out` is exclusive. A span on one clip is
     /// stored as that clip's source marks. A span across clips is stored as
@@ -1324,21 +1338,6 @@ pub enum Request {
     /// stay.
     #[serde(rename = "media.compound_remove")]
     MediaCompoundRemove { compound: String },
-    /// Put a compound clip of the Media tab on the video track `track` and
-    /// on the audio track of its number, at `at`. Defaults: V1 and A1, the
-    /// end of the timeline, and `overwrite`. On V1, `insert` opens the
-    /// timeline at `at`, and `replace` takes the place of the clip under
-    /// `at`. On other tracks `how` is `overwrite`. Returns its clips.
-    #[serde(rename = "edit.place_compound")]
-    EditPlaceCompound {
-        compound: String,
-        #[serde(default)]
-        at: Option<TimeSpec>,
-        #[serde(default)]
-        track: Option<String>,
-        #[serde(default)]
-        how: crate::ops::Place,
-    },
     /// Decompose in Place: a compound clip becomes the clips it holds, at
     /// their times, trimmed to the part it shows. Inner track n goes on the
     /// track of the compound clip plus n. Where a clip is in the way, a new
@@ -4084,11 +4083,13 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         alone: Option<bool>,
     },
-    /// Set the In and/or Out of the Multi Source viewer, or of a generator
-    /// open as the source. `out` is exclusive. In the Multi Source viewer they
-    /// are frames of its scroll area and hold for each camera. The files' own
-    /// source marks do not change. A change of bin clears them. A generator's
-    /// marks last until another source opens, and they are not in the project.
+    /// Set the In and/or Out of the Multi Source viewer, of a generator open
+    /// as the source, or of a compound clip open in the Source viewer. `out`
+    /// is exclusive. In the Multi Source viewer they are frames of its scroll
+    /// area and hold for each camera. The files' own source marks do not
+    /// change. A change of bin clears them. A generator's marks last until
+    /// another source opens, and they are not in the project. A compound
+    /// clip's marks are in the project, as `media.marks.set` sets them.
     #[serde(rename = "viewer.marks.set")]
     ViewerMarksSet {
         #[serde(rename = "in", default)]
@@ -4101,8 +4102,8 @@ pub enum Request {
         #[serde(default)]
         duration: Option<DurationSpec>,
     },
-    /// Clear the In and Out of the Multi Source viewer, or of a generator open
-    /// as the source.
+    /// Clear the In and Out of the Multi Source viewer, of a generator open as
+    /// the source, or of a compound clip open in the Source viewer.
     #[serde(rename = "viewer.marks.clear")]
     ViewerMarksClear {},
     /// Viewer framing and safe-area guides (decision D90). Stored in
@@ -4147,13 +4148,17 @@ pub enum Request {
     #[serde(rename = "viewer.frame")]
     ViewerFrame { mode: ViewerFrame },
     /// Open a media item in the viewer as Source Clip, optionally at a source
-    /// time. With `generator`, open that generator as a source of 5 s. The
-    /// timeline does not change.
+    /// time. With `generator`, open that generator as a source of 5 s. With
+    /// `compound`, open a compound clip of the Media tab. The timeline does
+    /// not change.
     #[serde(rename = "viewer.load")]
     ViewerLoad {
-        /// Media id (`m1`). Omitted when `generator` is set.
+        /// Media id (`m1`). Omitted when `generator` or `compound` is set.
         #[serde(default)]
         media: String,
+        /// A compound clip of the Media tab, by id or name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compound: Option<String>,
         /// The generator to open instead of a media item. The settings below
         /// go with it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5864,9 +5869,14 @@ impl GeneratorSettings {
 /// What to put on the timeline: a media range or a generator, and where.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceParams {
-    /// Media id (`m1`). Omitted when `tape` or `generator` is set.
+    /// Media id (`m1`). Omitted when `tape`, `generator` or `compound` is set.
     #[serde(default)]
     pub media: String,
+    /// A compound clip of the Media tab (by id or name) as the source. It goes
+    /// in as a picture and a sound clip, linked. Its marks (`media.marks.set`
+    /// with `compound`) pick the part, as for a media item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compound: Option<String>,
     /// Edit the Source Tape In–Out span instead of one media item. Both marks
     /// must be set.
     #[serde(default)]
@@ -5878,8 +5888,8 @@ pub struct SourceParams {
     #[serde(flatten)]
     pub settings: GeneratorSettings,
     /// Source range (TimeSpecs relative to the source's start). Default: the
-    /// media's source marks, or all of it. For a generator: its 5 s. A range
-    /// on a generator can be longer than 5 s.
+    /// source marks of the media or the compound clip, or all of it. For a
+    /// generator: its 5 s. A range on a generator can be longer than 5 s.
     #[serde(default)]
     pub range: Option<RangeSpec>,
     /// Leave the audio out (Video Only).

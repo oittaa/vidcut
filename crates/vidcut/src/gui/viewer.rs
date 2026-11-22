@@ -407,6 +407,17 @@ impl Workspace {
             let label = g.name().to_string();
             self.start_generator_drag((g.kind, g.settings, label), b - a, press);
         }
+        if mode.is_source()
+            && area_resp.drag_started()
+            && let Some(p) = self.project_shared()
+            && let Some(k) = self.snap.open_compound()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            use vidcut_core::ops::compound::{host_span, marked};
+            let (a, b) = host_span(&p, k, marked(&p, k));
+            let (id, name) = (k.id.clone(), k.name.clone());
+            self.start_compound_drag(&id, &name, b - a, press);
+        }
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
         let player = self.snap.player(id).clone();
@@ -969,10 +980,15 @@ impl Workspace {
                     60,
                 )
             }
-            _ => match (self.snap.source_at(), self.snap.open_generator()) {
-                (Some((m, _)), _) => elide(&name(m), 60),
-                (None, Some(g)) => g.name().to_string(),
-                (None, None) => String::new(),
+            _ => match (
+                self.snap.source_at(),
+                self.snap.open_generator(),
+                self.snap.open_compound(),
+            ) {
+                (Some((m, _)), _, _) => elide(&name(m), 60),
+                (None, Some(g), _) => g.name().to_string(),
+                (None, None, Some(k)) => elide(&k.name, 60),
+                (None, None, None) => String::new(),
             },
         }
     }

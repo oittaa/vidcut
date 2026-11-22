@@ -406,6 +406,11 @@ The bar and the Jobs button:
   - `SourceGenerator` holds the kind, its settings, the length and the marks, for this session. Why: a generator is not a file of the project, so it has no `Media.marks`.
   - `Snapshot::viewer_marks` gives the marks of the grid or of the open generator. The scroll area, the Duration field and the keys of the viewer use it, with `viewer.marks.set`.
   - `SourceGenerator::params` gives the source of an edit (`Workspace::edit_sources`). A drag from the viewer starts a `Gesture::Generator` with the marked length.
+- A double-click on a compound clip in the Media tab sends `viewer.load` with `compound`. `Live::load_compound` holds its id in `Live.source_compound`.
+  - `SourceContent::Compound` loads `render::compound_tape`. It opens the compound clip on a copy of the project, so the player plays its own timeline at its own rate.
+  - `Snapshot::viewer_marks` also gives the marks of the open compound clip. `viewer.marks.set` sends them to the project as `media.marks.set` with `compound`.
+  - Why: the marks of a compound clip are the In and Out of its own timeline, so they are in the project.
+  - `Gesture::Compound` drops by the same rules as a file (`source_preview`).
 
 **Pictures.**
 

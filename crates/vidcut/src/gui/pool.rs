@@ -7,6 +7,7 @@ use eframe::egui::{
 };
 use serde_json::json;
 use vidcut_core::model::{Compound, CompoundTarget, Media, Project};
+use vidcut_core::ops::compound;
 use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
 use vidcut_core::shortcuts::Action;
 
@@ -779,27 +780,41 @@ impl Workspace {
                 }
                 if r.double_clicked() {
                     self.compound_click = None;
-                    self.send("compound.open", json!({ "compound": k.id }));
+                    self.send("viewer.load", json!({ "compound": k.id }));
                 }
                 if r.drag_started()
                     && let Some(press) = r.ctx.input(|i| i.pointer.press_origin())
                 {
                     self.compound_click = None;
-                    self.start_compound_drag(&k.id, &k.name, frames, press);
+                    let (a, b) = compound::host_span(p, k, compound::marked(p, k));
+                    self.start_compound_drag(&k.id, &k.name, b - a, press);
                 }
                 r.context_menu(|ui| {
+                    if ui.button("Open in Viewer").clicked() {
+                        self.send("viewer.load", json!({ "compound": k.id }));
+                        ui.close();
+                    }
                     if ui.button("Open in Timeline").clicked() {
                         self.send("compound.open", json!({ "compound": k.id }));
                         ui.close();
                     }
                     ui.separator();
                     if ui.button("Append to Timeline").clicked() {
-                        self.send("edit.place_compound", json!({ "compound": k.id }));
+                        self.send("edit.append", json!({ "compound": k.id }));
                         ui.close();
                     }
                     if ui.button("Place at Playhead").clicked() {
                         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
-                        self.send("edit.place_compound", json!({ "compound": k.id, "at": at }));
+                        let place = json!({ "compound": k.id, "at": at, "use_marks": false });
+                        self.send("edit.overwrite", place);
+                        ui.close();
+                    }
+                    let marked = !p.compound_sheet(k).marks.is_empty();
+                    if ui
+                        .add_enabled(marked, egui::Button::new("Clear In and Out"))
+                        .clicked()
+                    {
+                        self.send("media.marks.clear", json!({ "compound": k.id }));
                         ui.close();
                     }
                     ui.separator();
@@ -2490,6 +2505,14 @@ impl Workspace {
                 Some(g) => {
                     let (a, b) = g.range();
                     format!("Source: {} ({} long)", g.name(), self.src_tc(b - a))
+                }
+                None if sources[0]["compound"].is_string() => {
+                    let shown = self.project().zip(self.snap.open_compound()).map(|(p, k)| {
+                        let (a, b) = compound::host_span(p, k, compound::marked(p, k));
+                        (k.name.clone(), b - a)
+                    });
+                    let (name, len) = shown.unwrap_or_default();
+                    format!("Source: {} ({} long)", elide(&name, 30), self.src_tc(len))
                 }
                 None => {
                     let s = &sources[0];
