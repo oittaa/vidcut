@@ -209,11 +209,6 @@ fn fresh_ids(p: &mut Project, t: &mut crate::model::Timeline) {
             x.id = p.alloc_transition_id();
             x.from.iter_mut().chain(x.to.iter_mut()).for_each(renamed);
         }
-        for c in &mut track.clips {
-            if let Some(f) = c.title.as_mut().and_then(|t| t.follows.as_mut()) {
-                renamed(&mut f.clip);
-            }
-        }
     }
     for m in &mut t.markers {
         m.id = p.alloc_marker_id();

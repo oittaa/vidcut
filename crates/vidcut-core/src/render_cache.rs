@@ -526,10 +526,6 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String, one: bool
 fn plain_title(t: &mut ShownTitle, one: bool) {
     t.clip.clear();
     t.placed.iter_mut().for_each(|p| plain_placed(p, one));
-    if one && t.lead.is_some() {
-        t.title = t.led(t.title.sampled(t.frame()));
-        t.lead = None;
-    }
 }
 
 fn plain_placed(p: &mut Placed, one: bool) {
@@ -1387,7 +1383,6 @@ mod tests {
                 },
                 source_in: 0,
                 fade: None,
-                lead: None,
                 placed: vec![Placed {
                     clip: "c1".into(),
                     picture,

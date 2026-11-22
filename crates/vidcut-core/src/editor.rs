@@ -852,7 +852,6 @@ impl Editor {
         if dropped > 0 {
             warnings.push(otio::transitions::dropped(dropped));
         }
-        warnings.extend(ops::motion::settle(&mut working));
         drop_unused_removed(&mut working);
         let problems = match touches_timelines(&request) {
             true => validate::everywhere(&working),
@@ -1123,7 +1122,6 @@ impl Editor {
         if dropped > 0 {
             warnings.push(otio::transitions::dropped(dropped));
         }
-        warnings.extend(ops::motion::settle(&mut working));
         drop_unused_removed(&mut working);
         let problems = validate::everywhere(&working);
         if !problems.is_empty() {
@@ -5383,20 +5381,6 @@ fn mutate(
             out["backward"] = json!(stops.0);
             out["forward"] = json!(stops.1);
             out
-        }
-        Request::MotionFollow { clip, of, path } => {
-            let id = resolve_clip(p, clip, playhead)?;
-            let to = match (of, path) {
-                (Some(of), Some(path)) => Some((resolve_clip(p, of, playhead)?, path.clone())),
-                (None, None) => None,
-                _ => {
-                    return Err(Error::usage(
-                        "motion.follow needs `of` (--of) and `path` (--path) together, or neither",
-                    ));
-                }
-            };
-            let to = to.as_ref().map(|(of, path)| (of.as_str(), path.as_str()));
-            ops::motion::follow(p, &id, to)?
         }
         Request::SubtitlesSet {
             cue,

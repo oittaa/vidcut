@@ -1773,7 +1773,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut has these five kinds:
     - Markup in the text styles words separately (X53).
     - The X and Y of a title are frame pixels from the bottom left, with Y up (measured in Resolve Studio 21.2).
-    - On a title that follows a motion path, X and Y count from the middle of the thing. Y is up.
     - A scroll has its own motion and line spacing (X55).
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
