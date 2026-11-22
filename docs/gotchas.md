@@ -609,6 +609,7 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - Its export has a `MissingReference.1` and an effect of `Type` 74 ([spec §8.24](spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)).
   - Its import makes an offline clip of that, with the Inspector title "Adjustment Clip".
   - It reads a `GeneratorReference.1` with `generator_kind` "Adjustment Clip" as an adjustment clip that works.
+    - That clip takes no Open FX in Resolve. The form that Resolve writes imports offline, so this form is the better one.
   - Thus `otio::generators::adjustment_reference` writes that form, and `otio::generators::is_adjustment` reads both.
 - **Resolve writes a Smooth Cut as a `Custom_Transition` with the effect `Morph Dissolve`.**
   - Its name and `Transition Type` are `Smooth Cut`. The `Type` of the effect is 39.

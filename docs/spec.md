@@ -3675,6 +3675,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Resolve reads a `GeneratorReference.1` with `generator_kind` "Adjustment Clip" as an adjustment clip.
     - It works as an adjustment clip: at Zoom 0.5, the picture below is half size on black.
     - Its Inspector title is "Generator - Adjustment Clip", and the timeline shows it in the color of a generator.
+    - It takes no Open FX. A drag from the Effects library does nothing, and the Effects tab of the Inspector is dimmed.
+    - An adjustment clip from the Effects library takes Open FX.
   - **vidcut:** it writes the `GeneratorReference.1` form. It reads both forms.
   - Transform, Crop, Composite and Retime/Scaling effects export with the same metadata keys as on a regular video clip.
 
