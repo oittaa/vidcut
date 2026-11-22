@@ -171,6 +171,8 @@ Timelines (spec §3):
   - Why: the code that edits, plays and exports a timeline reads these fields. It does not change for many timelines.
   - `Project::check_in` puts them back into the entry, and `Project::check_out` takes them out. `Project::open_timeline` does both.
   - `Project::compounds` holds canonical compound clip definitions (`Compound`). `Compound::removed` keeps a removed item while clips still use it (`drop_unused_removed`).
+  - `Project::clip_name` gives the name that a clip shows: its own `name`, else the name of its `Compound`, else the name of its media.
+    - Why: a rename of the compound clip then shows on each clip that has no name of its own.
   - `Project::compound_path` holds open compound clips (`OpenCompound`, outermost first) with their `CompoundTarget`.
     - Each `OpenCompound` refers by id to a `Compound` in `Project::compounds`.
     - While one is open, `Project::checked_out_compound` names it. `Project::format` uses its `fps` and `drop_frame`, and `Project::start_tc` gives `Compound::start_tc`.

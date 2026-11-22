@@ -24,7 +24,6 @@ vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../desi
 - Measure in Resolve. No script reaches these, so each needs the window of Resolve:
   - The thumbnails of the Media Pool: do they show the input LUT of a clip, and the Input LUT of the project?
   - The Input LUT of the project in the viewer of the Media page.
-  - The Input LUT of the project on a generator, on a Text title, on a Text+ title and on a compound clip.
   - A LUT on the node of a Text+ title. Generators and Text titles take no grade ([spec §8.20](../spec.md#820-primaries-palette-pp-118-31413159)).
   - A gap through the Output LUT of the project, in a render with alpha. vidcut keeps the gap clear.
 

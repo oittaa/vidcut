@@ -65,6 +65,7 @@ const LOCKED: Badge = Badge {
 };
 
 pub(super) struct Outlet {
+    pub(super) slot: usize,
     pub(super) name: String,
     pub(super) color: Color32,
 }
@@ -83,7 +84,7 @@ pub(super) struct Tile<K> {
     pub(super) note: String,
     pub(super) badges: Vec<Badge>,
     pub(super) locked: Option<bool>,
-    pub(super) outlet: Option<Outlet>,
+    pub(super) outlets: Vec<Outlet>,
     pub(super) inlets: Vec<Inlet>,
     pub(super) edge: Option<Edge>,
     pub(super) shot: Option<Shot>,
@@ -91,8 +92,10 @@ pub(super) struct Tile<K> {
 
 pub(super) struct Wire<K> {
     pub(super) from: K,
+    pub(super) out: usize,
     pub(super) to: K,
     pub(super) slot: usize,
+    pub(super) drops: bool,
 }
 
 pub(super) struct Graph<'a, K> {
@@ -100,12 +103,13 @@ pub(super) struct Graph<'a, K> {
     pub(super) tiles: Vec<Tile<K>>,
     pub(super) wires: Vec<Wire<K>>,
     pub(super) selected: &'a [K],
+    pub(super) current: Option<&'a K>,
     pub(super) active: Color32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum End<K> {
-    Output(K),
+    Output(K, usize),
     Input(K, usize),
 }
 
@@ -320,8 +324,9 @@ fn along(side: Side) -> Vec2 {
 
 fn size<K>(t: &Tile<K>) -> Vec2 {
     let left = t.inlets.iter().filter(|i| i.side == Side::Left).count();
+    let rows = left.max(t.outlets.len());
     let body = if t.shot.is_some() { SHOT_BOX } else { BOX };
-    vec2(body.x, body.y.max(left as f32 * PORT + KNOT * 2.0))
+    vec2(body.x, body.y.max(rows as f32 * PORT + KNOT * 2.0))
 }
 
 fn shots_in<K>(tiles: &[Tile<K>]) -> bool {
@@ -339,11 +344,13 @@ fn paint_shot(painter: &egui::Painter, area: Rect, shot: &Shot, fade: f32) {
     painter.image(texture, shown, uv, tint);
 }
 
-fn outlet_at<K>(r: Rect, t: &Tile<K>) -> Pos2 {
-    match t.edge {
-        Some(_) => r.center(),
-        None => r.right_center(),
+fn outlet_at<K>(r: Rect, t: &Tile<K>, slot: usize) -> Option<Pos2> {
+    let j = t.outlets.iter().position(|o| o.slot == slot)?;
+    if t.edge.is_some() {
+        return Some(r.center());
     }
+    let y = r.top() + r.height() * (j + 1) as f32 / (t.outlets.len() + 1) as f32;
+    Some(pos2(r.right(), y))
 }
 
 fn inlet_at<K>(r: Rect, t: &Tile<K>, slot: usize) -> Option<(Pos2, Side)> {
@@ -487,7 +494,7 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
             let fade = if t.faded { FADED } else { 1.0 };
             painter.rect_filled(r.shrink(1.0), CornerRadius::same(3), c.panel);
             let edge = match (
-                graph.selected.last() == Some(&t.key),
+                graph.current == Some(&t.key),
                 graph.selected.contains(&t.key),
             ) {
                 (true, _) => Stroke::new(2.0, CURRENT_ROW),
@@ -657,9 +664,11 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     let index_of = |key: &K| graph.tiles.iter().position(|t| t.key == *key);
     let mut knots: Vec<(End<K>, Pos2, Option<&str>)> = Vec::new();
     for (t, r) in graph.tiles.iter().zip(&boxes) {
-        if let Some(o) = &t.outlet {
-            let name = (o.name != t.label).then_some(o.name.as_str());
-            knots.push((End::Output(t.key.clone()), outlet_at(*r, t), name));
+        for o in &t.outlets {
+            if let Some(at) = outlet_at(*r, t, o.slot) {
+                let name = (o.name != t.label).then_some(o.name.as_str());
+                knots.push((End::Output(t.key.clone(), o.slot), at, name));
+            }
         }
         for i in &t.inlets {
             if let Some((at, _)) = inlet_at(*r, t, i.slot) {
@@ -689,7 +698,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
     };
     let curve = |w: &Wire<K>| -> Option<[Pos2; 4]> {
         let i = index_of(&w.from)?;
-        let from = outlet_at(boxes[i], &graph.tiles[i]);
+        let from = outlet_at(boxes[i], &graph.tiles[i], w.out)?;
         let (to, side, _) = end_of(w)?;
         Some(bezier((from, to), along(side)))
     };
@@ -720,7 +729,8 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         .and_then(|m| index_of(&m.node))
         .filter(|i| graph.tiles[*i].drops && loose(&graph.tiles[*i].key))
         .and_then(|i| pointer.and_then(|p| wire_near(p, Some(i))))
-        .map(|(k, _)| k);
+        .map(|(k, _)| k)
+        .filter(|k| wires[*k].drops);
     let lit = Stroke::new(2.5, LIT);
     for (k, w) in wires.iter().enumerate() {
         if pulled.as_ref() == Some(&(w.to.clone(), w.slot)) {
@@ -750,7 +760,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         let used = wires.iter().any(|w| w.from == t.key);
         if t.edge.is_some() {
             let linked = used || wires.iter().any(|w| w.to == t.key);
-            let color = match (&t.outlet, t.inlets.first()) {
+            let color = match (t.outlets.first(), t.inlets.first()) {
                 (Some(o), _) if linked => o.color,
                 (None, Some(i)) if linked => i.knot,
                 _ => c.text_dim,
@@ -768,7 +778,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         let id = ui.scope_id().with((&graph.salt, &t.key));
         let mut node_resp = ui.interact(r, id, Sense::click_and_drag());
         let selected = graph.selected.contains(&t.key);
-        let active = graph.selected.last() == Some(&t.key);
+        let active = graph.current == Some(&t.key);
         let fade = if t.faded { FADED } else { 1.0 };
         painter.rect_filled(r, CornerRadius::same(4), c.panel.gamma_multiply(fade));
         let edge = match (active, selected) {
@@ -847,10 +857,14 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
                 });
             }
         }
-        if let Some(o) = &t.outlet {
+        for o in &t.outlets {
+            let Some(at) = outlet_at(r, t, o.slot) else {
+                continue;
+            };
+            let used = wires.iter().any(|w| w.from == t.key && w.out == o.slot);
             let out = if used { o.color } else { c.text_dim };
             painter.rect_filled(
-                Rect::from_center_size(r.right_center(), Vec2::splat(KNOT * 2.0)),
+                Rect::from_center_size(at, Vec2::splat(KNOT * 2.0)),
                 CornerRadius::ZERO,
                 out,
             );
@@ -965,12 +979,12 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             End::Input(dst, slot) => wires
                 .iter()
                 .find(|w| w.to == *dst && w.slot == *slot)
-                .map(|w| w.from.clone()),
-            End::Output(_) => None,
+                .map(|w| (w.from.clone(), w.out)),
+            End::Output(..) => None,
         };
         started = Some(match (end, from) {
-            (End::Input(dst, slot), Some(src)) => Linking {
-                anchor: End::Output(src),
+            (End::Input(dst, slot), Some((src, out))) => Linking {
+                anchor: End::Output(src, out),
                 pulled: Some((dst.clone(), *slot)),
             },
             _ => Linking {
@@ -985,7 +999,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         match wire_at(press).map(|(k, half)| (&wires[k], half)) {
             Some((w, Half::Input)) => {
                 started = Some(Linking {
-                    anchor: End::Output(w.from.clone()),
+                    anchor: End::Output(w.from.clone(), w.out),
                     pulled: Some((w.to.clone(), w.slot)),
                 });
             }
@@ -1010,7 +1024,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         && let Some(to) = at
     {
         let from = match &l.anchor {
-            End::Output(s) => index_of(s).map(|i| outlet_at(boxes[i], &graph.tiles[i])),
+            End::Output(s, o) => index_of(s).and_then(|i| outlet_at(boxes[i], &graph.tiles[i], *o)),
             End::Input(d, slot) => index_of(d)
                 .and_then(|i| inlet_at(boxes[i], &graph.tiles[i], *slot))
                 .map(|(p, _)| p),

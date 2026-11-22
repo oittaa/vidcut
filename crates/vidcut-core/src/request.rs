@@ -989,9 +989,10 @@ pub enum Request {
         #[serde(default)]
         to: Option<usize>,
     },
-    /// Change a compound clip's starting timecode. Pass `compound` (from the
-    /// Media tab), `clip` (on the timeline), or neither for the open compound
-    /// clip.
+    /// Change a compound clip's name or starting timecode. Pass `compound`
+    /// (from the Media tab), `clip` (on the timeline), or neither for the
+    /// open compound clip. A new name shows on each copy that has no name of
+    /// its own (`clip.set` `name`).
     #[serde(rename = "compound.set")]
     CompoundSet {
         /// A copy on the timeline (by clip id, label, or `playhead`).
@@ -1000,8 +1001,12 @@ pub enum Request {
         /// A compound clip in the Media tab (by id or name).
         #[serde(default)]
         compound: Option<String>,
+        /// The new name. Two compound clips can have the same name.
+        #[serde(default)]
+        name: Option<String>,
         /// The new starting timecode (`HH:MM:SS:FF`, frames, or seconds).
-        start_tc: TimeSpec,
+        #[serde(default)]
+        start_tc: Option<TimeSpec>,
     },
 
     /// Append after the last clip (Shift+F12).
@@ -1275,12 +1280,14 @@ pub enum Request {
         #[serde(default)]
         start_tc: Option<TimeSpec>,
     },
-    /// Convert In and Out to Compound Clip: cuts the clips of every track at
-    /// the In mark and the Out mark, and makes a compound clip of what is
+    /// Convert In and Out to Compound Clip: cuts the clips and the subtitle
+    /// cues of every track at the In mark and the Out mark. The cues stay on
+    /// their tracks. It makes a compound clip of what is
     /// between them. It goes on the lowest picture track and the lowest
     /// sound track with clips in the range, and the clips outside the range
     /// stay. A J or L cut that reaches a mark is undone. A clip in the range on a
-    /// locked track refuses it. `range` defaults to the timeline's marks,
+    /// locked track refuses it. A cue on a locked subtitle track stays whole.
+    /// `range` defaults to the timeline's marks,
     /// which stay. With one mark, the range runs from the start of the
     /// timeline or to its end. `name` is optional. Returns its clips.
     #[serde(rename = "edit.compound_range")]
@@ -2913,13 +2920,16 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
         add: GradeAdd,
-        /// The node it goes beside: for `serial`, `before`, `parallel` and
-        /// `layer`.
+        /// The node it goes beside: for `serial`, `before`, `parallel`,
+        /// `layer` and `outside`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// Its place in the node editor, for `corrector`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         place: Option<[f64; 2]>,
+        /// The first window of this kind of the new corrector is on.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<WindowKind>,
     },
     /// Take a node out of the grade of a clip, or with `timeline` of the
     /// timeline grade. A corrector or the output that took the picture of
@@ -2944,8 +2954,9 @@ pub enum Request {
     /// Join the picture of node `from` (0: the picture that comes into the
     /// grade) to an input of `node` (0: the output of the grade), in place of
     /// what was there. Without `from`, the input takes nothing. On a mixer,
-    /// an `input` one past the last, or no `input`, adds an input. A link
-    /// that makes a loop is an error.
+    /// an `input` one past the last, or no `input`, adds an input. With
+    /// `key`, the key of `from` joins the key input of a corrector or an
+    /// input of a key mixer. A link that makes a loop is an error.
     #[serde(rename = "grade.connect")]
     GradeConnect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2959,6 +2970,22 @@ pub enum Request {
         input: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<u32>,
+        /// Join a key, not a picture.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        key: bool,
+    },
+    /// Remove one input with no link from a mixer of the grade of a clip,
+    /// or with `timeline` of the timeline grade (Remove One Input). The
+    /// last input with no link goes, and the inputs after it move up one.
+    /// A mixer with each input linked, or with one input, stays as it is.
+    #[serde(rename = "grade.input.remove")]
+    GradeInputRemove {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        node: u32,
     },
     /// Copy the settings of a corrector of the grade of a clip, or with
     /// `timeline` of the timeline grade (Ctrl+C on the Color page): its
@@ -4404,10 +4431,16 @@ pub enum Request {
         wide: Option<bool>,
     },
     /// Select nodes in the node editor of the color page, by number. The
-    /// palette then shows the last one. An empty list selects none.
-    /// Answers what `gui.state` does.
+    /// palette then shows the last one, or `current`. An empty list selects
+    /// none. Answers what `gui.state` does.
     #[serde(rename = "gui.grade_nodes")]
-    GuiGradeNodes { nodes: Vec<u32> },
+    GuiGradeNodes {
+        nodes: Vec<u32>,
+        /// The current node, when it is not one of `nodes`. The palette
+        /// shows it, and a delete of the selected nodes keeps it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current: Option<u32>,
+    },
     /// The playhead of the effects page. It moves over the whole source of
     /// the clip: the head before its In and the tail after its Out too.
     /// `at` moves it, in frames from the In (negative: in the head).
@@ -4636,15 +4669,54 @@ pub struct GradeNodeChange {
     /// The label above it in the node editor. An empty text removes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    /// The gain of the key that a corrector gives out, from 0 to 2.
+    /// The gain of the key that a corrector or a key mixer gives out, from
+    /// 0 to 2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_gain: Option<f64>,
-    /// The offset of the key that a corrector gives out, from -1 to 1.
+    /// The offset of the key that a corrector or a key mixer gives out,
+    /// from -1 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_offset: Option<f64>,
-    /// The key that a corrector gives out is turned over: 1 minus it.
+    /// The key that a corrector or a key mixer gives out is turned over: 1
+    /// minus it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_invert: Option<bool>,
+    /// The key that comes into a corrector is turned over: 1 minus it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_invert: Option<bool>,
+    /// The key that comes into a corrector adds to the key of its windows.
+    /// Off, it is Matte: the key is where both keys are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_mask: Option<bool>,
+    /// The gain of the key that comes into a corrector, from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_gain: Option<f64>,
+    /// The offset of the key that comes into a corrector, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_offset: Option<f64>,
+    /// The blur of the key that comes into a corrector, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_blur: Option<f64>,
+    /// The ratio of the blur of the key that comes into a corrector, from
+    /// -1 to 1. Above 0 the blur is less high, and below 0 less wide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_input_blur_ratio: Option<f64>,
+    /// The input of a key mixer, from 0, that the `mix_` values change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<u32>,
+    /// The key of `input` is turned over: 1 minus it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mix_invert: Option<bool>,
+    /// The key of `input` limits the mix to where it is. Off, it is Mask:
+    /// the key adds to the mix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mix_matte: Option<bool>,
+    /// The gain of the key of `input`, from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mix_gain: Option<f64>,
+    /// The offset of the key of `input`, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mix_offset: Option<f64>,
     /// Locked, the node keeps its grade: the values, the keyframes and the
     /// Key Output of a corrector, and the kind and mode of a mixer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4660,7 +4732,7 @@ pub enum GradePalette {
     Primaries,
     /// The windows of the corrector.
     Window,
-    /// The Key Output.
+    /// The Key Input and the Key Output, or the values of a key mixer.
     Key,
 }
 
@@ -4708,6 +4780,11 @@ pub enum GradeAdd {
     Append,
     /// A corrector that joins nothing, at `place`.
     Corrector,
+    /// As `serial` after the corrector `node`. Its key input takes the key
+    /// of `node`, turned over.
+    Outside,
+    /// A key mixer with two inputs that take nothing, at `place`.
+    KeyMixer,
 }
 
 /// The channels of a printer point.
@@ -5234,6 +5311,9 @@ pub struct CopiedNode {
     /// As `key` of a grade node. Left out at its usual value.
     #[serde(default, skip_serializing_if = "crate::model::KeyOutput::is_usual")]
     pub key: crate::model::KeyOutput,
+    /// As `key_input` of a grade node. Left out at its usual value.
+    #[serde(default, skip_serializing_if = "crate::model::KeyInput::is_usual")]
+    pub key_input: crate::model::KeyInput,
     /// As `windows` of a grade node. Left out when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub windows: Vec<crate::model::GradeWindow>,

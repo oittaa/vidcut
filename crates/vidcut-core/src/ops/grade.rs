@@ -2,8 +2,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Corrector, Grade, GradeKey, GradeNode, GradeTool, GradeWindow, KeyOutput, Project,
-    WindowKind,
+    Clip, Corrector, Grade, GradeKey, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
+    KeyOutput, Project, WindowKind,
 };
 use crate::preferences::ColorPrefs;
 use crate::request::{
@@ -77,6 +77,43 @@ impl GradeNodeChange {
             gain: self.key_gain.unwrap_or(k.gain),
             offset: self.key_offset.unwrap_or(k.offset),
             invert: self.key_invert.unwrap_or(k.invert),
+        }
+    }
+
+    fn changes_key_input(&self) -> bool {
+        let flags = [self.key_input_invert, self.key_input_mask];
+        let values = [
+            self.key_input_gain,
+            self.key_input_offset,
+            self.key_input_blur,
+            self.key_input_blur_ratio,
+        ];
+        flags.iter().any(Option::is_some) || values.iter().any(Option::is_some)
+    }
+
+    fn key_input_changed(&self, i: KeyInput) -> KeyInput {
+        KeyInput {
+            invert: self.key_input_invert.unwrap_or(i.invert),
+            mask: self.key_input_mask.unwrap_or(i.mask),
+            gain: self.key_input_gain.unwrap_or(i.gain),
+            offset: self.key_input_offset.unwrap_or(i.offset),
+            blur: self.key_input_blur.unwrap_or(i.blur),
+            blur_ratio: self.key_input_blur_ratio.unwrap_or(i.blur_ratio),
+        }
+    }
+
+    fn changes_mix(&self) -> bool {
+        let flags = [self.mix_invert, self.mix_matte];
+        let values = [self.mix_gain, self.mix_offset];
+        flags.iter().any(Option::is_some) || values.iter().any(Option::is_some)
+    }
+
+    fn mix_changed(&self, m: KeyMix) -> KeyMix {
+        KeyMix {
+            invert: self.mix_invert.unwrap_or(m.invert),
+            matte: self.mix_matte.unwrap_or(m.matte),
+            gain: self.mix_gain.unwrap_or(m.gain),
+            offset: self.mix_offset.unwrap_or(m.offset),
         }
     }
 }
@@ -156,15 +193,65 @@ fn key_checked(k: &KeyOutput) -> Result<()> {
     within(k.offset, (-1.0, 1.0), "key_offset")
 }
 
+fn key_input_checked(i: &KeyInput) -> Result<()> {
+    within(i.gain, (0.0, 2.0), "key_input_gain")?;
+    within(i.offset, (-1.0, 1.0), "key_input_offset")?;
+    within(i.blur, (-1.0, 1.0), "key_input_blur")?;
+    within(i.blur_ratio, (-1.0, 1.0), "key_input_blur_ratio")
+}
+
+fn links_checked(g: &Grade, n: &GradeNode, k: u32) -> Result<()> {
+    let last = g.last();
+    if let Some(v) = n.links().find(|v| *v > last || *v == k) {
+        return Err(Error::invalid(format!("node {k} cannot take node {v}")));
+    }
+    let keyed = |v: u32| {
+        (g.node(v)).is_some_and(|d| matches!(d.tool, GradeTool::Corrector(_)) || d.takes_keys())
+    };
+    let keys = n.inputs.iter().flatten().filter(|_| n.takes_keys());
+    if let Some(v) = keys.copied().chain(n.key_from).find(|v| !keyed(*v)) {
+        return Err(Error::invalid(format!(
+            "node {k} cannot take the key of node {v}: a corrector or a key mixer gives a key"
+        )));
+    }
+    let mut pictures = n.inputs.iter().flatten().filter(|_| !n.takes_keys());
+    if let Some(v) = pictures.find(|v| g.node(**v).is_some_and(GradeNode::takes_keys)) {
+        return Err(Error::invalid(format!(
+            "key mixer {v} gives out no picture"
+        )));
+    }
+    if n.tool.is_mixer() && (n.key_from.is_some() || !n.key_input.is_usual()) {
+        return Err(Error::invalid(format!("mixer {k} has no key input")));
+    }
+    if let GradeTool::KeyMixer { mix } = &n.tool {
+        if mix.len() != n.inputs.len() {
+            return Err(Error::invalid(format!(
+                "key mixer {k} has one mix for each input"
+            )));
+        }
+        for m in mix {
+            within(m.gain, (0.0, 2.0), "mix_gain")?;
+            within(m.offset, (-1.0, 1.0), "mix_offset")?;
+        }
+    }
+    key_input_checked(&n.key_input)
+}
+
 pub fn checked(g: &Grade) -> Result<()> {
     let last = g.last();
     if let Some(o) = g.output.filter(|o| *o > last) {
         return Err(no_node(o));
     }
+    if let Some(o) = g
+        .output
+        .filter(|o| g.node(*o).is_some_and(GradeNode::takes_keys))
+    {
+        return Err(Error::invalid(format!(
+            "key mixer {o} gives out no picture"
+        )));
+    }
     for (n, k) in g.nodes.iter().zip(1..) {
-        if let Some(v) = n.inputs.iter().flatten().find(|v| **v > last || **v == k) {
-            return Err(Error::invalid(format!("node {k} cannot take node {v}")));
-        }
+        links_checked(g, n, k)?;
         finite(&n.place, "place")?;
         match &n.tool {
             GradeTool::Corrector(c) => {
@@ -184,7 +271,7 @@ pub fn checked(g: &Grade) -> Result<()> {
             }
             _ => {}
         }
-        if n.tool.is_mixer() && !n.key.is_usual() {
+        if n.tool.is_mixer() && !n.takes_keys() && !n.key.is_usual() {
             return Err(Error::invalid(format!("mixer {k} gives out no key")));
         }
         key_checked(&n.key)?;
@@ -369,9 +456,38 @@ fn key_changed(
     frame: Option<i64>,
     change: impl FnOnce(KeyOutput) -> KeyOutput,
 ) -> Result<()> {
+    if g.node(n).is_some_and(GradeNode::takes_keys) {
+        let d = unlocked(g, n)?;
+        d.key = change(d.key);
+        return Ok(());
+    }
     let (d, frame) = changed_node(g, n, frame)?;
     d.change_key_output_at(frame, change)
         .ok_or_else(|| no_node(n))
+}
+
+fn key_input_changed(
+    g: &mut Grade,
+    n: u32,
+    change: impl FnOnce(KeyInput) -> KeyInput,
+) -> Result<()> {
+    let d = unlocked(g, n)?;
+    values(d, n)?;
+    d.key_input = change(d.key_input);
+    Ok(())
+}
+
+fn mix_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
+    let d = unlocked(g, n)?;
+    let GradeTool::KeyMixer { mix } = &mut d.tool else {
+        return Err(Error::invalid(format!("node {n} is not a key mixer")));
+    };
+    let i =
+        (change.input).ok_or_else(|| Error::usage("give `input`, an input of the key mixer"))?;
+    let m = (mix.get_mut(i as usize))
+        .ok_or_else(|| Error::not_found(format!("key mixer {n} has no input {i}")))?;
+    *m = change.mix_changed(*m);
+    Ok(())
 }
 
 const NEEDS: &str = "grade.set needs a value to change";
@@ -394,6 +510,14 @@ pub fn set(
             }
             if node_change.changes_key() {
                 key_changed(g, n, frame, |k| node_change.key_changed(k))?;
+            }
+            if node_change.changes_key_input() {
+                key_input_changed(g, n, |i| node_change.key_input_changed(i))?;
+            }
+            match (node_change.changes_mix(), node_change.input) {
+                (true, _) => mix_changed(g, n, node_change)?,
+                (false, Some(_)) => return Err(Error::usage("`input` needs a `mix_` value")),
+                (false, None) => {}
             }
             node_changed(g, n, node_change)
         })?;
@@ -422,6 +546,9 @@ fn node_changed(g: &mut Grade, n: u32, change: &GradeNodeChange) -> Result<()> {
         d.tool = match (&d.tool, to) {
             (GradeTool::Corrector(_), _) => {
                 return Err(Error::invalid(format!("node {n} is a corrector")));
+            }
+            (GradeTool::KeyMixer { .. }, _) => {
+                return Err(Error::invalid(format!("node {n} is a key mixer")));
             }
             (GradeTool::LayerMixer { .. }, GradeMixer::LayerMixer) => d.tool.clone(),
             (_, GradeMixer::LayerMixer) => GradeTool::LayerMixer {
@@ -458,11 +585,11 @@ pub fn clear(
         edited(p, one, |g| match (n, keep_nodes) {
             (Some(n), _) => cleared(g, n, frame, (palette, size)),
             (None, true) => {
-                let correctors: Vec<u32> = (g.nodes.iter().zip(1..))
-                    .filter(|(d, _)| !d.tool.is_mixer() && !d.locked)
+                let graded: Vec<u32> = (g.nodes.iter().zip(1..))
+                    .filter(|(d, _)| (!d.tool.is_mixer() || d.takes_keys()) && !d.locked)
                     .map(|(_, k)| k)
                     .collect();
-                for k in correctors {
+                for k in graded {
                     cleared(g, k, frame, (None, size))?;
                 }
                 Ok(())
@@ -483,11 +610,24 @@ fn cleared(
     (palette, size): (Option<GradePalette>, [f64; 2]),
 ) -> Result<()> {
     let resets = |one: GradePalette| palette.is_none_or(|p| p == one);
+    if g.node(n).is_some_and(GradeNode::takes_keys) && resets(GradePalette::Key) {
+        let d = unlocked(g, n)?;
+        if let GradeTool::KeyMixer { mix } = &mut d.tool {
+            mix.fill(KeyMix::default());
+        }
+        d.key = KeyOutput::default();
+        return Ok(());
+    }
     if resets(GradePalette::Primaries) {
         changed(g, n, frame, |_| Corrector::default())?;
     }
     if resets(GradePalette::Key) {
         key_changed(g, n, frame, |_| KeyOutput::default())?;
+        let kept = palette.is_some();
+        key_input_changed(g, n, |i| KeyInput {
+            invert: kept && i.invert,
+            ..KeyInput::default()
+        })?;
     }
     if resets(GradePalette::Window) {
         let d = unlocked(g, n)?;
@@ -540,6 +680,7 @@ fn takers(g: &Grade, n: u32) -> Vec<(u32, usize)> {
     g.nodes
         .iter()
         .zip(1..)
+        .filter(|(d, _)| !d.takes_keys())
         .flat_map(|(d, k)| {
             d.inputs
                 .iter()
@@ -552,7 +693,7 @@ fn takers(g: &Grade, n: u32) -> Vec<(u32, usize)> {
 
 fn retake(g: &mut Grade, from: u32, to: Option<u32>, except: u32) {
     for (d, k) in g.nodes.iter_mut().zip(1..) {
-        if k == except {
+        if k == except || d.takes_keys() {
             continue;
         }
         for v in &mut d.inputs {
@@ -622,18 +763,10 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd, frame: [f64; 2]) -> Result<u32>
             let place = free_below(g, at);
             g.nodes.push(GradeNode::corrector(input, place, frame));
             retake(g, n, Some(added + 1), 0);
-            g.nodes.push(GradeNode {
-                tool: mixer_of(kind),
-                inputs: vec![Some(n), Some(added)],
-                on: true,
-                place: [at[0] + 1.0, at[1]],
-                label: String::new(),
-                keys: Vec::new(),
-                animated: false,
-                key: Default::default(),
-                locked: false,
-                windows: Vec::new(),
-            });
+            let inputs = vec![Some(n), Some(added)];
+            let place = [at[0] + 1.0, at[1]];
+            g.nodes
+                .push(GradeNode::mixer(mixer_of(kind), inputs, place));
         }
     }
     Ok(added)
@@ -643,8 +776,8 @@ pub fn add(
     p: &mut Project,
     of: &GradeOf,
     kind: GradeAdd,
-    n: Option<u32>,
-    place: Option<[f64; 2]>,
+    (n, place): (Option<u32>, Option<[f64; 2]>),
+    window: Option<WindowKind>,
 ) -> Result<Value> {
     let frame = p.frame_size();
     let mut made = 0;
@@ -653,8 +786,14 @@ pub fn add(
         let around = |g: &Grade| -> Result<(u32, [f64; 2])> {
             let n = n.ok_or_else(|| Error::usage("give `node`, the node it goes beside"))?;
             let d = g.node(n).ok_or_else(|| no_node(n))?;
+            if d.takes_keys() {
+                return Err(Error::invalid(format!(
+                    "key mixer {n} gives out no picture"
+                )));
+            }
             Ok((n, d.place))
         };
+        let below = g.nodes.iter().map(|d| d.place[1] + 1.0).fold(0.0, f64::max);
         made = match kind {
             GradeAdd::Serial => {
                 let (n, [x, y]) = around(g)?;
@@ -691,12 +830,37 @@ pub fn add(
                 added
             }
             GradeAdd::Corrector => {
-                let below = g.nodes.iter().map(|d| d.place[1] + 1.0).fold(0.0, f64::max);
                 let at = place.unwrap_or([0.0, below]);
                 g.nodes.push(GradeNode::corrector(None, at, frame));
                 added
             }
+            GradeAdd::Outside => {
+                let (n, [x, y]) = around(g)?;
+                values(node(g, n)?, n)?;
+                shifted(g, x + 1.0);
+                let mut outside = GradeNode::corrector(Some(n), [x + 1.0, y], frame);
+                outside.key_from = Some(n);
+                outside.key_input.invert = true;
+                g.nodes.push(outside);
+                retake(g, n, Some(added), added);
+                added
+            }
+            GradeAdd::KeyMixer => {
+                let at = place.unwrap_or([0.0, below]);
+                let mix = vec![KeyMix::default(); 2];
+                let tool = GradeTool::KeyMixer { mix };
+                g.nodes.push(GradeNode::mixer(tool, vec![None; 2], at));
+                added
+            }
         };
+        if let Some(w) = window {
+            let d = node(g, made)?;
+            let first = WindowKind::ALL.iter().position(|k| *k == w);
+            match (first.and_then(|i| d.windows.get_mut(i)), &d.tool) {
+                (Some(on), GradeTool::Corrector(_)) => on.on = true,
+                _ => return Err(Error::invalid("a key mixer has no window")),
+            }
+        }
         Ok(())
     })?;
     Ok(json!({ "node": made }))
@@ -712,6 +876,7 @@ fn renumbered(g: &mut Grade, gone: u32) {
     };
     for d in &mut g.nodes {
         d.inputs.iter_mut().for_each(after);
+        after(&mut d.key_from);
     }
     after(&mut g.output);
 }
@@ -731,7 +896,10 @@ pub fn remove(p: &mut Project, of: &GradeOf, n: u32, extract: bool) -> Result<()
             }
         };
         retake(g, n, input, n);
-        node(g, n)?.inputs = vec![None];
+        let d = node(g, n)?;
+        d.inputs = vec![None];
+        d.key_from = None;
+        unkeyed(g, n);
         Ok(())
     })
 }
@@ -743,6 +911,7 @@ pub fn taken_out(g: &mut Grade, n: u32) -> Result<Vec<u32>> {
         _ => (None, false),
     };
     let mut fed = Vec::new();
+    unkeyed(g, n);
     for (d, k) in g.nodes.iter_mut().zip(1..) {
         let mixer = d.tool.is_mixer();
         let to = if mixer { None } else { input };
@@ -770,6 +939,19 @@ pub fn taken_out(g: &mut Grade, n: u32) -> Result<Vec<u32>> {
         renumbered(g, k);
     }
     Ok(gone)
+}
+
+fn unkeyed(g: &mut Grade, n: u32) {
+    for d in &mut g.nodes {
+        if d.key_from == Some(n) {
+            d.key_from = None;
+        }
+        if d.takes_keys() {
+            for v in d.inputs.iter_mut().filter(|v| **v == Some(n)) {
+                *v = None;
+            }
+        }
+    }
 }
 
 fn lone_input(g: &Grade, m: u32) -> Option<u32> {
@@ -817,6 +999,7 @@ pub fn copy(p: &Project, of: &GradeOf, n: u32) -> Result<CopiedNode> {
         on: d.on,
         animated: d.is_animated(),
         key: d.key,
+        key_input: d.key_input,
         windows: d.windows.clone(),
     })
 }
@@ -833,6 +1016,7 @@ pub fn paste(p: &mut Project, of: &[GradeOf], n: u32, copied: &CopiedNode) -> Re
             d.on = copied.on;
             d.animated = copied.animated;
             d.key = copied.key;
+            d.key_input = copied.key_input;
             d.windows.clone_from(&copied.windows);
             Ok(())
         })?;
@@ -965,7 +1149,53 @@ pub fn swap(p: &mut Project, of: &GradeOf, n: u32, with: u32) -> Result<()> {
             d.on = from.on;
             d.animated = from.animated;
             d.key = from.key;
+            d.key_input = from.key_input;
             d.windows = from.windows;
+        }
+        Ok(())
+    })
+}
+
+fn linked(
+    inputs: &mut Vec<Option<u32>>,
+    (n, input): (u32, Option<u32>),
+    from: Option<u32>,
+) -> Result<bool> {
+    let count = inputs.len();
+    match input.map(|i| i as usize) {
+        Some(i) if i < count => {
+            inputs[i] = from;
+            Ok(false)
+        }
+        None => {
+            inputs.push(from);
+            Ok(true)
+        }
+        Some(i) if i == count => {
+            inputs.push(from);
+            Ok(true)
+        }
+        Some(i) => Err(Error::invalid(format!(
+            "mixer {n} has {count} inputs: input {i} is past the next one"
+        ))),
+    }
+}
+
+pub fn remove_input(p: &mut Project, of: &GradeOf, n: u32) -> Result<()> {
+    edited(p, of, |g| {
+        let d = node(g, n)?;
+        if matches!(d.tool, GradeTool::Corrector(_)) {
+            return Err(Error::invalid(format!(
+                "node {n} is a corrector, not a mixer"
+            )));
+        }
+        let empty = d.inputs.iter().rposition(Option::is_none);
+        let Some(i) = empty.filter(|_| d.inputs.len() > 1) else {
+            return Ok(());
+        };
+        d.inputs.remove(i);
+        if let GradeTool::KeyMixer { mix } = &mut d.tool {
+            mix.remove(i);
         }
         Ok(())
     })
@@ -974,15 +1204,18 @@ pub fn swap(p: &mut Project, of: &GradeOf, n: u32, with: u32) -> Result<()> {
 pub fn connect(
     p: &mut Project,
     of: &GradeOf,
-    n: u32,
-    input: Option<u32>,
+    (n, input): (u32, Option<u32>),
     from: Option<u32>,
+    key: bool,
 ) -> Result<()> {
     edited(p, of, |g| {
         if let Some(f) = from.filter(|f| *f > g.last()) {
             return Err(no_node(f));
         }
         if n == 0 {
+            if key {
+                return Err(Error::invalid("the output takes a picture, not a key"));
+            }
             if input.is_some_and(|i| i > 0) {
                 return Err(Error::invalid("the output has one input"));
             }
@@ -993,19 +1226,34 @@ pub fn connect(
             return Err(Error::invalid(format!("node {n} cannot take itself")));
         }
         let d = node(g, n)?;
-        match (d.tool.is_mixer(), input) {
-            (false, None | Some(0)) => d.inputs[0] = from,
-            (false, Some(_)) => {
-                return Err(Error::invalid(format!("corrector {n} has one input")));
+        match (&mut d.tool, key) {
+            (GradeTool::KeyMixer { mix }, true) => {
+                if linked(&mut d.inputs, (n, input), from)? {
+                    mix.push(KeyMix::default());
+                }
             }
-            (true, None) => d.inputs.push(from),
-            (true, Some(i)) if (i as usize) < d.inputs.len() => d.inputs[i as usize] = from,
-            (true, Some(i)) if i as usize == d.inputs.len() => d.inputs.push(from),
-            (true, Some(i)) => {
+            (GradeTool::KeyMixer { .. }, false) => {
                 return Err(Error::invalid(format!(
-                    "mixer {n} has {} inputs: input {i} is past the next one",
-                    d.inputs.len()
+                    "key mixer {n} takes keys: give `key`"
                 )));
+            }
+            (GradeTool::Corrector(_), true) => match input {
+                None | Some(0) => d.key_from = from,
+                Some(_) => {
+                    return Err(Error::invalid(format!("corrector {n} has one key input")));
+                }
+            },
+            (_, true) => {
+                return Err(Error::invalid(format!("mixer {n} takes no key")));
+            }
+            (GradeTool::Corrector(_), false) => match input {
+                None | Some(0) => d.inputs[0] = from,
+                Some(_) => {
+                    return Err(Error::invalid(format!("corrector {n} has one input")));
+                }
+            },
+            (_, false) => {
+                linked(&mut d.inputs, (n, input), from)?;
             }
         }
         if crate::grade::order(g).is_none() {

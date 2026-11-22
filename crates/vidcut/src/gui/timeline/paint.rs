@@ -474,10 +474,8 @@ fn clip(
         ));
     }
     if look.names && width > 30.0 {
-        let name = c
-            .name
-            .clone()
-            .or_else(|| media.map(|m| m.name.clone()))
+        let name = p
+            .clip_name(c)
             .or_else(|| c.title.as_ref().map(vidcut_core::model::Title::label))
             .or_else(|| {
                 c.generator

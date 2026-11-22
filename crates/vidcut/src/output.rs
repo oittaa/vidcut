@@ -261,7 +261,8 @@ pub fn print(method: &str, r: &Response, json: bool) {
         }
         "compound.set" => {
             println!(
-                "ok {method}: {} (rev {})",
+                "ok {method}: {} {} (rev {})",
+                r.result["name"].as_str().unwrap_or_default(),
                 r.result["start_tc"].as_str().unwrap_or_default(),
                 r.rev
             );
@@ -1469,7 +1470,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 }
             );
             println!(
-                "color grade {}, palette {} ({}), window {}, nodes {}",
+                "color grade {}, palette {} ({}), window {}, nodes {}, current {}",
                 v["grade"].as_str().unwrap_or("-"),
                 v["palette"].as_str().unwrap_or("-"),
                 v["primaries"].as_str().unwrap_or("-"),
@@ -1478,7 +1479,10 @@ fn live(method: &str, r: &Response) -> Option<()> {
                     "-".to_string()
                 } else {
                     grade_nodes.join(" ")
-                }
+                },
+                v["grade_node"]
+                    .as_u64()
+                    .map_or("-".into(), |n| n.to_string())
             );
             let on = |k: &str| if t[k] == true { "on" } else { "off" };
             let windows: Vec<&str> = v["windows"]

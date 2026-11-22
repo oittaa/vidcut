@@ -92,6 +92,7 @@ pub(super) struct EffectsPage {
     pub(super) window_grab: Option<super::window_overlay::WindowGrab>,
     pub(super) window_drawing: Option<super::window_overlay::Drawing>,
     pub(super) grade_nodes: Vec<u32>,
+    pub(super) grade_loose: bool,
     pub(super) grade_seen: Option<(String, GradeOf, Option<String>)>,
     pub(super) grade_left: Lru<(String, GradeOf), u32, GRADES_LEFT_KEPT>,
     pub(super) grade_coming: Option<(u32, Instant)>,
@@ -131,6 +132,7 @@ impl Default for EffectsPage {
             window_grab: None,
             window_drawing: None,
             grade_nodes: Vec::new(),
+            grade_loose: false,
             grade_seen: None,
             grade_left: Lru::new(),
             grade_coming: None,
@@ -157,6 +159,16 @@ impl Default for EffectsPage {
 impl EffectsPage {
     pub(super) fn picked(&self) -> Option<&str> {
         self.nodes.last().map(String::as_str)
+    }
+
+    pub(super) fn pick_grade(&mut self, nodes: Vec<u32>, loose: bool) {
+        self.grade_loose = loose && nodes.len() > 1;
+        self.grade_nodes = nodes;
+    }
+
+    pub(super) fn picked_grade(&self) -> &[u32] {
+        let held = self.grade_nodes.len() - usize::from(self.grade_loose);
+        &self.grade_nodes[..held]
     }
 
     pub(super) fn leave(&mut self) {
@@ -359,6 +371,8 @@ fn joins(comp: &Composition) -> Vec<Wire<String>> {
                     to: n.name.clone(),
                     slot: slot(which),
                     from,
+                    out: 0,
+                    drops: true,
                 });
             }
         }
@@ -387,7 +401,8 @@ fn tile(n: &Node) -> Tile<String> {
             name: "Effect Mask".into(),
         });
     }
-    let outlet = (!matches!(n.tool, Tool::MediaOut)).then(|| Outlet {
+    let outlets = (!matches!(n.tool, Tool::MediaOut)).then(|| Outlet {
+        slot: 0,
         name: "Output".into(),
         color: Color32::WHITE,
     });
@@ -401,7 +416,7 @@ fn tile(n: &Node) -> Tile<String> {
         note: String::new(),
         badges: Vec::new(),
         locked: None,
-        outlet,
+        outlets: outlets.into_iter().collect(),
         inlets,
         edge: None,
         shot: None,
@@ -429,15 +444,15 @@ fn join_command(clip: &str, (dst, which): (&str, NodeInput), src: Option<&str>) 
 
 fn linked(comp: &Composition, clip: &str, l: &Link<String>) -> Vec<Value> {
     let new = match (&l.anchor, &l.spot) {
-        (End::Output(src), Spot::Knot(End::Input(dst, s))) => {
+        (End::Output(src, _), Spot::Knot(End::Input(dst, s))) => {
             Some((dst.clone(), which(*s), src.clone()))
         }
-        (End::Output(src), Spot::Tile(dst)) => comp
+        (End::Output(src, _), Spot::Tile(dst)) => comp
             .node(src)
             .zip(comp.node(dst))
             .and_then(|(s, d)| default_input(d, s))
             .map(|w| (dst.clone(), w, src.clone())),
-        (End::Input(dst, s), Spot::Knot(End::Output(src)) | Spot::Tile(src)) => {
+        (End::Input(dst, s), Spot::Knot(End::Output(src, _)) | Spot::Tile(src)) => {
             Some((dst.clone(), which(*s), src.clone()))
         }
         _ => None,
@@ -1049,7 +1064,7 @@ impl Workspace {
         ui.horizontal(|ui| {
             ui.label(RichText::new(vidcut_core::composition::MEDIA_OUT).strong());
             if let (Some(p), Some(c)) = (&p, &clip) {
-                ui.label(dim(clip_name(p, c)));
+                ui.label(dim(p.clip_name(c).unwrap_or_else(|| c.id.clone())));
             }
         });
         let avail = ui.available_rect_before_wrap();
@@ -1985,6 +2000,7 @@ impl Workspace {
             tiles: comp.nodes.iter().map(tile).collect(),
             wires: joins(&comp),
             selected: &self.effects_page.nodes,
+            current: self.effects_page.nodes.last(),
             active: theme::colors().accent,
         };
         let done = node_editor::show(
@@ -2210,11 +2226,4 @@ impl Workspace {
 fn slid((v0, v1): (f64, f64), by: f64) -> (f64, f64) {
     let by = by.max(-v0).min(1.0 - v1);
     (v0 + by, v1 + by)
-}
-
-fn clip_name(p: &Project, c: &Clip) -> String {
-    c.name
-        .clone()
-        .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
-        .unwrap_or_else(|| c.id.clone())
 }

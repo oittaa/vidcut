@@ -1837,6 +1837,9 @@ fn fs_grade_mix(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let under = textureLoad(blur_start, px, 0);
     let top = textureLoad(blur_source, px, 0);
+    if grade_mixing.how.x > 1.5 {
+        return clamp(2.0 * top - under, vec4<f32>(0.0), vec4<f32>(1.0));
+    }
     if grade_mixing.how.x < 0.5 {
         return under + top - textureLoad(grade_base, px, 0);
     }
@@ -2054,6 +2057,44 @@ fn fs_window_key(in: Out) -> @location(0) vec4<f32> {
     let o = window_keying.output;
     let out = o.x * clamp(key, 0.0, 1.0) + o.y;
     return vec4<f32>(clamp(select(out, 1.0 - out, o.z > 0.5), 0.0, 1.0));
+}
+
+struct KeyFolding {
+    scale: vec4<f32>,
+    flat: vec4<f32>,
+    finish: vec4<f32>,
+    out: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> key_folding: KeyFolding;
+
+@fragment
+fn fs_key_fold(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let f = key_folding.flat;
+    let acc = select(f.x, textureLoad(blur_start, px, 0).r, f.y > 0.5);
+    let k = select(f.z, textureLoad(blur_source, px, 0).r, f.w > 0.5);
+    let s = key_folding.scale;
+    var x = s.x * k + s.y;
+    if s.z > 0.5 {
+        x = 1.0 - x;
+    }
+    var v = window_join(acc, x);
+    if s.w > 0.5 {
+        v = 1.0 - window_join(1.0 - acc, 1.0 - x);
+    }
+    let e = key_folding.finish;
+    if e.x > 0.5 {
+        if e.y > 0.5 {
+            v = clamp(v, 0.0, 1.0);
+        }
+        v = e.z * v + e.w;
+        if key_folding.out.x > 0.5 {
+            v = 1.0 - v;
+        }
+        v = clamp(v, 0.0, 1.0);
+    }
+    return vec4<f32>(v);
 }
 
 struct Shot {

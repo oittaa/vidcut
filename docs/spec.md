@@ -2473,11 +2473,12 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - It opens the same window.
   - It cuts the clips at In and at the frame after Out, on all tracks. The Out frame is inside.
   - Thus In 24 and Out 120 give 97 frames, from 24 up to 121.
+  - A subtitle cue across In or across the frame after Out is cut there too. Both parts stay on their subtitle track (measured in Resolve Studio 21.2).
   - The compound clip goes on the lowest video track and the lowest audio track with clips in the range, linked.
   - The lowest track with clips in the range is inner V1 or A1. A track below it does not go inside.
   - The clips of the other tracks go inside. Those tracks stay on the timeline, empty.
   - The inner tracks start at the In frame.
-  - A locked track does not stop it. Its clips in the range are cut and go inside.
+  - A locked track does not stop it, and changes: [Resolve's edits](gotchas.md#resolves-edits).
   - With only In, the range runs to the end of the timeline. With only Out, the range starts at the start of the timeline.
   - With no marks, the menu does not have this item or Create Compound Clip….
   - A range with no clips does nothing, and shows no message.
@@ -2509,7 +2510,11 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Switching, making or duplicating a timeline closes open compound clips first. Removing an open compound from the Media tab closes it too.
     - A `.vidcut` file saves `compound_path`. Thus reopening resumes inside the open compound clip at its `start_tc`.
     - Exporting while a compound clip is open writes that compound clip with its name and no project data.
-    - Subtitles and a Timeline Color grade inside a compound clip wait in [the gaps](todo/gaps.md).
+    - While a compound clip is open, a request that changes subtitles is refused. A timeline grade is refused there too.
+  - **Subtitles and the timeline grade inside** (measured in Resolve Studio 21.2):
+    - Inside an open compound clip, Add Subtitle Track is dimmed. Add Tracks offers only video and audio tracks.
+    - On the Color page, the Timeline mode of the Node Editor shows an empty graph with no input and no output.
+    - A new node does not go into that graph. A changed value goes to no grade.
 - **Starting Timecode** (pp. 1052–1054; measured in Resolve Studio 21.2):
   - New Compound Clip, Convert In and Out to Compound Clip, and Create Compound Clip accept a Start Timecode.
   - A new compound clip defaults to `00:00:00:00` (`00:00:00;00` on a drop-frame timeline), regardless of clip placement.
@@ -2523,6 +2528,16 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - `compound.set` and Starting Timecode in the Media tab update the canonical compound definition, so every placement reflects it.
     - Opening a compound clip uses its own frame rate, drop-frame flag and `start_tc`, regardless of the host timeline.
     - OTIO keeps `source_range` zero-based for interchange and stores non-zero `start_tc` in `metadata.vidcut.start_tc`.
+- **Name** (pp. 424, 1025; measured in Resolve Studio 21.2):
+  - In the Media Pool, a click on the name, a pause and a second click open the name for editing.
+  - Return or a click elsewhere keeps the new name. Escape drops it.
+  - An empty name is refused, and the old name stays.
+  - Two compound clips can have the same name.
+  - A new name shows on each placed copy that has no name of its own.
+  - A placed copy can have a name of its own. Its picture and its sound show that name. The Media Pool name stays.
+  - In OTIO export, each `Stack` has the name that its copy shows.
+  - OTIO import loses the own name of a copy: [Resolve's OTIO files](gotchas.md#resolves-otio-files).
+  - **vidcut:** `compound.set` with `name` renames a compound clip. `clip.set` with `name` gives a copy its own name.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data….
   - Preserving Audio Data… is for a nested timeline, on the Edit page and on the Fairlight page (pp. 3960–3962).
@@ -2930,8 +2945,12 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: does the same. Same Node also keeps the current node, because the timeline grade has that number. This part is not measured in Resolve.
   - Measured in Resolve Studio 21.2: a drag box from the empty Node Editor selects the nodes in the box.
   - Measured: a click on the empty Node Editor keeps the current node.
-  - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
-  - vidcut: a Ctrl-click adds a node to the selection, and a drag box adds the nodes in the box. The current node stays.
+  - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node. With `current`, the current node need not be selected.
+  - vidcut: a Ctrl-click adds a node to the selection. A drag box selects the nodes in the box in place of the selection. The current node stays.
+  - Measured in Resolve Studio 21.2: a Ctrl-click on a selected node takes it out of the selection.
+  - vidcut: does the same. A Ctrl-click on the current node does nothing. This part is not measured in Resolve.
+  - vidcut: after a drag box that leaves out the current node, that node stays current but is not selected. Thus Delete keeps it, as measured.
+  - vidcut: `gui.state` gives the selected nodes in `grade_nodes` and the current node in `grade_node`.
   - Measured: a click on the empty Node Editor clears the other selected nodes. The current node stays.
   - vidcut: does the same.
 - **Labels and badges** (pp. 3390–3391):
@@ -2987,11 +3006,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Layer node does the same with a Layer Mixer. Alt+L at the corrector on input 1 of a Layer Mixer added a corrector on input 2.
   - Measured: Alt+P and Alt+L at a corrector that feeds a Layer Mixer each add a new last input to that mixer. The new corrector takes the source.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
-  - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append` or `corrector`. The menus of the Node Editor have each one.
+  - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append`, `outside`, `corrector` or `key_mixer`. The menus of the Node Editor have each one.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
   - vidcut: the new corrector takes the input of the current node, as measured.
-  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L and Alt+K. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K and Alt+O. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
   - Measured in Resolve Studio 21.2: Add Serial Before on a Parallel Mixer puts the new corrector on input 0 of the mixer. The node on that input feeds the new corrector.
   - vidcut: `before` on a mixer does the same, also with Shift+S. With input 0 empty, the new corrector takes nothing. This part is not measured in Resolve.
 - **Delete and extract** (pp. 3395–3396):
@@ -2999,6 +3018,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - The Forward-Delete key deletes the selected node (p. 3395).
   - After a delete, each node after it gets one number less.
   - Measured in Resolve Studio 21.2: the Delete key deletes the current node. With two nodes selected by a drag box, it deletes both.
+  - Measured: after a drag box that leaves out the current node, Delete deletes only the nodes in the box.
   - Measured: a mixer input that took a deleted corrector stays, with no connection. Thus the mixer keeps all its inputs.
   - Measured: in node 1 to node 2 to a mixer input, the delete of node 2 leaves that input with no connection.
   - Measured: a delete that leaves a mixer with one linked input removes the mixer too. The node on that input takes the place of the mixer at its output.
@@ -3008,7 +3028,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: the menu of a mixer shows Shift+Backspace at Delete Node.
   - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
-  - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. The last corrector then becomes the current node.
+  - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. A current node that is not selected stays. The last corrector then becomes the current node.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.
@@ -3023,10 +3043,14 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Label Selected Node.
   - Measured: Add Outside Node, Delete Current Node and Label Selected Node show no key. The other items show their keys.
   - Measured: the manual has other names for three items: Add Serial, Add Before Current and Append Node (p. 3395).
-  - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. Each item shows its key.
+  - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. The items show their keys as measured.
   - vidcut: Delete Current Node deletes the current node. Label Selected Node edits the label of the current corrector in place.
   - vidcut: the submenu comes after the printer submenus. Its place in the Color menu of Resolve is not measured.
-  - vidcut: Switch to Node Layer, Add Outside Node, Add Splitter Combiner Node and the window items are not in the submenu ([todo](todo/color-page.md)).
+  - Measured in Resolve Studio 21.2: Alt+C, Alt+Q, Alt+G and Alt+B add a serial node with its circle, linear, polygon or curve window on (p. 3395).
+  - vidcut: `grade.add` with `window` turns that first window of the new corrector on. The four items and their keys do the same.
+  - vidcut: the curve of Alt+B has no points ([§8.23](#823-windows-pp-32653279)).
+  - vidcut: on the Color page, Alt+B adds a node and does not make a subclip ([§11](#11-keyboard-shortcuts)).
+  - vidcut: Switch to Node Layer and Add Splitter Combiner Node are not in the submenu ([todo](todo/color-page.md)).
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.
@@ -3089,7 +3113,13 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Parallel Mixer that is off gives the same result as when it is on.
   - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
   - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
-  - vidcut: the menu of a mixer has these items in this order, but not Remove One Input ([todo](todo/color-page.md)).
+  - vidcut: the menu of a mixer has these items in this order.
+  - Measured in Resolve Studio 21.2: Remove One Input removes the last input with no link. The inputs after it move up one.
+  - Measured: thus with an empty last input, that input goes. Else an empty input in the middle goes.
+  - Measured: Remove One Input does nothing when each input has a link. A mixer with a linked input and an empty input keeps one input.
+  - Measured: a Key Mixer and a Parallel Mixer act the same.
+  - vidcut: `grade.input.remove` does the same, on each kind of mixer. Remove One Input in the menu of a mixer sends it.
+  - Not measured: Remove One Input on a Layer Mixer, and on a mixer with one empty input. vidcut keeps that one input.
   - Measured in Resolve Studio 21.2: the Add Node submenu of a mixer has Add Serial (Alt+S) and Add Serial Before (Shift+S).
   - vidcut: the Add Node submenu of a mixer has these two items, with their keys.
 - **Lock Node** (pp. 3374, 3454):
@@ -3142,10 +3172,10 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Key Output change goes to a keyframe by the same rule as a change of the values, with the same pairs.
   - Measured: from a usual Dynamic keyframe to the next, Gain blends linearly.
   - Measured: Reset in the Primaries palette keeps the Key Output. Reset Node Grade and Reset Grades and Keep Nodes reset it.
-  - vidcut: Primaries and Key at the top of the palette select the palette. The Key palette has the preview, Invert, Gain and Offset of Key Output.
+  - vidcut: Primaries and Key at the top of the palette select the palette. The Key palette has the Key Input, and the preview, Invert, Gain and Offset of Key Output.
   - vidcut: the Key palette keeps the height of the Primaries palette.
   - vidcut: a typed value outside the range goes to the nearest end.
-  - vidcut: the resets work as measured. Reset in the Key palette resets only the Key Output.
+  - vidcut: the resets work as measured. Reset in the Key palette resets the Key Input and the Key Output, and keeps the Key Input Invert.
   - vidcut: `grade.clear` with `node` and `palette` resets one palette of the node: `primaries`, `window` or `key`.
   - vidcut: `grade.set` with `key_gain`, `key_offset` and `key_invert`. It refuses a value outside the range.
   - vidcut: the key out acts in serial nodes and in the mixers as measured.
@@ -3153,9 +3183,61 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Gain and Offset blend as the values do. Invert changes on the frame of the next keyframe.
   - vidcut: a corrector has one keyframe track, so the Key Output has no track of its own ([todo](todo/gaps.md)).
   - vidcut: the Key palette shows the Key Output of the keyframe that a change goes to.
-  - vidcut: keys, Key Input, the Qualifier controls and the Key Mixer come later ([todo](todo/color-page.md)).
+  - vidcut: the Qualifier controls come later ([todo](todo/color-page.md)).
+- **Key Input, Key Mixer and Outside node** (pp. 3388–3389, 3417–3420, 3431–3437):
+  - Each corrector has a key input and a key output. They are blue, below the RGB input and the RGB output (p. 3388).
+  - A link from a key output to a key input gives the key of one node to another node.
+  - The Key Input of a corrector has Invert, Matte, Gain, Offset, Blur Radius and Blur H/V Ratio (p. 3436). Matte is on by default.
+  - A Key Mixer combines the keys on its inputs. It has no RGB input and no RGB output. A new Key Mixer has two inputs (p. 3435).
+  - Add One Input in the menu of a Key Mixer adds an input. A drag of a key output onto a Key Mixer also adds one (p. 3435).
+  - Each input of a Key Mixer has Invert, Matte, Gain and Offset. Matte is off by default (p. 3437).
+  - The output of a Key Mixer has Invert, Gain and Offset (p. 3437).
+  - An Outside node is a serial corrector after the current node. Its key input takes the key output of that node, with Invert on (p. 3417).
+  - Measured in Resolve Studio 21.2 with float renders. The functions are:
+    - smax(a, b) = max(a, b) + 0.5 max(0, 0.5 − |a − b|)².
+    - L(x) = (8x − 1) / 7, U(a, b) = L(smax(a, b)) and Q(x) = U(0, x).
+  - Measured: a key on a link is clamped to 0..1 first.
+  - Measured: Key Mixer input i with key kᵢ gives xᵢ = gᵢ kᵢ + oᵢ, with the Gain and Offset of the input. Invert gives 1 − xᵢ.
+  - Measured: the Mask inputs go first, in input order: acc = U(acc, xᵢ), from acc = 0. Then each Matte input gives acc = 1 − U(1 − acc, 1 − xᵢ).
+  - Measured: the output of a Key Mixer is og acc + oo. Output Invert gives 1 − (og acc + oo). There is no clamp between the steps.
+  - Measured: the key input of a corrector gives x = ig k + io. With no window in the node, its key is clamp(Q(x)). Matte and Mask give the same key.
+  - Measured: with a window w in the node, a = Q(w). Matte gives clamp(1 − U(1 − a, 1 − x)), and Mask gives clamp(U(a, x)).
+  - Measured: the Key Output then acts on that key E: clamp(kg E + ko).
+  - Measured: a node with windows and no link on its key input has the key of its windows, with no Q.
+  - Measured: Blur Radius goes from −1 to 1. It is a near-Gaussian blur. Its sigma is in proportion to the value and to the frame height.
+  - Measured: Blur H/V h multiplies the sigma across by min(1, 1 + h), and the sigma down by min(1, 1 − h).
+  - Measured: a Blur Radius of −r gives clamp(2k − b, 0, 1), where b is the blur of radius r. The error is below 1.6e-4 at r = 0.5. Thus a hard edge does not change.
+  - Measured: a key link from a corrector that is off gives the linked corrector no correction. The Invert and the Offset of its Key Input do not change that.
+  - Measured: a Key Mixer that is off mixes the keys as when it is on.
+  - Measured: a Key Mixer skips an input with no link. A Key Mixer with no linked input gives a key of 1.
+  - Measured: Extract of a node removes its key links.
+  - Measured: in the Key Input, the Key Output and each Key Mixer input, Gain goes from 0 to 2 and Offset from −1 to 1.
+  - Measured: Reset in the Key palette resets the values of the Key Input and of the Key Output. The Key Input Invert stays on.
+  - Measured: a change of the Key Input gets a keyframe on the Defocus track of the node. A change of a Key Mixer gets a keyframe on its Color Corrector track.
+  - Measured: the Add Node submenu of a corrector has Add Outside as its last item. Color > Nodes > Add Outside Node shows no shortcut, and Alt+O adds no node.
+  - Measured: the menu of a Key Mixer has Reset Node Grade, Add Node, Lock Node, Delete Node, Add One Input and Remove One Input. Its Add Node submenu has Add Serial and Add Serial Before.
+  - The errors of the key functions are below 8.2e-7. The record is in `fixtures/color/NOTES.md` of the test data.
+  - vidcut: the keys combine as measured. Blur Radius is a Gaussian blur with the measured sigma. A Blur Radius below 0 sharpens as measured.
+  - vidcut: a key link from a corrector that is off, an off Key Mixer and the inputs with no link act as measured.
+  - vidcut: a Key Mixer with no linked input gives its Key Output of a key of 1.
+  - vidcut: `grade.connect` with `key` links a key output to a key input. `grade.add` with `key_mixer` and `outside` adds the nodes.
+  - vidcut: `grade.set` with `key_input_invert`, `key_input_mask`, `key_input_gain`, `key_input_offset`, `key_input_blur` and `key_input_blur_ratio` changes the Key Input.
+  - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
+  - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
+  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
+  - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node, Add One Input and Remove One Input. The Add Node submenu comes later ([todo](todo/color-page.md)).
+  - vidcut: a key link is blue. A node cannot drop into a key link.
+  - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
+  - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
+  - vidcut: the Key Input and the Key Mixer have no keyframes yet ([todo](todo/color-page.md)).
+  - Not measured: a key link from a corrector that is off into a Key Mixer. vidcut mixes that key as when the corrector is on.
+  - Not measured: the Key Output of a Key Mixer with no linked input.
+  - Not measured: a Key Mixer with one linked input after a delete. vidcut keeps it.
+  - Not measured: Reset in the Key palette with Matte or the Key Output Invert on. vidcut resets them.
+  - Not measured: Add Serial and Add Serial Before on a Key Mixer.
 
-Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
+Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
+The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.
 `grade.get` gives the nodes and the `output`.
 
 ### 8.22 Color page keyframes (pp. 3453–3465)
@@ -3864,8 +3946,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
-  - The Color page has its own level too. There, its keys go first. Thus Shift+S, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
-  - On the other pages, these four keys keep the actions of the table.
+  - The Color page has its own level too. There, its keys go first. Thus Shift+S, Alt+B, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
+  - On the other pages, these five keys keep the actions of the table.
   - On the Color page, Ctrl+[, Alt+] and the Mark menu act on the keyframes of the grade ([§8.22](#822-color-page-keyframes-pp-34533465)).
   - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
 - These keys and gestures do not change:
@@ -6047,6 +6129,10 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 
 - A grid of values gives the same picture as the Output LUT of the project.
 - It applies to clips. A gap stays black.
+- It does not apply to a Solid Color generator, a Text title or a Text+ title.
+- On a compound clip, it applies once, to the clip inside. It does not apply again to the compound clip.
+  - A clip inside at Zoom 0.5 gets it. The uncovered part of the compound clip stays black, not `T(0)`.
+- In a timeline with its own settings, the Lookup Tables section of the settings shows a warning. The LUT still applies there.
 - A picture with alpha gives `T(clamp(C / A)) * A`, and each layer gets its own `T` before the mix.
 - The Input LUT of a clip replaces it on that clip.
 - vidcut has no Input LUT of the project yet ([todo](todo/luts.md)).

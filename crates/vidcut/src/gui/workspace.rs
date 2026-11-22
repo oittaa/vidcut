@@ -89,6 +89,8 @@ pub struct Workspace {
     pub(super) new_subclip: Option<super::subclip::NewSubclip>,
     pub(super) new_compound: Option<super::compound::NewCompound>,
     pub(super) compound_tc: Option<super::compound::CompoundStartTc>,
+    pub(super) compound_click: Option<super::compound::CompoundClick>,
+    pub(super) compound_rename: Option<super::compound::CompoundRename>,
     pub(super) edit_subclip: Option<super::subclip::EditSubclip>,
     pub(super) hover: Option<(String, i64)>,
     pub(super) pool_clicked: Option<String>,
@@ -193,6 +195,8 @@ impl Workspace {
             new_subclip: None,
             new_compound: None,
             compound_tc: None,
+            compound_click: None,
+            compound_rename: None,
             edit_subclip: None,
             hover: None,
             pool_clicked: None,
@@ -353,7 +357,9 @@ impl Workspace {
                 live::GuiChange::Primaries(view) => self.effects_page.primaries = view,
                 live::GuiChange::Window(w) => self.effects_page.window = w,
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
-                live::GuiChange::GradeNodes(nodes) => self.pick_grade_nodes(nodes)?,
+                live::GuiChange::GradeNodes(nodes, current) => {
+                    self.pick_grade_nodes(nodes, current)?
+                }
                 live::GuiChange::NodeView { zoom, list, wide } => {
                     self.set_node_view(zoom, list, wide)
                 }
@@ -479,8 +485,12 @@ impl Workspace {
             },
             nodes: self.effects_page.nodes.clone(),
             grade_nodes: match page {
-                Page::Color => self.effects_page.grade_nodes.clone(),
+                Page::Color => self.effects_page.picked_grade().to_vec(),
                 Page::Effects | Page::Cut => Vec::new(),
+            },
+            grade_node: match page {
+                Page::Color => self.effects_page.grade_nodes.last().copied(),
+                Page::Effects | Page::Cut => None,
             },
             node_zoom: self.node_zoom(),
             node_list: self.effects_page.grade_list,
