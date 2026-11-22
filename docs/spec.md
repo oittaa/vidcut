@@ -3635,6 +3635,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Double-clicking it on the Edit page inserts it at the playhead on V1 and splits any clip there.
   - Dragging it to the empty space above V1 puts it on a new V2 track.
   - **vidcut:** the Effects tab holds Effects > Adjustment Clip, and `adjustment.add` puts one at `at` (default playhead) for `duration` (default 5 s).
+  - On the timeline, an adjustment clip has a color of its own, a blue-green. A screen capture gives `#136281`. A generator and a video clip have other colors.
+  - **vidcut:** each theme has an `adjustment` color for these clips.
+    - In a built-in theme, it has the hue of `#136281`, and the lightness and saturation of the `generator` color of the theme.
+    - A theme that takes its colors from Omarchy uses the cyan of the palette.
 - **Audio and speed** (measured in Resolve Studio 21.2):
   - An adjustment clip has no sound and no Change Clip Speed command. Its Speed Change section in the Inspector is dimmed.
   - **vidcut:** an adjustment clip goes only on a video track. Speed changes and motion paths are refused, and OTIO import drops any speed effect while keeping its duration.
@@ -3651,8 +3655,14 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
      - With Use Alpha on, Gaussian Blur blurs the edges of a zoomed-out or cropped picture into black on both sides.
      - With Use Alpha off, those pixels outside stay exact black `(0, 0, 0)` and the edge inside does not bleed outside.
      - Film Grain changes only the pixels inside a zoomed-out picture, and leaves pure black `(0, 0, 0)` over an empty gap unchanged.
+     - Measured with Mosaic Blur at its defaults, at 640x360 and 1280x720: the cells keep the size and the grid of the frame.
+       - At Zoom 0.5, the cells do not get smaller. A cell across the edge of the picture has one color.
+       - At Position X 100, the picture moves and the grid does not move. This is measured at 640x360 only.
+       - At Rotation 30, the picture turns and the cells stay square to the frame.
   4. The Color page grade runs after the Edit effects. Outside a zoomed-out picture stays black `(0, 0, 0)` with no grey border.
      - On a zoomed-out blurred edge with Use Alpha on, the grade multiplies the halo cleanly with no dark or bright rim.
+     - Over an empty gap, the grade changes the black. An Offset of 52.6 gives `(51, 51, 51)` in an 8-bit frame.
+     - A Circle window stays at the same place on the frame at Zoom 0.5 and Zoom 1. Its soft edge is smooth, not in the cells of a Mosaic Blur.
   5. Composite Mode and Opacity mix the opaque result (black outside any Zoom or Crop) over the tracks below in float before the 8-bit clip.
 - **Fades, transitions, markers and compound clips** (measured in Resolve Studio 21.2):
   - An adjustment clip supports markers, clip color, enable/disable, render cache, fade handles and transitions on a track.

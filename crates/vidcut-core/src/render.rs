@@ -781,6 +781,27 @@ impl Placed {
         let z = self.picture.dynamic_zoom?;
         Some(z.at(self.run.map_or(0.0, |r| r.share())))
     }
+
+    pub fn unplaced(&self) -> Self {
+        Self {
+            clip: self.clip.clone(),
+            picture: Picture {
+                effects: self.picture.effects.clone(),
+                grade: self.picture.grade.clone(),
+                ..Picture::default()
+            },
+            run: None,
+            source: self.source,
+            frame: self.frame,
+            start: self.start,
+            ready: self.ready,
+            ramp: None,
+            crossing: false,
+            moving: None,
+            clock: self.clock.clone(),
+            adjustment: self.adjustment,
+        }
+    }
 }
 
 /// How a dissolve's level goes over its frames (decision D50): straight

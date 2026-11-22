@@ -76,6 +76,8 @@ pub struct Colors {
     #[serde(with = "hex")]
     pub generator: Color32,
     #[serde(with = "hex")]
+    pub adjustment: Color32,
+    #[serde(with = "hex")]
     pub compound: Color32,
     #[serde(with = "hex")]
     pub marked: Color32,

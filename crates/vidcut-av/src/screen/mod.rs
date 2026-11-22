@@ -2035,7 +2035,8 @@ impl Screen {
                     blurred.drop_layer(i);
                     let chain = placed.get(i).expect("adjustment layer has placement");
                     let mut placing = Placing::whole(chain, frame);
-                    let effects = std::mem::take(&mut placing.effects);
+                    placing.effects.clear();
+                    let effects = Placing::whole(&[chain[0].unplaced()], frame).effects;
                     let factor = level.unwrap_or(1.0) * placing.level.opacity;
                     placing.level.opacity = 1.0;
                     let mode = placing.mode.code();

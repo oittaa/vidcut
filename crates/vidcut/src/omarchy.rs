@@ -62,6 +62,7 @@ pub(crate) fn palette(text: &str, light_marker: bool) -> std::result::Result<Pal
     let yellow = color(&table, &["yellow", "color3", "orange"]).unwrap_or(YELLOW);
     let blue = color(&table, &["blue", "color4"]).unwrap_or(accent);
     let magenta = color(&table, &["magenta", "color5"]).unwrap_or(accent);
+    let cyan = color(&table, &["cyan", "color6"]).unwrap_or(blue);
     let bright_red = color(&table, &["bright_red", "color9"]).unwrap_or(red);
     let mode = ["mode", "theme_type"]
         .iter()
@@ -90,6 +91,7 @@ pub(crate) fn palette(text: &str, light_marker: bool) -> std::result::Result<Pal
             offline: red,
             audio: wash(green),
             generator: wash(magenta),
+            adjustment: wash(cyan),
             compound: wash(yellow),
             marked: Color32::from_rgba_unmultiplied(r, g, b, 0x50),
             error: bright_red,
