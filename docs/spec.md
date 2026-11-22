@@ -2509,7 +2509,11 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Switching, making or duplicating a timeline closes open compound clips first. Removing an open compound from the Media tab closes it too.
     - A `.vidcut` file saves `compound_path`. Thus reopening resumes inside the open compound clip at its `start_tc`.
     - Exporting while a compound clip is open writes that compound clip with its name and no project data.
-    - Subtitles and a Timeline Color grade inside a compound clip wait in [the gaps](todo/gaps.md).
+    - While a compound clip is open, a request that changes subtitles is refused. A timeline grade is refused there too.
+  - **Subtitles and the timeline grade inside** (measured in Resolve Studio 21.2):
+    - Inside an open compound clip, Add Subtitle Track is dimmed. Add Tracks offers only video and audio tracks.
+    - On the Color page, the Timeline mode of the Node Editor shows an empty graph with no input and no output.
+    - A new node does not go into that graph. A changed value goes to no grade.
 - **Starting Timecode** (pp. 1052–1054; measured in Resolve Studio 21.2):
   - New Compound Clip, Convert In and Out to Compound Clip, and Create Compound Clip accept a Start Timecode.
   - A new compound clip defaults to `00:00:00:00` (`00:00:00;00` on a drop-frame timeline), regardless of clip placement.
