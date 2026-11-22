@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{Value, json};
 
@@ -135,6 +135,10 @@ fn sound_part(c: &Clip) -> Option<Clip> {
 }
 
 pub(crate) fn sound_tracks(whole: &[Track]) -> Vec<Track> {
+    sounds(whole).into_iter().map(|(_, t)| t).collect()
+}
+
+fn sounds(whole: &[Track]) -> Vec<(String, Track)> {
     let mut sound = Vec::new();
     let mut under = 0;
     for t in whole {
@@ -149,19 +153,22 @@ pub(crate) fn sound_tracks(whole: &[Track]) -> Vec<Track> {
             }
             TrackKind::Audio => under + number(t),
         };
-        sound.push(Track {
-            clips,
-            transitions: t.transitions.iter().filter(|x| x.sound).cloned().collect(),
-            locked: t.locked,
-            muted: t.muted,
-            solo: t.solo,
-            volume_db: t.volume_db,
-            voice_isolation: t.voice_isolation,
-            name: (t.kind == TrackKind::Audio)
-                .then(|| t.name.clone())
-                .flatten(),
-            ..Track::new(format!("A{n}"), TrackKind::Audio)
-        });
+        sound.push((
+            t.id.clone(),
+            Track {
+                clips,
+                transitions: t.transitions.iter().filter(|x| x.sound).cloned().collect(),
+                locked: t.locked,
+                muted: t.muted,
+                solo: t.solo,
+                volume_db: t.volume_db,
+                voice_isolation: t.voice_isolation,
+                name: (t.kind == TrackKind::Audio)
+                    .then(|| t.name.clone())
+                    .flatten(),
+                ..Track::new(format!("A{n}"), TrackKind::Audio)
+            },
+        ));
     }
     sound
 }
@@ -310,6 +317,49 @@ pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Res
         p.tracks[ai].sort();
     }
     Ok(out)
+}
+
+pub(crate) fn landed(p: &mut Project, ids: Vec<String>, src: &Source) -> Result<Vec<String>> {
+    if !src.decompose {
+        return with_sound(p, ids, src);
+    }
+    let mut blocks = Vec::new();
+    for id in &ids {
+        let (ti, ci) = locate(p, id)?;
+        blocks.push((p.tracks[ti].id.clone(), p.tracks[ti].clips.remove(ci)));
+    }
+    spread_blocks(p, blocks, src)
+}
+
+pub(crate) fn spread_blocks(
+    p: &mut Project,
+    blocks: Vec<(String, Clip)>,
+    src: &Source,
+) -> Result<Vec<String>> {
+    let audio = p.tracks_of(TrackKind::Audio).len();
+    let mut made = Vec::new();
+    for (track, block) in blocks {
+        let sound = match (block.video, src.video_only) {
+            (true, true) => None,
+            (true, false) => Some(format!("A{}", &track[1..])),
+            (false, _) => Some(track.clone()),
+        };
+        let picture = block.video.then_some(track);
+        let hosts = (picture.as_deref(), sound.as_deref());
+        made.extend(spread(p, &block, hosts, Lay::OnEdit, &src.inner_tracks)?);
+    }
+    otio::transitions::prune(p);
+    while p.tracks_of(TrackKind::Audio).len() > audio
+        && (p.tracks.last()).is_some_and(|t| t.kind == TrackKind::Audio && t.clips.is_empty())
+    {
+        p.tracks.pop();
+    }
+    if made.is_empty() {
+        return Err(Error::invalid(
+            "the marked part of the compound clip holds no clips",
+        ));
+    }
+    Ok(made)
 }
 
 pub fn pooled_id(p: &Project, query: &str) -> Result<String> {
@@ -537,38 +587,54 @@ pub fn leads(p: &Project, ids: &[String]) -> Vec<String> {
     kept
 }
 
-pub(crate) fn target(
-    p: &mut Project,
-    kind: TrackKind,
-    base: &str,
-    n: usize,
-    span: (i64, i64),
-) -> usize {
-    let at = p
-        .tracks_of(kind)
-        .iter()
-        .position(|&i| p.tracks[i].id == base)
-        .expect("the track of the compound clip");
-    let ti = tracks::nth(p, kind, at + n);
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Lay {
+    InPlace,
+    OnEdit,
+}
+
+fn slot(id: &str) -> usize {
+    id[1..].parse::<usize>().map_or(0, |n| n.saturating_sub(1))
+}
+
+fn target(p: &mut Project, kind: TrackKind, n: usize, span: (i64, i64), lay: Lay) -> Result<usize> {
+    let ti = tracks::nth(p, kind, n);
     let range = if kind == TrackKind::Video {
         picture_of
     } else {
         extent
     };
-    if !free(&p.tracks[ti], span, range) {
-        tracks::insert_at(p, kind, ti);
+    match lay {
+        Lay::OnEdit => unlocked(p, ti)?,
+        Lay::InPlace if !free(&p.tracks[ti], span, range) => {
+            tracks::insert_at(p, kind, ti);
+        }
+        Lay::InPlace => {}
     }
-    ti
+    Ok(ti)
 }
 
-fn put_back(p: &mut Project, ti: usize, inner: &Track, block: &Clip, made: &mut Vec<String>) {
-    let mut renamed = HashMap::new();
+fn pieces(block: &Clip) -> Vec<Clip> {
     let cut = crate::render::stretches(block, TrackKind::Audio);
-    let parts = if cut.is_empty() {
-        std::slice::from_ref(block)
-    } else {
-        cut.as_slice()
-    };
+    match cut.is_empty() {
+        true => vec![block.clone()],
+        false => cut,
+    }
+}
+
+fn shows(inner: &Track, parts: &[Clip]) -> bool {
+    (inner.clips.iter())
+        .any(|x| (parts.iter()).any(|part| crate::render::inside(x, part).is_some()))
+}
+
+fn put_back(
+    p: &mut Project,
+    (ti, lay): (usize, Lay),
+    inner: &Track,
+    parts: &[Clip],
+    made: &mut Vec<String>,
+) {
+    let mut renamed = HashMap::new();
     for (x, part) in inner
         .clips
         .iter()
@@ -583,6 +649,9 @@ fn put_back(p: &mut Project, ti: usize, inner: &Track, block: &Clip, made: &mut 
             y.id = id;
         }
         made.push(y.id.clone());
+        if lay == Lay::OnEdit {
+            clear_range(p, ti, y.start, y.end());
+        }
         p.tracks[ti].clips.push(y);
     }
     p.tracks[ti].sort();
@@ -639,6 +708,7 @@ fn fit_sound(p: &mut Project, ti: usize, made: &[String]) {
 pub(crate) fn unnest(
     p: &mut Project,
     id: &str,
+    lay: Lay,
     warnings: &mut Vec<String>,
 ) -> Result<(Clip, Vec<String>)> {
     let parts: Vec<String> = std::iter::once(id.to_string())
@@ -654,6 +724,27 @@ pub(crate) fn unnest(
     }
     let lead = hosts.iter().find(|(_, c)| c.video).unwrap_or(&hosts[0]);
     let block = lead.1.clone();
+    let on = |video: bool| {
+        hosts
+            .iter()
+            .find(|(_, c)| c.video == video)
+            .map(|(t, _)| t.as_str())
+    };
+    let made = spread(p, &block, (on(true), on(false)), lay, &BTreeMap::new())?;
+    let dropped = otio::transitions::prune(p);
+    if dropped > 0 {
+        warnings.push(otio::transitions::dropped(dropped));
+    }
+    Ok((block, made))
+}
+
+fn spread(
+    p: &mut Project,
+    block: &Clip,
+    (picture, sound): (Option<&str>, Option<&str>),
+    lay: Lay,
+    inner_tracks: &BTreeMap<String, Option<String>>,
+) -> Result<Vec<String>> {
     let cid = block.compound.as_deref().expect("a compound clip");
     let mut k = p.compound(cid).expect("compound exists").clone();
     if let Some(r) = super::conform::Rates::new(k.fps, p.fps()) {
@@ -661,30 +752,71 @@ pub(crate) fn unnest(
             super::conform::track(p, t, r);
         }
     }
-    let source = if hosts.len() > 1 {
-        k.tracks
-    } else if block.video {
-        picture_tracks(&k.tracks)
-    } else {
-        sound_tracks(&k.tracks)
+    let layout = sound.map_or_else(Vec::new, |_| sounds(&k.tracks));
+    let named = |tracks: Vec<Track>| tracks.into_iter().map(|t| (t.id.clone(), t)).collect();
+    let source: Vec<(String, Track)> = match (picture, sound) {
+        (Some(_), Some(_)) => named(k.tracks),
+        (Some(_), None) => named(picture_tracks(&k.tracks)),
+        _ => sounds(&k.tracks),
     };
     let span = (block.start, block.end());
+    let parts = pieces(block);
     let mut made = Vec::new();
-    for inner in source.iter().filter(|t| !t.clips.is_empty()) {
-        let video = inner.kind == TrackKind::Video;
-        let Some((base, _)) = hosts.iter().find(|(_, c)| c.video == video) else {
-            continue;
+    let mut taken = HashSet::new();
+    let mut heard = Vec::new();
+    for (id, inner) in source.iter().filter(|(_, t)| shows(t, &parts)) {
+        let base = match inner.kind {
+            TrackKind::Video => picture,
+            _ => sound,
         };
-        let ti = target(p, inner.kind, base, number(inner) - 1, span);
-        put_back(p, ti, inner, &block, &mut made);
-        fit_sound(p, ti, &made);
-        fix_audio(p, ti);
+        let route = match (inner_tracks.get(id), inner.kind) {
+            (Some(None), TrackKind::Audio) if id.starts_with('V') => None,
+            (route, _) => route,
+        };
+        let n = match (route, base) {
+            (Some(None), _) => {
+                if let (TrackKind::Video, Some(s)) = (inner.kind, sound) {
+                    let own = layout.iter().filter(|(o, t)| o == id && shows(t, &parts));
+                    heard.extend(own.map(|(_, t)| (t, s)));
+                }
+                continue;
+            }
+            (None, None) => continue,
+            (Some(Some(to)), _) => slot(to),
+            (None, Some(base)) => slot(base) + number(inner) - 1,
+        };
+        if !taken.insert((inner.kind == TrackKind::Video, n)) {
+            return Err(Error::invalid(format!(
+                "two tracks inside {} go to {}{}",
+                k.name,
+                &inner.id[..1],
+                n + 1
+            )));
+        }
+        let ti = target(p, inner.kind, n, span, lay)?;
+        lay_down(p, (ti, lay), inner, &parts, &mut made);
     }
-    let dropped = otio::transitions::prune(p);
-    if dropped > 0 {
-        warnings.push(otio::transitions::dropped(dropped));
+    for (track, s) in heard {
+        let mut n = slot(s) + number(track) - 1;
+        while !taken.insert((false, n)) {
+            n += 1;
+        }
+        let ti = target(p, TrackKind::Audio, n, span, lay)?;
+        lay_down(p, (ti, lay), track, &parts, &mut made);
     }
-    Ok((block, made))
+    Ok(made)
+}
+
+fn lay_down(
+    p: &mut Project,
+    (ti, lay): (usize, Lay),
+    inner: &Track,
+    parts: &[Clip],
+    made: &mut Vec<String>,
+) {
+    put_back(p, (ti, lay), inner, parts, made);
+    fit_sound(p, ti, made);
+    fix_audio(p, ti);
 }
 
 fn open_sequence_ids(p: &Project) -> HashSet<String> {

@@ -1,5 +1,5 @@
 use crate::validate::{GAIN, PAN};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -253,6 +253,10 @@ pub trait Env {
 
     fn still_duration(&self) -> crate::time::TimeSpec {
         crate::preferences::Editing::default().still_duration
+    }
+
+    fn decompose_on_edit(&self) -> bool {
+        crate::preferences::Editing::default().decompose_on_edit
     }
 
     fn printer_lights(&self) -> crate::preferences::ColorPrefs {
@@ -2616,7 +2620,7 @@ pub fn compound_context(p: &Project, k: &Compound, playhead: Option<i64>) -> Tim
     }
 }
 
-fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
+fn resolve_sources(p: &Project, params: &SourceParams, env: &dyn Env) -> Result<Vec<Source>> {
     let sources = if params.tape {
         if !params.media.is_empty() || params.range.is_some() || params.compound.is_some() {
             return Err(Error::usage(
@@ -2649,7 +2653,25 @@ fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
             "every frame of the range is left out (media.leave_out)",
         ));
     }
+    let kept: Vec<Source> = kept.into_iter().map(|s| decomposing(s, env)).collect();
+    routed(params, &kept)?;
     Ok(kept)
+}
+
+fn routed<'a>(params: &SourceParams, sources: impl IntoIterator<Item = &'a Source>) -> Result<()> {
+    match !params.inner_tracks.is_empty() && sources.into_iter().any(|s| !s.decompose) {
+        true => Err(Error::usage(
+            "inner_tracks needs a compound clip and Decompose Compound Clips On Edit",
+        )),
+        false => Ok(()),
+    }
+}
+
+fn decomposing(s: Source, env: &dyn Env) -> Source {
+    Source {
+        decompose: s.compound.is_some() && env.decompose_on_edit(),
+        ..s
+    }
 }
 
 fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
@@ -2681,6 +2703,8 @@ fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
             track: params.track.clone(),
             generator: None,
             compound: None,
+            decompose: false,
+            inner_tracks: BTreeMap::new(),
         })
         .collect())
 }
@@ -2829,6 +2853,8 @@ fn generator_source(p: &Project, params: &SourceParams, generator: Generator) ->
         track: params.track.clone(),
         generator: Some(generator),
         compound: None,
+        decompose: false,
+        inner_tracks: BTreeMap::new(),
     })
 }
 
@@ -2884,7 +2910,32 @@ fn compound_source(p: &Project, params: &SourceParams, query: &str) -> Result<So
         track: params.track.clone(),
         generator: None,
         compound: Some(id),
+        decompose: false,
+        inner_tracks: inner_tracks(p, k, &params.inner_tracks)?,
     })
+}
+
+fn inner_tracks(
+    p: &Project,
+    k: &Compound,
+    asked: &BTreeMap<String, Option<String>>,
+) -> Result<BTreeMap<String, Option<String>>> {
+    for (inner, to) in asked {
+        let Some(t) = p.compound_tracks(k).iter().find(|t| &t.id == inner) else {
+            return Err(Error::not_found(format!("{} has no track {inner}", k.name)));
+        };
+        let Some(to) = to else {
+            continue;
+        };
+        match p.track(to) {
+            None => return Err(Error::not_found(format!("no track {to}"))),
+            Some(x) if x.kind != t.kind => {
+                return Err(Error::usage(format!("{inner} cannot go on {to}")));
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(asked.clone())
 }
 
 fn source(p: &Project, params: &SourceParams) -> Result<Source> {
@@ -2914,6 +2965,8 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
         track: params.track.clone(),
         generator: None,
         compound: None,
+        decompose: false,
+        inner_tracks: BTreeMap::new(),
     })
 }
 
@@ -3581,7 +3634,7 @@ fn mutate(
             json!({ "media": media, "stream": stream, "changes": changes })
         }
         Request::EditAppend(src) => {
-            let sources = resolve_sources(p, src)?;
+            let sources = resolve_sources(p, src, env)?;
             clip_ids(&ops::append_block(p, &sources, src.lead.unwrap_or(0))?)
         }
         Request::EditSmartInsert {
@@ -3589,7 +3642,7 @@ fn mutate(
             playhead: at,
         } => {
             let at = resolve(p, at, playhead)?;
-            let sources = resolve_sources(p, src)?;
+            let sources = resolve_sources(p, src, env)?;
             let edit = ops::nearest_edit(p, at);
             let lead = src.lead.unwrap_or(0);
             let mut v = clip_ids(&ops::smart_insert_block(p, &sources, at, lead)?);
@@ -3598,7 +3651,7 @@ fn mutate(
         }
         Request::EditInsert { source: src, at } => {
             let at = resolve(p, at, playhead)?;
-            let sources = resolve_sources(p, src)?;
+            let sources = resolve_sources(p, src, env)?;
             clip_ids(&ops::insert_at_block(p, &sources, at, 0)?)
         }
         Request::EditOverwrite {
@@ -3610,7 +3663,7 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let sources = resolve_sources(p, src)?;
+            let sources = resolve_sources(p, src, env)?;
             let marked = *use_marks && (p.marks.mark_in.is_some() || p.marks.mark_out.is_some());
             let at = if marked {
                 at.unwrap_or(0)
@@ -3634,7 +3687,7 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let sources = resolve_sources(p, src)?;
+            let sources = resolve_sources(p, src, env)?;
             let marked = *use_marks && (p.marks.mark_in.is_some() || p.marks.mark_out.is_some());
             let at = if marked {
                 at.unwrap_or(0)
@@ -3677,8 +3730,9 @@ fn mutate(
                     Some(m) if src.generator.is_none() => Some(marked(p, m, src)?),
                     _ => None,
                 };
-                vec![(source(p, src)?, own)]
+                vec![(decomposing(source(p, src)?, env), own)]
             };
+            routed(src, sources.iter().map(|(s, _)| s))?;
             let mut landed = Vec::with_capacity(sources.len());
             for (s, own) in &sources {
                 let marks = match s.compound.as_deref().and_then(|id| p.pooled_compound(id)) {
@@ -3716,7 +3770,7 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let sources = resolve_sources(p, src)?;
+            let sources = resolve_sources(p, src, env)?;
             let marked = *use_marks && p.marks.mark_in.is_some() && p.marks.mark_out.is_some();
             let at = if marked {
                 at.unwrap_or(0)
@@ -7489,7 +7543,7 @@ fn decompose(
     {
         unpack_compound(p, &cid, env, at, 8, imported_compounds, warnings)?;
     }
-    let (block, made) = ops::compound::unnest(p, id, warnings)?;
+    let (block, made) = ops::compound::unnest(p, id, ops::compound::Lay::InPlace, warnings)?;
     finish_decompose(id, &block, warnings);
     Ok(made)
 }
