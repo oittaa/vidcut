@@ -3232,6 +3232,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a key link from a corrector that is off gives the linked corrector no correction. The Invert and the Offset of its Key Input do not change that.
   - Measured: a Key Mixer that is off mixes the keys as when it is on.
   - Measured: a Key Mixer skips an input with no link. A Key Mixer with no linked input gives a key of 1.
+  - Measured: a Key Mixer also skips an input from a corrector that is off.
   - Measured: Extract of a node removes its key links.
   - Measured: in the Key Input, the Key Output and each Key Mixer input, Gain goes from 0 to 2 and Offset from −1 to 1.
   - Measured: Reset in the Key palette resets the values of the Key Input and of the Key Output. The Key Input Invert stays on.
@@ -3258,7 +3259,6 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Not measured: the blend of the Key Input and of a Key Mixer.
   - vidcut: a change goes to a keyframe by the rule of the values. The Key palette shows the values of that keyframe.
   - vidcut: a new input of a Key Mixer gets the usual values in each keyframe. Remove One Input removes the input from each keyframe.
-  - Not measured: a key link from a corrector that is off into a Key Mixer. vidcut mixes that key as when the corrector is on.
   - Not measured: the Key Output of a Key Mixer with no linked input.
   - Not measured: a Key Mixer with one linked input after a delete. vidcut keeps it.
   - Not measured: Reset in the Key palette with Matte or the Key Output Invert on. vidcut resets them.
