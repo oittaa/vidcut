@@ -6296,6 +6296,7 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - A script cannot set the `Input LUT` of a compound clip or of a timeline.
 - A LUT on the node of a compound clip gives the same picture as a LUT on the node of a plain clip.
 - A generator and a title have no Media Pool clip. A script gets no node graph for them, so it cannot give them a LUT.
+- A LUT on the node of a Text+ title gives `T(C / A) * A`. vidcut titles take no grade yet ([todo](todo/luts.md)).
 
 **The Input LUT of a clip**, measured in Resolve Studio 21.2:
 
@@ -6315,6 +6316,7 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 
 - A grid of values gives the same picture as the Output LUT of the project.
 - It applies to clips. A gap stays black.
+- The viewer of the Media page and the thumbnails of the Media Pool show it. vidcut does not yet ([todo](todo/luts.md)).
 - It does not apply to a Solid Color generator, a Text title or a Text+ title.
 - On a compound clip, it applies once, to the clip inside. It does not apply again to the compound clip.
   - A clip inside at Zoom 0.5 gets it. The uncovered part of the compound clip stays black, not `T(0)`.
@@ -6332,6 +6334,7 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - It works on the mixed picture of the timeline.
 - It also applies to a gap. In a render without alpha, a gap becomes `T(0)`, with a difference of 5e-9 at most.
 - In a render with alpha, a picture with alpha gives `T(clamp(C / A)) * A`. The alpha does not change. Where `A` is 0, the result is 0.
+  - A gap stays RGB 0 and alpha 0.
 - vidcut does the same (`fs_lut`, [design](design/README.md#lut-files)).
 
 A script gets no error for a broken file, and the window shows no message:
