@@ -379,8 +379,13 @@ Ranges and resolution:
   - The clip starts at the playhead when the playhead shows the source In. Else it starts at the first timeline frame that shows the source In or a later frame.
   - The clip starts with the frame In. With timeline marks, it starts with the frame that `Spot::frame` gives at its first timeline frame.
 - A generator as the source has `origin` 0 and the length of `ops::titles::default_length`.
+- A compound clip as the source starts at `Compound::timecode_at` and has the length `compound_frames`.
+  - `compound::with_sound` adds its sound, as in the other edits.
+- `Lining::start` gives the start of a clip in frames of the open timeline. `Lining::placed` gives it in frames of the project.
+  - A file starts at `origin`. A compound clip starts at its own start timecode (`Compound::timecode_at`).
+  - With a group, a compound clip has no start. Why: a compound clip is in no synced group.
 - `shown` gives the timecode range that a clip shows, from `Clip::source_at`.
-  - A clip with no media or with a still has no such range. Thus generators, titles and compound clips do not count.
+  - A still, a generator and a title have no such range. Thus they do not count.
 - `first_where` takes clips by the order of the tracks: video from the lowest, then audio.
   - `by_marks` and `by_playhead` choose the reference clip with it.
   - A video clip and an audio clip that give different positions under one rule make the edit fail (`disagree`). No measurement tells which of them wins.

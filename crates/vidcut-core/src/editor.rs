@@ -3660,9 +3660,6 @@ fn mutate(
                     "Source Overwrite picks its own track; leave out `track`",
                 ));
             }
-            if src.compound.is_some() {
-                return Err(Error::usage("Source Overwrite takes a media item"));
-            }
             if *grid && src.range.is_none() {
                 return Err(Error::usage("`grid` needs `range`"));
             }
@@ -3684,7 +3681,10 @@ fn mutate(
             };
             let mut landed = Vec::with_capacity(sources.len());
             for (s, own) in &sources {
-                let marks = p.media(&s.media).map(|m| &m.marks);
+                let marks = match s.compound.as_deref().and_then(|id| p.pooled_compound(id)) {
+                    Some(k) => Some(p.compound_sheet(k).marks),
+                    None => p.media(&s.media).map(|m| &m.marks),
+                };
                 let marked =
                     src.tape || src.range.is_some() || marks.is_some_and(|m| !m.is_empty());
                 let lining = match (*grid, marked) {
