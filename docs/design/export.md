@@ -550,11 +550,21 @@ Cancel:
   - Its `placed` pictures are those of a generator ([placed pictures](#placed-pictures)). Thus the Transform, Cropping, Dynamic Zoom and Composite of its clip work on the whole picture of the title.
   - A title never fills the frame. Thus the tracks below it show through its clear parts.
   - A title takes the path of the other pictures through a dissolve, a wipe, a Push, a Slide and a compound clip.
-- `player::titles::placing` gives the key of one frame of a title. It holds the title with the values of that frame (`ShownTitle::sampled`), the size, the colors and the `Run` of a scroll.
-- `player::titles::frame` draws that frame. It is a clear picture of the output size, premultiplied, in 32-bit floats.
+- `player::titles::laid` gives the key of the drawing of a title at one frame, and the move of its text (`Move`).
+  - The key holds the title with the values of that frame (`ShownTitle::sampled`), the size and the colors.
+  - The key has no position and no rotation of the text (`steady`). Thus a scroll and keys of the position or rotation of the text keep one drawing.
+  - Keys of the zoom of the text change the key. Thus such a title is drawn again on each frame.
+  - The move holds the whole pixels that the text moves, and its turn about its pivot. `Run::top` gives the move of a scroll.
+- `player::titles::frame` draws the drawing. It is a clear picture the size of its blocks, premultiplied, in 32-bit floats.
   - Each block of the title goes over the blocks before it, at its place.
   - In an HDR timeline, it converts the colors as for burned-in subtitles.
-- `VideoFrames::title_frame` keeps the last frames of titles in an `Lru` (`TITLES_KEPT`). Thus a title that does not change is drawn once.
+- `player::titles::placed` gives the `Placed` that puts the drawing at its place in the frame, with the move.
+  - The layer of the title holds it (`Sampling::Within`). The screen puts it before the `placed` pictures of the clip.
+  - Thus the GPU moves the text. The Transform, Cropping, Dynamic Zoom and Composite of the clip then work on the moved text.
+- `laid` gives no move in these cases. Then the drawing holds the place of the text at that frame, cut to the frame. It is drawn again on each frame.
+  - The blocks of the title move by different amounts. An example is a lower third whose two lines have different keys.
+  - The drawing is larger than `LARGEST` pixels on a side.
+- `VideoFrames::title_frame` keeps the last drawings of titles in an `Lru` (`TITLES_KEPT`). Thus a title that does not change is drawn once.
 - `burn::title_blocks` draws each `TitleBlock` of a title with the code of the burn-in (`lay_out`). `burn::title` merges the blocks into one `Sprite`.
   - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Look`, its `bare` field).
     - The rows of the upper line (`Laid`, its `above` field) stand above the point of the lower line.

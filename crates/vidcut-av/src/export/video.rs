@@ -1887,7 +1887,7 @@ pub struct VideoFrames {
     out: (format::Pixel, Option<Hdr>),
     timeline: Option<Hdr>,
     drawn_in: Option<Hdr>,
-    titled: Lru<crate::player::titles::Placing, frame::Video, TITLES_KEPT>,
+    titled: Lru<crate::player::titles::Placing, (frame::Video, [i32; 2]), TITLES_KEPT>,
     subtitles: crate::player::Subtitles,
     timeline_height: u32,
     drawer: Option<Drawer>,
@@ -2650,11 +2650,16 @@ impl VideoFrames {
                 } = layer
                 else {
                     if take == Take::Picture {
+                        let mut sampling = Sampling::Own;
                         let (frame, how) = match layer {
                             VideoPiece::Generated {
                                 picture: Generated::Title(t),
                                 ..
-                            } => (self.title_frame(&t.after(k))?, Made::Generated),
+                            } => {
+                                let (frame, placed) = self.title_frame(&t.after(k))?;
+                                sampling = Sampling::Within(std::sync::Arc::new(placed));
+                                (frame, Made::Generated)
+                            }
                             VideoPiece::Generated { picture, .. } => {
                                 let pattern = picture
                                     .at(k)
@@ -2679,7 +2684,7 @@ impl VideoFrames {
                             frame: Some(frame),
                             weight,
                             rotation: 0,
-                            sampling: Sampling::Own,
+                            sampling,
                             decoder: None,
                             decoding: None,
                             went: None,
@@ -2900,17 +2905,20 @@ impl VideoFrames {
         Ok(out)
     }
 
-    fn title_frame(&mut self, shown: &ShownTitle) -> Result<frame::Video> {
+    fn title_frame(&mut self, shown: &ShownTitle) -> Result<(frame::Video, Placed)> {
         let (w, h, _) = self.maker.out();
-        let placing =
-            crate::player::titles::placing(shown, (w, h), self.timeline_height, self.drawn_in);
+        let (placing, moved) =
+            crate::player::titles::laid(shown, (w, h), self.timeline_height, self.drawn_in);
         if !self.titled.contains(&placing) {
             let made = crate::player::titles::frame(&placing);
             self.titled.insert(placing.clone(), made);
         }
-        let mut out = frame_ref(self.titled.get(&placing).expect("just set"))?;
+        let (made, origin) = self.titled.get(&placing).expect("just set");
+        let size = (made.width(), made.height());
+        let placed = crate::player::titles::placed(*origin, size, (w, h), moved);
+        let mut out = frame_ref(made)?;
         self.black_metadata(&mut out)?;
-        Ok(out)
+        Ok((out, placed))
     }
 
     fn black_metadata(&self, out: &mut frame::Video) -> Result<()> {

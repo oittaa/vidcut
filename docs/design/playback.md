@@ -185,7 +185,8 @@ flowchart TD
   - One store keeps the drawings for all engines and exports (`Store::keep_titles`, a `ByBytes`).
   - The drawings take at most a part of the memory budget (`TITLES_PART`). Past that part, the least recently used drawings go.
   - When the budget falls, for example for an AI upscaler, the drawings go at once. A frame that needs one draws it again. The render cache does not hold them.
-  - A drawing holds the place, zoom and rotation of the text. Thus a title with keyframes is drawn again on each frame.
+  - A drawing has no position and no rotation of the text. The GPU moves the text on each frame ([export](export.md#titles)).
+  - Keys of the zoom of the text draw the title again on each frame. So does a title whose blocks move by different amounts.
   - All blocks of a title go into one picture before its opacity. Thus text at half opacity over the box does not show the box.
   - `burn` draws the letters of a Text title or a lower third one at a time on a `Canvas`. The exact place comes from `Title::seated_left` ([spec D65](../spec.md)).
   - A drawing's top is on a whole pixel. A scroll moves by whole pixels.
