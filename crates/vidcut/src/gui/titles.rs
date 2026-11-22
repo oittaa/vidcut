@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use vidcut_core::keyframes::{PictureValue, ease_of, eases};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
 use vidcut_core::model::{
-    Clip, Ease, Follow, LowerThirdLine, MotionPath, Project, Title, TitleAlign, TitleAnchor,
-    TitleCase, TitleKind, TitleLine, TitlePart,
+    Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine,
+    TitlePart,
 };
 
 use super::export::Ask;
@@ -28,34 +28,29 @@ struct LineFields {
 struct Axis {
     side: f64,
     up: bool,
-    from_middle: bool,
 }
 
 impl Axis {
-    fn pair(size: [f64; 2], follows: bool) -> [Self; 2] {
+    fn pair(size: [f64; 2]) -> [Self; 2] {
         [
             Self {
                 side: size[0],
                 up: false,
-                from_middle: follows,
             },
             Self {
                 side: size[1],
                 up: true,
-                from_middle: follows,
             },
         ]
     }
 
     fn pixels(self, n: f64) -> f64 {
         let n = if self.up { 1.0 - n } else { n };
-        let n = if self.from_middle { n - 0.5 } else { n };
         n * self.side
     }
 
     fn fraction(self, px: f64) -> f64 {
         let n = px / self.side;
-        let n = if self.from_middle { n + 0.5 } else { n };
         if self.up { 1.0 - n } else { n }
     }
 
@@ -74,7 +69,7 @@ impl Axis {
 
 impl LineFields {
     fn of(t: &Title, size: [f64; 2]) -> Self {
-        let [x, y] = Axis::pair(size, t.follows.is_some());
+        let [x, y] = Axis::pair(size);
         Self {
             anchor: t.anchor,
             across: x.shown(t.position.map(|p| p[0])),
@@ -252,58 +247,6 @@ fn sampled_at(c: &Clip, t: &Title, at: i64) -> Title {
     t.sampled(c.content_at(at) as f64)
 }
 
-fn leads(p: &Project, c: &Clip, now: Option<&Follow>) -> Vec<(Follow, String)> {
-    let meets = |x: &Clip| x.start < c.end() && c.start < x.end();
-    let led = |x: &Clip| now.is_some_and(|f| f.clip == x.id);
-    let has = |x: &&Clip| {
-        vidcut_core::ops::motion::takes(x) && !x.motion.is_empty() && (meets(x) || led(x))
-    };
-    let clips: Vec<&Clip> = p.tracks.iter().flat_map(|t| &t.clips).filter(has).collect();
-    let several = clips.len() > 1;
-    let entry = |x: &Clip, m: &MotionPath| {
-        let follow = Follow {
-            clip: x.id.clone(),
-            path: m.id.clone(),
-        };
-        let name = m.name.as_deref().unwrap_or(&m.id);
-        if several {
-            (follow, format!("{name} ({})", x.id))
-        } else {
-            (follow, name.to_string())
-        }
-    };
-    let paths = clips.iter().flat_map(|x| x.motion.iter().map(|m| (*x, m)));
-    paths.map(|(x, m)| entry(x, m)).collect()
-}
-
-fn follow_row(
-    ui: &mut egui::Ui,
-    leads: &[(Follow, String)],
-    now: Option<&Follow>,
-) -> Option<Option<Follow>> {
-    let mut picked = None;
-    let shown = leads.iter().find(|(f, _)| Some(f) == now);
-    ui.label("Follow");
-    ui.add_enabled_ui(!leads.is_empty() || now.is_some(), |ui| {
-        egui::ComboBox::from_id_salt("title-follow")
-            .selected_text(shown.map_or("None", |(_, label)| label.as_str()))
-            .width(240.0)
-            .show_ui(ui, |ui| {
-                if ui.selectable_label(now.is_none(), "None").clicked() && now.is_some() {
-                    picked = Some(None);
-                }
-                for (f, label) in leads {
-                    let on = Some(f) == now;
-                    if ui.selectable_label(on, label.as_str()).clicked() && !on {
-                        picked = Some(Some(f.clone()));
-                    }
-                }
-            });
-    });
-    ui.end_row();
-    picked
-}
-
 fn key_eases(c: &Clip, t: &Title, v: PictureValue, at: i64) -> (Vec<Ease>, Option<Ease>) {
     let keys = t.keys_of(v);
     let found = keys
@@ -322,7 +265,7 @@ fn kept(shown: &str, value: Option<f64>, what: &str) -> Result<Option<f64>, Stri
 }
 
 fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine, String> {
-    let [x, y] = Axis::pair(d.size, stored.follows.is_some());
+    let [x, y] = Axis::pair(d.size);
     let across = x.kept(&f.across, stored.position.map(|p| p[0]))?;
     let down = y.kept(&f.down, stored.position.map(|p| p[1]))?;
     let scroll = d.kind == TitleKind::Scroll;
@@ -388,7 +331,6 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         opacity: kept(&d.title_opacity, stored.opacity, "title opacity")?,
         opacity_keys: stored.opacity_keys.clone(),
         upper: (lines && apart).then_some(upper),
-        follows: stored.follows.clone(),
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
 }
@@ -769,13 +711,10 @@ impl Workspace {
             "{}% of the picture",
             percent(Some(Title::usual_size(d.kind)))
         );
-        let following = found.and_then(|(_, _, t)| t.follows.as_ref());
-        let [x, y] = Axis::pair(d.size, following.is_some());
+        let [x, y] = Axis::pair(d.size);
         let across_hint = x.shown(Some(usual[0]));
         let down_hint = y.shown(Some(usual[1]));
         let upper_hint = y.shown(Some(usual[1] + Title::UPPER_DROP));
-        let paths = found.map_or_else(Vec::new, |(_, clip, _)| leads(&p, clip, following));
-        let mut follow = None;
         let mut clicks = Vec::new();
         egui::Grid::new("title-style-fields").show(ui, |ui| {
             changed |= d
@@ -854,27 +793,14 @@ impl Workspace {
             } else {
                 changed |= line_rows(ui, &mut d.line, None);
             }
-            if !scroll {
-                follow = follow_row(ui, &paths, following);
-            }
             changed |= row(ui, "Title opacity", &mut d.title_opacity, "100%");
             keys(ui, PictureValue::Opacity, None);
             ui.end_row();
         });
-        ui.label(dim(match (d.kind, following.is_some()) {
-            (TitleKind::LowerThird, false) => {
-                "X and Y: each line's anchor, in pixels from the bottom left."
-            }
-            (TitleKind::LowerThird, true) => {
-                "X and Y: each line's anchor, in pixels from the followed thing."
-            }
-            (TitleKind::Scroll, _) => "X: the anchor's column, in pixels from the left.",
-            (TitleKind::Text, false) => {
-                "X and Y: the anchor's place, in pixels from the bottom left."
-            }
-            (TitleKind::Text, true) => {
-                "X and Y: the anchor's place, in pixels from the followed thing."
-            }
+        ui.label(dim(match d.kind {
+            TitleKind::LowerThird => "X and Y: each line's anchor, in pixels from the bottom left.",
+            TitleKind::Scroll => "X: the anchor's column, in pixels from the left.",
+            TitleKind::Text => "X and Y: the anchor's place, in pixels from the bottom left.",
         }));
         if !d.error.is_empty() {
             ui.colored_label(ui.visuals().error_fg_color, &d.error);
@@ -882,7 +808,7 @@ impl Workspace {
         changed |= std::mem::take(&mut d.typed);
         d.dirty |= changed;
         if d.dirty
-            && (self.inspector_commits() || follow.is_some())
+            && self.inspector_commits()
             && let Some(s) = stored.as_ref()
         {
             match title_of(&d, s) {
@@ -901,14 +827,6 @@ impl Workspace {
                 }
                 Err(e) => d.error = e,
             }
-        }
-        if let Some(to) = follow.filter(|_| !d.dirty) {
-            let mut params = json!({ "clip": d.clip });
-            if let Some(f) = to {
-                params["of"] = json!(f.clip);
-                params["path"] = json!(f.path);
-            }
-            self.send("motion.follow", params);
         }
         ui.separator();
         if changed && let Some(s) = &stored {

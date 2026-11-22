@@ -3683,42 +3683,6 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
-    /// Make a title follow a motion path of another clip, or stop that. The
-    /// title (`c5`, or `V2@15s`) goes onto the thing on the path, and moves
-    /// with it: its `position` becomes `[0.5, 0.5]`. Each `position` of the
-    /// title counts from the middle of that thing, and `[0.5, 0.5]` puts the
-    /// `anchor` of the title on it. The upper line of a lower third moves by
-    /// the same amount. A title with keyframes on its position is refused.
-    /// The title keeps its size and its angle.
-    ///
-    /// `of` is the clip that has the path, and `path` is the id of the path
-    /// (`motion.list`). That clip is footage, a still or an image sequence
-    /// of the same timeline. Before the first sample of the path and after
-    /// its last, the thing is where that sample has it. Before and after
-    /// that clip, the thing is where the first or the last frame of that
-    /// clip has it. Without `of` and `path`, the title follows no path. A
-    /// scroll follows none.
-    ///
-    /// While a title follows a path, `motion.remove` and `motion.find` with
-    /// `replace` do not take that path off. When the clip of the path is
-    /// deleted, the title follows no path, with a warning. When that clip
-    /// plays on no frame of the title, and another clip there has the same
-    /// path of the same media, the title follows that clip: the two parts of
-    /// a split clip are an example. `of` takes that clip in the same way,
-    /// and `follows` in the answer names it.
-    ///
-    /// Returns the `clip` of the title, its `follows` and its `position`.
-    #[serde(rename = "motion.follow")]
-    MotionFollow {
-        clip: ClipRef,
-        /// The clip that has the path. Left out with `path`, the title
-        /// follows no path.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        of: Option<ClipRef>,
-        /// The id of the path on that clip, for example `p2`.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        path: Option<String>,
-    },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.
     #[serde(rename = "export.plan")]

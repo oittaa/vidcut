@@ -415,10 +415,6 @@ pub fn describe_at(
             d.params["node"].as_str().unwrap_or("a mask"),
             d.clips("clip")
         ),
-        "motion.follow" => match d.params["path"].as_str() {
-            Some(path) => format!("Make {} follow motion path {path}", d.clips("clip")),
-            None => format!("Stop {} following a motion path", d.clips("clip")),
-        },
         "picture.clear" => match d.params["tool"].as_str() {
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
             Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),

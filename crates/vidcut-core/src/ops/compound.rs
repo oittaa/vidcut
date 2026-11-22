@@ -1095,13 +1095,6 @@ fn prepare_open_tracks(
         t.sort();
     }
     for t in &mut out {
-        for c in &mut t.clips {
-            if let Some(f) = c.title.as_mut().and_then(|x| x.follows.as_mut())
-                && let Some(new) = renamed_clips.get(&f.clip)
-            {
-                f.clip.clone_from(new);
-            }
-        }
         for x in &mut t.transitions {
             for side in [&mut x.from, &mut x.to].into_iter().flatten() {
                 if let Some(new) = renamed_clips.get(side) {

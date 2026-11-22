@@ -1134,7 +1134,6 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         opacity: None,
         opacity_keys: Vec::new(),
         upper: None,
-        follows: None,
     };
     crate::ops::titles::checked(&title).ok()
 }
@@ -1231,7 +1230,7 @@ pub fn read(item: &Value, reference: &Value, height: u32, origin: i64) -> Option
         && let Ok(t) = serde_json::from_value::<Title>(raw.clone())
         && let Ok(t) = crate::ops::titles::checked(&t)
     {
-        return Some(Title { follows: None, ..t });
+        return Some(t);
     }
     let mut t = from_editor(reference, height)?;
     let all = groups(reference);
@@ -1415,7 +1414,6 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         opacity: None,
         opacity_keys: Vec::new(),
         upper: None,
-        follows: None,
     };
     let [x, from_bottom] = at;
     title.position = Some([across(x), down(1.0 - from_bottom)]);

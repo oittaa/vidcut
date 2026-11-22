@@ -13,7 +13,6 @@ use crate::model::{
     Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
     SmoothMode, TimelineColors, Title, Track, TrackKind, Transition, Upscale,
 };
-use crate::motion::Area;
 use crate::otio::transitions;
 use crate::time::Rational;
 
@@ -370,72 +369,6 @@ pub struct ShownTitle {
     /// plays inside, outward. Empty, it is drawn over the frame as it is.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub placed: Vec<Placed>,
-    /// The clip whose motion path it follows. Left out when it follows none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lead: Option<Arc<Lead>>,
-}
-
-/// The clip whose motion path a title follows, as it goes over the frame.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Lead {
-    /// The picture of that clip on the first frame of the title's clip, with
-    /// the path.
-    pub placed: Placed,
-    /// The id of the path.
-    pub path: String,
-    /// Where the fitted picture of that clip is in the frame: x, y, width
-    /// and height, in pixels.
-    pub fitted: [f64; 4],
-    /// The size of its upright source picture, in pixels.
-    pub pixels: (f64, f64),
-    /// The size of the frame, in pixels.
-    pub frame: (f64, f64),
-    /// The frames of the title's clip on which that clip plays: the first
-    /// and the last, counted from the first frame of the title's clip.
-    pub lasts: (i64, i64),
-}
-
-impl Lead {
-    pub fn of(p: &Project, c: &Clip, follow: &crate::model::Follow) -> Option<Self> {
-        let a = p.clip(&follow.clip)?;
-        let path = a.motion.iter().find(|m| m.id == follow.path)?;
-        let size = (p.width(), p.height());
-        let frame = (f64::from(size.0), f64::from(size.1));
-        let video = p.media(&a.media).and_then(|m| m.info.video.as_ref());
-        let (fitted, pixels) = match video.filter(|v| v.width > 0 && v.height > 0) {
-            Some(v) => {
-                let shape = ((v.width, v.height), (v.sar[0], v.sar[1]), v.rotation);
-                (
-                    crate::place::fitted(shape.0, shape.1, shape.2, size),
-                    crate::place::upright_pixels(shape.0, shape.2),
-                )
-            }
-            None => ([0.0, 0.0, frame.0, frame.1], frame),
-        };
-        let run = Run {
-            at: c.start - a.start,
-            of: a.duration,
-            held: false,
-        };
-        let mut placed = Placed::at(a, a.picture.clone().unwrap_or_default(), run, c.start);
-        placed.followed = Followed::named(p, a, path);
-        Some(Self {
-            placed,
-            path: follow.path.clone(),
-            fitted,
-            pixels,
-            frame,
-            lasts: (a.start - c.start, a.end() - 1 - c.start),
-        })
-    }
-
-    pub fn spot(&self, at: i64) -> Option<[f64; 2]> {
-        let placed = self.placed.after(at.clamp(self.lasts.0, self.lasts.1));
-        let area = placed.followed.held(&self.path, placed.source)?;
-        let level = crate::place::level(&placed, self.frame, self.fitted, self.pixels);
-        let [x, y] = level.forward(area.center);
-        (x.is_finite() && y.is_finite()).then(|| [x / self.frame.0, y / self.frame.1])
-    }
 }
 
 /// Where a piece is in its clip, which a moving title and a Dynamic Zoom
@@ -482,7 +415,6 @@ impl ShownTitle {
             source_in: self.source_in,
             fade: self.fade.map(|r| r.after(k)),
             placed: self.placed.iter().map(|p| p.after(k)).collect(),
-            lead: self.lead.clone(),
         }
     }
 
@@ -490,17 +422,9 @@ impl ShownTitle {
         (self.source_in + self.run.at) as f64
     }
 
-    pub fn led(&self, mut title: Title) -> Title {
-        let follows = title.follows.take().and(self.lead.as_ref());
-        if let Some([x, y]) = follows.and_then(|l| l.spot(self.run.at)) {
-            title.moved([x - 0.5, y - 0.5]);
-        }
-        title
-    }
-
     pub fn sampled(self) -> Self {
         Self {
-            title: self.led(self.title.sampled(self.frame())),
+            title: self.title.sampled(self.frame()),
             ..self
         }
     }
@@ -812,23 +736,8 @@ impl Followed {
         }
     }
 
-    pub fn named(p: &Project, clip: &Clip, path: &MotionPath) -> Self {
-        Self {
-            paths: Arc::new([MotionPath {
-                name: None,
-                ..path.clone()
-            }]),
-            clock: FileClock::of(p, clip),
-        }
-    }
-
     pub fn is_empty(&self) -> bool {
         self.paths.is_empty()
-    }
-
-    pub fn held(&self, named: &str, source: i64) -> Option<Area> {
-        let path = self.paths.iter().find(|m| m.id == named)?;
-        path.held_at(self.frame(source))
     }
 
     pub fn frame(&self, source: i64) -> f64 {
@@ -3983,12 +3892,6 @@ impl<'a> Span<'a> {
             source_in: c.source_in,
             fade,
             placed: crossed.into_iter().chain(outer_at(nest, x)).collect(),
-            lead: c
-                .title
-                .as_ref()
-                .and_then(|t| t.follows.as_ref())
-                .and_then(|f| Lead::of(self.plan.p, c, f))
-                .map(Arc::new),
         })
     }
 
