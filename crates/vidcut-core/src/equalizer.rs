@@ -190,7 +190,9 @@ impl Biquad {
         let shelf = sin * boost.sqrt() / SHELF_Q;
         let (b, a) = match band.kind {
             EqKind::Bell => {
-                let alpha = sin / (2.0 * band.q);
+                let half = w / 2.0;
+                let lower = half * (1.0 - 0.5 / band.q);
+                let alpha = (1.0 + cos) * (half.tan() - lower.tan());
                 (
                     [1.0 + alpha * boost, -2.0 * cos, 1.0 - alpha * boost],
                     [1.0 + alpha / boost, -2.0 * cos, 1.0 - alpha / boost],
