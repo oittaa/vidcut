@@ -3027,6 +3027,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Layer node does the same with a Layer Mixer. Alt+L at the corrector on input 1 of a Layer Mixer added a corrector on input 2.
   - Measured: Alt+P and Alt+L at a corrector that feeds a Layer Mixer each add a new last input to that mixer. The new corrector takes the source.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
+  - Measured in Resolve Studio 21.2: the numbers do not follow p. 3395.
+    - Nodes 1, 2 and 4 are in series. Nodes 1 and 2 give their keys to Key Mixer 3, and it gives its key to node 4.
+    - Alt+S at node 1 then gives a new node 3. The old node 2 becomes 5, and the mixer becomes 2.
+    - The 5 measured cases fit one rule: a walk from the source, one step of links at a time. The links of each node go in the order in which they were made.
+  - vidcut: a new node gets the next number, as the manual says ([todo](todo/color-page.md)).
   - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append`, `outside`, `corrector` or `key_mixer`. The menus of the Node Editor have each one.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
@@ -3135,6 +3140,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Parallel Mixer that is off gives the same result as when it is on.
   - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
   - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
+  - Measured: the menu of a Parallel Mixer has no Reset Node Grade either.
+  - Not measured: the other items of the menu of a Parallel Mixer.
   - vidcut: the menu of a mixer has these items in this order.
   - Measured in Resolve Studio 21.2: Remove One Input removes the last input with no link. The inputs after it move up one.
   - Measured: thus with an empty last input, that input goes. Else an empty input in the middle goes.
@@ -3279,7 +3286,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a change goes to a keyframe by the rule of the values. The Key palette shows the values of that keyframe.
   - vidcut: a new input of a Key Mixer gets the usual values in each keyframe. Remove One Input removes the input from each keyframe.
   - Not measured: the Key Output of a Key Mixer with no linked input.
-  - Not measured: a Key Mixer with one linked input after a delete. vidcut keeps it.
+  - Measured: a delete of the node on an input of a Key Mixer keeps the mixer. That input stays, with no link.
+  - vidcut: the same.
   - Not measured: Reset in the Key palette with Matte or the Key Output Invert on. vidcut resets them.
   - Measured: Add Serial on a Key Mixer puts a corrector between the mixer and the node that it feeds.
     - The key of the mixer goes to the RGB input of the corrector. The RGB output of the corrector goes to the key input of that node.
@@ -3542,6 +3550,11 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - A middle-click removes any point of a curve.
     - The viewer shows the outline, thin lines at the inner and the outer path, the points, the Bezier handles and a middle dot.
     - Not measured: the look of a curve in the viewer of Resolve, and its key before the curve is closed.
+  - Measured in Resolve Studio 21.2: Shift and a drag box fill the points in the box. A dashed box with 8 handles stays around them.
+    - A drag of a selected point moves all the selected points and the box.
+    - A drag of a side handle scales the selected points about the opposite side.
+    - Delete with two selected points removed one of them. A second Delete removed nothing.
+  - vidcut: Shift and a drag box are not there yet ([todo](todo/color-page.md)).
   - Each point of a curve has a magenta inside and outside softness point. A drag moves each one alone (p. 3273).
   - Measured in Resolve Studio 21.2: a curve keeps an inner and an outer path, each with a point for each point of the curve.
     - With no drag, the two paths are the curve moved by Inside and Outside, with mitred corners.
@@ -5392,7 +5405,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - On a 1000 x 562 picture, Crop Top 1 is 0.78 of a source pixel, and it cuts nothing.
       - The rule is the same with Zoom, Rotation and Softness.
       - A crop with keyframes, pixels that are not square and a rotation in the file were not measured. vidcut uses the same rule, in the pixels of the upright file.
-      - A compound clip was not measured. vidcut counts its crop in pixels of the frame.
+      - The crop of a compound clip (measured in Resolve Studio 21.2, in timelines 1280, 1920 and 3840 wide):
+        - It can hold one clip with no change of place, size or crop. Then its crop is a crop of that clip, in that clip's source pixels.
+        - A 960 x 720 picture in a 1280 x 720 timeline starts at x = 160. Crop Left 10 on the compound clip moves that edge to x = 167. Crop Left 40 moves it to x = 190.
+        - The opacity of the clip inside does not change this.
+        - In all other cases, the crop cuts the frame of the compound clip in whole pixels of the timeline.
+        - Tilt 1, Zoom 1.1 or a crop on the clip inside gives this. A second clip over it inside gives this too.
+        - **vidcut:** a flip, a turn, pitch, yaw, a Dynamic Zoom, a Push or a Slide inside is also a change of place.
   - **Over the tracks below:**
     - A clip covers the tracks below it only where its picture covers the frame, at its usual values too.
     - The tracks below show in the bars around a picture of another shape, outside a placed picture, and where it is cropped.

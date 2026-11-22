@@ -22,6 +22,26 @@ pub struct Level {
     pub opacity: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Extent {
+    pub rect: [f64; 4],
+    pub grid: (f64, f64),
+}
+
+impl Extent {
+    pub fn whole((w, h): (f64, f64)) -> Self {
+        Self {
+            rect: [0.0, 0.0, w, h],
+            grid: (w, h),
+        }
+    }
+
+    pub fn within(&self, [fx, fy, fw, fh]: [f64; 4]) -> [f64; 4] {
+        let [ex, ey, ew, eh] = self.rect;
+        [(ex - fx) / fw, (ey - fy) / fh, ew / fw, eh / fh]
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Soft {
     pub inner: [f64; 4],
@@ -963,7 +983,7 @@ fn whole_pixels(part: f64, pixels: f64) -> f64 {
     (part * pixels + 1e-6).floor() / pixels.max(1.0)
 }
 
-fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], (pw, ph): (f64, f64)) -> Level {
+fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -> Level {
     let sampled = placed.picture.sampled(placed.source as f64);
     let p = &sampled;
     let [_, _, fw, fh] = fitted;
@@ -981,14 +1001,26 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], (pw, ph): (f64, f
     let (a, b) = (k * sx * cos / (zx * fw), -k * sx * sin / (zx * fw));
     let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
+    let [cx, cy, cw, ch] = extent.within(fitted);
+    let (gw, gh) = extent.grid;
     let crop = [
-        whole_pixels(c0.left, pw),
-        whole_pixels(c0.top, ph),
-        1.0 - whole_pixels(c0.right, pw),
-        1.0 - whole_pixels(c0.bottom, ph),
+        cx + whole_pixels(c0.left, gw) * cw,
+        cy + whole_pixels(c0.top, gh) * ch,
+        cx + (1.0 - whole_pixels(c0.right, gw)) * cw,
+        cy + (1.0 - whole_pixels(c0.bottom, gh)) * ch,
     ];
     let gone = p.scale().contains(&0.0) || crop[0] >= crop[2] || crop[1] >= crop[3];
-    let (mut edge, soft) = Soft::of(crop, p.softness(), [fw, fh]);
+    let cut = |part: f64, grid: f64, at: f64, open: f64| match whole_pixels(part, grid) > 0.0 {
+        true => at,
+        false => open,
+    };
+    let cuts = [
+        cut(c0.left, gw, crop[0], 0.0),
+        cut(c0.top, gh, crop[1], 0.0),
+        cut(c0.right, gw, crop[2], 1.0),
+        cut(c0.bottom, gh, crop[3], 1.0),
+    ];
+    let (mut edge, soft) = Soft::of(cuts, p.softness(), [fw, fh]);
     if gone {
         edge = [1.0, 1.0, 0.0, 0.0];
     }
@@ -1110,6 +1142,14 @@ pub fn lettered([px, py]: [f64; 2], zoom: f64, radians: f64, [ox, oy]: [f64; 2])
 impl Level {
     const OPEN: f64 = 1e6;
 
+    fn keeps(&self, [fx, fy, fw, fh]: [f64; 4], extent: Extent) -> bool {
+        let still = [1.0 / fw, 0.0, -fx / fw, 0.0, 1.0 / fh, -fy / fh, 0.0, 0.0];
+        let [cx, cy, cw, ch] = extent.within([fx, fy, fw, fh]);
+        let all = [cx, cy, cx + cw, cy + ch];
+        let near = |a: &[f64], b: &[f64]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-9);
+        near(&self.back, &still) && near(&self.shown, &all)
+    }
+
     pub fn forward(&self, uv: [f64; 2]) -> [f64; 2] {
         ahead(&self.back, uv)
     }
@@ -1137,9 +1177,30 @@ impl Level {
 
 impl Placing {
     pub fn new(placed: &[Placed], frame: (f64, f64), fitted: [f64; 4], pixels: (f64, f64)) -> Self {
+        let extent = Extent {
+            rect: fitted,
+            grid: pixels,
+        };
+        Self::over(placed, frame, (fitted, pixels), extent)
+    }
+
+    pub fn whole(placed: &[Placed], frame: (f64, f64)) -> Self {
+        Self::within(placed, frame, Extent::whole(frame))
+    }
+
+    pub fn within(placed: &[Placed], frame: (f64, f64), extent: Extent) -> Self {
+        Self::over(placed, frame, ([0.0, 0.0, frame.0, frame.1], frame), extent)
+    }
+
+    pub fn over(
+        placed: &[Placed],
+        frame: (f64, f64),
+        (fitted, pixels): ([f64; 4], (f64, f64)),
+        extent: Extent,
+    ) -> Self {
         let p = &placed[0];
         let [zx, zy] = p.picture.scale_at(p.source as f64);
-        let mut own = level(p, frame, fitted, pixels);
+        let mut own = level(p, frame, fitted, extent);
         let unzoomed = p
             .zoomed()
             .map_or(Picture::MIDDLE, |b| flipped(&p.picture, b.center));
@@ -1184,10 +1245,6 @@ impl Placing {
             effects,
             composed,
         }
-    }
-
-    pub fn whole(placed: &[Placed], frame: (f64, f64)) -> Self {
-        Self::new(placed, frame, [0.0, 0.0, frame.0, frame.1], frame)
     }
 
     pub fn at(&self, x: f64, y: f64) -> Option<([f64; 2], f64)> {
@@ -1268,6 +1325,7 @@ pub enum MixPart {
 pub struct Mix {
     pub parts: Vec<MixPart>,
     pub placing: Placing,
+    pub extent: Extent,
     pub added: bool,
     pub moving: Option<Moving>,
     pub outgoing: Option<bool>,
@@ -1294,6 +1352,7 @@ struct Member<'a> {
     index: usize,
     title: bool,
     placed: &'a [Placed],
+    extent: Extent,
 }
 
 impl Member<'_> {
@@ -1314,14 +1373,30 @@ impl Member<'_> {
             false => MixPart::Layer(self.index),
         }
     }
+
+    fn shown(&self, frame: (f64, f64)) -> Extent {
+        let whole = Extent::whole(frame);
+        match self.placed.first() {
+            Some(own) if !self.title => kept(own, frame, self.extent.rect, self.extent),
+            _ => whole,
+        }
+    }
 }
 
-fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixPart> {
+fn kept(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -> Extent {
+    let still = placed.moving.is_none() && placed.zoomed().is_none();
+    match still && level(placed, frame, fitted, extent).keeps(fitted, extent) {
+        true => extent,
+        false => Extent::whole(frame),
+    }
+}
+
+fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<(MixPart, Extent)> {
     let mut parts = Vec::new();
     let mut rest = members;
     while let Some(first) = rest.first() {
         let Some(outer) = first.around(depth) else {
-            parts.push(first.part());
+            parts.push((first.part(), first.shown(frame)));
             rest = &rest[1..];
             continue;
         };
@@ -1330,25 +1405,36 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixP
             .take_while(|m| m.around(depth) == Some(outer))
             .count();
         let (run, after) = rest.split_at(n);
-        let inner = parts_of(run, depth + 1, frame);
-        let mut placing = Placing::whole(std::slice::from_ref(outer), frame);
+        let (inner, shown): (Vec<MixPart>, Vec<Extent>) =
+            parts_of(run, depth + 1, frame).into_iter().unzip();
+        let extent = match shown.as_slice() {
+            [only] => *only,
+            _ => Extent::whole(frame),
+        };
+        let mut placing = Placing::within(std::slice::from_ref(outer), frame, extent);
         if let (CompositeMode::Normal, [only]) = (placing.mode, inner.as_slice()) {
             placing.mode = run_mode(only, run);
         }
-        parts.push(MixPart::Mix(Box::new(Mix {
-            parts: inner,
-            placing,
-            added: outer.crossing,
-            moving: outer
-                .moving
-                .as_ref()
-                .zip(outer.ramp)
-                .map(|(m, r)| m.at(&r, 0)),
-            outgoing: outer
-                .ramp
-                .filter(|r| r.moved && !outer.crossing)
-                .map(|r| r.falling),
-        })));
+        let whole = [0.0, 0.0, frame.0, frame.1];
+        let out = kept(outer, frame, whole, extent);
+        parts.push((
+            MixPart::Mix(Box::new(Mix {
+                parts: inner,
+                placing,
+                extent,
+                added: outer.crossing,
+                moving: outer
+                    .moving
+                    .as_ref()
+                    .zip(outer.ramp)
+                    .map(|(m, r)| m.at(&r, 0)),
+                outgoing: outer
+                    .ramp
+                    .filter(|r| r.moved && !outer.crossing)
+                    .map(|r| r.falling),
+            })),
+            out,
+        ));
         rest = after;
     }
     parts
@@ -1386,9 +1472,13 @@ fn layers_in(parts: &[MixPart]) -> usize {
 }
 
 impl Mixes {
-    pub fn of(layers: &[&[Placed]], titles: &[(usize, &[Placed])], frame: (f64, f64)) -> Self {
+    pub fn of(
+        layers: &[(&[Placed], Extent)],
+        titles: &[(usize, &[Placed])],
+        frame: (f64, f64),
+    ) -> Self {
         let n = layers.len();
-        let plain = layers.iter().all(|p| p.len() < 2);
+        let plain = layers.iter().all(|(p, _)| p.len() < 2);
         if n == 0 || plain && titles.iter().all(|(a, p)| *a > n || p.is_empty()) {
             return Self::default();
         }
@@ -1401,18 +1491,23 @@ impl Mixes {
                     index,
                     title: true,
                     placed: if *above > n { &[] } else { placed },
+                    extent: Extent::whole(frame),
                 })
         };
         let mut members: Vec<Member<'_>> = titled(0).collect();
-        for (index, placed) in layers.iter().enumerate() {
+        for (index, (placed, extent)) in layers.iter().enumerate() {
             members.push(Member {
                 index,
                 title: false,
                 placed,
+                extent: *extent,
             });
             members.extend(titled(index + 1));
         }
-        let parts = parts_of(&members, 0, frame);
+        let parts: Vec<MixPart> = parts_of(&members, 0, frame)
+            .into_iter()
+            .map(|(part, _)| part)
+            .collect();
         if !parts.iter().any(|p| matches!(p, MixPart::Mix(_))) {
             return Self::default();
         }
