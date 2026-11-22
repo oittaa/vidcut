@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use vidcut_core::model::{Clip, Generator, GeneratorKind, Marks};
+use vidcut_core::model::{Clip, Compound, Generator, GeneratorKind, Marks};
 use vidcut_core::multicam::camera_order;
 use vidcut_core::render::{FileClock, TapeEntry};
 use vidcut_core::request::{GeneratorSettings, TimecodeDisplay, ViewerFrame, ViewerMode};
@@ -254,6 +254,7 @@ pub struct Snapshot {
     pub timeline: PlayerSnap,
     pub source_media: Option<String>,
     pub source_generator: Option<SourceGenerator>,
+    pub source_compound: Option<String>,
     pub source_grid: Arc<vidcut_core::multicam::SourceGrid>,
     pub multi_marks: Marks,
     pub multi_alone: bool,
@@ -318,10 +319,20 @@ impl Snapshot {
             .filter(|_| self.viewer == ViewerMode::SourceClip)
     }
 
+    pub fn open_compound(&self) -> Option<&Compound> {
+        let id = self.source_compound.as_deref()?;
+        let shown = self.viewer == ViewerMode::SourceClip && self.source_media.is_none();
+        self.project()?.pooled_compound(id).filter(|_| shown)
+    }
+
     pub fn viewer_marks(&self) -> Option<&Marks> {
         match self.viewer {
             ViewerMode::MultiSource if !self.multi_alone => Some(&self.multi_marks),
-            _ => self.open_generator().map(|g| &g.marks),
+            _ => match (self.open_generator(), self.open_compound()) {
+                (Some(g), _) => Some(&g.marks),
+                (None, Some(k)) => self.project().map(|p| p.compound_sheet(k).marks),
+                (None, None) => None,
+            },
         }
     }
 

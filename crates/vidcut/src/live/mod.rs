@@ -19,7 +19,9 @@ use notify::Watcher;
 use serde_json::{Value, json};
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::duck::Unmeasured;
-use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue, source_context};
+use vidcut_core::editor::{
+    Env, compound_context, media_context, resolve_clip, resolve_cue, source_context,
+};
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, Title};
 use vidcut_core::ops::ClipSpans;
@@ -578,6 +580,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         timeline: PlayerSnap::default(),
         source_media: None,
         source_generator: None,
+        source_compound: None,
         source_grid: Default::default(),
         multi_marks: Default::default(),
         multi_alone: false,
@@ -662,6 +665,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         last_source: ViewerMode::SourceClip,
         source_media: None,
         source_generator: None,
+        source_compound: None,
         source_grid: Default::default(),
         multi_marks: Default::default(),
         multi_alone: false,
@@ -833,6 +837,7 @@ enum SourceContent {
     Tape,
     Multi(String),
     Generator,
+    Compound(String),
 }
 
 enum Until {
@@ -958,6 +963,7 @@ struct Live {
     last_source: ViewerMode,
     source_media: Option<String>,
     source_generator: Option<snapshot::SourceGenerator>,
+    source_compound: Option<String>,
     generator_position: i64,
     source_grid: Arc<vidcut_core::multicam::SourceGrid>,
     multi_marks: vidcut_core::model::Marks,
@@ -1654,6 +1660,7 @@ impl Live {
             timeline: self.player.snap(TIMELINE),
             source_media: self.source_media.clone(),
             source_generator: self.source_generator.clone(),
+            source_compound: self.source_compound.clone(),
             source_grid: self.source_grid.clone(),
             multi_marks: self.multi_marks.clone(),
             multi_alone: self.multi_alone,
@@ -2908,6 +2915,14 @@ impl Live {
             } => {
                 Step::Now(self.viewer_marks_set(mark_in.as_ref(), out.as_ref(), duration.as_ref()))
             }
+            Request::ViewerMarksClear {} if self.open_compound().is_some() => {
+                let compound = self.open_compound().map(str::to_string);
+                let clear = Request::MediaMarksClear {
+                    media: String::new(),
+                    compound,
+                };
+                Step::Now(self.edit(Envelope::new(clear), Origin::Session))
+            }
             Request::ViewerMarksClear {} => {
                 *self.viewer_marks_mut() = Marks::default();
                 self.sync_loop();
@@ -2916,10 +2931,17 @@ impl Live {
             }
             Request::ViewerLoad {
                 media,
+                compound,
                 generator,
                 settings,
                 at,
-            } => match self.viewer_load(&media, generator, &settings, at.as_ref()) {
+            } => match self.viewer_load(
+                &media,
+                compound.as_deref(),
+                generator,
+                &settings,
+                at.as_ref(),
+            ) {
                 Ok(motion) => self.shown(motion),
                 Err(e) => Step::Now(Err(e)),
             },
@@ -3782,11 +3804,21 @@ impl Live {
             }
             Request::MediaMarksSet {
                 media,
+                compound,
                 mark_in,
                 out,
                 ..
             } => {
-                let base = self.source_frame_of(media);
+                let shown = compound.as_ref().and_then(|q| {
+                    let p = self.project.as_ref()?.project();
+                    let id = vidcut_core::ops::compound::pooled_id(p, q).ok()?;
+                    (self.open_compound() == Some(id.as_str())).then_some(id)
+                });
+                let base = match (compound, &shown) {
+                    (Some(_), Some(_)) => Some(self.player.position(SOURCE)),
+                    (Some(_), None) => None,
+                    (None, _) => self.source_frame_of(media),
+                };
                 for spec in [mark_in, out].into_iter().flatten() {
                     if let Some(frame) = base
                         && matches!(
@@ -3795,10 +3827,14 @@ impl Live {
                         )
                     {
                         let resolved = self.project.as_ref().and_then(|p| {
-                            let m = p.project().media(media)?;
-                            media_context(p.project(), m, Some(frame))
-                                .resolve_from(spec, frame)
-                                .ok()
+                            let p = p.project();
+                            let c = match &shown {
+                                Some(id) => {
+                                    compound_context(p, p.pooled_compound(id)?, Some(frame))
+                                }
+                                None => media_context(p, p.media(media)?, Some(frame)),
+                            };
+                            c.resolve_from(spec, frame).ok()
                         });
                         if let Some(f) = resolved {
                             *spec = TimeSpec::Frames(f);
@@ -3929,6 +3965,7 @@ impl Live {
         self.selection = Selection::default();
         self.source_media = None;
         self.source_generator = None;
+        self.source_compound = None;
         self.generator_position = 0;
         self.multi_marks = Default::default();
         self.multi_alone = false;
@@ -4027,6 +4064,13 @@ impl Live {
             .is_some_and(|m| !media.contains(m))
         {
             self.source_media = None;
+        }
+        if self
+            .source_compound
+            .as_ref()
+            .is_some_and(|k| p.pooled_compound(k).is_none())
+        {
+            self.source_compound = None;
         }
         let _ = response;
         self.check_media();
@@ -4232,6 +4276,11 @@ impl Live {
                 .as_ref()
                 .and_then(|id| p.media(id).map(|m| p.media_frames(m)))
                 .or(self.source_generator.as_ref().map(|g| g.frames))
+                .or(self
+                    .source_compound
+                    .as_ref()
+                    .and_then(|k| p.pooled_compound(k))
+                    .map(|k| vidcut_core::ops::compound::length(p, k)))
                 .unwrap_or(0),
             ViewerMode::SourceTape | ViewerMode::MultiSource => {
                 let at = self.player.position(SOURCE);
@@ -4518,10 +4567,15 @@ impl Live {
         let want = match self.last_source {
             ViewerMode::SourceTape => SourceContent::Tape,
             ViewerMode::MultiSource => SourceContent::Multi(self.pool.bin.clone()),
-            _ => match (&self.source_media, &self.source_generator) {
-                (Some(m), _) => SourceContent::Clip(m.clone()),
-                (None, Some(_)) => SourceContent::Generator,
-                (None, None) => {
+            _ => match (
+                &self.source_media,
+                &self.source_compound,
+                &self.source_generator,
+            ) {
+                (Some(m), _, _) => SourceContent::Clip(m.clone()),
+                (None, Some(k), _) => SourceContent::Compound(k.clone()),
+                (None, None, Some(_)) => SourceContent::Generator,
+                (None, None, None) => {
                     self.stash_source_position();
                     self.source_content = None;
                     self.player.unload(SOURCE);
@@ -4556,6 +4610,9 @@ impl Live {
                 .ok_or_else(|| Error::invalid("no generator is open"))
                 .and_then(|g| render::generator_tape(&p, &g.generator, 0, g.frames))
                 .map(|plan| (plan, Vec::new())),
+            SourceContent::Compound(k) => {
+                render::compound_tape(&p, k).map(|plan| (plan, Vec::new()))
+            }
         };
         let Ok((plan, entries)) = made else {
             self.source_content = None;
@@ -4572,7 +4629,9 @@ impl Live {
             Some(match &want {
                 SourceContent::Tape => self.tape_position,
                 SourceContent::Multi(_) => self.multi_position,
-                SourceContent::Clip(m) => self.source_positions.peek(m).copied().unwrap_or(0),
+                SourceContent::Clip(m) | SourceContent::Compound(m) => {
+                    self.source_positions.peek(m).copied().unwrap_or(0)
+                }
                 SourceContent::Generator => self.generator_position,
             })
         };
@@ -4584,7 +4643,7 @@ impl Live {
     fn stash_source_position(&mut self) {
         let pos = self.player.position(SOURCE);
         match &self.source_content {
-            Some(SourceContent::Clip(m)) => {
+            Some(SourceContent::Clip(m) | SourceContent::Compound(m)) => {
                 self.source_positions.insert(m.clone(), pos);
             }
             Some(SourceContent::Tape) => self.tape_position = pos,
@@ -4661,12 +4720,14 @@ impl Live {
         if dropped {
             let clear = Request::MediaMarksClear {
                 media: media.clone(),
+                compound: None,
             };
             self.edit(Envelope::new(clear), Origin::Session)?;
         }
         if !want.is_empty() {
             let set = Request::MediaMarksSet {
                 media,
+                compound: None,
                 mark_in: want.mark_in.map(TimeSpec::Frames),
                 out: want.mark_out.map(TimeSpec::Frames),
                 duration: None,
@@ -4684,8 +4745,18 @@ impl Live {
     ) -> Result<Response> {
         if !self.has_viewer_marks() {
             return Err(Error::usage(
-                "viewer.marks.set goes with the Multi Source viewer or an open generator",
+                "viewer.marks.set goes with the Multi Source viewer, a generator or a compound clip",
             ));
+        }
+        if let Some(k) = self.open_compound().map(str::to_string) {
+            let set = Request::MediaMarksSet {
+                media: String::new(),
+                compound: Some(k),
+                mark_in: mark_in.cloned(),
+                out: out.cloned(),
+                duration: duration.cloned(),
+            };
+            return self.edit(Envelope::new(set), Origin::Session);
         }
         let ctx = self.viewer_context()?;
         let held = self.viewer_marks_mut().clone();
@@ -4724,6 +4795,7 @@ impl Live {
     fn has_viewer_marks(&self) -> bool {
         self.viewer == ViewerMode::MultiSource
             || (self.viewer == ViewerMode::SourceClip && self.source_generator.is_some())
+            || self.open_compound().is_some()
     }
 
     fn viewer_marks_mut(&mut self) -> &mut Marks {
@@ -4835,6 +4907,7 @@ impl Live {
             }
             self.source_media = Some(a.to_string());
             self.source_generator = None;
+            self.source_compound = None;
             self.multi_media = Some(a.to_string());
             self.selection.media = vec![a.to_string()];
         }
@@ -4863,6 +4936,7 @@ impl Live {
         if opens_grid {
             self.source_media = self.multi_media.clone();
             self.source_generator = None;
+            self.source_compound = None;
         }
         self.viewer = mode;
         if mode.is_source() {
@@ -4896,6 +4970,7 @@ impl Live {
         }
         self.source_media = Some(media.to_string());
         self.source_generator = None;
+        self.source_compound = None;
         self.viewer = ViewerMode::SourceClip;
         self.last_source = ViewerMode::SourceClip;
         let loaded = self.refresh_source();
@@ -4910,10 +4985,17 @@ impl Live {
     fn viewer_load(
         &mut self,
         media: &str,
+        compound: Option<&str>,
         generator: Option<GeneratorKind>,
         settings: &GeneratorSettings,
         at: Option<&TimeSpec>,
     ) -> Result<Option<u64>> {
+        if let Some(k) = compound {
+            if !media.is_empty() || generator.is_some() {
+                return Err(Error::usage("give one of media, generator or compound"));
+            }
+            return self.load_compound(k, at);
+        }
         let made = vidcut_core::ops::generators::source_of(generator, settings)?;
         match (generator.zip(made), media.is_empty()) {
             (Some(_), false) => Err(Error::usage("give media or generator, not both")),
@@ -4921,6 +5003,43 @@ impl Live {
             (None, true) => Err(Error::usage("viewer.load needs media or generator")),
             (None, false) => self.load_source(media, at),
         }
+    }
+
+    fn load_compound(&mut self, query: &str, at: Option<&TimeSpec>) -> Result<Option<u64>> {
+        let open = self.project.as_ref().ok_or_else(no_project)?;
+        let p = open.project();
+        let id = vidcut_core::ops::compound::pooled_id(p, query)?;
+        let k = p.pooled_compound(&id).expect("pooled_id finds it");
+        let position = match at {
+            Some(t) => {
+                let current = self.source_positions.peek(&id).copied().unwrap_or(0);
+                Some(compound_context(p, k, Some(current)).resolve_from(t, current)?)
+            }
+            None => None,
+        };
+        self.stash_source_position();
+        if let Some(pos) = position {
+            self.source_positions.insert(id.clone(), pos);
+        }
+        self.source_media = None;
+        self.source_generator = None;
+        self.source_compound = Some(id);
+        self.viewer = ViewerMode::SourceClip;
+        self.last_source = ViewerMode::SourceClip;
+        self.dirty = true;
+        let loaded = self.refresh_source();
+        let motion = self.player.show(SOURCE).or(loaded);
+        Ok(match (motion, position) {
+            (Some(m), _) => Some(m),
+            (None, Some(pos)) => self.seek(SOURCE, pos, true),
+            (None, None) => None,
+        })
+    }
+
+    fn open_compound(&self) -> Option<&str> {
+        self.source_compound
+            .as_deref()
+            .filter(|_| self.viewer == ViewerMode::SourceClip && self.source_media.is_none())
     }
 
     fn load_generator(
@@ -4940,6 +5059,7 @@ impl Live {
         };
         self.stash_source_position();
         self.source_media = None;
+        self.source_compound = None;
         self.source_generator = Some(snapshot::SourceGenerator {
             kind,
             settings: settings.clone(),
@@ -4975,11 +5095,13 @@ impl Live {
                 let position = self.player.position(SOURCE);
                 match (
                     self.source_media.as_ref().and_then(|m| p.media(m)),
+                    self.open_compound().and_then(|k| p.pooled_compound(k)),
                     &self.source_generator,
                 ) {
-                    (Some(m), _) => media_context(p, m, Some(position)),
-                    (None, Some(g)) => source_context(p, g.frames, &g.marks, Some(position)),
-                    (None, None) => return Err(Error::usage("no source clip is open")),
+                    (Some(m), _, _) => media_context(p, m, Some(position)),
+                    (None, Some(k), _) => compound_context(p, k, Some(position)),
+                    (None, None, Some(g)) => source_context(p, g.frames, &g.marks, Some(position)),
+                    (None, None, None) => return Err(Error::usage("no source clip is open")),
                 }
             }
             ViewerMode::MultiSource => {
@@ -5260,11 +5382,16 @@ impl Live {
             (Some(SourceContent::Clip(m)), Some(p)) => p.media(m),
             _ => None,
         };
-        let source_rate = match (clip, p) {
-            (Some(m), Some(p)) => {
+        let shown_compound = match (&self.source_content, p) {
+            (Some(SourceContent::Compound(k)), Some(p)) => p.pooled_compound(k),
+            _ => None,
+        };
+        let source_rate = match (clip, shown_compound, p) {
+            (Some(m), _, Some(p)) => {
                 let (rate, drop) = p.clip_rate(m);
                 (rate, drop, 0)
             }
+            (None, Some(k), _) => (k.fps, k.counts_drop_frame(), 0),
             _ => (fps, drop, 0),
         };
         let mut source = player(SOURCE, source_rate);
@@ -5292,6 +5419,14 @@ impl Live {
                 }
                 None
             }
+            Some(SourceContent::Compound(k)) => {
+                source["compound"] = json!(k);
+                if let (Some(c), Some(p)) = (shown_compound, p) {
+                    source["marks"] = json!(p.compound_sheet(c).marks);
+                }
+                source["source_frame"] = json!(position);
+                None
+            }
             None => None,
         };
         if let Some((m, f)) = under {
@@ -5303,6 +5438,7 @@ impl Live {
             Some(SourceContent::Tape) => "source_tape",
             Some(SourceContent::Multi(_)) => "multi_source",
             Some(SourceContent::Generator) => "generator",
+            Some(SourceContent::Compound(_)) => "compound",
             None => "none",
         });
         json!({

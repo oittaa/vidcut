@@ -54,6 +54,7 @@ pub struct Source {
     pub audio_only: bool,
     pub track: Option<String>,
     pub generator: Option<Generator>,
+    pub compound: Option<String>,
 }
 
 #[derive(
@@ -74,28 +75,6 @@ pub enum MoveMode {
     Insert,
     /// Write over whatever is at the target; nothing else moves.
     Overwrite,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum Place {
-    /// Write over what is there; nothing else moves.
-    #[default]
-    Overwrite,
-    /// On V1: open the timeline at `at`; later clips move right.
-    Insert,
-    /// On V1: take the place of the clip under `at`; later clips follow.
-    Replace,
 }
 
 fn main_index(p: &Project) -> usize {
@@ -323,6 +302,9 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         let id = p.alloc_clip_id();
         return Ok(block_clip(id, (0, b - a), None, Some(generator.clone())));
     }
+    if let Some(cid) = &src.compound {
+        return compound_clip(p, src, cid);
+    }
     let media = p
         .media(&src.media)
         .ok_or_else(|| Error::not_found(format!("no media {}", src.media)))?;
@@ -390,6 +372,33 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
     })
 }
 
+fn compound_clip(p: &mut Project, src: &Source, cid: &str) -> Result<Clip> {
+    let k = p
+        .pooled_compound(cid)
+        .ok_or_else(|| Error::not_found(format!("no compound clip {cid}")))?;
+    let video = !src.audio_only && (k.has_picture() || !k.has_sound());
+    if !video && (src.video_only || !k.has_sound()) {
+        return Err(Error::invalid(format!(
+            "{} has no {}",
+            k.name,
+            if src.audio_only { "audio" } else { "video" }
+        )));
+    }
+    let frames = p.compound_frames(k);
+    let (a, b) = src.range;
+    if a < 0 || b > frames || a >= b {
+        return Err(Error::invalid(format!(
+            "source range {a}..{b} is outside {} (0..{frames} frames)",
+            k.name
+        )));
+    }
+    let mut c = block_clip(p.alloc_clip_id(), (0, b - a), None, None);
+    c.source_in = a;
+    c.video = video;
+    c.compound = Some(cid.to_string());
+    Ok(c)
+}
+
 fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
     let ti = match &src.track {
         Some(id) => tracks::resolve(p, id)?,
@@ -404,10 +413,14 @@ fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
                     p.tracks[ti].id
                 )));
             }
-            if clip.audio.is_none() {
+            let (what, sound) = match p.clip_compound(clip) {
+                Some(k) => (k.name.clone(), k.has_sound()),
+                None => (clip.media.clone(), clip.audio.is_some()),
+            };
+            if !sound {
                 return Err(Error::invalid(format!(
-                    "{} has no audio for audio track {}",
-                    clip.media, p.tracks[ti].id
+                    "{what} has no audio for audio track {}",
+                    p.tracks[ti].id
                 )));
             }
             clip.video = false;
@@ -477,7 +490,7 @@ pub fn append_block(p: &mut Project, srcs: &[Source], lead: i64) -> Result<Vec<S
     let start = p.tracks[ti].end() + lead.max(0);
     let ids = place_block(p, ti, clips, start);
     fix_audio(p, ti);
-    Ok(ids)
+    compound::with_sound(p, ids, &srcs[0])
 }
 
 pub fn nearest_edit(p: &Project, playhead: i64) -> i64 {
@@ -539,7 +552,7 @@ pub fn insert_at_block(
         clear_range(p, ti, at + lead, at + lead + len);
         let ids = place_block(p, ti, clips, at + lead);
         fix_audio(p, ti);
-        return Ok(ids);
+        return compound::with_sound(p, ids, &srcs[0]);
     }
     linked::split_main(p, at, &[]);
     let before = Before::of(p);
@@ -560,7 +573,7 @@ pub fn insert_at_block(
             ..Edit::default()
         },
     );
-    Ok(ids)
+    compound::with_sound(p, ids, &srcs[0])
 }
 
 fn marked_start(p: &Project, srcs: &[Source], at: i64, lead: Option<i64>) -> (i64, Vec<Source>) {
@@ -643,7 +656,7 @@ pub fn overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<
     clear_range(p, ti, start, start + block_len(&clips));
     let ids = place_block(p, ti, clips, start);
     fix_audio(p, ti);
-    Ok(ids)
+    compound::with_sound(p, ids, &srcs[0])
 }
 
 pub fn ripple_overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
@@ -675,7 +688,7 @@ pub fn ripple_overwrite_block(
         clear_range(p, ti, a, b.max(a + lead + len));
         let ids = place_block(p, ti, clips, a + lead);
         fix_audio(p, ti);
-        return Ok(ids);
+        return compound::with_sound(p, ids, &srcs[0]);
     }
     let end = p.tracks[ti].end();
     let (a, b) = if p.settings.ripple_on && a > end {
@@ -699,7 +712,7 @@ pub fn ripple_overwrite_block(
             ..Edit::default()
         },
     );
-    Ok(ids)
+    compound::with_sound(p, ids, &srcs[0])
 }
 
 fn busy(t: &Track, start: i64, end: i64) -> bool {
@@ -756,7 +769,8 @@ pub fn place_on_top_block(
     clear_range(p, ti, start, start + block_len(&clips));
     let ids = place_block(p, ti, clips, start);
     fix_audio(p, ti);
-    Ok((ids, p.tracks[ti].id.clone()))
+    let track = p.tracks[ti].id.clone();
+    Ok((compound::with_sound(p, ids, &srcs[0])?, track))
 }
 
 pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<String>> {
@@ -2932,8 +2946,20 @@ pub fn set_media_marks(
     let m = p
         .pooled(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    let frames = p.clip_limit(m);
-    let mut marks = m.marks.clone();
+    let marks = merged_marks(&m.marks, mark_in, mark_out, p.clip_limit(m), media)?;
+    let m = p.media.iter_mut().find(|m| m.id == media).expect("found");
+    m.marks = marks;
+    Ok(())
+}
+
+pub(crate) fn merged_marks(
+    held: &crate::model::Marks,
+    mark_in: Option<Option<i64>>,
+    mark_out: Option<Option<i64>>,
+    frames: i64,
+    what: &str,
+) -> Result<crate::model::Marks> {
+    let mut marks = held.clone();
     if let Some(i) = mark_in {
         marks.mark_in = i;
     }
@@ -2949,12 +2975,10 @@ pub fn set_media_marks(
         || marks.mark_out.is_some_and(|o| o < 1 || o > frames)
     {
         return Err(Error::invalid(format!(
-            "source marks must be inside {media} (0..{frames} frames)"
+            "source marks must be inside {what} (0..{frames} frames)"
         )));
     }
-    let m = p.media.iter_mut().find(|m| m.id == media).expect("found");
-    m.marks = marks;
-    Ok(())
+    Ok(marks)
 }
 
 fn mirrored_piece(

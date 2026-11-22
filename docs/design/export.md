@@ -673,6 +673,7 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - The width of the canvas, multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it.
   - The size of the picture on the frame: its fitted size, multiplied by each Zoom X and each Zoom Y.
   - The middle of the picture on the frame, through the levels. A Dynamic Zoom box does not move it.
+  - The rotation of the picture (`OnFrame.turn`).
 - `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas, and the border.
   - The sigma is that of `GaussianBlur::spreads` at that width.
   - A blur with no sigma and Use Alpha on is left out.
@@ -681,6 +682,7 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - It also holds Blur Alpha and Whole Cells Only.
   - The size of a cell comes from the area of the picture on the frame (`MosaicBlur::CELL`).
   - The origin is the middle of the picture on the frame, moved by Position and the offsets.
+    - Position is a point of the picture. Thus it turns with the picture. The offsets and the cells keep the directions of the frame.
   - Its sizes are in samples. Antialias Result gives two samples for each pixel.
   - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
 - `place::Glowing` holds what `fs_glow` needs for a Glow.
@@ -768,7 +770,8 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
 - `Graded::of` makes the tree into a list of passes on numbered textures (`grade::Pass`). A grade with only copies is no grade.
   - `grade::complete` tells if the grade works. Else the grade does nothing, as in the spec (§8.21).
-  - It works when something goes out, each input of a corrector has a link, each mixer has a link, and each node goes somewhere. A node that gives only its key goes somewhere.
+  - It works when something goes out, each input of a corrector has a link, and each node goes somewhere.
+  - It also needs a link on each Parallel Mixer and Layer Mixer. A Key Mixer with no link gives a key of 1. A node that gives only its key goes somewhere.
   - `grade::order` puts each node after the nodes on its inputs.
   - Texture 0 is the picture of the clip. A node writes on the texture of its first input when no other node reads it later. Else a `Copy` pass first gives it a new texture (`Registers`).
   - Why: most trees then need no texture more than the picture.
@@ -783,10 +786,13 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
     - The last step clamps the key and applies the Key Output.
   - `shape_of` tells if the key of a node is one value for all pixels (`Shape::Flat`) or a texture (`Shape::Map`). Flat keys fold on the CPU and cost no pass.
   - A `KeyFold` pass folds a texture key with `fs_key_fold`. A node with windows and no key input keeps its one `Key` pass.
-  - A key on a key input with a Blur Radius above 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
+  - A key on a key input with a Blur Radius other than 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
+    - A Blur Radius below 0 then adds a `KeySharpen` pass. It gives twice the key minus its blur, as measured (spec §8.21).
+  - `cut_off` tells if a corrector takes its key input from a corrector that is off. Its key is then 0, and it reads no key from its links.
   - `Uses::counts` counts the readers of each key, from the last node back. A node counts its own key only when it is on and needs it. Only then do the keys on its links count.
   - Why: each key texture is then free after its last reader, and a key that nothing reads costs no pass.
   - A key mixer makes no picture. `grade::passed` and the counts of the pictures skip it.
+  - A corrector whose picture no node reads gives only its key. It gets no `Correct` pass, except in `Graded::tapped`, where its thumbnail shows its picture.
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
   - A curve goes to the GPU as two closed paths of lines: the inner and the outer path (`flattened`, `mitred`).
   - A curve with dragged softness points gets each path from its own points: the curve points with their moves (`inner`, `outer`).

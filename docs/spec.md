@@ -1988,10 +1988,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - These rows change between renders. Two renders of Aspect 2 at Pixel Frequency 25 differ on 1211 pixels, by up to 9.22/255. Renders at 0.132 and 0.566 of a step repeat exactly.
     - vidcut takes the box at the middle of the pixel's own triangle, clamped into the frame, at each distance.
   - Only the Fusion page gave renders of Blur Alpha off and Whole Cells Only. Only the default Pixel Frequency has Edit page renders on other sizes and Zooms ([todo](todo/effects-library.md)).
+  - Measured in Resolve Studio 21.2, with a 1280×720 source on timelines of 1280×720 and 1920×1080, at Position 0.3, 0.62:
+    - Position counts in fractions of the picture on the frame. A Zoom scales the grid, and a Pan moves it.
+    - On a rotated clip, the Position point turns with the picture. The cells keep the directions of the frame.
+    - A crop does not change the size or the place of the cells.
+    - On a compound clip, the effect gives the same picture as on a plain clip with the same values.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
-    - A Position away from the middle, on a picture with a Zoom or a Pan, counts in fractions of the picture on the frame.
-    - On a rotated clip, the cells keep the directions of the frame, as Gaussian Blur does.
-    - A crop and a Dynamic Zoom box do not change the size or the place of the cells.
+    - A Dynamic Zoom box does not change the size or the place of the cells.
     - The Zoom of each compound clip around the picture multiplies the size on the frame.
     - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
     - Whole Cells Only tests each sample's cell, with each Cell Shape and each Aliasing.
@@ -2493,6 +2496,20 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - An append gives a linked picture on V1 and sound on A1.
   - A range of it trims these two, as a clip of a file.
   - A drag follows [§7.3](#73-drag-and-drop-from-the-pool-or-viewer-pp-648-679-694695), as a drag of a file does.
+- **A compound clip in the Source viewer** (measured in Resolve Studio 21.2):
+  - A double-click on a compound clip in the Media Pool opens it in the Source viewer.
+  - In and Out in the Source viewer are the In and Out of its own timeline. The pool item and the open timeline show the same marks.
+  - Overwrite, Insert and Place on Top edit in the part from In to Out, with the Out frame, as for a file.
+  - The picture and the sound go in linked. The left offset of each is the In frame.
+  - With clips on V1 and A1, Place on Top makes a new V2 and a new A2.
+  - **vidcut:**
+    - `viewer.load` takes `compound`. The source viewer plays its tracks at its own frame rate.
+    - The edits of [§7.2](#72-edit-functions) take `compound`. Without `range`, they use its marks, converted to the timeline's frame rate.
+    - The sound goes on the audio track with the number of the picture's track.
+    - `media.marks.set` and `media.marks.clear` take `compound`.
+    - The marks stay when the compound clip closes.
+    - With an In past the end of the compound clip, an edit refuses and tells why.
+    - Source Overwrite refuses a compound clip: [the todo](todo/sync-bin.md).
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
   - Double-click the parent name in the bottom-left path bar to close the compound clip (p. 1054).
@@ -2501,7 +2518,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - Measured: a new compound clip starts at `00:00:00:00`.
   - Measured: in an OTIO file, outer clip markers sit on `Stack.markers`, and Media Pool compound markers do not export.
   - **vidcut:**
-    - A compound clip in the Media tab also opens by double-click or its context menu.
+    - A compound clip in the Media tab also opens from its context menu.
     - Opening a nested compound clip adds one more level to the path bar. Double-clicking any parent steps back to that level.
     - Closing writes edits back to the canonical compound definition, so every placement shows the change.
     - Growing inner tracks unlocks tail trims on placed clips.
@@ -3226,6 +3243,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
   - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
   - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node, Add One Input and Remove One Input. The Add Node submenu comes later ([todo](todo/color-page.md)).
+  - vidcut: Alt+S and Shift+S do nothing on a Key Mixer.
   - vidcut: a key link is blue. A node cannot drop into a key link.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
   - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
@@ -3652,13 +3670,23 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Band 6 starts off. It is a Lo-Pass filter at 19000 Hz.
   - Renders of noise at 48 kHz give these curves (measured):
     - Each filter is a biquad filter. With all gains at 0 dB, the sound does not change.
-    - A Bell filter has its gain at its frequency, and the given Q.
+    - A Bell filter has its gain at its frequency f. Its width comes from its Q and from the sample rate r:
+      - The scale of the filter is `t(x) = tan(π · x / r)` for a frequency x.
+      - The lower point of the band is `f − f / (2 · Q)`.
+      - The band has the width of the Q value `t(f) / (2 · (t(f) − t(f − f / (2 · Q))))`.
+      - With that Q value, the filter is the peaking filter of the Audio EQ Cookbook.
+      - Thus Q 0.5 puts the lower point at 0 Hz, and keeps its width at all frequencies.
+      - Above Q 0.5, the band is wider than its Q value. The difference increases with the frequency and with the Q.
+      - At 16000 Hz, Q 1 gives the width of Q 0.75, and Q 4 gives the width of Q 2.02.
+      - The renders have bands at 1000 to 20000 Hz, with Q 0.5 to 8 and gains of −12, 6 and 12 dB.
+      - All of them agree with this rule to 0.000001 dB.
+      - A Q below 0.5 and other sample rates are not measured.
     - A Lo-Shelf or Hi-Shelf filter has a fixed Q of 0.75.
     - The corner of a shelf is 10^(|gain| / 80) times away from the given frequency. A Lo-Shelf moves down and a Hi-Shelf moves up.
     - Thus a Hi-Shelf of 12 dB at 1000 Hz has about 2.5 dB at 1000 Hz.
     - A Hi-Pass or Lo-Pass filter has 12 dB per octave and a fixed Q of 1. It has 0 dB at its frequency.
     - Thus the curve has a peak of 1.25 dB beside the frequency. A Hi-Pass at 1000 Hz has it at 1414 Hz, and a Lo-Pass at 1000 Hz has it at 707 Hz.
-    - The curve in the Inspector shows a Notch filter, but a render does not change the sound.
+    - The curve in the Inspector shows a Notch filter, but a render does not change the sound ([gotchas](gotchas.md#resolves-renders)).
   - An OTIO export writes the effect `Fairlight Clip Equaliser`, `Type` 64, and six effects `Fairlight Equaliser Band`, `Type` 63 (measured):
     - The `Enabled` of the first effect is the switch of the equalizer. The `Enabled` of a band is the switch of that band.
     - The parameter `eq band index` of a band goes from 0 to 5.
@@ -3682,7 +3710,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut: `clip.set` sets `equalizer`. Its `on` is the switch.
     - On a clip with no equalizer, a change makes a flat one. It is on, unless `on` is false.
     - null makes the equalizer off again, with the usual values. Reset sends it.
-  - vidcut: a Notch band makes a cut in the sound. A Bell band keeps the width of its Q value ([X170](deviations.md#x170-the-equalizer-notch-and-bell-width)).
+  - vidcut: a Notch band makes a cut in the sound ([gotchas](gotchas.md#resolves-renders)).
+  - vidcut: a Bell band uses the same rule for a Q below 0.5 and at all sample rates.
   - vidcut: an OTIO export writes `Fairlight Clip Equaliser` and its six `Fairlight Equaliser Band` effects when the equalizer is on or off its usual values.
   - vidcut: an import reads those effects when they have no keyframes, and keeps keyed or unsupported ones carried.
   - vidcut: an equalizer that is off does not change the sound, also after an import.
