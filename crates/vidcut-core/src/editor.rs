@@ -2654,12 +2654,17 @@ fn resolve_sources(p: &Project, params: &SourceParams, env: &dyn Env) -> Result<
         ));
     }
     let kept: Vec<Source> = kept.into_iter().map(|s| decomposing(s, env)).collect();
-    if !params.inner_tracks.is_empty() && kept.iter().any(|s| !s.decompose) {
-        return Err(Error::usage(
-            "inner_tracks needs a compound clip and Decompose Compound Clips On Edit",
-        ));
-    }
+    routed(params, &kept)?;
     Ok(kept)
+}
+
+fn routed<'a>(params: &SourceParams, sources: impl IntoIterator<Item = &'a Source>) -> Result<()> {
+    match !params.inner_tracks.is_empty() && sources.into_iter().any(|s| !s.decompose) {
+        true => Err(Error::usage(
+            "inner_tracks needs a compound clip and Decompose Compound Clips On Edit",
+        )),
+        false => Ok(()),
+    }
 }
 
 fn decomposing(s: Source, env: &dyn Env) -> Source {
@@ -3727,6 +3732,7 @@ fn mutate(
                 };
                 vec![(decomposing(source(p, src)?, env), own)]
             };
+            routed(src, sources.iter().map(|(s, _)| s))?;
             let mut landed = Vec::with_capacity(sources.len());
             for (s, own) in &sources {
                 let marks = match s.compound.as_deref().and_then(|id| p.pooled_compound(id)) {

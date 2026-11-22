@@ -135,6 +135,10 @@ fn sound_part(c: &Clip) -> Option<Clip> {
 }
 
 pub(crate) fn sound_tracks(whole: &[Track]) -> Vec<Track> {
+    sounds(whole).into_iter().map(|(_, t)| t).collect()
+}
+
+fn sounds(whole: &[Track]) -> Vec<(String, Track)> {
     let mut sound = Vec::new();
     let mut under = 0;
     for t in whole {
@@ -149,19 +153,22 @@ pub(crate) fn sound_tracks(whole: &[Track]) -> Vec<Track> {
             }
             TrackKind::Audio => under + number(t),
         };
-        sound.push(Track {
-            clips,
-            transitions: t.transitions.iter().filter(|x| x.sound).cloned().collect(),
-            locked: t.locked,
-            muted: t.muted,
-            solo: t.solo,
-            volume_db: t.volume_db,
-            voice_isolation: t.voice_isolation,
-            name: (t.kind == TrackKind::Audio)
-                .then(|| t.name.clone())
-                .flatten(),
-            ..Track::new(format!("A{n}"), TrackKind::Audio)
-        });
+        sound.push((
+            t.id.clone(),
+            Track {
+                clips,
+                transitions: t.transitions.iter().filter(|x| x.sound).cloned().collect(),
+                locked: t.locked,
+                muted: t.muted,
+                solo: t.solo,
+                volume_db: t.volume_db,
+                voice_isolation: t.voice_isolation,
+                name: (t.kind == TrackKind::Audio)
+                    .then(|| t.name.clone())
+                    .flatten(),
+                ..Track::new(format!("A{n}"), TrackKind::Audio)
+            },
+        ));
     }
     sound
 }
@@ -607,20 +614,27 @@ fn target(p: &mut Project, kind: TrackKind, n: usize, span: (i64, i64), lay: Lay
     Ok(ti)
 }
 
+fn pieces(block: &Clip) -> Vec<Clip> {
+    let cut = crate::render::stretches(block, TrackKind::Audio);
+    match cut.is_empty() {
+        true => vec![block.clone()],
+        false => cut,
+    }
+}
+
+fn shows(inner: &Track, parts: &[Clip]) -> bool {
+    (inner.clips.iter())
+        .any(|x| (parts.iter()).any(|part| crate::render::inside(x, part).is_some()))
+}
+
 fn put_back(
     p: &mut Project,
     (ti, lay): (usize, Lay),
     inner: &Track,
-    block: &Clip,
+    parts: &[Clip],
     made: &mut Vec<String>,
 ) {
     let mut renamed = HashMap::new();
-    let cut = crate::render::stretches(block, TrackKind::Audio);
-    let parts = if cut.is_empty() {
-        std::slice::from_ref(block)
-    } else {
-        cut.as_slice()
-    };
     for (x, part) in inner
         .clips
         .iter()
@@ -738,20 +752,22 @@ fn spread(
             super::conform::track(p, t, r);
         }
     }
-    let source = match (picture, sound) {
-        (Some(_), Some(_)) => k.tracks,
-        (Some(_), None) => picture_tracks(&k.tracks),
-        _ => sound_tracks(&k.tracks),
+    let named = |tracks: Vec<Track>| tracks.into_iter().map(|t| (t.id.clone(), t)).collect();
+    let source: Vec<(String, Track)> = match (picture, sound) {
+        (Some(_), Some(_)) => named(k.tracks),
+        (Some(_), None) => named(picture_tracks(&k.tracks)),
+        _ => sounds(&k.tracks),
     };
     let span = (block.start, block.end());
+    let parts = pieces(block);
     let mut made = Vec::new();
     let mut taken = HashSet::new();
-    for inner in source.iter().filter(|t| !t.clips.is_empty()) {
+    for (id, inner) in source.iter().filter(|(_, t)| shows(t, &parts)) {
         let base = match inner.kind {
             TrackKind::Video => picture,
             _ => sound,
         };
-        let n = match (inner_tracks.get(&inner.id), base) {
+        let n = match (inner_tracks.get(id), base) {
             (Some(None), _) | (None, None) => continue,
             (Some(Some(to)), _) => slot(to),
             (None, Some(base)) => slot(base) + number(inner) - 1,
@@ -765,7 +781,7 @@ fn spread(
             )));
         }
         let ti = target(p, inner.kind, n, span, lay)?;
-        put_back(p, (ti, lay), inner, block, &mut made);
+        put_back(p, (ti, lay), inner, &parts, &mut made);
         fit_sound(p, ti, &made);
         fix_audio(p, ti);
     }

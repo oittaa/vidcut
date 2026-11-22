@@ -839,6 +839,8 @@ Import:
       - Insert and Ripple Overwrite on V1 put the block in the space that they open. `landed` then takes the block away and calls `spread_blocks`.
       - `Source::inner_tracks` gives the track of a track inside. The other tracks inside go on the edit's track plus their number minus 1.
       - Two tracks inside on one track are refused. The empty audio tracks that the edit made go away.
+      - A track inside with no clip in the marked part gets no track (`shows`). Thus it makes no empty track and needs no unlocked track.
+      - With sound alone, `sounds` keeps the id of each track inside. Thus `inner_tracks` names the tracks inside as the compound clip holds them.
     - `set_marks` writes the marks to the open sheet when the compound clip is open, else to `Compound::marks`.
   - `edit.copy` and `edit.cut` include transitive compound definitions (`copied_compounds`). `edit.paste` restores missing definitions as removed (`restore_copied`).
   - `ops::conform::clip` keeps conformed compound clips within their compound's frame limit (`fit_compound`).
