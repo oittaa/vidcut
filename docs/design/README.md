@@ -181,7 +181,7 @@ The [spec](../spec.md#the-lut-tables) gives the math of a table. vidcut reads a 
   - A dropdown lists them in this order (`luts::combo`). The submenus of the pool group them by `menu` (`luts::menu`).
 - `LutList::read` reads each folder once (`dirs::canonical`). Thus a link, or a folder inside another listed folder, gives each LUT once.
 - `luts.list` reads the folders again on each call.
-- The GUI holds the one list (`Luts` in `Workspace`). It sends `luts.list` at start, on Update Lists, and when `luts.folders` changes (`Workspace::update_luts`).
+- The GUI holds the one list (`Luts` in `Workspace`). It sends `luts.list` at start, on Update Lists, after a reset, and when the snapshot gives other `luts.folders` (`Workspace::update_luts`). The live core reads them again when the preferences file changes.
 - A LUT that is set but not in the list shows by its file name. Thus a path that a script gave stays in view.
 - `media.set` refuses an input LUT on a media item with no pictures (`ops::set_media_input_lut`).
 - A generator, a title, a compound clip and an adjustment clip have no media item. Thus they have no input LUT, also not the LUT of the project. The clips inside a compound clip get it.

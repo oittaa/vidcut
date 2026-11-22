@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use eframe::egui;
 use egui_phosphor::regular::CHECK;
@@ -16,11 +17,13 @@ pub(super) struct Luts {
     pub(super) list: LutList,
     ask: Option<Ask>,
     asked: bool,
+    folders: Arc<Vec<PathBuf>>,
 }
 
 impl Workspace {
     pub(super) fn luts_frame(&mut self, ctx: &egui::Context) {
-        if !self.luts.asked {
+        if !self.luts.asked || self.luts.folders != self.snap.lut_folders {
+            self.luts.folders = self.snap.lut_folders.clone();
             self.update_luts(ctx);
         }
         let Some(answer) = self.luts.ask.as_ref().and_then(Ask::take) else {
