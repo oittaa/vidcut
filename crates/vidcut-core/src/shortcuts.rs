@@ -157,6 +157,10 @@ actions! {
     AddLayerNode "add_layer_node",
     AppendNode "append_node",
     AddOutsideNode "add_outside_node",
+    AddCircleNode "add_circle_node",
+    AddLinearNode "add_linear_node",
+    AddPolygonNode "add_polygon_node",
+    AddCurveNode "add_curve_node",
     ExtractNode "extract_node",
     DeleteNode "delete_node",
     SwitchSelectedNodes "switch_selected_nodes",
@@ -198,6 +202,10 @@ impl Action {
             | Action::AddLayerNode
             | Action::AppendNode
             | Action::AddOutsideNode
+            | Action::AddCircleNode
+            | Action::AddLinearNode
+            | Action::AddPolygonNode
+            | Action::AddCurveNode
             | Action::ExtractNode
             | Action::DeleteNode
             | Action::SwitchSelectedNodes
@@ -1499,6 +1507,34 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Alt+O"],
         "Add an outside node",
         Some("A corrector after the current node, on the inverse of its key."),
+    ),
+    own(
+        Color,
+        Action::AddCircleNode,
+        &["Alt+C"],
+        "Add a serial node with a circle window",
+        Some("A corrector after the current node, with its circle window on."),
+    ),
+    own(
+        Color,
+        Action::AddLinearNode,
+        &["Alt+Q"],
+        "Add a serial node with a linear window",
+        Some("A corrector after the current node, with its linear window on."),
+    ),
+    own(
+        Color,
+        Action::AddPolygonNode,
+        &["Alt+G"],
+        "Add a serial node with a polygon window",
+        Some("A corrector after the current node, with its polygon window on."),
+    ),
+    own(
+        Color,
+        Action::AddCurveNode,
+        &["Alt+B"],
+        "Add a serial node with a curve window",
+        Some("A corrector after the current node, with its curve window on."),
     ),
     own(
         Color,

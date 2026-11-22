@@ -74,6 +74,13 @@ const ADDS: [(Action, GradeAdd); 6] = [
     (Action::AddOutsideNode, GradeAdd::Outside),
 ];
 
+const WINDOW_ADDS: [(Action, WindowKind); 4] = [
+    (Action::AddCircleNode, WindowKind::Circle),
+    (Action::AddLinearNode, WindowKind::Linear),
+    (Action::AddPolygonNode, WindowKind::Polygon),
+    (Action::AddCurveNode, WindowKind::Curve),
+];
+
 const KEY_PORT: usize = 1;
 
 #[derive(Debug, Clone, Copy)]
@@ -82,7 +89,7 @@ enum NodesItem {
     Act(NodeAct),
 }
 
-const NODES_MENU: [&[(&str, NodesItem)]; 5] = [
+const NODES_MENU: [&[(&str, NodesItem)]; 6] = [
     &[
         ("Previous Node", NodesItem::Key(Action::PreviousNode)),
         ("Next Node", NodesItem::Key(Action::NextNode)),
@@ -99,6 +106,24 @@ const NODES_MENU: [&[(&str, NodesItem)]; 5] = [
         (
             "Add Outside Node",
             NodesItem::Act(NodeAct::Add(GradeAdd::Outside)),
+        ),
+    ],
+    &[
+        (
+            "Add Serial Node + CPW",
+            NodesItem::Key(Action::AddCircleNode),
+        ),
+        (
+            "Add Serial Node + LPW",
+            NodesItem::Key(Action::AddLinearNode),
+        ),
+        (
+            "Add Serial Node + PPW",
+            NodesItem::Key(Action::AddPolygonNode),
+        ),
+        (
+            "Add Serial Node + PCW",
+            NodesItem::Key(Action::AddCurveNode),
         ),
     ],
     &[
@@ -2181,9 +2206,14 @@ impl Workspace {
                 g.is_some_and(|g| correctors(g).next().is_some())
             }
             NodesItem::Key(Action::AppendNode) => g.is_some(),
-            NodesItem::Key(Action::AddSerialNode | Action::AddNodeBefore) => {
-                current.is_some_and(|d| !d.takes_keys())
-            }
+            NodesItem::Key(
+                Action::AddSerialNode
+                | Action::AddNodeBefore
+                | Action::AddCircleNode
+                | Action::AddLinearNode
+                | Action::AddPolygonNode
+                | Action::AddCurveNode,
+            ) => current.is_some_and(|d| !d.takes_keys()),
             NodesItem::Key(Action::AddParallelNode | Action::AddLayerNode) => corrector.is_some(),
             NodesItem::Act(NodeAct::Add(_)) => corrector.is_some(),
             NodesItem::Key(Action::SwitchAllNodes) => g.is_some_and(|g| !g.nodes.is_empty()),
@@ -2326,7 +2356,12 @@ impl Workspace {
         let struck = |a: Action| mine.contains(&a);
         for (action, add) in ADDS {
             if struck(action) {
-                self.add_grade_node(add);
+                self.add_grade_node(add, None);
+            }
+        }
+        for (action, kind) in WINDOW_ADDS {
+            if struck(action) {
+                self.add_grade_node(GradeAdd::Serial, Some(kind));
             }
         }
         if struck(Action::AddStaticKeyframe) {
@@ -2447,7 +2482,7 @@ impl Workspace {
         self.send_all(commands, "Delete Node");
     }
 
-    fn add_grade_node(&mut self, add: GradeAdd) {
+    fn add_grade_node(&mut self, add: GradeAdd, window: Option<WindowKind>) {
         let Some((of, _, g)) = self.grade_shown() else {
             return;
         };
@@ -2461,11 +2496,14 @@ impl Workspace {
         if d.is_some_and(GradeNode::takes_keys) && add != GradeAdd::Append {
             return;
         }
-        let more = match (add, node) {
+        let mut more = match (add, node) {
             (GradeAdd::Append, _) => json!({ "add": add }),
             (_, Some(n)) => json!({ "add": add, "node": n }),
             (_, None) => return,
         };
+        if let Some(w) = window {
+            more["window"] = json!(w);
+        }
         self.select_coming(g.last() + 1);
         self.send("grade.add", params(&of, "clip", more));
     }
@@ -2514,7 +2552,7 @@ impl Workspace {
         match act {
             NodeAct::Add(add) => {
                 self.effects_page.pick_grade(vec![n], false);
-                self.add_grade_node(add);
+                self.add_grade_node(add, None);
                 return;
             }
             NodeAct::Delete => {
