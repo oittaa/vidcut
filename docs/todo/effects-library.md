@@ -38,7 +38,7 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
      - Blur Alpha off and Whole Cells Only.
      - Whole Cells Only with Hexagon, with Triangle, with other Aliasing values and with Antialias Result. The alpha limit of a whole cell.
      - Pixel Frequency 25 and 10 with Zoom, with a Pan and on other timeline sizes.
-     - Position away from the middle with a Zoom or a Pan. A rotated clip, a crop, a Dynamic Zoom box and a compound clip.
+     - Position away from the middle with a Dynamic Zoom box.
      - A speed change or a render cache frame with Blur Alpha off or Whole Cells Only. vidcut keeps no color at an alpha of 0 there.
 2. **Generators** (p. 766), one pull request for each line:
    - Measure on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color. vidcut plays them as on a still.

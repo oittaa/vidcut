@@ -673,6 +673,7 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - The width of the canvas, multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it.
   - The size of the picture on the frame: its fitted size, multiplied by each Zoom X and each Zoom Y.
   - The middle of the picture on the frame, through the levels. A Dynamic Zoom box does not move it.
+  - The rotation of the picture (`OnFrame.turn`).
 - `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas, and the border.
   - The sigma is that of `GaussianBlur::spreads` at that width.
   - A blur with no sigma and Use Alpha on is left out.
@@ -681,6 +682,7 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - It also holds Blur Alpha and Whole Cells Only.
   - The size of a cell comes from the area of the picture on the frame (`MosaicBlur::CELL`).
   - The origin is the middle of the picture on the frame, moved by Position and the offsets.
+    - Position is a point of the picture. Thus it turns with the picture. The offsets and the cells keep the directions of the frame.
   - Its sizes are in samples. Antialias Result gives two samples for each pixel.
   - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
 - `place::Glowing` holds what `fs_glow` needs for a Glow.
