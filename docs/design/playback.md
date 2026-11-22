@@ -193,7 +193,7 @@ flowchart TD
 - The live core puts a title that the user changes into the plan of the timeline (`Msg::PreviewTitle`). Thus the viewer shows it as an export does.
 - Each engine and export holds the drawings of the subtitles of its frame (`HeldTitles`). The frame at the playhead and the frame of an export keep them over the budget.
   - Why: with no hold, a small budget makes the engine draw them again without end, and an export can lose a subtitle.
-- `Player::present` hands each subtitle picture of a frame as a `TitleOver`, over all layers (`TitleOver::SUBTITLES`).
+- `Player::present` hands each subtitle picture of a frame as a `TitleOver`, over all layers.
   - The picture is in premultiplied RGBA. A picture larger than the largest texture of the GPU goes in parts (`LetterTile`).
   - The picture is 8-bit. With its `float` field set, it is in 32-bit floats (`TitlePicture`, [export](export.md#titles)).
 - `Player::set_subtitles` takes the shown track (`SubtitleView`), each cue with its color set (`Speakers::color_of`).

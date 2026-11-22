@@ -1317,7 +1317,6 @@ impl Placing {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MixPart {
     Layer(usize),
-    Title(usize),
     Mix(Box<Mix>),
 }
 
@@ -1340,27 +1339,21 @@ pub struct OuterMix {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mixes {
     pub outer: Vec<OuterMix>,
-    pub follows: Vec<Option<usize>>,
     pub deepest: usize,
     pub blurs: bool,
     pub moved: usize,
     layers: Vec<bool>,
-    titles: Vec<bool>,
 }
 
 struct Member<'a> {
     index: usize,
-    title: bool,
     placed: &'a [Placed],
     extent: Extent,
 }
 
 impl Member<'_> {
     fn chain(&self) -> &[Placed] {
-        match self.title {
-            true => self.placed,
-            false => self.placed.get(1..).unwrap_or_default(),
-        }
+        self.placed.get(1..).unwrap_or_default()
     }
 
     fn around(&self, depth: usize) -> Option<&Placed> {
@@ -1368,17 +1361,13 @@ impl Member<'_> {
     }
 
     fn part(&self) -> MixPart {
-        match self.title {
-            true => MixPart::Title(self.index),
-            false => MixPart::Layer(self.index),
-        }
+        MixPart::Layer(self.index)
     }
 
     fn shown(&self, frame: (f64, f64)) -> Extent {
-        let whole = Extent::whole(frame);
         match self.placed.first() {
-            Some(own) if !self.title => kept(own, frame, self.extent.rect, self.extent),
-            _ => whole,
+            Some(own) => kept(own, frame, self.extent.rect, self.extent),
+            None => Extent::whole(frame),
         }
     }
 }
@@ -1452,10 +1441,10 @@ fn placing_mode(p: &Placed) -> CompositeMode {
 fn run_mode(part: &MixPart, run: &[Member<'_>]) -> CompositeMode {
     match part {
         MixPart::Mix(m) if !m.added => m.placing.mode,
-        MixPart::Mix(_) | MixPart::Title(_) => CompositeMode::Normal,
+        MixPart::Mix(_) => CompositeMode::Normal,
         MixPart::Layer(i) => run
             .iter()
-            .find(|m| !m.title && m.index == *i)
+            .find(|m| m.index == *i)
             .map_or(CompositeMode::Normal, |m| placing_mode(&m.placed[0])),
     }
 }
@@ -1465,45 +1454,26 @@ fn layers_in(parts: &[MixPart]) -> usize {
         .iter()
         .map(|p| match p {
             MixPart::Layer(_) => 1,
-            MixPart::Title(_) => 0,
             MixPart::Mix(m) => layers_in(&m.parts),
         })
         .sum()
 }
 
 impl Mixes {
-    pub fn of(
-        layers: &[(&[Placed], Extent)],
-        titles: &[(usize, &[Placed])],
-        frame: (f64, f64),
-    ) -> Self {
+    pub fn of(layers: &[(&[Placed], Extent)], frame: (f64, f64)) -> Self {
         let n = layers.len();
-        let plain = layers.iter().all(|(p, _)| p.len() < 2);
-        if n == 0 || plain && titles.iter().all(|(a, p)| *a > n || p.is_empty()) {
+        if n == 0 || layers.iter().all(|(p, _)| p.len() < 2) {
             return Self::default();
         }
-        let titled = |k: usize| {
-            titles
-                .iter()
-                .enumerate()
-                .filter(move |(_, (above, _))| (*above).min(n) == k)
-                .map(move |(index, (above, placed))| Member {
-                    index,
-                    title: true,
-                    placed: if *above > n { &[] } else { placed },
-                    extent: Extent::whole(frame),
-                })
-        };
-        let mut members: Vec<Member<'_>> = titled(0).collect();
-        for (index, (placed, extent)) in layers.iter().enumerate() {
-            members.push(Member {
+        let members: Vec<Member<'_>> = layers
+            .iter()
+            .enumerate()
+            .map(|(index, (placed, extent))| Member {
                 index,
-                title: false,
                 placed,
                 extent: *extent,
-            });
-            members.extend(titled(index + 1));
-        }
+            })
+            .collect();
         let parts: Vec<MixPart> = parts_of(&members, 0, frame)
             .into_iter()
             .map(|(part, _)| part)
@@ -1512,19 +1482,13 @@ impl Mixes {
             return Self::default();
         }
         let mut out = Self {
-            follows: vec![None; titles.len()],
             layers: vec![false; n],
-            titles: vec![false; titles.len()],
             ..Self::default()
         };
-        let (mut next, mut last) = (0, None);
+        let mut next = 0;
         for part in parts {
             match part {
-                MixPart::Layer(i) => {
-                    next = i + 1;
-                    last = None;
-                }
-                MixPart::Title(j) => out.follows[j] = last,
+                MixPart::Layer(i) => next = i + 1,
                 MixPart::Mix(mix) => {
                     out.mark(&mix, 1);
                     let to = next + layers_in(&mix.parts);
@@ -1533,7 +1497,6 @@ impl Mixes {
                         layers: (next, to),
                     });
                     next = to;
-                    last = Some(out.outer.len() - 1);
                 }
             }
         }
@@ -1547,7 +1510,6 @@ impl Mixes {
         for part in &mix.parts {
             match part {
                 MixPart::Layer(i) => self.layers[*i] = true,
-                MixPart::Title(j) => self.titles[*j] = true,
                 MixPart::Mix(m) => self.mark(m, depth + 1),
             }
         }
@@ -1555,10 +1517,6 @@ impl Mixes {
 
     pub fn layer_in_mix(&self, i: usize) -> bool {
         self.layers.get(i).copied().unwrap_or(false)
-    }
-
-    pub fn title_in_mix(&self, j: usize) -> bool {
-        self.titles.get(j).copied().unwrap_or(false)
     }
 
     pub fn starts_at(&self, i: usize) -> bool {

@@ -899,7 +899,7 @@ The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline
   - A gap is a black layer of the draw (`VideoFrames::solid_frame`), in the player, the export, `frame.render` and the storyboard. Thus it takes the same route as a picture.
   - With alpha output, the gap layer is transparent. The grade keeps a pixel with no alpha empty.
   - A draw with no layer has no grade, as it has no output LUT. An example is the draw of the viewer before its first picture.
-- The burned subtitles go on the canvas after the grade (`TitleOver::SUBTITLES`). Then `fs_lut` runs the output LUT.
+- The burned subtitles go on the canvas after the grade (`TitleOver`). Then `fs_lut` runs the output LUT.
 - The viewer gets the grade from the player (`Shown`). `Player::preview_grade` shows a dragged grade before the project has it.
 - An export gets it with `VideoFrames::with_timeline_grade`. `frame.render`, the storyboard and `FrameReader` get it in `Finish`.
 - The render cache holds no timeline grade. Thus a change of the timeline grade renders nothing again.
