@@ -138,6 +138,7 @@ pub fn add(
                         .ok_or_else(|| no_node(k))?
                         .into_owned();
                     let key = d.key_output_at(frame as f64);
+                    let windows = d.windows_at(frame as f64).into_owned();
                     d.put_key(GradeKey {
                         frame,
                         kind,
@@ -145,6 +146,7 @@ pub fn add(
                         end: profile.end,
                         values,
                         key,
+                        windows,
                     });
                 }
             }

@@ -5037,8 +5037,10 @@ fn mutate(
             points,
             inner,
             outer,
+            at,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let change = ops::grade_windows::WindowChange {
                 on: *on,
                 name: name.clone(),
@@ -5057,7 +5059,7 @@ fn mutate(
                 inner: inner.clone(),
                 outer: outer.clone(),
             };
-            ops::grade_windows::set(p, &of, *node, *window, &change)?;
+            ops::grade_windows::set(p, &of, (*node, *window), &change, at)?;
             Value::Null
         }
         Request::GradeWindowRemove {
@@ -5086,12 +5088,14 @@ fn mutate(
             window,
             append,
             settings,
+            at,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
             let copied = settings.as_ref().ok_or_else(|| {
                 Error::usage("give `settings`, a window from `grade.window.copy`")
             })?;
-            let to = ops::grade_windows::paste(p, &of, *node, (*window, *append), copied)?;
+            let to = ops::grade_windows::paste(p, &of, *node, (*window, *append), copied, at)?;
             json!({ "window": to })
         }
         Request::EffectsAdd { clips, kind } => {
@@ -8706,9 +8710,11 @@ pub fn query(
             timeline,
             node,
             window,
+            at,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
-            json!({ "settings": ops::grade_windows::copy(p, &of, *node, *window)? })
+            let at = time_or_playhead(p, at.as_ref(), playhead)?;
+            json!({ "settings": ops::grade_windows::copy(p, &of, (*node, *window), at)? })
         }
         Request::GradeGet { clip, timeline, at } => {
             let of = grade_of(p, clip, *timeline, playhead)?;

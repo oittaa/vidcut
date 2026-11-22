@@ -3523,7 +3523,23 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - The copy has the shape, the softness, the Transform values, Invert and Mask.
     - A window that takes a copy keeps its name, and stays on or off. A copy at the end has no name.
     - Not measured: the name, Invert, Mask and the on state after a paste.
-  - Window keyframes and the Shift box come later ([todo](todo/color-page.md)).
+  - Measured in Resolve Studio 21.2: each window of a corrector has its own keyframe track. An added window gets a track after Gradient Win.
+  - Measured: each number of a window blends linearly from a keyframe to the next, on the time curve of the color values.
+    - This holds for Pan, Tilt, Aspect, Rotate, Opacity, the softness, the points of a polygon and a curve, and the corners of a linear window.
+    - On a circle, the scale of the Size blends, not the Size number. The radius then moves in a straight line.
+  - Measured: Invert does not blend. It changes on the frame of the next keyframe.
+  - Measured: a window that is off on one keyframe and on at the next is off up to the frame of the next keyframe.
+  - Measured: a change between keyframes goes to the keyframe before the playhead and to its Static partner, as a change of the values.
+  - vidcut: each keyframe of a corrector holds its windows. Thus the windows have no tracks of their own ([todo](todo/gaps.md)).
+  - vidcut: the numbers blend as measured. The scale of the Size blends on each shape.
+    - Not measured: the Size of the other shapes under keyframes.
+  - vidcut: on, Invert, Mask and the name change on the frame of the next keyframe.
+    - So do the points of a polygon or a curve when the next keyframe has another number of points. Not measured in Resolve.
+  - vidcut: a change of a window goes to a keyframe by the rule of the values. `grade.window.set`, `grade.window.copy` and `grade.window.paste` take `at`.
+  - vidcut: an added, removed or converted window changes the window list of each keyframe.
+  - vidcut: the Window palette and the viewer show the windows of the keyframe that a change goes to.
+    - Not measured: the outline in the viewer of Resolve between two keyframes.
+  - The Shift box comes later ([todo](todo/color-page.md)).
 
 Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.window.convert`, `grade.window.copy` and `grade.window.paste`.
 

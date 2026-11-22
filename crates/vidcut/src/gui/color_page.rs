@@ -609,14 +609,19 @@ fn mixer_sets(from: &Grade, to: &Grade, n: u32) -> Vec<Map<String, Value>> {
     out
 }
 
-fn window_sets(from: &Grade, to: &Grade, n: u32) -> Vec<(usize, Map<String, Value>)> {
+fn window_sets(
+    (from, to): (&Grade, &Grade),
+    n: u32,
+    frame: i64,
+) -> Vec<(usize, Map<String, Value>)> {
     let (Some(a), Some(b)) = (from.node(n), to.node(n)) else {
         return Vec::new();
     };
-    if a.windows.len() != b.windows.len() {
+    let (a, b) = (a.windows_changed_at(frame), b.windows_changed_at(frame));
+    if a.len() != b.len() {
         return Vec::new();
     }
-    let pairs = a.windows.iter().zip(&b.windows).enumerate();
+    let pairs = a.iter().zip(b).enumerate();
     pairs
         .map(|(i, (a, b))| (i, grade_windows::window_changes(a, b)))
         .filter(|(_, m)| !m.is_empty())
@@ -1797,7 +1802,7 @@ impl Workspace {
                 None
             }
             GradePalette::Window => {
-                window_acts = self.window_body(ui, &grade, (&of, n));
+                window_acts = self.window_body(ui, &grade, (&of, n, frame));
                 None
             }
             GradePalette::Primaries => primaries_body(ui, (&g, mode), &mut changes),
@@ -1864,7 +1869,7 @@ impl Workspace {
                 if let (Some(a), Some(b)) = inputs {
                     params.extend(key_input_changes(a.key_input, b.key_input));
                 }
-                Some((params, window_sets(&stored, &h.grade, n)))
+                Some((params, window_sets((&stored, &h.grade), n, frame)))
             }
             _ => None,
         };
@@ -1878,6 +1883,7 @@ impl Workspace {
                     set.insert(one.clone(), clip.clone());
                     set.insert("node".into(), json!(n));
                     set.insert("window".into(), json!(i));
+                    set.insert("at".into(), json!(at));
                     self.send("grade.window.set", Value::Object(set));
                 }
                 if !params.is_empty() {
@@ -1992,10 +1998,10 @@ impl Workspace {
         &mut self,
         ui: &mut Ui,
         grade: &Grade,
-        (of, n): (&GradeOf, u32),
+        (of, n, frame): (&GradeOf, u32, i64),
     ) -> Vec<WindowAct> {
         let node = grade.node(n);
-        let windows = node.map_or(&[][..], |d| &d.windows[..]);
+        let windows = node.map_or(&[][..], |d| d.windows_changed_at(frame));
         let locked = node.is_some_and(|d| d.locked);
         let current = self
             .effects_page
@@ -2025,7 +2031,9 @@ impl Workspace {
         (n, frame, at): (u32, i64, i64),
         act: WindowAct,
     ) {
-        let windows = grade.node(n).map_or(&[][..], |d| &d.windows[..]);
+        let windows = grade
+            .node(n)
+            .map_or(&[][..], |d| d.windows_changed_at(frame));
         let current = self
             .effects_page
             .window
@@ -2113,9 +2121,8 @@ impl Workspace {
             }
             WindowAct::Value(i, f, v) => {
                 let mut next = grade.clone();
-                let at_window = next.node_mut(n).and_then(|d| d.windows.get_mut(i));
-                if let Some(w) = at_window {
-                    *w = grade_windows::with_value(w, f, v);
+                if let Some(d) = next.node_mut(n) {
+                    d.change_window_at(frame, i, |w| grade_windows::with_value(w, f, v));
                 }
                 self.effects_page.graded = Some(Graded {
                     of: of.clone(),

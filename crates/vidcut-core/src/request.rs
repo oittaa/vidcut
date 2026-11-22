@@ -3177,6 +3177,9 @@ pub enum Request {
         node: u32,
         /// The number of the window in the window list, from 0.
         window: usize,
+        /// The time whose keyframe changes. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         on: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3254,6 +3257,9 @@ pub enum Request {
         node: u32,
         /// The number of the window in the window list, from 0.
         window: usize,
+        /// The time whose keyframe gives the window. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
     },
     /// Paste a copied window into a corrector of the grade of a clip, or
     /// with `timeline` of the timeline grade (Paste Window and Paste
@@ -3275,6 +3281,9 @@ pub enum Request {
         /// `append`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window: Option<usize>,
+        /// The time whose keyframe takes the copy. Left out: the playhead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
         /// Add the copy at the end of the window list.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         append: bool,
