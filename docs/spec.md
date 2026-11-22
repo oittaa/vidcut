@@ -3041,7 +3041,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. The items show their keys as measured.
   - vidcut: Delete Current Node deletes the current node. Label Selected Node edits the label of the current corrector in place.
   - vidcut: the submenu comes after the printer submenus. Its place in the Color menu of Resolve is not measured.
-  - vidcut: Switch to Node Layer, Add Splitter Combiner Node and the window items are not in the submenu ([todo](todo/color-page.md)).
+  - Measured in Resolve Studio 21.2: Alt+C, Alt+Q, Alt+G and Alt+B add a serial node with its circle, linear, polygon or curve window on (p. 3395).
+  - vidcut: `grade.add` with `window` turns that first window of the new corrector on. The four items and their keys do the same.
+  - vidcut: the curve of Alt+B has no points ([§8.23](#823-windows-pp-32653279)).
+  - vidcut: on the Color page, Alt+B adds a node and does not make a subclip ([§11](#11-keyboard-shortcuts)).
+  - vidcut: Switch to Node Layer and Add Splitter Combiner Node are not in the submenu ([todo](todo/color-page.md)).
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.
@@ -3927,8 +3931,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
-  - The Color page has its own level too. There, its keys go first. Thus Shift+S, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
-  - On the other pages, these four keys keep the actions of the table.
+  - The Color page has its own level too. There, its keys go first. Thus Shift+S, Alt+B, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
+  - On the other pages, these five keys keep the actions of the table.
   - On the Color page, Ctrl+[, Alt+] and the Mark menu act on the keyframes of the grade ([§8.22](#822-color-page-keyframes-pp-34533465)).
   - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
 - These keys and gestures do not change:

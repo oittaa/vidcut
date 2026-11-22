@@ -776,8 +776,8 @@ pub fn add(
     p: &mut Project,
     of: &GradeOf,
     kind: GradeAdd,
-    n: Option<u32>,
-    place: Option<[f64; 2]>,
+    (n, place): (Option<u32>, Option<[f64; 2]>),
+    window: Option<WindowKind>,
 ) -> Result<Value> {
     let frame = p.frame_size();
     let mut made = 0;
@@ -853,6 +853,14 @@ pub fn add(
                 added
             }
         };
+        if let Some(w) = window {
+            let d = node(g, made)?;
+            let first = WindowKind::ALL.iter().position(|k| *k == w);
+            match (first.and_then(|i| d.windows.get_mut(i)), &d.tool) {
+                (Some(on), GradeTool::Corrector(_)) => on.on = true,
+                _ => return Err(Error::invalid("a key mixer has no window")),
+            }
+        }
         Ok(())
     })?;
     Ok(json!({ "node": made }))
