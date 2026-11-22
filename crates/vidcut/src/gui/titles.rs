@@ -122,6 +122,7 @@ pub struct TitleDialog {
     word_font: String,
     base: Option<Title>,
     picker: Option<Picker>,
+    fade: Option<f64>,
 }
 
 const CASES: [(TitleCase, &str); 5] = [
@@ -168,6 +169,7 @@ impl TitleDialog {
             from: None,
             base: None,
             picker: None,
+            fade: None,
         };
         if let Some(t) = t {
             d.load(t);
@@ -420,12 +422,23 @@ fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Vec<Value> {
     out
 }
 
+fn commands(d: &TitleDialog, sends: Vec<Value>) -> Vec<Value> {
+    let fade = d.fade.map(|opacity| {
+        let params = json!({ "clips": d.clip, "opacity": opacity, "at": d.at });
+        json!({ "method": "picture.set", "params": params })
+    });
+    let titles = sends
+        .into_iter()
+        .map(|params| json!({ "method": "titles.set", "params": params }));
+    fade.into_iter().chain(titles).collect()
+}
+
 impl Workspace {
     fn title_changes(&self, d: &TitleDialog) -> Option<(String, Vec<Value>, Title)> {
         let c = self.project()?.clip(&d.clip)?;
         let stored = sampled_at(c, c.title.as_ref()?, d.at);
         let t = title_of(d, &stored).ok()?;
-        let sends = changes(&d.clip, &t, &stored, d.at);
+        let sends = commands(d, changes(&d.clip, &t, &stored, d.at));
         (!sends.is_empty()).then(|| (d.clip.clone(), sends, t))
     }
 
@@ -515,10 +528,17 @@ impl Workspace {
             .filter(|d| d.dirty)
             .and_then(|d| self.title_changes(&d))
         {
-            for params in sends {
-                self.send("titles.set", params);
-            }
+            self.send_title(sends);
             self.title_landing(&clip, &t);
+        }
+    }
+
+    fn send_title(&mut self, mut commands: Vec<Value>) {
+        if let [one] = &mut commands[..] {
+            let method = one["method"].as_str().unwrap_or_default().to_string();
+            self.send(&method, one["params"].take());
+        } else {
+            self.send("apply", json!({ "commands": commands }));
         }
     }
 
@@ -589,12 +609,7 @@ impl Workspace {
             if let Some(Styled::Titles(l)) = self.look_picker(ui, &mut picker, current) {
                 d.load(&l.on(&d.text));
                 if l.opacity.unwrap_or(1.0) != opacity.unwrap_or(1.0) {
-                    let to = json!({
-                        "clips": d.clip,
-                        "opacity": l.opacity.unwrap_or(1.0),
-                        "at": d.at,
-                    });
-                    self.send("picture.set", to);
+                    d.fade = Some(l.opacity.unwrap_or(1.0));
                 }
                 changed = true;
             }
@@ -811,13 +826,12 @@ impl Workspace {
         {
             match title_of(&d, s) {
                 Ok(t) => {
-                    let sends = changes(&d.clip, &t, s, d.at);
+                    let sends = commands(&d, changes(&d.clip, &t, s, d.at));
+                    d.fade = None;
                     if sends.is_empty() {
                         d.loaded = false;
                     } else {
-                        for params in sends {
-                            self.send("titles.set", params);
-                        }
+                        self.send_title(sends);
                         self.title_landing(&d.clip, &t);
                     }
                     d.dirty = false;
