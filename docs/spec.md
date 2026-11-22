@@ -2991,11 +2991,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Layer node does the same with a Layer Mixer. Alt+L at the corrector on input 1 of a Layer Mixer added a corrector on input 2.
   - Measured: Alt+P and Alt+L at a corrector that feeds a Layer Mixer each add a new last input to that mixer. The new corrector takes the source.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
-  - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append` or `corrector`. The menus of the Node Editor have each one.
+  - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append`, `outside`, `corrector` or `key_mixer`. The menus of the Node Editor have each one.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
   - vidcut: the new corrector takes the input of the current node, as measured.
-  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L and Alt+K. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K and Alt+O. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
   - Measured in Resolve Studio 21.2: Add Serial Before on a Parallel Mixer puts the new corrector on input 0 of the mixer. The node on that input feeds the new corrector.
   - vidcut: `before` on a mixer does the same, also with Shift+S. With input 0 empty, the new corrector takes nothing. This part is not measured in Resolve.
 - **Delete and extract** (pp. 3395–3396):
@@ -3027,10 +3027,10 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Label Selected Node.
   - Measured: Add Outside Node, Delete Current Node and Label Selected Node show no key. The other items show their keys.
   - Measured: the manual has other names for three items: Add Serial, Add Before Current and Append Node (p. 3395).
-  - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. Each item shows its key.
+  - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. The items show their keys as measured.
   - vidcut: Delete Current Node deletes the current node. Label Selected Node edits the label of the current corrector in place.
   - vidcut: the submenu comes after the printer submenus. Its place in the Color menu of Resolve is not measured.
-  - vidcut: Switch to Node Layer, Add Outside Node, Add Splitter Combiner Node and the window items are not in the submenu ([todo](todo/color-page.md)).
+  - vidcut: Switch to Node Layer, Add Splitter Combiner Node and the window items are not in the submenu ([todo](todo/color-page.md)).
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.
@@ -3146,10 +3146,10 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Key Output change goes to a keyframe by the same rule as a change of the values, with the same pairs.
   - Measured: from a usual Dynamic keyframe to the next, Gain blends linearly.
   - Measured: Reset in the Primaries palette keeps the Key Output. Reset Node Grade and Reset Grades and Keep Nodes reset it.
-  - vidcut: Primaries and Key at the top of the palette select the palette. The Key palette has the preview, Invert, Gain and Offset of Key Output.
+  - vidcut: Primaries and Key at the top of the palette select the palette. The Key palette has the Key Input, and the preview, Invert, Gain and Offset of Key Output.
   - vidcut: the Key palette keeps the height of the Primaries palette.
   - vidcut: a typed value outside the range goes to the nearest end.
-  - vidcut: the resets work as measured. Reset in the Key palette resets only the Key Output.
+  - vidcut: the resets work as measured. Reset in the Key palette resets the Key Input and the Key Output, and keeps the Key Input Invert.
   - vidcut: `grade.clear` with `node` and `palette` resets one palette of the node: `primaries`, `window` or `key`.
   - vidcut: `grade.set` with `key_gain`, `key_offset` and `key_invert`. It refuses a value outside the range.
   - vidcut: the key out acts in serial nodes and in the mixers as measured.
@@ -3157,9 +3157,61 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Gain and Offset blend as the values do. Invert changes on the frame of the next keyframe.
   - vidcut: a corrector has one keyframe track, so the Key Output has no track of its own ([todo](todo/gaps.md)).
   - vidcut: the Key palette shows the Key Output of the keyframe that a change goes to.
-  - vidcut: keys, Key Input, the Qualifier controls and the Key Mixer come later ([todo](todo/color-page.md)).
+  - vidcut: the Qualifier controls come later ([todo](todo/color-page.md)).
+- **Key Input, Key Mixer and Outside node** (pp. 3388–3389, 3417–3420, 3431–3437):
+  - Each corrector has a key input and a key output. They are blue, below the RGB input and the RGB output (p. 3388).
+  - A link from a key output to a key input gives the key of one node to another node.
+  - The Key Input of a corrector has Invert, Matte, Gain, Offset, Blur Radius and Blur H/V Ratio (p. 3436). Matte is on by default.
+  - A Key Mixer combines the keys on its inputs. It has no RGB input and no RGB output. A new Key Mixer has two inputs (p. 3435).
+  - Add One Input in the menu of a Key Mixer adds an input. A drag of a key output onto a Key Mixer also adds one (p. 3435).
+  - Each input of a Key Mixer has Invert, Matte, Gain and Offset. Matte is off by default (p. 3437).
+  - The output of a Key Mixer has Invert, Gain and Offset (p. 3437).
+  - An Outside node is a serial corrector after the current node. Its key input takes the key output of that node, with Invert on (p. 3417).
+  - Measured in Resolve Studio 21.2 with float renders. The functions are:
+    - smax(a, b) = max(a, b) + 0.5 max(0, 0.5 − |a − b|)².
+    - L(x) = (8x − 1) / 7, U(a, b) = L(smax(a, b)) and Q(x) = U(0, x).
+  - Measured: a key on a link is clamped to 0..1 first.
+  - Measured: Key Mixer input i with key kᵢ gives xᵢ = gᵢ kᵢ + oᵢ, with the Gain and Offset of the input. Invert gives 1 − xᵢ.
+  - Measured: the Mask inputs go first, in input order: acc = U(acc, xᵢ), from acc = 0. Then each Matte input gives acc = 1 − U(1 − acc, 1 − xᵢ).
+  - Measured: the output of a Key Mixer is og acc + oo. Output Invert gives 1 − (og acc + oo). There is no clamp between the steps.
+  - Measured: the key input of a corrector gives x = ig k + io. With no window in the node, its key is clamp(Q(x)). Matte and Mask give the same key.
+  - Measured: with a window w in the node, a = Q(w). Matte gives clamp(1 − U(1 − a, 1 − x)), and Mask gives clamp(U(a, x)).
+  - Measured: the Key Output then acts on that key E: clamp(kg E + ko).
+  - Measured: a node with windows and no link on its key input has the key of its windows, with no Q.
+  - Measured: Blur Radius goes from −1 to 1. It is a near-Gaussian blur. Its sigma is in proportion to the value and to the frame height.
+  - Measured: Blur H/V h multiplies the sigma across by min(1, 1 + h), and the sigma down by min(1, 1 − h).
+  - Measured: a Blur Radius of −r gives clamp(2k − b, 0, 1), where b is the blur of radius r. The error is below 1.6e-4 at r = 0.5. Thus a hard edge does not change.
+  - Measured: a key link from a corrector that is off gives the linked corrector no correction. The Invert and the Offset of its Key Input do not change that.
+  - Measured: a Key Mixer that is off mixes the keys as when it is on.
+  - Measured: a Key Mixer skips an input with no link. A Key Mixer with no linked input gives a key of 1.
+  - Measured: Extract of a node removes its key links.
+  - Measured: in the Key Input, the Key Output and each Key Mixer input, Gain goes from 0 to 2 and Offset from −1 to 1.
+  - Measured: Reset in the Key palette resets the values of the Key Input and of the Key Output. The Key Input Invert stays on.
+  - Measured: a change of the Key Input gets a keyframe on the Defocus track of the node. A change of a Key Mixer gets a keyframe on its Color Corrector track.
+  - Measured: the Add Node submenu of a corrector has Add Outside as its last item. Color > Nodes > Add Outside Node shows no shortcut, and Alt+O adds no node.
+  - Measured: the menu of a Key Mixer has Reset Node Grade, Add Node, Lock Node, Delete Node, Add One Input and Remove One Input. Its Add Node submenu has Add Serial and Add Serial Before.
+  - The errors of the key functions are below 8.2e-7. The record is in `fixtures/color/NOTES.md` of the test data.
+  - vidcut: the keys combine as measured. Blur Radius is a Gaussian blur with the measured sigma. A Blur Radius below 0 sharpens as measured.
+  - vidcut: a key link from a corrector that is off, an off Key Mixer and the inputs with no link act as measured.
+  - vidcut: a Key Mixer with no linked input gives its Key Output of a key of 1.
+  - vidcut: `grade.connect` with `key` links a key output to a key input. `grade.add` with `key_mixer` and `outside` adds the nodes.
+  - vidcut: `grade.set` with `key_input_invert`, `key_input_mask`, `key_input_gain`, `key_input_offset`, `key_input_blur` and `key_input_blur_ratio` changes the Key Input.
+  - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
+  - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
+  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
+  - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node and Add One Input. Remove One Input and the Add Node submenu come later ([todo](todo/color-page.md)).
+  - vidcut: a key link is blue. A node cannot drop into a key link.
+  - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
+  - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
+  - vidcut: the Key Input and the Key Mixer have no keyframes yet ([todo](todo/color-page.md)).
+  - Not measured: a key link from a corrector that is off into a Key Mixer. vidcut mixes that key as when the corrector is on.
+  - Not measured: the Key Output of a Key Mixer with no linked input.
+  - Not measured: a Key Mixer with one linked input after a delete. vidcut keeps it.
+  - Not measured: Reset in the Key palette with Matte or the Key Output Invert on. vidcut resets them.
+  - Not measured: Add Serial and Add Serial Before on a Key Mixer.
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
+The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.
 `grade.get` gives the nodes and the `output`.
 
 ### 8.22 Color page keyframes (pp. 3453–3465)

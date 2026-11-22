@@ -3837,7 +3837,8 @@ pub struct GradeNode {
     pub tool: GradeTool,
     /// What comes into each input, in order: the number of a node, 0 for
     /// the picture that comes into the grade, or null for nothing. A
-    /// corrector has one input. A mixer has one or more.
+    /// corrector has one input. A mixer has one or more. The inputs of a
+    /// key mixer take keys: each names a corrector or a key mixer.
     pub inputs: Vec<Option<u32>>,
     /// Off, a corrector passes on the picture that comes into it, and a
     /// layer mixer mixes in `normal`. A parallel mixer mixes the same way
@@ -3862,10 +3863,18 @@ pub struct GradeNode {
     /// not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub animated: bool,
-    /// How the key of a corrector goes out. A mixer has none. Left out at
-    /// its usual value.
+    /// How the key of a corrector or a key mixer goes out. The other
+    /// mixers have none. Left out at its usual value.
     #[serde(default, skip_serializing_if = "KeyOutput::is_usual")]
     pub key: KeyOutput,
+    /// The node whose key comes into the key input of a corrector: a
+    /// corrector or a key mixer. Left out when no key comes in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_from: Option<u32>,
+    /// How the key input of a corrector takes the key that comes in. Left
+    /// out at its usual value.
+    #[serde(default, skip_serializing_if = "KeyInput::is_usual")]
+    pub key_input: KeyInput,
     /// A locked node keeps its grade: the values, the keyframes and the
     /// Key Output of a corrector, and the kind and mode of a mixer. It can
     /// still go, move, switch off and on, and take links. Left out when
@@ -3892,9 +3901,36 @@ impl GradeNode {
             keys: Vec::new(),
             animated: false,
             key: KeyOutput::default(),
+            key_from: None,
+            key_input: KeyInput::default(),
             locked: false,
             windows: GradeWindow::fixed(frame),
         }
+    }
+
+    pub fn mixer(tool: GradeTool, inputs: Vec<Option<u32>>, place: [f64; 2]) -> Self {
+        Self {
+            tool,
+            inputs,
+            on: true,
+            place,
+            label: String::new(),
+            keys: Vec::new(),
+            animated: false,
+            key: KeyOutput::default(),
+            key_from: None,
+            key_input: KeyInput::default(),
+            locked: false,
+            windows: Vec::new(),
+        }
+    }
+
+    pub fn links(&self) -> impl Iterator<Item = u32> + '_ {
+        self.inputs.iter().flatten().copied().chain(self.key_from)
+    }
+
+    pub fn takes_keys(&self) -> bool {
+        matches!(self.tool, GradeTool::KeyMixer { .. })
     }
 
     pub fn is_animated(&self) -> bool {
@@ -4092,12 +4128,12 @@ impl GradeWindow {
     }
 }
 
-/// The key that a corrector gives out. A corrector with no window and no
-/// qualifier has the key 1 everywhere. The key out is `gain` times the
-/// key plus `offset`, or 1 minus that with `invert`, kept from 0 to 1. The
-/// corrector changes its input by that share of its change. A layer mixer
-/// puts the whole change of the corrector over the inputs before it, by
-/// that share.
+/// The key that a corrector or a key mixer gives out. A corrector with no
+/// window, no qualifier and no key input has the key 1 everywhere. The key
+/// out is `gain` times the key plus `offset`, or 1 minus that with
+/// `invert`, kept from 0 to 1. The corrector changes its input by that
+/// share of its change. A layer mixer puts the whole change of the
+/// corrector over the inputs before it, by that share.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct KeyOutput {
     /// From 0 to 2. Usual: 1.
@@ -4124,9 +4160,91 @@ impl KeyOutput {
     }
 
     pub fn of(&self, key: f64) -> f64 {
-        let v = self.gain * key + self.offset;
-        let v = if self.invert { 1.0 - v } else { v };
-        v.clamp(0.0, 1.0)
+        scaled_key((self.gain, self.offset, self.invert), key).clamp(0.0, 1.0)
+    }
+}
+
+fn scaled_key((gain, offset, invert): (f64, f64, bool), key: f64) -> f64 {
+    let v = gain * key + offset;
+    if invert { 1.0 - v } else { v }
+}
+
+/// How the key input of a corrector takes the key that comes in. The key
+/// in is `gain` times the key plus `offset`, or 1 minus that with
+/// `invert`. With no window on, the key of the corrector comes from the
+/// key in alone. With a window on, in Matte the key is where the key in
+/// and the key of the windows both are, and with `mask` where either is.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct KeyInput {
+    /// Usual: off.
+    pub invert: bool,
+    /// The key in adds to the key of the windows. Off, it is Matte. Usual:
+    /// off.
+    pub mask: bool,
+    /// From 0 to 2. Usual: 1.
+    pub gain: f64,
+    /// From -1 to 1. Usual: 0.
+    pub offset: f64,
+    /// A blur of the key in, from -1 to 1. Each step blurs by 0.00844 of
+    /// the frame height. 0 and below give no blur. Usual: 0.
+    pub blur: f64,
+    /// From -1 to 1. Above 0 the blur is less high, and below 0 less
+    /// wide. Usual: 0.
+    pub blur_ratio: f64,
+}
+
+impl Default for KeyInput {
+    fn default() -> Self {
+        Self {
+            invert: false,
+            mask: false,
+            gain: 1.0,
+            offset: 0.0,
+            blur: 0.0,
+            blur_ratio: 0.0,
+        }
+    }
+}
+
+impl KeyInput {
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn of(&self, key: f64) -> f64 {
+        scaled_key((self.gain, self.offset, self.invert), key)
+    }
+}
+
+/// How an input of a key mixer takes its key. The key in is `gain` times
+/// the key plus `offset`, or 1 minus that with `invert`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct KeyMix {
+    /// Usual: off.
+    pub invert: bool,
+    /// The key in limits the mix to where it is. Off, it is Mask: the key
+    /// in adds to the mix. Usual: off.
+    pub matte: bool,
+    /// From 0 to 2. Usual: 1.
+    pub gain: f64,
+    /// From -1 to 1. Usual: 0.
+    pub offset: f64,
+}
+
+impl Default for KeyMix {
+    fn default() -> Self {
+        Self {
+            invert: false,
+            matte: false,
+            gain: 1.0,
+            offset: 0.0,
+        }
+    }
+}
+
+impl KeyMix {
+    pub fn of(&self, key: f64) -> f64 {
+        scaled_key((self.gain, self.offset, self.invert), key)
     }
 }
 
@@ -4205,6 +4323,15 @@ pub enum GradeTool {
         /// How each input mixes with the inputs before it. Usual: `normal`.
         #[serde(default, skip_serializing_if = "BlendMode::is_normal")]
         mode: BlendMode,
+    },
+    /// It mixes the keys of its inputs into one key at its key output. The
+    /// inputs in Mask add first, in input order. Then each input in Matte
+    /// limits the mix. `key` of the node acts on the mix. A key mixer takes
+    /// no picture and gives none.
+    KeyMixer {
+        /// How each input takes its key, one for each input, in input
+        /// order.
+        mix: Vec<KeyMix>,
     },
 }
 

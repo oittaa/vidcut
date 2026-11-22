@@ -5,8 +5,8 @@ use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
 use vidcut_av::screen::{ShotsOf, ShotsWanted};
 use vidcut_core::model::{
-    BlendMode, Corrector, Grade, GradeNode, GradeTool, GradeWindow, KeyOutput, Picture, Project,
-    WindowKind,
+    BlendMode, Corrector, Grade, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix, KeyOutput,
+    Picture, Project, WindowKind,
 };
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed, taken_out};
 use vidcut_core::ops::picture::takes_effects;
@@ -18,8 +18,8 @@ use vidcut_core::shortcuts::{Action, Bindings, Panel};
 
 use super::grade_windows::{self, WindowAct};
 use super::node_editor::{
-    self, Badge, Dropped, Edge, End, Graph, Inlet, Link, Outlet, Pick, RGB_KNOT, SHOT_HEIGHT, Shot,
-    Side, Spot, Tile, Wire,
+    self, Badge, Dropped, Edge, End, Graph, Inlet, Link, MASK_KNOT, Outlet, Pick, RGB_KNOT,
+    SHOT_HEIGHT, Shot, Side, Spot, Tile, Wire,
 };
 use super::theme;
 use super::workspace::{NodeShots, Workspace};
@@ -65,13 +65,16 @@ const PRINTED: [(PrinterColor, &str); 3] = [
 
 const CURRENT: Color32 = Color32::from_rgb(255, 140, 0);
 
-const ADDS: [(Action, GradeAdd); 5] = [
+const ADDS: [(Action, GradeAdd); 6] = [
     (Action::AddSerialNode, GradeAdd::Serial),
     (Action::AddNodeBefore, GradeAdd::Before),
     (Action::AddParallelNode, GradeAdd::Parallel),
     (Action::AddLayerNode, GradeAdd::Layer),
     (Action::AppendNode, GradeAdd::Append),
+    (Action::AddOutsideNode, GradeAdd::Outside),
 ];
+
+const KEY_PORT: usize = 1;
 
 #[derive(Debug, Clone, Copy)]
 enum NodesItem {
@@ -93,6 +96,10 @@ const NODES_MENU: [&[(&str, NodesItem)]; 5] = [
         ("Add Parallel Node", NodesItem::Key(Action::AddParallelNode)),
         ("Add Layer Node", NodesItem::Key(Action::AddLayerNode)),
         ("Append a Node", NodesItem::Key(Action::AppendNode)),
+        (
+            "Add Outside Node",
+            NodesItem::Act(NodeAct::Add(GradeAdd::Outside)),
+        ),
     ],
     &[
         (
@@ -116,12 +123,13 @@ const MIXER_ADD_MENU: [(GradeAdd, &str); 2] = [
     (GradeAdd::Before, "Add Serial Before"),
 ];
 
-const ADD_MENU: [(GradeAdd, &str); 5] = [
+const ADD_MENU: [(GradeAdd, &str); 6] = [
     (GradeAdd::Serial, "Add Serial"),
     (GradeAdd::Before, "Add Before Current"),
     (GradeAdd::Parallel, "Add Parallel"),
     (GradeAdd::Layer, "Add Layer"),
     (GradeAdd::Append, "Append Node"),
+    (GradeAdd::Outside, "Add Outside"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -148,6 +156,7 @@ enum NodeAct {
 #[derive(Debug, Clone, Copy)]
 enum FieldAct {
     Corrector,
+    KeyMixer,
     ResetAll,
     KeepNodes,
     Zoom(NodeZoom),
@@ -263,9 +272,10 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
         (changed.iter().any(log), icon::CIRCLE_HALF, "Log"),
         (d.is_animated(), icon::DIAMOND, "Keyframes"),
         (
-            std::iter::once(&d.key)
-                .chain(d.keys.iter().map(|k| &k.key))
-                .any(|k| !k.is_usual()),
+            !d.key_input.is_usual()
+                || std::iter::once(&d.key)
+                    .chain(d.keys.iter().map(|k| &k.key))
+                    .any(|k| !k.is_usual()),
             icon::SQUARE_HALF,
             "Key",
         ),
@@ -296,7 +306,7 @@ fn differences(from: &Corrector, to: &Corrector) -> Map<String, Value> {
 
 const KEY_SWATCH: Vec2 = Vec2::new(96.0, 54.0);
 
-fn key_output(ui: &mut Ui, changes: &mut Vec<Change>, key: KeyOutput) {
+fn key_output(ui: &mut Ui, changes: &mut Vec<Change>, (title, key): (&str, KeyOutput)) {
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(KEY_SWATCH, Sense::hover());
         let level = (key.of(1.0) * 255.0).round() as u8;
@@ -305,7 +315,7 @@ fn key_output(ui: &mut Ui, changes: &mut Vec<Change>, key: KeyOutput) {
         ui.add_space(12.0);
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.strong("Key Output");
+                ui.strong(title);
                 let mut invert = key.invert;
                 if ui.toggle_value(&mut invert, "Invert").changed() {
                     changes.push(Change {
@@ -334,6 +344,72 @@ fn key_output(ui: &mut Ui, changes: &mut Vec<Change>, key: KeyOutput) {
                 );
             });
         });
+    });
+}
+
+fn key_input(ui: &mut Ui, changes: &mut Vec<Change>, input: KeyInput) {
+    ui.horizontal(|ui| {
+        ui.strong("Key Input");
+        let mut invert = input.invert;
+        if ui.toggle_value(&mut invert, "Invert").changed() {
+            changes.push(Change {
+                field: "key_input_invert",
+                value: json!(invert),
+            });
+        }
+        let mut matte = !input.mask;
+        if ui.toggle_value(&mut matte, "Matte").changed() {
+            changes.push(Change {
+                field: "key_input_mask",
+                value: json!(!matte),
+            });
+        }
+    });
+    ui.horizontal(|ui| {
+        let (gain, range) = ((0.0, 2.0), (-1.0, 1.0));
+        slider(
+            ui,
+            changes,
+            ("Gain", "key_input_gain"),
+            input.gain,
+            0.005,
+            gain,
+        );
+        let offset = ("Offset", "key_input_offset");
+        slider(ui, changes, offset, input.offset, 0.005, range);
+        slider(
+            ui,
+            changes,
+            ("Blur R.", "key_input_blur"),
+            input.blur,
+            0.005,
+            range,
+        );
+        let ratio = ("Blur H/V", "key_input_blur_ratio");
+        slider(ui, changes, ratio, input.blur_ratio, 0.005, range);
+    });
+}
+
+fn key_mix_row(ui: &mut Ui, changes: &mut Vec<Change>, (i, m): (usize, KeyMix)) {
+    ui.horizontal(|ui| {
+        ui.strong(format!("Input Link {}", i + 1));
+        let mut invert = m.invert;
+        if ui.toggle_value(&mut invert, "Invert").changed() {
+            changes.push(Change {
+                field: "mix_invert",
+                value: json!(invert),
+            });
+        }
+        let mut matte = m.matte;
+        if ui.toggle_value(&mut matte, "Matte").changed() {
+            changes.push(Change {
+                field: "mix_matte",
+                value: json!(matte),
+            });
+        }
+        slider(ui, changes, ("Gain", "mix_gain"), m.gain, 0.005, (0.0, 2.0));
+        let offset = ("Offset", "mix_offset");
+        slider(ui, changes, offset, m.offset, 0.005, (-1.0, 1.0));
     });
 }
 
@@ -416,6 +492,95 @@ fn keyed(key: KeyOutput, c: &Change) -> KeyOutput {
         _ => {}
     }
     key
+}
+
+fn key_inputted(input: KeyInput, c: &Change) -> KeyInput {
+    let mut input = input;
+    let number = |v: &Value, now: f64| v.as_f64().unwrap_or(now);
+    match (c.field, &c.value) {
+        ("key_input_gain", v) => input.gain = number(v, input.gain),
+        ("key_input_offset", v) => input.offset = number(v, input.offset),
+        ("key_input_blur", v) => input.blur = number(v, input.blur),
+        ("key_input_blur_ratio", v) => input.blur_ratio = number(v, input.blur_ratio),
+        ("key_input_invert", Value::Bool(v)) => input.invert = *v,
+        ("key_input_mask", Value::Bool(v)) => input.mask = *v,
+        _ => {}
+    }
+    input
+}
+
+fn mixed(m: KeyMix, c: &Change) -> KeyMix {
+    let mut m = m;
+    match (c.field, &c.value) {
+        ("mix_gain", Value::Number(v)) => m.gain = v.as_f64().unwrap_or(m.gain),
+        ("mix_offset", Value::Number(v)) => m.offset = v.as_f64().unwrap_or(m.offset),
+        ("mix_invert", Value::Bool(v)) => m.invert = *v,
+        ("mix_matte", Value::Bool(v)) => m.matte = *v,
+        _ => {}
+    }
+    m
+}
+
+fn key_input_changes(from: KeyInput, to: KeyInput) -> Map<String, Value> {
+    let pairs = [
+        ("key_input_gain", from.gain, to.gain),
+        ("key_input_offset", from.offset, to.offset),
+        ("key_input_blur", from.blur, to.blur),
+        ("key_input_blur_ratio", from.blur_ratio, to.blur_ratio),
+    ];
+    let mut out: Map<String, Value> = pairs
+        .into_iter()
+        .filter(|(_, a, b)| a != b)
+        .map(|(k, _, b)| (k.to_string(), json!(b)))
+        .collect();
+    if from.invert != to.invert {
+        out.insert("key_input_invert".into(), json!(to.invert));
+    }
+    if from.mask != to.mask {
+        out.insert("key_input_mask".into(), json!(to.mask));
+    }
+    out
+}
+
+fn mix_changes(from: KeyMix, to: KeyMix) -> Map<String, Value> {
+    let mut out = Map::new();
+    if from.invert != to.invert {
+        out.insert("mix_invert".into(), json!(to.invert));
+    }
+    if from.matte != to.matte {
+        out.insert("mix_matte".into(), json!(to.matte));
+    }
+    if from.gain != to.gain {
+        out.insert("mix_gain".into(), json!(to.gain));
+    }
+    if from.offset != to.offset {
+        out.insert("mix_offset".into(), json!(to.offset));
+    }
+    out
+}
+
+fn mixer_sets(from: &Grade, to: &Grade, n: u32) -> Vec<Map<String, Value>> {
+    let (Some(a), Some(b)) = (from.node(n), to.node(n)) else {
+        return Vec::new();
+    };
+    let (GradeTool::KeyMixer { mix: was }, GradeTool::KeyMixer { mix: now }) = (&a.tool, &b.tool)
+    else {
+        return Vec::new();
+    };
+    let mut out: Vec<Map<String, Value>> = (was.iter().zip(now).enumerate())
+        .filter_map(|(i, (x, y))| {
+            let mut set = mix_changes(*x, *y);
+            (!set.is_empty()).then(|| {
+                set.insert("input".into(), json!(i));
+                set
+            })
+        })
+        .collect();
+    let keys = key_changes(a.key, b.key);
+    if !keys.is_empty() {
+        out.push(keys);
+    }
+    out
 }
 
 fn window_sets(from: &Grade, to: &Grade, n: u32) -> Vec<(usize, Map<String, Value>)> {
@@ -528,6 +693,7 @@ fn kind(tool: &GradeTool) -> &'static str {
         GradeTool::Corrector(_) => "Corrector",
         GradeTool::ParallelMixer => "Parallel Mixer",
         GradeTool::LayerMixer { .. } => "Layer Mixer",
+        GradeTool::KeyMixer { .. } => "Key Mixer",
     }
 }
 
@@ -547,6 +713,22 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
         wire: line,
         name,
     };
+    let key_input = |slot: usize, name: String| Inlet {
+        slot,
+        side: Side::Left,
+        knot: MASK_KNOT,
+        wire: Stroke::new(1.5, MASK_KNOT),
+        name,
+    };
+    let outlet = |slot: usize, name: &str| Outlet {
+        slot,
+        name: name.into(),
+        color: if slot == KEY_PORT {
+            MASK_KNOT
+        } else {
+            RGB_KNOT
+        },
+    };
     let mut out = vec![Tile {
         key: Port::Source,
         label: "Source".into(),
@@ -557,26 +739,36 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
         note: String::new(),
         badges: Vec::new(),
         locked: None,
-        outlet: Some(Outlet {
-            name: "Source".into(),
-            color: RGB_KNOT,
-        }),
+        outlets: vec![outlet(0, "Source")],
         inlets: Vec::new(),
         edge: Some(Edge::Left),
         shot: None,
     }];
     for (d, n) in g.nodes.iter().zip(1u32..) {
-        let (label, inlets, shot) = match &d.tool {
+        let (label, inlets, outlets, shot) = match &d.tool {
             GradeTool::Corrector(_) => (
                 format!("{n:02}"),
-                vec![input(0, "RGB Input".into())],
+                vec![
+                    input(0, "RGB Input".into()),
+                    key_input(KEY_PORT, "Key Input".into()),
+                ],
+                vec![outlet(0, "RGB Output"), outlet(KEY_PORT, "Key Output")],
                 shots.map(|s| shot_of(s, n)),
+            ),
+            GradeTool::KeyMixer { .. } => (
+                kind(&d.tool).to_string(),
+                (0..d.inputs.len())
+                    .map(|i| key_input(i, format!("Input Link {}", i + 1)))
+                    .collect(),
+                vec![outlet(KEY_PORT, "Key Output")],
+                None,
             ),
             tool => (
                 kind(tool).to_string(),
                 (0..d.inputs.len())
                     .map(|i| input(i, format!("Input {}", i + 1)))
                     .collect(),
+                vec![outlet(0, "RGB Output")],
                 None,
             ),
         };
@@ -590,10 +782,7 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
             note: d.label.clone(),
             badges: badges(d),
             locked: Some(d.locked),
-            outlet: Some(Outlet {
-                name: "RGB Output".into(),
-                color: RGB_KNOT,
-            }),
+            outlets,
             inlets,
             edge: None,
             shot,
@@ -609,7 +798,7 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
         note: String::new(),
         badges: Vec::new(),
         locked: None,
-        outlet: None,
+        outlets: Vec::new(),
         inlets: vec![input(0, "Output".into())],
         edge: Some(Edge::Right),
         shot: None,
@@ -618,42 +807,94 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
 }
 
 fn wires(g: &Grade) -> Vec<Wire<Port>> {
-    let mut out: Vec<Wire<Port>> = g
-        .nodes
-        .iter()
-        .zip(1u32..)
-        .flat_map(|(d, n)| {
-            d.inputs.iter().enumerate().filter_map(move |(slot, v)| {
-                v.map(|v| Wire {
-                    from: port(v),
+    let mut out = Vec::new();
+    for (d, n) in g.nodes.iter().zip(1u32..) {
+        let keys = d.takes_keys();
+        for (slot, v) in d.inputs.iter().enumerate() {
+            if let Some(v) = v {
+                out.push(Wire {
+                    from: port(*v),
+                    out: if keys { KEY_PORT } else { 0 },
                     to: Port::Node(n),
                     slot,
-                })
-            })
-        })
-        .collect();
+                    drops: !keys,
+                });
+            }
+        }
+        if let Some(k) = d.key_from {
+            out.push(Wire {
+                from: port(k),
+                out: KEY_PORT,
+                to: Port::Node(n),
+                slot: KEY_PORT,
+                drops: false,
+            });
+        }
+    }
     if let Some(o) = g.output {
         out.push(Wire {
             from: port(o),
+            out: 0,
             to: Port::Output,
             slot: 0,
+            drops: true,
         });
     }
     out
 }
 
+fn inlet(g: &Grade, to: Port, slot: Option<usize>) -> Option<(Option<usize>, bool)> {
+    match to {
+        Port::Node(n) => Some(match (&g.node(n)?.tool, slot) {
+            (GradeTool::KeyMixer { .. }, s) => (s, true),
+            (GradeTool::Corrector(_), Some(KEY_PORT)) => (None, true),
+            (_, s) => (s, false),
+        }),
+        Port::Output => Some((Some(0), false)),
+        Port::Source => None,
+    }
+}
+
+fn gives(g: &Grade, from: Port, key: bool) -> bool {
+    match (from, key) {
+        (Port::Source, false) => true,
+        (Port::Node(n), key) => g.node(n).is_some_and(|d| match &d.tool {
+            GradeTool::Corrector(_) => true,
+            GradeTool::KeyMixer { .. } => key,
+            _ => !key,
+        }),
+        _ => false,
+    }
+}
+
 fn linked_now(g: &Grade, to: Port, slot: usize) -> Option<Port> {
     match to {
-        Port::Node(n) => g.node(n)?.inputs.get(slot).copied().flatten().map(port),
+        Port::Node(n) => {
+            let d = g.node(n)?;
+            let v = match inlet(g, to, Some(slot))? {
+                (None, true) => d.key_from,
+                _ => d.inputs.get(slot).copied().flatten(),
+            };
+            v.map(port)
+        }
         Port::Output => g.output.map(port),
         Port::Source => None,
     }
 }
 
-fn connect(of: &GradeOf, to: Port, slot: Option<usize>, from: Option<Port>) -> Option<Value> {
+fn connect(
+    g: &Grade,
+    of: &GradeOf,
+    (to, slot): (Port, Option<usize>),
+    from: Option<Port>,
+) -> Option<Value> {
+    let (input, key) = inlet(g, to, slot)?;
     let mut more = json!({ "node": to_number(to)? });
-    if let Some(s) = slot {
+    if let Some(s) = input {
         more["input"] = json!(s);
+    }
+    if key {
+        more["key"] = json!(true);
     }
     if let Some(f) = from.and_then(from_number) {
         more["from"] = json!(f);
@@ -662,24 +903,37 @@ fn connect(of: &GradeOf, to: Port, slot: Option<usize>, from: Option<Port>) -> O
 }
 
 fn grade_links(g: &Grade, of: &GradeOf, l: &Link<Port>) -> Vec<Value> {
-    let onto = |dst: Port| -> Option<Option<usize>> {
-        match dst {
-            Port::Node(n) if g.node(n)?.tool.is_mixer() => Some(None),
-            Port::Node(_) | Port::Output => Some(Some(0)),
-            Port::Source => None,
+    let keyed = |dst: Port, s: usize| inlet(g, dst, Some(s)).map(|(_, key)| key);
+    let onto = |dst: Port, key: bool| -> Option<Option<usize>> {
+        let tool = match dst {
+            Port::Node(n) => &g.node(n)?.tool,
+            Port::Output => return (!key).then_some(Some(0)),
+            Port::Source => return None,
+        };
+        match (tool, key) {
+            (GradeTool::Corrector(_), true) => Some(Some(KEY_PORT)),
+            (GradeTool::Corrector(_), false) => Some(Some(0)),
+            (GradeTool::KeyMixer { .. }, true) => Some(None),
+            (GradeTool::KeyMixer { .. }, false) | (_, true) => None,
+            (_, false) => Some(None),
         }
     };
     let new = match (&l.anchor, &l.spot) {
-        (End::Output(src), Spot::Knot(End::Input(dst, s))) => Some((*dst, Some(*s), *src)),
-        (End::Output(src), Spot::Tile(dst)) => match l.pulled {
-            Some((pd, ps)) if pd == *dst => Some((*dst, Some(ps), *src)),
-            _ => onto(*dst).map(|s| (*dst, s, *src)),
-        },
-        (End::Input(dst, s), Spot::Knot(End::Output(src)) | Spot::Tile(src))
-            if *src != Port::Output =>
-        {
-            Some((*dst, Some(*s), *src))
+        (End::Output(src, out), Spot::Knot(End::Input(dst, s))) => {
+            let key = *out == KEY_PORT;
+            (keyed(*dst, *s) == Some(key)).then_some((*dst, Some(*s), *src))
         }
+        (End::Output(src, out), Spot::Tile(dst)) => match l.pulled {
+            Some((pd, ps)) if pd == *dst => Some((*dst, Some(ps), *src)),
+            _ => onto(*dst, *out == KEY_PORT).map(|s| (*dst, s, *src)),
+        },
+        (End::Input(dst, s), Spot::Knot(End::Output(src, out))) => {
+            let key = *out == KEY_PORT;
+            (keyed(*dst, *s) == Some(key)).then_some((*dst, Some(*s), *src))
+        }
+        (End::Input(dst, s), Spot::Tile(src)) => keyed(*dst, *s)
+            .filter(|key| gives(g, *src, *key))
+            .map(|_| (*dst, Some(*s), *src)),
         _ => None,
     };
     let new = new.filter(|(d, _, s)| d != s);
@@ -687,12 +941,12 @@ fn grade_links(g: &Grade, of: &GradeOf, l: &Link<Port>) -> Vec<Value> {
     if let Some((pd, ps)) = l.pulled
         && new.is_none_or(|(d, s, _)| d != pd || s != Some(ps))
     {
-        out.extend(connect(of, pd, Some(ps), None));
+        out.extend(connect(g, of, (pd, Some(ps)), None));
     }
     if let Some((d, s, src)) = new
         && s.is_none_or(|s| linked_now(g, d, s) != Some(src))
     {
-        out.extend(connect(of, d, s, Some(src)));
+        out.extend(connect(g, of, (d, s), Some(src)));
     }
     out
 }
@@ -705,18 +959,21 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
             ui.close();
         }
     };
-    let adds: &[(GradeAdd, &str)] = match d.tool.is_mixer() {
-        true => &MIXER_ADD_MENU,
-        false => &ADD_MENU,
+    let adds: &[(GradeAdd, &str)] = match &d.tool {
+        GradeTool::Corrector(_) => &ADD_MENU,
+        GradeTool::KeyMixer { .. } => &[],
+        _ => &MIXER_ADD_MENU,
     };
-    ui.menu_button("Add Node", |ui| {
-        for &(add, text) in adds {
-            let action = ADDS.iter().find(|(_, a)| *a == add);
-            let shown = action.map(|(a, _)| key(*a)).unwrap_or_default();
-            let button = egui::Button::new(text).shortcut_text(shown);
-            pick(ui, true, button, NodeAct::Add(add));
-        }
-    });
+    if !adds.is_empty() {
+        ui.menu_button("Add Node", |ui| {
+            for &(add, text) in adds {
+                let action = ADDS.iter().find(|(_, a)| *a == add);
+                let shown = action.map(|(a, _)| key(*a)).unwrap_or_default();
+                let button = egui::Button::new(text).shortcut_text(shown);
+                pick(ui, true, button, NodeAct::Add(add));
+            }
+        });
+    }
     let delete = || egui::Button::new("Delete Node").shortcut_text(key(Action::DeleteNode));
     let (morph, to) = match &d.tool {
         GradeTool::Corrector(_) => {
@@ -739,6 +996,16 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
                 NodeAct::Extract,
             );
             pick(ui, true, delete(), NodeAct::Delete);
+            return;
+        }
+        GradeTool::KeyMixer { .. } => {
+            let reset = egui::Button::new("Reset Node Grade");
+            pick(ui, true, reset, NodeAct::Reset);
+            let lock = egui::Button::selectable(d.locked, "Lock Node");
+            pick(ui, true, lock, NodeAct::Lock);
+            pick(ui, true, delete(), NodeAct::Delete);
+            let more = egui::Button::new("Add One Input");
+            pick(ui, true, more, NodeAct::AddInput);
             return;
         }
         GradeTool::ParallelMixer => ("Morph Into Layer Mixer Node", GradeMixer::LayerMixer),
@@ -774,7 +1041,10 @@ fn field_menu(ui: &mut Ui, act: &mut Option<FieldAct>) {
     };
     pick(ui, "Reset All Grades and Nodes", FieldAct::ResetAll);
     pick(ui, "Reset Grades and Keep Nodes", FieldAct::KeepNodes);
-    ui.menu_button("Add Node", |ui| pick(ui, "Corrector", FieldAct::Corrector));
+    ui.menu_button("Add Node", |ui| {
+        pick(ui, "Corrector", FieldAct::Corrector);
+        pick(ui, "Key Mixer", FieldAct::KeyMixer);
+    });
     ui.separator();
     for (text, zoom) in [
         ("Zoom In", NodeZoom::In),
@@ -807,10 +1077,15 @@ fn grade_switch(ui: &mut Ui, level: GradeLevel) -> Option<GradeLevel> {
 }
 
 fn usual(field: &str) -> f64 {
-    let (values, field) = match field.strip_prefix("key_") {
-        Some(f) => (serde_json::to_value(KeyOutput::default()), f),
-        None => (serde_json::to_value(Corrector::default()), field),
-    };
+    let parts = [
+        ("key_input_", serde_json::to_value(KeyInput::default())),
+        ("mix_", serde_json::to_value(KeyMix::default())),
+        ("key_", serde_json::to_value(KeyOutput::default())),
+    ];
+    let (values, field) = parts
+        .into_iter()
+        .find_map(|(lead, v)| Some((v, field.strip_prefix(lead)?)))
+        .unwrap_or_else(|| (serde_json::to_value(Corrector::default()), field));
     values
         .ok()
         .and_then(|v| v.get(field).and_then(Value::as_f64))
@@ -1355,6 +1630,12 @@ impl Workspace {
             None => (stored.clone(), frame, self.snap.timeline.position),
         };
         let Some((n, g)) = node.and_then(|n| Some((n, held(&grade, n, frame)?.clone()))) else {
+            let mixer = node.filter(|n| grade.node(*n).is_some_and(GradeNode::takes_keys));
+            if let Some(n) = mixer {
+                let stored_grade = (&stored, &grade);
+                self.key_mixer_palette(ui, (&of, &name, level), stored_grade, (n, frame, at));
+                return false;
+            }
             let what = node
                 .and_then(|n| stored.node(n))
                 .map_or("No Node Selected", |d| kind(&d.tool));
@@ -1464,7 +1745,10 @@ impl Workspace {
         let mut window_acts = Vec::new();
         let point = match palette {
             GradePalette::Key => {
-                key_output(ui, &mut changes, key_now);
+                let input = grade.node(n).map(|d| d.key_input).unwrap_or_default();
+                key_input(ui, &mut changes, input);
+                ui.separator();
+                key_output(ui, &mut changes, ("Key Output", key_now));
                 None
             }
             GradePalette::Window => {
@@ -1493,6 +1777,9 @@ impl Workspace {
             return palette == GradePalette::Primaries;
         }
         if !changes.is_empty() {
+            let (inputs, changes): (Vec<Change>, Vec<Change>) = changes
+                .into_iter()
+                .partition(|c| c.field.starts_with("key_input_"));
             let (keys, values): (Vec<Change>, Vec<Change>) = changes
                 .into_iter()
                 .partition(|c| c.field.starts_with("key_"));
@@ -1502,6 +1789,7 @@ impl Workspace {
             let mut next = with_corrector(&grade, n, frame, c);
             if let Some(d) = next.node_mut(n) {
                 d.change_key_output_at(frame, |k| keys.iter().fold(k, keyed));
+                d.key_input = inputs.iter().fold(d.key_input, key_inputted);
             }
             self.effects_page.graded = Some(Graded {
                 of: of.clone(),
@@ -1526,6 +1814,10 @@ impl Workspace {
                 );
                 if let (Some(a), Some(b)) = keys {
                     params.extend(key_changes(a, b));
+                }
+                let inputs = (stored.node(n), h.grade.node(n));
+                if let (Some(a), Some(b)) = inputs {
+                    params.extend(key_input_changes(a.key_input, b.key_input));
                 }
                 Some((params, window_sets(&stored, &h.grade, n)))
             }
@@ -1556,6 +1848,99 @@ impl Workspace {
             self.printer_point(point);
         }
         palette == GradePalette::Primaries
+    }
+
+    fn key_mixer_palette(
+        &mut self,
+        ui: &mut Ui,
+        (of, name, level): (&GradeOf, &str, GradeLevel),
+        (stored, grade): (&Grade, &Grade),
+        (n, frame, at): (u32, i64, i64),
+    ) {
+        let Some(d) = grade.node(n) else {
+            return;
+        };
+        let GradeTool::KeyMixer { mix } = &d.tool else {
+            return;
+        };
+        let (mut picked, mut reset) = (None, false);
+        ui.horizontal(|ui| {
+            ui.strong(name);
+            ui.separator();
+            ui.label(kind(&d.tool));
+            ui.separator();
+            reset = ui.button("Reset").clicked();
+            picked = grade_switch(ui, level);
+        });
+        if let Some(l) = picked {
+            self.send("gui.page", json!({ "page": Page::Color, "grade": l }));
+        }
+        let mut mixes: Vec<(usize, Change)> = Vec::new();
+        let linked = (mix.iter().copied().enumerate()).filter(|(i, _)| d.inputs[*i].is_some());
+        for (i, m) in linked {
+            let mut changes = Vec::new();
+            key_mix_row(ui, &mut changes, (i, m));
+            mixes.extend(changes.into_iter().map(|c| (i, c)));
+        }
+        ui.separator();
+        let mut keys = Vec::new();
+        key_output(ui, &mut keys, ("Output", d.key));
+        if d.locked {
+            return;
+        }
+        if reset {
+            self.effects_page.graded = None;
+            let (field, target) = named(of);
+            let node = ("node".to_string(), json!(n));
+            let part = ("palette".to_string(), json!(GradePalette::Key));
+            let params = Map::from_iter([(field, target), node, part]);
+            self.send("grade.clear", Value::Object(params));
+            return;
+        }
+        if !mixes.is_empty() || !keys.is_empty() {
+            let mut next = grade.clone();
+            if let Some(d) = next.node_mut(n) {
+                d.key = keys.iter().fold(d.key, keyed);
+                if let GradeTool::KeyMixer { mix } = &mut d.tool {
+                    for (i, c) in &mixes {
+                        if let Some(m) = mix.get_mut(*i) {
+                            *m = mixed(*m, c);
+                        }
+                    }
+                }
+            }
+            self.effects_page.graded = Some(Graded {
+                of: of.clone(),
+                node: n,
+                frame,
+                at,
+                grade: next,
+                sent: None,
+            });
+        }
+        let down = ui.input(|i| i.pointer.any_down());
+        let ready = match &mut self.effects_page.graded {
+            Some(h) if h.sent.is_none() && !down => {
+                h.sent = Some(Instant::now());
+                Some(mixer_sets(stored, &h.grade, n))
+            }
+            _ => None,
+        };
+        match ready {
+            Some(sets) if sets.is_empty() => self.effects_page.graded = None,
+            Some(sets) => {
+                let (field, target) = named(of);
+                let commands = (sets.into_iter())
+                    .map(|mut set| {
+                        set.insert(field.clone(), target.clone());
+                        set.insert("node".into(), json!(n));
+                        command("grade.set", Value::Object(set))
+                    })
+                    .collect();
+                self.send_all(commands, "Key Mixer");
+            }
+            None => {}
+        }
     }
 
     fn window_body(
@@ -1776,7 +2161,11 @@ impl Workspace {
                 g.is_some_and(|g| correctors(g).next().is_some())
             }
             NodesItem::Key(Action::AppendNode) => g.is_some(),
+            NodesItem::Key(Action::AddSerialNode | Action::AddNodeBefore) => {
+                current.is_some_and(|d| !d.takes_keys())
+            }
             NodesItem::Key(Action::AddParallelNode | Action::AddLayerNode) => corrector.is_some(),
+            NodesItem::Act(NodeAct::Add(_)) => corrector.is_some(),
             NodesItem::Key(Action::SwitchAllNodes) => g.is_some_and(|g| !g.nodes.is_empty()),
             NodesItem::Key(Action::ExtractNode) => {
                 corrector.is_some_and(|d| d.inputs.iter().any(Option::is_some))
@@ -2033,10 +2422,12 @@ impl Workspace {
         };
         self.settle_grade(&of, &g);
         let node = self.current_grade_node(&g);
-        let mixer = node
-            .and_then(|n| g.node(n))
-            .is_some_and(|d| d.tool.is_mixer());
+        let d = node.and_then(|n| g.node(n));
+        let mixer = d.is_some_and(|d| d.tool.is_mixer());
         if mixer && !matches!(add, GradeAdd::Serial | GradeAdd::Before | GradeAdd::Append) {
+            return;
+        }
+        if d.is_some_and(GradeNode::takes_keys) && add != GradeAdd::Append {
             return;
         }
         let more = match (add, node) {
@@ -2121,7 +2512,13 @@ impl Workspace {
             NodeAct::Lock => set(json!({ "locked": !d.locked })),
             NodeAct::Morph(to) => set(json!({ "mixer": to })),
             NodeAct::Mode(mode) => set(json!({ "mode": mode })),
-            NodeAct::AddInput => ("grade.connect", params(of, "clip", json!({ "node": n }))),
+            NodeAct::AddInput => {
+                let mut more = json!({ "node": n });
+                if d.takes_keys() {
+                    more["key"] = json!(true);
+                }
+                ("grade.connect", params(of, "clip", more))
+            }
             NodeAct::Extract => {
                 let more = json!({ "node": n, "extract": true });
                 ("grade.remove", params(of, "clip", more))
@@ -2146,13 +2543,14 @@ impl Workspace {
                 let area = self.effects_page.grade_view.area();
                 ("grade.cleanup", json!({ "area": area }))
             }
-            FieldAct::Corrector => {
+            FieldAct::Corrector | FieldAct::KeyMixer => {
                 let at = self.effects_page.grade_spot.unwrap_or_default();
+                let add = match act {
+                    FieldAct::KeyMixer => GradeAdd::KeyMixer,
+                    _ => GradeAdd::Corrector,
+                };
                 self.select_coming(g.last() + 1);
-                (
-                    "grade.add",
-                    json!({ "add": GradeAdd::Corrector, "place": at }),
-                )
+                ("grade.add", json!({ "add": add, "place": at }))
             }
             FieldAct::KeepNodes => {
                 let at = self.snap.timeline.position;
@@ -2311,7 +2709,7 @@ impl Workspace {
             .map(|l| grade_links(&stored, &of, &l))
             .unwrap_or_default();
         if let Some((to, slot)) = done.unlink {
-            commands.extend(connect(&of, to, Some(slot), None));
+            commands.extend(connect(&stored, &of, (to, Some(slot)), None));
         }
         self.send_all(commands, "Link Nodes");
         let moves = (done.moved.into_iter())
