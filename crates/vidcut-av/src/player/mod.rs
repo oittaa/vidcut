@@ -872,11 +872,12 @@ impl Player {
 
     pub fn set_plan(&self, plan: RenderPlan) -> Result<()> {
         self.check(&plan)?;
-        if self.shared.control().plan.plan == plan {
+        let luts = plan.lut_stamps();
+        if self.shared.control().plan.is(&plan, &luts) {
             return Ok(());
         }
         self.shared.change(true, |ctl, pos, _| {
-            replace_plan(ctl, plan);
+            replace_plan(ctl, Plan::stamped(plan, luts));
             if let Mode::Paused { .. } = ctl.mode {
                 ctl.mode = Mode::Paused {
                     at: ctl.plan.clamp(pos),
@@ -888,10 +889,11 @@ impl Player {
 
     pub fn set_plan_at(&self, plan: RenderPlan, at: i64) -> Result<()> {
         self.check(&plan)?;
-        let same = self.shared.control().plan.plan == plan;
+        let luts = plan.lut_stamps();
+        let same = self.shared.control().plan.is(&plan, &luts);
         self.shared.change(true, |ctl, _, _| {
             if !same {
-                replace_plan(ctl, plan);
+                replace_plan(ctl, Plan::stamped(plan, luts));
             }
             move_to(ctl, at, false);
         });
@@ -1348,8 +1350,8 @@ impl Player {
     }
 }
 
-fn replace_plan(ctl: &mut Control, plan: RenderPlan) {
-    ctl.plan = Arc::new(Plan::new(plan).keeping_output_lut_of(&ctl.plan));
+fn replace_plan(ctl: &mut Control, plan: Plan) {
+    ctl.plan = Arc::new(plan.keeping_output_lut_of(&ctl.plan));
     ctl.plan_gen += 1;
     ctl.error = None;
     ctl.trims.clear();

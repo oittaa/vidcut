@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -51,6 +51,7 @@ pub(super) struct Background {
     index: Scan,
     decodes: Arc<HashMap<PathBuf, bool>>,
     base: Option<Arc<RenderPlan>>,
+    luts: BTreeMap<PathBuf, String>,
     mark: Option<Mark>,
     touched: u64,
     seen: u64,
@@ -115,6 +116,7 @@ impl Background {
             index: Scan::None,
             decodes: Arc::default(),
             base: None,
+            luts: BTreeMap::new(),
             mark: None,
             touched: 0,
             seen: 0,
@@ -238,8 +240,10 @@ impl Background {
     }
 
     pub(super) fn apply(&mut self, plan: &mut RenderPlan, project: &Project) -> bool {
-        if self.base.as_deref() != Some(plan) {
+        let luts = plan.lut_stamps();
+        if self.luts != luts || self.base.as_deref() != Some(plan) {
             self.base = Some(Arc::new(plan.clone()));
+            self.luts = luts;
             self.done = false;
             self.stop();
             self.lock().unblock();

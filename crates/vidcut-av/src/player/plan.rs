@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use vidcut_core::model::Retime;
@@ -71,8 +73,11 @@ impl Id {
     }
 }
 
+pub(crate) type Stamps = BTreeMap<PathBuf, String>;
+
 pub(crate) struct Plan {
     pub(crate) plan: RenderPlan,
+    luts: Stamps,
     starts: Vec<i64>,
     sources: Vec<Vec<Arc<str>>>,
     pub(crate) samples: i64,
@@ -92,7 +97,8 @@ impl Plan {
         let kept = old.output_lut.get().and_then(|lut| lut.as_ref().ok());
         let same = kept.and_then(Option::as_ref).filter(|lut| {
             let path = self.plan.output_lut.as_deref();
-            path.is_some_and(|p| vidcut_core::cube::stamp(p) == lut.stamp())
+            path.and_then(|p| self.luts.get(p))
+                .is_some_and(|s| s == lut.stamp())
         });
         if let Some(lut) = same {
             self.output_lut.get_or_init(|| Ok(Some(lut.clone())));
@@ -100,7 +106,16 @@ impl Plan {
         self
     }
 
+    pub(crate) fn is(&self, plan: &RenderPlan, luts: &Stamps) -> bool {
+        self.luts == *luts && self.plan == *plan
+    }
+
     pub(crate) fn new(plan: RenderPlan) -> Self {
+        let luts = plan.lut_stamps();
+        Self::stamped(plan, luts)
+    }
+
+    pub(crate) fn stamped(plan: RenderPlan, luts: Stamps) -> Self {
         let mut starts = Vec::with_capacity(plan.video.len());
         let mut t = 0;
         let sources = plan
@@ -119,6 +134,7 @@ impl Plan {
         let samples = plan.samples();
         Self {
             plan,
+            luts,
             starts,
             sources,
             samples,
@@ -372,11 +388,18 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             plan.width, plan.height, plan.colors
         )
         .into(),
-        VideoPiece::Flat { pieces, .. } => format!(
-            "flat|{}x{}|{:?}|{pieces:?}",
-            plan.width, plan.height, plan.colors
-        )
-        .into(),
+        VideoPiece::Flat { pieces, .. } => {
+            let luts: Vec<String> = piece
+                .lut_files()
+                .into_iter()
+                .map(vidcut_core::cube::stamp)
+                .collect();
+            format!(
+                "flat|{}x{}|{:?}|{pieces:?}|{luts:?}",
+                plan.width, plan.height, plan.colors
+            )
+            .into()
+        }
         VideoPiece::Mix { .. } => format!("black|{}x{}", plan.width, plan.height).into(),
     }
 }

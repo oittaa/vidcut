@@ -795,7 +795,7 @@ impl Workspace {
         let mut cancel = false;
         let mut apply = None;
         let mut lut_action = None;
-        let luts = &self.luts.list;
+        let luts = &*self.snap.luts;
         egui::Window::new("Project Settings")
             .collapsible(false)
             .resizable(false)
@@ -820,7 +820,7 @@ impl Workspace {
                 });
             });
         match lut_action {
-            Some(LutAction::Update) => self.update_luts(ctx),
+            Some(LutAction::Update) => self.update_luts(),
             Some(LutAction::OpenFolder) => self.open_lut_folder(),
             None => {}
         }

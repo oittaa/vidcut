@@ -29,7 +29,6 @@ struct Presenting {
 #[derive(Default)]
 struct Content {
     plan: Option<RenderPlan>,
-    luts: Vec<String>,
     lanes: Vec<LaneTrack>,
     faders: std::collections::BTreeMap<usize, f64>,
     frames: i64,
@@ -191,23 +190,17 @@ impl Player {
             return None;
         }
         with_end(&mut plan);
-        let luts: Vec<String> = plan
-            .lut_files()
-            .into_iter()
-            .map(vidcut_core::cube::stamp)
-            .collect();
         if self.auditioning && id == PlayerId::Timeline {
             let c = &mut self.contents[i];
             c.position = at.unwrap_or(c.position).clamp(0, frames);
             c.plan = Some(plan);
-            c.luts = luts;
             c.frames = frames;
             c.lanes = lanes;
             c.faders.clear();
             c.error = None;
             return None;
         }
-        if self.contents[i].plan.as_ref() == Some(&plan) && self.contents[i].luts == luts {
+        if self.contents[i].plan.as_ref() == Some(&plan) {
             self.contents[i].frames = frames;
             let to = at?.clamp(0, frames);
             if to == self.position(id) && (id != self.active || to == self.target) {
@@ -217,7 +210,6 @@ impl Player {
         }
         let c = &mut self.contents[i];
         c.plan = Some(plan);
-        c.luts = luts;
         c.frames = frames;
         c.lanes = lanes;
         c.faders.clear();
@@ -320,6 +312,17 @@ impl Player {
                 None
             }
         }
+    }
+
+    pub fn reread_luts(&mut self) {
+        let i = self.active.index();
+        if let Some(e) = self.shown_engine().filter(|_| !self.auditioning)
+            && let Some(plan) = self.contents[i].plan.clone()
+            && let Err(err) = e.set_plan(plan)
+        {
+            self.contents[i].error = Some(err.to_string());
+        }
+        self.prepare_other();
     }
 
     fn prepare_other(&self) {

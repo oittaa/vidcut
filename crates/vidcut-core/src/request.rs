@@ -3837,7 +3837,9 @@ pub enum Request {
     /// with no extension), `menu` (the subfolders it is in, the outer one
     /// first) and `path`. They come in the order of the menus: by their path
     /// in their folder, letter by letter. `media.set` and `project.set` take
-    /// a path from here, or any other `.cube` file.
+    /// a path from here, or any other `.cube` file. In an open GUI it is
+    /// Update Lists: the menus get this list, and the viewers, the scopes and
+    /// the thumbnails read their LUT files again.
     #[serde(rename = "luts.list")]
     LutsList {},
     /// Save one of your looks (`~/.config/vidcut/looks/subtitles/NAME.toml`

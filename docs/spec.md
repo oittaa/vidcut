@@ -6407,6 +6407,7 @@ In vidcut:
   - The LUT Locations row of the General page of the Preferences window adds and removes them.
 - vidcut lists the `.cube` files of these folders and of their subfolders, in the order of their paths in their folders, by character code.
   - It reads the folders at start, on `Update Lists`, and when the LUT Locations change. `luts.list` gives the list to a script.
+  - A `luts.list` from a script does the same as `Update Lists`. Thus the menus of an open GUI show its list.
 - The `LUT` submenu of the pool and the Input LUT row of the Inspector set the Input LUT of media items.
 - The Project Settings window has the rows Input LUT, Output LUT, Video Monitor LUT, Color Viewer LUT and Scopes LUT, each one dropdown. It also has `Update Lists` and `Open LUT Folder`.
   - The lists of the Color Viewer LUT and the Scopes LUT have `Use video monitoring selection` after `No LUT selected`.

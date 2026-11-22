@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1331,6 +1331,17 @@ impl VideoPiece {
             .collect()
     }
 
+    pub fn lut_files(&self) -> Vec<&Path> {
+        self.with_flat_pieces()
+            .into_iter()
+            .flat_map(VideoPiece::layers)
+            .filter_map(|(p, _)| match p {
+                VideoPiece::Source { input_lut, .. } => input_lut.as_deref(),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn flat_layers_mut(&mut self) -> Vec<&mut VideoPiece> {
         self.layers_mut()
             .into_iter()
@@ -1676,21 +1687,17 @@ impl RenderPlan {
                 })
     }
 
-    pub fn lut_files(&self) -> Vec<&Path> {
-        let mut files: Vec<&Path> = self
+    pub fn lut_stamps(&self) -> BTreeMap<PathBuf, String> {
+        let files: BTreeSet<&Path> = self
             .video
             .iter()
-            .flat_map(VideoPiece::with_flat_pieces)
-            .flat_map(VideoPiece::layers)
-            .filter_map(|(p, _)| match p {
-                VideoPiece::Source { input_lut, .. } => input_lut.as_deref(),
-                _ => None,
-            })
+            .flat_map(VideoPiece::lut_files)
             .chain(self.output_lut.as_deref())
             .collect();
-        files.sort();
-        files.dedup();
         files
+            .into_iter()
+            .map(|f| (f.to_path_buf(), crate::cube::stamp(f)))
+            .collect()
     }
 
     pub fn samples(&self) -> i64 {

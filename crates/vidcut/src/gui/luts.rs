@@ -4,12 +4,10 @@ use std::sync::Arc;
 use eframe::egui;
 use egui_phosphor::regular::CHECK;
 use serde_json::json;
-use vidcut_core::Error;
 use vidcut_core::luts::{Lut, LutList};
 use vidcut_core::model::MonitorLut;
 use vidcut_core::request::Page;
 
-use super::export::Ask;
 use super::workspace::Workspace;
 
 const NONE: &str = "No LUT selected";
@@ -18,50 +16,40 @@ const FOLLOW: &str = "Use video monitoring selection";
 
 #[derive(Default)]
 pub(super) struct Luts {
-    pub(super) list: LutList,
-    ask: Option<Ask>,
     asked: bool,
     folders: Arc<Vec<PathBuf>>,
-    checked: u64,
+    read: u64,
 }
 
 impl Workspace {
-    pub(super) fn luts_frame(&mut self, ctx: &egui::Context) {
+    pub(super) fn luts_frame(&mut self) {
         if !self.luts.asked || self.luts.folders != self.snap.lut_folders {
             self.luts.folders = self.snap.lut_folders.clone();
-            self.update_luts(ctx);
+            self.update_luts();
         }
-        let Some(answer) = self.luts.ask.as_ref().and_then(Ask::take) else {
-            return;
-        };
-        self.luts.ask = None;
-        let list = answer.and_then(|r| {
-            serde_json::from_value(r.result).map_err(|e| Error::internal(e.to_string()))
-        });
-        match list {
-            Ok(list) => self.luts.list = list,
-            Err(e) => self.say(format!("LUTs: {}", e.message)),
+        if self.luts.read != self.snap.luts_read {
+            self.luts.read = self.snap.luts_read;
+            if let (Some(tiles), Some(p)) = (&mut self.tiles, self.snap.project()) {
+                tiles.check_luts(p);
+            }
         }
     }
 
-    pub(super) fn update_luts(&mut self, ctx: &egui::Context) {
+    pub(super) fn update_luts(&mut self) {
         self.luts.asked = true;
-        self.luts.checked += 1;
-        if let (Some(tiles), Some(p)) = (&mut self.tiles, self.snap.project()) {
-            tiles.check_luts(p);
-        }
-        self.luts.ask = Some(Ask::send(&self.live, ctx, "luts.list", json!({})));
+        self.send("luts.list", json!({}));
     }
 
     pub(super) fn monitor_luts(&self) -> ((Option<&Path>, Option<&Path>), u64) {
+        let read = self.snap.luts_read;
         let Some(p) = self.project() else {
-            return ((None, None), self.luts.checked);
+            return ((None, None), read);
         };
         let display = match self.effects_page.page {
             Page::Color => p.settings.viewer_lut_file(),
             _ => None,
         };
-        ((display, p.settings.scopes_lut_file()), self.luts.checked)
+        ((display, p.settings.scopes_lut_file()), read)
     }
 
     pub(super) fn open_lut_folder(&mut self) {

@@ -2158,7 +2158,7 @@ impl Workspace {
         self.keys_window(&ctx);
         self.help_window(&ctx);
         self.history_frame(&ctx);
-        self.luts_frame(&ctx);
+        self.luts_frame();
         self.project_windows(&ctx);
         self.timeline_windows(&ctx);
         self.import_window(&ctx);
