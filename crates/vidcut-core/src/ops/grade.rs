@@ -789,6 +789,9 @@ pub fn add(
     (n, place): (Option<u32>, Option<[f64; 2]>),
     window: Option<WindowKind>,
 ) -> Result<Value> {
+    if window.is_some() && kind == GradeAdd::KeyMixer {
+        return Err(Error::invalid("a key mixer has no window"));
+    }
     let frame = p.frame_size();
     let mut made = 0;
     edited(p, of, |g| {
@@ -866,10 +869,9 @@ pub fn add(
         if let Some(w) = window {
             let d = node(g, made)?;
             let first = WindowKind::ALL.iter().position(|k| *k == w);
-            match (first.and_then(|i| d.windows.get_mut(i)), &d.tool) {
-                (Some(on), GradeTool::Corrector(_)) => on.on = true,
-                _ => return Err(Error::invalid("a key mixer has no window")),
-            }
+            let on = (first.and_then(|i| d.windows.get_mut(i)))
+                .ok_or_else(|| Error::invalid(format!("node {made} has no such window")))?;
+            on.on = true;
         }
         Ok(())
     })?;
