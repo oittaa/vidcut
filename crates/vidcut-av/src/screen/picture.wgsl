@@ -324,10 +324,23 @@ fn cut(a: vec4<f32>, b: vec4<f32>, s: vec4<f32>, px: vec2<f32>) -> vec3<f32> {
     let gu = length(du);
     let gv = length(dv);
     let edges = vec4<f32>((uv.x - s.x) / gu, (s.z - uv.x) / gu, (uv.y - s.y) / gv, (s.w - uv.y) / gv);
+    let weight = (abs(a.w * px.x) + abs(b.w * px.y) + 1.0) / abs(w);
+    let sizes = vec2<f32>(
+        abs(a.x * px.x) + abs(a.y * px.y) + abs(a.z),
+        abs(b.x * px.x) + abs(b.y * px.y) + abs(b.z),
+    ) / abs(w) + abs(uv) * (1.0 + weight);
+    let slack = ROUNDING * vec4<f32>(
+        (sizes.x + abs(s.x)) / gu,
+        (sizes.x + abs(s.z)) / gu,
+        (sizes.y + abs(s.y)) / gv,
+        (sizes.y + abs(s.w)) / gv,
+    );
     let raw = edges + 0.5;
-    let e = clamp(select(raw, vec4<f32>(0.0), raw < vec4<f32>(5e-4)), vec4<f32>(0.0), vec4<f32>(1.0));
+    let e = clamp(select(raw, vec4<f32>(0.0), raw <= slack), vec4<f32>(0.0), vec4<f32>(1.0));
     return vec3<f32>(uv, e.x * e.y * e.z * e.w);
 }
+
+const ROUNDING: f32 = 4.0 * 1.1920929e-7;
 
 fn faded_edge(inner: vec4<f32>, reach: vec4<f32>, uv: vec2<f32>) -> f32 {
     if reach.x <= 0.0 || reach.y <= 0.0 {
