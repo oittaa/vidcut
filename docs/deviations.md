@@ -1573,14 +1573,10 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - One setting does the work of a tracker node and a connection.
   - A title with keyframes, and a title that stops following, wait for a measurement in Resolve ([todo](todo/motion-tracking.md)).
 
-## X170. The Equalizer: Notch and Bell width
+## X170. The Equalizer: Bell width
 
-The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the controls of the Equalizer. vidcut is different in two things.
+The [spec](spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives the controls of the Equalizer. vidcut is different in the width of a Bell band.
 
-- **Notch band:**
-  - Resolve: the graph shows a cut at the frequency of the band. The exported sound has no cut. This is a fault in Resolve.
-  - vidcut: the exported sound has the cut that the graph shows. The width of the cut is fixed.
-  - Why: vidcut does not copy a fault.
 - **Bell band:**
   - Resolve: above 8000 Hz, the band is wider than its Q value. At 8000 Hz, Q 1 gives the width of Q 0.94. At 16000 Hz, Q 1 gives the width of Q 0.75, and Q 4 gives the width of Q 2.
   - vidcut: the width agrees with the Q value at all frequencies.

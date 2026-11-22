@@ -3545,7 +3545,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Thus a Hi-Shelf of 12 dB at 1000 Hz has about 2.5 dB at 1000 Hz.
     - A Hi-Pass or Lo-Pass filter has 12 dB per octave and a fixed Q of 1. It has 0 dB at its frequency.
     - Thus the curve has a peak of 1.25 dB beside the frequency. A Hi-Pass at 1000 Hz has it at 1414 Hz, and a Lo-Pass at 1000 Hz has it at 707 Hz.
-    - The curve in the Inspector shows a Notch filter, but a render does not change the sound.
+    - The curve in the Inspector shows a Notch filter, but a render does not change the sound ([gotchas](gotchas.md#resolves-renders)).
   - An OTIO export writes the effect `Fairlight Clip Equaliser`, `Type` 64, and six effects `Fairlight Equaliser Band`, `Type` 63 (measured):
     - The `Enabled` of the first effect is the switch of the equalizer. The `Enabled` of a band is the switch of that band.
     - The parameter `eq band index` of a band goes from 0 to 5.
@@ -3569,7 +3569,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut: `clip.set` sets `equalizer`. Its `on` is the switch.
     - On a clip with no equalizer, a change makes a flat one. It is on, unless `on` is false.
     - null makes the equalizer off again, with the usual values. Reset sends it.
-  - vidcut: a Notch band makes a cut in the sound. A Bell band keeps the width of its Q value ([X170](deviations.md#x170-the-equalizer-notch-and-bell-width)).
+  - vidcut: a Notch band makes a cut in the sound ([gotchas](gotchas.md#resolves-renders)). A Bell band keeps the width of its Q value ([X170](deviations.md#x170-the-equalizer-bell-width)).
   - vidcut: an OTIO export writes `Fairlight Clip Equaliser` and its six `Fairlight Equaliser Band` effects when the equalizer is on or off its usual values.
   - vidcut: an import reads those effects when they have no keyframes, and keeps keyed or unsupported ones carried.
   - vidcut: an equalizer that is off does not change the sound, also after an import.
