@@ -2925,7 +2925,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     if !read_titles.is_empty() {
         warnings.push(format!(
             "titles read without what vidcut's titles lack (tracking, keyframes of the shadow \
-             and the background, the clip's Transform and Cropping): {}",
+             and the background): {}",
             read_titles.join(", ")
         ));
     }

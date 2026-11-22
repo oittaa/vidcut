@@ -14,6 +14,7 @@ use vidcut_core::model::{
 };
 use vidcut_core::motion::Area;
 use vidcut_core::ops::grade::GradeOf;
+use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::place::{Figure, MaskBase, Outline, Shaping, turned};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::request::{GradeLevel, GradePalette, NodeInput, Page, PrimariesView};
@@ -644,7 +645,7 @@ fn draw_grips(painter: &egui::Painter, f: &Figure, spots: &[(Grip, Pos2)], turni
 impl Workspace {
     pub(super) fn effects_clip(&self) -> Option<String> {
         let p = self.project()?;
-        super::placing::topmost(p, self.snap.timeline.position)
+        super::placing::topmost_by(p, self.snap.timeline.position, takes_effects)
     }
 
     pub(super) fn set_page(&mut self, page: Page) {

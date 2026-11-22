@@ -561,6 +561,7 @@ Cancel:
 - `player::titles::placed` gives the `Placed` that puts the drawing at its place in the frame, with the move.
   - The layer of the title holds it (`Sampling::Within`). The screen puts it before the `placed` pictures of the clip.
   - Thus the GPU moves the text. The Transform, Cropping, Dynamic Zoom and Composite of the clip then work on the moved text.
+  - The `Placed` has no crop. The screen draws the moved text into a picture of the frame size (`Mixes`), and the edge of that picture cuts it after the turn.
 - `laid` gives no move in these cases. Then the drawing holds the place of the text at that frame, cut to the frame. It is drawn again on each frame.
   - The blocks of the title move by different amounts. An example is a lower third whose two lines have different keys.
   - The drawing is larger than `LARGEST` pixels on a side.

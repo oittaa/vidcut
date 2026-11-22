@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use vidcut_core::model::{Crop, Hdr, Picture, Title, TitleLine, TitlePart};
+use vidcut_core::model::{Hdr, Picture, Title, TitleLine, TitlePart};
 use vidcut_core::render::{Placed, Run, ShownTitle};
 
 use super::frame::TitlePicture;
@@ -171,12 +171,6 @@ pub(crate) fn placed(origin: [i32; 2], made: (u32, u32), size: (u32, u32), m: Mo
         false => m.pivot,
     };
     let anchor = [(px - dx - bx) / bw, (py - dy - by) / bh];
-    let crop = Crop {
-        left: ((-dx - bx) / bw).clamp(0.0, 1.0),
-        right: ((bx + bw + dx - w) / bw).clamp(0.0, 1.0),
-        top: ((-dy - by) / bh).clamp(0.0, 1.0),
-        bottom: ((by + bh + dy - h) / bh).clamp(0.0, 1.0),
-    };
     let picture = Picture {
         position: Some([
             0.5 + (px - fx - anchor[0] * fw) / w,
@@ -185,7 +179,6 @@ pub(crate) fn placed(origin: [i32; 2], made: (u32, u32), size: (u32, u32), m: Mo
         zoom: Some([bw / fw, bh / fh]),
         rotation: (m.turn != 0.0).then_some(m.turn),
         anchor: Some(anchor),
-        crop,
         ..Picture::default()
     };
     Placed {

@@ -286,7 +286,7 @@ The bar and the Jobs button:
 - The Node Editor is `node_editor::show`. The Color page uses it too.
   - A page gives it a `Graph`: the tiles, the wires and the selection. It keeps its pan, zoom and drags in a `NodeView`.
   - It gives back a `Done`: the picks, the moves, the drops of a link, the box and the clicks. Each page makes them into its own requests.
-- `Workspace::effects_clip` finds the clip of the page: the topmost visible clip at the playhead (`placing::topmost`).
+- `Workspace::effects_clip` finds the clip of the page: the topmost visible clip at the playhead that takes effects (`placing::topmost_by`, `takes_effects`). Thus it skips a generator and a title, as the Color page does.
 - The viewer renders that clip alone through `render::composition_alone` and `Cells::show_plan`, at the size of its own picture.
   - The plan covers the whole source of the clip, at the frame rate of its file. Each frame of the plan is a frame of the file.
   - `composition::Frames` gives the frames of the composition: the first and the last frame of the source, the In and the Out.
