@@ -841,14 +841,18 @@ Import:
     - `marked` gives the part between its marks, and `host_span` converts that part to the timeline's frames.
     - `ops::make_clip` makes the picture block. `with_sound` adds the sound block on the audio track of the same number, after the edit.
     - Why: then each edit, its ripple and its track rules come from one implementation for files and compound clips.
-    - Each edit ends with `compound::landed`. It calls `with_sound`, and with `Source::decompose` it calls `unnest` with `Lay::OnEdit`.
+    - Each edit ends with `compound::landed`. Without `Source::decompose`, it calls `with_sound`.
+    - With `Source::decompose`, the edit puts the clips inside, not the compound clip. `compound::spread_blocks` puts them, with `Lay::OnEdit`.
       - `Source::decompose` comes from the preference `editing.decompose_on_edit`, through `Env::decompose_on_edit`.
-      - Then the edit puts the clips inside, not the compound clip. The empty audio tracks that `with_sound` made go away.
+      - An edit that does not ripple gives the blocks to `spread_blocks` and does not put them on the timeline. Thus a gap inside leaves the clips under it.
+      - Insert and Ripple Overwrite on V1 put the block in the space that they open. `landed` then takes the block away and calls `spread_blocks`.
+      - `Source::inner_tracks` gives the track of a track inside. The other tracks inside go on the edit's track plus their number minus 1.
+      - Two tracks inside on one track are refused. The empty audio tracks that the edit made go away.
     - `set_marks` writes the marks to the open sheet when the compound clip is open, else to `Compound::marks`.
   - `edit.copy` and `edit.cut` include transitive compound definitions (`copied_compounds`). `edit.paste` restores missing definitions as removed (`restore_copied`).
   - `ops::conform::clip` keeps conformed compound clips within their compound's frame limit (`fit_compound`).
-  - `ops::compound::unnest` conforms `Compound::tracks` when needed and restores all tracks for tied blocks, or only one part when alone.
-  - `ops::compound::target` gives the track of each inner track, for a compound clip made here and for an imported one.
+  - `ops::compound::unnest` takes the blocks off the timeline. `spread` then puts all tracks for tied blocks, or only one part when alone.
+  - `spread` conforms `Compound::tracks` when needed. `target` gives the track of each inner track, for a compound clip made here and for an imported one.
     - `Lay::InPlace` adds a track where a clip is in the way. `Lay::OnEdit` writes over the clips, as an edit does.
   - `ops::compound::open_clip` and `ops::compound::open_pooled` check out a compound's inner tracks and `Compound::markers` into the editor sheet, refusing an already open sequence id.
     - Inner clips, transitions and markers get unique ids against active sheets and other compounds. An audio-only compound gets an empty V1 track while open.

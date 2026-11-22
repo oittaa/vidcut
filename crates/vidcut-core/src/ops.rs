@@ -56,6 +56,7 @@ pub struct Source {
     pub generator: Option<Generator>,
     pub compound: Option<String>,
     pub decompose: bool,
+    pub inner_tracks: BTreeMap<String, Option<String>>,
 }
 
 #[derive(
@@ -456,6 +457,44 @@ fn place_block(p: &mut Project, ti: usize, clips: Vec<Clip>, start: i64) -> Vec<
         .collect()
 }
 
+fn put(
+    p: &mut Project,
+    ti: usize,
+    clips: Vec<Clip>,
+    start: i64,
+    src: &Source,
+) -> Result<Vec<String>> {
+    if src.decompose {
+        let mut at = start;
+        let id = p.tracks[ti].id.clone();
+        let blocks = clips
+            .into_iter()
+            .map(|mut clip| {
+                clip.start = at;
+                at += clip.duration;
+                (id.clone(), clip)
+            })
+            .collect();
+        return compound::spread_blocks(p, blocks, src);
+    }
+    let ids = place_block(p, ti, clips, start);
+    fix_audio(p, ti);
+    compound::landed(p, ids, src)
+}
+
+fn put_over(
+    p: &mut Project,
+    ti: usize,
+    clips: Vec<Clip>,
+    start: i64,
+    src: &Source,
+) -> Result<Vec<String>> {
+    if !src.decompose {
+        clear_range(p, ti, start, start + block_len(&clips));
+    }
+    put(p, ti, clips, start, src)
+}
+
 fn only(ids: Vec<String>) -> String {
     ids.into_iter().next().expect("one source makes one clip")
 }
@@ -489,9 +528,7 @@ pub fn append_block(p: &mut Project, srcs: &[Source], lead: i64) -> Result<Vec<S
     let mut clips = make_clips(p, srcs)?;
     let ti = home(p, &mut clips, &srcs[0])?;
     let start = p.tracks[ti].end() + lead.max(0);
-    let ids = place_block(p, ti, clips, start);
-    fix_audio(p, ti);
-    compound::landed(p, ids, &srcs[0])
+    put(p, ti, clips, start, &srcs[0])
 }
 
 pub fn nearest_edit(p: &Project, playhead: i64) -> i64 {
@@ -550,10 +587,7 @@ pub fn insert_at_block(
     let lead = lead.max(0);
     let len = block_len(&clips);
     if !is_main(p, ti) {
-        clear_range(p, ti, at + lead, at + lead + len);
-        let ids = place_block(p, ti, clips, at + lead);
-        fix_audio(p, ti);
-        return compound::landed(p, ids, &srcs[0]);
+        return put_over(p, ti, clips, at + lead, &srcs[0]);
     }
     linked::split_main(p, at, &[]);
     let before = Before::of(p);
@@ -654,10 +688,7 @@ pub fn overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<
     } else {
         start
     };
-    clear_range(p, ti, start, start + block_len(&clips));
-    let ids = place_block(p, ti, clips, start);
-    fix_audio(p, ti);
-    compound::landed(p, ids, &srcs[0])
+    put_over(p, ti, clips, start, &srcs[0])
 }
 
 pub fn ripple_overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
@@ -685,11 +716,13 @@ pub fn ripple_overwrite_block(
     };
     let len = block_len(&clips);
     if !is_main(p, ti) {
-        clear_tied(p, ti, a, b.max(a + lead + len))?;
-        clear_range(p, ti, a, b.max(a + lead + len));
-        let ids = place_block(p, ti, clips, a + lead);
-        fix_audio(p, ti);
-        return compound::landed(p, ids, &srcs[0]);
+        let reach = match srcs[0].decompose {
+            true => b,
+            false => b.max(a + lead + len),
+        };
+        clear_tied(p, ti, a, reach)?;
+        clear_range(p, ti, a, reach);
+        return put(p, ti, clips, a + lead, &srcs[0]);
     }
     let end = p.tracks[ti].end();
     let (a, b) = if p.settings.ripple_on && a > end {
@@ -767,11 +800,8 @@ pub fn place_on_top_block(
     } else {
         start
     };
-    clear_range(p, ti, start, start + block_len(&clips));
-    let ids = place_block(p, ti, clips, start);
-    fix_audio(p, ti);
     let track = p.tracks[ti].id.clone();
-    Ok((compound::landed(p, ids, &srcs[0])?, track))
+    Ok((put_over(p, ti, clips, start, &srcs[0])?, track))
 }
 
 pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<String>> {

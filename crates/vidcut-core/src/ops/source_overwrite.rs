@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 use crate::model::{Clip, Compound, Media, Project, SyncGroup, TrackKind, uncovered};
 
 use super::titles::default_length;
-use super::{Source, compound, fix_audio, make_clip, place_block, track_above, tracks, unlocked};
+use super::{Source, make_clip, put, track_above, tracks, unlocked};
 
 pub struct Placed {
     pub clip: String,
@@ -389,10 +389,8 @@ pub fn source_overwrite(
     let stops_at_end = clips[0].video && p.tracks.len() > tracks_before;
     let mut ids = Vec::with_capacity(kept.len());
     for (clip, range) in clips.into_iter().zip(&kept) {
-        ids.extend(place_block(p, ti, vec![clip], place(*range)));
+        ids.extend(put(p, ti, vec![clip], place(*range), src)?);
     }
-    fix_audio(p, ti);
-    let mut ids = compound::landed(p, ids, src)?;
     Ok(Placed {
         clip: ids.swap_remove(0),
         track: p.tracks[ti].id.clone(),

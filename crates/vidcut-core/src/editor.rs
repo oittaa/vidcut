@@ -1,5 +1,5 @@
 use crate::validate::{GAIN, PAN};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -2650,7 +2650,13 @@ fn resolve_sources(p: &Project, params: &SourceParams, env: &dyn Env) -> Result<
             "every frame of the range is left out (media.leave_out)",
         ));
     }
-    Ok(kept.into_iter().map(|s| decomposing(s, env)).collect())
+    let kept: Vec<Source> = kept.into_iter().map(|s| decomposing(s, env)).collect();
+    if !params.inner_tracks.is_empty() && kept.iter().any(|s| !s.decompose) {
+        return Err(Error::usage(
+            "inner_tracks needs a compound clip and Decompose Compound Clips On Edit",
+        ));
+    }
+    Ok(kept)
 }
 
 fn decomposing(s: Source, env: &dyn Env) -> Source {
@@ -2690,6 +2696,7 @@ fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
             generator: None,
             compound: None,
             decompose: false,
+            inner_tracks: BTreeMap::new(),
         })
         .collect())
 }
@@ -2839,6 +2846,7 @@ fn generator_source(p: &Project, params: &SourceParams, generator: Generator) ->
         generator: Some(generator),
         compound: None,
         decompose: false,
+        inner_tracks: BTreeMap::new(),
     })
 }
 
@@ -2887,7 +2895,31 @@ fn compound_source(p: &Project, params: &SourceParams, query: &str) -> Result<So
         generator: None,
         compound: Some(id),
         decompose: false,
+        inner_tracks: inner_tracks(p, k, &params.inner_tracks)?,
     })
+}
+
+fn inner_tracks(
+    p: &Project,
+    k: &Compound,
+    asked: &BTreeMap<String, Option<String>>,
+) -> Result<BTreeMap<String, Option<String>>> {
+    for (inner, to) in asked {
+        let Some(t) = p.compound_tracks(k).iter().find(|t| &t.id == inner) else {
+            return Err(Error::not_found(format!("{} has no track {inner}", k.name)));
+        };
+        let Some(to) = to else {
+            continue;
+        };
+        match p.track(to) {
+            None => return Err(Error::not_found(format!("no track {to}"))),
+            Some(x) if x.kind != t.kind => {
+                return Err(Error::usage(format!("{inner} cannot go on {to}")));
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(asked.clone())
 }
 
 fn source(p: &Project, params: &SourceParams) -> Result<Source> {
@@ -2918,6 +2950,7 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
         generator: None,
         compound: None,
         decompose: false,
+        inner_tracks: BTreeMap::new(),
     })
 }
 

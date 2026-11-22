@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -5885,6 +5885,12 @@ pub struct SourceParams {
     /// audio is used. A generator goes only on a video track.
     #[serde(default)]
     pub track: Option<String>,
+    /// With Decompose Compound Clips On Edit on: the timeline track for a
+    /// track inside the compound clip, as `{"V2": "V4", "A1": null}`. `null`
+    /// leaves that track out. A track that is not named goes on the edit's
+    /// track plus its number minus 1.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub inner_tracks: BTreeMap<String, Option<String>>,
     /// A part of the Multi Source viewer: the frames left empty before the
     /// clip. `edit.append`, `edit.smart_insert`, `edit.ripple_overwrite` and
     /// `edit.place_on_top` read it. With it, `edit.place_on_top` keeps the

@@ -2523,12 +2523,14 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Inner track n goes on the track of the compound clip plus n − 1, for picture and for sound. A missing track is made.
     - A clip inside overwrites what is under it. A gap inside leaves the timeline as it is.
   - A compound clip inside stays a compound clip. Only one level comes apart.
-  - The destination controls show one control for each track inside (p. 1054).
+  - The destination controls show one control for each track inside (p. 1055).
   - **vidcut:**
     - `preferences.set` with `editing.decompose_on_edit` turns it on. The Edit menu has Edit Options > Decompose Compound Clips On Edit.
     - The edits of [§7.2](#72-edit-functions) and a drag from the Media tab do this.
     - Insert and Smart Insert move other tracks by the rules of D23.
     - The tracks inside go on the track that the edit picks, and on the tracks above it.
+    - `inner_tracks` of an edit puts a track inside on a track of the timeline. `null` leaves that track out.
+    - Two tracks inside on one track of the timeline are refused.
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
   - Double-click the parent name in the bottom-left path bar to close the compound clip (p. 1054).

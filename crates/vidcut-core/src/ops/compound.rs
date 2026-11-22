@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{Value, json};
 
@@ -313,17 +313,35 @@ pub(crate) fn with_sound(p: &mut Project, ids: Vec<String>, src: &Source) -> Res
 }
 
 pub(crate) fn landed(p: &mut Project, ids: Vec<String>, src: &Source) -> Result<Vec<String>> {
-    let audio = p.tracks_of(TrackKind::Audio).len();
-    let ids = with_sound(p, ids, src)?;
     if !src.decompose {
-        return Ok(ids);
+        return with_sound(p, ids, src);
     }
-    let mut made = Vec::new();
+    let mut blocks = Vec::new();
     for id in &ids {
-        if p.clip(id).is_some_and(|c| c.compound.is_some()) {
-            made.extend(unnest(p, id, Lay::OnEdit, &mut Vec::new())?.1);
-        }
+        let (ti, ci) = locate(p, id)?;
+        blocks.push((p.tracks[ti].id.clone(), p.tracks[ti].clips.remove(ci)));
     }
+    spread_blocks(p, blocks, src)
+}
+
+pub(crate) fn spread_blocks(
+    p: &mut Project,
+    blocks: Vec<(String, Clip)>,
+    src: &Source,
+) -> Result<Vec<String>> {
+    let audio = p.tracks_of(TrackKind::Audio).len();
+    let mut made = Vec::new();
+    for (track, block) in blocks {
+        let sound = match (block.video, src.video_only) {
+            (true, true) => None,
+            (true, false) => Some(format!("A{}", &track[1..])),
+            (false, _) => Some(track.clone()),
+        };
+        let picture = block.video.then_some(track);
+        let hosts = (picture.as_deref(), sound.as_deref());
+        made.extend(spread(p, &block, hosts, Lay::OnEdit, &src.inner_tracks)?);
+    }
+    otio::transitions::prune(p);
     while p.tracks_of(TrackKind::Audio).len() > audio
         && (p.tracks.last()).is_some_and(|t| t.kind == TrackKind::Audio && t.clips.is_empty())
     {
@@ -564,20 +582,12 @@ pub enum Lay {
     OnEdit,
 }
 
-pub(crate) fn target(
-    p: &mut Project,
-    kind: TrackKind,
-    base: &str,
-    n: usize,
-    span: (i64, i64),
-    lay: Lay,
-) -> Result<usize> {
-    let at = p
-        .tracks_of(kind)
-        .iter()
-        .position(|&i| p.tracks[i].id == base)
-        .expect("the track of the compound clip");
-    let ti = tracks::nth(p, kind, at + n);
+fn slot(id: &str) -> usize {
+    id[1..].parse::<usize>().map_or(0, |n| n.saturating_sub(1))
+}
+
+fn target(p: &mut Project, kind: TrackKind, n: usize, span: (i64, i64), lay: Lay) -> Result<usize> {
+    let ti = tracks::nth(p, kind, n);
     let range = if kind == TrackKind::Video {
         picture_of
     } else {
@@ -696,6 +706,27 @@ pub(crate) fn unnest(
     }
     let lead = hosts.iter().find(|(_, c)| c.video).unwrap_or(&hosts[0]);
     let block = lead.1.clone();
+    let on = |video: bool| {
+        hosts
+            .iter()
+            .find(|(_, c)| c.video == video)
+            .map(|(t, _)| t.as_str())
+    };
+    let made = spread(p, &block, (on(true), on(false)), lay, &BTreeMap::new())?;
+    let dropped = otio::transitions::prune(p);
+    if dropped > 0 {
+        warnings.push(otio::transitions::dropped(dropped));
+    }
+    Ok((block, made))
+}
+
+fn spread(
+    p: &mut Project,
+    block: &Clip,
+    (picture, sound): (Option<&str>, Option<&str>),
+    lay: Lay,
+    inner_tracks: &BTreeMap<String, Option<String>>,
+) -> Result<Vec<String>> {
     let cid = block.compound.as_deref().expect("a compound clip");
     let mut k = p.compound(cid).expect("compound exists").clone();
     if let Some(r) = super::conform::Rates::new(k.fps, p.fps()) {
@@ -703,30 +734,38 @@ pub(crate) fn unnest(
             super::conform::track(p, t, r);
         }
     }
-    let source = if hosts.len() > 1 {
-        k.tracks
-    } else if block.video {
-        picture_tracks(&k.tracks)
-    } else {
-        sound_tracks(&k.tracks)
+    let source = match (picture, sound) {
+        (Some(_), Some(_)) => k.tracks,
+        (Some(_), None) => picture_tracks(&k.tracks),
+        _ => sound_tracks(&k.tracks),
     };
     let span = (block.start, block.end());
     let mut made = Vec::new();
+    let mut taken = HashSet::new();
     for inner in source.iter().filter(|t| !t.clips.is_empty()) {
-        let video = inner.kind == TrackKind::Video;
-        let Some((base, _)) = hosts.iter().find(|(_, c)| c.video == video) else {
-            continue;
+        let base = match inner.kind {
+            TrackKind::Video => picture,
+            _ => sound,
         };
-        let ti = target(p, inner.kind, base, number(inner) - 1, span, lay)?;
-        put_back(p, (ti, lay), inner, &block, &mut made);
+        let n = match (inner_tracks.get(&inner.id), base) {
+            (Some(None), _) | (None, None) => continue,
+            (Some(Some(to)), _) => slot(to),
+            (None, Some(base)) => slot(base) + number(inner) - 1,
+        };
+        if !taken.insert((inner.kind == TrackKind::Video, n)) {
+            return Err(Error::invalid(format!(
+                "two tracks inside {} go to {}{}",
+                k.name,
+                &inner.id[..1],
+                n + 1
+            )));
+        }
+        let ti = target(p, inner.kind, n, span, lay)?;
+        put_back(p, (ti, lay), inner, block, &mut made);
         fit_sound(p, ti, &made);
         fix_audio(p, ti);
     }
-    let dropped = otio::transitions::prune(p);
-    if dropped > 0 {
-        warnings.push(otio::transitions::dropped(dropped));
-    }
-    Ok((block, made))
+    Ok(made)
 }
 
 fn open_sequence_ids(p: &Project) -> HashSet<String> {
