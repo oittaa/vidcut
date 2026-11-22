@@ -1782,6 +1782,19 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A scroll has its own motion and line spacing (X55).
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
+- **Clip stages** (p. 763):
+  - Titles and generators have the Transform, Cropping, Speed and Composite controls of a clip (p. 763).
+  - These are measurements in Resolve Studio 21.2, on a Text title, at 1920×1080 and 3840×2160:
+    - The title draws its text into a picture of the size of the timeline.
+    - The Transform, Cropping, Dynamic Zoom and Composite of the clip then work on that whole picture, as on a media clip.
+    - The crop comes first. A Zoom of 2 doubles the distance of the text from the center of the frame, or from the anchor point.
+    - The composite modes and the opacity mix the title with the picture below by the sums of a media clip.
+    - The keyframes of the Transform play as on a media clip.
+    - An OTIO file holds the Transform, Cropping, Dynamic Zoom and Composite of a title in the effects of its clip, as on a media clip. Resolve reads them back.
+    - The scripting API adds no OpenFX effect to a title.
+    - The right-click menu of a title has no Change Clip Speed, no Retime Controls and no Open in Fusion Page.
+    - An OTIO import drops a `LinearTimeWarp` on a title.
+  - Not measured: the Speed controls of the Inspector on a title, and a Fusion composition on a Text title. The scripting API does not get to either.
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
   - vidcut: the Keyframes tab of a title has the rows Position, Zoom, Rotation and Opacity. A scroll has only Position and Opacity.
