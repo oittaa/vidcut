@@ -6348,7 +6348,6 @@ A script gets no error for a broken file, and the window shows no message:
   - Its first entry is `No LUT selected`. Then come the LUT files of the LUT folders, by name with no extension.
   - Each subfolder is its own submenu, for example `ACES`, `Arri` and `MCP`.
   - A check mark is on `LUT`, and on the subfolder that holds the current LUT of the clip.
-  - There are no 1D LUT and 3D LUT submenus. The text of p. 3480 about them does not match 21.2.
 - The Lookup Tables of the Color Management panel of the Project Settings have four rows.
   - The rows are `Input lookup table`, `Output lookup table`, `Video monitor lookup table` and `Color viewer lookup table`.
   - Each row is one dropdown. Its list is `No LUT selected`, then the LUTs by name, flat, with no submenus.
