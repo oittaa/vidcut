@@ -15,17 +15,10 @@ use super::picture::{node_checked, takes};
 
 fn comp_of<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut Composition> {
     let (ti, ci) = locate(p, id)?;
-    let clip = &p.tracks[ti].clips[ci];
-    if clip.title.is_some() {
-        return Err(Error::invalid(format!(
-            "{} is a title, and a title has no nodes",
-            clip.id
-        )));
-    }
-    takes(p, ti, clip)?;
+    takes(p, ti, &p.tracks[ti].clips[ci])?;
     let start = Frames::of(p, &p.tracks[ti].clips[ci]).zero;
     let c = &mut p.tracks[ti].clips[ci];
-    if c.generator.is_some() {
+    if c.generates() {
         return Err(Error::invalid(format!(
             "{id} is a generator, which takes no composition"
         )));

@@ -471,7 +471,7 @@ The two levels (spec D98):
 
 The names of frames:
 
-- The cache keeps the frame after the tracks mix. `render_cache::bare` takes off the titles on top of all tracks. Thus an edit of their text keeps the cache.
+- The cache keeps the frame after the tracks mix.
 - `Cache::keys` names each frame by a SHA-256 of its piece of one frame (`VideoPiece::part`).
   - In the piece, the fingerprint of each media takes the place of its path.
   - The piece has no clip ids and no times on the timeline. Thus a part that moves keeps its names.

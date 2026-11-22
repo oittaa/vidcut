@@ -351,15 +351,9 @@ pub enum GradeOf {
 
 fn grades(p: &Project, ti: usize, c: &Clip) -> Result<()> {
     takes(p, ti, c)?;
-    if c.generator.is_some() {
+    if c.generates() {
         return Err(Error::invalid(format!(
             "{} is a generator, which takes no grade",
-            c.id
-        )));
-    }
-    if c.title.is_some() {
-        return Err(Error::invalid(format!(
-            "{} is a title, which takes no grade",
             c.id
         )));
     }

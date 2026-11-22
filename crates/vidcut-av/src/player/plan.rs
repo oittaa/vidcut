@@ -1,7 +1,7 @@
 use std::sync::{Arc, OnceLock};
 
 use vidcut_core::model::Retime;
-use vidcut_core::render::{Generated, Image, Placed, RenderPlan, Run, VideoPiece};
+use vidcut_core::render::{Image, Placed, RenderPlan, Run, VideoPiece};
 use vidcut_core::time::Rational;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -367,14 +367,6 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
         VideoPiece::Adjustment { .. } => {
             format!("adjustment|{}x{}", plan.width, plan.height).into()
         }
-        VideoPiece::Generated {
-            picture: Generated::Title(t),
-            ..
-        } if !t.title.is_keyed() && !t.title.moves() => format!(
-            "title|{}x{}|{:?}|{:?}",
-            plan.width, plan.height, plan.colors, t.title
-        )
-        .into(),
         VideoPiece::Generated { picture, .. } => format!(
             "generated|{}x{}|{:?}|{picture:?}",
             plan.width, plan.height, plan.colors

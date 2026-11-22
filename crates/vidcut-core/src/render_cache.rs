@@ -11,7 +11,7 @@ use crate::model::{
     Upscaler,
 };
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
-use crate::render::{CacheFrames, Generated, Image, Over, Placed, RenderPlan, Shape, VideoPiece};
+use crate::render::{CacheFrames, Image, Placed, RenderPlan, Shape, VideoPiece};
 
 pub type Key = [u8; 16];
 
@@ -134,7 +134,6 @@ impl Setup<'_> {
     }
 
     fn levels(&self, piece: &VideoPiece) -> (bool, Vec<bool>) {
-        let piece = &bare(piece);
         let user = self.mode == RenderCache::User;
         let mut whole = false;
         let clips = piece
@@ -263,7 +262,7 @@ impl Setup<'_> {
     }
 
     fn piece_name(&self, piece: &VideoPiece, plan: &RenderPlan) -> Key {
-        let mut whole = bare(piece);
+        let mut whole = piece.clone();
         plain(&mut whole, &|m: &str, p: &Path| self.name(m, p), false);
         let whole = serde_json::to_vec(&whole).unwrap_or_default();
         digest(&[self.stem(plan).as_bytes(), &whole])
@@ -371,7 +370,6 @@ fn checked_on_own(placed: &[Placed]) -> bool {
 }
 
 pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<Reason> {
-    let piece = &bare(piece);
     let mut out: Vec<Reason> = layered(piece, slow, user).into_iter().flatten().collect();
     out.sort_unstable();
     out.dedup();
@@ -460,34 +458,6 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
     out
 }
 
-fn on_top(over: &[Over]) -> usize {
-    over.iter()
-        .rev()
-        .take_while(|o| {
-            matches!(
-                o.piece,
-                VideoPiece::Generated {
-                    picture: Generated::Title(_),
-                    ..
-                }
-            )
-        })
-        .count()
-}
-
-fn bare(piece: &VideoPiece) -> VideoPiece {
-    match piece {
-        VideoPiece::Mix { under, over } => match over.len() - on_top(over) {
-            0 => (**under).clone(),
-            n => VideoPiece::Mix {
-                under: under.clone(),
-                over: over[..n].to_vec(),
-            },
-        },
-        other => other.clone(),
-    }
-}
-
 fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String, one: bool) {
     match piece {
         VideoPiece::Source {
@@ -510,18 +480,9 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String, one: bool
         }
         VideoPiece::Black { .. } => {}
         VideoPiece::Generated {
-            picture,
-            placed,
-            excluded,
-            ..
-        } => {
-            if let Generated::Title(t) = picture {
-                t.clip.clear();
-            }
-            *excluded = false;
-            placed.iter_mut().for_each(|p| plain_placed(p, one));
+            placed, excluded, ..
         }
-        VideoPiece::Adjustment {
+        | VideoPiece::Adjustment {
             placed, excluded, ..
         } => {
             *excluded = false;
@@ -662,7 +623,6 @@ impl Cache {
         if let Some(keys) = self.keys.get(&memo) {
             return keys;
         }
-        let piece = &bare(piece);
         let keys: Arc<[Key]> = (0..piece.frames())
             .map(|k| {
                 let mut one = piece.part(k, 1);
@@ -933,7 +893,7 @@ impl Cache {
                     && let Some((f, i)) = found(&keys[k])
                 {
                     let m = index.run(&f, i, &keys[k..]);
-                    video.push(cached(&piece.part(k as i64, m as i64), &f, i, m as i64));
+                    video.push(cached(&f, i, m as i64));
                     k += m;
                     continue;
                 }
@@ -992,9 +952,9 @@ pub struct Job {
     pub alpha: bool,
 }
 
-fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
+fn cached(file: &Path, at: u32, frames: i64) -> VideoPiece {
     crate::disk_cache::used(file);
-    let source = VideoPiece::Source {
+    VideoPiece::Source {
         media: String::new(),
         path: file.to_path_buf(),
         origin: 0.0,
@@ -1013,13 +973,6 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
         excluded: false,
         made: None,
         input_lut: None,
-    };
-    match part {
-        VideoPiece::Mix { over, .. } if on_top(over) > 0 => VideoPiece::Mix {
-            under: Box::new(source),
-            over: over[over.len() - on_top(over)..].to_vec(),
-        },
-        _ => source,
     }
 }
 
@@ -1098,7 +1051,7 @@ pub fn segment(plan: &RenderPlan, look: &Look, start: i64, frames: i64) -> Rende
         let n = piece.frames();
         let (a, b) = (start.max(t), (start + frames).min(t + n));
         if a < b {
-            video.push(bare(&piece.part(a - t, b - a)));
+            video.push(piece.part(a - t, b - a));
         }
         t += n;
     }

@@ -4506,7 +4506,7 @@ impl Live {
         {
             p.tracks[t].clips[c].title = Some(title.clone());
         }
-        let mut scrolled: Option<(String, (i64, i64), i64)> = None;
+        let mut scrolled: Option<(Title, (i64, i64), i64)> = None;
         if let Some(FreeTitle {
             title,
             at,
@@ -4515,12 +4515,11 @@ impl Live {
         {
             let len = vidcut_core::ops::titles::default_length(&p);
             if let Ok((id, _)) = vidcut_core::ops::titles::add(&mut p, None, *at, len, title, None)
-                && let Some(c) = p
-                    .clip(&id)
-                    .filter(|c| c.title.as_ref().is_some_and(Title::moves))
+                && let Some(c) = p.clip(&id)
+                && let Some(shown) = c.title.as_ref().filter(|t| t.moves())
             {
                 let off = (fraction * len as f64).round() as i64 - (at - c.start);
-                scrolled = Some((id.clone(), (c.start, c.end()), off));
+                scrolled = Some((shown.clone(), (c.start, c.end()), off));
             }
         }
         let end = p.end();
@@ -4535,12 +4534,12 @@ impl Live {
                 return None;
             }
         };
-        if let Some((id, (a, b), off)) = &scrolled {
+        if let Some((shown, (a, b), off)) = &scrolled {
             let mut from = 0;
             for piece in &mut plan.video {
                 let frames = piece.frames();
                 if from < *b && from + frames > *a {
-                    scroll_by(piece, id, *off);
+                    scroll_by(piece, shown, *off);
                 }
                 from += frames;
             }
@@ -5622,13 +5621,13 @@ fn job_notes(tx: &Sender<Msg>, id: &str) -> vidcut_av::progress::Noting {
     }))
 }
 
-fn scroll_by(piece: &mut render::VideoPiece, clip: &str, off: i64) {
+fn scroll_by(piece: &mut render::VideoPiece, title: &Title, off: i64) {
     for layer in piece.layers_mut() {
         if let render::VideoPiece::Generated {
             picture: render::Generated::Title(s),
             ..
         } = layer
-            && s.clip == clip
+            && s.title == *title
         {
             s.run.at += off;
         }

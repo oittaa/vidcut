@@ -7135,6 +7135,10 @@ impl Clip {
         self.generator.is_some() || self.title.is_some() || self.adjustment
     }
 
+    pub fn generates(&self) -> bool {
+        self.draws() || self.title.is_some()
+    }
+
     pub fn is_block(&self) -> bool {
         self.is_generator() || self.compound.is_some()
     }

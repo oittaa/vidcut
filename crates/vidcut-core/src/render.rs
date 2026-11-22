@@ -318,12 +318,11 @@ impl Generated {
 
     pub fn after(&self, k: i64) -> Self {
         match self {
-            Self::FourColorGradient { gradient, frame } if gradient.is_keyed() => {
-                Self::FourColorGradient {
-                    gradient: gradient.clone(),
-                    frame: frame + k,
-                }
-            }
+            still if !still.is_keyed() => still.clone(),
+            Self::FourColorGradient { gradient, frame } => Self::FourColorGradient {
+                gradient: gradient.clone(),
+                frame: frame + k,
+            },
             Self::Title(t) => Self::Title(Box::new(t.after(k))),
             other => other.clone(),
         }
@@ -344,7 +343,7 @@ impl Generated {
                     frame: 0,
                 }
             }
-            Self::Title(t) => Self::Title(Box::new(ShownTitle {
+            Self::Title(t) if self.is_keyed() => Self::Title(Box::new(ShownTitle {
                 run: Run {
                     held: true,
                     ..t.run
@@ -366,19 +365,12 @@ impl Generated {
             Self::Title(_) => None,
         }
     }
-
-    pub fn title(&self) -> Option<&ShownTitle> {
-        match self {
-            Self::Title(t) => Some(t),
-            _ => None,
-        }
-    }
 }
 
-/// The text of a title clip, with where the piece is in its clip.
+/// The text of a title clip, with where the piece is in its clip. `run`
+/// and `keys_from` are 0 when the text has no keyframes and does not move.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ShownTitle {
-    pub clip: String,
     pub title: Title,
     pub run: Run,
     /// The keyframe position of its clip's first frame: its source frame,
@@ -424,7 +416,6 @@ impl Run {
 impl ShownTitle {
     pub fn after(&self, k: i64) -> Self {
         Self {
-            clip: self.clip.clone(),
             title: self.title.clone(),
             run: self.run.after(k),
             keys_from: self.keys_from,
@@ -2251,10 +2242,7 @@ pub const NESTED: usize = 8;
 type Nesting<'a> = (Option<&'a Nest>, &'a [Placed]);
 
 fn visible(t: &Track, c: &Clip) -> bool {
-    t.video_enabled
-        && c.enabled
-        && c.video
-        && (!c.is_block() || c.draws() || c.adjustment || c.title.is_some())
+    t.video_enabled && c.enabled && c.video && (!c.is_block() || c.generates() || c.adjustment)
 }
 
 fn pictures_at<'a>(p: &'a Project, c: &Clip, t: i64, depth: usize) -> Vec<&'a Clip> {
@@ -3490,16 +3478,21 @@ impl VideoPlan<'_> {
         let (pool, s) = (&self.pool, &self.p.flat_settings());
         let fills = self.fills(c);
         if let Some(title) = &c.title {
+            let keyed = title.is_keyed() || title.moves();
             let run = nest.and_then(|n| n.run).filter(|r| r.held).unwrap_or(Run {
                 at: x - c.start,
                 of: c.duration,
                 held: false,
             });
+            let still = Run {
+                at: 0,
+                of: 0,
+                held: false,
+            };
             let shown = ShownTitle {
-                clip: c.id.clone(),
                 title: title.clone(),
-                run,
-                keys_from: c.content_at(c.start),
+                run: if keyed { run } else { still },
+                keys_from: if keyed { c.content_at(c.start) } else { 0 },
             };
             return Ok(VideoPiece::Generated {
                 frames: y - x,

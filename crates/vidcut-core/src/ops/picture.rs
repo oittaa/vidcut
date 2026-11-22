@@ -849,7 +849,7 @@ pub fn has_picture(c: &Clip) -> bool {
 }
 
 pub fn takes_effects(c: &Clip) -> bool {
-    has_picture(c) && c.generator.is_none() && c.title.is_none()
+    has_picture(c) && !c.generates()
 }
 
 pub(super) fn takes(p: &Project, ti: usize, c: &Clip) -> Result<()> {
@@ -1298,17 +1298,8 @@ pub fn violation(p: &Project, ti: usize, c: &Clip) -> Option<String> {
     if let Err(e) = takes(p, ti, c) {
         return Some(e.message);
     }
-    if c.generator.is_some() && picture.composition.is_some() {
+    if c.generates() && picture.composition.is_some() {
         return Some(format!("{} is a generator, which has no composition", c.id));
-    }
-    if c.title.is_some() && picture.composition.is_some() {
-        return Some(format!("{} is a title, which has no composition", c.id));
-    }
-    if c.title.is_some() && !picture.effects.is_empty() {
-        return Some(format!("{} is a title, which takes no effects", c.id));
-    }
-    if c.title.is_some() && picture.grade.is_some() {
-        return Some(format!("{} is a title, which takes no grade", c.id));
     }
     checked(picture)
         .err()
