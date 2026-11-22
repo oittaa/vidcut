@@ -5,8 +5,8 @@ use egui_phosphor::regular as icon;
 use serde_json::{Map, Value, json};
 use vidcut_av::screen::{ShotsOf, ShotsWanted};
 use vidcut_core::model::{
-    BlendMode, Corrector, Grade, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix, KeyOutput,
-    Picture, Project, WindowKind,
+    BlendMode, Corrector, Grade, GradeLink, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
+    KeyOutput, Picture, Project, WindowKind,
 };
 use vidcut_core::ops::grade::{GradeOf, checked, corrector_checked, printed, taken_out};
 use vidcut_core::ops::picture::takes_effects;
@@ -738,19 +738,16 @@ fn shot_of(shots: &NodeShots, n: u32) -> Shot {
 }
 
 fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
-    let line = Stroke::new(1.5, theme::colors().text_dim);
     let input = |slot: usize, name: String| Inlet {
         slot,
         side: Side::Left,
         knot: RGB_KNOT,
-        wire: line,
         name,
     };
     let key_input = |slot: usize, name: String| Inlet {
         slot,
         side: Side::Left,
         knot: MASK_KNOT,
-        wire: Stroke::new(1.5, MASK_KNOT),
         name,
     };
     let outlet = |slot: usize, name: &str| Outlet {
@@ -840,52 +837,50 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
 }
 
 fn wires(g: &Grade) -> Vec<Wire<Port>> {
+    let dim = Stroke::new(1.5, theme::colors().text_dim);
+    let wire = |l: GradeLink, (to, slot): (Port, usize)| Wire {
+        from: port(l.node),
+        out: if l.key { KEY_PORT } else { 0 },
+        to,
+        slot,
+        drops: !l.key && inlet(g, to, slot) == Some(false),
+        line: match l.key {
+            true => Stroke::new(1.5, MASK_KNOT),
+            false => dim,
+        },
+    };
     let mut out = Vec::new();
     for (d, n) in g.nodes.iter().zip(1u32..) {
-        let keys = d.takes_keys();
-        for (slot, v) in d.inputs.iter().enumerate() {
-            if let Some(v) = v {
-                out.push(Wire {
-                    from: port(*v),
-                    out: if keys { KEY_PORT } else { 0 },
-                    to: Port::Node(n),
-                    slot,
-                    drops: !keys,
-                });
+        for (slot, l) in d.inputs.iter().enumerate() {
+            if let Some(l) = l {
+                out.push(wire(*l, (Port::Node(n), slot)));
             }
         }
-        if let Some(k) = d.key_from {
-            out.push(Wire {
-                from: port(k),
-                out: KEY_PORT,
-                to: Port::Node(n),
-                slot: KEY_PORT,
-                drops: false,
-            });
+        if let Some(l) = d.key_from {
+            out.push(wire(l, (Port::Node(n), KEY_PORT)));
         }
     }
-    if let Some(o) = g.output {
-        out.push(Wire {
-            from: port(o),
-            out: 0,
-            to: Port::Output,
-            slot: 0,
-            drops: true,
-        });
+    if let Some(l) = g.output {
+        out.push(wire(l, (Port::Output, 0)));
     }
     out
 }
 
-fn inlet(g: &Grade, to: Port, slot: Option<usize>) -> Option<(Option<usize>, bool)> {
+fn inlet(g: &Grade, to: Port, slot: usize) -> Option<bool> {
     match to {
-        Port::Node(n) => Some(match (&g.node(n)?.tool, slot) {
-            (GradeTool::KeyMixer { .. }, s) => (s, true),
-            (GradeTool::Corrector(_), Some(KEY_PORT)) => (None, true),
-            (_, s) => (s, false),
+        Port::Node(n) => Some(match &g.node(n)?.tool {
+            GradeTool::KeyMixer { .. } => true,
+            GradeTool::Corrector(_) => slot == KEY_PORT,
+            _ => false,
         }),
-        Port::Output => Some((Some(0), false)),
+        Port::Output => Some(false),
         Port::Source => None,
     }
+}
+
+fn link_of((from, out): (Port, usize)) -> Option<GradeLink> {
+    let key = out == KEY_PORT;
+    from_number(from).map(|node| GradeLink { node, key })
 }
 
 fn gives(g: &Grade, from: Port, key: bool) -> bool {
@@ -900,43 +895,39 @@ fn gives(g: &Grade, from: Port, key: bool) -> bool {
     }
 }
 
-fn linked_now(g: &Grade, to: Port, slot: usize) -> Option<Port> {
+fn linked_now(g: &Grade, to: Port, slot: usize) -> Option<GradeLink> {
     match to {
         Port::Node(n) => {
             let d = g.node(n)?;
-            let v = match inlet(g, to, Some(slot))? {
-                (None, true) => d.key_from,
+            match (&d.tool, slot) {
+                (GradeTool::Corrector(_), KEY_PORT) => d.key_from,
                 _ => d.inputs.get(slot).copied().flatten(),
-            };
-            v.map(port)
+            }
         }
-        Port::Output => g.output.map(port),
+        Port::Output => g.output,
         Port::Source => None,
     }
 }
 
 fn connect(
-    g: &Grade,
     of: &GradeOf,
     (to, slot): (Port, Option<usize>),
-    from: Option<Port>,
+    from: Option<GradeLink>,
 ) -> Option<Value> {
-    let (input, key) = inlet(g, to, slot)?;
     let mut more = json!({ "node": to_number(to)? });
-    if let Some(s) = input {
+    if let Some(s) = slot {
         more["input"] = json!(s);
     }
-    if key {
-        more["key"] = json!(true);
-    }
-    if let Some(f) = from.and_then(from_number) {
-        more["from"] = json!(f);
+    if let Some(f) = from {
+        more["from"] = json!(f.node);
+        if f.key {
+            more["key"] = json!(true);
+        }
     }
     Some(command("grade.connect", params(of, "clip", more)))
 }
 
 fn grade_links(g: &Grade, of: &GradeOf, l: &Link<Port>) -> Vec<Value> {
-    let keyed = |dst: Port, s: usize| inlet(g, dst, Some(s)).map(|(_, key)| key);
     let onto = |dst: Port, key: bool| -> Option<Option<usize>> {
         let tool = match dst {
             Port::Node(n) => &g.node(n)?.tool,
@@ -953,33 +944,32 @@ fn grade_links(g: &Grade, of: &GradeOf, l: &Link<Port>) -> Vec<Value> {
     };
     let new = match (&l.anchor, &l.spot) {
         (End::Output(src, out), Spot::Knot(End::Input(dst, s))) => {
-            let key = *out == KEY_PORT;
-            (keyed(*dst, *s) == Some(key)).then_some((*dst, Some(*s), *src))
+            inlet(g, *dst, *s).map(|_| (*dst, Some(*s), (*src, *out)))
         }
         (End::Output(src, out), Spot::Tile(dst)) => match l.pulled {
-            Some((pd, ps)) if pd == *dst => Some((*dst, Some(ps), *src)),
-            _ => onto(*dst, *out == KEY_PORT).map(|s| (*dst, s, *src)),
+            Some((pd, ps)) if pd == *dst => Some((*dst, Some(ps), (*src, *out))),
+            _ => onto(*dst, *out == KEY_PORT).map(|s| (*dst, s, (*src, *out))),
         },
         (End::Input(dst, s), Spot::Knot(End::Output(src, out))) => {
-            let key = *out == KEY_PORT;
-            (keyed(*dst, *s) == Some(key)).then_some((*dst, Some(*s), *src))
+            inlet(g, *dst, *s).map(|_| (*dst, Some(*s), (*src, *out)))
         }
-        (End::Input(dst, s), Spot::Tile(src)) => keyed(*dst, *s)
+        (End::Input(dst, s), Spot::Tile(src)) => inlet(g, *dst, *s)
             .filter(|key| gives(g, *src, *key))
-            .map(|_| (*dst, Some(*s), *src)),
+            .map(|key| (*dst, Some(*s), (*src, if key { KEY_PORT } else { 0 }))),
         _ => None,
     };
-    let new = new.filter(|(d, _, s)| d != s);
+    let new = new.filter(|(d, _, (s, _))| d != s);
     let mut out = Vec::new();
     if let Some((pd, ps)) = l.pulled
         && new.is_none_or(|(d, s, _)| d != pd || s != Some(ps))
     {
-        out.extend(connect(g, of, (pd, Some(ps)), None));
+        out.extend(connect(of, (pd, Some(ps)), None));
     }
     if let Some((d, s, src)) = new
-        && s.is_none_or(|s| linked_now(g, d, s) != Some(src))
+        && let Some(from) = link_of(src)
+        && s.is_none_or(|s| linked_now(g, d, s) != Some(from))
     {
-        out.extend(connect(g, of, (d, s), Some(src)));
+        out.extend(connect(of, (d, s), Some(from)));
     }
     out
 }
@@ -2591,10 +2581,7 @@ impl Workspace {
             NodeAct::Morph(to) => set(json!({ "mixer": to })),
             NodeAct::Mode(mode) => set(json!({ "mode": mode })),
             NodeAct::AddInput => {
-                let mut more = json!({ "node": n });
-                if d.takes_keys() {
-                    more["key"] = json!(true);
-                }
+                let more = json!({ "node": n });
                 ("grade.connect", params(of, "clip", more))
             }
             NodeAct::RemoveInput => {
@@ -2791,7 +2778,7 @@ impl Workspace {
             .map(|l| grade_links(&stored, &of, &l))
             .unwrap_or_default();
         if let Some((to, slot)) = done.unlink {
-            commands.extend(connect(&stored, &of, (to, Some(slot)), None));
+            commands.extend(connect(&of, (to, Some(slot)), None));
         }
         self.send_all(commands, "Link Nodes");
         let moves = (done.moved.into_iter())
