@@ -24,7 +24,7 @@ vidcut has an input LUT of a media item and of the project, and an output LUT, f
   - The Input LUT of the project in the viewer of the Media page.
   - A LUT on the node of a Text+ title. Generators and Text titles take no grade ([spec §8.20](../spec.md#820-primaries-palette-pp-118-31413159)).
   - A gap through the Output LUT of the project, in a render with alpha. vidcut keeps the gap clear.
-  - The `…` button of each row of the Lookup Tables in the Project Settings. vidcut has no such button ([spec §13](../spec.md#the-lut-tables)).
+  - The `…` button of each row of the Lookup Tables in the Project Settings ([spec §13](../spec.md#the-lut-tables)).
   - The LUTs of a folder added in LUT Locations: at the top of the submenu, or in a submenu of their own. vidcut puts them at the top.
   - Whether an added or removed LUT file shows without `Update Lists`.
   - The check marks of the `LUT` submenu when a clip has no LUT.

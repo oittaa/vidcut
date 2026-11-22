@@ -6319,7 +6319,7 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - On a compound clip, it applies once, to the clip inside. It does not apply again to the compound clip.
   - A clip inside at Zoom 0.5 gets it. The uncovered part of the compound clip stays black, not `T(0)`.
 - In a timeline with its own settings, the Lookup Tables section of the settings shows a warning. The LUT still applies there.
-  - vidcut applies it there too. The Timeline Settings window of vidcut has no LUT rows, so it shows no warning.
+  - vidcut applies it there too.
 - A picture with alpha gives `T(clamp(C / A)) * A`, and each layer gets its own `T` before the mix.
 - The Input LUT of a clip replaces it on that clip.
 - vidcut does the same. Each clip of a media item with no `input_lut` gets the `input_lut` of the project in the render plan.
@@ -6351,7 +6351,7 @@ A script gets no error for a broken file, and the window shows no message:
 - The Lookup Tables of the Color Management panel of the Project Settings have four rows.
   - The rows are `Input lookup table`, `Output lookup table`, `Video monitor lookup table` and `Color viewer lookup table`.
   - Each row is one dropdown. Its list is `No LUT selected`, then the LUTs by name, flat, with no submenus.
-  - Each row also has a `…` button. No measurement tells what it does ([todo](todo/luts.md)).
+  - Each row also has a `…` button.
 - A list in the General panel of the System Preferences adds folders where Resolve looks for LUTs, with Add and Remove (p. 3479).
   - Its name is LUT Locations (p. 107).
 - The menus list the LUTs in the master LUT folder and in those folders (p. 152).
@@ -6367,10 +6367,8 @@ In vidcut:
   - The LUT Locations row of the General page of the Preferences window adds and removes them.
 - vidcut lists the `.cube` files of these folders and of their subfolders, in the order of their paths in their folders, by character code.
   - It reads the folders at start and on `Update Lists`. `luts.list` gives the list to a script.
-  - It lists no other file types ([todo](todo/luts.md)).
 - The `LUT` submenu of the pool and the Input LUT row of the Inspector set the Input LUT of media items.
 - The Project Settings window has an Input LUT row and an Output LUT row, each one dropdown. It also has `Update Lists` and `Open LUT Folder`.
-  - It has no `…` button, and no rows for the display LUTs ([todo](todo/luts.md)).
 - A LUT that is set but not in the list shows by its file name, with its check mark.
 - `media.set` and `project.set` take the path of any `.cube` file. Thus a script can give a file outside the LUT folders.
 
