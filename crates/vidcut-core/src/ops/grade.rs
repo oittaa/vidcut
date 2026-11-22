@@ -147,6 +147,15 @@ fn keys_checked(d: &GradeNode, k: u32) -> Result<()> {
         }
         corrector_checked(&key.values)?;
         key_checked(&key.key)?;
+        let kinds = |l: &[GradeWindow]| l.iter().map(|w| w.shape.kind()).collect::<Vec<_>>();
+        if kinds(&key.windows) != kinds(&d.windows) {
+            return Err(Error::invalid(format!(
+                "each keyframe of node {k} has the windows of the node, of the same shapes"
+            )));
+        }
+        for w in &key.windows {
+            super::grade_windows::checked(w)?;
+        }
     }
     Ok(())
 }
@@ -336,7 +345,11 @@ pub(super) fn unlocked(g: &mut Grade, n: u32) -> Result<&mut GradeNode> {
     }
 }
 
-fn changed_node(g: &mut Grade, n: u32, frame: Option<i64>) -> Result<(&mut GradeNode, i64)> {
+pub(super) fn changed_node(
+    g: &mut Grade,
+    n: u32,
+    frame: Option<i64>,
+) -> Result<(&mut GradeNode, i64)> {
     let d = unlocked(g, n)?;
     if d.tool.is_mixer() {
         return Err(Error::invalid(format!("node {n} is a mixer")));
@@ -490,16 +503,13 @@ fn cleared(
         key_changed(g, n, frame, |_| KeyOutput::default())?;
     }
     if resets(GradePalette::Window) {
-        let d = unlocked(g, n)?;
-        if d.tool.is_mixer() {
-            return Err(Error::invalid(format!("node {n} is a mixer")));
-        }
-        for w in &mut d.windows {
-            *w = GradeWindow {
+        let (d, frame) = changed_node(g, n, frame)?;
+        for i in 0..d.windows.len() {
+            d.change_window_at(frame, i, |w| GradeWindow {
                 on: false,
-                name: std::mem::take(&mut w.name),
+                name: w.name.clone(),
                 ..GradeWindow::new(w.shape.kind(), size)
-            };
+            });
         }
     }
     Ok(())

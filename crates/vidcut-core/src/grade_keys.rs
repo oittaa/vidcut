@@ -1,6 +1,10 @@
 use std::borrow::Cow;
 
-use crate::model::{Corrector, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, KeyOutput};
+use crate::model::{
+    Corrector, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, GradeWindow, KeyOutput,
+    WindowShape,
+};
+use crate::window_key::{circle_scale, circle_size, linear_scale, linear_size};
 
 pub const LAST_PROFILE: u8 = 10;
 
@@ -9,6 +13,8 @@ const STEPS: u32 = 1024;
 const HALVINGS: u32 = 60;
 
 type Ease = (f64, f64);
+
+type Scale = fn(f64) -> f64;
 
 fn ease(profile: u8) -> Option<Ease> {
     Some(match profile {
@@ -238,6 +244,251 @@ impl KeyOutput {
     }
 }
 
+fn pick<T: PartialEq + Clone>(own: &T, was: &T, now: &T) -> T {
+    match was == now {
+        true => own.clone(),
+        false => now.clone(),
+    }
+}
+
+fn each<T: PartialEq + Clone>(own: &[T], was: &[T], now: &[T]) -> Vec<T> {
+    match own.len() == now.len() && was.len() == now.len() {
+        true => (own.iter().zip(was).zip(now))
+            .map(|((o, w), n)| pick(o, w, n))
+            .collect(),
+        false => now.to_vec(),
+    }
+}
+
+fn mixed_list<const N: usize>(a: &[[f64; N]], b: &[[f64; N]], w: f64) -> Vec<[f64; N]> {
+    match a.len() == b.len() {
+        true => a.iter().zip(b).map(|(p, q)| mixed(p, q, w)).collect(),
+        false => a.to_vec(),
+    }
+}
+
+fn mixed_curve(a: &[[[f64; 2]; 3]], b: &[[[f64; 2]; 3]], w: f64) -> Vec<[[f64; 2]; 3]> {
+    match a.len() == b.len() {
+        true => (a.iter().zip(b))
+            .map(|(p, q)| std::array::from_fn(|i| mixed(&p[i], &q[i], w)))
+            .collect(),
+        false => a.to_vec(),
+    }
+}
+
+fn mixed_moves(
+    a: &Option<Vec<[f64; 2]>>,
+    b: &Option<Vec<[f64; 2]>>,
+    w: f64,
+) -> Option<Vec<[f64; 2]>> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(mixed_list(a, b, w)),
+        _ => a.clone(),
+    }
+}
+
+fn each_moves(
+    own: &Option<Vec<[f64; 2]>>,
+    was: &Option<Vec<[f64; 2]>>,
+    now: &Option<Vec<[f64; 2]>>,
+    count: usize,
+) -> Option<Vec<[f64; 2]>> {
+    let moves = match (own, was, now) {
+        (Some(o), Some(w), Some(n)) => Some(each(o, w, n)),
+        _ => pick(own, was, now),
+    };
+    moves.filter(|m| m.len() == count)
+}
+
+impl GradeWindow {
+    pub fn blended(&self, to: &GradeWindow, w: f64) -> GradeWindow {
+        let one = |a: f64, b: f64| a + (b - a) * w;
+        let (scale, size): (Scale, Scale) = match self.shape {
+            WindowShape::Circle { .. } => (circle_scale, circle_size),
+            _ => (linear_scale, linear_size),
+        };
+        let shape = match (&self.shape, &to.shape) {
+            (
+                WindowShape::Linear { soft: a, points: p },
+                WindowShape::Linear { soft: b, points: q },
+            ) => WindowShape::Linear {
+                soft: mixed(a, b, w),
+                points: std::array::from_fn(|i| mixed(&p[i], &q[i], w)),
+            },
+            (WindowShape::Circle { soft: a }, WindowShape::Circle { soft: b }) => {
+                WindowShape::Circle { soft: one(*a, *b) }
+            }
+            (
+                WindowShape::Polygon {
+                    points: p,
+                    inside: a,
+                    outside: c,
+                },
+                WindowShape::Polygon {
+                    points: q,
+                    inside: b,
+                    outside: d,
+                },
+            ) => WindowShape::Polygon {
+                points: mixed_list(p, q, w),
+                inside: one(*a, *b),
+                outside: one(*c, *d),
+            },
+            (
+                WindowShape::Curve {
+                    points: p,
+                    soft: s,
+                    inside: a,
+                    outside: c,
+                    inner: i,
+                    outer: o,
+                },
+                WindowShape::Curve {
+                    points: q,
+                    soft: t,
+                    inside: b,
+                    outside: d,
+                    inner: j,
+                    outer: u,
+                },
+            ) => WindowShape::Curve {
+                points: mixed_curve(p, q, w),
+                soft: one(*s, *t),
+                inside: one(*a, *b),
+                outside: one(*c, *d),
+                inner: mixed_moves(i, j, w).filter(|m| m.len() == p.len()),
+                outer: mixed_moves(o, u, w).filter(|m| m.len() == p.len()),
+            },
+            (WindowShape::Gradient { soft: a }, WindowShape::Gradient { soft: b }) => {
+                WindowShape::Gradient { soft: one(*a, *b) }
+            }
+            _ => self.shape.clone(),
+        };
+        GradeWindow {
+            shape,
+            on: self.on,
+            name: self.name.clone(),
+            invert: self.invert,
+            mask: self.mask,
+            size: match self.size == to.size {
+                true => self.size,
+                false => size(one(scale(self.size), scale(to.size))),
+            },
+            aspect: one(self.aspect, to.aspect),
+            pan: one(self.pan, to.pan),
+            tilt: one(self.tilt, to.tilt),
+            rotate: one(self.rotate, to.rotate),
+            opacity: one(self.opacity, to.opacity),
+        }
+    }
+
+    pub fn carried(&self, was: &GradeWindow, now: &GradeWindow) -> GradeWindow {
+        let one = |own: f64, was: f64, now: f64| if was == now { own } else { now };
+        let shape = match (&self.shape, &was.shape, &now.shape) {
+            (
+                WindowShape::Linear { soft, points },
+                WindowShape::Linear {
+                    soft: ws,
+                    points: wp,
+                },
+                WindowShape::Linear {
+                    soft: ns,
+                    points: np,
+                },
+            ) => WindowShape::Linear {
+                soft: moved(soft, ws, ns),
+                points: std::array::from_fn(|i| moved(&points[i], &wp[i], &np[i])),
+            },
+            (
+                WindowShape::Circle { soft },
+                WindowShape::Circle { soft: ws },
+                WindowShape::Circle { soft: ns },
+            ) => WindowShape::Circle {
+                soft: one(*soft, *ws, *ns),
+            },
+            (
+                WindowShape::Polygon {
+                    points,
+                    inside,
+                    outside,
+                },
+                WindowShape::Polygon {
+                    points: wp,
+                    inside: wi,
+                    outside: wo,
+                },
+                WindowShape::Polygon {
+                    points: np,
+                    inside: ni,
+                    outside: no,
+                },
+            ) => WindowShape::Polygon {
+                points: each(points, wp, np),
+                inside: one(*inside, *wi, *ni),
+                outside: one(*outside, *wo, *no),
+            },
+            (
+                WindowShape::Curve {
+                    points,
+                    soft,
+                    inside,
+                    outside,
+                    inner,
+                    outer,
+                },
+                WindowShape::Curve {
+                    points: wp,
+                    soft: ws,
+                    inside: wi,
+                    outside: wo,
+                    inner: wn,
+                    outer: wu,
+                },
+                WindowShape::Curve {
+                    points: np,
+                    soft: ns,
+                    inside: ni,
+                    outside: no,
+                    inner: nn,
+                    outer: nu,
+                },
+            ) => {
+                let points = each(points, wp, np);
+                let count = points.len();
+                WindowShape::Curve {
+                    points,
+                    soft: one(*soft, *ws, *ns),
+                    inside: one(*inside, *wi, *ni),
+                    outside: one(*outside, *wo, *no),
+                    inner: each_moves(inner, wn, nn, count),
+                    outer: each_moves(outer, wu, nu, count),
+                }
+            }
+            (
+                WindowShape::Gradient { soft },
+                WindowShape::Gradient { soft: ws },
+                WindowShape::Gradient { soft: ns },
+            ) => WindowShape::Gradient {
+                soft: one(*soft, *ws, *ns),
+            },
+            _ => pick(&self.shape, &was.shape, &now.shape),
+        };
+        GradeWindow {
+            shape,
+            on: pick(&self.on, &was.on, &now.on),
+            name: pick(&self.name, &was.name, &now.name),
+            invert: pick(&self.invert, &was.invert, &now.invert),
+            mask: pick(&self.mask, &was.mask, &now.mask),
+            size: one(self.size, was.size, now.size),
+            aspect: one(self.aspect, was.aspect, now.aspect),
+            pan: one(self.pan, was.pan, now.pan),
+            tilt: one(self.tilt, was.tilt, now.tilt),
+            rotate: one(self.rotate, was.rotate, now.rotate),
+            opacity: one(self.opacity, was.opacity, now.opacity),
+        }
+    }
+}
+
 impl GradeKey {
     pub fn is_static(&self) -> bool {
         self.kind == GradeKeyKind::Static
@@ -277,6 +528,54 @@ impl GradeNode {
             (Some(i), GradeTool::Corrector(_)) => Some(&mut self.keys[i].values),
             (None, GradeTool::Corrector(c)) => Some(&mut **c),
             _ => None,
+        }
+    }
+
+    fn windows_mut(&mut self, key: Option<usize>) -> Option<&mut Vec<GradeWindow>> {
+        match key {
+            _ if self.tool.is_mixer() => None,
+            Some(i) => Some(&mut self.keys[i].windows),
+            None => Some(&mut self.windows),
+        }
+    }
+
+    pub fn window_lists_mut(&mut self) -> impl Iterator<Item = &mut Vec<GradeWindow>> {
+        std::iter::once(&mut self.windows).chain(self.keys.iter_mut().map(|k| &mut k.windows))
+    }
+
+    pub fn windows_changed_at(&self, frame: i64) -> &[GradeWindow] {
+        self.changed_key(frame)
+            .map_or(&self.windows, |i| &self.keys[i].windows)
+    }
+
+    pub fn change_window_at(
+        &mut self,
+        frame: i64,
+        i: usize,
+        change: impl FnOnce(&GradeWindow) -> GradeWindow,
+    ) -> Option<()> {
+        let key = self.changed_key(frame);
+        let was = self.windows_changed_at(frame).get(i)?.clone();
+        let now = change(&was);
+        let other = (self.paired_key(key))
+            .and_then(|k| self.windows_mut(k))
+            .and_then(|w| w.get_mut(i));
+        if let Some(other) = other {
+            *other = other.carried(&was, &now);
+        }
+        *self.windows_mut(key)?.get_mut(i)? = now;
+        Some(())
+    }
+
+    pub fn windows_at(&self, frame: f64) -> Cow<'_, [GradeWindow]> {
+        match self.span(frame) {
+            None => Cow::Borrowed(&self.windows),
+            Some((k, Some((n, w)))) => Cow::Owned(
+                (k.windows.iter().zip(&n.windows))
+                    .map(|(a, b)| a.blended(b, w))
+                    .collect(),
+            ),
+            Some((k, None)) => Cow::Borrowed(&k.windows),
         }
     }
 
@@ -388,6 +687,7 @@ impl Grade {
                 **c = now.into_owned();
             }
             d.key = from.key_output_at(frame);
+            d.windows = from.windows_at(frame).into_owned();
             d.keys.clear();
             d.animated = false;
         }

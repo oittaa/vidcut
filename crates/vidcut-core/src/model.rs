@@ -3902,7 +3902,9 @@ impl GradeNode {
             GradeTool::Corrector(c) => {
                 !self.keys.is_empty()
                     && (self.animated
-                        || (self.keys.iter()).any(|k| k.values != **c || k.key != self.key))
+                        || (self.keys.iter()).any(|k| {
+                            k.values != **c || k.key != self.key || k.windows != self.windows
+                        }))
             }
             _ => false,
         }
@@ -4141,8 +4143,8 @@ impl KeyOutput {
     }
 }
 
-/// A keyframe of a corrector: every value of the corrector and its Key
-/// Output on one frame.
+/// A keyframe of a corrector: every value of the corrector, its Key Output
+/// and its windows on one frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GradeKey {
     /// On a clip, the source frame, counted as the `frame` of a `Keyframe`
@@ -4164,6 +4166,11 @@ pub struct GradeKey {
     /// Left out at its usual value.
     #[serde(default, skip_serializing_if = "KeyOutput::is_usual")]
     pub key: KeyOutput,
+    /// The windows of the corrector on this frame, in the order of the
+    /// `windows` of the node. The numbers blend as the values do. `on`,
+    /// `invert`, `mask` and `name` change on the frame of the next
+    /// keyframe, and so do the points of a list of another length.
+    pub windows: Vec<GradeWindow>,
 }
 
 /// What a keyframe of a corrector does up to the next keyframe.

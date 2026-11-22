@@ -871,7 +871,8 @@ The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline
 The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes panel of the Color page):
 
 - `GradeNode::keys` holds the keyframes of a corrector, in the order of their frames. A mixer has none.
-  - Each `GradeKey` holds every value of the corrector, its `KeyOutput`, its `GradeKeyKind`, and its `start` and `end`.
+  - Each `GradeKey` holds every value of the corrector, its `KeyOutput`, its windows, its `GradeKeyKind`, and its `start` and `end`.
+  - The window list of each keyframe has the shapes of the window list of the node. `ops::grade::checked` refuses other lists.
   - A keyframe of a clip grade is on a source frame, as a `Keyframe` of an effect is. A keyframe of the timeline grade is on a timeline frame.
   - `ops::grade::checked` refuses keyframes on a mixer, frames out of order, two keyframes on one frame, and a `start` or `end` past `LAST_PROFILE`.
 - `GradeNode::corrector_at` gives the values on a frame:
@@ -881,6 +882,10 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - Why linear: the renders of the spec equal a grade with no keyframes at the blended values (spec §8.22).
 - `GradeNode::key_output_at` gives the Key Output on a frame in the same way (`KeyOutput::blended`).
   - Invert cannot blend. It keeps the value of the keyframe before the frame.
+- `GradeNode::windows_at` gives the windows on a frame in the same way (`GradeWindow::blended`).
+  - The Size blends by its scale (`circle_scale`, `linear_scale`), and `circle_size` or `linear_size` gives the Size back.
+  - Why: on a circle, the radius moves in a straight line (spec §8.23).
+  - On, Invert, Mask, the name, and a point list of another length keep the value of the keyframe before the frame.
 - `Dissolve::of` finds the joints of the curve once: where the straight line touches the start curve and the end curve.
   - `root` scans `STEPS` points for a change of sign, and then halves the step `HALVINGS` times.
   - Where no line touches both curves, the joint is where the slopes of the two curves are equal.
@@ -898,6 +903,9 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - A Static keyframe, or the corrector itself, and the Dynamic keyframe right after it are a pair.
   - The other keyframe of the pair takes only the values that changed (`Corrector::carried`). Each channel of a wheel is one value.
 - `key_gain`, `key_offset` and `key_invert` change the Key Output in the same way (`GradeNode::change_key_output_at`, `KeyOutput::carried`).
+- `grade.window.set` changes a window in the same way (`GradeNode::change_window_at`, `GradeWindow::carried`).
+  - Each point of a polygon or a curve is one value, and so is each softness move of a curve.
+  - `grade.window.add`, `grade.window.remove`, `grade.window.convert` and a paste at the end change each window list (`GradeNode::window_lists_mut`).
 - `grade.clear` with `node` or `keep_nodes` puts these values back to the usual values in the same way. The keyframes stay.
 - Each of these changes, and a change of the keyframes, refuses a locked node (`ops::grade::unlocked`). Requests for all nodes skip it.
   - It also puts back `KeyOutput::default`. With `palette`, only the values of that palette go back (`GradePalette`).

@@ -35,7 +35,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 **To do:**
 
 - The windows ([spec §8.23](../spec.md#823-windows-pp-32653279)):
-  - Window keyframes.
   - Shift and a drag box select points of a curve, to move, delete or scale them together (p. 3274).
 - Add Outside Node (Option-O), and Node + CPW, LPW, PPW and PCW (p. 3395). They need windows.
 - Switch to Node Layer in the Nodes submenu, with the Node Stack Layers (pp. 3400–3401). Add Splitter Combiner Node (Option-Y, p. 3441).

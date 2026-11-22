@@ -7,6 +7,8 @@ pub const POLYGON_SOFT_STEP: f64 = 1.0 / 25.0;
 pub const CIRCLE_RADIUS: f64 = 0.15;
 pub const CIRCLE_LEAST: f64 = 0.002;
 pub const CIRCLE_GROWTH: f64 = 0.08;
+pub const LINEAR_LEAST: f64 = 0.025;
+pub const LINEAR_GROWTH: f64 = 0.06;
 pub const LINEAR_MOST: f64 = 4.0;
 pub const FAR_OUTSIDE: f64 = 1000.0;
 pub const EVEN: f64 = 1e-6;
@@ -83,8 +85,15 @@ fn joined_first(w: &GradeWindow) -> (bool, u8) {
 
 pub fn linear_scale(size: f64) -> f64 {
     match size <= 50.0 {
-        true => 0.025 + 0.975 * size / 50.0,
-        false => 1.0 + 0.06 * (size - 50.0),
+        true => LINEAR_LEAST + (1.0 - LINEAR_LEAST) * size / 50.0,
+        false => 1.0 + LINEAR_GROWTH * (size - 50.0),
+    }
+}
+
+pub fn linear_size(scale: f64) -> f64 {
+    match scale <= 1.0 {
+        true => (scale - LINEAR_LEAST) / (1.0 - LINEAR_LEAST) * 50.0,
+        false => 50.0 + (scale - 1.0) / LINEAR_GROWTH,
     }
 }
 
