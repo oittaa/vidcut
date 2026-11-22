@@ -1795,7 +1795,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The right-click menu of a title has no Change Clip Speed, no Retime Controls and no Open in Fusion Page.
     - An OTIO import drops a `LinearTimeWarp` on a title.
   - vidcut: a title clip has the Transform, Cropping, Dynamic Zoom and Composite sections of a clip (§8.15). `picture.set` sets them.
-  - Not measured: the Speed controls of the Inspector on a title, and a Fusion composition on a Text title. The scripting API does not get to either.
+  - vidcut: a title takes a speed and speed keyframes as a media clip does. Its right-click menu has no Change Speed and no Add Speed Point.
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
   - vidcut: the Keyframes tab of a title has the rows of its clip's picture. It also has the rows Position, Zoom and Rotation of its text. The text of a scroll has only Position.
@@ -1811,7 +1811,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: the Across button holds the keyframes of Across and Down.
 - **Later** (X53):
   - Text+ and Fusion titles (p. 1178)
-  - Speed on titles (pp. 763, 1176)
   - animation
   - keyframes of the shadow and the background
   - Safe area overlays in the viewer are in §4.5 (D90).
@@ -2345,8 +2344,8 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: Speed Change on a generator has a dim dot and does not open. A still acts the same.
   - Measured: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
   - Measured: the scripting API refuses a speed. An import of a time warp on a Solid Color keeps the length and drops the warp.
-  - vidcut: the speed requests refuse a generator. The right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
-  - vidcut: an import of a time warp on a Solid Color keeps the length and drops the warp.
+  - vidcut: a generator takes a speed and speed keyframes as a media clip does (p. 763). The right-click menu has Change Speed and Add Speed Point on.
+  - vidcut: an import keeps a time warp on a generator.
 - **Solid Color:**
   - It has one value, Color. Black is the default (measured).
   - `generators.set` and the Color row change it.
@@ -5239,7 +5238,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A dissolve at the edge of a title fades it in or out, as Resolve does.
   - The title is drawn through all of the frames of the dissolve, at the level of the dissolve, on both sides of its edge.
   - The opacity of the clip's Composite fades the whole title (§8.14).
-  - A title has no speed.
   - It draws the same in every export, in `frame.render` and in the viewer, whatever the subtitle settings.
   - HDR white is graphics white, as for burned-in subtitles.
 - **D66. Where Add Title goes** (§8.14; p. 763).

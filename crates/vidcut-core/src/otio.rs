@@ -2476,11 +2476,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 || adjustment
                 || plain.is_some()
                 || schema(reference).starts_with("GeneratorReference");
-            let mut speed = speed_of(speed, item, fps, !block || stack, &mut notes);
-            if stack {
-                our_skip(&mut speed, item);
-            }
+            let mut speed = speed_of(speed, item, fps, !adjustment, &mut notes);
             if block {
+                our_skip(&mut speed, item);
                 clip_markers(item, start, len, fps, &mut markers);
                 keys[i] = Some(clips.len());
                 let mut c = ImportedClip::block(clips.len(), &id, item, (start, len), fps);
@@ -2515,7 +2513,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 } else {
                     if generators::read(reference, 0).is_some() {
                         c.picture = our_picture(item);
-                        c.speed = None;
                         if c.name == reference["name"].as_str().unwrap_or_default() {
                             c.name.clear();
                         }

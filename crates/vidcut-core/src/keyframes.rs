@@ -1,7 +1,7 @@
 use crate::effect_keys::Keyed;
 use crate::model::{
-    Clip, ClipAudio, Composition, Crop, Ease, Effect, Grade, Handle, Keyframe, Node, Picture,
-    PositionHandles, Title, TitleKind,
+    Clip, ClipAudio, Composition, Crop, Ease, Effect, Generator, Grade, Handle, Keyframe, Node,
+    Picture, PositionHandles, Title, TitleKind,
 };
 use crate::otio::effects::rounded;
 use crate::validate::{GAIN, PAN};
@@ -442,6 +442,32 @@ impl ClipAudio {
 }
 
 impl Clip {
+    pub fn retime_keys(&mut self, old: &Clip) {
+        let new = self.clone();
+        let frame = |f: i64| new.key_at(old.key_time(f)).round() as i64;
+        if let Some(a) = self.audio.as_mut() {
+            a.gain_keys = retimed(&a.gain_keys, old, &new);
+            a.pan_keys = retimed(&a.pan_keys, old, &new);
+        }
+        if let Some(picture) = self.picture.as_mut().filter(|p| p.is_keyed()) {
+            picture.retimed_to(old, &new);
+        }
+        if let Some(title) = self.title.as_mut().filter(|t| t.is_keyed()) {
+            title.each_line(|line| {
+                let mut picture = line.as_picture();
+                picture.retimed_to(old, &new);
+                line.move_handles(frame);
+                line.take_picture(&picture);
+            });
+        }
+        if let Some(Generator::FourColorGradient(g)) = self.generator.as_mut() {
+            for axis in [crate::generators::Axis::X, crate::generators::Axis::Y] {
+                let keys = g.keys_mut(axis);
+                *keys = retimed(keys, old, &new);
+            }
+        }
+    }
+
     pub fn key_at(&self, t: f64) -> f64 {
         self.content_at(self.start) as f64 + t - self.start as f64
     }

@@ -381,9 +381,9 @@ pub struct ShownTitle {
     pub clip: String,
     pub title: Title,
     pub run: Run,
-    /// The source frame of its clip's first frame, which its keyframes are
-    /// counted from.
-    pub source_in: i64,
+    /// The keyframe position of its clip's first frame: its source frame,
+    /// or on a clip with a speed, its frame on the retimed source.
+    pub keys_from: i64,
 }
 
 /// Where a piece is in its clip, which a moving title and a Dynamic Zoom
@@ -427,12 +427,12 @@ impl ShownTitle {
             clip: self.clip.clone(),
             title: self.title.clone(),
             run: self.run.after(k),
-            source_in: self.source_in,
+            keys_from: self.keys_from,
         }
     }
 
     pub fn frame(&self) -> f64 {
-        (self.source_in + self.run.at) as f64
+        (self.keys_from + self.run.at) as f64
     }
 
     pub fn sampled(self) -> Self {
@@ -3499,7 +3499,7 @@ impl VideoPlan<'_> {
                 clip: c.id.clone(),
                 title: title.clone(),
                 run,
-                source_in: c.source_in,
+                keys_from: c.content_at(c.start),
             };
             return Ok(VideoPiece::Generated {
                 frames: y - x,

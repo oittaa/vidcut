@@ -300,7 +300,7 @@ struct Deleting {
 }
 
 pub(super) fn takes_speed(c: &Clip) -> bool {
-    c.title.is_none() && !c.is_generator() && !is_cue(c)
+    !c.adjustment && !is_cue(c)
 }
 
 fn is_cue(c: &Clip) -> bool {
@@ -1975,7 +1975,7 @@ impl Workspace {
         }
         let clips: Vec<Clip> = picked.into_iter().filter(takes_speed).collect();
         if clips.is_empty() {
-            return Err("Titles and generators have no speed keyframes");
+            return Err("Adjustment clips have no speed keyframes");
         }
         Ok(clips)
     }

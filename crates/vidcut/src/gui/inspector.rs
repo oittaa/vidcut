@@ -4175,9 +4175,7 @@ impl Workspace {
             .clips
             .iter()
             .filter_map(|id| {
-                let c = p
-                    .clip(id)
-                    .filter(|c| !c.is_generator() && c.title.is_none())?;
+                let c = p.clip(id).filter(|c| !c.adjustment)?;
                 let at = position.clamp(c.start, c.end() - 1);
                 let stored = (c.speed_at(at), c.duration);
                 let shown = retimed
