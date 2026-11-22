@@ -3662,9 +3662,6 @@ fn mutate(
                     "Source Overwrite picks its own track; leave out `track`",
                 ));
             }
-            if src.compound.is_some() {
-                return Err(Error::usage("Source Overwrite takes a media item"));
-            }
             if *grid && src.range.is_none() {
                 return Err(Error::usage("`grid` needs `range`"));
             }
