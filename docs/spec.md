@@ -838,6 +838,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A file with no timecode tag has timecode 0.
   - A clip counts when the timecode range that it shows overlaps the file. The rest of its media does not count.
     - Audio clips count. Generators do not count.
+    - A clip on a disabled track counts, as the reference and for the track (measured in Resolve Studio 21.2).
+  - **A compound clip** counts by its own start timecode, as the source and as the reference (measured in Resolve Studio 21.2).
+    - The timecode of the clips inside plays no part.
+    - Its sound goes on the audio track with the number of the picture's track.
   - **With timeline marks,** the source marks play no part.
     - The reference is the first of these: a clip at In, a clip in the marked range, any clip.
     - With In alone, no marked range counts: the reference is a clip at In, else any clip.
@@ -857,6 +861,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - When a video clip and an audio clip under the playhead disagree, the video clip counts.
   - With source marks or no marks, the clip is cut at the timeline start, and it can pass the timeline end.
   - **Track:** the first video track above the highest track with a clip in the new clip's range.
+    - A title counts for the track (measured in Resolve Studio 21.2).
     - With no clip in the range, the track is V1, even into a gap.
     - It makes the track if necessary. It never fills a free lower track.
     - A source with no picture is an audio-only edit. An audio-only edit always makes a new top audio track.
@@ -2504,7 +2509,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - The edits of [§7.2](#72-edit-functions) take `compound`. Without `range`, they use its marks, converted to the timeline's frame rate.
     - The sound goes on the audio track with the number of the picture's track.
     - `media.marks.set` and `media.marks.clear` take `compound`.
-    - Source Overwrite refuses a compound clip: [the todo](todo/sync-bin.md).
+    - Source Overwrite lines up a compound clip by its own start timecode ([§7.2](#72-edit-functions)).
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
   - Double-click the parent name in the bottom-left path bar to close the compound clip (p. 1054).
