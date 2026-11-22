@@ -436,6 +436,7 @@ pub fn describe_at(
         "grade.add"
         | "grade.remove"
         | "grade.connect"
+        | "grade.input.remove"
         | "grade.swap"
         | "grade.cleanup"
         | "grade.keys.add"
@@ -451,6 +452,7 @@ pub fn describe_at(
             match method {
                 "grade.add" => "Add a node to",
                 "grade.remove" => "Remove a node from",
+                "grade.input.remove" => "Remove a mixer input from",
                 "grade.swap" => "Swap two nodes of",
                 "grade.cleanup" => "Clean up the nodes of",
                 "grade.keys.add" => "Add a keyframe to",
