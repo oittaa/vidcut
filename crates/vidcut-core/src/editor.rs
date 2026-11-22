@@ -5326,59 +5326,16 @@ fn mutate(
             Value::Null
         }
         Request::MotionFind {
-            clip,
             node,
             subject,
-            model,
-            replace,
             download,
-            size,
-            start,
-            keep,
-            overlap,
-            wait,
-            shortest,
-            steady,
+            ..
         } => {
-            let usual = crate::motion::Join::of(*subject);
-            let rules = crate::motion::Join {
-                start: start.unwrap_or(usual.start),
-                keep: keep.unwrap_or(usual.keep),
-                overlap: overlap.unwrap_or(usual.overlap),
-                wait_secs: wait.unwrap_or(usual.wait_secs),
-                shortest_secs: shortest.unwrap_or(usual.shortest_secs),
-                steady: steady.unwrap_or(usual.steady),
-            };
-            if let Some(why) = rules.problem() {
-                return Err(Error::usage(why));
-            }
-            if !model.finds(*subject) {
-                return Err(Error::usage(format!(
-                    "the {} model (--model) finds only faces",
-                    model.name()
-                )));
-            }
-            let sides = crate::analysis::SIDES;
-            if size.is_some_and(|s| !(sides.0..=sides.1).contains(&s)) {
-                return Err(Error::usage(format!(
-                    "size (--size) is from {} to {} pixels",
-                    sides.0, sides.1
-                )));
-            }
-            let id = resolve_clip(p, clip, playhead)?;
-            ops::motion::findable(p, &id, node, *subject, *replace)?;
-            let c = p.clip(&id);
-            let media = c.and_then(|c| Some((p.media(&c.media).cloned()?, c)));
-            let (media, c) = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
-            let (frames, rate) = ops::motion::file_frames(p, c);
-            let look = Look {
-                side: *size,
-                model: *model,
-                ..subject_look(&media, rate, frames)
-            };
-            let found = env.subjects(&media, *subject, look, *download)?;
-            let tracks = crate::motion::joined(&found, media.origin(), rate, frames, &rules);
-            let mut out = ops::motion::found(p, &id, (*subject, node), tracks)?;
+            let f = find_plan(p, request, playhead)?;
+            let found = env.subjects(&f.media, *subject, f.look, *download)?;
+            let tracks =
+                crate::motion::joined(&found, f.media.origin(), f.rate, f.frames, &f.rules);
+            let mut out = ops::motion::found(p, &f.id, (*subject, node), tracks)?;
             out["subject"] = json!(subject);
             out
         }
@@ -8218,32 +8175,90 @@ pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec
         .collect()
 }
 
-pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<SubjectLook> {
+struct FindPlan {
+    id: String,
+    media: Media,
+    rules: crate::motion::Join,
+    frames: (i64, i64),
+    rate: f64,
+    look: Look,
+}
+
+fn find_plan(p: &Project, request: &Request, playhead: Option<i64>) -> Result<FindPlan> {
     let Request::MotionFind {
         clip,
+        node,
         subject,
         model,
-        download,
+        replace,
         size,
+        start,
+        keep,
+        overlap,
+        wait,
+        shortest,
+        steady,
         ..
+    } = request
+    else {
+        return Err(Error::invalid("not a motion.find request"));
+    };
+    let usual = crate::motion::Join::of(*subject);
+    let rules = crate::motion::Join {
+        start: start.unwrap_or(usual.start),
+        keep: keep.unwrap_or(usual.keep),
+        overlap: overlap.unwrap_or(usual.overlap),
+        wait_secs: wait.unwrap_or(usual.wait_secs),
+        shortest_secs: shortest.unwrap_or(usual.shortest_secs),
+        steady: steady.unwrap_or(usual.steady),
+    };
+    if let Some(why) = rules.problem() {
+        return Err(Error::usage(why));
+    }
+    if !model.finds(*subject) {
+        return Err(Error::usage(format!(
+            "the {} model (--model) finds only faces",
+            model.name()
+        )));
+    }
+    let sides = crate::analysis::SIDES;
+    if size.is_some_and(|s| !(sides.0..=sides.1).contains(&s)) {
+        return Err(Error::usage(format!(
+            "size (--size) is from {} to {} pixels",
+            sides.0, sides.1
+        )));
+    }
+    let id = resolve_clip(p, clip, playhead)?;
+    ops::motion::findable(p, &id, node, *subject, *replace)?;
+    let c = p.clip(&id);
+    let media = c.and_then(|c| Some((p.media(&c.media).cloned()?, c)));
+    let (media, c) = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
+    let (frames, rate) = ops::motion::file_frames(p, c);
+    let look = Look {
+        side: *size,
+        model: *model,
+        ..subject_look(&media, rate, frames)
+    };
+    Ok(FindPlan {
+        id,
+        media,
+        rules,
+        frames,
+        rate,
+        look,
+    })
+}
+
+pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<SubjectLook> {
+    let Request::MotionFind {
+        subject, download, ..
     } = request
     else {
         return Vec::new();
     };
-    let id = resolve_clip(p, clip, playhead).ok();
-    let clips = id.iter().filter_map(|id| p.clip(id));
-    clips
-        .filter(|c| ops::motion::takes(c))
-        .filter_map(|c| {
-            let media = p.media(&c.media)?;
-            let (frames, rate) = ops::motion::file_frames(p, c);
-            let look = Look {
-                side: *size,
-                model: *model,
-                ..subject_look(media, rate, frames)
-            };
-            Some((media.clone(), *subject, look, *download))
-        })
+    let plan = find_plan(p, request, playhead).ok();
+    plan.map(|f| (f.media, *subject, f.look, *download))
+        .into_iter()
         .collect()
 }
 
