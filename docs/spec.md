@@ -6351,9 +6351,9 @@ A script gets no error for a broken file, and the window shows no message:
   - Its first entry is `No LUT selected`. Then come the LUT files of the LUT folders, by name with no extension.
   - Each subfolder is its own submenu, for example `ACES`, `Arri` and `MCP`.
   - A check mark is on `LUT`, and on the subfolder that holds the current LUT of the clip.
-- The Lookup Tables of the Color Management panel of the Project Settings have four rows.
-  - The rows are `Input lookup table`, `Output lookup table`, `Video monitor lookup table` and `Color viewer lookup table`.
+- The Lookup Tables of the Color Management panel of the Project Settings start with `Input lookup table`, `Output lookup table`, `Video monitor lookup table` and `Color viewer lookup table`.
   - Each row is one dropdown. Its list is `No LUT selected`, then the LUTs by name, flat, with no submenus.
+  - `Color viewer lookup table` is `Use video monitoring selection` by default.
   - Each row also has a `…` button.
 - A list in the General panel of the System Preferences adds folders where Resolve looks for LUTs, with Add and Remove (p. 3479).
   - Its name is LUT Locations (p. 107).
@@ -6369,7 +6369,7 @@ In vidcut:
 - The LUT folder of vidcut is `LUT` in the folder of its preferences. `luts.folders` in the preferences adds more folders.
   - The LUT Locations row of the General page of the Preferences window adds and removes them.
 - vidcut lists the `.cube` files of these folders and of their subfolders, in the order of their paths in their folders, by character code.
-  - It reads the folders at start and on `Update Lists`. `luts.list` gives the list to a script.
+  - It reads the folders at start, on `Update Lists`, and when the LUT Locations change. `luts.list` gives the list to a script.
 - The `LUT` submenu of the pool and the Input LUT row of the Inspector set the Input LUT of media items.
 - The Project Settings window has an Input LUT row and an Output LUT row, each one dropdown. It also has `Update Lists` and `Open LUT Folder`.
 - A LUT that is set but not in the list shows by its file name, with its check mark.
