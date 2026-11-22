@@ -149,6 +149,7 @@ enum NodeAct {
     Extract,
     Delete,
     AddInput,
+    RemoveInput,
     Morph(GradeMixer),
     Mode(BlendMode),
 }
@@ -1017,6 +1018,8 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
             pick(ui, true, delete(), NodeAct::Delete);
             let more = egui::Button::new("Add One Input");
             pick(ui, true, more, NodeAct::AddInput);
+            let less = egui::Button::new("Remove One Input");
+            pick(ui, true, less, NodeAct::RemoveInput);
             return;
         }
         GradeTool::ParallelMixer => ("Morph Into Layer Mixer Node", GradeMixer::LayerMixer),
@@ -1030,6 +1033,12 @@ fn node_menu(ui: &mut Ui, d: &GradeNode, keys: &Bindings, act: &mut Option<NodeA
         true,
         egui::Button::new("Add One Input"),
         NodeAct::AddInput,
+    );
+    pick(
+        ui,
+        true,
+        egui::Button::new("Remove One Input"),
+        NodeAct::RemoveInput,
     );
     pick(ui, true, egui::Button::new(morph), NodeAct::Morph(to));
     if let GradeTool::LayerMixer { mode } = &d.tool {
@@ -1503,7 +1512,7 @@ impl Workspace {
                 let id = self.color_clip()?;
                 let c = p.clip(&id)?;
                 let stored = c.picture.as_ref().and_then(|pic| pic.grade.clone());
-                let name = c.name.clone().unwrap_or_else(|| id.clone());
+                let name = p.clip_name(c).unwrap_or_else(|| id.clone());
                 let usual = || Grade::usual(p.frame_size());
                 Some((GradeOf::Clip(id), name, stored.unwrap_or_else(usual)))
             }
@@ -2540,6 +2549,10 @@ impl Workspace {
                     more["key"] = json!(true);
                 }
                 ("grade.connect", params(of, "clip", more))
+            }
+            NodeAct::RemoveInput => {
+                let more = json!({ "node": n });
+                ("grade.input.remove", params(of, "clip", more))
             }
             NodeAct::Extract => {
                 let more = json!({ "node": n, "extract": true });

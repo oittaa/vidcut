@@ -102,6 +102,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("grade.add", &["add", "clip"]),
     ("grade.remove", &["node", "clip"]),
     ("grade.connect", &["node", "clip"]),
+    ("grade.input.remove", &["node", "clip"]),
     ("grade.copy", &["node", "clip"]),
     ("grade.paste", &["node", "clips"]),
     ("grade.swap", &["node", "with", "clip"]),
@@ -234,6 +235,7 @@ const GROUPS: &[(&str, &str)] = &[
         "grade",
         "The grades of clips and of the timeline: nodes of primary corrections and mixers",
     ),
+    ("grade.input", "Inputs of the mixers of a grade"),
     ("grade.keys", "Keyframes of the correctors of a grade"),
     ("grade.window", "Windows of the correctors of a grade"),
     (
@@ -622,7 +624,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "compound.set",
         "vidcut compound set --start-tc 01:00:00:00\n  \
-         vidcut compound set --compound k1 --start-tc 01:02:03:04",
+         vidcut compound set --compound k1 --start-tc 01:02:03:04\n  \
+         vidcut compound set --compound k1 --name Interview",
     ),
     (
         "storyboard.render",

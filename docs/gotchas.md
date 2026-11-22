@@ -365,6 +365,11 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
 - **Resolve drops metadata it doesn't know**, which includes the `vidcut` key of the clip.
   - Thus a title comes back from Resolve by its parameters alone.
   - A placed clip comes back by its Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling alone.
+- **Resolve's import loses the own name of a copy of a compound clip** (measured in Resolve Studio 21.2).
+  - Its export writes on the `Stack` of each copy the name that the copy shows.
+  - Its import gives each copy of one compound clip the name of the first `Stack`.
+  - vidcut keeps the name of each `Stack` on its copy.
+  - A name that is the name of the compound clip is not kept as the copy's own name. Thus the copy follows a later rename.
 - **Resolve's file holds no frame size:**
   - The metadata of its timeline is only `Resolve OTIO Meta Version`.
   - The Transform of a clip (a `Resolve Effect` of type 2), Cropping (3) and Retime and Scaling (22) hold fractions.
@@ -617,6 +622,18 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - When the optical flow does not find the move, the frame is a cross dissolve at the same point. A jump of 150 pixels gave this.
   - Speed Warp on gave one sharp bar for the 30-pixel jump. It smeared the 150-pixel jump.
   - Measured with renders of 24-frame Smooth Cuts between pictures with a bar at known places.
+
+## Resolve's edits
+
+These facts come from measurements in Resolve Studio 21.2, by hand and through its scripting API.
+
+- **Convert In and Out to Compound Clip changes locked tracks.**
+  - It cuts the clips of a locked track at the marks, and takes the part in the range inside.
+  - It cuts a cue of a locked subtitle track at the marks. Both parts stay on that track.
+  - The tracks stay locked, and no message shows.
+  - vidcut does not change a locked track:
+    - A clip in the range on a locked track refuses the request, with a message.
+    - A cue on a locked subtitle track stays whole.
 
 ## Resolve's renders
 

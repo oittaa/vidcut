@@ -940,11 +940,7 @@ impl Workspace {
                     picture: got.map(|g| g.picture),
                 });
             }
-            let name = c
-                .name
-                .clone()
-                .or_else(|| p.media(&c.media).map(|m| m.name.clone()))
-                .unwrap_or_default();
+            let name = p.clip_name(c).unwrap_or_default();
             painter.text(
                 picture.left_top() + vec2(6.0, 6.0),
                 Align2::LEFT_TOP,

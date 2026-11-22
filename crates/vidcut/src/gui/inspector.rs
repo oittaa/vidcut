@@ -2196,9 +2196,7 @@ fn name(p: &Project, c: &Clip) -> String {
     match (&c.name, &c.generator) {
         (Some(n), _) if !n.is_empty() => n.clone(),
         (_, Some(g)) => vidcut_core::generators::name(g).to_string(),
-        _ => p
-            .media(&c.media)
-            .map_or_else(|| c.id.clone(), |m| m.name.clone()),
+        _ => p.clip_name(c).unwrap_or_else(|| c.id.clone()),
     }
 }
 

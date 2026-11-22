@@ -487,7 +487,7 @@ The bar and the Jobs button:
   - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the lock, the thumbnail, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
   - A tile with `Tile::drops` can land on another such tile or on a link (`Dropped`). `grade_dropped` sends `grade.swap`, `grade.paste`, or one `apply` that inserts the node.
   - An Alt-drag builds the settings with `ops::grade::copy` from the shown project. Ctrl+C sends `grade.copy`; the live core keeps its answer (`node_clipboard`) for `grade.paste`.
-  - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.set` and `grade.clear`.
+  - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.set` and `grade.clear`.
   - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, reset, and the previous and the next node.
   - The Nodes submenu of the Color menu (`Workspace::nodes_menu`) runs the same actions (`Workspace::grade_keys_struck`). Its Delete Current Node and Label Selected Node act on the current node.
   - Ctrl+D and Alt+D send one `grade.set` with `on` for each node that changes (`Workspace::switch_grade_nodes`).

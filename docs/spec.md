@@ -2473,11 +2473,12 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - It opens the same window.
   - It cuts the clips at In and at the frame after Out, on all tracks. The Out frame is inside.
   - Thus In 24 and Out 120 give 97 frames, from 24 up to 121.
+  - A subtitle cue across In or across the frame after Out is cut there too. Both parts stay on their subtitle track (measured in Resolve Studio 21.2).
   - The compound clip goes on the lowest video track and the lowest audio track with clips in the range, linked.
   - The lowest track with clips in the range is inner V1 or A1. A track below it does not go inside.
   - The clips of the other tracks go inside. Those tracks stay on the timeline, empty.
   - The inner tracks start at the In frame.
-  - A locked track does not stop it. Its clips in the range are cut and go inside.
+  - A locked track does not stop it, and changes: [Resolve's edits](gotchas.md#resolves-edits).
   - With only In, the range runs to the end of the timeline. With only Out, the range starts at the start of the timeline.
   - With no marks, the menu does not have this item or Create Compound Clip….
   - A range with no clips does nothing, and shows no message.
@@ -2527,6 +2528,16 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - `compound.set` and Starting Timecode in the Media tab update the canonical compound definition, so every placement reflects it.
     - Opening a compound clip uses its own frame rate, drop-frame flag and `start_tc`, regardless of the host timeline.
     - OTIO keeps `source_range` zero-based for interchange and stores non-zero `start_tc` in `metadata.vidcut.start_tc`.
+- **Name** (pp. 424, 1025; measured in Resolve Studio 21.2):
+  - In the Media Pool, a click on the name, a pause and a second click open the name for editing.
+  - Return or a click elsewhere keeps the new name. Escape drops it.
+  - An empty name is refused, and the old name stays.
+  - Two compound clips can have the same name.
+  - A new name shows on each placed copy that has no name of its own.
+  - A placed copy can have a name of its own. Its picture and its sound show that name. The Media Pool name stays.
+  - In OTIO export, each `Stack` has the name that its copy shows.
+  - OTIO import loses the own name of a copy: [Resolve's OTIO files](gotchas.md#resolves-otio-files).
+  - **vidcut:** `compound.set` with `name` renames a compound clip. `clip.set` with `name` gives a copy its own name.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data….
   - Preserving Audio Data… is for a nested timeline, on the Edit page and on the Fairlight page (pp. 3960–3962).
@@ -3098,7 +3109,13 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Parallel Mixer that is off gives the same result as when it is on.
   - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
   - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
-  - vidcut: the menu of a mixer has these items in this order, but not Remove One Input ([todo](todo/color-page.md)).
+  - vidcut: the menu of a mixer has these items in this order.
+  - Measured in Resolve Studio 21.2: Remove One Input removes the last input with no link. The inputs after it move up one.
+  - Measured: thus with an empty last input, that input goes. Else an empty input in the middle goes.
+  - Measured: Remove One Input does nothing when each input has a link. A mixer with a linked input and an empty input keeps one input.
+  - Measured: a Key Mixer and a Parallel Mixer act the same.
+  - vidcut: `grade.input.remove` does the same, on each kind of mixer. Remove One Input in the menu of a mixer sends it.
+  - Not measured: Remove One Input on a Layer Mixer, and on a mixer with one empty input. vidcut keeps that one input.
   - Measured in Resolve Studio 21.2: the Add Node submenu of a mixer has Add Serial (Alt+S) and Add Serial Before (Shift+S).
   - vidcut: the Add Node submenu of a mixer has these two items, with their keys.
 - **Lock Node** (pp. 3374, 3454):
@@ -3204,7 +3221,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
   - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
-  - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node and Add One Input. Remove One Input and the Add Node submenu come later ([todo](todo/color-page.md)).
+  - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node, Add One Input and Remove One Input. The Add Node submenu comes later ([todo](todo/color-page.md)).
   - vidcut: a key link is blue. A node cannot drop into a key link.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
   - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
@@ -3215,7 +3232,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Not measured: Reset in the Key palette with Matte or the Key Output Invert on. vidcut resets them.
   - Not measured: Add Serial and Add Serial Before on a Key Mixer.
 
-Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
+Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.
 `grade.get` gives the nodes and the `output`.
 

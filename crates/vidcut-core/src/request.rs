@@ -989,9 +989,10 @@ pub enum Request {
         #[serde(default)]
         to: Option<usize>,
     },
-    /// Change a compound clip's starting timecode. Pass `compound` (from the
-    /// Media tab), `clip` (on the timeline), or neither for the open compound
-    /// clip.
+    /// Change a compound clip's name or starting timecode. Pass `compound`
+    /// (from the Media tab), `clip` (on the timeline), or neither for the
+    /// open compound clip. A new name shows on each copy that has no name of
+    /// its own (`clip.set` `name`).
     #[serde(rename = "compound.set")]
     CompoundSet {
         /// A copy on the timeline (by clip id, label, or `playhead`).
@@ -1000,8 +1001,12 @@ pub enum Request {
         /// A compound clip in the Media tab (by id or name).
         #[serde(default)]
         compound: Option<String>,
+        /// The new name. Two compound clips can have the same name.
+        #[serde(default)]
+        name: Option<String>,
         /// The new starting timecode (`HH:MM:SS:FF`, frames, or seconds).
-        start_tc: TimeSpec,
+        #[serde(default)]
+        start_tc: Option<TimeSpec>,
     },
 
     /// Append after the last clip (Shift+F12).
@@ -1275,12 +1280,14 @@ pub enum Request {
         #[serde(default)]
         start_tc: Option<TimeSpec>,
     },
-    /// Convert In and Out to Compound Clip: cuts the clips of every track at
-    /// the In mark and the Out mark, and makes a compound clip of what is
+    /// Convert In and Out to Compound Clip: cuts the clips and the subtitle
+    /// cues of every track at the In mark and the Out mark. The cues stay on
+    /// their tracks. It makes a compound clip of what is
     /// between them. It goes on the lowest picture track and the lowest
     /// sound track with clips in the range, and the clips outside the range
     /// stay. A J or L cut that reaches a mark is undone. A clip in the range on a
-    /// locked track refuses it. `range` defaults to the timeline's marks,
+    /// locked track refuses it. A cue on a locked subtitle track stays whole.
+    /// `range` defaults to the timeline's marks,
     /// which stay. With one mark, the range runs from the start of the
     /// timeline or to its end. `name` is optional. Returns its clips.
     #[serde(rename = "edit.compound_range")]
@@ -2963,6 +2970,19 @@ pub enum Request {
         /// Join a key, not a picture.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         key: bool,
+    },
+    /// Remove one input with no link from a mixer of the grade of a clip,
+    /// or with `timeline` of the timeline grade (Remove One Input). The
+    /// last input with no link goes, and the inputs after it move up one.
+    /// A mixer with each input linked, or with one input, stays as it is.
+    #[serde(rename = "grade.input.remove")]
+    GradeInputRemove {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<ClipRef>,
+        /// The timeline grade of the open timeline, in place of a clip.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        timeline: bool,
+        node: u32,
     },
     /// Copy the settings of a corrector of the grade of a clip, or with
     /// `timeline` of the timeline grade (Ctrl+C on the Color page): its

@@ -2050,7 +2050,7 @@ impl Workspace {
                 let whose = match held.as_slice() {
                     [one] => self
                         .project_shared()
-                        .map(|p| clip_name(&p, one))
+                        .and_then(|p| p.clip_name(one))
                         .unwrap_or_default(),
                     many => format!("{} clips", many.len()),
                 };
@@ -2167,7 +2167,7 @@ impl Workspace {
                 let names: Vec<&str> = names.iter().map(String::as_str).collect();
                 let name = self
                     .project_shared()
-                    .map(|p| clip_name(&p, &t.clip))
+                    .and_then(|p| p.clip_name(&t.clip))
                     .unwrap_or_default();
                 let keyframes = if count == 1 { "keyframe" } else { "keyframes" };
                 self.key_editor.deleting = Some(Deleting {
@@ -2230,7 +2230,7 @@ impl Workspace {
         view: (f64, f64),
         play: i64,
     ) {
-        let name = clip_name(p, clip);
+        let name = p.clip_name(clip).unwrap_or_default();
         let (whole_lo, whole_hi) = clip_span(clip);
         let length = whole_hi - whole_lo;
         let most = (length / LEAST_FRAMES).max(1.0);
@@ -4090,14 +4090,6 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
         handles: Vec::new(),
         snap: near.filter(|_| dt == by).map(|(_, at)| at),
     }
-}
-
-fn clip_name(p: &Project, clip: &Clip) -> String {
-    clip.name
-        .clone()
-        .filter(|s| !s.is_empty())
-        .or_else(|| p.media(&clip.media).map(|m| m.name.clone()))
-        .unwrap_or_default()
 }
 
 fn listed(names: &[&str]) -> String {
