@@ -7,6 +7,7 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - Audio Assistant, Voice Convert, Set Color and Add Marker, and Add Transition to All Edits in Timeline Actions ([§2](../spec.md#2-layout-pp-636637))
 - The switch of Dynamic Zoom, Composite, Speed and the other Audio groups, which turns a group off (p. 734; [§8.15](../spec.md#815-transform-and-crop-pp-766768))
 - Most of the System and User preferences (p. 94)
+- The destination controls of the Edit page, one for each source track (pp. 896–898, 1055; [§8.18](../spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
 - Deinterlace Quality for each clip in Retime and Scaling: Normal, High and DaVinci Neural Engine (pp. 739, 741)
 - CEA-608 and EAS708 captions, and MXF files (pp. 1247–1248)
 - Export and import of a subtitle preset as a `.preset` file (pp. 1239–1240)

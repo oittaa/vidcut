@@ -2822,8 +2822,8 @@ pub enum Request {
     /// (its sides and softness), the `dynamic_zoom`, the `composite` (the
     /// composite mode and the opacity), or all of them when no `tool` is
     /// given. Their effects and compositions stay. `composition` takes off
-    /// the composition, and each picture comes as it is. The paths that
-    /// its trackers made go too, when nothing else uses them.
+    /// the composition with the motion paths of its trackers, and each
+    /// picture comes as it is.
     #[serde(rename = "picture.clear")]
     PictureClear {
         clips: OneOrMany<ClipRef>,
@@ -2969,12 +2969,14 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         extract: bool,
     },
-    /// Join the picture of node `from` (0: the picture that comes into the
+    /// Join an output of node `from` (0: the picture that comes into the
     /// grade) to an input of `node` (0: the output of the grade), in place of
-    /// what was there. Without `from`, the input takes nothing. On a mixer,
-    /// an `input` one past the last, or no `input`, adds an input. With
-    /// `key`, the key of `from` joins the key input of a corrector or an
-    /// input of a key mixer. A link that makes a loop is an error.
+    /// what was there. Without `from`, the input takes nothing. Input 0 of a
+    /// corrector is its RGB input, and input 1 is its key input. On a mixer,
+    /// an `input` one past the last, or no `input`, adds an input. The
+    /// inputs of a key mixer are key inputs. A key on an RGB input is a gray
+    /// picture: R, G and B are the key. A picture on a key input gives its
+    /// Rec. 709 luma as the key. A link that makes a loop is an error.
     #[serde(rename = "grade.connect")]
     GradeConnect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2983,12 +2985,14 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
         node: u32,
-        /// The input of `node`, from 0. A corrector has input 0 only.
+        /// The input of `node`, from 0. Left out: input 0 of a corrector or
+        /// of the output, and a new input of a mixer.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<u32>,
-        /// Join a key, not a picture.
+        /// The link leaves the key output of `from`, not its RGB output.
+        /// Needs `from`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         key: bool,
     },
@@ -3495,8 +3499,8 @@ pub enum Request {
         ease: Option<Ease>,
     },
     /// Put one node of a clip's composition back at its usual values, with
-    /// no keyframes. It keeps its name, its joins, its place and the motion
-    /// path that it follows.
+    /// no keyframes. It keeps its name, its joins, its place, the pattern
+    /// that it follows and the motion paths of its patterns.
     #[serde(rename = "comp.reset")]
     CompReset { clip: ClipRef, node: String },
     /// The Loop button of the effects page, kept in the composition of a
@@ -3513,37 +3517,43 @@ pub enum Request {
         #[serde(default)]
         ping_pong: Option<bool>,
     },
-    /// The motion paths of `clips`, or of every clip that has some. A motion
-    /// path tells where one area of a clip's picture is on the frames of its
-    /// file: a face, a number plate or another thing in the picture. The
-    /// frames of the file go at the frame rate of the file. When the file
-    /// has the frame rate of the timeline, they are the source frames. Each
-    /// clip gives its `track` and its `paths`: the `id`, the `name`, the
-    /// `count` of its samples, and the frames `first` and `last` of them. A
-    /// path that `motion.track` made also has `tracked`.
+    /// The trackers of `clips`, or of every clip that has one, with the
+    /// motion path of each pattern. A motion path tells where one area of a
+    /// clip's picture is on the frames of its file: a face, a number plate or
+    /// another thing in the picture. The frames of the file go at the frame
+    /// rate of the file. When the file has the frame rate of the timeline,
+    /// they are the source frames. Each clip gives its `track` and its
+    /// `trackers`: the `node` and its `patterns`. Each pattern gives its
+    /// number `pattern`, from 1, its `name` and the `count` of the samples of
+    /// its path. A pattern with a path also gives the frames `first` and
+    /// `last` of them, its `subject` when `motion.find` made it, and
+    /// `tracked` when `motion.track` made it.
     #[serde(rename = "motion.list")]
     MotionList {
         #[serde(default)]
         clips: Option<OneOrMany<ClipRef>>,
-        /// Each path with an area at this time also gives its `area` there: the
-        /// `frame` of the file that its clip shows, and the `center`, `size`
-        /// and `rotation` of the area on it.
+        /// Each pattern with an area at this time also gives its `area`
+        /// there: the `frame` of the file that its clip shows, and the
+        /// `center`, `size` and `rotation` of the area on it.
         #[serde(default)]
         at: Option<TimeSpec>,
         /// Each path also gives every sample.
         #[serde(default)]
         samples: bool,
     },
-    /// Add a motion path to a clip of footage, a still or an image sequence
-    /// (`c3`, or `V2@15s`). The path lasts from its first sample to its last:
-    /// before and after them it has no area. Between two samples the area
-    /// moves in a straight line. The path stays on the frames of the file
-    /// through trims, slips, splits and speed changes.
-    /// Returns the `clip` and the id of the new `path`.
+    /// Add a pattern with a motion path to the tracker `node` of the
+    /// composition of a clip of footage, a still or an image sequence (`c3`,
+    /// or `V2@15s`). The path lasts from its first sample to its last: before
+    /// and after them it has no area. Between two samples the area moves in a
+    /// straight line. The path stays on the frames of the file through trims,
+    /// slips, splits and speed changes.
+    /// Returns the `clip`, the `node` and the number of the new `pattern`.
     #[serde(rename = "motion.add")]
     MotionAdd {
         clip: ClipRef,
-        /// What it follows, for example `Face 1`.
+        node: String,
+        /// The name of the pattern, for example `Face 1`. Left out, it is
+        /// the first free name of the tracker.
         #[serde(default)]
         name: Option<String>,
         /// The area on frames of the file: at least one sample, one for a
@@ -3551,15 +3561,16 @@ pub enum Request {
         /// of the file of a clip at a time.
         samples: Vec<PathSample>,
     },
-    /// Change one motion path of a clip. `clear` works first, then `samples`.
+    /// Change the motion path of a pattern of the tracker `node` of a clip.
+    /// `clear` works first, then `samples`. A pattern without a path gets
+    /// one. `comp.set` renames the pattern.
     #[serde(rename = "motion.set")]
     MotionSet {
         clip: ClipRef,
-        /// The id of the path (`motion.list`), as `p1`.
-        path: String,
-        /// Its new name. An empty name takes the name off.
-        #[serde(default)]
-        name: Option<String>,
+        node: String,
+        /// The pattern of the tracker, from 1. Usual: 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pattern: Option<u32>,
         /// Samples to put on their frames of the file, in the order of the
         /// frames. A sample takes the place of the sample on its frame.
         #[serde(default)]
@@ -3570,21 +3581,24 @@ pub enum Request {
         #[serde(default)]
         clear: Option<[i64; 2]>,
     },
-    /// Take motion paths off a clip: `paths`, or all of them. A path of a
-    /// pattern of a tracker stays, and the request fails: first remove that
-    /// pattern (`comp.set` with `remove_pattern`).
+    /// Take the motion paths off patterns of the tracker `node` of a clip:
+    /// `patterns`, or each pattern with a path. Each pattern stays, and goes
+    /// back to its own box. A mask that follows it then follows that box.
     #[serde(rename = "motion.remove")]
     MotionRemove {
         clip: ClipRef,
+        node: String,
+        /// The patterns of the tracker, each from 1.
         #[serde(default)]
-        paths: Option<OneOrMany<String>>,
+        patterns: Option<OneOrMany<u32>>,
     },
-    /// Find things of one kind in the pictures of clips of footage, stills
-    /// or image sequences, and give each thing a motion path. It looks at
-    /// each frame of the file in each clip. A thing that is not found for
-    /// up to a second, and then shows near the same place, stays on its path.
-    /// A shot change inside a clip ends each path, and a thing of the next
-    /// shot gets a new one.
+    /// Find things of one kind in the picture of a clip of footage, a still
+    /// or an image sequence (`c3`, or `V2@15s`), and give the tracker `node`
+    /// of its composition a pattern with a motion path for each thing. It
+    /// looks at each frame of the file in the clip. A thing that is not
+    /// found for up to a second, and then shows near the same place, stays
+    /// on its path. A shot change inside the clip ends each path, and a thing
+    /// of the next shot gets a new one.
     /// A face found for under half a second gets no path. A person or a
     /// vehicle gets a path when it is found for a second. Text gets a path
     /// when it is found for a second, on four of each five frames. Less time
@@ -3592,19 +3606,20 @@ pub enum Request {
     /// found on each of those frames then gets a path. Lines of text
     /// that are near each other are one block with one path, and a line
     /// that leans gets an area that leans with it. The area of a person or
-    /// a vehicle is the box around all of it that shows. The paths get
-    /// names in the order the things first show: `Face 1`, `Face 2`, or
+    /// a vehicle is the box around all of it that shows. The new patterns
+    /// get names in the order the things first show: `Face 1`, `Face 2`, or
     /// `Text 1`, `Person 1`, `Vehicle 1`.
     ///
-    /// Returns each clip with its new `paths`: the `id`, the `name`, the
-    /// `count` of its samples, the frames of the file `first` and `last` of
-    /// them, the `score` (how sure the model is, from 0 to 1, the mean of
-    /// the frames it was `seen` on), and the `gaps`: the ranges of frames
-    /// between them where the thing was not found. The area moves in
-    /// a straight line across a gap.
+    /// Returns the `clip`, the `node` and its new `patterns`: the number
+    /// `pattern`, the `name`, the `count` of its samples, the frames of the
+    /// file `first` and `last` of them, the `score` (how sure the model is,
+    /// from 0 to 1, the mean of the frames it was `seen` on), and the `gaps`:
+    /// the ranges of frames between them where the thing was not found. The
+    /// area moves in a straight line across a gap.
     #[serde(rename = "motion.find")]
     MotionFind {
-        clips: OneOrMany<ClipRef>,
+        clip: ClipRef,
+        node: String,
         /// The kind of thing to find: `face`, `text`, `person` or `vehicle`.
         /// Usual: `face`.
         #[serde(default)]
@@ -3613,11 +3628,10 @@ pub enum Request {
         /// `face`. Usual: `fast`.
         #[serde(default)]
         model: FindModel,
-        /// Take the paths that an earlier `motion.find` of this subject made
-        /// off the clip first. Without it, a clip that has such paths is an
-        /// error. A path of a pattern of a tracker, or of a title, stays.
-        /// A thing that such a path follows gets no second path: its new
-        /// samples go into that path.
+        /// Find again in a tracker that has patterns of this subject. Without
+        /// it, such a tracker is an error. A thing that such a pattern
+        /// follows gets no second pattern: its new samples go into the path
+        /// of that pattern. The other patterns stay.
         #[serde(default)]
         replace: bool,
         /// Download the model of the subject when it is not on this
@@ -3660,12 +3674,6 @@ pub enum Request {
         /// to 1. Usual: 0.8 for `text`, 0.5 for the others.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         steady: Option<f64>,
-        /// A tracker node of the composition of the clip, with one clip in
-        /// `clips`. The tracker then gets a pattern for each path of the
-        /// subject, named as the path, in place of its patterns of earlier
-        /// paths of the subject. Its other patterns stay.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        tracker: Option<String>,
     },
     /// Track a pattern of the tracker `node` of the composition of a clip
     /// (`c3`, or `V2@15s`). The track looks at the picture that comes into
@@ -3679,13 +3687,11 @@ pub enum Request {
     /// The pattern then follows its path: before the first sample of the
     /// path and after its last, it stays where that sample puts it. When
     /// the pattern has a path already, the track changes it only on the
-    /// frames that it tracked. The other samples stay. A path that an earlier
-    /// track made for the pattern gets the new samples, and keeps its id.
-    /// Another path stays as it is, and the pattern gets a new path, named
-    /// as the pattern.
+    /// frames that it tracked. The other samples stay.
     ///
-    /// Returns the path: its `id`, its `name`, the `count` of its samples
-    /// and their frames of the file `first` and `last`. It also gives the
+    /// Returns the `node`, the `pattern`, its `name`, the `count` of the
+    /// samples of its path and their frames of the file `first` and `last`.
+    /// It also gives the
     /// `score` (how sure the model is, from 0 to 1, the mean of the
     /// frames), and where the track ended `backward` and `forward`: `clip`
     /// (the In or the Out), `length` (after its `length`), `stopped`
@@ -4766,7 +4772,8 @@ pub enum GradeMixer {
 #[serde(rename_all = "snake_case")]
 pub enum GradeAdd {
     /// After `node`: it takes the picture of `node`, and what took that
-    /// picture takes its picture.
+    /// picture takes its picture. After a key mixer, it takes the key of the
+    /// mixer as a gray picture, and what took that key takes its picture.
     Serial,
     /// Before `node`: it takes what came into `node`, and `node` takes its
     /// picture. For a mixer, that is the first input of the mixer.
@@ -6207,9 +6214,8 @@ pub struct NodeChange {
     pub remove_pattern: bool,
     /// Take the tracked samples of the pattern off: `start` takes those
     /// before `frame`, `end` those after `frame`, and `all` takes each.
-    /// The box on `frame` stays as it was. With no sample left, the pattern has no path, and it goes back to
-    /// its own box. A path that a track made then goes when nothing else
-    /// uses it.
+    /// The box on `frame` stays as it was. With no sample left, the pattern
+    /// has no path, and it goes back to its own box.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_trim: Option<PatternTrim>,
     #[serde(flatten)]

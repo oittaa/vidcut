@@ -1154,7 +1154,6 @@ mod tests {
             ramp: None,
             crossing: false,
             moving: None,
-            followed: Default::default(),
             clock: Default::default(),
             adjustment: false,
         };

@@ -341,7 +341,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
                             .effects
                             .iter_mut()
                             .for_each(|e| e.render_cache = false);
-                        (picture, p.followed.clone())
+                        picture
                     })
                     .collect()
             };
@@ -404,8 +404,8 @@ fn placed_now(piece: &VideoPiece, k: i64) -> Option<Keyed> {
                 .iter()
                 .map(|p| {
                     let at = p.source_after(k);
-                    let moves = p.picture.is_keyed() || !p.followed.is_empty();
-                    let boxes = p.followed.stamp_at(at);
+                    let moves = p.picture.is_keyed() || p.follows();
+                    let boxes = p.stamp_at(at);
                     (moves.then_some(at), p.run.map(|r| r.after(k)), boxes)
                 })
                 .collect(),
@@ -523,7 +523,6 @@ mod tests {
                 ramp: None,
                 crossing: false,
                 moving: None,
-                followed: Default::default(),
                 clock: Default::default(),
                 adjustment: false,
             }],

@@ -2102,6 +2102,26 @@ fn fs_key_fold(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(v);
 }
 
+@fragment
+fn fs_key_luma(in: Out) -> @location(0) vec4<f32> {
+    return vec4<f32>(grade_luma(vec2<i32>(in.position.xy)));
+}
+
+struct KeyGraying {
+    flat: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> key_graying: KeyGraying;
+
+@fragment
+fn fs_key_gray(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let f = key_graying.flat;
+    let k = select(f.x, textureLoad(blur_source, px, 0).r, f.y > 0.5);
+    let a = textureLoad(blur_start, px, 0).a;
+    return vec4<f32>(vec3<f32>(k * a), a);
+}
+
 struct Shot {
     size: vec4<f32>,
     fit: vec4<f32>,

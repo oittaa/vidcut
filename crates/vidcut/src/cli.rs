@@ -133,10 +133,10 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("effects.reset", &["clip", "effect"]),
     ("effects.remove", &["clip", "effect"]),
     ("effects.move", &["clip", "effect", "to"]),
-    ("motion.add", &["clip"]),
-    ("motion.set", &["clip", "path"]),
-    ("motion.remove", &["clip"]),
-    ("motion.find", &["clips"]),
+    ("motion.add", &["clip", "node"]),
+    ("motion.set", &["clip", "node"]),
+    ("motion.remove", &["clip", "node"]),
+    ("motion.find", &["clip", "node"]),
     ("motion.track", &["clip", "node"]),
     ("edit.append", &["media"]),
     ("edit.smart_insert", &["media"]),
@@ -277,7 +277,7 @@ const GROUPS: &[(&str, &str)] = &[
     ),
     (
         "motion",
-        "Motion paths of clips: where things in the picture are",
+        "The motion paths of the patterns of trackers: where things in the picture are",
     ),
     (
         "picture",
@@ -561,28 +561,29 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "motion.add",
-        "vidcut motion add c3 --name \"Face 1\" --samples \
+        "vidcut motion add c3 Tracker1 --name \"Face 1\" --samples \
          '[{\"frame\":0,\"center\":[0.4,0.3],\"size\":[0.1,0.2]},\
          {\"frame\":48,\"center\":[0.6,0.35],\"size\":[0.1,0.2]}]'\n  \
-         vidcut motion add V2@10s --samples @path.json",
+         vidcut motion add V2@10s Tracker1 --samples @path.json",
     ),
     (
         "motion.set",
-        "vidcut motion set c3 p1 --name \"Number plate\"\n  vidcut motion set c3 p1 --clear 20,30\n  \
-         vidcut motion set c3 p1 --clear 48,100000 --samples @rest.json",
+        "vidcut motion set c3 Tracker1 --clear 20,30\n  \
+         vidcut motion set c3 Tracker1 --pattern 2 --clear 48,100000 --samples @rest.json",
     ),
     (
         "motion.remove",
-        "vidcut motion remove c3\n  vidcut motion remove c3 --paths p1,p2",
+        "vidcut motion remove c3 Tracker1\n  vidcut motion remove c3 Tracker1 --patterns 1,2",
     ),
     (
         "motion.find",
-        "vidcut motion find c3 --download\n  vidcut motion find V1@10s,c7 --subject face\n  \
-         vidcut motion find c3 --model slow --download\n  \
-         vidcut motion find c3 --subject text --download\n  \
-         vidcut motion find c3 --subject person --download\n  \
-         vidcut motion find c3 --subject vehicle\n  vidcut motion find c3 --replace\n  \
-         vidcut motion find c3 --subject face --tracker Tracker1\n  vidcut motion find c3 --subject vehicle --size 1920 --replace\n  vidcut motion find c3 --subject person --shortest 0.5 --steady 0.6 --replace",
+        "vidcut motion find c3 Tracker1 --download\n  vidcut motion find V1@10s Tracker1 --subject face\n  \
+         vidcut motion find c3 Tracker1 --model slow --download\n  \
+         vidcut motion find c3 Tracker1 --subject text --download\n  \
+         vidcut motion find c3 Tracker1 --subject person --download\n  \
+         vidcut motion find c3 Tracker1 --subject vehicle\n  vidcut motion find c3 Tracker1 --replace\n  \
+         vidcut motion find c3 Tracker1 --subject vehicle --size 1920 --replace\n  \
+         vidcut motion find c3 Tracker1 --subject person --shortest 0.5 --steady 0.6 --replace",
     ),
     (
         "motion.track",

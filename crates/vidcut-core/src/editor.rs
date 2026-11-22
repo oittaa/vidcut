@@ -5026,7 +5026,7 @@ fn mutate(
             key,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
-            ops::grade::connect(p, &of, (*node, *input), *from, *key)?;
+            ops::grade::connect(p, &of, (*node, *input), (*from, *key))?;
             Value::Null
         }
         Request::GradeInputRemove {
@@ -5364,36 +5364,41 @@ fn mutate(
         }
         Request::MotionAdd {
             clip,
+            node,
             name,
             samples,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            ops::motion::add(p, &id, name.as_deref(), samples)?
+            ops::motion::add(p, &id, node, name.as_deref(), samples)?
         }
         Request::MotionSet {
             clip,
-            path,
-            name,
+            node,
+            pattern,
             samples,
             clear,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
             let change = ops::motion::PathChange {
-                name: name.as_deref(),
                 samples: samples.as_deref(),
                 clear: *clear,
             };
-            ops::motion::set(p, &id, path, change)?;
+            ops::motion::set(p, &id, (node, pattern.unwrap_or(1)), change)?;
             Value::Null
         }
-        Request::MotionRemove { clip, paths } => {
+        Request::MotionRemove {
+            clip,
+            node,
+            patterns,
+        } => {
             let id = resolve_clip(p, clip, playhead)?;
-            let paths = paths.as_ref().map(OneOrMany::to_vec);
-            ops::motion::remove(p, &id, paths.as_deref())?;
+            let patterns = patterns.as_ref().map(OneOrMany::to_vec);
+            ops::motion::remove(p, &id, node, patterns.as_deref())?;
             Value::Null
         }
         Request::MotionFind {
-            clips,
+            clip,
+            node,
             subject,
             model,
             replace,
@@ -5405,7 +5410,6 @@ fn mutate(
             wait,
             shortest,
             steady,
-            tracker,
         } => {
             let usual = crate::motion::Join::of(*subject);
             let rules = crate::motion::Join {
@@ -5432,38 +5436,22 @@ fn mutate(
                     sides.0, sides.1
                 )));
             }
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            if let Some(tracker) = tracker {
-                let [id] = ids.as_slice() else {
-                    return Err(Error::usage(
-                        "motion.find with a tracker (--tracker) takes one clip",
-                    ));
-                };
-                ops::motion::tracker_checked(p, id, tracker)?;
-            }
-            let mut looks = Vec::new();
-            for id in &ids {
-                ops::motion::findable(p, id, *subject, *replace)?;
-                let c = p.clip(id);
-                let media = c.and_then(|c| Some((p.media(&c.media).cloned()?, c)));
-                let (media, c) =
-                    media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
-                let (frames, rate) = ops::motion::file_frames(p, c);
-                looks.push((id, media, frames, rate));
-            }
-            let mut out = Vec::new();
-            for (id, media, frames, rate) in looks {
-                let look = Look {
-                    side: *size,
-                    model: *model,
-                    ..subject_look(&media, rate, frames)
-                };
-                let found = env.subjects(&media, *subject, look, *download)?;
-                let tracks = crate::motion::joined(&found, media.origin(), rate, frames, &rules);
-                let to = (*subject, tracker.as_deref());
-                out.push(ops::motion::found(p, id, to, tracks)?);
-            }
-            json!({ "subject": subject, "clips": out })
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::motion::findable(p, &id, node, *subject, *replace)?;
+            let c = p.clip(&id);
+            let media = c.and_then(|c| Some((p.media(&c.media).cloned()?, c)));
+            let (media, c) = media.ok_or_else(|| Error::not_found(format!("{id} has no media")))?;
+            let (frames, rate) = ops::motion::file_frames(p, c);
+            let look = Look {
+                side: *size,
+                model: *model,
+                ..subject_look(&media, rate, frames)
+            };
+            let found = env.subjects(&media, *subject, look, *download)?;
+            let tracks = crate::motion::joined(&found, media.origin(), rate, frames, &rules);
+            let mut out = ops::motion::found(p, &id, (*subject, node), tracks)?;
+            out["subject"] = json!(subject);
+            out
         }
         Request::MotionTrack {
             clip,
@@ -7093,7 +7081,6 @@ fn place_imported(
                 retime: c.retime,
                 color: color(c),
                 render_cache: crate::model::ClipCache::Auto,
-                motion: Vec::new(),
             };
             let hi = clip.shown().1;
             if let Some(ic) = c.compound.as_ref() {
@@ -7274,11 +7261,6 @@ fn place_imported(
             retime: c.retime,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
-            motion: if c.video {
-                c.motion.clone()
-            } else {
-                Vec::new()
-            },
         });
         placed.insert(track_of(&c.track));
     }
@@ -8311,7 +8293,7 @@ pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec
 
 pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<SubjectLook> {
     let Request::MotionFind {
-        clips,
+        clip,
         subject,
         model,
         download,
@@ -8321,8 +8303,8 @@ pub fn subject_looks(p: &Project, request: &Request, playhead: Option<i64>) -> V
     else {
         return Vec::new();
     };
-    let ids = resolve_clips(p, &clips.to_vec(), playhead).unwrap_or_default();
-    let clips = ids.iter().filter_map(|id| p.clip(id));
+    let id = resolve_clip(p, clip, playhead).ok();
+    let clips = id.iter().filter_map(|id| p.clip(id));
     clips
         .filter(|c| ops::motion::takes(c))
         .filter_map(|c| {
@@ -10457,9 +10439,6 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
     }
     if !keyed.is_empty() {
         v["keyframes"] = json!(keyed);
-    }
-    if !c.motion.is_empty() {
-        v["motion"] = json!(c.motion.iter().map(|m| &m.id).collect::<Vec<_>>());
     }
     v
 }

@@ -452,7 +452,8 @@ The bar and the Jobs button:
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
   - A corrector has an RGB input and a key input at its left (`Inlet`). It has an RGB output and a key output at its right (`Outlet`).
   - A key mixer has a key input for each input, and a key output.
-  - The key ports and the key links are blue (`MASK_KNOT`). A link knows the outlet that it leaves (`Wire::out`).
+  - The key ports are blue (`MASK_KNOT`). A link knows the outlet that it leaves (`Wire::out`).
+  - Each link has its own line (`Wire::line`). On the Color page, a link from a key output is blue. On the Effects page, a link into a mask input is blue.
   - `EffectsPage::grade_nodes` holds the selection, and `gui.grade_nodes` sets it. The last one is the current node.
   - With `EffectsPage::grade_loose`, the current node is not selected (`EffectsPage::picked_grade`). A drag box that leaves out the current node sets it.
   - Thus `Graph` takes the selected nodes and the current node apart (`Graph::current`). Delete and a drag of the selected nodes leave out a current node that is not selected. Ctrl+D acts on it too.
@@ -480,10 +481,11 @@ The bar and the Jobs button:
   - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.
   - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
   - On a mixer, the keys add only a serial node or an appended node, as the menu does.
+  - On a key mixer, the keys add only an appended node. Its menu adds a serial node after it or before it (`Workspace::grade_add_sent`).
   - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
-  - A link between a key output and a key input sends `key`. A link from a key output to an RGB input, or the reverse, does nothing.
-  - A drop of a key output on a corrector links its key input. A drop on a key mixer adds an input.
-  - A node can drop only into a link with `Wire::drops`. A key link has none.
+  - A drag from any output to any input links them. A link from a key output sends `key`. The key input of a corrector is input 1 (`KEY_PORT`).
+  - A drop of an output on a node links the input of the same kind (`grade_links`). A drop of a key output on a key mixer adds an input.
+  - A node can drop only into a link with `Wire::drops`: a link from an RGB output to an RGB input.
   - `gui.node_view` asks a zoom of the shown Node Editor (`NodeView::ask`). The editor does it on its next frame, with its own size (`zoomed`).
   - Cleanup Node Graph sends `grade.cleanup` with the `area` that the editor shows, less a margin and the size of a node (`NodeView::area`). The zoom stays.
   - `NodeView` keeps the rectangle of its last frame for the area. Only the graph view has the menu with Cleanup Node Graph.
@@ -586,18 +588,17 @@ The bar and the Jobs button:
     - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
     - Each field tells on hover what it sets, and what a lower or a higher number does.
     - Find sends the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
-  - Find sends `motion.find` with the `tracker` (`find_request`), and with `replace` when the clip has paths of that subject.
+  - Find sends `motion.find` for the Tracker (`find_request`), with `replace` when the Tracker has patterns of that subject.
   - Blur sends one `apply` (`page_blur`): `comp.add` of a Mosaic Blur before Media Out, and a chain of masks on its effect mask.
-    - Each pattern with a path in the clip gets one mask, with `comp.set` of `connect`, Follow Size and the size `BLUR_SIZE`.
+    - Each pattern with a path gets one mask, with `comp.set` of `connect`, Follow Size and the size `BLUR_SIZE`.
     - A pattern without a path gets no mask. Such a pattern does not move. A mask on it blurs the same box on each frame.
     - The mask is a rectangle for text, a person or a vehicle, and an ellipse for a face (`boxed`).
     - With no pattern that has a path, the button is off.
   - The live core runs an `apply` with `motion.find` as a long edit (`runs_long`): it measures on a job thread first.
   - A `motion.find` and a `motion.track` of their own run as jobs (`start_encode`, kinds `find` and `track`). The Jobs window shows each with its progress, and Cancel stops it.
   - `Workspace::ask` asks before a download when a model is not there (`model_needs`, `Finding`). `Workspace::motion_prompt` shows the question that the other local models use (`ask_download`), and `with_model` then sets `download`.
-  - The rows below list the motion paths of the clip.
-  - A name goes with `motion.set` when its field loses the focus (`Naming`). Escape drops the typed name. Delete sends `motion.remove`.
-  - The rows read the paths from the shared project of the snapshot. The snapshot holds no copy of the samples.
+  - A name goes with `comp.set` when its field loses the focus (`Naming`). Escape drops the typed name.
+  - The rows read the patterns and their paths from the shared project of the snapshot. The snapshot holds no copy of the samples.
 - `Workspace::input_lut_section` shows the Input LUT row of the media of the selected clips, with a file pick and Reset. Each change is one `media.set`.
   - The Input LUT submenu of the pool's right-click menu sends the same request (`Workspace::pool_item_menu`, `Workspace::ask_input_lut`).
 - `speed_section` sends what the Change Clip Speed window sends (`SpeedDialog::params`). `Workspace::audio_section` sends `clip.set`.

@@ -9,9 +9,9 @@ use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
     AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, Compound, DuckDetect,
-    Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, MotionPath, PathSample,
-    Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
-    SmoothMode, TimelineColors, Title, Track, TrackKind, Transition, Upscale,
+    Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, Picture, PictureTransition,
+    Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode, TimelineColors, Title,
+    Track, TrackKind, Transition, Upscale,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -512,7 +512,6 @@ impl Smooth {
             ramp: None,
             crossing: false,
             moving: None,
-            followed: Followed::default(),
             clock: Default::default(),
             adjustment: false,
         }));
@@ -582,10 +581,6 @@ pub struct Placed {
     /// The Push or the Slide of this crossing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moving: Option<Move>,
-    /// The motion paths that the masks of its composition follow. Left out
-    /// when none follows a path.
-    #[serde(default, skip_serializing_if = "Followed::is_empty")]
-    pub followed: Followed,
     /// The way from its keyframe position to the frame of its file, for the
     /// keyframes of its composition. Left out on a clip without a speed
     /// whose file has the rate of the timeline.
@@ -690,115 +685,9 @@ impl FileClock {
     }
 }
 
-/// The motion paths that the masks of a picture's composition follow, with
-/// the way from a keyframe position of the clip to the frame of its file.
-#[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
-pub struct Followed {
-    /// The paths, on frames of the file, without their names.
-    pub paths: Arc<[MotionPath]>,
-    /// The way from a keyframe position of the clip to the frame of its
-    /// file.
-    pub clock: FileClock,
-}
-
-impl std::fmt::Debug for Followed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Followed({})", self.paths.len())
-    }
-}
-
-impl PartialEq for Followed {
-    fn eq(&self, other: &Self) -> bool {
-        let same = |(a, b): (&MotionPath, &MotionPath)| {
-            a.id == b.id
-                && a.subject == b.subject
-                && (Arc::ptr_eq(&a.samples, &b.samples) || a.samples == b.samples)
-        };
-        self.clock == other.clock
-            && self.paths.len() == other.paths.len()
-            && self.paths.iter().zip(other.paths.iter()).all(same)
-    }
-}
-
-impl Followed {
-    pub fn of(clip: &Clip, picture: &Picture) -> Self {
-        let mut named: Vec<&str> = Vec::new();
-        if let Some(c) = &picture.composition {
-            let connected = c
-                .nodes
-                .iter()
-                .filter_map(|n| n.tool.mask()?.connect.as_ref());
-            named.extend(connected.filter_map(|k| c.pattern(k)?.path.as_deref()));
-        }
-        let follows = |m: &&MotionPath| named.contains(&m.id.as_str());
-        let shared = |m: &MotionPath| MotionPath {
-            id: m.id.clone(),
-            name: None,
-            subject: m.subject,
-            tracked: m.tracked,
-            samples: m.samples.clone(),
-        };
-        let paths: Arc<[MotionPath]> = clip.motion.iter().filter(follows).map(shared).collect();
-        if paths.is_empty() {
-            return Self::default();
-        }
-        Self {
-            paths,
-            clock: FileClock::plain(clip),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.paths.is_empty()
-    }
-
-    pub fn frame(&self, source: i64) -> f64 {
-        self.clock.frame(source) as f64
-    }
-
-    pub fn stamp_at(&self, source: i64) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let frame = self.frame(source);
-        let mut hasher = std::hash::DefaultHasher::new();
-        for m in self.paths.iter() {
-            if let Some(area) = m.base_at(frame) {
-                m.id.hash(&mut hasher);
-                let numbers = area.center.iter().chain(&area.size).chain([&area.rotation]);
-                for v in numbers {
-                    v.to_bits().hash(&mut hasher);
-                }
-            }
-        }
-        hasher.finish()
-    }
-
-    pub fn at(&self, source: i64) -> Self {
-        let held = |m: &MotionPath| {
-            let area = m.base_at(self.frame(source))?;
-            Some(MotionPath {
-                id: m.id.clone(),
-                name: None,
-                subject: m.subject,
-                tracked: m.tracked,
-                samples: Arc::new(vec![PathSample {
-                    frame: 0,
-                    center: area.center,
-                    size: area.size,
-                    rotation: area.rotation,
-                }]),
-            })
-        };
-        Self {
-            paths: self.paths.iter().filter_map(held).collect(),
-            clock: FileClock::default(),
-        }
-    }
-}
-
 impl Placed {
     pub fn of(clip: &Clip, picture: Picture, run: Run) -> Self {
         let picture = crate::ops::picture::working(picture);
-        let followed = Followed::of(clip, &picture);
         Self {
             clip: clip.id.clone(),
             run: picture.dynamic_zoom.map(|_| run),
@@ -810,7 +699,6 @@ impl Placed {
             ramp: None,
             crossing: false,
             moving: None,
-            followed,
             clock: FileClock::default(),
             adjustment: clip.adjustment,
         }
@@ -819,7 +707,6 @@ impl Placed {
     pub fn at(clip: &Clip, picture: Picture, run: Run, time: i64) -> Self {
         let picture = crate::ops::picture::working(picture);
         let run = picture.dynamic_zoom.map(|_| run);
-        let followed = Followed::of(clip, &picture);
         Self {
             clip: clip.id.clone(),
             picture,
@@ -831,9 +718,37 @@ impl Placed {
             ramp: None,
             crossing: false,
             moving: None,
-            followed,
             clock: FileClock::default(),
             adjustment: clip.adjustment,
+        }
+    }
+
+    pub fn follows(&self) -> bool {
+        let comp = self.picture.composition.as_ref();
+        comp.is_some_and(|c| !c.followed().is_empty())
+    }
+
+    pub fn stamp_at(&self, source: i64) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let frame = self.clock.frame(source) as f64;
+        let mut hasher = std::hash::DefaultHasher::new();
+        let comp = self.picture.composition.iter();
+        for (tracker, k, m) in comp.flat_map(|c| c.followed()) {
+            if let Some(area) = m.base_at(frame) {
+                (tracker, k).hash(&mut hasher);
+                let numbers = area.center.iter().chain(&area.size).chain([&area.rotation]);
+                for v in numbers {
+                    v.to_bits().hash(&mut hasher);
+                }
+            }
+        }
+        hasher.finish()
+    }
+
+    pub fn hold(&mut self, one: bool) {
+        let frame = one.then(|| self.clock.frame(self.source) as f64);
+        if let Some(c) = self.picture.composition.as_mut() {
+            c.hold(frame);
         }
     }
 
@@ -857,7 +772,6 @@ impl Placed {
             ramp: self.ramp.map(|r| r.after(k)),
             crossing: self.crossing,
             moving: self.moving.clone(),
-            followed: self.followed.clone(),
             clock: self.clock.clone(),
             adjustment: self.adjustment,
         }
@@ -2451,7 +2365,6 @@ fn crossing(d: &transitions::Playing, inside: bool) -> Option<Placed> {
         ramp: None,
         crossing: true,
         moving,
-        followed: Followed::default(),
         clock: Default::default(),
         adjustment: false,
     })
@@ -3625,7 +3538,6 @@ impl VideoPlan<'_> {
         let mut placed = placed_of(c, nest, fills, crossed, x);
         if let Some(own) = placed.first_mut().filter(|o| o.clip == c.id) {
             own.clock = FileClock::of(self.p, c);
-            own.followed.clock = own.clock.clone();
         }
         Ok(VideoPiece::Source {
             media: c.media.clone(),
@@ -3705,7 +3617,6 @@ impl<'a> Span<'a> {
                     ramp: Some(ramp),
                     crossing: false,
                     moving: None,
-                    followed: Followed::default(),
                     clock: Default::default(),
                     ..across.clone()
                 };
@@ -3898,7 +3809,6 @@ impl<'a> Span<'a> {
                 picture: Picture::default(),
                 crossing: false,
                 moving: None,
-                followed: Followed::default(),
                 clock: Default::default(),
                 ..c.clone()
             });

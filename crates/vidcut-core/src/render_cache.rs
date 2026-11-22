@@ -534,9 +534,7 @@ fn plain_title(t: &mut ShownTitle, one: bool) {
 
 fn plain_placed(p: &mut Placed, one: bool) {
     p.clip.clear();
-    if one && !p.followed.is_empty() {
-        p.followed = p.followed.at(p.source);
-    }
+    p.hold(one);
     if p.ready {
         p.start = 0;
     }
@@ -1398,7 +1396,6 @@ mod tests {
                     ramp: None,
                     crossing: false,
                     moving: None,
-                    followed: Default::default(),
                     clock: Default::default(),
                     adjustment: false,
                 }],

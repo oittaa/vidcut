@@ -4,7 +4,8 @@ use crate::composition::{Frames, cleaned};
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::model::{
-    Composition, Connect, Ease, EffectValue, Node, PathSample, Pattern, Project, Tool, ToolType,
+    Composition, Connect, Ease, EffectValue, MotionPath, Node, PathSample, Pattern, Project, Tool,
+    ToolType,
 };
 use crate::request::{NodeChange, NodeInput, PatternTrim};
 
@@ -160,10 +161,10 @@ pub fn copied(p: &mut Project, id: &str, name: &str) -> Result<Node> {
     Ok(c.nodes[found(c, id, name)?].clone())
 }
 
-fn kept_paths(n: &mut Node, ids: &[String]) {
-    if let Tool::Tracker(t) = &mut n.tool {
+fn kept_paths(n: &mut Node, takes: bool) {
+    if let Some(t) = n.tool.tracker_mut().filter(|_| !takes) {
         for pattern in &mut t.patterns {
-            pattern.path = pattern.path.take().filter(|path| ids.contains(path));
+            pattern.path = None;
         }
     }
 }
@@ -223,10 +224,7 @@ fn replaced(c: &mut Composition, mut node: Node, name: &str) {
 
 pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, to: Landing) -> Result<Value> {
     let nodes = nodes.iter().map(node_checked).collect::<Result<Vec<_>>>()?;
-    let ids: Vec<String> = p
-        .clip(id)
-        .map(|c| c.motion.iter().map(|m| m.id.clone()).collect())
-        .unwrap_or_default();
+    let takes = p.clip(id).is_some_and(super::motion::takes);
     let c = comp_of(p, id)?;
     let spot = match to {
         Landing::After(a) => {
@@ -244,12 +242,6 @@ pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, to: Landing) -> Result
             return Err(Error::invalid("a node's place is two finite numbers"));
         }
         Landing::Apart => apart(c),
-    };
-    let gone: Vec<String> = match to {
-        Landing::Over(r) => (c.node(r).and_then(|n| n.tool.tracker()).into_iter())
-            .flat_map(|t| t.patterns.iter().filter_map(|x| x.path.clone()))
-            .collect(),
-        _ => Vec::new(),
     };
     let mut d = c.clone();
     let start = d.nodes.len();
@@ -271,7 +263,7 @@ pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, to: Landing) -> Result
     };
     for k in start..d.nodes.len() {
         let mut node = d.nodes[k].clone();
-        kept_paths(&mut node, &ids);
+        kept_paths(&mut node, takes);
         let tracker = node.tool.mask().and_then(|m| m.connect.as_ref());
         let to = tracker.and_then(|t| copied(&t.tracker));
         kept_connect(&d, &mut node, to);
@@ -311,7 +303,6 @@ pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, to: Landing) -> Result
     }
     *c = d;
     tidied(p, id)?;
-    super::motion::unused(p, id, &gone);
     Ok(json!({ "clip": id, "node": last, "nodes": names }))
 }
 
@@ -397,9 +388,6 @@ pub fn rename(p: &mut Project, id: &str, name: &str, to: &str) -> Result<Value> 
 pub fn remove(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let c = kept(p, id)?;
     let gone = c.nodes.remove(found(c, id, name)?);
-    let paths: Vec<String> = (gone.tool.tracker().into_iter())
-        .flat_map(|t| t.patterns.iter().filter_map(|x| x.path.clone()))
-        .collect();
     let passes = gone.tool.flows();
     for n in &mut c.nodes {
         if let Some(m) = n.tool.mask_mut()
@@ -415,7 +403,6 @@ pub fn remove(p: &mut Project, id: &str, name: &str) -> Result<()> {
         }
     }
     tidied(p, id)?;
-    super::motion::unused(p, id, &paths);
     Ok(())
 }
 
@@ -576,13 +563,6 @@ pub fn set(
             "{name}'s center has keyframes: first remove them (comp.key), then connect it"
         )));
     }
-    let gone = match &n.tool {
-        Tool::Tracker(t) if change.remove_pattern => {
-            let k = (pattern as usize).checked_sub(1);
-            k.and_then(|k| t.patterns.get(k)?.path.clone())
-        }
-        _ => None,
-    };
     let mut next = applied(n, change)?;
     let named = named_values(n, change)?;
     for value in n.keys.iter().map(|k| k.value).filter(|v| named.contains(v)) {
@@ -603,7 +583,6 @@ pub fn set(
         unhooked(c, name, pattern);
     }
     tidied(p, id)?;
-    super::motion::unused(p, id, gone.as_slice());
     Ok(())
 }
 
@@ -631,26 +610,13 @@ fn trimmed(
         return Ok(());
     };
     let k = change.pattern.unwrap_or(1);
-    let c = p
-        .clip(id)
-        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
-    let t = comp.and_then(|x| x.node(name)?.tool.tracker());
-    let t = t.ok_or_else(|| Error::invalid(format!("{name} is not a tracker")))?;
-    let i = (k as usize)
-        .checked_sub(1)
-        .filter(|i| *i < t.patterns.len());
-    let i = i.ok_or_else(|| super::motion::no_pattern(name, k, t.patterns.len()))?;
-    let Some(path) = t.patterns[i].path.clone() else {
-        return Ok(());
-    };
-    let Some(m) = c.motion.iter().find(|m| m.id == path) else {
+    let Some(m) = path_of(p, id, name, k)? else {
         return Ok(());
     };
     let samples = m.samples.clone();
     let at = match (trim, frame) {
         (PatternTrim::All, _) => None,
-        (_, Some(frame)) => Some(Frames::of(p, c).file(frame)),
+        (_, Some(frame)) => p.clip(id).map(|c| Frames::of(p, c).file(frame)),
         (_, None) => {
             return Err(Error::usage(
                 "pattern_trim start and end take off the samples before or after `frame`",
@@ -671,21 +637,20 @@ fn trimmed(
             let to = super::motion::PathChange {
                 clear: Some(span),
                 samples: Some(edge).filter(|e| !e.is_empty()),
-                ..Default::default()
             };
-            super::motion::set(p, id, &path, to)?;
+            super::motion::set(p, id, (name, k), to)?;
         }
         None if trim != PatternTrim::All => {}
-        _ => {
-            let c = kept(p, id)?;
-            let n = found(c, id, name)?;
-            if let Tool::Tracker(t) = &mut c.nodes[n].tool {
-                t.patterns[i].path = None;
-            }
-            super::motion::unused(p, id, &[path]);
-        }
+        _ => super::motion::remove(p, id, name, Some(&[k]))?,
     }
     Ok(())
+}
+
+fn path_of(p: &Project, id: &str, name: &str, k: u32) -> Result<Option<MotionPath>> {
+    let c = p
+        .clip(id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    Ok(super::motion::pattern_of(c, name, k)?.path.clone())
 }
 
 fn moved_path(
@@ -701,23 +666,16 @@ fn moved_path(
     let Some(frame) = frame.filter(|_| boxed) else {
         return Ok(());
     };
-    let Some(c) = p.clip(id) else {
-        return Ok(());
-    };
-    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
-    let tracker = comp.and_then(|k| k.node(name)?.tool.tracker());
-    let k = change.pattern.unwrap_or(1) as usize;
-    let pattern = tracker.and_then(|t| t.patterns.get(k.checked_sub(1)?));
-    let Some(path) = pattern.and_then(|x| x.path.clone()) else {
-        return Ok(());
-    };
-    let Some(m) = c.motion.iter().find(|m| m.id == path) else {
+    let k = change.pattern.unwrap_or(1);
+    let Some(m) = path_of(p, id, name, k).ok().flatten() else {
         return Ok(());
     };
     let Some((first, last)) = m.span() else {
         return Ok(());
     };
-    let source = Frames::of(p, c).file(frame);
+    let Some(source) = p.clip(id).map(|c| Frames::of(p, c).file(frame)) else {
+        return Ok(());
+    };
     let source = if m.tracked {
         source.clamp(first, last)
     } else {
@@ -756,7 +714,7 @@ fn moved_path(
         samples: Some(&samples),
         ..Default::default()
     };
-    super::motion::set(p, id, &path, to)?;
+    super::motion::set(p, id, (name, k), to)?;
     change.pattern_center = None;
     change.pattern_width = None;
     change.pattern_height = None;

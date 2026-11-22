@@ -1506,26 +1506,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - A move of 1 pixel must not change a black frame to the correct picture. This behavior of Resolve is a fault.
 
-## X165. A clip has motion paths
-
-- **Resolve:**
-  - The Cut page makes no track of a thing in the picture. Its chapters name the Tracker palette only under Stabilization (pp. 738, 770).
-  - The Tracker palette of the Color page moves a window or an effect with a feature of the frame (pp. 3308, 3494).
-  - Its tracking data is apart from the values of the window, and those values can have keyframes (p. 3309).
-  - On a frame with no tracking data, the window stays where the first or the last tracked frame put it (p. 3310).
-    - For a subject that disappears, the manual tells the user to fade the correction out with keyframes (p. 3310).
-  - Magic Mask takes a stroke out of the tracking at the frame where its subject is fully off screen (p. 3305).
-  - The scripting API of Resolve Studio 21.2 has no call that makes or reads a track.
-- **vidcut:**
-  - A clip of footage, a still or an image sequence has motion paths. A motion path tells where one thing is on each frame of the file: its box.
-  - `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths. A script gives the samples.
-  - A path that `motion.track` made holds its place outside its samples. Before its first sample and after its last, the box is where that sample puts it.
-  - Another path lasts from its first sample to its last. Before and after them it has no box. Thus a path that `motion.find` made ends where its thing is gone.
-  - A pattern of a Tracker node on the Effects page has a path ([spec](spec.md#the-tracker)). `motion.find` makes a path for each face or each block of text ([X167](#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
-- **Why:**
-  - A blur over a face or a number plate must follow it. A cut that vidcut delivers does not go through another page.
-  - The path is apart from the keyframes, as the tracking data of the Color page is. Thus a new path keeps the keyframes that the user set.
-
 ## X167. vidcut finds the faces and the text of a clip
 
 - **Resolve:**
@@ -1533,14 +1513,17 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - On the Media page, Analyze Clips for People finds faces to make People keywords (p. 418).
   - Face Refinement is a Resolve FX of Resolve Studio. Detect Faces in Frame draws a box on each face (p. 3615).
     - The user chooses one face. The tracking controls of the effect then follow it through the clip (pp. 3615–3616).
-  - The manual names no way to make tracking data for each face of a clip on the Cut page ([X165](#x165-a-clip-has-motion-paths)).
+  - The manual names no way to make tracking data for each face of a clip on the Cut page.
+  - On a frame with no tracking data, a window of the Color page stays where the first or the last tracked frame put it (p. 3310).
+  - Magic Mask takes a stroke out of the tracking at the frame where its subject is fully off screen (p. 3305).
   - A search of the whole manual finds no tool that finds text in a picture.
     - A number plate is only an example for the Planar Tracker node of the Fusion page, where the user sets the track (p. 2820).
 - **vidcut:**
   - `motion.find` finds the things of one subject on each frame of the file in a clip. The subjects are `face`, `text`, `person` and `vehicle`.
     - A vehicle is a bicycle, a car, a motorcycle, a bus, a train or a truck.
     - Find in the Inspector of a Tracker node finds each subject. The Tracker gets a pattern for each thing.
-  - Each thing gets a motion path of its own.
+  - Each thing gets a pattern of its own, with its motion path.
+  - A found path lasts from its first sample to its last. Before and after them it has no box. Thus a mask that follows it ends where its thing is gone.
   - A shot change inside a clip ends each path. For a file with another frame rate than the project, `motion.find` and Detect Scene Cuts can find different shot changes.
   - The text model sees the picture with a longer side of 960 pixels. Thus it does not find very small text.
   - A face has two models. `fast` is a small network on the CPU. `slow` is a larger network on the GPU.
@@ -1548,4 +1531,4 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - A blur must cover each face of a clip, and the user must not draw each one.
   - Text is the next thing that people hide: names, addresses, documents and screens.
-  - One request gives the paths and the patterns. A mask then follows a pattern ([spec](spec.md#the-tracker)).
+  - One request gives the patterns with their paths. A mask then follows a pattern ([spec](spec.md#the-tracker)).

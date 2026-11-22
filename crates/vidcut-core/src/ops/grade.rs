@@ -2,8 +2,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Corrector, Grade, GradeKey, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
-    KeyOutput, Project, WindowKind,
+    Clip, Corrector, Grade, GradeKey, GradeLink, GradeNode, GradeTool, GradeWindow, KeyInput,
+    KeyMix, KeyOutput, Project, WindowKind,
 };
 use crate::preferences::ColorPrefs;
 use crate::request::{
@@ -232,25 +232,29 @@ fn key_input_checked(i: &KeyInput) -> Result<()> {
     within(i.blur_ratio, (-1.0, 1.0), "key_input_blur_ratio")
 }
 
+fn gives(g: &Grade, l: GradeLink) -> Result<()> {
+    let d = g.node(l.node);
+    let keyed = d.is_some_and(|d| matches!(d.tool, GradeTool::Corrector(_)) || d.takes_keys());
+    match (l.key, d) {
+        (true, _) if !keyed => Err(Error::invalid(format!(
+            "node {} gives out no key: a corrector or a key mixer gives a key",
+            l.node
+        ))),
+        (false, Some(d)) if d.takes_keys() => Err(Error::invalid(format!(
+            "key mixer {} gives out no picture",
+            l.node
+        ))),
+        _ => Ok(()),
+    }
+}
+
 fn links_checked(g: &Grade, n: &GradeNode, k: u32) -> Result<()> {
     let last = g.last();
-    if let Some(v) = n.links().find(|v| *v > last || *v == k) {
+    if let Some(v) = n.links().map(|l| l.node).find(|v| *v > last || *v == k) {
         return Err(Error::invalid(format!("node {k} cannot take node {v}")));
     }
-    let keyed = |v: u32| {
-        (g.node(v)).is_some_and(|d| matches!(d.tool, GradeTool::Corrector(_)) || d.takes_keys())
-    };
-    let keys = n.inputs.iter().flatten().filter(|_| n.takes_keys());
-    if let Some(v) = keys.copied().chain(n.key_from).find(|v| !keyed(*v)) {
-        return Err(Error::invalid(format!(
-            "node {k} cannot take the key of node {v}: a corrector or a key mixer gives a key"
-        )));
-    }
-    let mut pictures = n.inputs.iter().flatten().filter(|_| !n.takes_keys());
-    if let Some(v) = pictures.find(|v| g.node(**v).is_some_and(GradeNode::takes_keys)) {
-        return Err(Error::invalid(format!(
-            "key mixer {v} gives out no picture"
-        )));
+    for l in n.links() {
+        gives(g, l)?;
     }
     if n.tool.is_mixer() && (n.key_from.is_some() || !n.key_input.is_usual()) {
         return Err(Error::invalid(format!("mixer {k} has no key input")));
@@ -269,17 +273,11 @@ fn links_checked(g: &Grade, n: &GradeNode, k: u32) -> Result<()> {
 }
 
 pub fn checked(g: &Grade) -> Result<()> {
-    let last = g.last();
-    if let Some(o) = g.output.filter(|o| *o > last) {
-        return Err(no_node(o));
-    }
-    if let Some(o) = g
-        .output
-        .filter(|o| g.node(*o).is_some_and(GradeNode::takes_keys))
-    {
-        return Err(Error::invalid(format!(
-            "key mixer {o} gives out no picture"
-        )));
+    if let Some(o) = g.output {
+        if o.node > g.last() {
+            return Err(no_node(o.node));
+        }
+        gives(g, o)?;
     }
     for (n, k) in g.nodes.iter().zip(1..) {
         links_checked(g, n, k)?;
@@ -707,6 +705,7 @@ pub fn get(p: &Project, of: &GradeOf, at: Option<i64>) -> Result<Value> {
 }
 
 fn takers(g: &Grade, n: u32) -> Vec<(u32, usize)> {
+    let picture = Some(GradeLink::picture(n));
     g.nodes
         .iter()
         .zip(1..)
@@ -715,18 +714,18 @@ fn takers(g: &Grade, n: u32) -> Vec<(u32, usize)> {
             d.inputs
                 .iter()
                 .enumerate()
-                .filter(move |(_, v)| **v == Some(n))
+                .filter(move |(_, v)| **v == picture)
                 .map(move |(i, _)| (k, i))
         })
         .collect()
 }
 
-fn retake(g: &mut Grade, from: u32, to: Option<u32>, except: u32) {
+fn retake(g: &mut Grade, from: GradeLink, to: Option<GradeLink>, except: u32) {
     for (d, k) in g.nodes.iter_mut().zip(1..) {
-        if k == except || d.takes_keys() {
+        if k == except {
             continue;
         }
-        for v in &mut d.inputs {
+        for v in d.inputs.iter_mut().chain([&mut d.key_from]) {
             if *v == Some(from) {
                 *v = to;
             }
@@ -753,7 +752,7 @@ fn free_below(g: &Grade, [x, y]: [f64; 2]) -> [f64; 2] {
     [x, below]
 }
 
-fn input_of(g: &Grade, n: u32) -> Result<Option<u32>> {
+fn input_of(g: &Grade, n: u32) -> Result<Option<GradeLink>> {
     match g.node(n) {
         Some(d) if !d.tool.is_mixer() => Ok(d.inputs[0]),
         Some(_) => Err(Error::invalid(format!(
@@ -778,7 +777,7 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd, frame: [f64; 2]) -> Result<u32>
     let added = g.last() + 1;
     let takers = takers(g, n);
     let mixes = |m: u32| g.node(m).is_some_and(|d| d.tool.is_mixer());
-    let mixer = match (takers.as_slice(), g.output == Some(n)) {
+    let mixer = match (takers.as_slice(), g.output == Some(GradeLink::picture(n))) {
         ([(m, _)], false) => Some(*m).filter(|m| mixes(*m)),
         _ => None,
     };
@@ -786,14 +785,15 @@ fn beside(g: &mut Grade, n: u32, kind: GradeAdd, frame: [f64; 2]) -> Result<u32>
         Some(m) => {
             let place = free_below(g, at);
             g.nodes.push(GradeNode::corrector(input, place, frame));
-            node(g, m)?.inputs.push(Some(added));
+            node(g, m)?.inputs.push(Some(GradeLink::picture(added)));
         }
         None => {
             shifted(g, at[0] + 1.0);
             let place = free_below(g, at);
             g.nodes.push(GradeNode::corrector(input, place, frame));
-            retake(g, n, Some(added + 1), 0);
-            let inputs = vec![Some(n), Some(added)];
+            let mixed = GradeLink::picture(added + 1);
+            retake(g, GradeLink::picture(n), Some(mixed), 0);
+            let inputs = vec![Some(GradeLink::picture(n)), Some(GradeLink::picture(added))];
             let place = [at[0] + 1.0, at[1]];
             g.nodes
                 .push(GradeNode::mixer(mixer_of(kind), inputs, place));
@@ -816,42 +816,38 @@ pub fn add(
     let mut made = 0;
     edited(p, of, |g| {
         let added = g.last() + 1;
-        let around = |g: &Grade| -> Result<(u32, [f64; 2])> {
+        let around = |g: &Grade| -> Result<(GradeLink, [f64; 2])> {
             let n = n.ok_or_else(|| Error::usage("give `node`, the node it goes beside"))?;
             let d = g.node(n).ok_or_else(|| no_node(n))?;
-            if d.takes_keys() {
-                return Err(Error::invalid(format!(
-                    "key mixer {n} gives out no picture"
-                )));
-            }
-            Ok((n, d.place))
+            let key = d.takes_keys();
+            Ok((GradeLink { node: n, key }, d.place))
         };
         let below = g.nodes.iter().map(|d| d.place[1] + 1.0).fold(0.0, f64::max);
         made = match kind {
             GradeAdd::Serial => {
-                let (n, [x, y]) = around(g)?;
+                let (from, [x, y]) = around(g)?;
                 shifted(g, x + 1.0);
                 g.nodes
-                    .push(GradeNode::corrector(Some(n), [x + 1.0, y], frame));
-                retake(g, n, Some(added), added);
+                    .push(GradeNode::corrector(Some(from), [x + 1.0, y], frame));
+                retake(g, from, Some(GradeLink::picture(added)), added);
                 added
             }
             GradeAdd::Before => {
-                let (n, [x, y]) = around(g)?;
+                let (GradeLink { node: n, .. }, [x, y]) = around(g)?;
                 let input = node(g, n)?.inputs.first().copied().flatten();
                 shifted(g, x);
                 g.nodes.push(GradeNode::corrector(input, [x, y], frame));
                 if let Some(first) = node(g, n)?.inputs.first_mut() {
-                    *first = Some(added);
+                    *first = Some(GradeLink::picture(added));
                 }
                 added
             }
             GradeAdd::Parallel | GradeAdd::Layer => {
-                let (n, _) = around(g)?;
-                beside(g, n, kind, frame)?
+                let (from, _) = around(g)?;
+                beside(g, from.node, kind, frame)?
             }
             GradeAdd::Append => {
-                let at = match g.output.and_then(|o| g.node(o)) {
+                let at = match g.output.and_then(|o| g.node(o.node)) {
                     Some(d) => [d.place[0] + 1.0, d.place[1]],
                     None => {
                         let right = g.nodes.iter().map(|d| d.place[0] + 1.0).fold(0.0, f64::max);
@@ -859,7 +855,7 @@ pub fn add(
                     }
                 };
                 g.nodes.push(GradeNode::corrector(g.output, at, frame));
-                g.output = Some(added);
+                g.output = Some(GradeLink::picture(added));
                 added
             }
             GradeAdd::Corrector => {
@@ -868,14 +864,15 @@ pub fn add(
                 added
             }
             GradeAdd::Outside => {
-                let (n, [x, y]) = around(g)?;
+                let (GradeLink { node: n, .. }, [x, y]) = around(g)?;
                 values(node(g, n)?, n)?;
                 shifted(g, x + 1.0);
-                let mut outside = GradeNode::corrector(Some(n), [x + 1.0, y], frame);
-                outside.key_from = Some(n);
+                let (from, to) = (GradeLink::picture(n), GradeLink::picture(added));
+                let mut outside = GradeNode::corrector(Some(from), [x + 1.0, y], frame);
+                outside.key_from = Some(GradeLink::key(n));
                 outside.key_input.invert = true;
                 g.nodes.push(outside);
-                retake(g, n, Some(added), added);
+                retake(g, from, Some(to), added);
                 added
             }
             GradeAdd::KeyMixer => {
@@ -899,11 +896,11 @@ pub fn add(
 }
 
 fn renumbered(g: &mut Grade, gone: u32) {
-    let after = |v: &mut Option<u32>| {
-        if let Some(k) = v
-            && *k > gone
+    let after = |v: &mut Option<GradeLink>| {
+        if let Some(l) = v
+            && l.node > gone
         {
-            *k -= 1;
+            l.node -= 1;
         }
     };
     for d in &mut g.nodes {
@@ -927,11 +924,11 @@ pub fn remove(p: &mut Project, of: &GradeOf, n: u32, extract: bool) -> Result<()
                 )));
             }
         };
-        retake(g, n, input, n);
+        unkeyed(g, n);
+        retake(g, GradeLink::picture(n), input, n);
         let d = node(g, n)?;
         d.inputs = vec![None];
         d.key_from = None;
-        unkeyed(g, n);
         Ok(())
     })
 }
@@ -944,23 +941,24 @@ pub fn taken_out(g: &mut Grade, n: u32) -> Result<Vec<u32>> {
     };
     let mut fed = Vec::new();
     unkeyed(g, n);
+    let picture = Some(GradeLink::picture(n));
     for (d, k) in g.nodes.iter_mut().zip(1..) {
         let mixer = d.tool.is_mixer();
         let to = if mixer { None } else { input };
-        for v in d.inputs.iter_mut().filter(|v| **v == Some(n) && k != n) {
+        for v in d.inputs.iter_mut().filter(|v| **v == picture && k != n) {
             *v = to;
             if mixer && corrector {
                 fed.push(k);
             }
         }
     }
-    if g.output == Some(n) {
+    if g.output == picture {
         g.output = input;
     }
     let mut gone = vec![n];
     for m in fed {
         if let Some(v) = lone_input(g, m) {
-            retake(g, m, Some(v), m);
+            retake(g, GradeLink::picture(m), Some(v), m);
             gone.push(m);
         }
     }
@@ -974,19 +972,23 @@ pub fn taken_out(g: &mut Grade, n: u32) -> Result<Vec<u32>> {
 }
 
 fn unkeyed(g: &mut Grade, n: u32) {
+    let gone =
+        |v: &Option<GradeLink>, keys: bool| v.is_some_and(|l| l.node == n && (l.key || keys));
     for d in &mut g.nodes {
-        if d.key_from == Some(n) {
+        if gone(&d.key_from, true) {
             d.key_from = None;
         }
-        if d.takes_keys() {
-            for v in d.inputs.iter_mut().filter(|v| **v == Some(n)) {
-                *v = None;
-            }
+        let keys = d.takes_keys();
+        for v in d.inputs.iter_mut().filter(|v| gone(v, keys)) {
+            *v = None;
         }
+    }
+    if gone(&g.output, false) {
+        g.output = None;
     }
 }
 
-fn lone_input(g: &Grade, m: u32) -> Option<u32> {
+fn lone_input(g: &Grade, m: u32) -> Option<GradeLink> {
     let mut linked = g.node(m)?.inputs.iter().flatten();
     match (linked.next(), linked.next()) {
         (Some(&v), None) => Some(v),
@@ -1064,7 +1066,7 @@ fn spread(g: &Grade, k: u32, spans: &mut [Option<f64>]) -> f64 {
         return 1.0;
     };
     let mut each = d.inputs.iter().map(|v| match v {
-        Some(v) if *v > 0 => spread(g, *v, spans),
+        Some(l) if l.node > 0 => spread(g, l.node, spans),
         _ => 1.0,
     });
     let s = match d.tool.is_mixer() {
@@ -1112,13 +1114,13 @@ pub fn cleanup(p: &mut Project, of: &GradeOf, area: Option<[[f64; 2]; 2]>) -> Re
                 .inputs
                 .iter()
                 .flatten()
-                .map(|v| depth[*v as usize]);
+                .map(|l| depth[l.node as usize]);
             depth[k as usize] = ins.fold(0.0, f64::max) + 1.0;
         }
         let mut spans = vec![None; count];
         let mut wants: Vec<Vec<f64>> = vec![Vec::new(); count];
-        if let Some(o) = g.output.filter(|o| *o > 0) {
-            wants[o as usize].push(0.0);
+        if let Some(o) = g.output.filter(|o| o.node > 0) {
+            wants[o.node as usize].push(0.0);
         }
         let mut rows = vec![None; count];
         for &k in order.iter().rev() {
@@ -1132,14 +1134,14 @@ pub fn cleanup(p: &mut Project, of: &GradeOf, area: Option<[[f64; 2]; 2]>) -> Re
             let mixer = node(g, k)?.tool.is_mixer();
             let sizes: Vec<f64> = (inputs.iter())
                 .map(|v| match v {
-                    Some(v) if *v > 0 && mixer => spread(g, *v, &mut spans),
+                    Some(l) if l.node > 0 && mixer => spread(g, l.node, &mut spans),
                     _ => 1.0,
                 })
                 .collect();
             let mut at = row - sizes.iter().sum::<f64>() / 2.0;
             for (v, size) in inputs.iter().zip(&sizes) {
-                if let Some(v) = v.filter(|v| *v > 0) {
-                    wants[v as usize].push(if mixer { at + size / 2.0 } else { row });
+                if let Some(l) = v.filter(|l| l.node > 0) {
+                    wants[l.node as usize].push(if mixer { at + size / 2.0 } else { row });
                 }
                 at += size;
             }
@@ -1189,9 +1191,9 @@ pub fn swap(p: &mut Project, of: &GradeOf, n: u32, with: u32) -> Result<()> {
 }
 
 fn linked(
-    inputs: &mut Vec<Option<u32>>,
+    inputs: &mut Vec<Option<GradeLink>>,
     (n, input): (u32, Option<u32>),
-    from: Option<u32>,
+    from: Option<GradeLink>,
 ) -> Result<bool> {
     let count = inputs.len();
     match input.map(|i| i as usize) {
@@ -1237,56 +1239,45 @@ pub fn connect(
     p: &mut Project,
     of: &GradeOf,
     (n, input): (u32, Option<u32>),
-    from: Option<u32>,
-    key: bool,
+    (from, key): (Option<u32>, bool),
 ) -> Result<()> {
+    if key && from.is_none() {
+        return Err(Error::usage("`key` needs `from`"));
+    }
+    let from = from.map(|node| GradeLink { node, key });
     edited(p, of, |g| {
-        if let Some(f) = from.filter(|f| *f > g.last()) {
-            return Err(no_node(f));
+        if let Some(f) = from.filter(|f| f.node > g.last()) {
+            return Err(no_node(f.node));
         }
         if n == 0 {
-            if key {
-                return Err(Error::invalid("the output takes a picture, not a key"));
-            }
             if input.is_some_and(|i| i > 0) {
                 return Err(Error::invalid("the output has one input"));
             }
             g.output = from;
             return Ok(());
         }
-        if from == Some(n) {
+        if from.is_some_and(|f| f.node == n) {
             return Err(Error::invalid(format!("node {n} cannot take itself")));
         }
         let d = node(g, n)?;
-        match (&mut d.tool, key) {
-            (GradeTool::KeyMixer { .. }, true) => {
+        match d.tool {
+            GradeTool::Corrector(_) => match input {
+                None | Some(0) => d.inputs[0] = from,
+                Some(1) => d.key_from = from,
+                Some(_) => {
+                    return Err(Error::invalid(format!(
+                        "corrector {n} has input 0, its RGB input, and input 1, its key input"
+                    )));
+                }
+            },
+            GradeTool::KeyMixer { .. } => {
                 if linked(&mut d.inputs, (n, input), from)? {
                     for mix in d.mix_lists_mut() {
                         mix.push(KeyMix::default());
                     }
                 }
             }
-            (GradeTool::KeyMixer { .. }, false) => {
-                return Err(Error::invalid(format!(
-                    "key mixer {n} takes keys: give `key`"
-                )));
-            }
-            (GradeTool::Corrector(_), true) => match input {
-                None | Some(0) => d.key_from = from,
-                Some(_) => {
-                    return Err(Error::invalid(format!("corrector {n} has one key input")));
-                }
-            },
-            (_, true) => {
-                return Err(Error::invalid(format!("mixer {n} takes no key")));
-            }
-            (GradeTool::Corrector(_), false) => match input {
-                None | Some(0) => d.inputs[0] = from,
-                Some(_) => {
-                    return Err(Error::invalid(format!("corrector {n} has one input")));
-                }
-            },
-            (_, false) => {
+            _ => {
                 linked(&mut d.inputs, (n, input), from)?;
             }
         }

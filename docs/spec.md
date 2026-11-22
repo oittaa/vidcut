@@ -2529,7 +2529,12 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - A clip inside overwrites what is under it. A gap inside leaves the timeline as it is.
   - A compound clip inside stays a compound clip. Only one level comes apart.
   - The destination controls show one control for each track inside (p. 1055).
+    - Measured with a compound clip that holds clips on V1 and V2. The clip on V1 has sound.
+    - The controls V1, V2 and A1 show at the timeline tracks of the same number. With the option off, only V1 and A1 show.
+    - A drag of the V2 control to Video 3 puts the clip of inner V2 on V3.
+    - A drop of the V2 control on the track of V1 swaps the two controls.
     - With the control of inner V1 off, V1 of the timeline stays as it is. The sound of the clip on inner V1 still goes on A1.
+    - With the control of A1 off, the pictures go in. A1 of the timeline stays as it is.
   - **vidcut:**
     - `preferences.set` with `editing.decompose_on_edit` turns it on. The Edit menu has Edit Options > Decompose Compound Clips On Edit.
     - The edits of [§7.2](#72-edit-functions) and a drag from the Media tab do this.
@@ -2737,7 +2742,7 @@ The shapes:
   - Ctrl+A selects all the nodes. Ctrl+Shift+A selects none.
 - Alt+[ and Alt+] move the playhead to the keyframes of the active node (p. 1303).
 - The MediaIn and the MediaOut nodes can be deleted. Undo puts them back.
-- An OTIO export of Resolve holds nothing of a composition. vidcut keeps the composition in its own metadata of the clip, in the picture (§8.16).
+- An OTIO export of Resolve holds nothing of a composition. vidcut keeps the composition in its own metadata of the clip, in the picture (§8.16). The motion paths of its Tracker patterns go with it.
 
 #### The Effects page
 
@@ -2849,7 +2854,7 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
 `gui.page_time` moves and plays the playhead of the page. `comp.loop` sets Loop and Ping Pong. `player.bounds` holds play of the timeline between two frames.
 `comp.set` and `comp.key` take a `frame` of the composition. Without it, they take the frame at the playhead. `comp.paste` takes `after`, `place` or `replace`.
-`comp.set` with `connect` connects the Center of a mask to a pattern. `motion.track` tracks a pattern of a Tracker, and `motion.find` with `tracker` gives it patterns.
+`comp.set` with `connect` connects the Center of a mask to a pattern. `motion.track` tracks a pattern of a Tracker, and `motion.find` gives it patterns. Each pattern holds its path: `motion.list` reads it, and `motion.add`, `motion.set` and `motion.remove` change it.
 
 ### 8.20 Primaries palette (pp. 118, 3141–3159)
 
@@ -3276,19 +3281,32 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the keys combine as measured. Blur Radius is a Gaussian blur with the measured sigma. A Blur Radius below 0 sharpens as measured.
   - vidcut: a key link from a corrector that is off, an off Key Mixer and the inputs with no link act as measured.
   - vidcut: a Key Mixer with no linked input gives its Key Output of a key of 1.
-  - vidcut: `grade.connect` with `key` links a key output to a key input. `grade.add` with `key_mixer` and `outside` adds the nodes.
+  - vidcut: `grade.connect` with `key` links the key output of a node. Input 1 of a corrector is its key input. `grade.add` with `key_mixer` and `outside` adds the nodes.
   - vidcut: `grade.set` with `key_input_invert`, `key_input_mask`, `key_input_gain`, `key_input_offset`, `key_input_blur` and `key_input_blur_ratio` changes the Key Input.
   - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
   - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
-  - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node, Add One Input and Remove One Input. The Add Node submenu comes later ([todo](todo/color-page.md)).
-  - vidcut: Alt+S and Shift+S do nothing on a Key Mixer.
-  - vidcut: a key link is blue. A node cannot drop into a key link.
+  - vidcut: the menu of a Key Mixer and its Add Node submenu are as measured.
+  - vidcut: Alt+S and Shift+S do nothing on a Key Mixer. Thus its Add Node submenu shows no shortcuts.
+  - Not measured: the shortcuts in the Add Node submenu of a Key Mixer.
+  - vidcut: a link from a key output is blue. A node can drop only into a link from an RGB output to an RGB input.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
   - Measured in Resolve Studio 21.2: a link from a key output to an RGB input gives the key as a gray picture. R, G and B are the key.
   - Measured: a link from an RGB output to a key input gives the Rec. 709 luma, 0.2126 R + 0.7152 G + 0.0722 B. The key input then acts on it as on a key.
     - With Invert on, a luma of −0.23 gave a key of 1, and a luma of 1.42 gave 0. A luma clamped to 0..1 gives the same keys.
-  - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
+  - Measured: the corrector grades the gray picture as any picture. An Offset of +0.5 gave the gray plus 0.5.
+  - Measured: the grade file holds the kind of port at each end of a link, RGB or key.
+  - vidcut: a link holds its node and the output that it leaves (`key` of the link). Thus any output can go to any input (p. 3420).
+  - vidcut: a key on an RGB input is a gray picture, and a picture on a key input gives its luma, as measured. The luma has no clamp.
+  - vidcut: a drag links any output to any input. A drop on a node links its input of the same kind as the output.
+  - Not measured: the alpha of the gray picture. vidcut gives it the alpha of the clip, as each picture of the grade has.
+  - Not measured: a key on the Output, on a Parallel Mixer or on a Layer Mixer. vidcut takes it as a gray picture there too.
+    - A Parallel Mixer takes the source as the base of a gray picture.
+  - Not measured: a link from the RGB output of a corrector that is off into a key input. vidcut gives the luma of the picture that it passes on.
+  - Not measured: a link from the key output of a corrector that is off into an RGB input. vidcut gives its key as a gray picture, as when it is on.
+  - Not measured: a delete or an extract of a node with such links. vidcut removes the links from its key output and its links into key inputs.
+  - Not measured: Add Serial, Add Parallel, Add Layer and Add Outside at a node whose RGB output goes into a key input. vidcut moves that link as it moves a link into an RGB input.
+  - Not measured: the look of a link from a key output to an RGB input. vidcut colors each link by the output that it leaves.
   - vidcut: each keyframe of a corrector holds its Key Input. Thus the Key Input has no track of its own ([todo](todo/gaps.md)).
   - vidcut: each keyframe of a Key Mixer holds the values of its inputs and its Key Output. The Keyframes panel has a track for each Key Mixer.
   - vidcut: Gain, Offset, Blur Radius and Blur H/V blend as the values do. Invert, Matte and Mask change on the frame of the next keyframe.
@@ -3307,6 +3325,10 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - The key of the mixer goes to the RGB input of the corrector. The RGB output of the corrector goes to the key input of that node.
   - Measured: Add Serial Before on a Key Mixer puts a corrector on input 0 of the mixer.
     - The key of the node on that input goes to the RGB input of the corrector. The RGB output of the corrector goes to the mixer.
+  - vidcut: the same. `grade.add` with `serial` or `before` on a Key Mixer adds the corrector.
+  - Not measured: Add Serial on a Key Mixer whose key goes to two or more nodes, to no node or to an RGB input.
+    - vidcut moves each link from the key of the mixer to the RGB output of the corrector.
+  - Not measured: Add Serial Before on a Key Mixer with no link on input 0. vidcut gives the corrector no input link.
 
 Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
 The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.

@@ -1240,8 +1240,8 @@ impl Placing {
                 nodes: c.nodes.iter().map(|n| n.sampled(at)).collect(),
                 ..Composition::default()
             };
-            let frame = p.followed.frame(p.source);
-            let areas = |pattern: &Pattern| pattern.area_at(&p.followed.paths, frame);
+            let frame = p.clock.frame(p.source) as f64;
+            let areas = |pattern: &Pattern| pattern.area_at(frame);
             composed(&sampled, pixels, p.frame, &areas)
         });
         Self {
@@ -1711,7 +1711,6 @@ mod tests {
             ramp: None,
             crossing: false,
             moving: None,
-            followed: Default::default(),
             clock: Default::default(),
             adjustment: false,
         };
@@ -1747,7 +1746,6 @@ mod tests {
             ramp: None,
             crossing: false,
             moving: None,
-            followed: Default::default(),
             clock: Default::default(),
             adjustment: false,
         };
@@ -1789,7 +1787,6 @@ mod tests {
             ramp: None,
             crossing: false,
             moving: None,
-            followed: Default::default(),
             clock: Default::default(),
             adjustment: false,
         };

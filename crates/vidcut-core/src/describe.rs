@@ -409,17 +409,27 @@ pub fn describe_at(
             (Some(true), None) => format!("Loop {}", d.clips("clip")),
             (None, None) => format!("Turn the loop of {} on or off", d.clips("clip")),
         },
-        "motion.add" => format!("Add a motion path to {}", d.clips("clip")),
-        "motion.set" => format!(
-            "Change motion path {} of {}",
-            d.params["path"].as_str().unwrap_or(""),
+        "motion.add" => format!(
+            "Add a motion path to {} of {}",
+            d.params["node"].as_str().unwrap_or("a tracker"),
             d.clips("clip")
         ),
-        "motion.remove" => format!("Remove motion paths of {}", d.clips("clip")),
+        "motion.set" => format!(
+            "Change the motion path of pattern {} of {} of {}",
+            d.params["pattern"].as_u64().unwrap_or(1),
+            d.params["node"].as_str().unwrap_or("a tracker"),
+            d.clips("clip")
+        ),
+        "motion.remove" => format!(
+            "Remove motion paths of {} of {}",
+            d.params["node"].as_str().unwrap_or("a tracker"),
+            d.clips("clip")
+        ),
         "motion.find" => format!(
-            "Find {} paths in {}",
+            "Find {} paths in {} of {}",
             d.params["subject"].as_str().unwrap_or("face"),
-            d.clips("clips")
+            d.params["node"].as_str().unwrap_or("a tracker"),
+            d.clips("clip")
         ),
         "motion.track" => format!(
             "Track {} of {}",

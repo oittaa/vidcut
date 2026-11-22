@@ -2147,37 +2147,45 @@ pub struct Clip {
     /// slow media and AI Upscale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
-    /// Its motion paths: where things in its picture are on its source
-    /// frames. Only a clip of footage, a still or an image sequence has
-    /// them. Left out when it has none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub motion: Vec<MotionPath>,
 }
 
-/// A motion path of a clip: where one area of its picture is on its source
-/// frames. A face, a number plate or another thing in the picture has one.
-/// A path that `motion.track` made holds its place: before its first sample
-/// and after its last, the area is where that sample puts it. Another path
-/// lasts from its first sample to its last: before and after them it has no
-/// area. Between two samples the area moves in a straight line.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// The motion path of a pattern of a tracker: where its thing is on the
+/// frames of the clip's file. A path that `motion.track` made holds its
+/// place: before its first sample and after its last, the area is where that
+/// sample puts it. Another path lasts from its first sample to its last:
+/// before and after them it has no area. Between two samples the area moves
+/// in a straight line.
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MotionPath {
-    /// `p<N>`, its own among the paths of the clip.
-    pub id: String,
-    /// What it follows, for example `Face 1`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
     /// The kind of thing that `motion.find` found for this path. Left out on
     /// a path that it did not make.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<Subject>,
-    /// On, `motion.track` made this path. A later track of the same area
-    /// then writes its samples again. Left out when off.
+    /// On, `motion.track` made this path. It then holds its first and its
+    /// last place. Left out when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub tracked: bool,
     /// The area on frames of the file: at least one sample, one for a
     /// frame, in the order of the frames.
     pub samples: Arc<Vec<PathSample>>,
+}
+
+impl PartialEq for MotionPath {
+    fn eq(&self, other: &Self) -> bool {
+        self.subject == other.subject
+            && self.tracked == other.tracked
+            && (Arc::ptr_eq(&self.samples, &other.samples) || self.samples == other.samples)
+    }
+}
+
+impl std::fmt::Debug for MotionPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MotionPath")
+            .field("subject", &self.subject)
+            .field("tracked", &self.tracked)
+            .field("samples", &self.samples.len())
+            .finish()
+    }
 }
 
 /// The ways that `motion.track` goes from its first frame.
@@ -3757,7 +3765,7 @@ pub struct Picture {
 }
 
 /// A grade: the nodes of the color page. The picture comes in, goes through
-/// the nodes that the inputs join, and goes out from the node `output`.
+/// the nodes that the inputs join, and goes out from the link `output`.
 /// A node's number is its place in `nodes`, from 1. The number 0 is the
 /// picture that comes into the grade. While a node has an empty input, or
 /// its picture goes nowhere, or nothing goes out, the grade does nothing.
@@ -3765,17 +3773,42 @@ pub struct Picture {
 pub struct Grade {
     /// The nodes, in the order they were added.
     pub nodes: Vec<GradeNode>,
-    /// The number of the node whose picture goes out, or 0 for the picture
-    /// that comes in. Left out when nothing goes out.
+    /// What goes out. Left out when nothing goes out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<u32>,
+    pub output: Option<GradeLink>,
+}
+
+/// A link into an input: the node that it leaves and the output of that
+/// node. A key that goes into an RGB input or the output is a gray
+/// picture: R, G and B are the key. A picture that goes into a key input
+/// gives its Rec. 709 luma, 0.2126 R + 0.7152 G + 0.0722 B, as the key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GradeLink {
+    /// The number of the node, or 0 for the picture that comes into the
+    /// grade.
+    pub node: u32,
+    /// The link leaves the key output of the node, not its RGB output. A
+    /// corrector and a key mixer have a key output. Left out when not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub key: bool,
+}
+
+impl GradeLink {
+    pub fn picture(node: u32) -> Self {
+        Self { node, key: false }
+    }
+
+    pub fn key(node: u32) -> Self {
+        Self { node, key: true }
+    }
 }
 
 impl Grade {
     pub fn usual(frame: [f64; 2]) -> Self {
+        let source = Some(GradeLink::picture(0));
         Self {
-            nodes: vec![GradeNode::corrector(Some(0), [0.0, 0.0], frame)],
-            output: Some(1),
+            nodes: vec![GradeNode::corrector(source, [0.0, 0.0], frame)],
+            output: Some(GradeLink::picture(1)),
         }
     }
 
@@ -3808,11 +3841,10 @@ impl Grade {
 pub struct GradeNode {
     #[serde(flatten)]
     pub tool: GradeTool,
-    /// What comes into each input, in order: the number of a node, 0 for
-    /// the picture that comes into the grade, or null for nothing. A
-    /// corrector has one input. A mixer has one or more. The inputs of a
-    /// key mixer take keys: each names a corrector or a key mixer.
-    pub inputs: Vec<Option<u32>>,
+    /// What comes into each input, in order, or null for nothing. A
+    /// corrector has one input, its RGB input. A mixer has one or more.
+    /// The inputs of a key mixer are key inputs.
+    pub inputs: Vec<Option<GradeLink>>,
     /// Off, a corrector passes on the picture that comes into it, and a
     /// layer mixer mixes in `normal`. A parallel mixer mixes the same way
     /// off and on. Usual: on.
@@ -3840,10 +3872,10 @@ pub struct GradeNode {
     /// mixers have none. Left out at its usual value.
     #[serde(default, skip_serializing_if = "KeyOutput::is_usual")]
     pub key: KeyOutput,
-    /// The node whose key comes into the key input of a corrector: a
-    /// corrector or a key mixer. Left out when no key comes in.
+    /// What comes into the key input of a corrector. Left out when nothing
+    /// comes in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_from: Option<u32>,
+    pub key_from: Option<GradeLink>,
     /// How the key input of a corrector takes the key that comes in. Left
     /// out at its usual value.
     #[serde(default, skip_serializing_if = "KeyInput::is_usual")]
@@ -3864,7 +3896,7 @@ pub struct GradeNode {
 }
 
 impl GradeNode {
-    pub fn corrector(input: Option<u32>, place: [f64; 2], frame: [f64; 2]) -> Self {
+    pub fn corrector(input: Option<GradeLink>, place: [f64; 2], frame: [f64; 2]) -> Self {
         Self {
             tool: GradeTool::Corrector(Box::default()),
             inputs: vec![input],
@@ -3881,7 +3913,7 @@ impl GradeNode {
         }
     }
 
-    pub fn mixer(tool: GradeTool, inputs: Vec<Option<u32>>, place: [f64; 2]) -> Self {
+    pub fn mixer(tool: GradeTool, inputs: Vec<Option<GradeLink>>, place: [f64; 2]) -> Self {
         Self {
             tool,
             inputs,
@@ -3898,7 +3930,7 @@ impl GradeNode {
         }
     }
 
-    pub fn links(&self) -> impl Iterator<Item = u32> + '_ {
+    pub fn links(&self) -> impl Iterator<Item = GradeLink> + '_ {
         self.inputs.iter().flatten().copied().chain(self.key_from)
     }
 
@@ -4598,9 +4630,9 @@ pub struct Tracker {
     pub patterns: Vec<Pattern>,
 }
 
-/// A pattern of a tracker: a box on the clip's own picture, and the motion
-/// path that a track of the box made (`motion.track`). On each frame, the
-/// pattern is where its path puts it. Before a track, it is where its own
+/// A pattern of a tracker: a box on the clip's own picture, and its motion
+/// path (`motion.track`, `motion.find`, `motion.set`). On each frame, the
+/// pattern is where its path puts it. Without a path, it is where its own
 /// box is. A field left out is at its usual value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Pattern {
@@ -4610,11 +4642,11 @@ pub struct Pattern {
     /// `motion.track` still tracks it. Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub enabled: bool,
-    /// The id of its motion path on the clip (`motion.list`), as `p1`. A
-    /// track of the pattern makes it, and `motion.find` with `tracker` gives
-    /// a pattern for each thing it finds. Left out before a track.
+    /// Its motion path, on frames of the clip's file. A track of the
+    /// pattern makes it, and `motion.find` gives a pattern with a path for
+    /// each thing it finds. Left out before a track.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
+    pub path: Option<MotionPath>,
     /// The middle of its own box, `[x, y]` as fractions of the picture from
     /// its bottom left, each from -10 to 10. Usual: `[0.25, 0.75]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -7959,7 +7991,6 @@ impl Cue {
             retime: ClipRetime::Project,
             color: None,
             render_cache: ClipCache::Auto,
-            motion: Vec::new(),
         }
     }
 

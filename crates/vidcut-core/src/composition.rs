@@ -170,10 +170,10 @@ impl Pattern {
         }
     }
 
-    pub fn area_at(&self, paths: &[MotionPath], frame: f64) -> Option<Area> {
+    pub fn area_at(&self, frame: f64) -> Option<Area> {
         match &self.path {
             None => Some(self.own()),
-            Some(id) => paths.iter().find(|m| m.id == *id)?.base_at(frame),
+            Some(m) => m.base_at(frame),
         }
     }
 }
@@ -316,6 +316,13 @@ impl Tool {
     }
 
     pub fn tracker(&self) -> Option<&Tracker> {
+        match self {
+            Tool::Tracker(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    pub fn tracker_mut(&mut self) -> Option<&mut Tracker> {
         match self {
             Tool::Tracker(t) => Some(t),
             _ => None,
@@ -577,6 +584,39 @@ impl Composition {
     pub fn pattern(&self, c: &Connect) -> Option<&Pattern> {
         let t = self.node(&c.tracker)?.tool.tracker()?;
         t.patterns.get((c.pattern as usize).checked_sub(1)?)
+    }
+
+    pub fn followed(&self) -> Vec<(&str, u32, &MotionPath)> {
+        let connects = self
+            .nodes
+            .iter()
+            .filter_map(|n| n.tool.mask()?.connect.as_ref());
+        let path = |k: &Connect| self.pattern(k)?.path.as_ref();
+        connects
+            .filter_map(|k| Some((k.tracker.as_str(), k.pattern, path(k)?)))
+            .collect()
+    }
+
+    pub fn hold(&mut self, frame: Option<f64>) {
+        let connects = self
+            .nodes
+            .iter()
+            .filter_map(|n| n.tool.mask()?.connect.as_ref());
+        let on: Vec<(String, u32)> = connects.map(|k| (k.tracker.clone(), k.pattern)).collect();
+        for n in &mut self.nodes {
+            let name = n.name.clone();
+            let Tool::Tracker(t) = &mut n.tool else {
+                continue;
+            };
+            for (i, pattern) in t.patterns.iter_mut().enumerate() {
+                let followed = on.iter().any(|(t, k)| *t == name && *k as usize == i + 1);
+                let path = pattern.path.take().filter(|_| followed);
+                pattern.path = match frame {
+                    Some(frame) => path.map(|m| m.held(frame)),
+                    None => path,
+                };
+            }
+        }
     }
 
     pub fn chain(&self) -> Option<Vec<&Node>> {
