@@ -1988,10 +1988,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - These rows change between renders. Two renders of Aspect 2 at Pixel Frequency 25 differ on 1211 pixels, by up to 9.22/255. Renders at 0.132 and 0.566 of a step repeat exactly.
     - vidcut takes the box at the middle of the pixel's own triangle, clamped into the frame, at each distance.
   - Only the Fusion page gave renders of Blur Alpha off and Whole Cells Only. Only the default Pixel Frequency has Edit page renders on other sizes and Zooms ([todo](todo/effects-library.md)).
+  - Measured in Resolve Studio 21.2, with a 1280×720 source on timelines of 1280×720 and 1920×1080, at Position 0.3, 0.62:
+    - Position counts in fractions of the picture on the frame. A Zoom scales the grid, and a Pan moves it.
+    - On a rotated clip, the Position point turns with the picture. The cells keep the directions of the frame.
+    - A crop does not change the size or the place of the cells.
+    - On a compound clip, the effect gives the same picture as on a plain clip with the same values.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
-    - A Position away from the middle, on a picture with a Zoom or a Pan, counts in fractions of the picture on the frame.
-    - On a rotated clip, the cells keep the directions of the frame, as Gaussian Blur does.
-    - A crop and a Dynamic Zoom box do not change the size or the place of the cells.
+    - A Dynamic Zoom box does not change the size or the place of the cells.
     - The Zoom of each compound clip around the picture multiplies the size on the frame.
     - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
     - Whole Cells Only tests each sample's cell, with each Cell Shape and each Aliasing.
