@@ -6059,9 +6059,9 @@ pub struct ProjectSet {
     /// Input LUT: a `.cube` file that the pictures of each clip go through
     /// just after their conversion into the timeline color space, in the
     /// viewer and in each export. A media item's own input LUT replaces it on
-    /// that media's clips. Gaps, generators and titles do not get it. A file
-    /// that can't be read is refused, with the reason. An empty path clears
-    /// it.
+    /// that media's clips. Gaps, generators, titles and adjustment clips do
+    /// not get it. A file that can't be read is refused, with the reason. An
+    /// empty path clears it.
     #[serde(default)]
     pub input_lut: Option<PathBuf>,
     /// Output LUT: a `.cube` file that the whole timeline goes through after

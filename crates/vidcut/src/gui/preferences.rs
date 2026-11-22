@@ -477,15 +477,10 @@ impl Workspace {
         if !ui_state.open {
             return;
         }
-        let mut luts_moved = false;
         if let Some(answer) = ui_state.ask.as_ref().and_then(Ask::take) {
             ui_state.ask = None;
             match answer {
                 Ok(r) => {
-                    luts_moved = ui_state
-                        .state
-                        .as_ref()
-                        .is_some_and(|old| lut_folders(old) != lut_folders(&r.result));
                     let p = &r.result["preferences"];
                     let n = |v: &Value| v.as_u64().unwrap_or(0).to_string();
                     ui_state.limit = match p["cache"]["limit"].as_str() {
@@ -665,9 +660,6 @@ impl Workspace {
             self.send(method, params);
             self.preferences.ask = Some(Ask::send(&self.live, ctx, "preferences.get", json!({})));
         }
-        if luts_moved {
-            self.update_luts(ctx);
-        }
     }
 
     fn reset_window(&mut self, ctx: &egui::Context) {
@@ -739,6 +731,7 @@ impl Workspace {
                 let n = r.result["removed"].as_array().map_or(0, Vec::len);
                 self.preferences.forgotten = None;
                 self.after_reset();
+                self.update_luts(ctx);
                 self.say(format!("Reset: {n} files and folders removed"));
                 if self.preferences.open {
                     self.preferences.ask =
@@ -877,7 +870,8 @@ fn lut_folders_row(
             let on = ui_state.lut_folder.as_ref() == Some(folder);
             let text = folder.display().to_string();
             if ui
-                .add(egui::Button::selectable(on, text).truncate())
+                .add(egui::Button::selectable(on, text.clone()).truncate())
+                .on_hover_text(text)
                 .clicked()
             {
                 ui_state.lut_folder = (!on).then(|| folder.clone());
