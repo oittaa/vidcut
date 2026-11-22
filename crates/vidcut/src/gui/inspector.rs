@@ -1438,10 +1438,7 @@ fn center_row(
     trackers: &[Hooked],
     acts: &mut Vec<Act>,
 ) {
-    let Some(m) = n.tool.mask() else {
-        return;
-    };
-    let Some(k) = &m.connect else {
+    let Some(k) = &n.connect else {
         if let Some(r) = node_value(ui, i, (slot, n), (EffectValue::Center, "Center"), acts) {
             r.context_menu(|ui| {
                 if let Some(v) = connect_menu(ui, None, trackers) {
@@ -1467,6 +1464,9 @@ fn center_row(
         acts.push(node_set(slot, "connect", Value::Null));
     }
     ui.end_row();
+    if !n.tool.is_mask() {
+        return;
+    }
     label(ui, "Follow Size", k.size);
     let mut on = k.size;
     if ui.checkbox(&mut on, "").changed() {

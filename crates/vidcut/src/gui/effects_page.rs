@@ -514,17 +514,24 @@ fn inverse(a: [[f64; 2]; 2]) -> Option<[[f64; 2]; 2]> {
     })
 }
 
-fn gripped(m: &mut Mask, tool: &Tool, grip: Grip, at: [f64; 2], base: &MaskBase) {
+fn gripped(
+    m: &mut Mask,
+    tool: &Tool,
+    (grip, at): (Grip, [f64; 2]),
+    base: &MaskBase,
+    frame: (f64, f64),
+) {
     let [w, h] = base.size;
     if !(w > 0.0 && h > 0.0) {
         return;
     }
-    let s = Shaping::figure(m, tool, &base.unturned());
-    let at = base.own(at);
+    let s = Shaping::figure(m, tool, &base.unturned(), frame);
+    let at = base.own(at, s.middle);
     let (lo, hi) = Mask::PLACES;
+    let (fw, fh) = frame;
     match (grip, &s.outline) {
         (Grip::Center, _) => {
-            m.center = Some([(at[0] / w).clamp(lo, hi), (1.0 - at[1] / h).clamp(lo, hi)]);
+            m.center = Some([(at[0] / fw).clamp(lo, hi), (1.0 - at[1] / fh).clamp(lo, hi)]);
         }
         (
             Grip::Width | Grip::Height,
@@ -1338,15 +1345,16 @@ impl Workspace {
             .filter(|x| x.sent.is_none() && x.clip == clip.id && x.grip == Grip::Angle)
             .map(|x| x.node.clone());
         let mut shown = Vec::new();
+        let sampled = comp.sampled(source, frame);
         for name in &self.effects_page.nodes {
-            let Some(node) = comp.node(name).map(|n| n.sampled(source)) else {
+            let Some(node) = sampled.node(name) else {
                 continue;
             };
             let Some(m) = node.tool.mask().filter(|m| m.show_view_controls) else {
                 continue;
             };
-            let bases = MaskBase::all(m, comp, (w, h), &areas);
-            let shaping = Shaping::of(m, &node.tool, w, &bases);
+            let bases = MaskBase::all(node, &sampled, (w, h), &areas);
+            let shaping = Shaping::of(m, &node.tool, (w, h), &bases);
             for f in &shaping.figures {
                 let line: Vec<Pos2> = f.line().into_iter().map(screen).collect();
                 painter.add(egui::Shape::line(line, Stroke::new(1.5, accent)));
@@ -1356,7 +1364,7 @@ impl Workspace {
             };
             let spots: Vec<(Grip, Pos2)> = grips(first)
                 .into_iter()
-                .filter(|(g, _)| *g != Grip::Center || m.connect.is_none())
+                .filter(|(g, _)| *g != Grip::Center || node.connect.is_none())
                 .map(|(g, s)| (g, screen(s)))
                 .collect();
             let turned = turning.as_deref() == Some(name.as_str());
@@ -1425,7 +1433,15 @@ impl Workspace {
             if let Some(v) = grip_value(held.grip) {
                 n.key_list_mut().retain(|k| k.value != v);
             }
-            let tool = n.sampled(source).tool;
+            let Some(tool) = held
+                .composition
+                .sampled(source, frame)
+                .node(&name)
+                .map(|x| x.tool.clone())
+            else {
+                return;
+            };
+            let n = &mut held.composition.nodes[i];
             let to = pixel(to);
             if let (Some(m), Some(now)) = (n.tool.mask_mut(), tool.mask()) {
                 *m = now.clone();
@@ -1435,7 +1451,7 @@ impl Workspace {
                         let (lo, hi) = Mask::TURNS;
                         m.angle = Some(held.turn.clamp(lo, hi));
                     }
-                    grip => gripped(m, &tool, grip, to, &s.base),
+                    grip => gripped(m, &tool, (grip, to), &s.base, (w, h)),
                 }
             }
             held.last = to;
