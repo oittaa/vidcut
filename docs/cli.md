@@ -248,7 +248,7 @@ The schema describes the parameters, not the results. This list gives the result
 - `compound open`, `compound close`, `compound set`:
   - `name` and `path[]`: open levels from the enclosing timeline (if any) down to the active compound clip.
   - `compound open` also gives `fps` and `start_tc`. `compound close` also gives `open`.
-  - `compound set` changes the starting timecode of the open, pool or clip compound clip. It returns `start_tc` and `frames`.
+  - `compound set` changes the name or the starting timecode of the open, pool or clip compound clip. It returns `name`, `start_tc` and `frames`.
   - Exporting while a compound clip is open exports that compound clip under its name.
 - `media list`, `media get`:
   - `missing`: the file is gone.

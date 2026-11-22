@@ -48,6 +48,20 @@ impl NewCompound {
 }
 
 #[derive(Debug)]
+pub(super) struct CompoundClick {
+    pub(super) id: String,
+    pub(super) at: f64,
+    pub(super) frame: u64,
+}
+
+#[derive(Debug)]
+pub(super) struct CompoundRename {
+    pub(super) id: String,
+    pub(super) text: String,
+    pub(super) focus: bool,
+}
+
+#[derive(Debug)]
 pub(super) struct CompoundStartTc {
     id: String,
     name: String,
