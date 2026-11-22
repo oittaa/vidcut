@@ -3899,7 +3899,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
   - The Color page has its own level too. There, its keys go first. Thus Shift+S, Alt+B, Ctrl+D, Alt+D and Delete act on the nodes ([§8.21](#821-color-page-nodes-pp-33853399-34093415)).
-  - On the other pages, these four keys keep the actions of the table.
+  - On the other pages, these five keys keep the actions of the table.
   - On the Color page, Ctrl+[, Alt+] and the Mark menu act on the keyframes of the grade ([§8.22](#822-color-page-keyframes-pp-34533465)).
   - The manual: on the Edit page, a key of a node action and of another action does the other action. The node actions do not apply there (p. 125).
 - These keys and gestures do not change:
