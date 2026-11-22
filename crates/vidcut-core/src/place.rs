@@ -1010,7 +1010,17 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
         cy + (1.0 - whole_pixels(c0.bottom, gh)) * ch,
     ];
     let gone = p.scale().contains(&0.0) || crop[0] >= crop[2] || crop[1] >= crop[3];
-    let (mut edge, soft) = Soft::of(crop, p.softness(), [fw, fh]);
+    let cut = |part: f64, grid: f64, at: f64, open: f64| match whole_pixels(part, grid) > 0.0 {
+        true => at,
+        false => open,
+    };
+    let cuts = [
+        cut(c0.left, gw, crop[0], 0.0),
+        cut(c0.top, gh, crop[1], 0.0),
+        cut(c0.right, gw, crop[2], 1.0),
+        cut(c0.bottom, gh, crop[3], 1.0),
+    ];
+    let (mut edge, soft) = Soft::of(cuts, p.softness(), [fw, fh]);
     if gone {
         edge = [1.0, 1.0, 0.0, 0.0];
     }

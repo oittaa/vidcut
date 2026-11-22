@@ -614,6 +614,7 @@ A compound clip ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions))
 - Each layer has a `place::Extent`: the rectangle of its picture on the frame, and its grid of source pixels.
   - `Level::keeps` tells if a level leaves its picture where it was, with no crop. Then the extent goes up to the next level (`kept`).
   - A `place::Mix` with one part crops in the extent of that part (`Placing::within`). A `place::Mix` with more parts crops in the frame (`Extent::whole`).
+  - A side that cuts no whole pixel cuts nothing. Thus the effects inside a compound clip with no crop can still spread past the extent.
   - The viewer draws the crop of a compound clip in the same extent (`extent_of`).
 - One part alone gives its composite mode to the `place::Mix` (`parts_of`). A mode on the compound clip replaces it. A transition inside gives no mode (`run_mode`).
 - A clip that fills its frame removes the layers under it from the plan (`Layer::hides`). A compound clip at its usual values with no ramp passes this on. Thus the tracks below it are not decoded. A Smooth Cut with a flat side keeps them (`Smooth::clear`).
