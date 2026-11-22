@@ -42,4 +42,3 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - Measure in Resolve, then match:
   - The keys of the nodes ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)):
     - A Key Mixer with one linked input after a delete.
-    - Add Serial and Add Serial Before in the menu of a Key Mixer.

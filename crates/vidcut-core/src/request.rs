@@ -4753,7 +4753,8 @@ pub enum GradeMixer {
 #[serde(rename_all = "snake_case")]
 pub enum GradeAdd {
     /// After `node`: it takes the picture of `node`, and what took that
-    /// picture takes its picture.
+    /// picture takes its picture. After a key mixer, it takes the key of the
+    /// mixer as a gray picture, and what took that key takes its picture.
     Serial,
     /// Before `node`: it takes what came into `node`, and `node` takes its
     /// picture. For a mixer, that is the first input of the mixer.

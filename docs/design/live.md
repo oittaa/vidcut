@@ -481,6 +481,7 @@ The bar and the Jobs button:
   - Each frame, the selection drops the nodes that the grade does not have. When no node stays, the last corrector becomes the current node.
   - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
   - On a mixer, the keys add only a serial node or an appended node, as the menu does.
+  - On a key mixer, the keys add only an appended node. Its menu adds a serial node after it or before it (`Workspace::grade_add_sent`).
   - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
   - A drag from any output to any input links them. A link from a key output sends `key`. The key input of a corrector is input 1 (`KEY_PORT`).
   - A drop of an output on a node links the input of the same kind (`grade_links`). A drop of a key output on a key mixer adds an input.

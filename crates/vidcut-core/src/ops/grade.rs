@@ -816,29 +816,24 @@ pub fn add(
     let mut made = 0;
     edited(p, of, |g| {
         let added = g.last() + 1;
-        let around = |g: &Grade| -> Result<(u32, [f64; 2])> {
+        let around = |g: &Grade| -> Result<(GradeLink, [f64; 2])> {
             let n = n.ok_or_else(|| Error::usage("give `node`, the node it goes beside"))?;
             let d = g.node(n).ok_or_else(|| no_node(n))?;
-            if d.takes_keys() {
-                return Err(Error::invalid(format!(
-                    "key mixer {n} gives out no picture"
-                )));
-            }
-            Ok((n, d.place))
+            let key = d.takes_keys();
+            Ok((GradeLink { node: n, key }, d.place))
         };
         let below = g.nodes.iter().map(|d| d.place[1] + 1.0).fold(0.0, f64::max);
         made = match kind {
             GradeAdd::Serial => {
-                let (n, [x, y]) = around(g)?;
+                let (from, [x, y]) = around(g)?;
                 shifted(g, x + 1.0);
-                let (from, to) = (GradeLink::picture(n), GradeLink::picture(added));
                 g.nodes
                     .push(GradeNode::corrector(Some(from), [x + 1.0, y], frame));
-                retake(g, from, Some(to), added);
+                retake(g, from, Some(GradeLink::picture(added)), added);
                 added
             }
             GradeAdd::Before => {
-                let (n, [x, y]) = around(g)?;
+                let (GradeLink { node: n, .. }, [x, y]) = around(g)?;
                 let input = node(g, n)?.inputs.first().copied().flatten();
                 shifted(g, x);
                 g.nodes.push(GradeNode::corrector(input, [x, y], frame));
@@ -848,8 +843,8 @@ pub fn add(
                 added
             }
             GradeAdd::Parallel | GradeAdd::Layer => {
-                let (n, _) = around(g)?;
-                beside(g, n, kind, frame)?
+                let (from, _) = around(g)?;
+                beside(g, from.node, kind, frame)?
             }
             GradeAdd::Append => {
                 let at = match g.output.and_then(|o| g.node(o.node)) {
@@ -869,7 +864,7 @@ pub fn add(
                 added
             }
             GradeAdd::Outside => {
-                let (n, [x, y]) = around(g)?;
+                let (GradeLink { node: n, .. }, [x, y]) = around(g)?;
                 values(node(g, n)?, n)?;
                 shifted(g, x + 1.0);
                 let (from, to) = (GradeLink::picture(n), GradeLink::picture(added));
