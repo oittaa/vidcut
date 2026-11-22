@@ -6,8 +6,7 @@ The compositions of vidcut get a Text+ tool and a Merge tool ([spec §8.19](../s
 
 **Why:**
 
-- Resolve's Text+ title and its Fusion titles are Fusion compositions with text tools (p. 1178). vidcut does not have them ([deviation X53](../deviations.md#x53-titles-are-text-the-three-lower-thirds-and-scroll-styled-by-markup)).
-- The compositions of vidcut have no text tool and no tool that joins two pictures.
+- Resolve's Text+ title and its Fusion titles are Fusion compositions with text tools (p. 1178).
 
 **What Resolve has:**
 
