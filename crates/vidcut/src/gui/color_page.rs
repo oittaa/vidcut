@@ -1853,9 +1853,10 @@ impl Workspace {
         }
         let coming = page.grade_coming.map(|(n, _)| n);
         let before = page.grade_nodes.len();
+        let last = page.grade_nodes.last().copied();
         page.grade_nodes
             .retain(|n| g.node(*n).is_some() || Some(*n) == coming);
-        if page.grade_nodes.len() != before || page.grade_nodes.len() < 2 {
+        if page.grade_nodes.last().copied() != last || page.grade_nodes.len() < 2 {
             page.grade_loose = false;
         }
         if page.grade_nodes.is_empty() && before > 0 {
@@ -1966,7 +1967,7 @@ impl Workspace {
             self.delete_grade_nodes(&of, &g, &picked);
         }
         if struck(Action::SwitchSelectedNodes) {
-            let picked = self.effects_page.grade_nodes.clone();
+            let picked = self.effects_page.picked_grade().to_vec();
             let label = "Enable/Disable Selected Nodes";
             self.switch_grade_nodes(&of, &g, Some(&picked), label);
         }
@@ -1996,7 +1997,7 @@ impl Workspace {
             .map(|(d, n)| (n, d.on))
             .collect();
         let to = match picked {
-            Some(_) => match self.current_grade_node(g).and_then(|n| g.node(n)) {
+            Some(p) => match p.last().and_then(|n| g.node(*n)) {
                 Some(d) => !d.on,
                 None => return,
             },
@@ -2273,9 +2274,10 @@ impl Workspace {
             GradeOf::Clip(id) => format!("grade-node-{id}"),
             GradeOf::Timeline => "grade-node-timeline".to_string(),
         };
-        let selected: Vec<Port> = (self.effects_page.grade_nodes.iter())
+        let selected: Vec<Port> = (self.effects_page.picked_grade().iter())
             .map(|n| Port::Node(*n))
             .collect();
+        let current = self.effects_page.grade_nodes.last().map(|n| Port::Node(*n));
         let graph = Graph {
             salt,
             tiles: tiles(
@@ -2284,6 +2286,7 @@ impl Workspace {
             ),
             wires: wires(&stored),
             selected: &selected,
+            current: current.as_ref(),
             active: CURRENT,
         };
         let mut node_act: Option<(NodeAct, u32)> = None;

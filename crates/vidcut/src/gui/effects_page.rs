@@ -1997,6 +1997,7 @@ impl Workspace {
             tiles: comp.nodes.iter().map(tile).collect(),
             wires: joins(&comp),
             selected: &self.effects_page.nodes,
+            current: self.effects_page.nodes.last(),
             active: theme::colors().accent,
         };
         let done = node_editor::show(

@@ -446,6 +446,7 @@ The bar and the Jobs button:
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
   - `EffectsPage::grade_nodes` holds the selection, and `gui.grade_nodes` sets it. The last one is the current node.
   - With `EffectsPage::grade_loose`, the current node is not selected (`EffectsPage::picked_grade`). A drag box that leaves out the current node sets it.
+  - Thus `Graph` takes the selected nodes and the current node apart (`Graph::current`). Delete, Ctrl+D and a drag of the selected nodes leave out a current node that is not selected.
   - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
   - In List View, the current row has a red outline (`CURRENT_ROW`). It is the red of the active angle (`ACTIVE_ANGLE`).
   - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.
