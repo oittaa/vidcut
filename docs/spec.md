@@ -3243,16 +3243,30 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: the keys combine as measured. Blur Radius is a Gaussian blur with the measured sigma. A Blur Radius below 0 sharpens as measured.
   - vidcut: a key link from a corrector that is off, an off Key Mixer and the inputs with no link act as measured.
   - vidcut: a Key Mixer with no linked input gives its Key Output of a key of 1.
-  - vidcut: `grade.connect` with `key` links a key output to a key input. `grade.add` with `key_mixer` and `outside` adds the nodes.
+  - vidcut: `grade.connect` with `key` links the key output of a node. Input 1 of a corrector is its key input. `grade.add` with `key_mixer` and `outside` adds the nodes.
   - vidcut: `grade.set` with `key_input_invert`, `key_input_mask`, `key_input_gain`, `key_input_offset`, `key_input_blur` and `key_input_blur_ratio` changes the Key Input.
   - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
   - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
   - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
   - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node, Add One Input and Remove One Input. The Add Node submenu comes later ([todo](todo/color-page.md)).
   - vidcut: Alt+S and Shift+S do nothing on a Key Mixer.
-  - vidcut: a key link is blue. A node cannot drop into a key link.
+  - vidcut: a link from a key output is blue. A node can drop only into a link from an RGB output to an RGB input.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
-  - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
+  - Measured in Resolve Studio 21.2: a link from a key output to an RGB input gives the key as a gray picture. R, G and B are the key.
+  - Measured: a link from an RGB output to a key input gives the Rec. 709 luma, 0.2126 R + 0.7152 G + 0.0722 B. The key input then acts on it as on a key.
+    - With Invert on, a luma of −0.23 gave a key of 1, and a luma of 1.42 gave 0. A luma clamped to 0..1 gives the same keys.
+  - Measured: the corrector grades the gray picture as any picture. An Offset of +0.5 gave the gray plus 0.5.
+  - Measured: the grade file holds the kind of port at each end of a link, RGB or key.
+  - vidcut: a link holds its node and the output that it leaves (`key` of the link). Thus any output can go to any input (p. 3420).
+  - vidcut: a key on an RGB input is a gray picture, and a picture on a key input gives its luma, as measured. The luma has no clamp.
+  - vidcut: a drag links any output to any input. A drop on a node links its input of the same kind as the output.
+  - Not measured: the alpha of the gray picture. vidcut gives it the alpha of the clip, as each picture of the grade has.
+  - Not measured: a key on the Output, on a Parallel Mixer or on a Layer Mixer. vidcut takes it as a gray picture there too.
+    - A Parallel Mixer takes the source as the base of a gray picture.
+  - Not measured: a link from the RGB output of a corrector that is off into a key input. vidcut gives the luma of the picture that it passes on.
+  - Not measured: a delete or an extract of a node with such links. vidcut removes the links from its key output and its links into key inputs.
+  - Not measured: Add Serial, Add Parallel, Add Layer and Add Outside at a node whose RGB output goes into a key input. vidcut moves that link as it moves a link into an RGB input.
+  - Not measured: the look of a link from a key output to an RGB input. vidcut colors each link by the output that it leaves.
   - vidcut: each keyframe of a corrector holds its Key Input. Thus the Key Input has no track of its own ([todo](todo/gaps.md)).
   - vidcut: each keyframe of a Key Mixer holds the values of its inputs and its Key Output. The Keyframes panel has a track for each Key Mixer.
   - vidcut: Gain, Offset, Blur Radius and Blur H/V blend as the values do. Invert, Matte and Mask change on the frame of the next keyframe.

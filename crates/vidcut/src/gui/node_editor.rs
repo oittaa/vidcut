@@ -50,7 +50,6 @@ pub(super) struct Inlet {
     pub(super) slot: usize,
     pub(super) side: Side,
     pub(super) knot: Color32,
-    pub(super) wire: Stroke,
     pub(super) name: String,
 }
 
@@ -96,6 +95,7 @@ pub(super) struct Wire<K> {
     pub(super) to: K,
     pub(super) slot: usize,
     pub(super) drops: bool,
+    pub(super) line: Stroke,
 }
 
 pub(super) struct Graph<'a, K> {
@@ -693,8 +693,7 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
         let i = index_of(&w.to)?;
         let t = &graph.tiles[i];
         let (at, side) = inlet_at(boxes[i], t, w.slot)?;
-        let line = t.inlets.iter().find(|i| i.slot == w.slot)?.wire;
-        Some((at, side, line))
+        Some((at, side, w.line))
     };
     let curve = |w: &Wire<K>| -> Option<[Pos2; 4]> {
         let i = index_of(&w.from)?;

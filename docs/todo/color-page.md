@@ -38,7 +38,6 @@ The Color page shows the grade of the clip at the playhead or of the timeline. I
 - The windows ([spec §8.23](../spec.md#823-windows-pp-32653279)):
   - Shift and a drag box select points of a curve, to move, delete or scale them together (p. 3274).
 - Switch to Node Layer in the Nodes submenu, with the Node Stack Layers (pp. 3400–3401). Add Splitter Combiner Node (Option-Y, p. 3441).
-- Links from a key output to an RGB input, and from an RGB output to a key input (p. 3420).
 - The Qualifier controls of the Key palette (p. 3436).
 - Measure in Resolve, then match:
   - The keys of the nodes ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)):

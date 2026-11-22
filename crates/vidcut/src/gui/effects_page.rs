@@ -363,6 +363,10 @@ fn slot(which: NodeInput) -> usize {
 }
 
 fn joins(comp: &Composition) -> Vec<Wire<String>> {
+    let line = |which| match which {
+        NodeInput::Input => Stroke::new(1.5, theme::colors().text_dim),
+        NodeInput::EffectMask => Stroke::new(1.5, MASK_KNOT),
+    };
     let mut out = Vec::new();
     for n in &comp.nodes {
         for which in [NodeInput::Input, NodeInput::EffectMask] {
@@ -373,6 +377,7 @@ fn joins(comp: &Composition) -> Vec<Wire<String>> {
                     from,
                     out: 0,
                     drops: true,
+                    line: line(which),
                 });
             }
         }
@@ -381,14 +386,12 @@ fn joins(comp: &Composition) -> Vec<Wire<String>> {
 }
 
 fn tile(n: &Node) -> Tile<String> {
-    let c = theme::colors();
     let mut inlets = Vec::new();
     if n.tool.takes_input() {
         inlets.push(Inlet {
             slot: slot(NodeInput::Input),
             side: Side::Left,
             knot: PICTURE_KNOT,
-            wire: Stroke::new(1.5, c.text_dim),
             name: "Input".into(),
         });
     }
@@ -397,7 +400,6 @@ fn tile(n: &Node) -> Tile<String> {
             slot: slot(NodeInput::EffectMask),
             side: Side::Top,
             knot: MASK_KNOT,
-            wire: Stroke::new(1.5, MASK_KNOT),
             name: "Effect Mask".into(),
         });
     }

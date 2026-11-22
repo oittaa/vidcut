@@ -107,6 +107,8 @@ pub(super) struct Pipes {
     window_key: wgpu::RenderPipeline,
     window_curves: wgpu::RenderPipeline,
     key_fold: wgpu::RenderPipeline,
+    key_luma: wgpu::RenderPipeline,
+    key_gray: wgpu::RenderPipeline,
     shot: wgpu::RenderPipeline,
 }
 
@@ -207,6 +209,8 @@ impl Pipes {
             window_key: pipeline(&of(&reading), "fs_window_key"),
             window_curves: pipeline(&of(&reading), "fs_window_curves"),
             key_fold: pipeline(&plain, "fs_key_fold"),
+            key_luma: pipeline(&plain, "fs_key_luma"),
+            key_gray: pipeline(&plain, "fs_key_gray"),
             shot: pipeline(&plain, "fs_shot"),
             layout,
             reading,
@@ -1618,6 +1622,20 @@ fn pass_into(
             (&scratch[0], [MIX_SHARPEN, 0.0, 1.0], None),
             encoder,
         ),
+        GradePass::Luma { from, to } => draw_step(
+            gpu,
+            (&gpu.blur.key_luma, &float_bytes(&[0.0; 4])[..]),
+            Views::same(&at[*from].view),
+            &at[*to].view,
+            encoder,
+        ),
+        GradePass::Gray { key, alpha, to } => {
+            let (k, map) = key_parts(key, at);
+            let bytes = float_bytes(&[k, flag(map.is_some()), 0.0, 0.0]);
+            let views = Views::with(map.unwrap_or(&at[*alpha].view), &at[*alpha].view);
+            let step = (&gpu.blur.key_gray, &bytes[..]);
+            draw_step(gpu, step, views, &at[*to].view, encoder);
+        }
         GradePass::Copy { from, to } => encoder.copy_texture_to_texture(
             at[*from].texture.as_image_copy(),
             at[*to].texture.as_image_copy(),

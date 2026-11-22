@@ -2952,12 +2952,14 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         extract: bool,
     },
-    /// Join the picture of node `from` (0: the picture that comes into the
+    /// Join an output of node `from` (0: the picture that comes into the
     /// grade) to an input of `node` (0: the output of the grade), in place of
-    /// what was there. Without `from`, the input takes nothing. On a mixer,
-    /// an `input` one past the last, or no `input`, adds an input. With
-    /// `key`, the key of `from` joins the key input of a corrector or an
-    /// input of a key mixer. A link that makes a loop is an error.
+    /// what was there. Without `from`, the input takes nothing. Input 0 of a
+    /// corrector is its RGB input, and input 1 is its key input. On a mixer,
+    /// an `input` one past the last, or no `input`, adds an input. The
+    /// inputs of a key mixer are key inputs. A key on an RGB input is a gray
+    /// picture: R, G and B are the key. A picture on a key input gives its
+    /// Rec. 709 luma as the key. A link that makes a loop is an error.
     #[serde(rename = "grade.connect")]
     GradeConnect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2966,12 +2968,14 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
         node: u32,
-        /// The input of `node`, from 0. A corrector has input 0 only.
+        /// The input of `node`, from 0. Left out: input 0 of a corrector or
+        /// of the output, and a new input of a mixer.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<u32>,
-        /// Join a key, not a picture.
+        /// The link leaves the key output of `from`, not its RGB output.
+        /// Needs `from`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         key: bool,
     },

@@ -452,7 +452,8 @@ The bar and the Jobs button:
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
   - A corrector has an RGB input and a key input at its left (`Inlet`). It has an RGB output and a key output at its right (`Outlet`).
   - A key mixer has a key input for each input, and a key output.
-  - The key ports and the key links are blue (`MASK_KNOT`). A link knows the outlet that it leaves (`Wire::out`).
+  - The key ports are blue (`MASK_KNOT`). A link knows the outlet that it leaves (`Wire::out`).
+  - Each link has its own line (`Wire::line`). On the Color page, a link from a key output is blue. On the Effects page, a link into a mask input is blue.
   - `EffectsPage::grade_nodes` holds the selection, and `gui.grade_nodes` sets it. The last one is the current node.
   - With `EffectsPage::grade_loose`, the current node is not selected (`EffectsPage::picked_grade`). A drag box that leaves out the current node sets it.
   - Thus `Graph` takes the selected nodes and the current node apart (`Graph::current`). Delete and a drag of the selected nodes leave out a current node that is not selected. Ctrl+D acts on it too.
@@ -481,9 +482,9 @@ The bar and the Jobs button:
   - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
   - On a mixer, the keys add only a serial node or an appended node, as the menu does.
   - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
-  - A link between a key output and a key input sends `key`. A link from a key output to an RGB input, or the reverse, does nothing.
-  - A drop of a key output on a corrector links its key input. A drop on a key mixer adds an input.
-  - A node can drop only into a link with `Wire::drops`. A key link has none.
+  - A drag from any output to any input links them. A link from a key output sends `key`. The key input of a corrector is input 1 (`KEY_PORT`).
+  - A drop of an output on a node links the input of the same kind (`grade_links`). A drop of a key output on a key mixer adds an input.
+  - A node can drop only into a link with `Wire::drops`: a link from an RGB output to an RGB input.
   - `gui.node_view` asks a zoom of the shown Node Editor (`NodeView::ask`). The editor does it on its next frame, with its own size (`zoomed`).
   - Cleanup Node Graph sends `grade.cleanup` with the `area` that the editor shows, less a margin and the size of a node (`NodeView::area`). The zoom stays.
   - `NodeView` keeps the rectangle of its last frame for the area. Only the graph view has the menu with Cleanup Node Graph.

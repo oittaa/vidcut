@@ -750,14 +750,18 @@ The draw:
 The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 
 - A grade is a list of nodes (`GradeNode`). Each node is a corrector (`model::Corrector`) or a mixer (`GradeTool`).
-  - Each node names the nodes on its inputs by number. The number 0 is the picture that comes in. `Grade::output` names the node that goes out.
+  - Each input holds a link (`GradeLink`): the number of a node and the output that the link leaves, RGB or key. The number 0 is the picture that comes in.
+  - `Grade::output` is the link that goes out.
+  - Why: a key output can go to an RGB input, and an RGB output to a key input. The place of a link gives only the kind of its input.
   - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
+  - It also refuses a key from a node with no key output, and a picture from a key mixer (`gives`).
   - It also refuses a corrector without one input and a mixer without an input.
   - `ops::grade` changes the tree for `grade.add`, `grade.remove`, `grade.connect` and `grade.input.remove`. A removed node gives each node after it one number less (`renumbered`).
   - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
   - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
+  - A removed or extracted node loses the links from its key output, and the links from its RGB output to key inputs (`unkeyed`). The other links that took its picture move (`retake`).
 - `Placing::new` adds the grade after the effects of the clip, as the last `place::Working` (`Work::Grade`).
   - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).
   - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
@@ -773,7 +777,15 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A corrector with no window that is on has one key for all pixels (`Key::Flat`, `KeyOutput::of`). It is from 0 to 1.
   - A corrector with a window that is on gets a `Key` pass first. It draws the key of the windows into a texture (`Key::Map`). The `Correct`, `Layer` and tap passes of the corrector read it.
   - The key texture comes from the same `Registers` as the pictures. It is free again after its last use (`Registers::used`).
-  - A corrector takes the key of another node on its key input (`GradeNode::key_from`). A key mixer takes keys on its inputs. `GradeNode::links` gives both kinds of link to `grade::order`.
+  - A corrector takes a link on its key input (`GradeNode::key_from`). A key mixer takes links on its key inputs. `GradeNode::links` gives each link to `grade::order`.
+  - The plan has a picture slot and a key slot for each node and for the source (`picture_of`, `key_of`). A link between an RGB port and a key port reads a second slot.
+    - The key of node v as a picture is in picture slot v plus the slot count. A `Gray` pass makes it with `fs_key_gray`: R, G and B are the key.
+    - The gray picture takes the alpha of the source texture. Why: each picture of the grade has the alpha of the clip.
+    - The picture of node v as a key is in key slot v plus the slot count. A `Luma` pass makes it with `fs_key_luma`, from the colors without their alpha (`grade_luma`).
+    - `converted` adds these passes after node v, only when a node reads them. `Uses::all` counts the readers of a gray picture, and `Uses::counts` the readers of a luma key.
+    - The stages after them read the slot as any picture or key. Thus no stage looks at the kind of the link on its input.
+    - A gray picture reads the source for its alpha. Thus the source stays until the last `Gray` pass.
+    - `grade::passed` takes a gray picture as a picture from the source. A Parallel Mixer with a gray picture on an input thus has the source as its base.
   - `key_steps` gives the steps of the key of a node. Each step folds one key into the key so far (`KeyFold`, `key_join`), in the order of the spec ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
     - A corrector folds the key of its windows first, then the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
     - The last step clamps the key and applies the Key Output.
@@ -781,10 +793,11 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A `KeyFold` pass folds a texture key with `fs_key_fold`. A node with windows and no key input keeps its one `Key` pass.
   - A key on a key input with a Blur Radius other than 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
     - A Blur Radius below 0 then adds a `KeySharpen` pass. It gives twice the key minus its blur, as measured (spec §8.21).
-  - `cut_off` tells if a corrector takes its key input from a corrector that is off. Its key is then 0, and it reads no key from its links.
-  - A Key Mixer skips an input from a corrector that is off, as an input with no link (`switched_off`).
+  - `cut_off` tells if a corrector takes its key input from the key output of a corrector that is off. Its key is then 0, and it reads no key from its links.
+  - A Key Mixer skips an input from the key output of a corrector that is off, as an input with no link (`switched_off`).
   - `Uses::counts` counts the readers of each key, from the last node back. A node counts its own key only when it is on and needs it. Only then do the keys on its links count.
   - Why: each key texture is then free after its last reader, and a key that nothing reads costs no pass.
+  - The same walk adds the reads of a picture that a luma key or a second texture (`Uses::twice`) needs. Each node then has all its readers before the walk comes to it.
   - A key mixer makes no picture. `grade::passed` and the counts of the pictures skip it.
   - A corrector whose picture no node reads gives only its key. It gets no `Correct` pass, except in `Graded::tapped`, where its thumbnail shows its picture.
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
