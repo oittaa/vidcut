@@ -789,6 +789,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A key on a key input with a Blur Radius other than 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
     - A Blur Radius below 0 then adds a `KeySharpen` pass. It gives twice the key minus its blur, as measured (spec §8.21).
   - `cut_off` tells if a corrector takes its key input from a corrector that is off. Its key is then 0, and it reads no key from its links.
+  - A Key Mixer skips an input from a corrector that is off, as an input with no link (`switched_off`).
   - `Uses::counts` counts the readers of each key, from the last node back. A node counts its own key only when it is on and needs it. Only then do the keys on its links count.
   - Why: each key texture is then free after its last reader, and a key that nothing reads costs no pass.
   - A key mixer makes no picture. `grade::passed` and the counts of the pictures skip it.

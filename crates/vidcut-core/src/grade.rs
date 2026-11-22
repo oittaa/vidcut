@@ -529,7 +529,7 @@ enum KeySource {
     Node(u32),
 }
 
-fn key_steps(node: &GradeNode) -> Vec<(KeySource, KeyFold)> {
+fn key_steps(node: &GradeNode, off: &[bool]) -> Vec<(KeySource, KeyFold)> {
     let fold = |(gain, offset, invert), matte| KeyFold {
         gain,
         offset,
@@ -552,7 +552,8 @@ fn key_steps(node: &GradeNode) -> Vec<(KeySource, KeyFold)> {
             (steps, true)
         }
         GradeTool::KeyMixer { mix } => {
-            let linked = (node.inputs.iter().zip(mix)).filter_map(|(v, m)| v.map(|v| (v, *m)));
+            let linked = (node.inputs.iter().zip(mix))
+                .filter_map(|(v, m)| v.filter(|v| !is_off(off, *v)).map(|v| (v, *m)));
             let (mattes, masks): (Vec<_>, Vec<_>) = linked.partition(|(_, m)| m.matte);
             let steps = (masks.into_iter().chain(mattes))
                 .map(|(v, m)| {
@@ -572,15 +573,26 @@ fn key_steps(node: &GradeNode) -> Vec<(KeySource, KeyFold)> {
     steps
 }
 
-fn cut_off(g: &Grade, node: &GradeNode) -> bool {
-    let corrector = |d: &GradeNode| matches!(d.tool, GradeTool::Corrector(_));
-    let off = |v: u32| g.node(v).is_some_and(|d| !d.on && corrector(d));
-    corrector(node) && node.key_from.is_some_and(off)
+fn switched_off(g: &Grade) -> Vec<bool> {
+    let off = |d: &GradeNode| !d.on && matches!(d.tool, GradeTool::Corrector(_));
+    std::iter::once(false)
+        .chain(g.nodes.iter().map(off))
+        .collect()
 }
 
-fn key_sources(node: &GradeNode) -> impl Iterator<Item = u32> + '_ {
+fn is_off(off: &[bool], v: u32) -> bool {
+    off.get(v as usize).copied().unwrap_or(false)
+}
+
+fn cut_off(node: &GradeNode, off: &[bool]) -> bool {
+    let corrector = matches!(node.tool, GradeTool::Corrector(_));
+    corrector && node.key_from.is_some_and(|v| is_off(off, v))
+}
+
+fn key_sources<'a>(node: &'a GradeNode, off: &'a [bool]) -> impl Iterator<Item = u32> + 'a {
     let mixed = node.inputs.iter().flatten().filter(|_| node.takes_keys());
-    mixed.copied().chain(node.key_from)
+    let mixed = mixed.copied().filter(|v| !is_off(off, *v));
+    mixed.chain(node.key_from)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -589,8 +601,8 @@ enum Shape {
     Map,
 }
 
-fn shape_of(node: &GradeNode, shapes: &[Shape]) -> Shape {
-    let steps = key_steps(node);
+fn shape_of(node: &GradeNode, shapes: &[Shape], off: &[bool]) -> Shape {
+    let steps = key_steps(node, off);
     if steps.is_empty() {
         return Shape::Flat(node.key.of(1.0));
     }
@@ -809,6 +821,7 @@ struct Uses {
     keys: Vec<Key>,
     shapes: Vec<Shape>,
     counts: Vec<usize>,
+    off: Vec<bool>,
     tapped: bool,
 }
 
@@ -872,7 +885,7 @@ impl Uses {
         r: &mut Registers,
         passes: &mut Vec<Pass>,
     ) -> Option<Key> {
-        let steps = key_steps(node);
+        let steps = key_steps(node, &self.off);
         if let [(KeySource::Windows, _)] = steps[..] {
             let to = r.kept(count);
             let keying = Box::new(Keying::of(node)?);
@@ -1044,12 +1057,13 @@ impl Graded {
 
     fn uses(g: &Grade, (order, through): (&[u32], &[Vec<u32>]), tapped: bool) -> Option<Uses> {
         let count = g.nodes.len() + 1;
+        let off = switched_off(g);
         let mut shapes = vec![Shape::Flat(1.0); count];
         for &k in order {
             let node = g.node(k)?;
-            shapes[k as usize] = match cut_off(g, node) {
+            shapes[k as usize] = match cut_off(node, &off) {
                 true => Shape::Flat(0.0),
-                false => shape_of(node, &shapes),
+                false => shape_of(node, &shapes, &off),
             };
         }
         let mut uses = Uses {
@@ -1059,6 +1073,7 @@ impl Graded {
             keys: vec![Key::Flat(1.0); count],
             shapes,
             counts: vec![0; count],
+            off,
             tapped,
         };
         for &k in order {
@@ -1092,8 +1107,8 @@ impl Graded {
             let node = g.node(k)?;
             let k = k as usize;
             uses.counts[k] += uses.own(node, k);
-            if uses.counts[k] > 0 && !cut_off(g, node) {
-                for v in key_sources(node) {
+            if uses.counts[k] > 0 && !cut_off(node, &uses.off) {
+                for v in key_sources(node, &uses.off) {
                     uses.counts[v as usize] += 1;
                 }
             }
