@@ -5370,7 +5370,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - On a 1000 x 562 picture, Crop Top 1 is 0.78 of a source pixel, and it cuts nothing.
       - The rule is the same with Zoom, Rotation and Softness.
       - A crop with keyframes, pixels that are not square and a rotation in the file were not measured. vidcut uses the same rule, in the pixels of the upright file.
-      - A compound clip was not measured. vidcut counts its crop in pixels of the frame.
+      - The crop of a compound clip (measured in Resolve Studio 21.2, in timelines 1280, 1920 and 3840 wide):
+        - It can hold one clip with no change of place, size or crop. Then its crop is a crop of that clip, in that clip's source pixels.
+        - A 960 x 720 picture in a 1280 x 720 timeline starts at x = 160. Crop Left 10 on the compound clip moves that edge to x = 167. Crop Left 40 moves it to x = 190.
+        - The opacity of the clip inside does not change this.
+        - In all other cases, the crop cuts the frame of the compound clip in whole pixels of the timeline.
+        - Tilt 1, Zoom 1.1 or a crop on the clip inside gives this. A second clip over it inside gives this too.
+        - **vidcut:** a flip, a turn, pitch, yaw, a Dynamic Zoom, a Push or a Slide inside is also a change of place.
   - **Over the tracks below:**
     - A clip covers the tracks below it only where its picture covers the frame, at its usual values too.
     - The tracks below show in the bars around a picture of another shape, outside a placed picture, and where it is cropped.
