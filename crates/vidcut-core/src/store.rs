@@ -329,6 +329,7 @@ fn files(project: &mut Project) -> Vec<&mut PathBuf> {
         out.push(&mut m.path);
         out.extend(m.input_lut.as_mut());
     }
+    out.extend(settings.input_lut.as_mut());
     out.extend(settings.output_lut.as_mut());
     out
 }

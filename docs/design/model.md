@@ -268,7 +268,7 @@ Media fields:
   - `Media::video_as_read` is the `VideoInfo` of the file, read in that space. Render pieces carry it.
   - `VideoReader` retags each decoded frame with it (`color::retag`). This drops the HDR side data.
   - A proxy is made from the pictures as read in that space. Thus its own tags are right.
-- `input_lut` is the `.cube` file that the pictures of each clip of the media go through (spec §3, [the LUT files](README.md#lut-files)).
+- `input_lut` is the `.cube` file that the pictures of each clip of the media go through (spec §3, [the LUT files](README.md#lut-files)). It replaces the `input_lut` of the settings.
 - `alpha_mode` (`AlphaMode`, spec §3) tells how to read the alpha channel of the pictures.
   - `VideoPiece::Source` carries it. `Picture::alpha_mode` gives it to the draw ([playback](playback.md#gpu-pictures)).
   - `Media::opaque` is true for a picture with no alpha channel, or with the mode None.
@@ -409,7 +409,7 @@ Ranges and resolution:
 
 - `Store` reads and writes the `Project` as pretty JSON (serde).
 - A media path in or under the folder of the project is stored relative to it. Other paths are stored absolute. In memory, media paths are absolute.
-  - The same rule holds for the `input_lut` of a media item and the `output_lut` of the settings.
+  - The same rule holds for the `input_lut` of a media item, and the `input_lut` and the `output_lut` of the settings.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-a-project-is-one-file-and-its-media-paths-are-relative)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
 - A save writes a temporary file and renames it over the project (`temp::write`). Thus readers see the old file or the new one, never part of one.
@@ -750,7 +750,7 @@ flowchart LR
 
 - A bundle holds `content.otio`, `version.txt` in a zip, and the media used under `media`, as the adapters of OpenTimelineIO lay them out.
 - The media used include the media that compound clips play (`otio::used_media`). They are whole and uncompressed.
-- A bundle holds no LUT file. The `input_lut` and the `output_lut` keep their paths.
+- A bundle holds no LUT file. Each `input_lut` and the `output_lut` keep their paths.
 - In a file name under `media`, `_` replaces each character that some file systems refuse. An image sequence keeps one name pattern, in its files and in the timeline text.
 - In the kept `Stack` of a compound clip, a reference to a file that the compound clips play also points into `media` (`otio::same_media`). Other references keep their URLs.
 - `bundle::open` unpacks an `.otioz` into a folder named after it, or into `unpack`. It keeps files whose CRC-32 matches.

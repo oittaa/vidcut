@@ -38,8 +38,24 @@ pub(super) struct Format {
     auto: Option<Hdr>,
     retime: ProjectRetime,
     upscaler: ProjectUpscaler,
+    input_lut: Option<PathBuf>,
     output_lut: Option<PathBuf>,
     dynamics: DynamicsProfile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LutRow {
+    Input,
+    Output,
+}
+
+impl LutRow {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Input => "Input LUT",
+            Self::Output => "Output LUT",
+        }
+    }
 }
 
 impl Default for Format {
@@ -54,6 +70,7 @@ impl Default for Format {
             auto: None,
             retime: ProjectRetime::Auto,
             upscaler: ProjectUpscaler::Auto,
+            input_lut: None,
             output_lut: None,
             dynamics: DynamicsProfile::default(),
         }
@@ -88,6 +105,7 @@ impl Format {
             auto: vidcut_core::render::auto_colors(p),
             retime: p.settings.retime,
             upscaler: p.settings.upscaler,
+            input_lut: p.settings.input_lut.clone(),
             output_lut: p.settings.output_lut.clone(),
             dynamics: p.settings.dynamics_profile,
         }
@@ -217,7 +235,14 @@ impl Format {
         }
     }
 
-    pub(super) fn edit_colors(&mut self, ui: &mut egui::Ui, choose: Option<&mut bool>) {
+    fn lut_mut(&mut self, row: LutRow) -> &mut Option<PathBuf> {
+        match row {
+            LutRow::Input => &mut self.input_lut,
+            LutRow::Output => &mut self.output_lut,
+        }
+    }
+
+    pub(super) fn edit_colors(&mut self, ui: &mut egui::Ui, choose: Option<&mut Option<LutRow>>) {
         egui::Grid::new(ui.scope_id().with("colors"))
             .num_columns(2)
             .spacing([12.0, 8.0])
@@ -242,19 +267,20 @@ impl Format {
                 let Some(choose) = choose else {
                     return;
                 };
-                let label = ui.label("Output LUT");
-                ui.horizontal(|ui| {
-                    *choose = ui.button("Choose…").labelled_by(label.id).clicked();
-                    let name = self
-                        .output_lut
-                        .as_deref()
-                        .map_or("None".to_string(), file_name);
-                    ui.label(name);
-                    if self.output_lut.is_some() && ui.button("Clear").clicked() {
-                        self.output_lut = None;
-                    }
-                });
-                ui.end_row();
+                for row in [LutRow::Input, LutRow::Output] {
+                    let label = ui.label(row.name());
+                    ui.horizontal(|ui| {
+                        if ui.button("Choose…").labelled_by(label.id).clicked() {
+                            *choose = Some(row);
+                        }
+                        let path = self.lut_mut(row);
+                        ui.label(path.as_deref().map_or("None".to_string(), file_name));
+                        if path.is_some() && ui.button("Clear").clicked() {
+                            *path = None;
+                        }
+                    });
+                    ui.end_row();
+                }
             });
     }
 
@@ -493,7 +519,7 @@ enum OpenOtio {
 pub(super) struct ProjectUi {
     new: Option<NewProject>,
     settings: Option<(Format, Format)>,
-    lut_pick: Option<Picked>,
+    lut_pick: Option<(LutRow, Picked)>,
     pub(super) found: Found,
     otio: Option<OpenOtio>,
 }
@@ -718,11 +744,11 @@ impl Workspace {
         let Some((mut format, was)) = self.project_ui.settings.take() else {
             return;
         };
-        if let Some(picked) = self.project_ui.lut_pick.take() {
+        if let Some((row, picked)) = self.project_ui.lut_pick.take() {
             match picked.take() {
-                None => self.project_ui.lut_pick = Some(picked),
+                None => self.project_ui.lut_pick = Some((row, picked)),
                 Some(None) => {}
-                Some(path) => format.output_lut = path,
+                Some(path) => *format.lut_mut(row) = path,
             }
         }
         let Some(p) = self.project() else {
@@ -732,7 +758,7 @@ impl Workspace {
         let mut open = true;
         let mut cancel = false;
         let mut apply = None;
-        let mut choose = false;
+        let mut choose = None;
         egui::Window::new("Project Settings")
             .collapsible(false)
             .resizable(false)
@@ -756,14 +782,15 @@ impl Workspace {
                     }
                 });
             });
-        if choose {
+        if let Some(row) = choose {
             let (dialogs, folder) = (
                 self.dialogs.clone(),
-                self.lut_folder(format.output_lut.as_deref()),
+                self.lut_folder(format.lut_mut(row).as_deref()),
             );
-            self.project_ui.lut_pick = Some(Picked::ask(ctx, move || {
-                dialogs.pick_file("Output LUT", &folder, &["cube"])
-            }));
+            let picked = Picked::ask(ctx, move || {
+                dialogs.pick_file(row.name(), &folder, &["cube"])
+            });
+            self.project_ui.lut_pick = Some((row, picked));
         }
         if let Some(changes) = apply {
             self.send_asking("project.set", changes);
@@ -793,6 +820,10 @@ fn changes(now: &Format, was: &Format) -> Value {
     }
     if now.upscaler != was.upscaler {
         set.insert("upscaler".into(), json!(now.upscaler));
+    }
+    if now.input_lut != was.input_lut {
+        let path = now.input_lut.clone().unwrap_or_default();
+        set.insert("input_lut".into(), json!(path));
     }
     if now.output_lut != was.output_lut {
         let path = now.output_lut.clone().unwrap_or_default();

@@ -529,6 +529,7 @@ The bar and the Jobs button:
 - On the Color page, Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the grade (`Workspace::grade_key_cmd`). `Workspace::grade_key_cmd_why` gives the next step.
   - Mark > Make Static Keyframe is on the Color page only (`Workspace::static_key_item`). Its key is `Action::AddStaticKeyframe`.
 - The Dynamics Profile row of the Project Settings window sends `project.set` with `dynamics_profile`.
+- The Input LUT and Output LUT rows of the Project Settings window (`LutRow`) send `project.set` with `input_lut` and `output_lut`. Choose… opens a file picker, and Clear sends an empty path.
 
 **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`).
 

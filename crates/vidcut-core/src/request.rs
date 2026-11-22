@@ -6045,6 +6045,14 @@ pub struct ProjectSet {
     /// the parts that are slow to make in the background, for the viewer.
     #[serde(default)]
     pub render_cache: Option<crate::model::RenderCache>,
+    /// Input LUT: a `.cube` file that the pictures of each clip go through
+    /// just after their conversion into the timeline color space, in the
+    /// viewer and in each export. A media item's own input LUT replaces it on
+    /// that media's clips. Gaps, generators and titles do not get it. A file
+    /// that can't be read is refused, with the reason. An empty path clears
+    /// it.
+    #[serde(default)]
+    pub input_lut: Option<PathBuf>,
     /// Output LUT: a `.cube` file that the whole timeline goes through after
     /// its subtitles, before each output's colors, in the viewer and in each
     /// export. A file that can't be read is refused, with the reason. An
@@ -7195,8 +7203,9 @@ impl Request {
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect(),
             Self::ProjectSet(set) => set
-                .output_lut
+                .input_lut
                 .iter_mut()
+                .chain(set.output_lut.iter_mut())
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect(),
             _ => Vec::new(),

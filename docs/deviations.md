@@ -1249,13 +1249,15 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - A wrapped line loses no letters.
 
-## X139. One Input LUT submenu takes any `.cube` file
+## X139. A file picker takes any `.cube` file in place of the LUT menus
 
 - **Resolve:**
   - A right-click on Media Pool clips gives the 1D LUT and 3D LUT submenus. The user selects a LUT there (p. 3480).
   - The submenus list the LUT files in the LUT folders that the preferences name (p. 3480).
+  - The Lookup Tables of the Project Settings have an Input Lookup Table and an Output Lookup Table (p. 152). Each has a 1D menu and a 3D menu.
 - **vidcut:**
   - The right-click menu of the pool has one Input LUT submenu, with Choose… and Reset.
+  - The Project Settings window has an Input LUT row and an Output LUT row, each with Choose… and Clear.
   - Choose… opens a file picker for any `.cube` file.
 - **Why:**
   - The picture is the same.

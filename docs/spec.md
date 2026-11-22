@@ -33,7 +33,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - compound clips (§8.18)
 - adjustment clips (§8.24)
 - compositions of nodes on the Effects page: Blur, the six effects, and Ellipse, Rectangle and Polygon masks (§8.19)
-- the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
+- the input LUT of a media item and of the project, and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
 **Later (later):**
@@ -394,9 +394,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - `media.get` shows them. The metadata strip shows the scene, the shot and the take.
   - vidcut does not read Date Created from a file. No measurement shows which time or tag gives it.
 - **Input LUT** (p. 3480, and [§13](#the-lut-tables)):
-  - A media item with pictures has an Input LUT (`input_lut`). Each of its clips on the timeline gets it.
+  - A media item with pictures has an Input LUT (`input_lut`). Each of its clips on the timeline gets it in place of the Input LUT of the project.
   - The Input LUT submenu of the pool's right-click menu and the LUT section of the Inspector set it.
-  - The submenu has a file picker in place of the 1D LUT and 3D LUT submenus ([deviation X139](deviations.md#x139-one-input-lut-submenu-takes-any-cube-file)).
+  - The submenu has a file picker in place of the 1D LUT and 3D LUT submenus ([deviation X139](deviations.md#x139-a-file-picker-takes-any-cube-file-in-place-of-the-lut-menus)).
   - `media.set` sets it on one or more items. An empty path clears it. `media.get` shows it.
   - A generator, a title and a compound clip have no media item. Thus they have no Input LUT.
 - **Multicam layout** (p. 1037):
@@ -6320,9 +6320,12 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - On a compound clip, it applies once, to the clip inside. It does not apply again to the compound clip.
   - A clip inside at Zoom 0.5 gets it. The uncovered part of the compound clip stays black, not `T(0)`.
 - In a timeline with its own settings, the Lookup Tables section of the settings shows a warning. The LUT still applies there.
+  - vidcut applies it there too. The Timeline Settings window of vidcut has no LUT rows, so it shows no warning.
 - A picture with alpha gives `T(clamp(C / A)) * A`, and each layer gets its own `T` before the mix.
 - The Input LUT of a clip replaces it on that clip.
-- vidcut has no Input LUT of the project yet ([todo](todo/luts.md)).
+- vidcut does the same. Each clip of a media item with no `input_lut` gets the `input_lut` of the project in the render plan.
+  - `project.set` with `input_lut` sets it, and an empty path clears it.
+  - The Input LUT row of the Project Settings window sends that request. It has a file picker in place of the 1D and 3D menus (p. 152, [X139](deviations.md#x139-a-file-picker-takes-any-cube-file-in-place-of-the-lut-menus)).
 
 **The Output LUT of the project**, measured in Resolve Studio 21.2:
 

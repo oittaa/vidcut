@@ -2,7 +2,7 @@
 
 **When:** not decided.
 
-vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../design/README.md#picture-order)). It has no display LUT.
+vidcut has an input LUT of a media item and of the project, and an output LUT, from a `.cube` file ([design](../design/README.md#lut-files)). It has no display LUT.
 
 **Why:**
 
@@ -18,8 +18,6 @@ vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../desi
 - The display LUT, as the viewer's own branch.
 - AI Slow in an HDR timeline, with a Retime Process, gives `T(C)` on a Premultiplied media item with an input LUT.
   - Why: the LUT runs on the enlarged frames, and they have no alpha ([upscale.md](upscale.md)).
-- The Input Lookup Table of the project (manual p. 152). vidcut has an input LUT on a media item only.
-  - The measured facts are in [spec §13](../spec.md#the-lut-tables).
 - The source viewer shows the input LUT of the media item, as the viewer of the Media page does.
 - Measure in Resolve. No script reaches these, so each needs the window of Resolve:
   - The thumbnails of the Media Pool: do they show the input LUT of a clip, and the Input LUT of the project?
