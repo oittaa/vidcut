@@ -1988,10 +1988,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - These rows change between renders. Two renders of Aspect 2 at Pixel Frequency 25 differ on 1211 pixels, by up to 9.22/255. Renders at 0.132 and 0.566 of a step repeat exactly.
     - vidcut takes the box at the middle of the pixel's own triangle, clamped into the frame, at each distance.
   - Only the Fusion page gave renders of Blur Alpha off and Whole Cells Only. Only the default Pixel Frequency has Edit page renders on other sizes and Zooms ([todo](todo/effects-library.md)).
+  - Measured in Resolve Studio 21.2, with a 1280×720 source on timelines of 1280×720 and 1920×1080, at Position 0.3, 0.62:
+    - Position counts in fractions of the picture on the frame. A Zoom scales the grid, and a Pan moves it.
+    - On a rotated clip, the Position point turns with the picture. The cells keep the directions of the frame.
+    - A crop does not change the size or the place of the cells.
+    - On a compound clip, the effect gives the same picture as on a plain clip with the same values.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
-    - A Position away from the middle, on a picture with a Zoom or a Pan, counts in fractions of the picture on the frame.
-    - On a rotated clip, the cells keep the directions of the frame, as Gaussian Blur does.
-    - A crop and a Dynamic Zoom box do not change the size or the place of the cells.
+    - A Dynamic Zoom box does not change the size or the place of the cells.
     - The Zoom of each compound clip around the picture multiplies the size on the frame.
     - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
     - Whole Cells Only tests each sample's cell, with each Cell Shape and each Aliasing.
@@ -3647,13 +3650,23 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - Band 6 starts off. It is a Lo-Pass filter at 19000 Hz.
   - Renders of noise at 48 kHz give these curves (measured):
     - Each filter is a biquad filter. With all gains at 0 dB, the sound does not change.
-    - A Bell filter has its gain at its frequency, and the given Q.
+    - A Bell filter has its gain at its frequency f. Its width comes from its Q and from the sample rate r:
+      - The scale of the filter is `t(x) = tan(π · x / r)` for a frequency x.
+      - The lower point of the band is `f − f / (2 · Q)`.
+      - The band has the width of the Q value `t(f) / (2 · (t(f) − t(f − f / (2 · Q))))`.
+      - With that Q value, the filter is the peaking filter of the Audio EQ Cookbook.
+      - Thus Q 0.5 puts the lower point at 0 Hz, and keeps its width at all frequencies.
+      - Above Q 0.5, the band is wider than its Q value. The difference increases with the frequency and with the Q.
+      - At 16000 Hz, Q 1 gives the width of Q 0.75, and Q 4 gives the width of Q 2.02.
+      - The renders have bands at 1000 to 20000 Hz, with Q 0.5 to 8 and gains of −12, 6 and 12 dB.
+      - All of them agree with this rule to 0.000001 dB.
+      - A Q below 0.5 and other sample rates are not measured.
     - A Lo-Shelf or Hi-Shelf filter has a fixed Q of 0.75.
     - The corner of a shelf is 10^(|gain| / 80) times away from the given frequency. A Lo-Shelf moves down and a Hi-Shelf moves up.
     - Thus a Hi-Shelf of 12 dB at 1000 Hz has about 2.5 dB at 1000 Hz.
     - A Hi-Pass or Lo-Pass filter has 12 dB per octave and a fixed Q of 1. It has 0 dB at its frequency.
     - Thus the curve has a peak of 1.25 dB beside the frequency. A Hi-Pass at 1000 Hz has it at 1414 Hz, and a Lo-Pass at 1000 Hz has it at 707 Hz.
-    - The curve in the Inspector shows a Notch filter, but a render does not change the sound.
+    - The curve in the Inspector shows a Notch filter, but a render does not change the sound ([gotchas](gotchas.md#resolves-renders)).
   - An OTIO export writes the effect `Fairlight Clip Equaliser`, `Type` 64, and six effects `Fairlight Equaliser Band`, `Type` 63 (measured):
     - The `Enabled` of the first effect is the switch of the equalizer. The `Enabled` of a band is the switch of that band.
     - The parameter `eq band index` of a band goes from 0 to 5.
@@ -3677,7 +3690,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - vidcut: `clip.set` sets `equalizer`. Its `on` is the switch.
     - On a clip with no equalizer, a change makes a flat one. It is on, unless `on` is false.
     - null makes the equalizer off again, with the usual values. Reset sends it.
-  - vidcut: a Notch band makes a cut in the sound. A Bell band keeps the width of its Q value ([X170](deviations.md#x170-the-equalizer-notch-and-bell-width)).
+  - vidcut: a Notch band makes a cut in the sound ([gotchas](gotchas.md#resolves-renders)).
+  - vidcut: a Bell band uses the same rule for a Q below 0.5 and at all sample rates.
   - vidcut: an OTIO export writes `Fairlight Clip Equaliser` and its six `Fairlight Equaliser Band` effects when the equalizer is on or off its usual values.
   - vidcut: an import reads those effects when they have no keyframes, and keeps keyed or unsupported ones carried.
   - vidcut: an equalizer that is off does not change the sound, also after an import.

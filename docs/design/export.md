@@ -673,6 +673,7 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - The width of the canvas, multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it.
   - The size of the picture on the frame: its fitted size, multiplied by each Zoom X and each Zoom Y.
   - The middle of the picture on the frame, through the levels. A Dynamic Zoom box does not move it.
+  - The rotation of the picture (`OnFrame.turn`).
 - `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas, and the border.
   - The sigma is that of `GaussianBlur::spreads` at that width.
   - A blur with no sigma and Use Alpha on is left out.
@@ -681,6 +682,7 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - It also holds Blur Alpha and Whole Cells Only.
   - The size of a cell comes from the area of the picture on the frame (`MosaicBlur::CELL`).
   - The origin is the middle of the picture on the frame, moved by Position and the offsets.
+    - Position is a point of the picture. Thus it turns with the picture. The offsets and the cells keep the directions of the frame.
   - Its sizes are in samples. Antialias Result gives two samples for each pixel.
   - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
 - `place::Glowing` holds what `fs_glow` needs for a Glow.
@@ -787,6 +789,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - `Uses::counts` counts the readers of each key, from the last node back. A node counts its own key only when it is on and needs it. Only then do the keys on its links count.
   - Why: each key texture is then free after its last reader, and a key that nothing reads costs no pass.
   - A key mixer makes no picture. `grade::passed` and the counts of the pictures skip it.
+  - A corrector whose picture no node reads gives only its key. It gets no `Correct` pass, except in `Graded::tapped`, where its thumbnail shows its picture.
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
   - A curve goes to the GPU as two closed paths of lines: the inner and the outer path (`flattened`, `mitred`).
   - A curve with dragged softness points gets each path from its own points: the curve points with their moves (`inner`, `outer`).
