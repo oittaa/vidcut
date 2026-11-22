@@ -287,6 +287,8 @@ pub struct Snapshot {
     pub guides: vidcut_core::preferences::Guides,
     pub scopes: vidcut_core::preferences::Scopes,
     pub lut_folders: Arc<Vec<PathBuf>>,
+    pub luts: Arc<vidcut_core::luts::LutList>,
+    pub luts_read: u64,
     pub show_upscale: bool,
     pub decompose_on_edit: bool,
     pub switching_clips: vidcut_core::preferences::SwitchingClips,

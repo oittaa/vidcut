@@ -150,7 +150,7 @@ The AI stages get the picture in the timeline color space (`Single`).
 
 vidcut has none of the other stages of the spec:
 
-- Camera Raw, Lens Correction, the display LUT and Fusion;
+- Camera Raw, Lens Correction and Fusion;
 - Input Sizing, Image Stabilization and the Pre-Clip and Post-Clip grades of a group;
 - Open FX, the Resolve FX other than Gaussian Blur, Mosaic Blur, Glow, Film Grain, Vignette and Sharpen, Output Sizing and Data Burn-In.
 
@@ -158,9 +158,11 @@ vidcut has none of the other stages of the spec:
 
 The [spec](../spec.md#the-lut-tables) gives the math of a table. vidcut reads a `.cube` file with `cube::read` and draws it on the GPU.
 
-- A media item holds its `input_lut`. The project settings hold an `input_lut` and the `output_lut`. The project file stores each path as it stores a media path ([model](model.md)).
+- A media item holds its `input_lut`. The project settings hold an `input_lut`, the `output_lut` and the `video_monitor_lut`. The project file stores each path as it stores a media path ([model](model.md)).
+  - The settings also hold the `color_viewer_lut` and the `scopes_lut` (`MonitorLut`). Each one follows the `video_monitor_lut`, has no LUT, or names a file (`MonitorLut::file`).
 - Each clip gets the `input_lut` of its media in the render plan (`VideoPiece::Source`). When the media has none, the clip gets the `input_lut` of the project.
   - Thus the render cache, a proxy and an export see one input LUT for each clip, as for a LUT of the media.
+  - The plans of the source viewer and of the tiles use the same rule (`Media::input_lut_in`). Thus they show the input LUT too.
 - Each table gets the code values of the timeline. vidcut converts nothing for a LUT.
 - A table is a texture of 32-bit floats, and the shader interpolates its rows (`table_rows`, `table_cube`). Why: that format has no texture filter without an extra device feature.
 - With no LUT, the draw does not change: the pipelines of the LUTs do not exist (`Gpu::luts`).
@@ -181,11 +183,32 @@ The [spec](../spec.md#the-lut-tables) gives the math of a table. vidcut reads a 
   - A dropdown lists them in this order (`luts::combo`). The submenus of the pool group them by `menu` (`luts::menu`).
 - `LutList::read` reads each folder once (`dirs::canonical`). Thus a link, or a folder inside another listed folder, gives each LUT once.
 - `luts.list` reads the folders again on each call.
-- The GUI holds the one list (`Luts` in `Workspace`). It sends `luts.list` at start, on Update Lists, after a reset, and when the snapshot gives other `luts.folders` (`Workspace::update_luts`). The live core reads them again when the preferences file changes.
+- The live core keeps the list of the last `luts.list`, from the GUI or from a script. The snapshot gives it to the menus (`Snapshot::luts`).
+- The GUI sends `luts.list` at start, on Update Lists, after a reset, and when the snapshot gives other `luts.folders` (`Workspace::update_luts`). The live core reads them again when the preferences file changes.
 - A LUT that is set but not in the list shows by its file name. Thus a path that a script gave stays in view.
 - `media.set` refuses an input LUT on a media item with no pictures (`ops::set_media_input_lut`).
 - A generator, a title, a compound clip and an adjustment clip have no media item. Thus they have no input LUT, also not the LUT of the project. The clips inside a compound clip get it.
-- The source viewer shows a picture with no input LUT. No measurement tells what it shows in the Cut page ([todo](../todo/luts.md)).
+- The viewer of the Color page has a display LUT (`Settings::viewer_lut_file`). The viewers of the other pages have none.
+- The scopes read the picture through the scopes LUT (`Settings::scopes_lut_file`). With none, they read the data as it is.
+- `Workspace::monitor_luts` gives both paths, and `Viewer::show_luts` gives them to the viewer thread.
+  - `MonitorLuts` reads the files there. It keeps the last tables by `cube::stamp` (`MONITOR_LUTS_KEPT`). Thus a change of page does not read a file again.
+  - `Screen::set_display_lut` adds one pass after the output LUT. `fs_lut` draws `Wide` into a second canvas, and that canvas goes to the screen.
+  - `Screen::set_scopes_lut` adds one more pass into a third canvas, and the scopes read it. With the same table as the display LUT, the scopes read the second canvas.
+  - The node shots read `Wide`. Thus they show the data with no display LUT.
+  - An export, the render cache, a proxy and `frame.render` get neither LUT. `frame.scope` gets the scopes LUT (`gui::frame::scope`).
+  - A file that cannot be read gives a message, and the picture goes on with no LUT.
+- Each `luts.list` adds one to `Snapshot::luts_read`, also a `luts.list` from a script. The GUI follows that count (`Workspace::luts_frame`).
+  - The viewer thread then reads the stamps again, and a changed file gives a new table (`Workspace::monitor_luts`).
+  - `Tiles::check_luts` drops the tiles whose LUT has a new stamp.
+- `luts.list` also makes the live core check its LUT files (`Live::finish`):
+  - the small pictures of the pool (`check_media`);
+  - the plan of the shown player (`Player::reread_luts`);
+  - the plan of the render cache (`Background::apply`).
+- The player engine and the render cache compare the stamps of the LUT files of a plan (`RenderPlan::lut_stamps`). A changed stamp counts as a new plan. Thus an unchanged file reads nothing again.
+  - The key of each frame of the player holds the stamps, also in a compound clip. Thus no frame of the old table shows.
+  - The other player prepares its plan again, with the new stamps.
+- Why: a file that changes in place gets no other check. vidcut does not read the stamps on each frame.
+- After an AI upscaler, the draw of an enlarged picture takes the alpha of its source frame. Thus an input LUT in that draw also follows the Alpha Mode ([export](export.md#which-source-frame)).
 - A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.
 - `fs_lut` works on colors that are not premultiplied. It leaves a pixel with no alpha as it is.
 - The canvas of a frame with no alpha starts as opaque black. Thus the output LUT also changes a gap, and the part of a clip that its alpha lets through.

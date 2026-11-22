@@ -6,7 +6,8 @@ use serde_json::{Value, json};
 use vidcut_core::Project;
 use vidcut_core::luts::LutList;
 use vidcut_core::model::{
-    DynamicsProfile, Hdr, ProjectRetime, ProjectUpscaler, TimelineColors, TimelineSettings,
+    DynamicsProfile, Hdr, MonitorLut, ProjectRetime, ProjectUpscaler, TimelineColors,
+    TimelineSettings,
 };
 use vidcut_core::time::{Rational, STANDARD_RATES, TimeSpec};
 
@@ -41,6 +42,9 @@ pub(super) struct Format {
     upscaler: ProjectUpscaler,
     input_lut: Option<PathBuf>,
     output_lut: Option<PathBuf>,
+    video_monitor_lut: Option<PathBuf>,
+    color_viewer_lut: MonitorLut,
+    scopes_lut: MonitorLut,
     dynamics: DynamicsProfile,
 }
 
@@ -48,6 +52,7 @@ pub(super) struct Format {
 enum LutRow {
     Input,
     Output,
+    VideoMonitor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +66,7 @@ impl LutRow {
         match self {
             Self::Input => "Input LUT",
             Self::Output => "Output LUT",
+            Self::VideoMonitor => "Video Monitor LUT",
         }
     }
 }
@@ -79,6 +85,9 @@ impl Default for Format {
             upscaler: ProjectUpscaler::Auto,
             input_lut: None,
             output_lut: None,
+            video_monitor_lut: None,
+            color_viewer_lut: MonitorLut::VideoMonitor,
+            scopes_lut: MonitorLut::None,
             dynamics: DynamicsProfile::default(),
         }
     }
@@ -114,6 +123,9 @@ impl Format {
             upscaler: p.settings.upscaler,
             input_lut: p.settings.input_lut.clone(),
             output_lut: p.settings.output_lut.clone(),
+            video_monitor_lut: p.settings.video_monitor_lut.clone(),
+            color_viewer_lut: p.settings.color_viewer_lut.clone(),
+            scopes_lut: p.settings.scopes_lut.clone(),
             dynamics: p.settings.dynamics_profile,
         }
     }
@@ -246,6 +258,7 @@ impl Format {
         match row {
             LutRow::Input => &mut self.input_lut,
             LutRow::Output => &mut self.output_lut,
+            LutRow::VideoMonitor => &mut self.video_monitor_lut,
         }
     }
 
@@ -279,13 +292,26 @@ impl Format {
                 let Some(list) = luts else {
                     return;
                 };
-                for row in [LutRow::Input, LutRow::Output] {
+                for row in [LutRow::Input, LutRow::Output, LutRow::VideoMonitor] {
                     let label = ui.label(row.name());
                     let now = self.lut_mut(row).clone();
                     let (r, pick) = super::luts::combo(ui, row.name(), list, now.as_deref(), 240.0);
                     r.labelled_by(label.id);
                     if let Some(path) = pick {
                         *self.lut_mut(row) = path;
+                    }
+                    ui.end_row();
+                }
+                let monitors = [
+                    ("Color Viewer LUT", &mut self.color_viewer_lut),
+                    ("Scopes LUT", &mut self.scopes_lut),
+                ];
+                for (name, now) in monitors {
+                    let label = ui.label(name);
+                    let (r, pick) = super::luts::monitor_combo(ui, name, list, now, 240.0);
+                    r.labelled_by(label.id);
+                    if let Some(lut) = pick {
+                        *now = lut;
                     }
                     ui.end_row();
                 }
@@ -769,7 +795,7 @@ impl Workspace {
         let mut cancel = false;
         let mut apply = None;
         let mut lut_action = None;
-        let luts = &self.luts.list;
+        let luts = &*self.snap.luts;
         egui::Window::new("Project Settings")
             .collapsible(false)
             .resizable(false)
@@ -794,7 +820,7 @@ impl Workspace {
                 });
             });
         match lut_action {
-            Some(LutAction::Update) => self.update_luts(ctx),
+            Some(LutAction::Update) => self.update_luts(),
             Some(LutAction::OpenFolder) => self.open_lut_folder(),
             None => {}
         }
@@ -834,6 +860,30 @@ fn changes(now: &Format, was: &Format) -> Value {
     if now.output_lut != was.output_lut {
         let path = now.output_lut.clone().unwrap_or_default();
         set.insert("output_lut".into(), json!(path));
+    }
+    if now.video_monitor_lut != was.video_monitor_lut {
+        let path = now.video_monitor_lut.clone().unwrap_or_default();
+        set.insert("video_monitor_lut".into(), json!(path));
+    }
+    let monitors = [
+        (
+            (&now.color_viewer_lut, &was.color_viewer_lut),
+            ("color_viewer_lut", "color_viewer_follows"),
+        ),
+        (
+            (&now.scopes_lut, &was.scopes_lut),
+            ("scopes_lut", "scopes_follow"),
+        ),
+    ];
+    for ((now, was), (lut, follows)) in monitors {
+        if now == was {
+            continue;
+        }
+        match now {
+            MonitorLut::VideoMonitor => set.insert(follows.into(), json!(true)),
+            MonitorLut::None => set.insert(lut.into(), json!("")),
+            MonitorLut::File(path) => set.insert(lut.into(), json!(path)),
+        };
     }
     if now.dynamics != was.dynamics {
         set.insert("dynamics_profile".into(), json!(now.dynamics));

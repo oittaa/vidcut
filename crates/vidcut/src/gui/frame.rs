@@ -184,7 +184,13 @@ pub fn scope(
     let size = scope_size(scope, size)?;
     let frame = Frame::of(p, at, None)?;
     let gpu = &frame.offscreen.gpu;
+    let lut = p
+        .settings
+        .scopes_lut_file()
+        .map(vidcut_av::screen::load_lut);
+    let lut = lut.transpose().map_err(|e| Error::invalid(e.to_string()))?;
     let mut screen = Screen::new();
+    screen.set_scopes_lut(lut);
     screen.scoping(true);
     frame.draw(&mut screen, p.width(), p.height());
     let scale = crate::preferences::load()?.viewer.scopes.scale;

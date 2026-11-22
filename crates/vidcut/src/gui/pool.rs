@@ -2275,7 +2275,7 @@ impl Workspace {
             let now = m.input_lut.as_deref();
             let mut lut = None;
             ui.menu_button(super::luts::menu_title(now), |ui| {
-                lut = super::luts::menu(ui, &self.luts.list, now);
+                lut = super::luts::menu(ui, &self.snap.luts, now);
             });
             if let Some(path) = lut {
                 let path = path.unwrap_or_default();

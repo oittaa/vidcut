@@ -617,6 +617,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         lut_folders: Arc::new(lut_folders()),
+        luts: Arc::default(),
+        luts_read: 0,
         show_upscale: crate::preferences::load().is_ok_and(|p| p.viewer.upscale),
         decompose_on_edit: crate::preferences::load().is_ok_and(|p| p.editing.decompose_on_edit),
         switching_clips: crate::preferences::load()
@@ -739,6 +741,8 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         lut_folders: Arc::new(lut_folders()),
+        luts: Arc::default(),
+        luts_read: 0,
         show_upscale: crate::preferences::load().is_ok_and(|p| p.viewer.upscale),
         decompose_on_edit: crate::preferences::load().is_ok_and(|p| p.editing.decompose_on_edit),
         switching_clips: crate::preferences::load()
@@ -899,9 +903,12 @@ fn thumbs_on() -> bool {
         .disk_cache
 }
 
-fn make_thumbs(media: &vidcut_core::model::Media) -> std::result::Result<bool, String> {
+fn make_thumbs(
+    media: &vidcut_core::model::Media,
+    (lut, look): (Option<&Path>, &str),
+) -> std::result::Result<bool, String> {
     let origin = paths::media_origin(media);
-    let file = crate::thumbcache::thumbs_file(media, &origin);
+    let file = crate::thumbcache::thumbs_file(media, &origin, look);
     if crate::thumbcache::has_thumbs(&file) {
         return Ok(true);
     }
@@ -909,7 +916,11 @@ fn make_thumbs(media: &vidcut_core::model::Media) -> std::result::Result<bool, S
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     let decoder = decoder.as_ref();
     let (count, (w, h)) = (crate::thumbcache::THUMBS, crate::thumbcache::THUMB_SIZE);
-    let look = (media.color_space, crate::thumbcache::drawn_alpha(media));
+    let look = (
+        media.color_space,
+        crate::thumbcache::drawn_alpha(media),
+        lut,
+    );
     let (images, times) = match media.sequence.as_ref().map(|s| s.count) {
         Some(pictures) => {
             vidcut_av::thumbs::filmstrip_pictures(&input, pictures, count, w, h, decoder, look)
@@ -1031,6 +1042,8 @@ struct Live {
     guides: vidcut_core::preferences::Guides,
     scopes: vidcut_core::preferences::Scopes,
     lut_folders: Arc<Vec<PathBuf>>,
+    luts: Arc<vidcut_core::luts::LutList>,
+    luts_read: u64,
     show_upscale: bool,
     decompose_on_edit: bool,
     switching_clips: vidcut_core::preferences::SwitchingClips,
@@ -1713,6 +1726,8 @@ impl Live {
             guides: self.guides,
             scopes: self.scopes,
             lut_folders: self.lut_folders.clone(),
+            luts: self.luts.clone(),
+            luts_read: self.luts_read,
             show_upscale: self.show_upscale,
             decompose_on_edit: self.decompose_on_edit,
             switching_clips: self.switching_clips,
@@ -2435,6 +2450,16 @@ impl Live {
     }
 
     fn finish(&mut self, job: Job, result: Result<Response>) {
+        if job.method == "luts.list" {
+            let read = result.as_ref().ok().map(|r| r.result.clone());
+            if let Some(Ok(list)) = read.map(serde_json::from_value) {
+                self.luts = Arc::new(list);
+            }
+            self.luts_read += 1;
+            self.check_media();
+            self.schedule_timeline();
+            self.player.reread_luts();
+        }
         let result = result.map(|mut r| {
             r.via = format!("gui:{}", std::process::id());
             r
@@ -4178,15 +4203,14 @@ impl Live {
         self.refresh_transcribed(false);
         let Some(open) = &self.project else { return };
         let media: Vec<_> = open.project().media.clone();
-        let channels = open.project().settings.channels;
+        let settings = open.project().settings.clone();
+        let channels = settings.channels;
         self.forget_removed(&media);
         for m in media {
             let version = media_version(&m);
-            let pictures = format!(
-                "{version}|{}|{}",
-                m.color_space.key(),
-                crate::thumbcache::drawn_alpha(&m).title()
-            );
+            let lut = m.input_lut_in(&settings).map(Path::to_path_buf);
+            let look = crate::thumbcache::look(&m, lut.as_deref());
+            let pictures = format!("{version}|{look}");
             if self.thumbs_on
                 && m.info.video.is_some()
                 && self.thumbs_wanted.get(&m.id) != Some(&pictures)
@@ -4201,7 +4225,7 @@ impl Live {
                     let _ = tx.send(Msg::Thumbs {
                         media: id,
                         wanted,
-                        result: make_thumbs(&media),
+                        result: make_thumbs(&media, (lut.as_deref(), &look)),
                     });
                 });
             }

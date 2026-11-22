@@ -4887,7 +4887,7 @@ impl Workspace {
             })
             .inner
         };
-        let list = &self.luts.list;
+        let list = &*self.snap.luts;
         let cleared = group(ui, "LUT", header, |ui| {
             label(ui, "Input LUT", any);
             pick = super::luts::combo(ui, "inspector-input-lut", list, now, 170.0).1;

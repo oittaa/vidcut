@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1331,6 +1331,17 @@ impl VideoPiece {
             .collect()
     }
 
+    pub fn lut_files(&self) -> Vec<&Path> {
+        self.with_flat_pieces()
+            .into_iter()
+            .flat_map(VideoPiece::layers)
+            .filter_map(|(p, _)| match p {
+                VideoPiece::Source { input_lut, .. } => input_lut.as_deref(),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn flat_layers_mut(&mut self) -> Vec<&mut VideoPiece> {
         self.layers_mut()
             .into_iter()
@@ -1674,6 +1685,19 @@ impl RenderPlan {
                         .iter()
                         .any(|placed| graded(&placed.picture.grade))
                 })
+    }
+
+    pub fn lut_stamps(&self) -> BTreeMap<PathBuf, String> {
+        let files: BTreeSet<&Path> = self
+            .video
+            .iter()
+            .flat_map(VideoPiece::lut_files)
+            .chain(self.output_lut.as_deref())
+            .collect();
+        files
+            .into_iter()
+            .map(|f| (f.to_path_buf(), crate::cube::stamp(f)))
+            .collect()
     }
 
     pub fn samples(&self) -> i64 {
@@ -4275,7 +4299,7 @@ pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
             cache: Default::default(),
             excluded: false,
             made: None,
-            input_lut: None,
+            input_lut: m.input_lut_in(&p.settings).map(Path::to_path_buf),
         },
         None => VideoPiece::black(1),
     }
@@ -4376,7 +4400,7 @@ pub fn camera_tape(
                 cache: Default::default(),
                 excluded: false,
                 made: None,
-                input_lut: None,
+                input_lut: m.input_lut_in(&p.settings).map(Path::to_path_buf),
             },
         );
         push_audio(&mut lane, sound_of(p, m, from, fps, samples));
@@ -4525,7 +4549,7 @@ fn laid_out(p: &Project, media: &[String], fps: Rational) -> Result<(RenderPlan,
                     cache: Default::default(),
                     excluded: false,
                     made: None,
-                    input_lut: None,
+                    input_lut: m.input_lut_in(&p.settings).map(Path::to_path_buf),
                 },
             );
         } else {

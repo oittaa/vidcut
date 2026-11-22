@@ -923,6 +923,33 @@ impl Words<'_> {
         });
         s.put("input_lut", "Input LUT", &text, |x| json!(x.input_lut));
         s.put("output_lut", "Output LUT", &text, |x| json!(x.output_lut));
+        s.put("video_monitor_lut", "Video Monitor LUT", &text, |x| {
+            json!(x.video_monitor_lut)
+        });
+        let monitor = |(lut, follows): (&str, &str)| match (&p[lut], &p[follows]) {
+            (_, Value::Bool(true)) => json!(crate::model::MonitorLut::VideoMonitor),
+            (Value::String(path), _) if path.is_empty() => json!(crate::model::MonitorLut::None),
+            (Value::String(path), _) => json!(crate::model::MonitorLut::File(path.into())),
+            _ => Value::Null,
+        };
+        let show = |v: &Value| match serde_json::from_value(v.clone()) {
+            Ok(crate::model::MonitorLut::VideoMonitor) => "Video Monitor LUT".to_string(),
+            Ok(crate::model::MonitorLut::None) => "none".to_string(),
+            Ok(crate::model::MonitorLut::File(path)) => text(&json!(path)),
+            Err(_) => raw(v),
+        };
+        let viewer = monitor(("color_viewer_lut", "color_viewer_follows"));
+        if !viewer.is_null() {
+            s.add("Color Viewer LUT", &viewer, &show, Value::Null, |x| {
+                json!(x.color_viewer_lut)
+            });
+        }
+        let scopes = monitor(("scopes_lut", "scopes_follow"));
+        if !scopes.is_null() {
+            s.add("Scopes LUT", &scopes, &show, Value::Null, |x| {
+                json!(x.scopes_lut)
+            });
+        }
         let list = |v: &Value| match v.as_array().map(Vec::len) {
             Some(n) => Shown {
                 text: if n == 1 {

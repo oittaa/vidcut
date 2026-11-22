@@ -157,6 +157,7 @@ struct Look {
     rounded: bool,
     alpha: Option<Through>,
     lut: Option<crate::screen::Lut>,
+    matted: bool,
 }
 
 struct Matte {
@@ -200,6 +201,7 @@ impl Look {
             rounded: false,
             alpha: None,
             lut: None,
+            matted: false,
         }
     }
 
@@ -221,6 +223,7 @@ impl Look {
             rounded: false,
             alpha: None,
             lut: None,
+            matted: false,
         }
     }
 
@@ -235,6 +238,13 @@ impl Look {
     fn with_alpha(self, mode: AlphaMode, matte: bool) -> Self {
         Self {
             alpha: Some(Through { mode, matte }),
+            ..self
+        }
+    }
+
+    fn matted(self) -> Self {
+        Self {
+            matted: true,
             ..self
         }
     }
@@ -793,6 +803,43 @@ impl Source {
         })
     }
 
+    fn matted_from(
+        &mut self,
+        (f, prev): (&frame::Video, bool),
+        (look, alpha): (&Look, &Look),
+        (reading, frames): (Reading, bool),
+    ) -> Result<frame::Video> {
+        self.follow_offscreen();
+        let at = (f.pts(), look);
+        let kept = match frames {
+            true => &mut self.framed,
+            false => &mut self.rgb,
+        };
+        if let Some(made) = kept_drawing(kept, at)? {
+            return Ok(made);
+        }
+        let matte = self.rgb_of(prev, alpha, reading)?;
+        let path = self.reader.path();
+        let single = match &mut self.drawn {
+            Some(single) => single,
+            None => self.drawn.insert(Single::new(reading)?),
+        };
+        let drawing = (look, path, Some(&matte));
+        let made = match frames {
+            true => {
+                let out = crate::interpolate::blank(look.size)?;
+                single.surface((f, (None, None)), 0, drawing, out)?
+            }
+            false => single.held((f, (None, None)), 0, drawing)?,
+        };
+        let kept = match frames {
+            true => &mut self.framed,
+            false => &mut self.rgb,
+        };
+        keep_drawing(kept, at, &made)?;
+        Ok(made)
+    }
+
     fn peek(&mut self) -> Result<Option<frame::Video>> {
         if self.queued.is_empty()
             && let Some(f) = self.reader.next_frame()?
@@ -1058,24 +1105,41 @@ fn shown_rgb(
         Some(single) => single,
         None => drawn.insert(Single::new(reading)?),
     };
-    single.held(frames, rotation, look, path)
+    single.held(frames, rotation, (look, path, None))
 }
 
 fn drawn_once(
     kept: &mut Drawn,
-    (pts, look): (Option<i64>, &Look),
+    at: (Option<i64>, &Look),
     draw: impl FnOnce() -> Result<frame::Video>,
 ) -> Result<frame::Video> {
-    let matte = matches!(look.alpha, Some(Through { matte: true, .. }));
-    if let Some((_, made)) = kept
-        .get_mut(&pts)
-        .and_then(|d| d.of(matte).as_ref())
-        .filter(|(l, _)| l == look)
-    {
-        return frame_ref(made);
+    if let Some(made) = kept_drawing(kept, at)? {
+        return Ok(made);
     }
     let made = draw()?;
-    let drawn = Some((look.clone(), frame_ref(&made)?));
+    keep_drawing(kept, at, &made)?;
+    Ok(made)
+}
+
+fn kept_drawing(
+    kept: &mut Drawn,
+    (pts, look): (Option<i64>, &Look),
+) -> Result<Option<frame::Video>> {
+    let matte = matches!(look.alpha, Some(Through { matte: true, .. }));
+    kept.get_mut(&pts)
+        .and_then(|d| d.of(matte).as_ref())
+        .filter(|(l, _)| l == look)
+        .map(|(_, made)| frame_ref(made))
+        .transpose()
+}
+
+fn keep_drawing(
+    kept: &mut Drawn,
+    (pts, look): (Option<i64>, &Look),
+    made: &frame::Video,
+) -> Result<()> {
+    let matte = matches!(look.alpha, Some(Through { matte: true, .. }));
+    let drawn = Some((look.clone(), frame_ref(made)?));
     match kept.get_mut(&pts) {
         Some(drawings) => *drawings.of(matte) = drawn,
         None => {
@@ -1084,7 +1148,7 @@ fn drawn_once(
             kept.insert(pts, drawings);
         }
     }
-    Ok(made)
+    Ok(())
 }
 
 pub(crate) fn surface_picture(
@@ -1116,7 +1180,7 @@ fn shown_frame(
         None => drawn.insert(Single::new(reading)?),
     };
     let out = crate::interpolate::blank(look.size)?;
-    single.surface(frames, rotation, (look, path), out)
+    single.surface(frames, rotation, (look, path, None), out)
 }
 
 impl Source {
@@ -1606,6 +1670,7 @@ fn placed_look(
         rounded: false,
         alpha: None,
         lut: None,
+        matted: false,
     })
 }
 
@@ -2029,6 +2094,8 @@ impl Drawer {
     }
 }
 
+type Painted<'a> = (&'a Look, &'a Path, Option<&'a frame::Video>);
+
 pub(crate) struct Single {
     drawer: Drawer,
     maker: Maker,
@@ -2055,12 +2122,13 @@ impl Single {
         size: (u32, u32),
         pixel: format::Pixel,
         path: &Path,
-        alpha: AlphaMode,
+        (alpha, lut): (AlphaMode, Option<&crate::screen::Lut>),
     ) -> Result<frame::Video> {
         let made = self.maker.make(&mut self.fitting, frame, path)?;
         let picture = crate::player::Picture::new(made, rotation, None, None)
             .with_sampling(Sampling::Rounded)
-            .with_alpha_mode(alpha);
+            .with_alpha_mode(alpha)
+            .with_lut(lut.cloned());
         let picture = std::sync::Arc::new(picture);
         let layers = (&[][..], &[][..], None);
         self.drawer
@@ -2117,29 +2185,23 @@ impl Single {
         &mut self,
         frames: (&frame::Video, Around<'_>),
         rotation: u16,
-        look: &Look,
-        path: &Path,
+        drawn: Painted<'_>,
     ) -> Result<frame::Video> {
-        let pixel = crate::screen::held::rgb_pixel(look.form.0).0;
-        self.draw_to(
-            frames,
-            rotation,
-            (look, path),
-            (pixel, crate::screen::Sink::Held),
-        )
+        let pixel = crate::screen::held::rgb_pixel(drawn.0.form.0).0;
+        self.draw_to(frames, rotation, drawn, (pixel, crate::screen::Sink::Held))
     }
 
     fn surface(
         &mut self,
         frames: (&frame::Video, Around<'_>),
         rotation: u16,
-        (look, path): (&Look, &Path),
+        drawn: Painted<'_>,
         out: frame::Video,
     ) -> Result<frame::Video> {
         let pts = frames.0.pts();
         let pixel = crate::hw::sw_format(&out);
         let sink = crate::screen::Sink::Surface(out);
-        let mut out = self.draw_to(frames, rotation, (look, path), (pixel, sink))?;
+        let mut out = self.draw_to(frames, rotation, drawn, (pixel, sink))?;
         out.set_pts(pts);
         Ok(out)
     }
@@ -2148,7 +2210,7 @@ impl Single {
         &mut self,
         frames: (&frame::Video, Around<'_>),
         rotation: u16,
-        (look, path): (&Look, &Path),
+        (look, path, matte): Painted<'_>,
         (pixel, sink): (format::Pixel, crate::screen::Sink<'_>),
     ) -> Result<frame::Video> {
         let mode = look.alpha.map(|t| t.mode);
@@ -2160,6 +2222,10 @@ impl Single {
                     false => AlphaUse::Multiplied,
                 })
             }
+            None => picture,
+        };
+        let picture = match matte {
+            Some(m) => picture.with_matte(Some(frame_ref(m)?)),
             None => picture,
         };
         let placed = [look.placed.clone()];
@@ -3494,21 +3560,30 @@ impl VideoFrames {
         let ai = scaled.as_ref().map(|_| upscale.upscaler);
         let look = look.with_lut(src.lut_on_drawing(ai, self.timeline));
         let size = look.size;
-        let mattes = match has_alpha && *alpha_mode != AlphaMode::None {
-            true => {
-                let matte = look.clone().with_lut(None).with_alpha(*alpha_mode, true);
-                Some((
-                    src.rgb_of(true, &matte, reading)?,
-                    src.rgb_of(false, &matte, reading)?,
-                ))
+        let alpha = has_alpha && *alpha_mode != AlphaMode::None;
+        let matte_look = alpha.then(|| look.clone().with_lut(None).with_alpha(*alpha_mode, true));
+        let look = match (&scaled, alpha) {
+            (Some(_), true) => look.matted(),
+            _ => look,
+        };
+        let enlarged = |src: &mut Source, f: &frame::Video, prev: bool, frames: bool| {
+            let at = (f, (None, None));
+            match (look.matted, frames) {
+                (true, _) => {
+                    let kernel = crate::screen::kernel(None);
+                    let alpha = Look::rounded((f.width(), f.height()), kernel, form)
+                        .with_alpha(*alpha_mode, true);
+                    src.matted_from((f, prev), (&look, &alpha), (reading, frames))
+                }
+                (false, true) => src.frame_from(at, 0, &look, reading),
+                (false, false) => src.rgb_from(at, 0, &look, reading),
             }
-            false => None,
         };
         let pair = match (*retime == Retime::Macos, &scaled) {
             (false, _) => None,
             (true, Some((a, b, _))) => Some((
-                src.frame_from((a, (None, None)), 0, &look, reading)?,
-                src.frame_from((b, (None, None)), 0, &look, reading)?,
+                enlarged(src, a, true, true)?,
+                enlarged(src, b, false, true)?,
             )),
             (true, None) => Some((
                 src.frame_of(true, &look, reading)?,
@@ -3519,13 +3594,20 @@ impl VideoFrames {
         let (a, b) = match (pair, &scaled) {
             (Some(pair), _) => pair,
             (None, Some((a, b, _))) => (
-                src.rgb_from((a, (None, None)), 0, &look, reading)?,
-                src.rgb_from((b, (None, None)), 0, &look, reading)?,
+                enlarged(src, a, true, false)?,
+                enlarged(src, b, false, false)?,
             ),
             (None, None) => (
                 src.rgb_of(true, &look, reading)?,
                 src.rgb_of(false, &look, reading)?,
             ),
+        };
+        let mattes = match &matte_look {
+            Some(m) => Some((
+                src.rgb_of(true, m, reading)?,
+                src.rgb_of(false, m, reading)?,
+            )),
+            None => None,
         };
         let pts = |f: &Option<(frame::Video, f64)>| f.as_ref().and_then(|(f, _)| f.pts());
         let (pa, pb) = (pts(&src.prev), pts(&src.current));
@@ -3604,7 +3686,7 @@ impl VideoFrames {
         src.lut_in = true;
         src.how = how;
         src.upscaled = upscaled;
-        src.matte = matte.map(|m| Matte::of(m, *alpha_mode, scaled.is_some()));
+        src.matte = matte.map(|m| Matte::of(m, *alpha_mode, false));
         src.sampling = match look.placed.is_empty() || colors {
             true => Sampling::Own,
             false => {

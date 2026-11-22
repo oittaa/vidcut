@@ -731,7 +731,7 @@ impl Workspace {
                 let n = r.result["removed"].as_array().map_or(0, Vec::len);
                 self.preferences.forgotten = None;
                 self.after_reset();
-                self.update_luts(ctx);
+                self.update_luts();
                 self.say(format!("Reset: {n} files and folders removed"));
                 if self.preferences.open {
                     self.preferences.ask =

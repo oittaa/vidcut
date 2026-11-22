@@ -72,10 +72,12 @@ struct Seen {
     color_space: vidcut_core::model::ColorSpace,
     alpha: vidcut_core::model::AlphaMode,
     subclip: Option<vidcut_core::model::Subclip>,
+    lut: Option<PathBuf>,
+    look: String,
 }
 
 impl Seen {
-    fn of(m: &Media) -> Self {
+    fn of(m: &Media, lut: Option<&Path>) -> Self {
         Self {
             path: m.path.clone(),
             size: m.size,
@@ -84,16 +86,19 @@ impl Seen {
             color_space: m.color_space,
             alpha: thumbcache::drawn_alpha(m),
             subclip: m.subclip,
+            lut: lut.map(Path::to_path_buf),
+            look: thumbcache::look(m, lut),
         }
     }
 
-    fn is(&self, m: &Media) -> bool {
+    fn is(&self, m: &Media, lut: Option<&Path>) -> bool {
         self.path.as_os_str() == m.path.as_os_str()
             && self.size == m.size
             && self.mtime_ns == m.mtime_ns
             && self.color_space == m.color_space
             && self.alpha == thumbcache::drawn_alpha(m)
             && self.subclip == m.subclip
+            && self.lut.as_deref() == lut
     }
 }
 
@@ -173,6 +178,22 @@ impl Tiles {
         self.disk = prefs.disk_cache;
     }
 
+    pub fn check_luts(&mut self, p: &Project) {
+        for m in &p.media {
+            let Some(lut) = m.input_lut_in(&p.settings) else {
+                continue;
+            };
+            let Some(seen) = self.versions.get(&m.id) else {
+                continue;
+            };
+            if !seen.is(m, Some(lut)) || seen.look == thumbcache::look(m, Some(lut)) {
+                continue;
+            }
+            self.versions.insert(m.id.clone(), Seen::of(m, Some(lut)));
+            self.forget(&m.id);
+        }
+    }
+
     pub fn begin_frame(&mut self, ctx: &egui::Context, p: Option<&Project>) {
         if !self.started {
             self.started = true;
@@ -188,12 +209,13 @@ impl Tiles {
         }
         if let Some(p) = p {
             for m in &p.media {
+                let lut = m.input_lut_in(&p.settings);
                 let seen = self.versions.get(&m.id);
-                if seen.is_some_and(|s| s.is(m)) {
+                if seen.is_some_and(|s| s.is(m, lut)) {
                     continue;
                 }
                 let changed = seen.is_some();
-                self.versions.insert(m.id.clone(), Seen::of(m));
+                self.versions.insert(m.id.clone(), Seen::of(m, lut));
                 if changed {
                     self.forget(&m.id);
                 }
@@ -323,7 +345,7 @@ impl Tiles {
         if !self.disk || stand_ins || (self.bytes > AHEAD_MEMORY && !first_look) {
             return;
         }
-        let origin = self.origin_of(m);
+        let (origin, look) = self.look_of(p, m);
         self.asked.borrow_mut().push(Job {
             key: TileKey {
                 media: m.id.clone(),
@@ -336,7 +358,7 @@ impl Tiles {
             pieces: Vec::new(),
             disk: None,
             thumbs: Some(ThumbsFile {
-                path: thumbcache::thumbs_file(m, &origin),
+                path: thumbcache::thumbs_file(m, &origin, &look),
                 origin,
                 skipped: m.skipped(),
                 frames: p.media_frames(m),
@@ -344,10 +366,11 @@ impl Tiles {
         });
     }
 
-    fn origin_of(&self, m: &Media) -> Origin {
+    fn look_of(&self, p: &Project, m: &Media) -> (Origin, String) {
+        let lut = m.input_lut_in(&p.settings);
         match self.versions.get(&m.id) {
-            Some(seen) if seen.is(m) => seen.origin.clone(),
-            _ => paths::media_origin(m),
+            Some(seen) if seen.is(m, lut) => (seen.origin.clone(), seen.look.clone()),
+            _ => (paths::media_origin(m), thumbcache::look(m, lut)),
         }
     }
 
@@ -381,8 +404,8 @@ impl Tiles {
             pieces,
             disk: (self.disk && m.subclip.is_none()).then(|| {
                 let block = key.frame.div_euclid(TILE_BLOCK);
-                let origin = self.origin_of(m);
-                let path = thumbcache::tile_block(&origin, key.height, block, m);
+                let (origin, look) = self.look_of(p, m);
+                let path = thumbcache::tile_block(&origin, key.height, block, &look);
                 BlockFile { path, origin }
             }),
             thumbs: None,

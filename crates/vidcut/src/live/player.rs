@@ -314,6 +314,17 @@ impl Player {
         }
     }
 
+    pub fn reread_luts(&mut self) {
+        let i = self.active.index();
+        if let Some(e) = self.shown_engine().filter(|_| !self.auditioning)
+            && let Some(plan) = self.contents[i].plan.clone()
+            && let Err(err) = e.set_plan(plan)
+        {
+            self.contents[i].error = Some(err.to_string());
+        }
+        self.prepare_other();
+    }
+
     fn prepare_other(&self) {
         let Some(engine) = &self.engine else { return };
         let other = &self.contents[self.active.other().index()];

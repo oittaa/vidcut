@@ -379,6 +379,22 @@ pub struct Settings {
     /// subtitles, before each output's colors. Left out when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_lut: Option<PathBuf>,
+    /// The `.cube` file that the monitored picture goes through after every
+    /// other step. It is only for monitoring: no export gets it. Left out
+    /// when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_monitor_lut: Option<PathBuf>,
+    /// The LUT that the viewer of the Color page goes through after every
+    /// other step. Left out while it follows `video_monitor_lut`.
+    #[serde(
+        default = "MonitorLut::video_monitor",
+        skip_serializing_if = "MonitorLut::follows"
+    )]
+    pub color_viewer_lut: MonitorLut,
+    /// The LUT that the scopes read the picture through. Left out while the
+    /// scopes read the picture as it is.
+    #[serde(default, skip_serializing_if = "MonitorLut::is_none")]
+    pub scopes_lut: MonitorLut,
     /// The `start` and `end` that each new keyframe of a grade gets. Left
     /// out at 1 and 1.
     #[serde(default, skip_serializing_if = "DynamicsProfile::is_usual")]
@@ -404,7 +420,45 @@ impl Default for Settings {
             render_cache: RenderCache::Off,
             input_lut: None,
             output_lut: None,
+            video_monitor_lut: None,
+            color_viewer_lut: MonitorLut::VideoMonitor,
+            scopes_lut: MonitorLut::None,
             dynamics_profile: DynamicsProfile::default(),
+        }
+    }
+}
+
+/// A LUT for monitoring: of the viewer of the Color page, or of the scopes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MonitorLut {
+    /// The Video Monitor LUT of the project.
+    VideoMonitor,
+    /// No LUT.
+    #[default]
+    None,
+    /// This `.cube` file.
+    File(PathBuf),
+}
+
+impl MonitorLut {
+    fn video_monitor() -> Self {
+        Self::VideoMonitor
+    }
+
+    pub fn follows(&self) -> bool {
+        matches!(self, Self::VideoMonitor)
+    }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    pub fn file<'a>(&'a self, video_monitor: Option<&'a Path>) -> Option<&'a Path> {
+        match self {
+            Self::VideoMonitor => video_monitor,
+            Self::None => None,
+            Self::File(path) => Some(path),
         }
     }
 }
@@ -440,6 +494,15 @@ impl Format {
 
 impl Settings {
     pub const MOST_CHANNELS: u16 = 24;
+
+    pub fn viewer_lut_file(&self) -> Option<&Path> {
+        self.color_viewer_lut
+            .file(self.video_monitor_lut.as_deref())
+    }
+
+    pub fn scopes_lut_file(&self) -> Option<&Path> {
+        self.scopes_lut.file(self.video_monitor_lut.as_deref())
+    }
 
     pub fn with_format(fps: Option<&str>, size: Option<(u32, u32)>) -> crate::error::Result<Self> {
         let mut s = Self::default();
@@ -1200,6 +1263,10 @@ impl Proxy {
 }
 
 impl Media {
+    pub fn input_lut_in<'a>(&'a self, settings: &'a Settings) -> Option<&'a Path> {
+        self.input_lut.as_deref().or(settings.input_lut.as_deref())
+    }
+
     pub fn opaque(&self) -> bool {
         self.info
             .video

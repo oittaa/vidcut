@@ -3753,7 +3753,8 @@ pub enum Request {
         viewer: bool,
     },
     /// Render one scope of the viewer picture as PNG: the timeline at `at`,
-    /// drawn as the viewer draws it, with no window. The answer gives the
+    /// drawn as the viewer draws it, with no window. The scope reads the
+    /// picture through the Scopes LUT of the project. The answer gives the
     /// timeline color space and the marks of the scale.
     #[serde(rename = "frame.scope")]
     FrameScope {
@@ -3836,7 +3837,9 @@ pub enum Request {
     /// with no extension), `menu` (the subfolders it is in, the outer one
     /// first) and `path`. They come in the order of the menus: by their path
     /// in their folder, letter by letter. `media.set` and `project.set` take
-    /// a path from here, or any other `.cube` file.
+    /// a path from here, or any other `.cube` file. In an open GUI it is
+    /// Update Lists: the menus get this list, and the viewers, the scopes and
+    /// the thumbnails read their LUT files again.
     #[serde(rename = "luts.list")]
     LutsList {},
     /// Save one of your looks (`~/.config/vidcut/looks/subtitles/NAME.toml`
@@ -6097,6 +6100,34 @@ pub struct ProjectSet {
     /// empty path clears it.
     #[serde(default)]
     pub output_lut: Option<PathBuf>,
+    /// Video Monitor LUT: a `.cube` file that the monitored picture goes
+    /// through after every other step. It is only for monitoring: no export,
+    /// render cache or proxy gets it. The viewer of the Color page shows it
+    /// while the Color Viewer LUT follows it. A file that can't be read is
+    /// refused, with the reason. An empty path clears it.
+    #[serde(default)]
+    pub video_monitor_lut: Option<PathBuf>,
+    /// Color Viewer LUT: a `.cube` file that the viewer of the Color page
+    /// goes through after every other step, in place of the Video Monitor
+    /// LUT. The other viewers and the exports do not get it. An empty path
+    /// gives that viewer no LUT. A file that can't be read is refused, with
+    /// the reason.
+    #[serde(default)]
+    pub color_viewer_lut: Option<PathBuf>,
+    /// The Color Viewer LUT follows the Video Monitor LUT again, as in a new
+    /// project. Not with `color_viewer_lut`.
+    #[serde(default)]
+    pub color_viewer_follows: bool,
+    /// Scopes LUT: a `.cube` file that the scopes read the picture through.
+    /// Nothing else gets it. An empty path makes the scopes read the picture
+    /// as it is, as in a new project. A file that can't be read is refused,
+    /// with the reason.
+    #[serde(default)]
+    pub scopes_lut: Option<PathBuf>,
+    /// The scopes read the picture through the Video Monitor LUT. Not with
+    /// `scopes_lut`.
+    #[serde(default)]
+    pub scopes_follow: bool,
     /// The `start` and `end` that each new keyframe of a grade gets, each
     /// from 0 to 10. Usual: 1 and 1.
     #[serde(default)]
@@ -7246,6 +7277,9 @@ impl Request {
                 .input_lut
                 .iter_mut()
                 .chain(set.output_lut.iter_mut())
+                .chain(set.video_monitor_lut.iter_mut())
+                .chain(set.color_viewer_lut.iter_mut())
+                .chain(set.scopes_lut.iter_mut())
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect(),
             _ => Vec::new(),
