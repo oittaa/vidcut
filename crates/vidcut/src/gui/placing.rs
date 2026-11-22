@@ -7,8 +7,10 @@ use vidcut_core::model::{
 };
 use vidcut_core::ops::grade::GradeOf;
 use vidcut_core::ops::picture::{has_picture, zoom_shown};
-use vidcut_core::place::{Level, Placing, anchored, apply, flipped, frame_back, window_back};
-use vidcut_core::render::{Placed, Run};
+use vidcut_core::place::{
+    Extent, Level, Mixes, Placing, anchored, apply, flipped, frame_back, window_back,
+};
+use vidcut_core::render::{Placed, Run, VideoPiece};
 
 use super::timeline::tools::landing;
 use super::window_overlay::Framing;
@@ -134,6 +136,7 @@ struct Shown {
     whole: f64,
     plain: Level,
     ends: [Level; 2],
+    within: [f64; 4],
 }
 
 impl Shown {
@@ -335,9 +338,9 @@ impl Shown {
     }
 }
 
-fn content(p: &Project, c: &Clip, (w, h): (f64, f64)) -> [f64; 4] {
+fn content(p: &Project, media: &str, (w, h): (f64, f64)) -> [f64; 4] {
     let shown = p
-        .media(&c.media)
+        .media(media)
         .and_then(|m| m.info.video.as_ref())
         .map(vidcut_core::model::VideoInfo::display_size)
         .filter(|(dw, dh)| *dw > 0 && *dh > 0);
@@ -355,13 +358,48 @@ fn content(p: &Project, c: &Clip, (w, h): (f64, f64)) -> [f64; 4] {
     }
 }
 
-fn pixels_of(p: &Project, c: &Clip, frame: (f64, f64)) -> (f64, f64) {
-    p.media(&c.media)
+fn pixels_of(p: &Project, media: &str, frame: (f64, f64)) -> (f64, f64) {
+    p.media(media)
         .and_then(|m| m.info.video.as_ref())
         .filter(|v| v.width > 0 && v.height > 0)
         .map_or(frame, |v| {
             vidcut_core::place::upright_pixels((v.width, v.height), v.rotation)
         })
+}
+
+fn extent_of(p: &Project, c: &Clip, at: i64, frame: (f64, f64)) -> Extent {
+    let own = |media: &str| Extent {
+        rect: content(p, media, frame),
+        grid: pixels_of(p, media, frame),
+    };
+    let mixed = p.clip_compound(c).and_then(|_| {
+        let plan = vidcut_core::render::flatten(p, at, at + 1).ok()?;
+        let piece = plan.video.first()?;
+        let chains: Vec<(&[Placed], Extent)> = piece
+            .layers()
+            .into_iter()
+            .map(|(l, _)| match l {
+                VideoPiece::Source { media, .. } => (l.placed(), own(media)),
+                _ => (l.placed(), own("")),
+            })
+            .collect();
+        let titles: Vec<(usize, &[Placed])> = piece
+            .titles()
+            .into_iter()
+            .map(|(above, t)| (above, t.placed.as_slice()))
+            .collect();
+        let mixes = Mixes::of(&chains, &titles, frame);
+        let outer = mixes.outer.into_iter().find(|o| {
+            let (from, to) = o.layers;
+            from < to
+                && chains
+                    .get(from)
+                    .and_then(|(chain, _)| chain.last())
+                    .is_some_and(|l| l.clip == c.id)
+        });
+        outer.map(|o| o.mix.extent)
+    });
+    mixed.unwrap_or_else(|| own(&c.media))
 }
 
 fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Option<Shown> {
@@ -371,15 +409,16 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
         of: c.duration,
         held: false,
     };
-    let fit = content(p, c, (w, h));
-    let pixels = pixels_of(p, c, (w, h));
-    let level_of =
-        |x: Picture| Placing::new(&[Placed::at(c, x, run, at)], (w, h), fit, pixels).level;
+    let fit = content(p, &c.media, (w, h));
+    let pixels = pixels_of(p, &c.media, (w, h));
+    let extent = extent_of(p, c, at, (w, h));
+    let placing = |placed: &[Placed]| Placing::over(placed, (w, h), (fit, pixels), extent);
+    let level_of = |x: Picture| placing(&[Placed::at(c, x, run, at)]).level;
     let placed = [Placed::at(c, shown.clone(), run, at)];
     let middle = placed[0]
         .zoomed()
         .map_or(Picture::MIDDLE, |b| flipped(&shown, b.center));
-    let level = Placing::new(&placed, (w, h), fit, pixels).level;
+    let level = placing(&placed).level;
     let plain = level_of(Picture {
         dynamic_zoom: None,
         ..shown.clone()
@@ -407,6 +446,7 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
         whole,
         plain,
         ends,
+        within: extent.within(fit),
     })
 }
 
@@ -859,8 +899,8 @@ impl Workspace {
                     of: c.duration,
                     held: false,
                 };
-                let fit = content(&p, c, (w, h));
-                let pixels = pixels_of(&p, c, (w, h));
+                let fit = content(&p, &c.media, (w, h));
+                let pixels = pixels_of(&p, &c.media, (w, h));
                 let placed = [Placed::at(
                     c,
                     c.picture.clone().unwrap_or_default(),
@@ -991,6 +1031,8 @@ impl Workspace {
             Hold::Crop(side) => {
                 let at = s.frame_at(to);
                 let [u, v] = apply(&s.level.back, at);
+                let [cx, cy, cw, ch] = s.within;
+                let (u, v) = ((u - cx) / cw, (v - cy) / ch);
                 let k = &mut next.now.crop;
                 let side_of = |v: f64| rounded(v.clamp(0.0, 1.0), 4);
                 match side {

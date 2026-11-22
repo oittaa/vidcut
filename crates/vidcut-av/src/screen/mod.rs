@@ -10,7 +10,7 @@ use crate::player::{AlphaUse, Layout, Picture, Sampling, TitleOver, TitlePicture
 use crate::thumbs::Image;
 use vidcut_core::model::{AlphaMode, CompositeMode, Grade, Hdr};
 use vidcut_core::place::{
-    Level, Mix, MixPart, Mixes, Placing, Working, chain, frame_back, lettered,
+    Extent, Level, Mix, MixPart, Mixes, Placing, Working, chain, frame_back, lettered,
 };
 use vidcut_core::preferences::{Scope, ScopeScale};
 use vidcut_core::render::{Moving, Placed, Shift};
@@ -1885,8 +1885,12 @@ impl Screen {
         {
             true => Mixes::default(),
             false => {
-                let chains: Vec<&[Placed]> = (0..n)
-                    .map(|i| placed.get(i).map_or(&[][..], Vec::as_slice))
+                let chains: Vec<(&[Placed], Extent)> = (0..n)
+                    .map(|i| {
+                        let (_, rect, grid) = layers[i].0.placed_in(size);
+                        let chain = placed.get(i).map_or(&[][..], Vec::as_slice);
+                        (chain, Extent { rect, grid })
+                    })
                     .collect();
                 let over: Vec<(usize, &[Placed])> = mixed
                     .iter()
