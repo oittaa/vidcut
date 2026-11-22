@@ -3406,6 +3406,16 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - A middle-click removes any point of a curve.
     - The viewer shows the outline, thin lines at the inner and the outer path, the points, the Bezier handles and a middle dot.
     - Not measured: the look of a curve in the viewer of Resolve, and its key before the curve is closed.
+  - Each point of a curve has a magenta inside and outside softness point. A drag moves each one alone (p. 3273).
+  - Measured in Resolve Studio 21.2: a curve keeps an inner and an outer path, each with a point for each point of the curve.
+    - With no drag, the two paths are the curve moved by Inside and Outside, with mitred corners.
+    - A drag of one outer softness point moves that point and its handles only. The other points keep their place.
+    - A new Outside value puts all the outer points back on the even outer path.
+  - vidcut: `inner` and `outer` of a curve hold the moves of the softness points from their points. A drag of a magenta point sets them.
+    - The first drag starts from the even path. Inside or Outside then puts that path back, as measured.
+    - A softness point keeps its move when its point moves. A new point between two points gets the mean of their moves.
+    - The viewer shows the magenta points of a closed curve. A point with no softness has its handles a short way in and out.
+    - Not measured: Inside, and what a move of a curve point, Size or Rotate does to a dragged softness point.
   - Measured in the Window palette of Resolve Studio 21.2: Copy Window in the option menu copies the current window.
     - Paste Window with a window of the same shape current gives it the copied values. It adds no row.
     - Paste Window with a window of another shape current adds a copy at the end, on and current. The other window does not change.
@@ -3414,7 +3424,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - The copy has the shape, the softness, the Transform values, Invert and Mask.
     - A window that takes a copy keeps its name, and stays on or off. A copy at the end has no name.
     - Not measured: the name, Invert, Mask and the on state after a paste.
-  - Window keyframes, the softness points of a curve and the Shift box come later ([todo](todo/color-page.md)).
+  - Window keyframes and the Shift box come later ([todo](todo/color-page.md)).
 
 Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.window.convert`, `grade.window.copy` and `grade.window.paste`.
 

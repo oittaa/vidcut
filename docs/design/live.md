@@ -438,6 +438,7 @@ The bar and the Jobs button:
   - A click on a polygon edge adds a corner, and a middle-click removes one. Both go through the same copy.
   - Copy Window sends `grade.window.copy`. The live core keeps its answer (`window_clipboard`) for `grade.window.paste`. The snapshot gives the shape of the copy, so the palette knows which window becomes current.
   - A curve has a handle at each point (`Grip::Point`) and at each Bezier handle (`Grip::Tangent`).
+  - Each point of a closed curve also has an inner and an outer softness handle (`Grip::Spread`). `bends` gives their even place.
   - A click on a curve adds a point with `curve_split`. `curve_inserted` cuts the Bezier segment there, so the shape stays.
   - While the current curve is on and has no points, a click adds a point. `Drawing` then keeps the curve open until a click on its first point.
   - A drag from a new point pulls its handles out (`Grip::Pull`). Alt and a drag on a corner do the same.

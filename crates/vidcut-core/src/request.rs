@@ -3187,6 +3187,15 @@ pub enum Request {
         /// the out handle.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         points: Option<Vec<[f64; 2]>>,
+        /// A curve only: the inner softness point of each point, as a move
+        /// from that point. `inside` puts them back on an even edge, and so
+        /// does a new number of `points` without `inner`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inner: Option<Vec<[f64; 2]>>,
+        /// A curve only: the outer softness point of each point, as
+        /// `inner`. `outside` puts them back on an even edge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outer: Option<Vec<[f64; 2]>>,
     },
     /// Turn a circle, a linear window or a polygon of a corrector into a
     /// curve of the same shape, with no softness. The curve goes last in

@@ -4001,6 +4001,15 @@ pub enum WindowShape {
         /// The softness outside the edge: 0.004243 of the frame width a
         /// step. Usual: 0.
         outside: f64,
+        /// The inner softness point of each point, as a move `[x, y]` from
+        /// that point, in the units of `points`. Left out while `inside`
+        /// gives the inner edge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inner: Option<Vec<[f64; 2]>>,
+        /// The outer softness point of each point, as `inner`. Left out
+        /// while `outside` gives the outer edge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outer: Option<Vec<[f64; 2]>>,
     },
     /// A line through the middle of the window. The key is 1 above it and
     /// goes to 0 below it.
@@ -4064,6 +4073,8 @@ impl GradeWindow {
                 soft: 0.0,
                 inside: 0.0,
                 outside: 0.0,
+                inner: None,
+                outer: None,
             },
             WindowKind::Gradient => WindowShape::Gradient { soft: 2.0 },
         };

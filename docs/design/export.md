@@ -779,6 +779,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - The key texture comes from the same `Registers` as the pictures. It is free again after its last use (`Registers::used`).
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
   - A curve goes to the GPU as two closed paths of lines: the inner and the outer path (`flattened`, `mitred`).
+  - A curve with dragged softness points gets each path from its own points: the curve points with their moves (`inner`, `outer`).
     - `flatten_into` halves each Bezier segment until its handles are within `FLAT_ERROR` pixel of the chord, `FLAT_DEPTH` times at most.
   - A curve with Soft 1 needs a blur of its hard key. `curves_blurred` draws up to `CURVE_CHANNELS` such keys into the channels of one texture (`fs_window_curves`).
     - It blurs each channel with its own sigma, as the Gaussian blur of an effect. `texel_spread` gives the sigma in texels.

@@ -236,14 +236,23 @@ pub(super) fn window_changes(from: &GradeWindow, to: &GradeWindow) -> Map<String
                 soft: a,
                 inside: ai,
                 outside: ao,
+                inner: an,
+                outer: au,
             },
             WindowShape::Curve {
                 points: bp,
                 soft: b,
                 inside: bi,
                 outside: bo,
+                inner: bn,
+                outer: bu,
             },
         ) => {
+            for (name, x, y) in [("inner", an, bn), ("outer", au, bu)] {
+                if let Some(y) = y.as_ref().filter(|_| x != y) {
+                    m.insert(name.into(), json!(y));
+                }
+            }
             for (name, x, y) in [("inside", ai, bi), ("outside", ao, bo)] {
                 if x != y {
                     m.insert(name.into(), json!(y));
