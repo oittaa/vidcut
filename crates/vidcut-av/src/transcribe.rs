@@ -327,6 +327,12 @@ fn unpack(archive: &Path, runtime: &Runtime, dir: &Path) -> Result<()> {
         std::fs::rename(&inner, &home)?;
     }
     let _ = std::fs::remove_file(archive);
+    for old in runtime.older(dir) {
+        let _ = std::fs::remove_dir_all(&old);
+        let mut lock = old.into_os_string();
+        lock.push(".lock");
+        let _ = std::fs::remove_file(lock);
+    }
     Ok(())
 }
 
