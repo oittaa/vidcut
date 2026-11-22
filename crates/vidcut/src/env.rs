@@ -618,6 +618,10 @@ impl Env for AvEnv {
             .still_duration
     }
 
+    fn decompose_on_edit(&self) -> bool {
+        crate::preferences::load().is_ok_and(|p| p.editing.decompose_on_edit)
+    }
+
     fn printer_lights(&self) -> vidcut_core::preferences::ColorPrefs {
         crate::preferences::load()
             .map(|p| p.color)

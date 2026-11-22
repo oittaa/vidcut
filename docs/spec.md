@@ -2514,6 +2514,36 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - The marks stay when the compound clip closes.
     - With an In past the end of the compound clip, an edit refuses and tells why.
     - Source Overwrite lines up a compound clip by its own start timecode ([§7.2](#72-edit-functions)).
+- **Decompose Compound Clips On Edit** (pp. 1053–1054; measured in Resolve Studio 21.2):
+  - It is in Edit > Edit Options. It is off by default.
+  - It is a preference of the user, not a setting of the project.
+  - With it on, an edit of a compound clip puts the clips inside it on the timeline.
+    - Append, Insert, Smart Insert, Overwrite, Ripple Overwrite, Replace, Place on Top and Source Overwrite do this.
+    - A drag from the Media Pool does this too.
+    - Fit to Fill puts the compound clip itself, with a speed change.
+    - The manual says that Place on Top puts the compound clip itself. Resolve Studio 21.2 puts the clips inside.
+  - The clips go where the compound clip would go.
+    - The marks of the compound clip cut each clip inside.
+    - Inner track n goes on the track of the compound clip plus n − 1, for picture and for sound. A missing track is made.
+    - A clip inside overwrites what is under it. A gap inside leaves the timeline as it is.
+  - A compound clip inside stays a compound clip. Only one level comes apart.
+  - The destination controls show one control for each track inside (p. 1055).
+    - Measured with a compound clip that holds clips on V1 and V2. The clip on V1 has sound.
+    - The controls V1, V2 and A1 show at the timeline tracks of the same number. With the option off, only V1 and A1 show.
+    - A drag of the V2 control to Video 3 puts the clip of inner V2 on V3.
+    - A drop of the V2 control on the track of V1 swaps the two controls.
+    - With the control of inner V1 off, V1 of the timeline stays as it is. The sound of the clip on inner V1 still goes on A1.
+    - With the control of A1 off, the pictures go in. A1 of the timeline stays as it is.
+  - **vidcut:**
+    - `preferences.set` with `editing.decompose_on_edit` turns it on. The Edit menu has Edit Options > Decompose Compound Clips On Edit.
+    - The edits of [§7.2](#72-edit-functions) and a drag from the Media tab do this.
+    - Insert and Smart Insert move other tracks by the rules of D23.
+    - The tracks inside go on the track that the edit picks, and on the tracks above it.
+    - `inner_tracks` of an edit puts a track inside on a track of the timeline. `null` leaves that track out.
+    - The sound of a picture track inside moves with it.
+    - `null` on a picture track inside leaves out only its picture.
+      - Its sound goes on the first audio track from its own that no other track inside takes.
+    - Two tracks inside on one track of the timeline are refused.
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
   - Double-click the parent name in the bottom-left path bar to close the compound clip (p. 1054).
@@ -3272,6 +3302,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Not measured: a key on the Output, on a Parallel Mixer or on a Layer Mixer. vidcut takes it as a gray picture there too.
     - A Parallel Mixer takes the source as the base of a gray picture.
   - Not measured: a link from the RGB output of a corrector that is off into a key input. vidcut gives the luma of the picture that it passes on.
+  - Not measured: a link from the key output of a corrector that is off into an RGB input. vidcut gives its key as a gray picture, as when it is on.
   - Not measured: a delete or an extract of a node with such links. vidcut removes the links from its key output and its links into key inputs.
   - Not measured: Add Serial, Add Parallel, Add Layer and Add Outside at a node whose RGB output goes into a key input. vidcut moves that link as it moves a link into an RGB input.
   - Not measured: the look of a link from a key output to an RGB input. vidcut colors each link by the output that it leaves.

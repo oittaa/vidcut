@@ -287,6 +287,7 @@ pub struct Snapshot {
     pub guides: vidcut_core::preferences::Guides,
     pub scopes: vidcut_core::preferences::Scopes,
     pub show_upscale: bool,
+    pub decompose_on_edit: bool,
     pub switching_clips: vidcut_core::preferences::SwitchingClips,
     pub show_thumbnails: bool,
     pub disable_thumbnail_refresh: bool,

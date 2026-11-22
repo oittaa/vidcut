@@ -617,6 +617,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         show_upscale: crate::preferences::load().is_ok_and(|p| p.viewer.upscale),
+        decompose_on_edit: crate::preferences::load().is_ok_and(|p| p.editing.decompose_on_edit),
         switching_clips: crate::preferences::load()
             .map(|p| p.color.switching_clips)
             .unwrap_or_default(),
@@ -736,6 +737,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         show_upscale: crate::preferences::load().is_ok_and(|p| p.viewer.upscale),
+        decompose_on_edit: crate::preferences::load().is_ok_and(|p| p.editing.decompose_on_edit),
         switching_clips: crate::preferences::load()
             .map(|p| p.color.switching_clips)
             .unwrap_or_default(),
@@ -1025,6 +1027,7 @@ struct Live {
     guides: vidcut_core::preferences::Guides,
     scopes: vidcut_core::preferences::Scopes,
     show_upscale: bool,
+    decompose_on_edit: bool,
     switching_clips: vidcut_core::preferences::SwitchingClips,
     show_thumbnails: bool,
     disable_thumbnail_refresh: bool,
@@ -1307,6 +1310,12 @@ impl Live {
                     self.show_upscale = show_upscale;
                     self.schedule_timeline();
                     self.refresh_source();
+                    changed = true;
+                }
+                let decompose_on_edit =
+                    crate::preferences::load().is_ok_and(|p| p.editing.decompose_on_edit);
+                if self.decompose_on_edit != decompose_on_edit {
+                    self.decompose_on_edit = decompose_on_edit;
                     changed = true;
                 }
                 let switching_clips = crate::preferences::load()
@@ -1693,6 +1702,7 @@ impl Live {
             guides: self.guides,
             scopes: self.scopes,
             show_upscale: self.show_upscale,
+            decompose_on_edit: self.decompose_on_edit,
             switching_clips: self.switching_clips,
             show_thumbnails: self.show_thumbnails,
             disable_thumbnail_refresh: self.disable_thumbnail_refresh,
