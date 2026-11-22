@@ -5886,9 +5886,10 @@ pub struct SourceParams {
     /// With Decompose Compound Clips On Edit on: the timeline track for a
     /// track inside the compound clip, as `{"V2": "V4", "A1": null}`. `null`
     /// leaves that track out. A track that is not named goes on the edit's
-    /// track plus its number minus 1. The sound of a picture track goes with
-    /// it, on the audio track of the same number, also with `audio_only`.
-    /// A picture track left out with `null` still gives its sound.
+    /// track plus its number minus 1. The sound of a picture track moves with
+    /// it, also with `audio_only`. `null` on a picture track leaves out only
+    /// its picture: its sound goes on the first audio track from its own that
+    /// no other track inside takes.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inner_tracks: BTreeMap<String, Option<String>>,
     /// A part of the Multi Source viewer: the frames left empty before the

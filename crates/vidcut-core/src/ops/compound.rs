@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{Value, json};
@@ -753,6 +752,7 @@ fn spread(
             super::conform::track(p, t, r);
         }
     }
+    let layout = sound.map_or_else(Vec::new, |_| sounds(&k.tracks));
     let named = |tracks: Vec<Track>| tracks.into_iter().map(|t| (t.id.clone(), t)).collect();
     let source: Vec<(String, Track)> = match (picture, sound) {
         (Some(_), Some(_)) => named(k.tracks),
@@ -763,37 +763,60 @@ fn spread(
     let parts = pieces(block);
     let mut made = Vec::new();
     let mut taken = HashSet::new();
+    let mut heard = Vec::new();
     for (id, inner) in source.iter().filter(|(_, t)| shows(t, &parts)) {
         let base = match inner.kind {
             TrackKind::Video => picture,
             _ => sound,
         };
-        let heard = match (inner.kind, sound) {
-            (TrackKind::Video, Some(s)) => sounds(std::slice::from_ref(inner))
-                .pop()
-                .map(|(_, t)| (t, s)),
-            _ => None,
+        let route = match (inner_tracks.get(id), inner.kind) {
+            (Some(None), TrackKind::Audio) if id.starts_with('V') => None,
+            (route, _) => route,
         };
-        let (track, n) = match (inner_tracks.get(id), base, heard) {
-            (Some(None), _, Some((t, s))) => (Cow::Owned(t), slot(s) + number(inner) - 1),
-            (Some(None), _, None) | (None, None, _) => continue,
-            (Some(Some(to)), _, _) => (Cow::Borrowed(inner), slot(to)),
-            (None, Some(base), _) => (Cow::Borrowed(inner), slot(base) + number(inner) - 1),
+        let n = match (route, base) {
+            (Some(None), _) => {
+                if let (TrackKind::Video, Some(s)) = (inner.kind, sound) {
+                    let own = layout.iter().filter(|(o, t)| o == id && shows(t, &parts));
+                    heard.extend(own.map(|(_, t)| (t, s)));
+                }
+                continue;
+            }
+            (None, None) => continue,
+            (Some(Some(to)), _) => slot(to),
+            (None, Some(base)) => slot(base) + number(inner) - 1,
         };
-        if !taken.insert((track.kind == TrackKind::Video, n)) {
+        if !taken.insert((inner.kind == TrackKind::Video, n)) {
             return Err(Error::invalid(format!(
                 "two tracks inside {} go to {}{}",
                 k.name,
-                &track.id[..1],
+                &inner.id[..1],
                 n + 1
             )));
         }
-        let ti = target(p, track.kind, n, span, lay)?;
-        put_back(p, (ti, lay), &track, &parts, &mut made);
-        fit_sound(p, ti, &made);
-        fix_audio(p, ti);
+        let ti = target(p, inner.kind, n, span, lay)?;
+        lay_down(p, (ti, lay), inner, &parts, &mut made);
+    }
+    for (track, s) in heard {
+        let mut n = slot(s) + number(track) - 1;
+        while !taken.insert((false, n)) {
+            n += 1;
+        }
+        let ti = target(p, TrackKind::Audio, n, span, lay)?;
+        lay_down(p, (ti, lay), track, &parts, &mut made);
     }
     Ok(made)
+}
+
+fn lay_down(
+    p: &mut Project,
+    (ti, lay): (usize, Lay),
+    inner: &Track,
+    parts: &[Clip],
+    made: &mut Vec<String>,
+) {
+    put_back(p, (ti, lay), inner, parts, made);
+    fit_sound(p, ti, made);
+    fix_audio(p, ti);
 }
 
 fn open_sequence_ids(p: &Project) -> HashSet<String> {

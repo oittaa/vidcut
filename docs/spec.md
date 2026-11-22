@@ -2535,8 +2535,9 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Insert and Smart Insert move other tracks by the rules of D23.
     - The tracks inside go on the track that the edit picks, and on the tracks above it.
     - `inner_tracks` of an edit puts a track inside on a track of the timeline. `null` leaves that track out.
-    - The sound of a picture track inside goes with it, on the audio track of the same number.
-    - A picture track inside that `null` leaves out still gives its sound.
+    - The sound of a picture track inside moves with it.
+    - `null` on a picture track inside leaves out only its picture.
+      - Its sound goes on the first audio track from its own that no other track inside takes.
     - Two tracks inside on one track of the timeline are refused.
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
