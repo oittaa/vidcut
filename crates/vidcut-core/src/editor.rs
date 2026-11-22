@@ -2609,7 +2609,12 @@ pub fn compound_context(p: &Project, k: &Compound, playhead: Option<i64>) -> Tim
     TimeContext {
         fps: k.fps,
         drop_frame: k.counts_drop_frame(),
-        ..source_context(p, k.frames, p.compound_sheet(k).marks, playhead)
+        ..source_context(
+            p,
+            ops::compound::length(p, k),
+            p.compound_sheet(k).marks,
+            playhead,
+        )
     }
 }
 
@@ -2855,7 +2860,15 @@ fn compound_source(p: &Project, params: &SourceParams, query: &str) -> Result<So
     ops::compound::placeable(p, &id)?;
     let k = p.pooled_compound(&id).expect("placeable finds it");
     let (a, b) = match &params.range {
-        None => ops::compound::marked(p, k),
+        None => match ops::compound::marked(p, k) {
+            (a, b) if a >= b => {
+                return Err(Error::invalid(format!(
+                    "the In of {} is past its end",
+                    k.name
+                )));
+            }
+            ab => ab,
+        },
         Some(r) => compound_context(p, k, None).range(r)?,
     };
     let range = ops::compound::host_span(p, k, (a, b));

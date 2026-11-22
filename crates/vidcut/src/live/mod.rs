@@ -4279,7 +4279,7 @@ impl Live {
                     .source_compound
                     .as_ref()
                     .and_then(|k| p.pooled_compound(k))
-                    .map(|k| k.frames))
+                    .map(|k| vidcut_core::ops::compound::length(p, k)))
                 .unwrap_or(0),
             ViewerMode::SourceTape | ViewerMode::MultiSource => {
                 let at = self.player.position(SOURCE);

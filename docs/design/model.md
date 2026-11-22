@@ -834,6 +834,10 @@ Import:
   - A pooled compound clip is a source of the edits (`Source::compound`), as a media item is.
     - `ops::compound::placeable` refuses a compound clip inside itself, an empty one, and one shorter than a frame of the timeline.
     - `marked` gives the part between its marks, and `host_span` converts that part to the timeline's frames.
+    - `length` gives the length of a compound clip: `Compound::frames`, or the end of its timeline while it is open.
+      - `marked`, `set_marks`, `compound_context`, `render::compound_tape` and the Source viewer use it.
+      - `marked` keeps the marks inside that length. Why: a timeline that grew while open can be cut back before the close.
+    - `close_one` keeps the marks of the open timeline in `Compound::marks`. Why: they are the source marks of the compound clip.
     - `ops::make_clip` makes the picture block. `with_sound` adds the sound block on the audio track of the same number, after the edit.
     - Why: then each edit, its ripple and its track rules come from one implementation for files and compound clips.
     - `set_marks` writes the marks to the open sheet when the compound clip is open, else to `Compound::marks`.
