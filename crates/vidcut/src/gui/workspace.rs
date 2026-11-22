@@ -357,7 +357,9 @@ impl Workspace {
                 live::GuiChange::Primaries(view) => self.effects_page.primaries = view,
                 live::GuiChange::Window(w) => self.effects_page.window = w,
                 live::GuiChange::Nodes(nodes) => self.pick_nodes(nodes)?,
-                live::GuiChange::GradeNodes(nodes) => self.pick_grade_nodes(nodes)?,
+                live::GuiChange::GradeNodes(nodes, current) => {
+                    self.pick_grade_nodes(nodes, current)?
+                }
                 live::GuiChange::NodeView { zoom, list, wide } => {
                     self.set_node_view(zoom, list, wide)
                 }
@@ -483,8 +485,12 @@ impl Workspace {
             },
             nodes: self.effects_page.nodes.clone(),
             grade_nodes: match page {
-                Page::Color => self.effects_page.grade_nodes.clone(),
+                Page::Color => self.effects_page.picked_grade().to_vec(),
                 Page::Effects | Page::Cut => Vec::new(),
+            },
+            grade_node: match page {
+                Page::Color => self.effects_page.grade_nodes.last().copied(),
+                Page::Effects | Page::Cut => None,
             },
             node_zoom: self.node_zoom(),
             node_list: self.effects_page.grade_list,

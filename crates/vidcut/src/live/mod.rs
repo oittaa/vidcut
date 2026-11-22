@@ -98,7 +98,7 @@ pub enum GuiChange {
     Primaries(PrimariesView),
     Window(usize),
     Nodes(Vec<String>),
-    GradeNodes(Vec<u32>),
+    GradeNodes(Vec<u32>, Option<u32>),
     NodeView {
         zoom: Option<vidcut_core::request::NodeZoom>,
         list: Option<bool>,
@@ -163,6 +163,7 @@ pub struct GuiState {
     pub clip: Option<String>,
     pub nodes: Vec<String>,
     pub grade_nodes: Vec<u32>,
+    pub grade_node: Option<u32>,
     pub node_zoom: f64,
     pub node_list: bool,
     pub node_wide: bool,
@@ -3292,8 +3293,8 @@ impl Live {
             Request::GuiNodes { nodes } => {
                 self.gui_change(vec![GuiChange::Nodes(nodes)], |s| json!(s))
             }
-            Request::GuiGradeNodes { nodes } => {
-                self.gui_change(vec![GuiChange::GradeNodes(nodes)], |s| json!(s))
+            Request::GuiGradeNodes { nodes, current } => {
+                self.gui_change(vec![GuiChange::GradeNodes(nodes, current)], |s| json!(s))
             }
             Request::GuiNodeView { zoom, list, wide } => {
                 let change = GuiChange::NodeView { zoom, list, wide };

@@ -2945,8 +2945,12 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: does the same. Same Node also keeps the current node, because the timeline grade has that number. This part is not measured in Resolve.
   - Measured in Resolve Studio 21.2: a drag box from the empty Node Editor selects the nodes in the box.
   - Measured: a click on the empty Node Editor keeps the current node.
-  - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node.
-  - vidcut: a Ctrl-click adds a node to the selection, and a drag box adds the nodes in the box. The current node stays.
+  - vidcut: `gui.grade_nodes` selects nodes. The last one is the current node. With `current`, the current node need not be selected.
+  - vidcut: a Ctrl-click adds a node to the selection. A drag box selects the nodes in the box in place of the selection. The current node stays.
+  - Measured in Resolve Studio 21.2: a Ctrl-click on a selected node takes it out of the selection.
+  - vidcut: does the same. A Ctrl-click on the current node does nothing. This part is not measured in Resolve.
+  - vidcut: after a drag box that leaves out the current node, that node stays current but is not selected. Thus Delete keeps it, as measured.
+  - vidcut: `gui.state` gives the selected nodes in `grade_nodes` and the current node in `grade_node`.
   - Measured: a click on the empty Node Editor clears the other selected nodes. The current node stays.
   - vidcut: does the same.
 - **Labels and badges** (pp. 3390–3391):
@@ -3014,6 +3018,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - The Forward-Delete key deletes the selected node (p. 3395).
   - After a delete, each node after it gets one number less.
   - Measured in Resolve Studio 21.2: the Delete key deletes the current node. With two nodes selected by a drag box, it deletes both.
+  - Measured: after a drag box that leaves out the current node, Delete deletes only the nodes in the box.
   - Measured: a mixer input that took a deleted corrector stays, with no connection. Thus the mixer keeps all its inputs.
   - Measured: in node 1 to node 2 to a mixer input, the delete of node 2 leaves that input with no connection.
   - Measured: a delete that leaves a mixer with one linked input removes the mixer too. The node on that input takes the place of the mixer at its output.
@@ -3023,7 +3028,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: the menu of a mixer shows Shift+Backspace at Delete Node.
   - Extract Current Node (E) removes a node from the tree. The nodes at its two sides connect. The node stays, with no connection.
   - vidcut: `grade.remove`, and with `extract` for Extract. E extracts the current node.
-  - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. The last corrector then becomes the current node.
+  - vidcut: on the Color page, Shift+Backspace and Delete delete the selected nodes. A current node that is not selected stays. The last corrector then becomes the current node.
   - vidcut: a corrector or the output that took a deleted corrector takes the picture that came into it. A mixer input takes nothing.
   - vidcut: a mixer that a deleted corrector leaves with one linked input goes too, as measured.
   - vidcut: what took the picture of a deleted mixer then takes nothing. Not measured in Resolve: a deleted mixer that feeds a mixer.

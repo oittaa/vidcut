@@ -4422,10 +4422,16 @@ pub enum Request {
         wide: Option<bool>,
     },
     /// Select nodes in the node editor of the color page, by number. The
-    /// palette then shows the last one. An empty list selects none.
-    /// Answers what `gui.state` does.
+    /// palette then shows the last one, or `current`. An empty list selects
+    /// none. Answers what `gui.state` does.
     #[serde(rename = "gui.grade_nodes")]
-    GuiGradeNodes { nodes: Vec<u32> },
+    GuiGradeNodes {
+        nodes: Vec<u32>,
+        /// The current node, when it is not one of `nodes`. The palette
+        /// shows it, and a delete of the selected nodes keeps it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current: Option<u32>,
+    },
     /// The playhead of the effects page. It moves over the whole source of
     /// the clip: the head before its In and the tail after its Out too.
     /// `at` moves it, in frames from the In (negative: in the head).
