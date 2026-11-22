@@ -3,7 +3,7 @@
 **When:** now, one pull request for each step below.
 
 A motion path is the path of a box of the picture through the frames of a clip.
-A clip stores motion paths, and a pattern of a Tracker node on the Effects page has a path ([model](../design/model.md#motion-paths)). `motion.find` makes a path for each thing of one kind in a clip ([analysis](../design/analysis.md#subjects)). `motion.track` makes a path for a pattern.
+Each pattern of a Tracker node on the Effects page holds its path ([model](../design/model.md#motion-paths)). `motion.find` makes a pattern with a path for each thing of one kind in a clip ([analysis](../design/analysis.md#subjects)). `motion.track` makes a path for a pattern.
 
 In this file, a path is never a track of the timeline.
 
@@ -40,7 +40,7 @@ In this file, a path is never a track of the timeline.
 
 **In the code:**
 
-- A clip holds motion paths, and `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read them ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
+- Each pattern of a Tracker node holds its motion path. `motion.add`, `motion.set`, `motion.remove` and `motion.list` write and read the paths ([model](../design/model.md#motion-paths)).
 - Transform, Crop and the values of the effects have keyframes ([keyframes.md](keyframes.md)).
 - A Glow stores Follow FX Tracker (`atmosphere_tracked`). The value does not change the picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)).
 - The Center of a mask of a composition can follow a pattern of a Tracker node ([spec](../spec.md#the-tracker)).

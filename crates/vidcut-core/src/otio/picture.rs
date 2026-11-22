@@ -1154,7 +1154,6 @@ mod tests {
             ramp: None,
             crossing: false,
             moving: None,
-            followed: Default::default(),
             clock: Default::default(),
         };
         let fitted = [240.0, 0.0, 1440.0, 1080.0];

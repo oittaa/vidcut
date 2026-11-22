@@ -281,7 +281,6 @@ pub(crate) fn block_clip(
         retime: crate::model::ClipRetime::Project,
         color: None,
         render_cache: crate::model::ClipCache::Auto,
-        motion: Vec::new(),
     }
 }
 
@@ -370,7 +369,6 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         retime: crate::model::ClipRetime::Project,
         color: None,
         render_cache: crate::model::ClipCache::Auto,
-        motion: Vec::new(),
     })
 }
 
@@ -3298,9 +3296,6 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         clip.video = clip.video && has_video && on_video;
         if !clip.video {
             clip.picture = None;
-        }
-        if !motion::takes(&clip) {
-            clip.motion.clear();
         }
         if let Some(why) = motion::violation(&clip) {
             return Err(Error::invalid(format!(

@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::composition::Frames;
 use crate::error::{Error, Result};
-use crate::model::{Clip, MotionPath, PathSample, Pattern, Project, Subject, Tool};
+use crate::model::{Clip, MotionPath, PathSample, Pattern, Project, Subject, Tracker};
 use crate::motion::{self, Area};
 use crate::render::FileClock;
 
@@ -12,7 +12,6 @@ use super::locate;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PathChange<'a> {
-    pub name: Option<&'a str>,
     pub samples: Option<&'a [PathSample]>,
     pub clear: Option<[i64; 2]>,
 }
@@ -21,57 +20,115 @@ pub fn takes(c: &Clip) -> bool {
     c.video && !c.is_block()
 }
 
+fn no_picture(id: &str) -> Error {
+    Error::invalid(format!(
+        "{id} has no source picture: a motion path goes on footage, a still or an image sequence"
+    ))
+}
+
 fn clip_of<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut Clip> {
     let (ti, ci) = locate(p, id)?;
     let c = &mut p.tracks[ti].clips[ci];
     if !takes(c) {
-        return Err(Error::invalid(format!(
-            "{id} has no source picture: a motion path goes on footage, a still or an image \
-             sequence"
-        )));
+        return Err(no_picture(id));
     }
     Ok(c)
 }
 
-fn path_of<'a>(c: &'a mut Clip, path: &str) -> Result<&'a mut MotionPath> {
+fn no_tracker(id: &str, tracker: &str) -> Error {
+    Error::invalid(format!(
+        "{id} has no tracker {tracker}: a motion path is on a pattern of a tracker of its \
+         composition"
+    ))
+}
+
+fn tracker_of<'a>(c: &'a Clip, tracker: &str) -> Result<&'a Tracker> {
+    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
+    let t = comp.and_then(|x| x.node(tracker)?.tool.tracker());
+    t.ok_or_else(|| no_tracker(&c.id, tracker))
+}
+
+fn tracker_mut<'a>(c: &'a mut Clip, tracker: &str) -> Result<&'a mut Tracker> {
     let id = c.id.clone();
-    c.motion
-        .iter_mut()
-        .find(|m| m.id == path)
-        .ok_or_else(|| Error::not_found(format!("{id} has no motion path {path}")))
+    let comp = c.picture.as_mut().and_then(|x| x.composition.as_mut());
+    let node = comp.and_then(|x| x.nodes.iter_mut().find(|n| n.name == tracker));
+    node.and_then(|n| n.tool.tracker_mut())
+        .ok_or_else(|| no_tracker(&id, tracker))
+}
+
+fn index(t: &Tracker, tracker: &str, k: u32) -> Result<usize> {
+    let i = (k as usize).checked_sub(1);
+    i.filter(|i| *i < t.patterns.len())
+        .ok_or_else(|| no_pattern(tracker, k, t.patterns.len()))
+}
+
+pub(super) fn no_pattern(tracker: &str, k: u32, count: usize) -> Error {
+    let have = match count {
+        0 => "it has no patterns".to_string(),
+        1 => "it has pattern 1".to_string(),
+        all => format!("its patterns are 1 to {all}"),
+    };
+    Error::invalid(format!("{tracker} has no pattern {k}: {have}"))
+}
+
+pub(super) fn pattern_of<'a>(c: &'a Clip, tracker: &str, k: u32) -> Result<&'a Pattern> {
+    let t = tracker_of(c, tracker)?;
+    Ok(&t.patterns[index(t, tracker, k)?])
+}
+
+fn pattern_mut<'a>(c: &'a mut Clip, tracker: &str, k: u32) -> Result<&'a mut Pattern> {
+    let t = tracker_mut(c, tracker)?;
+    let i = index(t, tracker, k)?;
+    Ok(&mut t.patterns[i])
 }
 
 fn named(name: &str) -> Option<String> {
     Some(name.trim().to_string()).filter(|n| !n.is_empty())
 }
 
-pub fn add(p: &mut Project, id: &str, name: Option<&str>, samples: &[PathSample]) -> Result<Value> {
+fn trackers(c: &Clip) -> impl Iterator<Item = (&str, &Tracker)> {
+    let comp = c.picture.iter().flat_map(|x| x.composition.iter());
+    let nodes = comp.flat_map(|k| &k.nodes);
+    nodes.filter_map(|n| Some((n.name.as_str(), n.tool.tracker()?)))
+}
+
+fn paths(c: &Clip) -> impl Iterator<Item = &MotionPath> {
+    let patterns = trackers(c).flat_map(|(_, t)| &t.patterns);
+    patterns.filter_map(|x| x.path.as_ref())
+}
+
+pub fn add(
+    p: &mut Project,
+    id: &str,
+    tracker: &str,
+    name: Option<&str>,
+    samples: &[PathSample],
+) -> Result<Value> {
     if let Some(why) = motion::samples_problem(samples) {
         return Err(Error::invalid(why));
     }
-    let c = clip_of(p, id)?;
-    if c.motion.len() >= motion::PATHS_KEPT {
+    let t = tracker_mut(clip_of(p, id)?, tracker)?;
+    if t.patterns.len() >= Tracker::PATTERNS_KEPT {
         return Err(Error::invalid(format!(
-            "{id} has {} motion paths, the most a clip takes",
-            motion::PATHS_KEPT
+            "{tracker} of {id} has {} patterns, the most a tracker takes",
+            Tracker::PATTERNS_KEPT
         )));
     }
-    let path = motion::next_id(&c.motion);
-    c.motion.push(MotionPath {
-        id: path.clone(),
-        name: name.and_then(named),
-        subject: None,
-        tracked: false,
-        samples: Arc::new(samples.to_vec()),
+    let name = name.and_then(named).unwrap_or_else(|| t.free_name());
+    t.patterns.push(Pattern {
+        path: Some(MotionPath {
+            subject: None,
+            tracked: false,
+            samples: Arc::new(samples.to_vec()),
+        }),
+        ..Pattern::new(name)
     });
-    Ok(json!({ "clip": id, "path": path }))
+    Ok(json!({ "clip": id, "node": tracker, "pattern": t.patterns.len() }))
 }
 
-pub fn set(p: &mut Project, id: &str, path: &str, change: PathChange) -> Result<()> {
+pub fn set(p: &mut Project, id: &str, (tracker, k): (&str, u32), change: PathChange) -> Result<()> {
     if change == PathChange::default() {
-        return Err(Error::usage(
-            "motion.set needs a name, samples or a range to clear",
-        ));
+        return Err(Error::usage("motion.set needs samples or a range to clear"));
     }
     if let Some([first, last]) = change.clear
         && first > last
@@ -87,8 +144,8 @@ pub fn set(p: &mut Project, id: &str, path: &str, change: PathChange) -> Result<
     {
         return Err(Error::invalid(why));
     }
-    let m = path_of(clip_of(p, id)?, path)?;
-    let mut samples = m.samples.to_vec();
+    let pattern = pattern_mut(clip_of(p, id)?, tracker, k)?;
+    let mut samples = (pattern.path.as_ref()).map_or_else(Vec::new, |m| m.samples.to_vec());
     if let Some([first, last]) = change.clear {
         motion::clear(&mut samples, (first, last));
     }
@@ -97,45 +154,48 @@ pub fn set(p: &mut Project, id: &str, path: &str, change: PathChange) -> Result<
     }
     if samples.is_empty() {
         return Err(Error::invalid(format!(
-            "that leaves {path} of {id} no samples: motion.remove takes a path off"
+            "that leaves pattern {k} of {tracker} of {id} no samples: motion.remove takes a path \
+             off"
         )));
     }
     if let Some(why) = motion::samples_problem(&samples) {
         return Err(Error::invalid(why));
     }
-    m.samples = Arc::new(samples);
-    if let Some(name) = change.name {
-        m.name = named(name);
+    match pattern.path.as_mut() {
+        Some(m) => m.samples = Arc::new(samples),
+        None => {
+            pattern.path = Some(MotionPath {
+                subject: None,
+                tracked: false,
+                samples: Arc::new(samples),
+            });
+        }
     }
     Ok(())
 }
 
-fn followers(c: &Clip) -> impl Iterator<Item = (&str, &str)> {
-    let nodes = c.picture.iter().flat_map(|x| x.composition.iter());
-    nodes.flat_map(|k| &k.nodes).flat_map(|n| {
-        let patterns = n.tool.tracker().map_or(&[][..], |t| &t.patterns[..]);
-        let on = patterns.iter().filter_map(|p| p.path.as_deref());
-        on.map(move |path| (n.name.as_str(), path))
-    })
-}
-
-pub fn remove(p: &mut Project, id: &str, paths: Option<&[String]>) -> Result<()> {
-    let c = clip_of(p, id)?;
-    let all: Vec<String> = c.motion.iter().map(|m| m.id.clone()).collect();
-    if paths.is_none() && all.is_empty() {
-        return Err(Error::not_found(format!("{id} has no motion paths")));
-    }
-    let paths = paths.unwrap_or(&all);
-    for path in paths {
-        path_of(c, path)?;
-    }
-    if let Some((tracker, path)) = followers(c).find(|(_, path)| paths.iter().any(|x| x == path)) {
-        return Err(Error::invalid(format!(
-            "a pattern of tracker {tracker} of {id} is on motion path {path}: first remove that \
-             pattern (comp.set with remove_pattern)"
+pub fn remove(p: &mut Project, id: &str, tracker: &str, patterns: Option<&[u32]>) -> Result<()> {
+    let t = tracker_mut(clip_of(p, id)?, tracker)?;
+    let picked: Vec<usize> = match patterns {
+        Some(ks) => (ks.iter().map(|k| index(t, tracker, *k))).collect::<Result<_>>()?,
+        None => (0..t.patterns.len())
+            .filter(|i| t.patterns[*i].path.is_some())
+            .collect(),
+    };
+    if picked.is_empty() {
+        return Err(Error::not_found(format!(
+            "{tracker} of {id} has no motion paths"
         )));
     }
-    c.motion.retain(|m| !paths.contains(&m.id));
+    if let Some(i) = picked.iter().find(|i| t.patterns[**i].path.is_none()) {
+        return Err(Error::not_found(format!(
+            "pattern {} of {tracker} of {id} has no motion path",
+            i + 1
+        )));
+    }
+    for i in picked {
+        t.patterns[i].path = None;
+    }
     Ok(())
 }
 
@@ -143,30 +203,35 @@ pub fn shift(c: &mut Clip, by: i64) {
     if by == 0 {
         return;
     }
-    for m in &mut c.motion {
+    let comp = c.picture.as_mut().and_then(|x| x.composition.as_mut());
+    let nodes = comp.into_iter().flat_map(|k| k.nodes.iter_mut());
+    let patterns = nodes
+        .filter_map(|n| n.tool.tracker_mut())
+        .flat_map(|t| t.patterns.iter_mut());
+    for m in patterns.filter_map(|x| x.path.as_mut()) {
         for s in Arc::make_mut(&mut m.samples) {
             s.frame += by;
         }
     }
 }
 
-fn shown(m: &MotionPath, at: Option<i64>, samples: bool) -> Value {
-    let mut v = json!({ "id": m.id, "count": m.samples.len() });
-    if let Some(name) = &m.name {
-        v["name"] = json!(name);
-    }
-    if let Some(subject) = m.subject {
-        v["subject"] = json!(subject);
-    }
-    if m.tracked {
-        v["tracked"] = json!(true);
-    }
-    if let Some((first, last)) = m.span() {
-        v["first"] = json!(first);
-        v["last"] = json!(last);
+fn shown(k: usize, pattern: &Pattern, at: Option<i64>, samples: bool) -> Value {
+    let mut v = json!({ "pattern": k + 1, "name": pattern.name, "count": 0 });
+    if let Some(m) = &pattern.path {
+        v["count"] = json!(m.samples.len());
+        if let Some(subject) = m.subject {
+            v["subject"] = json!(subject);
+        }
+        if m.tracked {
+            v["tracked"] = json!(true);
+        }
+        if let Some((first, last)) = m.span() {
+            v["first"] = json!(first);
+            v["last"] = json!(last);
+        }
     }
     if let Some(frame) = at
-        && let Some(area) = m.base_at(frame as f64)
+        && let Some(area) = pattern.area_at(frame as f64)
     {
         v["area"] = json!({
             "frame": frame,
@@ -175,7 +240,7 @@ fn shown(m: &MotionPath, at: Option<i64>, samples: bool) -> Value {
             "rotation": area.rotation,
         });
     }
-    if samples {
+    if samples && let Some(m) = &pattern.path {
         v["samples"] = json!(m.samples);
     }
     v
@@ -188,54 +253,67 @@ pub fn list(p: &Project, ids: Option<&[String]>, at: Option<i64>, samples: bool)
         }
     }
     let mut clips = Vec::new();
-    for t in &p.tracks {
-        for c in &t.clips {
+    for track in &p.tracks {
+        for c in &track.clips {
             let wanted = match ids {
                 Some(ids) => ids.contains(&c.id),
-                None => !c.motion.is_empty(),
+                None => trackers(c).next().is_some(),
             };
-            if wanted {
-                let clock = FileClock::of(p, c);
-                let frame = at.map(|t| clock.frame(c.content_at(t)));
-                let paths: Vec<Value> = c.motion.iter().map(|m| shown(m, frame, samples)).collect();
-                clips.push(json!({ "clip": c.id, "track": t.id, "paths": paths }));
+            if !wanted {
+                continue;
             }
+            let clock = FileClock::of(p, c);
+            let frame = at.map(|t| clock.frame(c.content_at(t)));
+            let nodes: Vec<Value> = trackers(c)
+                .map(|(name, t)| {
+                    let patterns = t.patterns.iter().enumerate();
+                    let patterns: Vec<Value> =
+                        patterns.map(|(k, x)| shown(k, x, frame, samples)).collect();
+                    json!({ "node": name, "patterns": patterns })
+                })
+                .collect();
+            clips.push(json!({ "clip": c.id, "track": track.id, "trackers": nodes }));
         }
     }
     Ok(json!({ "clips": clips }))
 }
 
 pub fn violation(c: &Clip) -> Option<String> {
-    let has = |path: &str| c.motion.iter().any(|m| m.id == path);
-    if let Some((tracker, path)) = followers(c).find(|(_, path)| !has(path)) {
-        return Some(format!(
-            "{}: a pattern of tracker {tracker} is on motion path {path}, which the clip has not",
-            c.id
-        ));
-    }
-    if c.motion.is_empty() {
-        return None;
-    }
-    if !takes(c) {
+    if paths(c).next().is_some() && !takes(c) {
         return Some(format!(
             "{}: motion paths on a clip with no source picture",
             c.id
         ));
     }
-    motion::problem(&c.motion).map(|why| format!("{}: {why}", c.id))
+    let why = paths(c).find_map(|m| motion::samples_problem(&m.samples));
+    why.map(|why| format!("{}: {why}", c.id))
 }
 
-fn of_subject(c: &Clip, subject: Subject) -> Vec<String> {
-    let found = c.motion.iter().filter(|m| m.subject == Some(subject));
-    found.map(|m| m.id.clone()).collect()
+fn of_subject(t: &Tracker, subject: Subject) -> Vec<usize> {
+    let found = |i: &usize| {
+        let path = t.patterns[*i].path.as_ref();
+        path.is_some_and(|m| m.subject == Some(subject))
+    };
+    (0..t.patterns.len()).filter(found).collect()
 }
 
-pub fn findable(p: &mut Project, id: &str, subject: Subject, replace: bool) -> Result<()> {
-    let c = clip_of(p, id)?;
-    let old = of_subject(c, subject);
+pub fn findable(
+    p: &Project,
+    id: &str,
+    tracker: &str,
+    subject: Subject,
+    replace: bool,
+) -> Result<()> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    if !takes(c) {
+        return Err(no_picture(id));
+    }
+    let old = of_subject(tracker_of(c, tracker)?, subject);
     if !old.is_empty() && !replace {
         return Err(Error::invalid(format!(
-            "{id} already has {} {} paths: pass replace (--replace) to find them again",
+            "{tracker} of {id} already has {} {} patterns: pass replace (--replace) to find them \
+             again",
             old.len(),
             subject.name()
         )));
@@ -248,11 +326,6 @@ pub fn file_frames(p: &Project, c: &Clip) -> ((i64, i64), f64) {
     let (lo, hi) = c.shown();
     let rate = clock.rate(p.fps().as_f64());
     ((clock.file(lo), clock.file(hi)), rate)
-}
-
-fn followed(p: &Project, id: &str) -> Vec<String> {
-    let paths = p.clip(id).into_iter().flat_map(followers);
-    paths.map(|(_, path)| path.to_string()).collect()
 }
 
 const SAME_THING: f64 = 0.5;
@@ -296,29 +369,6 @@ pub struct Start {
     pub bounds: [f64; 4],
 }
 
-fn pattern_of<'a>(c: &'a Clip, id: &str, tracker: &str, k: u32) -> Result<&'a Pattern> {
-    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
-    let t = comp.and_then(|x| x.node(tracker)?.tool.tracker());
-    let t = t.ok_or_else(|| {
-        Error::invalid(format!(
-            "{id} has no tracker {tracker}: a track follows a pattern of a tracker of its \
-             composition"
-        ))
-    })?;
-    let i = (k as usize).checked_sub(1);
-    i.and_then(|i| t.patterns.get(i))
-        .ok_or_else(|| no_pattern(tracker, k, t.patterns.len()))
-}
-
-pub(super) fn no_pattern(tracker: &str, k: u32, count: usize) -> Error {
-    let have = match count {
-        0 => "it has no patterns".to_string(),
-        1 => "it has pattern 1".to_string(),
-        all => format!("its patterns are 1 to {all}"),
-    };
-    Error::invalid(format!("{tracker} has no pattern {k}: {have}"))
-}
-
 pub fn start(
     p: &Project,
     id: &str,
@@ -351,8 +401,8 @@ pub fn start(
         (lo, f.file((frame + n).min(f.mark_out)) + 1)
     });
     let at = f.file(frame);
-    let pattern = pattern_of(c, id, tracker, k)?;
-    let own = pattern.area_at(&c.motion, at as f64);
+    let pattern = pattern_of(c, tracker, k)?;
+    let own = pattern.area_at(at as f64);
     let own = own.unwrap_or_else(|| pattern.own());
     Ok(Start {
         frames,
@@ -370,10 +420,8 @@ pub fn tracked(
     (tracker, k): (&str, u32),
     mut samples: Vec<PathSample>,
 ) -> Result<Value> {
-    let c = clip_of(p, id)?;
-    let pattern = pattern_of(c, id, tracker, k)?.clone();
-    let old = (pattern.path.as_ref()).and_then(|f| c.motion.iter().find(|m| m.id == *f));
-    if let Some(old) = old {
+    let pattern = pattern_mut(clip_of(p, id)?, tracker, k)?;
+    if let Some(old) = &pattern.path {
         let frames = samples.iter().map(|s| s.frame);
         let covered = frames.clone().min().zip(frames.max());
         let stays = |s: &&PathSample| covered.is_none_or(|(a, b)| s.frame < a || s.frame > b);
@@ -390,143 +438,67 @@ pub fn tracked(
     if let Some(why) = motion::samples_problem(&samples) {
         return Err(Error::invalid(why));
     }
-    let shared = |old: &String| followers(c).filter(|(_, path)| *path == old).count() > 1;
-    let own = old.filter(|m| m.tracked && !shared(&m.id));
-    let path = match own.map(|m| m.id.clone()) {
-        Some(own) => {
-            path_of(c, &own)?.samples = Arc::new(samples);
-            own
-        }
-        None => {
-            if c.motion.len() >= motion::PATHS_KEPT {
-                return Err(Error::invalid(format!(
-                    "{id} has {} motion paths, the most a clip takes",
-                    motion::PATHS_KEPT
-                )));
-            }
-            let path = motion::next_id(&c.motion);
-            c.motion.push(MotionPath {
-                id: path.clone(),
-                name: Some(pattern.name.clone()),
-                subject: None,
-                tracked: true,
-                samples: Arc::new(samples),
-            });
-            path
-        }
-    };
-    let stored = c.motion.iter().find(|m| m.id == path);
-    let shown = stored.map_or(Value::Null, |m| shown(m, None, false));
-    let comp = c.picture.as_mut().and_then(|x| x.composition.as_mut());
-    let node = comp.and_then(|x| x.nodes.iter_mut().find(|n| n.name == tracker));
-    if let Some(Tool::Tracker(t)) = node.map(|n| &mut n.tool)
-        && let Some(own) = t.patterns.get_mut(k as usize - 1)
-    {
-        own.path = Some(path);
-    }
-    Ok(shown)
-}
-
-pub fn unused(p: &mut Project, id: &str, paths: &[String]) {
-    let kept = followed(p, id);
-    let gone: Vec<&String> = paths.iter().filter(|x| !kept.contains(x)).collect();
-    if let Ok(c) = clip_of(p, id) {
-        c.motion.retain(|m| !m.tracked || !gone.contains(&&m.id));
-    }
-}
-
-pub fn tracker_checked(p: &Project, id: &str, tracker: &str) -> Result<()> {
-    let c = p
-        .clip(id)
-        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
-    match comp.and_then(|x| x.node(tracker)?.tool.tracker()) {
-        Some(_) => Ok(()),
-        None => Err(Error::invalid(format!(
-            "{id} has no tracker {tracker}: the patterns go to a tracker of its composition"
-        ))),
-    }
-}
-
-fn patterned(c: &mut Clip, tracker: &str, subject: Subject) {
-    let paths: Vec<(String, String)> = c
-        .motion
-        .iter()
-        .filter(|m| m.subject == Some(subject))
-        .map(|m| (m.id.clone(), m.name.clone().unwrap_or_else(|| m.id.clone())))
-        .collect();
-    let comp = c.picture.as_mut().and_then(|x| x.composition.as_mut());
-    let node = comp.and_then(|x| x.nodes.iter_mut().find(|n| n.name == tracker));
-    let Some(Tool::Tracker(t)) = node.map(|n| &mut n.tool) else {
-        return;
-    };
-    for (path, name) in paths {
-        let has = t.patterns.iter().any(|p| p.path.as_ref() == Some(&path));
-        if !has && t.patterns.len() < crate::model::Tracker::PATTERNS_KEPT {
-            t.patterns.push(Pattern {
-                path: Some(path),
-                ..Pattern::new(name)
-            });
-        }
-    }
+    pattern.path = Some(MotionPath {
+        subject: None,
+        tracked: true,
+        samples: Arc::new(samples),
+    });
+    let mut v = shown(k as usize - 1, pattern, None, false);
+    v["node"] = json!(tracker);
+    Ok(v)
 }
 
 pub fn found(
     p: &mut Project,
     id: &str,
-    (subject, tracker): (Subject, Option<&str>),
+    (subject, tracker): (Subject, &str),
     tracks: Vec<motion::FoundPath>,
 ) -> Result<Value> {
-    let kept = followed(p, id);
-    let c = clip_of(p, id)?;
-    let old = of_subject(c, subject);
-    c.motion
-        .retain(|m| !old.contains(&m.id) || kept.contains(&m.id));
+    let t = tracker_mut(clip_of(p, id)?, tracker)?;
+    let old = of_subject(t, subject);
     let mut fresh = Vec::new();
     for track in tracks {
-        let stays = c
-            .motion
-            .iter_mut()
-            .find(|m| old.contains(&m.id) && same_thing(m, &track.samples));
-        match stays {
+        let same = |i: &&usize| {
+            let path = t.patterns[**i].path.as_ref();
+            path.is_some_and(|m| same_thing(m, &track.samples))
+        };
+        let stays = old.iter().find(same).copied();
+        match stays.and_then(|i| t.patterns[i].path.as_mut()) {
             Some(m) => m.samples = Arc::new(merged(&m.samples, &track.samples)),
             None => fresh.push(track),
         }
     }
-    let tracks: Vec<motion::FoundPath> = fresh;
-    if c.motion.len() + tracks.len() > motion::PATHS_KEPT {
+    if t.patterns.len() + fresh.len() > Tracker::PATTERNS_KEPT {
         return Err(Error::invalid(format!(
-            "{id} would have {} motion paths, more than the {} a clip takes",
-            c.motion.len() + tracks.len(),
-            motion::PATHS_KEPT
+            "{tracker} of {id} would have {} patterns, more than the {} a tracker takes",
+            t.patterns.len() + fresh.len(),
+            Tracker::PATTERNS_KEPT
         )));
     }
-    let mut paths = Vec::new();
+    let mut patterns = Vec::new();
     let mut n = 0;
-    for track in tracks {
+    for track in fresh {
         let name = loop {
             n += 1;
             let name = format!("{} {n}", subject.title());
-            if !c.motion.iter().any(|m| m.name.as_deref() == Some(&name)) {
+            if !t.patterns.iter().any(|x| x.name == name) {
                 break name;
             }
         };
-        let path = MotionPath {
-            id: motion::next_id(&c.motion),
-            name: Some(name),
-            subject: Some(subject),
-            tracked: false,
-            samples: Arc::new(track.samples),
-        };
-        let mut v = shown(&path, None, false);
+        t.patterns.push(Pattern {
+            path: Some(MotionPath {
+                subject: Some(subject),
+                tracked: false,
+                samples: Arc::new(track.samples),
+            }),
+            ..Pattern::new(name)
+        });
+        let k = t.patterns.len() - 1;
+        let mut v = shown(k, &t.patterns[k], None, false);
         v["seen"] = json!(track.seen);
         v["score"] = json!(track.score);
         v["gaps"] = json!(track.gaps);
-        paths.push(v);
-        c.motion.push(path);
+        patterns.push(v);
     }
-    if let Some(tracker) = tracker {
-        patterned(c, tracker, subject);
-    }
-    Ok(json!({ "clip": id, "paths": paths }))
+    Ok(json!({ "clip": id, "node": tracker, "patterns": patterns }))
 }

@@ -89,12 +89,13 @@ def project(work, name, span):
     run(["--headless", "project", "create", path])
     run(["--headless", "-p", path, "media", "add", CLIP])
     run(["--headless", "-p", path, "edit", "append", "m1", "--range", span])
+    run(["--headless", "-p", path, "comp", "add", "c1", "tracker", "--after", "MediaIn1"])
     return path
 
 
 def find(work, path, size, **env):
     env = dict(os.environ, VIDCUT_DEBUG="1", XDG_CACHE_HOME=str(work / "cache"), **env)
-    args = ["--headless", "-p", path, "motion", "find", "c1", "--subject", "face", "--model", "slow", "--size", size]
+    args = ["--headless", "-p", path, "motion", "find", "c1", "Tracker1", "--subject", "face", "--model", "slow", "--size", size]
     return run(args, env).stderr
 
 

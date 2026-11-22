@@ -621,6 +621,10 @@ fn pattern_checked(p: &Pattern) -> Result<Pattern> {
     let why = "a pattern's width and height are from 0.001 to 0.5";
     within(p.width, Pattern::SIDES, why)?;
     within(p.height, Pattern::SIDES, why)?;
+    let path = p.path.as_ref();
+    if let Some(why) = path.and_then(|m| crate::motion::samples_problem(&m.samples)) {
+        return Err(Error::invalid(format!("{name}: {why}")));
+    }
     Ok(Pattern {
         name,
         center: p.center.filter(|c| *c != Pattern::CENTER),
@@ -1060,18 +1064,7 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
                 ..Picture::default()
             },
         };
-        let trackers = old
-            .composition
-            .iter()
-            .filter(|_| kept.composition.is_none());
-        let nodes = trackers
-            .flat_map(|k| &k.nodes)
-            .filter_map(|n| n.tool.tracker());
-        let gone: Vec<String> = nodes
-            .flat_map(|t| t.patterns.iter().filter_map(|x| x.path.clone()))
-            .collect();
         c.picture = (!kept.is_usual()).then_some(kept);
-        super::motion::unused(p, id, &gone);
     }
     Ok(())
 }
