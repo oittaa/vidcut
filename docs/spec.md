@@ -1773,7 +1773,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut has these five kinds:
     - Markup in the text styles words separately (X53).
     - The X and Y of a title are frame pixels from the bottom left, with Y up (measured in Resolve Studio 21.2).
-    - On a title that follows a motion path, X and Y count from the middle of the thing. Y is up.
     - A scroll has its own motion and line spacing (X55).
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
@@ -3118,6 +3117,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - With more than one selected node, Command-D turns the selected nodes off or on. The current node is always one of them (p. 3392).
   - Option-D turns all nodes off, and then all on. After that, each node is on, also a node that was off before (p. 3392).
   - Measured in Resolve Studio 21.2: Command-D gives each selected node the opposite of the state of the current node.
+  - Measured: when the current node is not selected, Command-D also acts on the current node. Each of these nodes gets the opposite of the state of the current node.
   - Measured: Option-D turns all nodes off when one or more is on, mixers too. Else it turns all of them on.
   - vidcut: Ctrl+D and Alt+D do the same, mixers too.
   - Reset Node Grade in the menu of a node resets that node (Shift-Home).
@@ -3248,7 +3248,12 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: a key link is blue. A node cannot drop into a key link.
   - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
   - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
-  - vidcut: the Key Input and the Key Mixer have no keyframes yet ([todo](todo/color-page.md)).
+  - vidcut: each keyframe of a corrector holds its Key Input. Thus the Key Input has no track of its own ([todo](todo/gaps.md)).
+  - vidcut: each keyframe of a Key Mixer holds the values of its inputs and its Key Output. The Keyframes panel has a track for each Key Mixer.
+  - vidcut: Gain, Offset, Blur Radius and Blur H/V blend as the values do. Invert, Matte and Mask change on the frame of the next keyframe.
+    - Not measured: the blend of the Key Input and of a Key Mixer.
+  - vidcut: a change goes to a keyframe by the rule of the values. The Key palette shows the values of that keyframe.
+  - vidcut: a new input of a Key Mixer gets the usual values in each keyframe. Remove One Input removes the input from each keyframe.
   - Not measured: the Key Output of a Key Mixer with no linked input.
   - Not measured: a Key Mixer with one linked input after a delete. vidcut keeps it.
   - Not measured: Reset in the Key palette with Matte or the Key Output Invert on. vidcut resets them.
@@ -3268,8 +3273,8 @@ The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key
   - The Keyframe Timeline mode sets the tracks that get a new keyframe: All, Color or Sizing (p. 3455).
   - All is the default. It adds a keyframe to every track. An orange bar marks the master track.
   - Color adds a keyframe to the current node only. A green bar marks its track.
-  - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector.
-  - vidcut: a mixer has no track, and it takes no keyframes.
+  - vidcut: the Keyframes panel is at the right of the palette. It has a ruler, a Master track and a track for each corrector and each Key Mixer.
+  - vidcut: a Parallel Mixer and a Layer Mixer have no track, and they take no keyframes.
   - vidcut: an All and Color switch at the top of the panel sets the mode. All is the default.
 - **Dynamic and Static keyframes** (pp. 3456–3459):
   - Mark > Add Keyframe (Command-[) adds a Dynamic keyframe at the playhead (p. 3456).

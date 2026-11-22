@@ -1,13 +1,10 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
 
 use crate::composition::Frames;
 use crate::error::{Error, Result};
-use crate::model::{
-    Clip, Follow, MotionPath, PathSample, Pattern, Project, Subject, Title, TitleKind, Tool, Track,
-};
+use crate::model::{Clip, MotionPath, PathSample, Pattern, Project, Subject, Tool};
 use crate::motion::{self, Area};
 use crate::render::FileClock;
 
@@ -138,201 +135,8 @@ pub fn remove(p: &mut Project, id: &str, paths: Option<&[String]>) -> Result<()>
              pattern (comp.set with remove_pattern)"
         )));
     }
-    led(p, id, paths)?;
-    clip_of(p, id)?.motion.retain(|m| !paths.contains(&m.id));
+    c.motion.retain(|m| !paths.contains(&m.id));
     Ok(())
-}
-
-fn led(p: &Project, id: &str, paths: &[String]) -> Result<()> {
-    let titles = p.tracks.iter().flat_map(|t| &t.clips);
-    let follows = |c: &Clip| {
-        let follow = c.title.as_ref()?.follows.as_ref()?;
-        let named = follow.clip == id && paths.contains(&follow.path);
-        named.then(|| (c.id.clone(), follow.path.clone()))
-    };
-    match titles.into_iter().find_map(follows) {
-        Some((title, path)) => Err(Error::invalid(format!(
-            "the title {title} follows motion path {path} of {id}: first give that title \
-             another path, or none (motion.follow)"
-        ))),
-        None => Ok(()),
-    }
-}
-
-pub fn follow(p: &mut Project, id: &str, to: Option<(&str, &str)>) -> Result<Value> {
-    let (ti, ci) = locate(p, id)?;
-    let c = &p.tracks[ti].clips[ci];
-    let Some(old) = c.title.clone() else {
-        return Err(Error::invalid(format!("{id} is not a title")));
-    };
-    let follows = match to {
-        None => None,
-        Some(_) if old.kind == TitleKind::Scroll => {
-            return Err(Error::invalid("a scroll follows no motion path"));
-        }
-        Some((of, path)) => {
-            let (ai, aj) = locate(p, of)?;
-            let a = &p.tracks[ai].clips[aj];
-            if !takes(a) {
-                return Err(Error::invalid(format!(
-                    "{of} has no source picture: a title follows a path of footage, a still or \
-                     an image sequence"
-                )));
-            }
-            let Some(m) = a.motion.iter().find(|m| m.id == path) else {
-                return Err(Error::not_found(format!("{of} has no motion path {path}")));
-            };
-            Some(Follow {
-                clip: under(p, c, a, m).id.clone(),
-                path: path.to_string(),
-            })
-        }
-    };
-    let mut next = Title {
-        follows,
-        ..old.clone()
-    };
-    if next.follows.is_some() {
-        let keyed = |keys: &[crate::model::Keyframe]| !keys.is_empty();
-        let upper = old.upper.as_ref().is_some_and(|u| keyed(&u.position_keys));
-        if keyed(&old.position_keys) || upper {
-            return Err(Error::invalid(format!(
-                "the position of {id} has keyframes: first remove them (keyframes.remove)"
-            )));
-        }
-        let [x, y] = old.place();
-        let [mx, my] = crate::model::Picture::MIDDLE;
-        next.moved([mx - x, my - y]);
-        next.position = Some(crate::model::Picture::MIDDLE);
-        if let Some(upper) = next.upper.as_mut() {
-            upper.position = upper
-                .position
-                .map(|at| at.map(crate::otio::effects::rounded));
-        }
-    }
-    let next = super::titles::checked(&next)?;
-    let shown = json!({ "clip": id, "follows": next.follows, "position": next.place() });
-    p.tracks[ti].clips[ci].title = Some(next);
-    Ok(shown)
-}
-
-fn under<'a>(p: &'a Project, c: &Clip, x: &'a Clip, path: &MotionPath) -> &'a Clip {
-    let meets = |y: &Clip| y.start < c.end() && c.start < y.end();
-    if meets(x) {
-        return x;
-    }
-    let same = |y: &&Clip| {
-        let part = y.id != x.id && takes(y) && meets(y) && y.media == x.media;
-        let has = |m: &MotionPath| m.id == path.id && m.samples == path.samples;
-        part && y.motion.iter().any(has)
-    };
-    let clips = p.tracks.iter().flat_map(|t| &t.clips);
-    clips.filter(same).min_by_key(|y| y.start).unwrap_or(x)
-}
-
-pub fn settle(p: &mut Project) -> Vec<String> {
-    let mut warnings = Vec::new();
-    let mut changes = Vec::new();
-    for (ti, t) in p.tracks.iter().enumerate() {
-        for (ci, c) in t.clips.iter().enumerate() {
-            let Some(f) = c.title.as_ref().and_then(|t| t.follows.as_ref()) else {
-                continue;
-            };
-            let led = p.clip(&f.clip).filter(|x| takes(x));
-            let path = led.and_then(|x| x.motion.iter().find(|m| m.id == f.path));
-            match led.zip(path) {
-                Some((x, path)) => {
-                    let y = under(p, c, x, path);
-                    if y.id != x.id {
-                        changes.push((ti, ci, Some(y.id.clone())));
-                    }
-                }
-                None => {
-                    warnings.push(format!(
-                        "{} follows no motion path now: {} or its path {} is gone",
-                        c.id, f.clip, f.path
-                    ));
-                    changes.push((ti, ci, None));
-                }
-            }
-        }
-    }
-    for (ti, ci, to) in changes {
-        let Some(title) = p.tracks[ti].clips[ci].title.as_mut() else {
-            continue;
-        };
-        match (to, title.follows.as_mut()) {
-            (Some(id), Some(f)) => f.clip = id,
-            _ => title.follows = None,
-        }
-    }
-    let mut stripped = HashSet::new();
-    for k in &mut p.compounds {
-        if unled(&mut k.tracks) {
-            stripped.insert(k.id.clone());
-        }
-    }
-    if !stripped.is_empty() {
-        for c in p.tracks.iter().flat_map(|t| &t.clips) {
-            let mut seen = HashSet::new();
-            if c.compound
-                .as_deref()
-                .is_some_and(|cid| holds_stripped(p, cid, &stripped, &mut seen))
-            {
-                warnings.push(format!(
-                    "{}: a title inside a compound clip follows no motion path",
-                    c.id
-                ));
-            }
-        }
-    }
-    warnings
-}
-
-fn holds_stripped(
-    p: &Project,
-    cid: &str,
-    stripped: &HashSet<String>,
-    seen: &mut HashSet<String>,
-) -> bool {
-    if stripped.contains(cid) {
-        return true;
-    }
-    if !seen.insert(cid.to_string()) {
-        return false;
-    }
-    p.compound(cid).is_some_and(|k| {
-        k.tracks
-            .iter()
-            .flat_map(|t| &t.clips)
-            .filter_map(|c| c.compound.as_deref())
-            .any(|inner| holds_stripped(p, inner, stripped, seen))
-    })
-}
-
-fn unled(tracks: &mut [Track]) -> bool {
-    let mut any = false;
-    for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
-        if let Some(title) = c.title.as_mut() {
-            any |= title.follows.take().is_some();
-        }
-    }
-    any
-}
-
-pub fn follow_violation(p: &Project, c: &Clip) -> Option<String> {
-    let title = c.title.as_ref()?;
-    let f = title.follows.as_ref()?;
-    if title.kind == TitleKind::Scroll {
-        return Some(format!("{}: a scroll that follows a motion path", c.id));
-    }
-    let has = |x: &Clip| takes(x) && x.motion.iter().any(|m| m.id == f.path);
-    (!p.clip(&f.clip).is_some_and(has)).then(|| {
-        format!(
-            "{}: the title follows motion path {} of {}, which is not there",
-            c.id, f.path, f.clip
-        )
-    })
 }
 
 pub fn shift(c: &mut Clip, by: i64) {
@@ -447,16 +251,8 @@ pub fn file_frames(p: &Project, c: &Clip) -> ((i64, i64), f64) {
 }
 
 fn followed(p: &Project, id: &str) -> Vec<String> {
-    let titles = p.tracks.iter().flat_map(|t| &t.clips);
-    let led = titles.filter_map(|c| {
-        let follow = c.title.as_ref()?.follows.as_ref()?;
-        (follow.clip == id).then(|| follow.path.clone())
-    });
-    let mut out: Vec<String> = led.collect();
-    if let Some(c) = p.clip(id) {
-        out.extend(followers(c).map(|(_, path)| path.to_string()));
-    }
-    out
+    let paths = p.clip(id).into_iter().flat_map(followers);
+    paths.map(|(_, path)| path.to_string()).collect()
 }
 
 const SAME_THING: f64 = 0.5;

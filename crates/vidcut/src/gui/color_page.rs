@@ -250,6 +250,10 @@ fn key_output_held(g: &Grade, n: u32, frame: i64) -> Option<KeyOutput> {
     g.node(n)?.key_output_changed_at(frame)
 }
 
+fn key_input_held(g: &Grade, n: u32, frame: i64) -> Option<KeyInput> {
+    g.node(n)?.key_input_changed_at(frame)
+}
+
 fn correctors(g: &Grade) -> impl DoubleEndedIterator<Item = u32> + '_ {
     (g.nodes.iter().enumerate())
         .filter(|(_, d)| !d.tool.is_mixer())
@@ -298,10 +302,9 @@ fn badges(d: &GradeNode) -> Vec<Badge> {
         (changed.iter().any(log), icon::CIRCLE_HALF, "Log"),
         (d.is_animated(), icon::DIAMOND, "Keyframes"),
         (
-            !d.key_input.is_usual()
-                || std::iter::once(&d.key)
-                    .chain(d.keys.iter().map(|k| &k.key))
-                    .any(|k| !k.is_usual()),
+            std::iter::once((&d.key, &d.key_input))
+                .chain(d.keys.iter().map(|k| (&k.key, &k.key_input)))
+                .any(|(k, i)| !k.is_usual() || !i.is_usual()),
             icon::SQUARE_HALF,
             "Key",
         ),
@@ -585,14 +588,11 @@ fn mix_changes(from: KeyMix, to: KeyMix) -> Map<String, Value> {
     out
 }
 
-fn mixer_sets(from: &Grade, to: &Grade, n: u32) -> Vec<Map<String, Value>> {
+fn mixer_sets((from, to): (&Grade, &Grade), n: u32, frame: i64) -> Vec<Map<String, Value>> {
     let (Some(a), Some(b)) = (from.node(n), to.node(n)) else {
         return Vec::new();
     };
-    let (GradeTool::KeyMixer { mix: was }, GradeTool::KeyMixer { mix: now }) = (&a.tool, &b.tool)
-    else {
-        return Vec::new();
-    };
+    let (was, now) = (a.mix_changed_at(frame), b.mix_changed_at(frame));
     let mut out: Vec<Map<String, Value>> = (was.iter().zip(now).enumerate())
         .filter_map(|(i, (x, y))| {
             let mut set = mix_changes(*x, *y);
@@ -602,10 +602,12 @@ fn mixer_sets(from: &Grade, to: &Grade, n: u32) -> Vec<Map<String, Value>> {
             })
         })
         .collect();
-    let keys = key_changes(a.key, b.key);
-    if !keys.is_empty() {
-        out.push(keys);
-    }
+    let keys = (
+        a.key_output_changed_at(frame),
+        b.key_output_changed_at(frame),
+    );
+    let keys = keys.0.zip(keys.1).map(|(x, y)| key_changes(x, y));
+    out.extend(keys.filter(|k| !k.is_empty()));
     out
 }
 
@@ -1795,7 +1797,7 @@ impl Workspace {
         let mut window_acts = Vec::new();
         let point = match palette {
             GradePalette::Key => {
-                let input = grade.node(n).map(|d| d.key_input).unwrap_or_default();
+                let input = key_input_held(&grade, n, frame).unwrap_or_default();
                 key_input(ui, &mut changes, input);
                 ui.separator();
                 key_output(ui, &mut changes, ("Key Output", key_now));
@@ -1839,7 +1841,7 @@ impl Workspace {
             let mut next = with_corrector(&grade, n, frame, c);
             if let Some(d) = next.node_mut(n) {
                 d.change_key_output_at(frame, |k| keys.iter().fold(k, keyed));
-                d.key_input = inputs.iter().fold(d.key_input, key_inputted);
+                d.change_key_input_at(frame, |i| inputs.iter().fold(i, key_inputted));
             }
             self.effects_page.graded = Some(Graded {
                 of: of.clone(),
@@ -1865,9 +1867,12 @@ impl Workspace {
                 if let (Some(a), Some(b)) = keys {
                     params.extend(key_changes(a, b));
                 }
-                let inputs = (stored.node(n), h.grade.node(n));
+                let inputs = (
+                    key_input_held(&stored, n, frame),
+                    key_input_held(&h.grade, n, frame),
+                );
                 if let (Some(a), Some(b)) = inputs {
-                    params.extend(key_input_changes(a.key_input, b.key_input));
+                    params.extend(key_input_changes(a, b));
                 }
                 Some((params, window_sets((&stored, &h.grade), n, frame)))
             }
@@ -1911,9 +1916,8 @@ impl Workspace {
         let Some(d) = grade.node(n) else {
             return;
         };
-        let GradeTool::KeyMixer { mix } = &d.tool else {
-            return;
-        };
+        let mix = d.mix_changed_at(frame);
+        let key = d.key_output_changed_at(frame).unwrap_or_default();
         let (mut picked, mut reset) = (None, false);
         ui.horizontal(|ui| {
             ui.strong(name);
@@ -1935,7 +1939,7 @@ impl Workspace {
         }
         ui.separator();
         let mut keys = Vec::new();
-        key_output(ui, &mut keys, ("Output", d.key));
+        key_output(ui, &mut keys, ("Output", key));
         if d.locked {
             return;
         }
@@ -1943,21 +1947,18 @@ impl Workspace {
             self.effects_page.graded = None;
             let (field, target) = named(of);
             let node = ("node".to_string(), json!(n));
+            let at = ("at".to_string(), json!(self.snap.timeline.position));
             let part = ("palette".to_string(), json!(GradePalette::Key));
-            let params = Map::from_iter([(field, target), node, part]);
+            let params = Map::from_iter([(field, target), node, at, part]);
             self.send("grade.clear", Value::Object(params));
             return;
         }
         if !mixes.is_empty() || !keys.is_empty() {
             let mut next = grade.clone();
             if let Some(d) = next.node_mut(n) {
-                d.key = keys.iter().fold(d.key, keyed);
-                if let GradeTool::KeyMixer { mix } = &mut d.tool {
-                    for (i, c) in &mixes {
-                        if let Some(m) = mix.get_mut(*i) {
-                            *m = mixed(*m, c);
-                        }
-                    }
+                d.change_key_output_at(frame, |k| keys.iter().fold(k, keyed));
+                for (i, c) in &mixes {
+                    d.change_mix_at(frame, *i, |m| mixed(m, c));
                 }
             }
             self.effects_page.graded = Some(Graded {
@@ -1973,7 +1974,7 @@ impl Workspace {
         let ready = match &mut self.effects_page.graded {
             Some(h) if h.sent.is_none() && !down => {
                 h.sent = Some(Instant::now());
-                Some(mixer_sets(stored, &h.grade, n))
+                Some(mixer_sets((stored, &h.grade), n, frame))
             }
             _ => None,
         };
@@ -1985,6 +1986,7 @@ impl Workspace {
                     .map(|mut set| {
                         set.insert(field.clone(), target.clone());
                         set.insert("node".into(), json!(n));
+                        set.insert("at".into(), json!(at));
                         command("grade.set", Value::Object(set))
                     })
                     .collect();
@@ -2407,7 +2409,7 @@ impl Workspace {
             self.delete_grade_nodes(&of, &g, &picked);
         }
         if struck(Action::SwitchSelectedNodes) {
-            let picked = self.effects_page.picked_grade().to_vec();
+            let picked = self.effects_page.grade_nodes.clone();
             let label = "Enable/Disable Selected Nodes";
             self.switch_grade_nodes(&of, &g, Some(&picked), label);
         }

@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use crate::model::{
-    Corrector, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, GradeWindow, KeyOutput,
-    WindowShape,
+    Corrector, Grade, GradeKey, GradeKeyKind, GradeNode, GradeTool, GradeWindow, KeyInput, KeyMix,
+    KeyOutput, WindowShape,
 };
 use crate::window_key::{circle_scale, circle_size, linear_scale, linear_size};
 
@@ -240,6 +240,49 @@ impl KeyOutput {
             } else {
                 now.invert
             },
+        }
+    }
+}
+
+impl KeyInput {
+    pub fn blended(&self, to: &KeyInput, w: f64) -> KeyInput {
+        let one = |a: f64, b: f64| a + (b - a) * w;
+        KeyInput {
+            gain: one(self.gain, to.gain),
+            offset: one(self.offset, to.offset),
+            blur: one(self.blur, to.blur),
+            blur_ratio: one(self.blur_ratio, to.blur_ratio),
+            ..*self
+        }
+    }
+
+    pub fn carried(&self, was: &KeyInput, now: &KeyInput) -> KeyInput {
+        KeyInput {
+            invert: pick(&self.invert, &was.invert, &now.invert),
+            mask: pick(&self.mask, &was.mask, &now.mask),
+            gain: pick(&self.gain, &was.gain, &now.gain),
+            offset: pick(&self.offset, &was.offset, &now.offset),
+            blur: pick(&self.blur, &was.blur, &now.blur),
+            blur_ratio: pick(&self.blur_ratio, &was.blur_ratio, &now.blur_ratio),
+        }
+    }
+}
+
+impl KeyMix {
+    pub fn blended(&self, to: &KeyMix, w: f64) -> KeyMix {
+        KeyMix {
+            gain: self.gain + (to.gain - self.gain) * w,
+            offset: self.offset + (to.offset - self.offset) * w,
+            ..*self
+        }
+    }
+
+    pub fn carried(&self, was: &KeyMix, now: &KeyMix) -> KeyMix {
+        KeyMix {
+            invert: pick(&self.invert, &was.invert, &now.invert),
+            matte: pick(&self.matte, &was.matte, &now.matte),
+            gain: pick(&self.gain, &was.gain, &now.gain),
+            offset: pick(&self.offset, &was.offset, &now.offset),
         }
     }
 }
@@ -523,6 +566,23 @@ impl GradeNode {
         }
     }
 
+    fn keyed_change<T: Clone>(
+        &mut self,
+        frame: i64,
+        part: impl Fn(&mut Self, Option<usize>) -> Option<&mut T>,
+        change: impl FnOnce(&T) -> T,
+        carried: fn(&T, &T, &T) -> T,
+    ) -> Option<()> {
+        let key = self.changed_key(frame);
+        let was = part(self, key)?.clone();
+        let now = change(&was);
+        if let Some(other) = self.paired_key(key).and_then(|k| part(self, k)) {
+            *other = carried(other, &was, &now);
+        }
+        *part(self, key)? = now;
+        Some(())
+    }
+
     fn values_mut(&mut self, key: Option<usize>) -> Option<&mut Corrector> {
         match (key, &mut self.tool) {
             (Some(i), GradeTool::Corrector(_)) => Some(&mut self.keys[i].values),
@@ -554,17 +614,12 @@ impl GradeNode {
         i: usize,
         change: impl FnOnce(&GradeWindow) -> GradeWindow,
     ) -> Option<()> {
-        let key = self.changed_key(frame);
-        let was = self.windows_changed_at(frame).get(i)?.clone();
-        let now = change(&was);
-        let other = (self.paired_key(key))
-            .and_then(|k| self.windows_mut(k))
-            .and_then(|w| w.get_mut(i));
-        if let Some(other) = other {
-            *other = other.carried(&was, &now);
-        }
-        *self.windows_mut(key)?.get_mut(i)? = now;
-        Some(())
+        self.keyed_change(
+            frame,
+            |d, k| d.windows_mut(k).and_then(|w| w.get_mut(i)),
+            change,
+            GradeWindow::carried,
+        )
     }
 
     pub fn windows_at(&self, frame: f64) -> Cow<'_, [GradeWindow]> {
@@ -581,18 +636,17 @@ impl GradeNode {
 
     fn key_output_mut(&mut self, key: Option<usize>) -> Option<&mut KeyOutput> {
         match key {
-            _ if self.tool.is_mixer() => None,
+            _ if !self.takes_keyframes() => None,
             Some(i) => Some(&mut self.keys[i].key),
             None => Some(&mut self.key),
         }
     }
 
     pub fn key_output_changed_at(&self, frame: i64) -> Option<KeyOutput> {
-        self.own()?;
-        Some(
-            self.changed_key(frame)
-                .map_or(self.key, |i| self.keys[i].key),
-        )
+        let key = self
+            .changed_key(frame)
+            .map_or(self.key, |i| self.keys[i].key);
+        self.takes_keyframes().then_some(key)
     }
 
     pub fn change_key_output_at(
@@ -600,14 +654,93 @@ impl GradeNode {
         frame: i64,
         change: impl FnOnce(KeyOutput) -> KeyOutput,
     ) -> Option<()> {
-        let key = self.changed_key(frame);
-        let was = self.key_output_changed_at(frame)?;
-        let now = change(was);
-        if let Some(other) = self.paired_key(key).and_then(|k| self.key_output_mut(k)) {
-            *other = other.carried(&was, &now);
+        let change = |k: &KeyOutput| change(*k);
+        self.keyed_change(frame, Self::key_output_mut, change, KeyOutput::carried)
+    }
+
+    fn key_input_mut(&mut self, key: Option<usize>) -> Option<&mut KeyInput> {
+        match key {
+            _ if self.tool.is_mixer() => None,
+            Some(i) => Some(&mut self.keys[i].key_input),
+            None => Some(&mut self.key_input),
         }
-        *self.key_output_mut(key)? = now;
-        Some(())
+    }
+
+    pub fn key_input_changed_at(&self, frame: i64) -> Option<KeyInput> {
+        let input = (self.changed_key(frame)).map_or(self.key_input, |i| self.keys[i].key_input);
+        self.own().map(|_| input)
+    }
+
+    pub fn change_key_input_at(
+        &mut self,
+        frame: i64,
+        change: impl FnOnce(KeyInput) -> KeyInput,
+    ) -> Option<()> {
+        let change = |k: &KeyInput| change(*k);
+        self.keyed_change(frame, Self::key_input_mut, change, KeyInput::carried)
+    }
+
+    pub fn key_input_at(&self, frame: f64) -> KeyInput {
+        match self.span(frame) {
+            None => self.key_input,
+            Some((k, Some((n, w)))) => k.key_input.blended(&n.key_input, w),
+            Some((k, None)) => k.key_input,
+        }
+    }
+
+    fn mix_mut(&mut self, key: Option<usize>) -> Option<&mut Vec<KeyMix>> {
+        match (key, &mut self.tool) {
+            (Some(i), GradeTool::KeyMixer { .. }) => Some(&mut self.keys[i].mix),
+            (None, GradeTool::KeyMixer { mix }) => Some(mix),
+            _ => None,
+        }
+    }
+
+    pub fn mix_lists_mut(&mut self) -> impl Iterator<Item = &mut Vec<KeyMix>> {
+        let own = match &mut self.tool {
+            GradeTool::KeyMixer { mix } => Some(mix),
+            _ => None,
+        };
+        own.into_iter()
+            .chain(self.keys.iter_mut().map(|k| &mut k.mix))
+    }
+
+    pub fn mix_changed_at(&self, frame: i64) -> &[KeyMix] {
+        match (self.changed_key(frame), &self.tool) {
+            (Some(i), GradeTool::KeyMixer { .. }) => &self.keys[i].mix,
+            (None, GradeTool::KeyMixer { mix }) => mix,
+            _ => &[],
+        }
+    }
+
+    pub fn change_mix_at(
+        &mut self,
+        frame: i64,
+        i: usize,
+        change: impl FnOnce(KeyMix) -> KeyMix,
+    ) -> Option<()> {
+        let change = |m: &KeyMix| change(*m);
+        self.keyed_change(
+            frame,
+            |d, k| d.mix_mut(k).and_then(|m| m.get_mut(i)),
+            change,
+            KeyMix::carried,
+        )
+    }
+
+    pub fn mix_at(&self, frame: f64) -> Option<Cow<'_, [KeyMix]>> {
+        let GradeTool::KeyMixer { mix } = &self.tool else {
+            return None;
+        };
+        Some(match self.span(frame) {
+            None => Cow::Borrowed(mix),
+            Some((k, Some((n, w)))) => Cow::Owned(
+                (k.mix.iter().zip(&n.mix))
+                    .map(|(a, b)| a.blended(b, w))
+                    .collect(),
+            ),
+            Some((k, None)) => Cow::Borrowed(&k.mix),
+        })
     }
 
     pub fn changed_at(&self, frame: i64) -> Option<&Corrector> {
@@ -623,14 +756,7 @@ impl GradeNode {
         frame: i64,
         change: impl FnOnce(&Corrector) -> Corrector,
     ) -> Option<()> {
-        let key = self.changed_key(frame);
-        let was = self.changed_at(frame)?.clone();
-        let now = change(&was);
-        if let Some(other) = self.paired_key(key).and_then(|k| self.values_mut(k)) {
-            *other = other.carried(&was, &now);
-        }
-        *self.values_mut(key)? = now;
-        Some(())
+        self.keyed_change(frame, Self::values_mut, change, Corrector::carried)
     }
 
     fn span(&self, frame: f64) -> Option<(&GradeKey, Option<(&GradeKey, f64)>)> {
@@ -686,7 +812,11 @@ impl Grade {
             if let (GradeTool::Corrector(c), Some(now)) = (&mut d.tool, from.corrector_at(frame)) {
                 **c = now.into_owned();
             }
+            if let (GradeTool::KeyMixer { mix }, Some(now)) = (&mut d.tool, from.mix_at(frame)) {
+                *mix = now.into_owned();
+            }
             d.key = from.key_output_at(frame);
+            d.key_input = from.key_input_at(frame);
             d.windows = from.windows_at(frame).into_owned();
             d.keys.clear();
             d.animated = false;

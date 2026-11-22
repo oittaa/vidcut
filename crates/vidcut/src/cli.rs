@@ -137,7 +137,6 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("motion.remove", &["clip"]),
     ("motion.find", &["clips"]),
     ("motion.track", &["clip", "node"]),
-    ("motion.follow", &["clip"]),
     ("edit.append", &["media"]),
     ("edit.smart_insert", &["media"]),
     ("edit.insert", &["media"]),
@@ -235,7 +234,10 @@ const GROUPS: &[(&str, &str)] = &[
         "The grades of clips and of the timeline: nodes of primary corrections and mixers",
     ),
     ("grade.input", "Inputs of the mixers of a grade"),
-    ("grade.keys", "Keyframes of the correctors of a grade"),
+    (
+        "grade.keys",
+        "Keyframes of the correctors and key mixers of a grade",
+    ),
     ("grade.window", "Windows of the correctors of a grade"),
     (
         "gui",
@@ -580,10 +582,6 @@ const EXAMPLES: &[(&str, &str)] = &[
         "motion.track",
         "vidcut motion track c3 Tracker1 --download\n  \
          vidcut motion track c3 Tracker1 --pattern 2 --frame 40 --way forward",
-    ),
-    (
-        "motion.follow",
-        "vidcut motion follow c5 --of c3 --path p1\n  vidcut motion follow c5",
     ),
     (
         "export.start",

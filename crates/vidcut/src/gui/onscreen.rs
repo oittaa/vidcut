@@ -2,7 +2,7 @@ use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, ve
 use serde_json::{Value, json};
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{Clip, Project, Title, TitleKind, TrackKind};
-use vidcut_core::render::{Lead, Run};
+use vidcut_core::render::Run;
 
 use super::timeline::tools::landing;
 use super::workspace::Workspace;
@@ -28,7 +28,6 @@ struct Held {
     from: Pos2,
     title: Title,
     now: Title,
-    lead: [f64; 2],
     guides: (Option<f64>, Option<f64>),
 }
 
@@ -45,7 +44,6 @@ pub struct Grab {
 struct Shown {
     clip: String,
     title: Title,
-    lead: [f64; 2],
     corners: [Pos2; 4],
     pivot: Pos2,
     angle: f32,
@@ -115,17 +113,6 @@ fn showing(p: &Project, at: i64) -> Vec<(&Clip, Title)> {
                 })
         })
         .collect()
-}
-
-fn lead_at(p: &Project, c: &Clip, t: &Title, at: i64) -> [f64; 2] {
-    let lead = t.follows.as_ref().and_then(|f| Lead::of(p, c, f));
-    let spot = lead.and_then(|l| l.spot(at - c.start));
-    spot.map_or([0.0, 0.0], |[x, y]| [x - 0.5, y - 0.5])
-}
-
-fn drawn_at(t: &Title, lead: [f64; 2]) -> [f64; 2] {
-    let [x, y] = t.place();
-    [x + lead[0], y + lead[1]]
 }
 
 fn rounded(v: f64, places: i32) -> f64 {
@@ -227,7 +214,6 @@ impl Workspace {
                 Some((id, t)) if *id == c.id => t.clone(),
                 _ => stored,
             };
-            let lead = lead_at(&p, c, &title, at);
             let base = Title {
                 position: None,
                 zoom: None,
@@ -242,7 +228,7 @@ impl Workspace {
             };
             let z = title.scale() as f32;
             let [qx, qy] = base.place().map(|v| v as f32);
-            let [px, py] = drawn_at(&title, lead);
+            let [px, py] = title.place();
             let (rx, ry) = (px as f32, py as f32);
             let (fw, fh) = (w as f32, h as f32);
             let x = rx * fw + (bx - qx * fw) * z;
@@ -285,7 +271,6 @@ impl Workspace {
             out.push(Shown {
                 clip: c.id.clone(),
                 title,
-                lead,
                 corners,
                 pivot,
                 angle,
@@ -295,23 +280,9 @@ impl Workspace {
         out
     }
 
-    fn moved(
-        &self,
-        held: &Held,
-        to: Pos2,
-        lead: [f64; 2],
-        picture: Rect,
-        shift: bool,
-        free: bool,
-    ) -> Held {
+    fn moved(&self, held: &Held, to: Pos2, picture: Rect, shift: bool, free: bool) -> Held {
         let mut next = held.clone();
         let t0 = &held.title;
-        let pivots = || {
-            (
-                self.pivot_on(t0, held.lead, picture),
-                self.pivot_on(t0, lead, picture),
-            )
-        };
         match held.hold {
             Hold::Move => {
                 let mut d = to - held.from;
@@ -322,7 +293,7 @@ impl Workspace {
                         d.x = 0.0;
                     }
                 }
-                let [x0, y0] = drawn_at(t0, held.lead);
+                let [x0, y0] = t0.place();
                 let mut x = x0 + f64::from(d.x / picture.width());
                 let mut y = y0 + f64::from(d.y / picture.height());
                 let mut guides = (None, None);
@@ -346,7 +317,6 @@ impl Workspace {
                 if t0.kind == TitleKind::Scroll {
                     y = y0;
                 }
-                let (x, y) = (x - lead[0], y - lead[1]);
                 next.now.position = Some([
                     rounded(x.clamp(Title::ACROSS.0, Title::ACROSS.1), 4),
                     rounded(y.clamp(Title::DOWN.0, Title::DOWN.1), 4),
@@ -354,17 +324,17 @@ impl Workspace {
                 next.guides = guides;
             }
             Hold::Zoom => {
-                let (was, pivot) = pivots();
-                let (d0, d1) = (held.from.distance(was), to.distance(pivot));
+                let pivot = self.pivot_on(t0, picture);
+                let (d0, d1) = (held.from.distance(pivot), to.distance(pivot));
                 if d0 > 1.0 {
                     let z = t0.scale() * f64::from(d1 / d0);
                     next.now.zoom = Some(rounded(z.clamp(0.25, 4.0), 3));
                 }
             }
             Hold::Turn => {
-                let (was, pivot) = pivots();
+                let pivot = self.pivot_on(t0, picture);
                 let turned =
-                    f64::from(angle_of(to - pivot) - angle_of(held.from - was)).to_degrees();
+                    f64::from(angle_of(to - pivot) - angle_of(held.from - pivot)).to_degrees();
                 let mut r = t0.turn() + turned;
                 if shift {
                     r = (r / 15.0).round() * 15.0;
@@ -376,8 +346,8 @@ impl Workspace {
         next
     }
 
-    fn pivot_on(&self, t: &Title, lead: [f64; 2], picture: Rect) -> Pos2 {
-        let [px, py] = drawn_at(t, lead);
+    fn pivot_on(&self, t: &Title, picture: Rect) -> Pos2 {
+        let [px, py] = t.place();
         picture.min + vec2(px as f32 * picture.width(), py as f32 * picture.height())
     }
 
@@ -417,16 +387,13 @@ impl Workspace {
                 from: press,
                 title: s.title.clone(),
                 now: s.title.clone(),
-                lead: s.lead,
                 guides: (None, None),
             });
         }
         if let (Some(held), Some(to)) = (self.timeline.title_grab.held.clone(), pointer)
             && resp.dragged()
         {
-            let shown = shapes.iter().find(|s| s.clip == held.clip);
-            let lead = shown.map_or(held.lead, |s| s.lead);
-            self.timeline.title_grab.held = Some(self.moved(&held, to, lead, picture, shift, free));
+            self.timeline.title_grab.held = Some(self.moved(&held, to, picture, shift, free));
         }
         if resp.drag_stopped()
             && let Some(held) = self.timeline.title_grab.held.take()

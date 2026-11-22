@@ -2834,10 +2834,10 @@ pub enum Request {
     /// replaces its own. The values of the Primaries palette go to a
     /// corrector, and `mode` and `mixer` go to a mixer.
     ///
-    /// On a corrector with keyframes, the values go to the keyframe at `at`,
-    /// or the last one before it. Before the first keyframe, the
-    /// corrector's own values change: they act as a static keyframe at the
-    /// start. A static keyframe and a dynamic keyframe right after it change
+    /// On a corrector or a key mixer with keyframes, the values go to the
+    /// keyframe at `at`, or the last one before it. Before the first
+    /// keyframe, the node's own values change: they act as a static
+    /// keyframe at the start. A static keyframe and a dynamic keyframe right after it change
     /// together: the values that change in one go to the other. Without
     /// `at`, or a playhead, that is an error.
     #[serde(rename = "grade.set")]
@@ -3050,9 +3050,10 @@ pub enum Request {
         node: u32,
         with: u32,
     },
-    /// Add a keyframe at `at` to a corrector of the grade of a clip, or with
-    /// `timeline` of the timeline grade. On a clip, it goes on the source
-    /// frame of the clip at `at`. Without `node`, each corrector gets one.
+    /// Add a keyframe at `at` to a corrector or a key mixer of the grade of
+    /// a clip, or with `timeline` of the timeline grade. On a clip, it goes
+    /// on the source frame of the clip at `at`. Without `node`, each
+    /// corrector and each key mixer gets one.
     /// A new keyframe holds the values that the picture gets on its frame,
     /// with the `start` and `end` of the project's `dynamics_profile`. A
     /// keyframe already on that frame takes the `kind`. Returns the `frame`
@@ -3064,7 +3065,8 @@ pub enum Request {
         /// The timeline grade of the open timeline, in place of a clip.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         timeline: bool,
-        /// The number of the corrector, from 1. Left out: each corrector.
+        /// The number of the corrector or the key mixer, from 1. Left out:
+        /// each corrector and each key mixer.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node: Option<u32>,
         /// Left out: the playhead.
@@ -3077,7 +3079,8 @@ pub enum Request {
     /// Change the kind, the `start` or the `end` of keyframes of the grade
     /// of a clip, or with `timeline` of the timeline grade: those on the
     /// `frames`, those at the timeline frames `at`, or, with neither, all
-    /// of them. Without `node`, the keyframes of each corrector change.
+    /// of them. Without `node`, the keyframes of each corrector and each key
+    /// mixer change.
     #[serde(rename = "grade.keys.set")]
     GradeKeysSet {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3106,7 +3109,8 @@ pub enum Request {
     /// timeline grade (those on the `frames`, those at the timeline frames
     /// `at`, or all of them) `by` timeline frames, or move the keyframes of
     /// one frame `to` a timeline frame. Without `node`, the keyframes of each
-    /// corrector move. A corrector has one keyframe on a frame at most.
+    /// corrector and each key mixer move. A node has one keyframe on a frame
+    /// at most.
     #[serde(rename = "grade.keys.move")]
     GradeKeysMove {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3131,8 +3135,8 @@ pub enum Request {
     /// Remove keyframes of the grade of a clip, or with `timeline` of the
     /// timeline grade: those on the `frames`, those at the timeline frames
     /// `at`, or, with neither, all of them. Without `node`, the keyframes of
-    /// each corrector go. Before its first keyframe, a corrector has its own
-    /// values.
+    /// each corrector and each key mixer go. Before its first keyframe, a
+    /// node has its own values.
     #[serde(rename = "grade.keys.remove")]
     GradeKeysRemove {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3690,42 +3694,6 @@ pub enum Request {
         /// model is an error that tells its size.
         #[serde(default)]
         download: bool,
-    },
-    /// Make a title follow a motion path of another clip, or stop that. The
-    /// title (`c5`, or `V2@15s`) goes onto the thing on the path, and moves
-    /// with it: its `position` becomes `[0.5, 0.5]`. Each `position` of the
-    /// title counts from the middle of that thing, and `[0.5, 0.5]` puts the
-    /// `anchor` of the title on it. The upper line of a lower third moves by
-    /// the same amount. A title with keyframes on its position is refused.
-    /// The title keeps its size and its angle.
-    ///
-    /// `of` is the clip that has the path, and `path` is the id of the path
-    /// (`motion.list`). That clip is footage, a still or an image sequence
-    /// of the same timeline. Before the first sample of the path and after
-    /// its last, the thing is where that sample has it. Before and after
-    /// that clip, the thing is where the first or the last frame of that
-    /// clip has it. Without `of` and `path`, the title follows no path. A
-    /// scroll follows none.
-    ///
-    /// While a title follows a path, `motion.remove` and `motion.find` with
-    /// `replace` do not take that path off. When the clip of the path is
-    /// deleted, the title follows no path, with a warning. When that clip
-    /// plays on no frame of the title, and another clip there has the same
-    /// path of the same media, the title follows that clip: the two parts of
-    /// a split clip are an example. `of` takes that clip in the same way,
-    /// and `follows` in the answer names it.
-    ///
-    /// Returns the `clip` of the title, its `follows` and its `position`.
-    #[serde(rename = "motion.follow")]
-    MotionFollow {
-        clip: ClipRef,
-        /// The clip that has the path. Left out with `path`, the title
-        /// follows no path.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        of: Option<ClipRef>,
-        /// The id of the path on that clip, for example `p2`.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        path: Option<String>,
     },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.
@@ -4445,13 +4413,14 @@ pub enum Request {
         wide: Option<bool>,
     },
     /// Select nodes in the node editor of the color page, by number. The
-    /// palette then shows the last one, or `current`. An empty list selects
-    /// none. Answers what `gui.state` does.
+    /// palette then shows the last one, or `current`. An empty list with no
+    /// `current` selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.grade_nodes")]
     GuiGradeNodes {
         nodes: Vec<u32>,
         /// The current node, when it is not one of `nodes`. The palette
-        /// shows it, and a delete of the selected nodes keeps it.
+        /// shows it, and a delete of the selected nodes keeps it. With an
+        /// empty `nodes`, it is the one selected node.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         current: Option<u32>,
     },
