@@ -76,7 +76,7 @@ vidcut -p talk.vidcut export start talk.mp4 --preset youtube-1080p
 
 | | Linux | Windows | macOS |
 |---|---|---|---|
-| Preferences, presets, themes | `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` |
+| Preferences, presets, themes, LUTs | `~/.config/vidcut` | `%APPDATA%\vidcut` | `~/Library/Application Support/vidcut` |
 | Cache and models | `~/.cache/vidcut` | `%LOCALAPPDATA%\vidcut\cache` | `~/Library/Caches/vidcut` |
 | Undo history, recent projects | `~/.local/state/vidcut` | `%LOCALAPPDATA%\vidcut\state` | `~/Library/Application Support/vidcut/state` |
 

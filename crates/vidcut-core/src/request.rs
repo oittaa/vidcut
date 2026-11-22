@@ -3828,6 +3828,16 @@ pub enum Request {
         #[serde(default)]
         kind: Option<LookKind>,
     },
+    /// The LUTs that the menus list, read again now: the `.cube` files in
+    /// vidcut's LUT folder (`folder`, `LUT` in the folder of the preferences)
+    /// and in the folders of `luts.folders` in the preferences (`folders`),
+    /// with their subfolders. Each of `luts` has its `name` (the file name
+    /// with no extension), `menu` (the subfolders it is in, the outer one
+    /// first) and `path`. They come in the order of the menus: by their path
+    /// in their folder, letter by letter. `media.set` and `project.set` take
+    /// a path from here, or any other `.cube` file.
+    #[serde(rename = "luts.list")]
+    LutsList {},
     /// Save one of your looks (`~/.config/vidcut/looks/subtitles/NAME.toml`
     /// or `looks/titles/NAME.toml`, on Windows in `%APPDATA%\vidcut`, on
     /// macOS in `~/Library/Application Support/vidcut`): `subtitles`, a
@@ -4580,7 +4590,8 @@ pub enum Request {
     /// `--dry-run` lists what would go.
     #[serde(rename = "reset")]
     Reset {
-        /// Also delete what you saved: presets, themes and looks.
+        /// Also delete what you saved: presets, themes, looks and the LUTs in
+        /// vidcut's LUT folder.
         #[serde(default)]
         saved: bool,
         /// Keep what was downloaded or paid for: the speech models, and the
@@ -6045,6 +6056,14 @@ pub struct ProjectSet {
     /// the parts that are slow to make in the background, for the viewer.
     #[serde(default)]
     pub render_cache: Option<crate::model::RenderCache>,
+    /// Input LUT: a `.cube` file that the pictures of each clip go through
+    /// just after their conversion into the timeline color space, in the
+    /// viewer and in each export. A media item's own input LUT replaces it on
+    /// that media's clips. Gaps, generators, titles and adjustment clips do
+    /// not get it. A file that can't be read is refused, with the reason. An
+    /// empty path clears it.
+    #[serde(default)]
+    pub input_lut: Option<PathBuf>,
     /// Output LUT: a `.cube` file that the whole timeline goes through after
     /// its subtitles, before each output's colors, in the viewer and in each
     /// export. A file that can't be read is refused, with the reason. An
@@ -7043,6 +7062,7 @@ impl Request {
                 | Self::LooksList { .. }
                 | Self::LooksSave { .. }
                 | Self::LooksDelete { .. }
+                | Self::LutsList {}
                 | Self::EncodersList { .. }
                 | Self::DecodersList {}
                 | Self::ModelsList {}
@@ -7124,6 +7144,7 @@ impl Request {
                     | Self::LooksList { .. }
                     | Self::LooksSave { .. }
                     | Self::LooksDelete { .. }
+                    | Self::LutsList {}
                     | Self::EncodersList { .. }
                     | Self::DecodersList {}
                     | Self::PreferencesGet {}
@@ -7195,8 +7216,9 @@ impl Request {
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect(),
             Self::ProjectSet(set) => set
-                .output_lut
+                .input_lut
                 .iter_mut()
+                .chain(set.output_lut.iter_mut())
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect(),
             _ => Vec::new(),

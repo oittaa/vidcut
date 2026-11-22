@@ -28,6 +28,7 @@ mod keyframe_editor;
 mod leveler;
 mod look_tiles;
 mod looks;
+mod luts;
 mod mixer;
 mod node_editor;
 mod noise;

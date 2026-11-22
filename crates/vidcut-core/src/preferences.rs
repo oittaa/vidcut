@@ -27,6 +27,7 @@ pub struct Preferences {
     pub viewer: ViewerPrefs,
     pub editing: Editing,
     pub color: ColorPrefs,
+    pub luts: LutPrefs,
     /// The keys that differ from the defaults, by action. `keys.list` names
     /// the actions. An action that is not here has its default keys, and an
     /// empty list leaves an action with no key. `keys.set` and `keys.reset`
@@ -769,6 +770,16 @@ impl Default for Cache {
     }
 }
 
+/// The LUTs that the menus list: the `.cube` files in vidcut's LUT folder
+/// (`luts.list` names it) and in these folders, with their subfolders.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct LutPrefs {
+    /// More folders of LUTs, each an absolute path. Empty (the default):
+    /// vidcut's LUT folder only.
+    pub folders: Vec<PathBuf>,
+}
+
 /// What sets the cache's limit.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -930,6 +941,17 @@ pub struct PreferencesPatch {
     pub editing: Option<EditingPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<ColorPrefsPatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub luts: Option<LutPrefsPatch>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LutPrefsPatch {
+    /// The whole list of more folders of LUTs, each an absolute path, in
+    /// place of the one before. An empty list removes them all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folders: Option<Vec<PathBuf>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1197,6 +1219,9 @@ impl Preferences {
             c.disable_thumbnail_refresh =
                 (x.disable_thumbnail_refresh).unwrap_or(c.disable_thumbnail_refresh);
         }
+        if let Some(folders) = patch.luts.as_ref().and_then(|l| l.folders.as_ref()) {
+            p.luts.folders = folders.clone();
+        }
         p.check()?;
         Ok(p)
     }
@@ -1263,6 +1288,20 @@ impl Preferences {
             if folder.starts_with("~") {
                 return Err(Error::usage(format!(
                     "{key}: write the home folder out; `~` is not expanded"
+                )));
+            }
+        }
+        for (i, folder) in self.luts.folders.iter().enumerate() {
+            if !folder.is_absolute() {
+                return Err(Error::usage(format!(
+                    "luts.folders: {} is not an absolute path; `~` is not expanded",
+                    folder.display()
+                )));
+            }
+            if self.luts.folders[..i].contains(folder) {
+                return Err(Error::usage(format!(
+                    "luts.folders: {} is in the list twice",
+                    folder.display()
                 )));
             }
         }

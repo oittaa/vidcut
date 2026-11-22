@@ -924,6 +924,7 @@ impl Words<'_> {
         s.put("render_cache", "Render Cache", &word, |x| {
             json!(x.render_cache)
         });
+        s.put("input_lut", "Input LUT", &text, |x| json!(x.input_lut));
         s.put("output_lut", "Output LUT", &text, |x| json!(x.output_lut));
         let list = |v: &Value| match v.as_array().map(Vec::len) {
             Some(n) => Shown {

@@ -1249,18 +1249,6 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Why:**
   - A wrapped line loses no letters.
 
-## X139. One Input LUT submenu takes any `.cube` file
-
-- **Resolve:**
-  - A right-click on Media Pool clips gives the 1D LUT and 3D LUT submenus. The user selects a LUT there (p. 3480).
-  - The submenus list the LUT files in the LUT folders that the preferences name (p. 3480).
-- **vidcut:**
-  - The right-click menu of the pool has one Input LUT submenu, with Choose… and Reset.
-  - Choose… opens a file picker for any `.cube` file.
-- **Why:**
-  - The picture is the same.
-  - The picker reaches any file, with no LUT folder to set up.
-
 ## X140. The Atmosphere noise of a Glow has its own pattern
 
 - **Resolve:**

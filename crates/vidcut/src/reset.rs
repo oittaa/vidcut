@@ -36,7 +36,7 @@ pub fn run(saved: bool, keep_downloads: bool, dry_run: bool) -> Result<Value> {
         .map(|s| s.history_path().to_path_buf())
         .collect();
     if !saved {
-        keep.extend(["presets", "themes", "looks"].map(|d| dirs.config.join(d)));
+        keep.extend(["presets", "themes", "looks", "LUT"].map(|d| dirs.config.join(d)));
     }
     if keep_downloads {
         keep.push(crate::paths::models_dir());

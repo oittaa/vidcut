@@ -256,6 +256,10 @@ const GROUPS: &[(&str, &str)] = &[
         "looks",
         "Looks: named styles for subtitle tracks and titles, built-in and your own",
     ),
+    (
+        "luts",
+        "LUTs: the .cube files in vidcut's LUT folder and in the folders of the preferences",
+    ),
     ("markers", "Timeline markers"),
     ("marks", "Timeline In and Out marks"),
     ("multicam", "Angles of one moment, lined up"),

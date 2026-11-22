@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::Project;
+use vidcut_core::luts::LutList;
 use vidcut_core::model::{
     DynamicsProfile, Hdr, ProjectRetime, ProjectUpscaler, TimelineColors, TimelineSettings,
 };
@@ -38,8 +39,30 @@ pub(super) struct Format {
     auto: Option<Hdr>,
     retime: ProjectRetime,
     upscaler: ProjectUpscaler,
+    input_lut: Option<PathBuf>,
     output_lut: Option<PathBuf>,
     dynamics: DynamicsProfile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LutRow {
+    Input,
+    Output,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LutAction {
+    Update,
+    OpenFolder,
+}
+
+impl LutRow {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Input => "Input LUT",
+            Self::Output => "Output LUT",
+        }
+    }
 }
 
 impl Default for Format {
@@ -54,6 +77,7 @@ impl Default for Format {
             auto: None,
             retime: ProjectRetime::Auto,
             upscaler: ProjectUpscaler::Auto,
+            input_lut: None,
             output_lut: None,
             dynamics: DynamicsProfile::default(),
         }
@@ -88,6 +112,7 @@ impl Format {
             auto: vidcut_core::render::auto_colors(p),
             retime: p.settings.retime,
             upscaler: p.settings.upscaler,
+            input_lut: p.settings.input_lut.clone(),
             output_lut: p.settings.output_lut.clone(),
             dynamics: p.settings.dynamics_profile,
         }
@@ -217,7 +242,19 @@ impl Format {
         }
     }
 
-    pub(super) fn edit_colors(&mut self, ui: &mut egui::Ui, choose: Option<&mut bool>) {
+    fn lut_mut(&mut self, row: LutRow) -> &mut Option<PathBuf> {
+        match row {
+            LutRow::Input => &mut self.input_lut,
+            LutRow::Output => &mut self.output_lut,
+        }
+    }
+
+    pub(super) fn edit_colors(&mut self, ui: &mut egui::Ui) {
+        self.colors_grid(ui, None);
+    }
+
+    fn colors_grid(&mut self, ui: &mut egui::Ui, luts: Option<&LutList>) -> Option<LutAction> {
+        let mut action = None;
         egui::Grid::new(ui.scope_id().with("colors"))
             .num_columns(2)
             .spacing([12.0, 8.0])
@@ -239,23 +276,31 @@ impl Format {
                     .response
                     .labelled_by(label.id);
                 ui.end_row();
-                let Some(choose) = choose else {
+                let Some(list) = luts else {
                     return;
                 };
-                let label = ui.label("Output LUT");
+                for row in [LutRow::Input, LutRow::Output] {
+                    let label = ui.label(row.name());
+                    let now = self.lut_mut(row).clone();
+                    let (r, pick) = super::luts::combo(ui, row.name(), list, now.as_deref(), 240.0);
+                    r.labelled_by(label.id);
+                    if let Some(path) = pick {
+                        *self.lut_mut(row) = path;
+                    }
+                    ui.end_row();
+                }
+                ui.label("");
                 ui.horizontal(|ui| {
-                    *choose = ui.button("Choose…").labelled_by(label.id).clicked();
-                    let name = self
-                        .output_lut
-                        .as_deref()
-                        .map_or("None".to_string(), file_name);
-                    ui.label(name);
-                    if self.output_lut.is_some() && ui.button("Clear").clicked() {
-                        self.output_lut = None;
+                    if ui.button("Update Lists").clicked() {
+                        action = Some(LutAction::Update);
+                    }
+                    if ui.button("Open LUT Folder").clicked() {
+                        action = Some(LutAction::OpenFolder);
                     }
                 });
                 ui.end_row();
             });
+        action
     }
 
     pub(super) fn fps(&self) -> Option<Rational> {
@@ -493,7 +538,6 @@ enum OpenOtio {
 pub(super) struct ProjectUi {
     new: Option<NewProject>,
     settings: Option<(Format, Format)>,
-    lut_pick: Option<Picked>,
     pub(super) found: Found,
     otio: Option<OpenOtio>,
 }
@@ -631,7 +675,6 @@ impl Workspace {
         if let Some(p) = self.project() {
             let now = Format::of(p);
             self.project_ui.settings = Some((now.clone(), now));
-            self.project_ui.lut_pick = None;
         }
     }
 
@@ -718,13 +761,6 @@ impl Workspace {
         let Some((mut format, was)) = self.project_ui.settings.take() else {
             return;
         };
-        if let Some(picked) = self.project_ui.lut_pick.take() {
-            match picked.take() {
-                None => self.project_ui.lut_pick = Some(picked),
-                Some(None) => {}
-                Some(path) => format.output_lut = path,
-            }
-        }
         let Some(p) = self.project() else {
             return;
         };
@@ -732,7 +768,8 @@ impl Workspace {
         let mut open = true;
         let mut cancel = false;
         let mut apply = None;
-        let mut choose = false;
+        let mut lut_action = None;
+        let luts = &self.luts.list;
         egui::Window::new("Project Settings")
             .collapsible(false)
             .resizable(false)
@@ -740,7 +777,7 @@ impl Workspace {
             .open(&mut open)
             .show(ctx, |ui| {
                 format.edit(ui, (!empty).then_some("only with no timelines"));
-                format.edit_colors(ui, Some(&mut choose));
+                lut_action = format.colors_grid(ui, Some(luts));
                 format.edit_ai(ui);
                 format.edit_dynamics(ui);
                 ui.add_space(4.0);
@@ -756,14 +793,10 @@ impl Workspace {
                     }
                 });
             });
-        if choose {
-            let (dialogs, folder) = (
-                self.dialogs.clone(),
-                self.lut_folder(format.output_lut.as_deref()),
-            );
-            self.project_ui.lut_pick = Some(Picked::ask(ctx, move || {
-                dialogs.pick_file("Output LUT", &folder, &["cube"])
-            }));
+        match lut_action {
+            Some(LutAction::Update) => self.update_luts(ctx),
+            Some(LutAction::OpenFolder) => self.open_lut_folder(),
+            None => {}
         }
         if let Some(changes) = apply {
             self.send_asking("project.set", changes);
@@ -793,6 +826,10 @@ fn changes(now: &Format, was: &Format) -> Value {
     }
     if now.upscaler != was.upscaler {
         set.insert("upscaler".into(), json!(now.upscaler));
+    }
+    if now.input_lut != was.input_lut {
+        let path = now.input_lut.clone().unwrap_or_default();
+        set.insert("input_lut".into(), json!(path));
     }
     if now.output_lut != was.output_lut {
         let path = now.output_lut.clone().unwrap_or_default();

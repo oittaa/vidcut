@@ -529,6 +529,11 @@ The bar and the Jobs button:
 - On the Color page, Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the grade (`Workspace::grade_key_cmd`). `Workspace::grade_key_cmd_why` gives the next step.
   - Mark > Make Static Keyframe is on the Color page only (`Workspace::static_key_item`). Its key is `Action::AddStaticKeyframe`.
 - The Dynamics Profile row of the Project Settings window sends `project.set` with `dynamics_profile`.
+- The Input LUT and Output LUT rows of the Project Settings window (`LutRow`) set `input_lut` and `output_lut` of `project.set`.
+  - Each row is one dropdown of the LUT list (`luts::combo`). No LUT selected sends an empty path.
+  - Update Lists sends `luts.list` again (`Workspace::update_luts`).
+  - Open LUT Folder makes the LUT folder of vidcut when it is missing, and opens it (`Workspace::open_lut_folder`).
+- The LUT Locations row of the General page of the Preferences window sends `preferences.set` with the whole list of `luts.folders`. Add… adds a folder, and Remove removes the selected one.
 
 **The Inspector** (`inspector::Inspector`, `Workspace::inspector_panel`).
 
@@ -599,8 +604,8 @@ The bar and the Jobs button:
   - `Workspace::ask` asks before a download when a model is not there (`model_needs`, `Finding`). `Workspace::motion_prompt` shows the question that the other local models use (`ask_download`), and `with_model` then sets `download`.
   - A name goes with `comp.set` when its field loses the focus (`Naming`). Escape drops the typed name.
   - The rows read the patterns and their paths from the shared project of the snapshot. The snapshot holds no copy of the samples.
-- `Workspace::input_lut_section` shows the Input LUT row of the media of the selected clips, with a file pick and Reset. Each change is one `media.set`.
-  - The Input LUT submenu of the pool's right-click menu sends the same request (`Workspace::pool_item_menu`, `Workspace::ask_input_lut`).
+- `Workspace::input_lut_section` shows the Input LUT row of the media of the selected clips: a dropdown of the LUT list (`luts::combo`), and Reset. Each change is one `media.set`.
+  - The LUT submenu of the pool's right-click menu sends the same request (`Workspace::pool_item_menu`, `luts::menu`).
 - `speed_section` sends what the Change Clip Speed window sends (`SpeedDialog::params`). `Workspace::audio_section` sends `clip.set`.
   - On a clip with speed keyframes, it shows the section under the playhead (`Paced`). `section_speed` sends `speed.set`, `speed.freeze` or `speed.reverse` there.
   - A Speed value under `Speed::RANGE` on clips with no speed keyframes goes to `Workspace::send_freeze`, which sends `speed.set` at the playhead.

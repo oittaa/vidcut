@@ -33,7 +33,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - compound clips (§8.18)
 - adjustment clips (§8.24)
 - compositions of nodes on the Effects page: Blur, the six effects, and Ellipse, Rectangle and Polygon masks (§8.19)
-- the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
+- the input LUT of a media item and of the project, and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
 **Later (later):**
@@ -394,9 +394,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - `media.get` shows them. The metadata strip shows the scene, the shot and the take.
   - vidcut does not read Date Created from a file. No measurement shows which time or tag gives it.
 - **Input LUT** (p. 3480, and [§13](#the-lut-tables)):
-  - A media item with pictures has an Input LUT (`input_lut`). Each of its clips on the timeline gets it.
-  - The Input LUT submenu of the pool's right-click menu and the LUT section of the Inspector set it.
-  - The submenu has a file picker in place of the 1D LUT and 3D LUT submenus ([deviation X139](deviations.md#x139-one-input-lut-submenu-takes-any-cube-file)).
+  - A media item with pictures has an Input LUT (`input_lut`). Each of its clips on the timeline gets it in place of the Input LUT of the project.
+  - The `LUT` submenu of the pool's right-click menu and the LUT section of the Inspector set it. They list the LUTs of the LUT folders ([§13](#the-lut-tables)).
   - `media.set` sets it on one or more items. An empty path clears it. `media.get` shows it.
   - A generator, a title and a compound clip have no media item. Thus they have no Input LUT.
 - **Multicam layout** (p. 1037):
@@ -6297,6 +6296,7 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - A script cannot set the `Input LUT` of a compound clip or of a timeline.
 - A LUT on the node of a compound clip gives the same picture as a LUT on the node of a plain clip.
 - A generator and a title have no Media Pool clip. A script gets no node graph for them, so it cannot give them a LUT.
+- A LUT on the node of a Text+ title gives `T(C / A) * A`. vidcut titles take no grade yet ([todo](todo/luts.md)).
 
 **The Input LUT of a clip**, measured in Resolve Studio 21.2:
 
@@ -6316,13 +6316,17 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 
 - A grid of values gives the same picture as the Output LUT of the project.
 - It applies to clips. A gap stays black.
+- The viewer of the Media page and the thumbnails of the Media Pool show it. vidcut does not yet ([todo](todo/luts.md)).
 - It does not apply to a Solid Color generator, a Text title or a Text+ title.
 - On a compound clip, it applies once, to the clip inside. It does not apply again to the compound clip.
   - A clip inside at Zoom 0.5 gets it. The uncovered part of the compound clip stays black, not `T(0)`.
 - In a timeline with its own settings, the Lookup Tables section of the settings shows a warning. The LUT still applies there.
+  - vidcut applies it there too.
 - A picture with alpha gives `T(clamp(C / A)) * A`, and each layer gets its own `T` before the mix.
 - The Input LUT of a clip replaces it on that clip.
-- vidcut has no Input LUT of the project yet ([todo](todo/luts.md)).
+- vidcut does the same. Each clip of a media item with no `input_lut` gets the `input_lut` of the project in the render plan.
+  - `project.set` with `input_lut` sets it, and an empty path clears it.
+  - The Input LUT row of the Project Settings window sends that request. It lists the LUTs of the LUT folders, as the menus below tell.
 
 **The Output LUT of the project**, measured in Resolve Studio 21.2:
 
@@ -6330,6 +6334,7 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - It works on the mixed picture of the timeline.
 - It also applies to a gap. In a render without alpha, a gap becomes `T(0)`, with a difference of 5e-9 at most.
 - In a render with alpha, a picture with alpha gives `T(clamp(C / A)) * A`. The alpha does not change. Where `A` is 0, the result is 0.
+  - A gap stays RGB 0 and alpha 0.
 - vidcut does the same (`fs_lut`, [design](design/README.md#lut-files)).
 
 A script gets no error for a broken file, and the window shows no message:
@@ -6339,6 +6344,36 @@ A script gets no error for a broken file, and the window shows no message:
 - 130 rows where 125 are due use the first 125 rows.
 - `LUT_3D_SIZE 1` gives a black picture.
 - vidcut refuses these files ([X131](deviations.md#x131-a-broken-cube-file-is-refused)).
+
+**The LUT menus**, measured in Resolve Studio 21.2 (pp. 152, 3479–3480):
+
+- The right-click menu of a Media Pool clip has one `LUT` item with a submenu.
+  - Its first entry is `No LUT selected`. Then come the LUT files of the LUT folders, by name with no extension.
+  - Each subfolder is its own submenu, for example `ACES`, `Arri` and `MCP`.
+  - A check mark is on `LUT`, and on the subfolder that holds the current LUT of the clip.
+- The Lookup Tables of the Color Management panel of the Project Settings start with `Input lookup table`, `Output lookup table`, `Video monitor lookup table` and `Color viewer lookup table`.
+  - Each row is one dropdown. Its list is `No LUT selected`, then the LUTs by name, flat, with no submenus.
+  - `Color viewer lookup table` is `Use video monitoring selection` by default.
+  - Each row also has a `…` button.
+- A list in the General panel of the System Preferences adds folders where Resolve looks for LUTs, with Add and Remove (p. 3479).
+  - Its name is LUT Locations (p. 107).
+- The menus list the LUTs in the master LUT folder and in those folders (p. 152).
+  - `Update Lists` refreshes the menus after files are added. `Open LUT Folder` opens the master folder.
+- Each pair of entries seen in the submenu is in the order of their paths, by character code.
+  - For example, `LMT Neon Suppression` comes before `Leica`. The file `Sony SLog2 to Rec709` comes before the subfolder `Sony`.
+- In the flat dropdown, `LMT ACES v0.1.1` comes first, and `Arri Alexa LogC to Rec709` comes before `ALog to ARRI Log C`.
+  - Those pairs are in the order of the paths in the LUT folder, and not in the order of the names.
+
+In vidcut:
+
+- The LUT folder of vidcut is `LUT` in the folder of its preferences. `luts.folders` in the preferences adds more folders.
+  - The LUT Locations row of the General page of the Preferences window adds and removes them.
+- vidcut lists the `.cube` files of these folders and of their subfolders, in the order of their paths in their folders, by character code.
+  - It reads the folders at start, on `Update Lists`, and when the LUT Locations change. `luts.list` gives the list to a script.
+- The `LUT` submenu of the pool and the Input LUT row of the Inspector set the Input LUT of media items.
+- The Project Settings window has an Input LUT row and an Output LUT row, each one dropdown. It also has `Update Lists` and `Open LUT Folder`.
+- A LUT that is set but not in the list shows by its file name, with its check mark.
+- `media.set` and `project.set` take the path of any `.cube` file. Thus a script can give a file outside the LUT folders.
 
 ### The scaling filter
 

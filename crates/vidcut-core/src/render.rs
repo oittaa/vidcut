@@ -228,7 +228,8 @@ pub enum VideoPiece {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         made: Option<CacheFrames>,
         /// The `.cube` file that its pictures go through just after their
-        /// conversion into the timeline color space.
+        /// conversion into the timeline color space: its media's input LUT,
+        /// or the project's.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_lut: Option<PathBuf>,
     },
@@ -3581,7 +3582,7 @@ impl VideoPlan<'_> {
             cache: c.render_cache,
             excluded: false,
             made: None,
-            input_lut: m.input_lut.clone(),
+            input_lut: m.input_lut.clone().or_else(|| s.input_lut.clone()),
         })
     }
 }
