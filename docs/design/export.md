@@ -758,7 +758,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - Each node names the nodes on its inputs by number. The number 0 is the picture that comes in. `Grade::output` names the node that goes out.
   - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
   - It also refuses a corrector without one input and a mixer without an input.
-  - `ops::grade` changes the tree for `grade.add`, `grade.remove` and `grade.connect`. A removed node gives each node after it one number less (`renumbered`).
+  - `ops::grade` changes the tree for `grade.add`, `grade.remove`, `grade.connect` and `grade.input.remove`. A removed node gives each node after it one number less (`renumbered`).
   - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
@@ -768,7 +768,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A grade at its defaults is left out (`Grade::is_usual`): one corrector at its defaults.
 - `Graded::of` makes the tree into a list of passes on numbered textures (`grade::Pass`). A grade with only copies is no grade.
   - `grade::complete` tells if the grade works. Else the grade does nothing, as in the spec (§8.21).
-  - It works when something goes out, each input of a corrector has a link, each mixer has a link, and each node goes somewhere.
+  - It works when something goes out, each input of a corrector has a link, each mixer has a link, and each node goes somewhere. A node that gives only its key goes somewhere.
   - `grade::order` puts each node after the nodes on its inputs.
   - Texture 0 is the picture of the clip. A node writes on the texture of its first input when no other node reads it later. Else a `Copy` pass first gives it a new texture (`Registers`).
   - Why: most trees then need no texture more than the picture.
@@ -777,7 +777,23 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - A corrector with no window that is on has one key for all pixels (`Key::Flat`, `KeyOutput::of`). It is from 0 to 1.
   - A corrector with a window that is on gets a `Key` pass first. It draws the key of the windows into a texture (`Key::Map`). The `Correct`, `Layer` and tap passes of the corrector read it.
   - The key texture comes from the same `Registers` as the pictures. It is free again after its last use (`Registers::used`).
+  - A corrector takes the key of another node on its key input (`GradeNode::key_from`). A key mixer takes keys on its inputs. `GradeNode::links` gives both kinds of link to `grade::order`.
+  - `key_steps` gives the steps of the key of a node. Each step folds one key into the key so far (`KeyFold`, `key_join`), in the order of the spec ([spec §8.21](../spec.md#821-color-page-nodes-pp-33853399-34093415)).
+    - A corrector folds the key of its windows first, then the key on its key input. A key mixer folds its Mask inputs, then its Matte inputs.
+    - The last step clamps the key and applies the Key Output.
+  - `shape_of` tells if the key of a node is one value for all pixels (`Shape::Flat`) or a texture (`Shape::Map`). Flat keys fold on the CPU and cost no pass.
+  - A `KeyFold` pass folds a texture key with `fs_key_fold`. A node with windows and no key input keeps its one `Key` pass.
+  - A key on a key input with a Blur Radius above 0 gets a copy and a `KeyBlur` pass. `key_blur_spread` gives the sigma of each axis from `KEY_BLUR_STEP` and the frame height.
+  - `Uses::counts` counts the readers of each key, from the last node back. A node counts its own key only when it is on and needs it. Only then do the keys on its links count.
+  - Why: each key texture is then free after its last reader, and a key that nothing reads costs no pass.
+  - A key mixer makes no picture. `grade::passed` and the counts of the pictures skip it.
   - `Keying::shaped` gives each window in pixels of the timeline frame, in the order of the join ([spec §8.23](../spec.md#823-windows-pp-32653279)). `fs_window_key` makes the key, with the Key Output.
+  - A curve goes to the GPU as two closed paths of lines: the inner and the outer path (`flattened`, `mitred`).
+    - `flatten_into` halves each Bezier segment until its handles are within `FLAT_ERROR` pixel of the chord, `FLAT_DEPTH` times at most.
+  - A curve with Soft 1 needs a blur of its hard key. `curves_blurred` draws up to `CURVE_CHANNELS` such keys into the channels of one texture (`fs_window_curves`).
+    - It blurs each channel with its own sigma, as the Gaussian blur of an effect. `texel_spread` gives the sigma in texels.
+  - With more soft curves, `key_runs` splits the windows into runs. Each run is one draw of `fs_window_key`.
+    - A run passes the state of the join to the next run in a texture of the `KEY_SLOTS`. The last run writes the key.
   - The grade works on textures of the render size. `texel_map` maps each fragment to a pixel of the timeline frame.
   - `texel_map` gives `back` the index of the texel, not its middle. Why: Edit Sizing acts on a window about the pixel W/2, H/2 ([spec §8.23](../spec.md#823-windows-pp-32653279)).
   - `back` of `Work::Grade` maps a pixel of the work texture to the timeline frame. A clip chains its placement and its fit. The timeline grade uses `frame_back`, and a thumbnail `shot_back`.
@@ -797,7 +813,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 - `Graded::tapped` makes the same passes for the node thumbnails ([gpu](gpu.md#the-node-thumbnails)). Each `Tap` names the texture with the output of a corrector, after its passes.
   - A corrector that a Layer Mixer reads, with a key above 0 and below 1, then always gets two textures (`Uses::twice`). One holds its output for the thumbnail.
   - A corrector that is off taps the texture of its input, with a key of 1. Thus the later thumbnails do not show its change.
-- `graded_into` runs the passes. Each texture past 0 has the size of the picture. They stay between draws in the spare textures, in the slots after `GRADE_SLOTS`. One limit holds all spare textures (`SPARE_TEXTURES`).
+- `graded_into` runs the passes. Each texture past 0 has the size of the picture. They stay between draws in the spare textures, in the slots after `KEY_SLOTS`. One limit holds all spare textures (`SPARE_TEXTURES`).
 - `fs_grade_mix` makes a `Parallel` or a `Layer` pass in a scratch texture. A copy then takes it back.
   - `Layer` uses `mixed`, the composite of the timeline, on the colors without their alpha. Thus a Layer Mixer and a track give the same mix.
   - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.

@@ -430,9 +430,12 @@ The bar and the Jobs button:
 **The Color page** (`Workspace::primaries_panel`).
 
 - The palette shows the current node of the grade of the clip at the playhead. During a drag, it shows the dragged grade (`Graded`).
-  - Primaries and Key at the top select the palette (`GradePalette`). The Key palette draws the Key Output of the node (`key_output`).
+  - Primaries and Key at the top select the palette (`GradePalette`). The Key palette draws the Key Input (`key_input`) and the Key Output (`key_output`) of the node.
   - The palette and the mode of the Primaries palette (`PrimariesView`) are in `EffectsPage`. A click sends `gui.page` with `palette` or `primaries`.
   - A change in the Key palette changes the `key` of the node in the dragged grade. The sent `grade.set` has `key_gain`, `key_offset` or `key_invert`.
+  - A Key Input change changes the `key_input` of the node in the same way. The sent `grade.set` has the `key_input_` fields.
+  - A key mixer has its own palette (`Workspace::key_mixer_palette`). It shows each linked input (`key_mix_row`), then the output.
+  - It sends one `grade.set` with `input` for each changed input, and one for the output, in one `apply` (`mixer_sets`).
   - Reset in a palette sends `grade.clear` with the `palette` of that palette.
   - The other palettes, and the line for a mixer, keep the height of the last Primaries palette (`primaries_panel`). Thus the page does not move when the palette changes.
 - With the Window palette open, the viewer draws the windows of the current node (`Workspace::window_controls`).
@@ -441,8 +444,17 @@ The bar and the Jobs button:
   - A drag of a handle changes a copy of the grade (`WindowGrab`). The palette then sends `grade.window.set` when the mouse button comes up, as for a field.
   - The viewer draws after the palette. Thus a change in the viewer updates the preview at once, and asks for one more frame. In that frame the palette sends it.
   - A click on a polygon edge adds a corner, and a middle-click removes one. Both go through the same copy.
+  - Copy Window sends `grade.window.copy`. The live core keeps its answer (`window_clipboard`) for `grade.window.paste`. The snapshot gives the shape of the copy, so the palette knows which window becomes current.
+  - A curve has a handle at each point (`Grip::Point`) and at each Bezier handle (`Grip::Tangent`).
+  - A click on a curve adds a point with `curve_split`. `curve_inserted` cuts the Bezier segment there, so the shape stays.
+  - While the current curve is on and has no points, a click adds a point. `Drawing` then keeps the curve open until a click on its first point.
+  - A drag from a new point pulls its handles out (`Grip::Pull`). Alt and a drag on a corner do the same.
+  - A drag of a Bezier handle turns the opposite handle with it (`turned_with`). With Alt, the opposite handle stays.
 - The Node Editor of the grade is at the right of the viewer (`Workspace::grade_nodes_panel`).
   - A corrector is a tile with its number, and a mixer is a tile with its kind. The Source and the Output are tiles at the left and the right edge (`Port`, `Edge`).
+  - A corrector has an RGB input and a key input at its left (`Inlet`). It has an RGB output and a key output at its right (`Outlet`).
+  - A key mixer has a key input for each input, and a key output.
+  - The key ports and the key links are blue (`MASK_KNOT`). A link knows the outlet that it leaves (`Wire::out`).
   - `EffectsPage::grade_nodes` is the selection, and `gui.grade_nodes` sets it. The last one is the current node.
   - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
   - In List View, the current row has a red outline (`CURRENT_ROW`). It is the red of the active angle (`ACTIVE_ANGLE`).
@@ -454,7 +466,7 @@ The bar and the Jobs button:
   - The label of a node is the `Tile::note` above it. Node Label and a double-click start an edit in place (`NodeView::name`). Enter gives `Done::named`, and the page sends `grade.set` with `label`.
   - In List View, the label is in the row, and Node Label edits it there. The graph and the list use one edit field (`label_field`).
   - The badges of a corrector (`Badge`) come from the values that differ from the usual values (`badges`). The Keyframes badge comes from `GradeNode::is_animated`. Each grade edit keeps that state in `animated` (`edited`).
-  - The Key badge comes from the Key Output of the node (`KeyOutput::is_usual`).
+  - The Key badge comes from the Key Input and the Key Output of the node (`KeyInput::is_usual`, `KeyOutput::is_usual`).
   - `Tile::locked` holds the lock of a node, a mixer too (`GradeNode::locked`). The graph shows a lock badge last. In List View, each row has a lock after the eye, and a click on it gives `Done::locked`.
   - The palette of a locked node drops its changes. Lock Node in the menu and the lock of a row send `grade.set` with `locked`.
   - The option menu at the top right of the Node Editor sets `color.switching_clips` with `preferences.set`.
@@ -469,13 +481,16 @@ The bar and the Jobs button:
   - An add selects the new node before the grade has it (`EffectsPage::grade_coming`). The selection keeps it until it comes, or for a short time.
   - On a mixer, the keys add only a serial node or an appended node, as the menu does.
   - A drop of a link sends `grade.connect` (`grade_links`). A drop on a mixer adds an input. A move sends `grade.set` with `place`.
+  - A link between a key output and a key input sends `key`. A link from a key output to an RGB input, or the reverse, does nothing.
+  - A drop of a key output on a corrector links its key input. A drop on a key mixer adds an input.
+  - A node can drop only into a link with `Wire::drops`. A key link has none.
   - `gui.node_view` asks a zoom of the shown Node Editor (`NodeView::ask`). The editor does it on its next frame, with its own size (`zoomed`).
   - Cleanup Node Graph sends `grade.cleanup` with the `area` that the editor shows, less a margin and the size of a node (`NodeView::area`). The zoom stays.
   - `NodeView` keeps the rectangle of its last frame for the area. Only the graph view has the menu with Cleanup Node Graph.
   - `EffectsPage::grade_list` draws the nodes with `node_editor::list`. A row has the number, the eye, the lock, the thumbnail, the label and the badges. `EffectsPage::grade_wide` hides the right panel, and `viewer_body` draws the Node Editor in the place of the picture.
   - A tile with `Tile::drops` can land on another such tile or on a link (`Dropped`). `grade_dropped` sends `grade.swap`, `grade.paste`, or one `apply` that inserts the node.
   - An Alt-drag builds the settings with `ops::grade::copy` from the shown project. Ctrl+C sends `grade.copy`; the live core keeps its answer (`node_clipboard`) for `grade.paste`.
-  - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.set` and `grade.clear`.
+  - The menus send `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.set` and `grade.clear`.
   - The keys of `Panel::Color` work only on the page (`Workspace::color_keys`): add, append, extract, delete, off and on, reset, and the previous and the next node.
   - The Nodes submenu of the Color menu (`Workspace::nodes_menu`) runs the same actions (`Workspace::grade_keys_struck`). Its Delete Current Node and Label Selected Node act on the current node.
   - Ctrl+D and Alt+D send one `grade.set` with `on` for each node that changes (`Workspace::switch_grade_nodes`).

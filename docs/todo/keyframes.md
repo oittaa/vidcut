@@ -168,7 +168,7 @@ The picture uses the `Keyframe` of the volume ([D81](../spec.md#12-decisions-on-
   - `ops::picture::checked` checks the values of each keyframe as it checks plain values.
   - `Picture::is_usual` is false while a value has keyframes.
 - **Compound clips:** the keyframes of a compound clip count its frames.
-  - `edit.decompose` moves them to the source frames of each clip inside.
+  - `edit.decompose` drops them.
 - **Another rate:** an import scales the keyframe times to the project's rate (`at_project_rate`), as for the volume.
 
 ## Playback and export
@@ -373,5 +373,4 @@ Rule 3: each GUI action has a request.
 
 ## Open questions
 
-- **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?

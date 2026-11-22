@@ -446,6 +446,7 @@ pub fn describe_at(
         "grade.add"
         | "grade.remove"
         | "grade.connect"
+        | "grade.input.remove"
         | "grade.swap"
         | "grade.cleanup"
         | "grade.keys.add"
@@ -454,11 +455,14 @@ pub fn describe_at(
         | "grade.keys.remove"
         | "grade.window.add"
         | "grade.window.set"
-        | "grade.window.remove" => format!(
+        | "grade.window.remove"
+        | "grade.window.convert"
+        | "grade.window.paste" => format!(
             "{} {}",
             match method {
                 "grade.add" => "Add a node to",
                 "grade.remove" => "Remove a node from",
+                "grade.input.remove" => "Remove a mixer input from",
                 "grade.swap" => "Swap two nodes of",
                 "grade.cleanup" => "Clean up the nodes of",
                 "grade.keys.add" => "Add a keyframe to",
@@ -468,6 +472,8 @@ pub fn describe_at(
                 "grade.window.add" => "Add a window to",
                 "grade.window.set" => "Change a window of",
                 "grade.window.remove" => "Remove a window from",
+                "grade.window.convert" => "Turn a window into a curve in",
+                "grade.window.paste" => "Paste a window into",
                 _ => "Link the nodes of",
             },
             match d.flag("timeline") {

@@ -156,6 +156,7 @@ actions! {
     AddParallelNode "add_parallel_node",
     AddLayerNode "add_layer_node",
     AppendNode "append_node",
+    AddOutsideNode "add_outside_node",
     ExtractNode "extract_node",
     DeleteNode "delete_node",
     SwitchSelectedNodes "switch_selected_nodes",
@@ -196,6 +197,7 @@ impl Action {
             | Action::AddParallelNode
             | Action::AddLayerNode
             | Action::AppendNode
+            | Action::AddOutsideNode
             | Action::ExtractNode
             | Action::DeleteNode
             | Action::SwitchSelectedNodes
@@ -1490,6 +1492,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Alt+K"],
         "Append a node",
         Some("A corrector after the node whose picture goes out."),
+    ),
+    own(
+        Color,
+        Action::AddOutsideNode,
+        &["Alt+O"],
+        "Add an outside node",
+        Some("A corrector after the current node, on the inverse of its key."),
     ),
     own(
         Color,

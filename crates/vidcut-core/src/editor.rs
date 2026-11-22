@@ -4886,9 +4886,19 @@ fn mutate(
             node,
             input,
             from,
+            key,
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
-            ops::grade::connect(p, &of, *node, *input, *from)?;
+            ops::grade::connect(p, &of, (*node, *input), *from, *key)?;
+            Value::Null
+        }
+        Request::GradeInputRemove {
+            clip,
+            timeline,
+            node,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            ops::grade::remove_input(p, &of, *node)?;
             Value::Null
         }
         Request::GradePaste {
@@ -5041,6 +5051,30 @@ fn mutate(
             let of = grade_of(p, clip, *timeline, playhead)?;
             ops::grade_windows::remove(p, &of, *node, *window)?;
             Value::Null
+        }
+        Request::GradeWindowConvert {
+            clip,
+            timeline,
+            node,
+            window,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            json!({ "window": ops::grade_windows::convert(p, &of, *node, *window)? })
+        }
+        Request::GradeWindowPaste {
+            clip,
+            timeline,
+            node,
+            window,
+            append,
+            settings,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            let copied = settings.as_ref().ok_or_else(|| {
+                Error::usage("give `settings`, a window from `grade.window.copy`")
+            })?;
+            let to = ops::grade_windows::paste(p, &of, *node, (*window, *append), copied)?;
+            json!({ "window": to })
         }
         Request::EffectsAdd { clips, kind } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -7450,64 +7484,20 @@ fn decompose(
         unpack_compound(p, &cid, env, at, 8, imported_compounds, warnings)?;
     }
     let (block, made) = ops::compound::unnest(p, id, warnings)?;
-    finish_decompose(p, id, &block, &made, warnings);
+    finish_decompose(id, &block, warnings);
     Ok(made)
 }
 
-fn finish_decompose(
-    p: &mut Project,
-    id: &str,
-    block: &Clip,
-    made: &[String],
-    warnings: &mut Vec<String>,
-) {
+fn finish_decompose(id: &str, block: &Clip, warnings: &mut Vec<String>) {
     if let Some(e) = &block.effects {
         warnings.push(format!(
             "{id}'s own effects were dropped: {}",
             e.names().join(", ")
         ));
     }
-    if let Some(picture) = block.picture.as_ref().filter(|x| !x.is_usual()) {
-        let dropped = give_picture(p, block, picture, made);
-        if !dropped.is_empty() {
-            warnings.push(format!(
-                "{id}'s place, zoom and crop were dropped from {}: they would not show as they did",
-                dropped.join(", ")
-            ));
-        }
+    if block.picture.as_ref().is_some_and(|x| !x.is_usual()) {
+        warnings.push(format!("{id}'s own picture settings were dropped"));
     }
-}
-
-fn give_picture(p: &mut Project, block: &Clip, picture: &Picture, made: &[String]) -> Vec<String> {
-    let frame = (p.width(), p.height());
-    let mut dropped = Vec::new();
-    for id in made {
-        let Some((ti, ci)) = p.find_clip(id) else {
-            continue;
-        };
-        let c = &p.tracks[ti].clips[ci];
-        if !c.video
-            || (c.generator.is_some() && !c.draws())
-            || p.tracks[ti].kind != TrackKind::Video
-        {
-            continue;
-        }
-        let fills = c.compound.is_some()
-            || c.draws()
-            || p.media(&c.media)
-                .is_some_and(|m| crate::place::fills(m, frame));
-        let whole = picture.dynamic_zoom.is_none()
-            || (c.start == block.start && c.duration == block.duration);
-        if c.title.is_none() && c.picture.is_none() && fills && whole {
-            let clip = c.clone();
-            let mut given = picture.clone();
-            given.retarget(|frame| clip.source_at(block.key_time(frame).round() as i64));
-            p.tracks[ti].clips[ci].picture = Some(given);
-        } else {
-            dropped.push(id.clone());
-        }
-    }
-    dropped
 }
 
 fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Value> {
@@ -8692,6 +8682,15 @@ pub fn query(
         } => {
             let of = grade_of(p, clip, *timeline, playhead)?;
             json!({ "settings": ops::grade::copy(p, &of, *node)? })
+        }
+        Request::GradeWindowCopy {
+            clip,
+            timeline,
+            node,
+            window,
+        } => {
+            let of = grade_of(p, clip, *timeline, playhead)?;
+            json!({ "settings": ops::grade_windows::copy(p, &of, *node, *window)? })
         }
         Request::GradeGet { clip, timeline, at } => {
             let of = grade_of(p, clip, *timeline, playhead)?;

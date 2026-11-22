@@ -264,6 +264,7 @@ pub struct Snapshot {
     pub clipboard: usize,
     pub key_clipboard: usize,
     pub node_clipboard: bool,
+    pub window_clipboard: Option<vidcut_core::model::WindowKind>,
     pub notices: Arc<VecDeque<Notice>>,
     pub thumbs: Arc<HashSet<String>>,
     pub missing: Arc<HashSet<String>>,

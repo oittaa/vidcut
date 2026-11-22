@@ -623,6 +623,18 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - Speed Warp on gave one sharp bar for the 30-pixel jump. It smeared the 150-pixel jump.
   - Measured with renders of 24-frame Smooth Cuts between pictures with a bar at known places.
 
+## Resolve's edits
+
+These facts come from measurements in Resolve Studio 21.2, by hand and through its scripting API.
+
+- **Convert In and Out to Compound Clip changes locked tracks.**
+  - It cuts the clips of a locked track at the marks, and takes the part in the range inside.
+  - It cuts a cue of a locked subtitle track at the marks. Both parts stay on that track.
+  - The tracks stay locked, and no message shows.
+  - vidcut does not change a locked track:
+    - A clip in the range on a locked track refuses the request, with a message.
+    - A cue on a locked subtitle track stays whole.
+
 ## Resolve's renders
 
 These facts come from float renders in Resolve Studio 21.2, without color management.
@@ -641,6 +653,11 @@ These facts come from float renders in Resolve Studio 21.2, without color manage
   - The window draws Start 11 as a steep start. After OK, the keyframe has Start 1 and End 1. Start 11 also resets End.
   - A grade file with 11 renders as 1.
   - vidcut does not copy this fault. Start and End go from 0 to 10 (`LAST_PROFILE`).
+- **Resolve reads a curve window at two places in a pixel.**
+  - The hard edge reads each pixel at (x, y + 0.5), with y down.
+  - The ramp of Inside and Outside fits best at (x − 0.5, y − 0.5).
+  - Thus the edge and the ramp are half a pixel apart in x, and one pixel apart in y.
+  - vidcut reads both at (x, y + 0.5) (`CURVE_SAMPLE`, `window_curve`).
 - **A circle window that Resolve makes with Toggle Display Mode on has no radius.**
   - With the viewer hidden, the grade of a new circle has no base radius.
   - The circle then renders about 30 pixels wide. The viewer draws the usual oval.

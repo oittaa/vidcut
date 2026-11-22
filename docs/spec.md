@@ -2473,11 +2473,12 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - It opens the same window.
   - It cuts the clips at In and at the frame after Out, on all tracks. The Out frame is inside.
   - Thus In 24 and Out 120 give 97 frames, from 24 up to 121.
+  - A subtitle cue across In or across the frame after Out is cut there too. Both parts stay on their subtitle track (measured in Resolve Studio 21.2).
   - The compound clip goes on the lowest video track and the lowest audio track with clips in the range, linked.
   - The lowest track with clips in the range is inner V1 or A1. A track below it does not go inside.
   - The clips of the other tracks go inside. Those tracks stay on the timeline, empty.
   - The inner tracks start at the In frame.
-  - A locked track does not stop it. Its clips in the range are cut and go inside.
+  - A locked track does not stop it, and changes: [Resolve's edits](gotchas.md#resolves-edits).
   - With only In, the range runs to the end of the timeline. With only Out, the range starts at the start of the timeline.
   - With no marks, the menu does not have this item or Create Compound Clip….
   - A range with no clips does nothing, and shows no message.
@@ -2521,7 +2522,11 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Switching, making or duplicating a timeline closes open compound clips first. Removing an open compound from the Media tab closes it too.
     - A `.vidcut` file saves `compound_path`. Thus reopening resumes inside the open compound clip at its `start_tc`.
     - Exporting while a compound clip is open writes that compound clip with its name and no project data.
-    - Subtitles and a Timeline Color grade inside a compound clip wait in [the gaps](todo/gaps.md).
+    - While a compound clip is open, a request that changes subtitles is refused. A timeline grade is refused there too.
+  - **Subtitles and the timeline grade inside** (measured in Resolve Studio 21.2):
+    - Inside an open compound clip, Add Subtitle Track is dimmed. Add Tracks offers only video and audio tracks.
+    - On the Color page, the Timeline mode of the Node Editor shows an empty graph with no input and no output.
+    - A new node does not go into that graph. A changed value goes to no grade.
 - **Starting Timecode** (pp. 1052–1054; measured in Resolve Studio 21.2):
   - New Compound Clip, Convert In and Out to Compound Clip, and Create Compound Clip accept a Start Timecode.
   - A new compound clip defaults to `00:00:00:00` (`00:00:00;00` on a drop-frame timeline), regardless of clip placement.
@@ -2546,13 +2551,25 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - OTIO import loses the own name of a copy: [Resolve's OTIO files](gotchas.md#resolves-otio-files).
   - **vidcut:** `compound.set` with `name` renames a compound clip. `clip.set` with `name` gives a copy its own name.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
-  - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
+  - The submenu has Using Clips Only and Preserving Audio Data….
+  - Preserving Audio Data… is for a nested timeline, on the Edit page and on the Fairlight page (pp. 3960–3962).
+    - It keeps the mix automation and the plugin automation of the tracks.
+    - It has three choices for the busses: New Matching Busses, Preserve Existing Paths and Leave Unassigned.
+  - For a compound clip, Preserving Audio Data… is dimmed (measured in Resolve Studio 21.2).
+    - The tests: plain sound, −6 dB on the clip inside, and −6 dB on the compound clip.
+  - vidcut: `edit.decompose` acts as Using Clips Only.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.
   - Thus a compound clip on V2 puts inner V1 on V2 and inner V2 on V3.
   - Cuts stay. A clip that was cut at In comes back as two pieces.
   - A free track is used as it is, and no track is added.
   - Where a clip is in the way, a new track goes in at the target. The clip in the way and all higher tracks move up.
   - This is the same on video tracks and on audio tracks.
+  - The settings of the compound clip itself are dropped (measured in Resolve Studio 21.2):
+    - Transform, Crop, Opacity, Composite, Dynamic Zoom and their keyframes.
+    - Its effects, its grade and its volume.
+  - Each clip keeps its time and its source frames.
+  - A compound clip with a speed change has no Decompose in Place item.
+  - vidcut: `edit.decompose` also breaks up a compound clip with a speed change. The clips inside take that speed.
 - **A transition at an edge of a compound clip** (measured in Resolve Studio 21.2.0):
   - A Cross Dissolve, a wipe, a Push, a Slide and a sound fade at an edge act as on a plain clip.
   - The dissolve uses the frames that a trim hides in the compound clip.
@@ -2997,11 +3014,11 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Layer node does the same with a Layer Mixer. Alt+L at the corrector on input 1 of a Layer Mixer added a corrector on input 2.
   - Measured: Alt+P and Alt+L at a corrector that feeds a Layer Mixer each add a new last input to that mixer. The new corrector takes the source.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
-  - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append` or `corrector`. The menus of the Node Editor have each one.
+  - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append`, `outside`, `corrector` or `key_mixer`. The menus of the Node Editor have each one.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
   - vidcut: the new corrector takes the input of the current node, as measured.
-  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L and Alt+K. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
+  - vidcut: the keys are Alt+S, Shift+S, Alt+P, Alt+L, Alt+K and Alt+O. On the Color page, Shift+S adds a node and does not change Audio Scrubbing ([§11](#11-keyboard-shortcuts)).
   - Measured in Resolve Studio 21.2: Add Serial Before on a Parallel Mixer puts the new corrector on input 0 of the mixer. The node on that input feeds the new corrector.
   - vidcut: `before` on a mixer does the same, also with Shift+S. With input 0 empty, the new corrector takes nothing. This part is not measured in Resolve.
 - **Delete and extract** (pp. 3395–3396):
@@ -3033,10 +3050,10 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
     - Label Selected Node.
   - Measured: Add Outside Node, Delete Current Node and Label Selected Node show no key. The other items show their keys.
   - Measured: the manual has other names for three items: Add Serial, Add Before Current and Append Node (p. 3395).
-  - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. Each item shows its key.
+  - vidcut: the submenu has the items of the commands that vidcut has, in the measured groups and order. The items show their keys as measured.
   - vidcut: Delete Current Node deletes the current node. Label Selected Node edits the label of the current corrector in place.
   - vidcut: the submenu comes after the printer submenus. Its place in the Color menu of Resolve is not measured.
-  - vidcut: Switch to Node Layer, Add Outside Node, Add Splitter Combiner Node and the window items are not in the submenu ([todo](todo/color-page.md)).
+  - vidcut: Switch to Node Layer, Add Splitter Combiner Node and the window items are not in the submenu ([todo](todo/color-page.md)).
 - **Connections** (p. 3396):
   - A drag from an output to an input connects them. A drag of the second half of a connection moves it.
   - A click on the right-hand half of a connection removes it.
@@ -3099,7 +3116,13 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Parallel Mixer that is off gives the same result as when it is on.
   - vidcut: a corrector that is off passes on its input. A mixer that is off mixes as measured.
   - Measured: the menu of a Layer Mixer has seven items. In order: Add Node, Lock Node, Delete Node, Add One Input, Remove One Input, Morph into Parallel Node, Composite Mode.
-  - vidcut: the menu of a mixer has these items in this order, but not Remove One Input ([todo](todo/color-page.md)).
+  - vidcut: the menu of a mixer has these items in this order.
+  - Measured in Resolve Studio 21.2: Remove One Input removes the last input with no link. The inputs after it move up one.
+  - Measured: thus with an empty last input, that input goes. Else an empty input in the middle goes.
+  - Measured: Remove One Input does nothing when each input has a link. A mixer with a linked input and an empty input keeps one input.
+  - Measured: a Key Mixer and a Parallel Mixer act the same.
+  - vidcut: `grade.input.remove` does the same, on each kind of mixer. Remove One Input in the menu of a mixer sends it.
+  - Not measured: Remove One Input on a Layer Mixer, and on a mixer with one empty input. vidcut keeps that one input.
   - Measured in Resolve Studio 21.2: the Add Node submenu of a mixer has Add Serial (Alt+S) and Add Serial Before (Shift+S).
   - vidcut: the Add Node submenu of a mixer has these two items, with their keys.
 - **Lock Node** (pp. 3374, 3454):
@@ -3152,10 +3175,10 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Key Output change goes to a keyframe by the same rule as a change of the values, with the same pairs.
   - Measured: from a usual Dynamic keyframe to the next, Gain blends linearly.
   - Measured: Reset in the Primaries palette keeps the Key Output. Reset Node Grade and Reset Grades and Keep Nodes reset it.
-  - vidcut: Primaries and Key at the top of the palette select the palette. The Key palette has the preview, Invert, Gain and Offset of Key Output.
+  - vidcut: Primaries and Key at the top of the palette select the palette. The Key palette has the Key Input, and the preview, Invert, Gain and Offset of Key Output.
   - vidcut: the Key palette keeps the height of the Primaries palette.
   - vidcut: a typed value outside the range goes to the nearest end.
-  - vidcut: the resets work as measured. Reset in the Key palette resets only the Key Output.
+  - vidcut: the resets work as measured. Reset in the Key palette resets the Key Input and the Key Output, and keeps the Key Input Invert.
   - vidcut: `grade.clear` with `node` and `palette` resets one palette of the node: `primaries`, `window` or `key`.
   - vidcut: `grade.set` with `key_gain`, `key_offset` and `key_invert`. It refuses a value outside the range.
   - vidcut: the key out acts in serial nodes and in the mixers as measured.
@@ -3163,9 +3186,61 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - vidcut: Gain and Offset blend as the values do. Invert changes on the frame of the next keyframe.
   - vidcut: a corrector has one keyframe track, so the Key Output has no track of its own ([todo](todo/gaps.md)).
   - vidcut: the Key palette shows the Key Output of the keyframe that a change goes to.
-  - vidcut: keys, Key Input, the Qualifier controls and the Key Mixer come later ([todo](todo/color-page.md)).
+  - vidcut: the Qualifier controls come later ([todo](todo/color-page.md)).
+- **Key Input, Key Mixer and Outside node** (pp. 3388–3389, 3417–3420, 3431–3437):
+  - Each corrector has a key input and a key output. They are blue, below the RGB input and the RGB output (p. 3388).
+  - A link from a key output to a key input gives the key of one node to another node.
+  - The Key Input of a corrector has Invert, Matte, Gain, Offset, Blur Radius and Blur H/V Ratio (p. 3436). Matte is on by default.
+  - A Key Mixer combines the keys on its inputs. It has no RGB input and no RGB output. A new Key Mixer has two inputs (p. 3435).
+  - Add One Input in the menu of a Key Mixer adds an input. A drag of a key output onto a Key Mixer also adds one (p. 3435).
+  - Each input of a Key Mixer has Invert, Matte, Gain and Offset. Matte is off by default (p. 3437).
+  - The output of a Key Mixer has Invert, Gain and Offset (p. 3437).
+  - An Outside node is a serial corrector after the current node. Its key input takes the key output of that node, with Invert on (p. 3417).
+  - Measured in Resolve Studio 21.2 with float renders. The functions are:
+    - smax(a, b) = max(a, b) + 0.5 max(0, 0.5 − |a − b|)².
+    - L(x) = (8x − 1) / 7, U(a, b) = L(smax(a, b)) and Q(x) = U(0, x).
+  - Measured: a key on a link is clamped to 0..1 first.
+  - Measured: Key Mixer input i with key kᵢ gives xᵢ = gᵢ kᵢ + oᵢ, with the Gain and Offset of the input. Invert gives 1 − xᵢ.
+  - Measured: the Mask inputs go first, in input order: acc = U(acc, xᵢ), from acc = 0. Then each Matte input gives acc = 1 − U(1 − acc, 1 − xᵢ).
+  - Measured: the output of a Key Mixer is og acc + oo. Output Invert gives 1 − (og acc + oo). There is no clamp between the steps.
+  - Measured: the key input of a corrector gives x = ig k + io. With no window in the node, its key is clamp(Q(x)). Matte and Mask give the same key.
+  - Measured: with a window w in the node, a = Q(w). Matte gives clamp(1 − U(1 − a, 1 − x)), and Mask gives clamp(U(a, x)).
+  - Measured: the Key Output then acts on that key E: clamp(kg E + ko).
+  - Measured: a node with windows and no link on its key input has the key of its windows, with no Q.
+  - Measured: Blur Radius goes from −1 to 1. It is a near-Gaussian blur. Its sigma is in proportion to the value and to the frame height.
+  - Measured: Blur H/V h multiplies the sigma across by min(1, 1 + h), and the sigma down by min(1, 1 − h).
+  - Measured: a Blur Radius of −r gives clamp(2k − b, 0, 1), where b is the blur of radius r. The error is below 1.6e-4 at r = 0.5. Thus a hard edge does not change.
+  - Measured: a key link from a corrector that is off gives the linked corrector no correction. The Invert and the Offset of its Key Input do not change that.
+  - Measured: a Key Mixer that is off mixes the keys as when it is on.
+  - Measured: a Key Mixer skips an input with no link. A Key Mixer with no linked input gives a key of 1.
+  - Measured: Extract of a node removes its key links.
+  - Measured: in the Key Input, the Key Output and each Key Mixer input, Gain goes from 0 to 2 and Offset from −1 to 1.
+  - Measured: Reset in the Key palette resets the values of the Key Input and of the Key Output. The Key Input Invert stays on.
+  - Measured: a change of the Key Input gets a keyframe on the Defocus track of the node. A change of a Key Mixer gets a keyframe on its Color Corrector track.
+  - Measured: the Add Node submenu of a corrector has Add Outside as its last item. Color > Nodes > Add Outside Node shows no shortcut, and Alt+O adds no node.
+  - Measured: the menu of a Key Mixer has Reset Node Grade, Add Node, Lock Node, Delete Node, Add One Input and Remove One Input. Its Add Node submenu has Add Serial and Add Serial Before.
+  - The errors of the key functions are below 8.2e-7. The record is in `fixtures/color/NOTES.md` of the test data.
+  - vidcut: the keys combine as measured. Blur Radius is a Gaussian blur with the measured sigma. A Blur Radius below 0 sharpens as measured.
+  - vidcut: a key link from a corrector that is off, an off Key Mixer and the inputs with no link act as measured.
+  - vidcut: a Key Mixer with no linked input gives its Key Output of a key of 1.
+  - vidcut: `grade.connect` with `key` links a key output to a key input. `grade.add` with `key_mixer` and `outside` adds the nodes.
+  - vidcut: `grade.set` with `key_input_invert`, `key_input_mask`, `key_input_gain`, `key_input_offset`, `key_input_blur` and `key_input_blur_ratio` changes the Key Input.
+  - vidcut: `grade.set` with `input` and `mix_invert`, `mix_matte`, `mix_gain` or `mix_offset` changes an input of a Key Mixer. `key_gain`, `key_offset` and `key_invert` change its output.
+  - vidcut: the Key palette of a corrector has the Key Input above the Key Output. The Key palette of a Key Mixer lists its linked inputs, then its output.
+  - vidcut: the empty Node Editor has Add Node > Key Mixer. The Add Node submenu of a corrector ends with Add Outside. Alt+O adds an Outside node, as the manual says (p. 3417).
+  - vidcut: the menu of a Key Mixer has Reset Node Grade, Lock Node, Delete Node, Add One Input and Remove One Input. The Add Node submenu comes later ([todo](todo/color-page.md)).
+  - vidcut: a key link is blue. A node cannot drop into a key link.
+  - vidcut: a corrector that only gives its key to another node counts as connected (p. 3419).
+  - vidcut: links from a key output to an RGB input, and from an RGB output to a key input, are not there (p. 3420, [todo](todo/color-page.md)).
+  - vidcut: the Key Input and the Key Mixer have no keyframes yet ([todo](todo/color-page.md)).
+  - Not measured: a key link from a corrector that is off into a Key Mixer. vidcut mixes that key as when the corrector is on.
+  - Not measured: the Key Output of a Key Mixer with no linked input.
+  - Not measured: a Key Mixer with one linked input after a delete. vidcut keeps it.
+  - Not measured: Reset in the Key palette with Matte or the Key Output Invert on. vidcut resets them.
+  - Not measured: Add Serial and Add Serial Before on a Key Mixer.
 
-Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
+Requests: `grade.add`, `grade.remove`, `grade.connect`, `grade.input.remove`, `grade.swap`, `grade.copy`, `grade.paste`, `grade.cleanup`, `gui.grade_nodes` and `gui.node_view`. `grade.set` with `on`, `place`, `mixer`, `mode`, `label`, `key_gain`, `key_offset` and `key_invert` changes a node.
+The `key_input_` and `mix_` fields of `grade.set` change the Key Input and a Key Mixer input.
 `grade.get` gives the nodes and the `output`.
 
 ### 8.22 Color page keyframes (pp. 3453–3465)
@@ -3281,14 +3356,23 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - A larger Aspect makes the window wider. A larger Tilt moves it up. A larger Rotate turns it clockwise (p. 3271).
   - Opacity sets the share of the window in the key of the node (p. 3271).
   - Softness: a circle and a gradient have Soft 1. A linear window has Soft 1 to 4. A polygon and a curve have Inside and Outside (p. 3273).
+  - A curve window has no points when it goes on. A click in the viewer adds a point (p. 3273).
+  - A click adds a corner. A click and a drag add a point with Bezier handles.
+  - A click on the first point closes the curve with a corner. A drag on the first point closes it with handles.
+  - A click on the curve adds a point. A drag of a point moves it, also before the curve is closed (p. 3274).
+  - A drag of a Bezier handle also moves the opposite handle. Option and a drag move one handle only.
+  - Option and a double-click make a point a corner. Option and a drag on a corner pull out handles.
+  - A middle-click removes a point of a polygon or a curve.
+  - Shift and a drag select the points in a box. Then a drag moves them, and the box scales them.
+  - The magenta softness points of a curve set the inside and outside softness at each point (p. 3273).
 - Measured in Resolve Studio 21.2 with float renders at 1920×1080, 3840×2160 and 1080×1920:
   - S(t) is smoothstep of t, clamped to 0..1. U(a, b) = (8m − 1) / 7, with m = max(a, b) + 0.5 max(0, 0.5 − |a − b|)². U is not clamped.
   - The place of a window is in pixels of the timeline frame, from its middle, with y up. Each pixel is at its index.
   - Pan and Tilt move the window by 81.92 pixels a step from 50. This is the same at each frame size.
   - Rotate R turns the window clockwise: u = x cos R − y sin R and v = x sin R + y cos R.
-  - Size scales a linear window and a polygon by 0.025 + 0.975 S/50 up to 50, and by 1 + 0.06 (S − 50) above.
+  - Size scales a linear window, a polygon and a curve by 0.025 + 0.975 S/50 up to 50, and by 1 + 0.06 (S − 50) above.
   - Size scales a circle by 0.002 + 0.998 S/50 up to 50, and by 1 + 0.08 (S − 50) above.
-  - Aspect A above 50 multiplies the width by 50/(100 − A). Below 50, it multiplies the height by 50/A. A polygon has no Aspect.
+  - Aspect A above 50 multiplies the width by 50/(100 − A). Below 50, it multiplies the height by 50/A. A polygon and a curve have no Aspect.
   - Aspect 0 makes a circle a band of width 2r, up and down the whole frame. Aspect 100 makes a band across it.
   - The Aspect field takes 0 to 100. A typed 150 gives 100, and a typed −20 gives 0.
   - A linear window clamps the scale of each axis to 4.
@@ -3303,9 +3387,20 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Polygon: the width w of a side is this value, but 0.25 pixel at least. Thus Inside 0 or Outside 0 gives an edge of 0.25 pixel.
   - Polygon: d is the distance from the outline, above 0 inside, clamped at −1000 pixels. key = S(0.5 + d / (2w)), with the w of that side.
   - Polygon: a pixel on the outline gets 0.5.
+  - Curve: the outline is a closed cubic Bezier path. Each point has an in handle and an out handle.
+  - Curve: with no softness, the key is 0 or 1. A pixel is in when (x, y + 0.5) is inside the path, with y down.
+  - Curve: the edge strays from the exact path by up to 0.30 pixel at Size 50, and by up to 0.44 pixel at Size 60.
+  - Curve: Inside and Outside move the path in and out, with mitred corners.
+  - Curve: at 1920×1080 and 3840×2160, Inside gives 0.001414 of the frame width a step. Outside gives three times that.
+  - Curve: between the two moved paths, key = S(dₒ / (dₒ + dᵢ)). dₒ and dᵢ are the distances to the outer and the inner path.
+  - Curve: this ramp fits best at (x − 0.5, y − 0.5) ([gotchas](gotchas.md#resolves-renders)). Near the corners it differs by up to 0.0055.
+  - Curve: Soft 1 is a blur of the key, close to a Gaussian, within 0.018. Sigma is Soft 1 × 0.005 of the frame height.
+  - Curve: Size does not change the sigma of Soft 1.
+  - Curve: Size and Rotate act about a pivot that the grade keeps.
   - Gradient: Soft 1 gives s = 100 pixels a step. key = S((s + v) / s), with v the distance above the line.
   - A new circle has Soft 1 = 0.015 of the frame diagonal / 16. A new linear window has Soft 1.25 on each side, and a new gradient Soft 2.
   - A new polygon has its corners at 0.25 of the frame width and height, and no softness.
+  - A new curve has no points and no softness.
   - Each window key first takes its Invert, 1 − w. Then Opacity multiplies it.
   - The add windows of one shape join with U, in list order, into a group A. The mask windows of one shape join in the same way into a group M.
   - With one group in the node, the key is A of that group, or 1 − M.
@@ -3317,7 +3412,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - Measured in Resolve Studio 21.2: the window list of a new node has a linear, a circle, a polygon, a curve and a gradient row. These windows are off.
   - Measured: these first rows stay. Delete on one of them gives a warning, and the list does not change.
   - Measured: an added window goes to the end of the list, after the earlier adds. It is on.
-  - vidcut: a corrector has a linear, a circle, a polygon and a gradient window first, off at first. Curve windows come later.
+  - vidcut: a corrector has the same five windows first, off at first.
   - `grade.window.add` adds a window at its usual values, at the end of the window list. `grade.window.set` changes a window.
   - `grade.window.remove` removes an added window. It refuses the first windows: `on` turns them off.
   - Delete in the Window palette on a first window shows a warning line in the status bar.
@@ -3327,8 +3422,9 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut renders the 16 measured linear windows with a moved corner within 2.2e-4, except one pixel at 6.3e-4.
   - vidcut keeps no separate center: it is always the mean of the corners. Resolve keeps it as a separate value, which a DRX file can set.
   - Not measured: whether a drag of a side of a linear window changes that center in Resolve.
-  - `grade.window.set` with `points` sets the four corners of a linear window.
+  - `grade.window.set` with `points` sets the four corners of a linear window, or the corners of a polygon.
   - Two equal corners give a side of no length. The key leaves that side out. Not measured: equal corners in Resolve.
+  - For a curve, `points` has three points for each point: the in handle, the point and the out handle.
   - Measured: the thumbnail of a node uses the window key of each pixel. vidcut uses it as k of the thumbnail.
   - Measured: a window moves with the Edit Sizing of its clip: position, zoom, rotation, flips, pitch, yaw and Dynamic Zoom.
   - Measured: its outline in the viewer moves with the position and the zoom.
@@ -3347,6 +3443,7 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
     - A double-click on the name edits it. Enter sets the name.
     - The fields show the values of the current window. They are dim when the window is off.
     - A circle and a linear window use all six Transform fields. A polygon uses all but Aspect. A gradient uses Pan, Tilt, Rotate and Opacity.
+    - A curve uses all Transform fields but Aspect. Its softness fields are Soft 1, Inside and Outside.
     - A typed value goes to the nearest end. Rotate takes −180 to 180. The other fields take 0 to 100.
     - An added window is current. After a Delete, the first window of the same shape is current.
     - Reset Selected Window gives the current window the values of a new window, with Invert off. It keeps the name and Mask, and the window stays on.
@@ -3369,9 +3466,42 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - vidcut: the same. A drag of a corner or a side keeps the other corners where they are in the viewer. A polygon keeps three corners at least.
     - Not measured: how far the rotate handle of a polygon is from its middle. vidcut uses the rule of a linear window.
     - Not measured: what a drag of the arrow of a gradient changes. In vidcut it turns the gradient and changes Soft 1.
-  - Curve windows, window keyframes, and Copy and Paste Window come later ([todo](todo/color-page.md)).
+  - Measured: Convert to Bezier in the option menu, with a circle current, gives a curve with four points.
+    - The points are at the top, the right, the bottom and the left of the circle.
+    - The handles are 0.5519 of the radius. Pan and Tilt stay. The softness is 0. The circle row turns off.
+  - Measured: Convert to Bezier of an added polygon removes its row. A curve with its corners goes to the end of the list.
+    - The curve is on and current. Soft 1, Inside and Outside are 0. The viewer shows the same shape.
+  - vidcut: Convert to Bezier works on a circle, a linear window and a polygon. `grade.window.convert` does it.
+    - The curve has the same shape and goes to the end of the list, on and current. Its softness is 0.
+    - A first row turns off, and an added row goes away.
+    - The curve keeps Size, Rotate, Opacity, Invert and Mask.
+    - A circle gives four points about its middle. A polygon keeps its corners.
+    - A linear window gives its corners about their mean. Pan and Tilt move to that mean.
+    - Not measured: Convert to Bezier of a linear window or a first polygon, and of a circle at another Aspect, Size or Rotate.
+    - Not measured: whether the curve keeps Size, Rotate, Opacity, Invert and Mask.
+  - vidcut: the points of a curve are from its Pan and Tilt point, as the corners of a polygon. Size and Rotate act about that point.
+    - Not measured: how Resolve sets the pivot of a curve. For a drawn curve, it is not the mean of the points.
+  - vidcut: a pixel reads the curve at (x, y + 0.5), also for the Inside and Outside ramp ([gotchas](gotchas.md#resolves-renders)).
+    - The edge of vidcut is within 0.1 pixel of the exact path.
+    - Not measured: Inside and Outside on a frame of another shape. vidcut uses the frame width.
+  - vidcut renders the 8 measured soft curves within 0.023. The largest differences come from the place where a pixel reads the ramp.
+    - In the 3 measured hard curves, up to 637 pixels differ. They are within 0.44 pixel of the path, where the edge of Resolve strays.
+  - vidcut: drawing works as the manual says. A click in the viewer adds a point while the current curve is on and has no points.
+    - Until the curve is closed, the outline is open, and the key fills the points that are there.
+    - A middle-click removes any point of a curve.
+    - The viewer shows the outline, thin lines at the inner and the outer path, the points, the Bezier handles and a middle dot.
+    - Not measured: the look of a curve in the viewer of Resolve, and its key before the curve is closed.
+  - Measured in the Window palette of Resolve Studio 21.2: Copy Window in the option menu copies the current window.
+    - Paste Window with a window of the same shape current gives it the copied values. It adds no row.
+    - Paste Window with a window of another shape current adds a copy at the end, on and current. The other window does not change.
+    - Paste Append Window adds a copy at the end, on and current, also with a window of the same shape current.
+  - vidcut: the same, with `grade.window.copy` and `grade.window.paste`. `append` gives Paste Append Window.
+    - The copy has the shape, the softness, the Transform values, Invert and Mask.
+    - A window that takes a copy keeps its name, and stays on or off. A copy at the end has no name.
+    - Not measured: the name, Invert, Mask and the on state after a paste.
+  - Window keyframes, the softness points of a curve and the Shift box come later ([todo](todo/color-page.md)).
 
-Requests: `grade.window.add`, `grade.window.set` and `grade.window.remove`.
+Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.window.convert`, `grade.window.copy` and `grade.window.paste`.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -4178,7 +4308,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Thus a cut goes to Resolve and back with its media linked, and with its audio together with its video.
   - **A file with tracks and no clips.** Resolve Studio 21.1.2 imports it as an empty timeline, with V1, A1 and the start timecode of the file (measured).
     - `project create --from` and `timeline.import` with `new` or `replace` make an empty timeline. It takes the start timecode of the file.
-    - `timeline.import` with `append`, `compound` or `media` refuses such a file. Resolve was not measured for these modes.
+    - `timeline.import` with `append`, `compound` or `media` refuses such a file. Resolve has no such modes for an OTIO file.
+      - An import of an AAF, XML, OTIO or EDL file makes a new timeline (p. 505).
+      - An AAF file can go into the open timeline, with Import AAF to Current Timeline (pp. 513, 521).
+      - An EDL can go to a new track of a timeline, with EDL to New Track (p. 526). An OTIO file cannot.
     - A file whose clips cannot be read also refuses, and the error names them.
   - Mapping: [deviation X9](deviations.md#x9-opentimelineio-interchange), [model](design/model.md#opentimelineio).
   - **A multicam clip in a file of Resolve** (measured in Resolve Studio 21.1.2):
@@ -5281,7 +5414,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip with any keyframes shows a mark on its timeline bar.
     - Flips, the composite mode and Dynamic Zoom have no keyframes.
     - A speed change keeps each keyframe at its frame of the clip, as volume does (D81).
-    - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
     - That picture has the size of the frame, and it is made first. These facts follow (measured in Resolve Studio 21.2.0):
@@ -5324,10 +5456,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A title inside it keeps its own place, zoom and rotation in the frame of the compound clip.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
-    - `edit.decompose` gives the picture of the compound clip to each of its clips that has no picture of its own and fills the frame.
-    - With a Dynamic Zoom, a clip takes the picture only when it spans all of the compound clip.
-    - Thus each of these clips stays where it was in the compound clip, with the same size, crop and zoom.
-    - The other clips do not take the picture. A warning names them.
   - An export fits a placed picture at the size it shows, up to the size of the source. Thus a punch-in keeps the detail of the source.
   - The viewer draws it from the decoded picture with the same sums.
   - Titles keep their own place.
@@ -5994,6 +6122,10 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 
 - A grid of values gives the same picture as the Output LUT of the project.
 - It applies to clips. A gap stays black.
+- It does not apply to a Solid Color generator, a Text title or a Text+ title.
+- On a compound clip, it applies once, to the clip inside. It does not apply again to the compound clip.
+  - A clip inside at Zoom 0.5 gets it. The uncovered part of the compound clip stays black, not `T(0)`.
+- In a timeline with its own settings, the Lookup Tables section of the settings shows a warning. The LUT still applies there.
 - A picture with alpha gives `T(clamp(C / A)) * A`, and each layer gets its own `T` before the mix.
 - The Input LUT of a clip replaces it on that clip.
 - vidcut has no Input LUT of the project yet ([todo](todo/luts.md)).

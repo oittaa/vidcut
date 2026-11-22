@@ -1,14 +1,16 @@
 use vidcut_core::grade::{
-    Graded, Grading, HALF_KNOTS, Key, LOG_KNOTS, LogCurve, Pass as GradePass, THUMBNAIL_GRAY,
-    TONE_EPS, TONE_SIZE, Tap, tone_filter,
+    Graded, Grading, HALF_KNOTS, Key, KeyFold, LOG_KNOTS, LogCurve, Pass as GradePass,
+    THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
 };
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{BlendMode, GlowOutput};
+use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
 use vidcut_core::place::{
     Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Outline, Placing,
     Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
 };
-use vidcut_core::window_key::{FAR_OUTSIDE, Keying, Outline as WindowOutline, texel_map};
+use vidcut_core::window_key::{
+    CURVE_SAMPLE, FAR_OUTSIDE, Keying, Outline as WindowOutline, Shaped, texel_map,
+};
 
 use super::{Gpu, MIXING, begin, grain, sharpen, vignette};
 
@@ -58,6 +60,12 @@ const DETAIL_SLOTS: [u32; 2] = [4, 5];
 
 const GRADE_SLOTS: [u32; 2] = [6, 7];
 
+const KEY_SLOTS: [u32; 2] = [8, 9];
+
+const CURVE_CHANNELS: usize = 4;
+
+const NO_CHANNEL: f64 = -1.0;
+
 const WINDOW_CELLS: usize = 16;
 
 const WINDOW_INVERT: u32 = 1;
@@ -69,6 +77,7 @@ const WINDOW_STARTS: u32 = 4;
 const WINDOW_ENDS: u32 = 8;
 
 const MIX_PARALLEL: f64 = 0.0;
+const MIX_SHARPEN: f64 = 2.0;
 
 const MIX_LAYER: f64 = 1.0;
 
@@ -96,6 +105,8 @@ pub(super) struct Pipes {
     grade_coef: wgpu::RenderPipeline,
     grade_mix: wgpu::RenderPipeline,
     window_key: wgpu::RenderPipeline,
+    window_curves: wgpu::RenderPipeline,
+    key_fold: wgpu::RenderPipeline,
     shot: wgpu::RenderPipeline,
 }
 
@@ -194,6 +205,8 @@ impl Pipes {
             grade_coef: pipeline(&plain, "fs_grade_coef"),
             grade_mix: pipeline(&plain, "fs_grade_mix"),
             window_key: pipeline(&of(&reading), "fs_window_key"),
+            window_curves: pipeline(&of(&reading), "fs_window_curves"),
+            key_fold: pipeline(&plain, "fs_key_fold"),
             shot: pipeline(&plain, "fs_shot"),
             layout,
             reading,
@@ -1270,7 +1283,7 @@ fn registers_taken(gpu: &Gpu, spare: &mut Spare, (w, h): (u32, u32), count: usiz
 }
 
 fn register_slot(i: usize) -> u32 {
-    GRADE_SLOTS[1] + i as u32
+    KEY_SLOTS[1] + i as u32
 }
 
 fn registers_back(spare: &mut Spare, (w, h): (u32, u32), taken: Vec<Texture>) {
@@ -1286,16 +1299,10 @@ fn key_parts<'a>(key: &Key, at: &[&'a Texture]) -> (f64, Option<&'a wgpu::Textur
     }
 }
 
-fn key_into(
-    gpu: &Gpu,
-    to: &Texture,
-    (keying, spot): (&Keying, &Spot),
-    bound: &wgpu::TextureView,
-    encoder: &mut wgpu::CommandEncoder,
-) {
+fn window_cells(shaped: &[&Shaped], channel: &dyn Fn(usize) -> f64) -> (Vec<f64>, f64) {
     let mut points: Vec<f64> = Vec::new();
     let mut cells: Vec<f64> = Vec::new();
-    for s in keying.shaped(spot.frame) {
+    for (i, s) in shaped.iter().enumerate() {
         let flags = [
             (s.invert, WINDOW_INVERT),
             (s.mask, WINDOW_MASK),
@@ -1312,57 +1319,66 @@ fn key_into(
             s.middle[0],
             s.middle[1],
         ]);
-        let (kind, shape): (f64, &[f64]) = match &s.outline {
+        let mut placed = |list: &[[f64; 2]]| {
+            let first = (points.len() / 2) as f64;
+            points.extend(list.iter().flatten());
+            [first, list.len() as f64]
+        };
+        let (kind, shape): (f64, Vec<f64>) = match &s.outline {
             WindowOutline::Circle {
                 radius,
                 soft,
                 shrink,
-            } => (0.0, &[*radius, *soft, shrink[0], shrink[1]]),
+            } => (0.0, vec![*radius, *soft, shrink[0], shrink[1]]),
             WindowOutline::Linear {
                 corners,
                 scale,
                 soft,
             } => {
-                let first = (points.len() / 2) as f64;
-                points.extend(corners.iter().flatten());
-                c[7..14].copy_from_slice(&[
-                    scale[0], scale[1], soft[0], soft[1], soft[2], soft[3], first,
-                ]);
-                (1.0, &[])
+                let [first, _] = placed(corners);
+                let mut v = vec![scale[0], scale[1]];
+                v.extend(soft);
+                v.push(first);
+                (1.0, v)
             }
             WindowOutline::Polygon {
                 points: corners,
                 inside,
                 outside,
             } => {
-                let first = (points.len() / 2) as f64;
-                points.extend(corners.iter().flatten());
-                c[7..12].copy_from_slice(&[
-                    *inside,
-                    *outside,
-                    first,
-                    corners.len() as f64,
-                    FAR_OUTSIDE,
-                ]);
-                (2.0, &[])
+                let [first, n] = placed(corners);
+                (2.0, vec![*inside, *outside, first, n, FAR_OUTSIDE])
             }
-            WindowOutline::Gradient { soft } => (3.0, &[*soft, 0.0, 0.0, 0.0]),
+            WindowOutline::Curve { inner, outer, .. } => {
+                let [a, na] = placed(inner);
+                let [b, nb] = match outer == inner {
+                    true => [a, na],
+                    false => placed(outer),
+                };
+                (4.0, vec![a, na, b, nb, CURVE_SAMPLE, channel(i)])
+            }
+            WindowOutline::Gradient { soft } => (3.0, vec![*soft, 0.0, 0.0, 0.0]),
         };
         c[0] = kind;
-        c[7..7 + shape.len()].copy_from_slice(shape);
+        c[7..7 + shape.len()].copy_from_slice(&shape);
         cells.extend(c);
     }
     let start = points.len() as f64;
-    let count = (cells.len() / WINDOW_CELLS) as f64;
     points.extend(cells);
-    let buffer = cells_buffer(gpu, &points);
+    (points, start)
+}
+
+fn window_bytes(
+    spot: &Spot,
+    (count, start): (usize, f64),
+    (held, ends, output): (bool, bool, KeyOutput),
+) -> Vec<u8> {
     let [m0, m1, m2, m3, m4, m5, m6, m7, m8] = spot.map;
-    let o = keying.output;
-    let bytes = float_bytes(&[
+    float_bytes(&[
         m0,
         m1,
         m2,
-        count,
+        count as f64,
         m3,
         m4,
         m5,
@@ -1370,23 +1386,208 @@ fn key_into(
         m6,
         m7,
         m8,
-        0.0,
-        o.gain,
-        o.offset,
-        flag(o.invert),
-        0.0,
-    ]);
+        flag(held),
+        output.gain,
+        output.offset,
+        flag(output.invert),
+        flag(!ends),
+    ])
+}
+
+fn texel_spread(spot: &Spot, (w, h): (u32, u32), blur: f64) -> [f64; 2] {
+    let [m0, m1, m2, m3, m4, m5, m6, m7, m8] = spot.map;
+    let at = |x: f64, y: f64| {
+        let z = m6 * x + m7 * y + m8;
+        [(m0 * x + m1 * y + m2) / z, (m3 * x + m4 * y + m5) / z]
+    };
+    let (cx, cy) = (f64::from(w) / 2.0, f64::from(h) / 2.0);
+    let [q, qx, qy] = [at(cx, cy), at(cx + 1.0, cy), at(cx, cy + 1.0)];
+    let [a, c] = [qx[0] - q[0], qx[1] - q[1]];
+    let [b, d] = [qy[0] - q[0], qy[1] - q[1]];
+    let det = a * d - b * c;
+    if !det.is_finite() || det.abs() < f64::EPSILON {
+        return [0.0; 2];
+    }
+    [blur * d.hypot(b) / det.abs(), blur * c.hypot(a) / det.abs()]
+}
+
+fn curve_blur(s: &Shaped) -> f64 {
+    match &s.outline {
+        WindowOutline::Curve { blur, inner, .. } if inner.len() >= 3 => *blur,
+        _ => 0.0,
+    }
+}
+
+fn curves_blurred<'a>(
+    gpu: &Gpu,
+    (soft, spot): (&[&Shaped], &Spot),
+    scratch: &'a [Texture; 2],
+    encoder: &mut wgpu::CommandEncoder,
+) -> &'a Texture {
+    let size = scratch[0].texture.size();
+    let size = (size.width, size.height);
+    let (floats, start) = window_cells(soft, &|_| NO_CHANNEL);
+    let buffer = cells_buffer(gpu, &floats);
+    let how = (false, true, KeyOutput::default());
+    let bytes = window_bytes(spot, (soft.len(), start), how);
     let views = Views {
         cells: Some(&buffer),
-        ..Views::same(bound)
+        ..Views::same(&scratch[1].view)
     };
+    let drawn = (&gpu.blur.window_curves, &bytes[..]);
+    draw_step(gpu, drawn, views, &scratch[0].view, encoder);
+    let mut across = [0.0; CURVE_CHANNELS];
+    let mut down = [0.0; CURVE_CHANNELS];
+    for (c, s) in soft.iter().enumerate() {
+        [across[c], down[c]] = texel_spread(spot, size, curve_blur(s));
+    }
+    let ways: Vec<(Pass, bool)> = (passes(across).into_iter().map(|p| (p, false)))
+        .chain(passes(down).into_iter().map(|p| (p, true)))
+        .collect();
+    let textures = (&scratch[0], &scratch[1]);
+    blurred_between(
+        gpu,
+        (&ways, BORDER_CLAMP),
+        ([0.0; 4], [0.0; 4]),
+        textures,
+        encoder,
+    )
+}
+
+fn key_runs(shaped: &[Shaped]) -> Vec<std::ops::Range<usize>> {
+    let mut runs = Vec::new();
+    let (mut start, mut count) = (0, 0);
+    for (i, s) in shaped.iter().enumerate() {
+        if curve_blur(s) > 0.0 {
+            if count == CURVE_CHANNELS {
+                runs.push(start..i);
+                (start, count) = (i, 0);
+            }
+            count += 1;
+        }
+    }
+    runs.push(start..shaped.len());
+    runs
+}
+
+fn key_into(
+    gpu: &Gpu,
+    to: &Texture,
+    (keying, spot): (&Keying, &Spot),
+    (scratch, spare): (&[Texture; 2], &mut Spare),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let shaped = keying.shaped(spot.frame);
+    let runs = key_runs(&shaped);
+    let size = to.texture.size();
+    let size = (size.width, size.height);
+    if runs.len() > 1 {
+        spare_ready(gpu, spare, size, KEY_SLOTS);
+    }
+    let held = KEY_SLOTS.map(|slot| spare.peek(&(size.0, size.1, slot)));
+    let mut state: Option<&Texture> = None;
+    for (j, run) in runs.iter().enumerate() {
+        let part: Vec<&Shaped> = shaped[run.clone()].iter().collect();
+        let soft: Vec<&Shaped> = (part.iter().copied())
+            .filter(|s| curve_blur(s) > 0.0)
+            .collect();
+        let curves =
+            (!soft.is_empty()).then(|| curves_blurred(gpu, (&soft, spot), scratch, encoder));
+        let channel = |i: usize| match curve_blur(part[i]) > 0.0 {
+            true => (part[..i].iter().filter(|s| curve_blur(s) > 0.0)).count() as f64,
+            false => NO_CHANNEL,
+        };
+        let (floats, start) = window_cells(&part, &channel);
+        let buffer = cells_buffer(gpu, &floats);
+        let ends = j + 1 == runs.len();
+        let how = (state.is_some(), ends, keying.output);
+        let bytes = window_bytes(spot, (part.len(), start), how);
+        let dummy = curves.unwrap_or(&scratch[0]);
+        let out = match (ends, held[j % 2]) {
+            (false, Some(t)) => t,
+            _ => to,
+        };
+        let views = Views {
+            source: &dummy.view,
+            start: &state.unwrap_or(dummy).view,
+            second: &dummy.view,
+            mask: &dummy.view,
+            cells: Some(&buffer),
+        };
+        let drawn = (&gpu.blur.window_key, &bytes[..]);
+        draw_step(gpu, drawn, views, &out.view, encoder);
+        state = Some(out);
+    }
+}
+
+fn key_fold_into(
+    gpu: &Gpu,
+    to: &Texture,
+    (acc, input, fold): (&Key, &Key, &KeyFold),
+    (at, dummy): (&[&Texture], &Texture),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let part = |key: &Key| match *key {
+        Key::Flat(v) => (v, false, &dummy.view),
+        Key::Map(r) => (0.0, true, &at[r].view),
+    };
+    let ((a, a_map, start), (k, k_map, source)) = (part(acc), part(input));
+    let (finish, (first, out)) = match fold.finish {
+        Some(f) => (true, f),
+        None => (false, (false, KeyOutput::default())),
+    };
+    let bytes = float_bytes(&[
+        fold.gain,
+        fold.offset,
+        flag(fold.invert),
+        flag(fold.matte),
+        a,
+        flag(a_map),
+        k,
+        flag(k_map),
+        flag(finish),
+        flag(first),
+        out.gain,
+        out.offset,
+        flag(out.invert),
+        0.0,
+        0.0,
+        0.0,
+    ]);
+    let views = Views::with(source, start);
     draw_step(
         gpu,
-        (&gpu.blur.window_key, &bytes[..]),
+        (&gpu.blur.key_fold, &bytes[..]),
         views,
         &to.view,
         encoder,
     );
+}
+
+fn key_blur_into(
+    gpu: &Gpu,
+    on: &Texture,
+    (blur, spot): ((f64, f64), &Spot),
+    scratch: &Texture,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let size = on.texture.size();
+    let size = (size.width, size.height);
+    let [sx, sy] = key_blur_spread(blur, spot.frame[1]);
+    let across = texel_spread(spot, size, sx)[0];
+    let down = texel_spread(spot, size, sy)[1];
+    let ways: Vec<(Pass, bool)> = (passes([across; 4]).into_iter().map(|p| (p, false)))
+        .chain(passes([down; 4]).into_iter().map(|p| (p, true)))
+        .collect();
+    let zero = ([0.0; 4], [0.0; 4]);
+    let out = blurred_between(gpu, (&ways, BORDER_CLAMP), zero, (on, scratch), encoder);
+    if !std::ptr::eq(out, on) {
+        encoder.copy_texture_to_texture(
+            out.texture.as_image_copy(),
+            on.texture.as_image_copy(),
+            on.texture.size(),
+        );
+    }
 }
 
 fn pass_into(
@@ -1399,8 +1600,24 @@ fn pass_into(
 ) {
     match pass {
         GradePass::Key { to, keying } => {
-            key_into(gpu, at[*to], (keying, spot), &scratch[0].view, encoder);
+            key_into(gpu, at[*to], (keying, spot), (scratch, spare), encoder);
         }
+        GradePass::KeyFold {
+            to,
+            acc,
+            input,
+            fold,
+        } => key_fold_into(gpu, at[*to], (acc, input, fold), (at, &scratch[0]), encoder),
+        GradePass::KeyBlur { on, blur } => {
+            key_blur_into(gpu, at[*on], (*blur, spot), &scratch[0], encoder);
+        }
+        GradePass::KeySharpen { on, from } => mix_into(
+            gpu,
+            at[*on],
+            (at[*from], at[*on]),
+            (&scratch[0], [MIX_SHARPEN, 0.0, 1.0], None),
+            encoder,
+        ),
         GradePass::Copy { from, to } => encoder.copy_texture_to_texture(
             at[*from].texture.as_image_copy(),
             at[*to].texture.as_image_copy(),
