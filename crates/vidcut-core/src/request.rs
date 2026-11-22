@@ -5888,6 +5888,7 @@ pub struct SourceParams {
     /// leaves that track out. A track that is not named goes on the edit's
     /// track plus its number minus 1. The sound of a picture track goes with
     /// it, on the audio track of the same number, also with `audio_only`.
+    /// A picture track left out with `null` still gives its sound.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inner_tracks: BTreeMap<String, Option<String>>,
     /// A part of the Multi Source viewer: the frames left empty before the

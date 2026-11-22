@@ -840,6 +840,7 @@ Import:
       - `Source::inner_tracks` gives the track of a track inside. The other tracks inside go on the edit's track plus their number minus 1.
       - Two tracks inside on one track are refused. The empty audio tracks that the edit made go away.
       - A track inside with no clip in the marked part gets no track (`shows`). Thus it makes no empty track and needs no unlocked track.
+      - A picture track that `inner_tracks` leaves out still gives its sound (`sounds`), on the audio track of its number.
       - With sound alone, `sounds` keeps the id of each track inside. Thus `inner_tracks` names the tracks inside as the compound clip holds them.
     - `set_marks` writes the marks to the open sheet when the compound clip is open, else to `Compound::marks`.
   - `edit.copy` and `edit.cut` include transitive compound definitions (`copied_compounds`). `edit.paste` restores missing definitions as removed (`restore_copied`).

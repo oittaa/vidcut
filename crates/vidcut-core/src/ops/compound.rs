@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{Value, json};
@@ -767,21 +768,28 @@ fn spread(
             TrackKind::Video => picture,
             _ => sound,
         };
-        let n = match (inner_tracks.get(id), base) {
-            (Some(None), _) | (None, None) => continue,
-            (Some(Some(to)), _) => slot(to),
-            (None, Some(base)) => slot(base) + number(inner) - 1,
+        let heard = match (inner.kind, sound) {
+            (TrackKind::Video, Some(s)) => sounds(std::slice::from_ref(inner))
+                .pop()
+                .map(|(_, t)| (t, s)),
+            _ => None,
         };
-        if !taken.insert((inner.kind == TrackKind::Video, n)) {
+        let (track, n) = match (inner_tracks.get(id), base, heard) {
+            (Some(None), _, Some((t, s))) => (Cow::Owned(t), slot(s) + number(inner) - 1),
+            (Some(None), _, None) | (None, None, _) => continue,
+            (Some(Some(to)), _, _) => (Cow::Borrowed(inner), slot(to)),
+            (None, Some(base), _) => (Cow::Borrowed(inner), slot(base) + number(inner) - 1),
+        };
+        if !taken.insert((track.kind == TrackKind::Video, n)) {
             return Err(Error::invalid(format!(
                 "two tracks inside {} go to {}{}",
                 k.name,
-                &inner.id[..1],
+                &track.id[..1],
                 n + 1
             )));
         }
-        let ti = target(p, inner.kind, n, span, lay)?;
-        put_back(p, (ti, lay), inner, &parts, &mut made);
+        let ti = target(p, track.kind, n, span, lay)?;
+        put_back(p, (ti, lay), &track, &parts, &mut made);
         fit_sound(p, ti, &made);
         fix_audio(p, ti);
     }

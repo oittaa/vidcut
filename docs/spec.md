@@ -2528,6 +2528,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - A clip inside overwrites what is under it. A gap inside leaves the timeline as it is.
   - A compound clip inside stays a compound clip. Only one level comes apart.
   - The destination controls show one control for each track inside (p. 1055).
+    - With the control of inner V1 off, V1 of the timeline stays as it is. The sound of the clip on inner V1 still goes on A1.
   - **vidcut:**
     - `preferences.set` with `editing.decompose_on_edit` turns it on. The Edit menu has Edit Options > Decompose Compound Clips On Edit.
     - The edits of [§7.2](#72-edit-functions) and a drag from the Media tab do this.
@@ -2535,6 +2536,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - The tracks inside go on the track that the edit picks, and on the tracks above it.
     - `inner_tracks` of an edit puts a track inside on a track of the timeline. `null` leaves that track out.
     - The sound of a picture track inside goes with it, on the audio track of the same number.
+    - A picture track inside that `null` leaves out still gives its sound.
     - Two tracks inside on one track of the timeline are refused.
 - **Open in Timeline** (pp. 1054–1055, 1126; measured in Resolve Studio 21.2):
   - Right-click any compound clip and choose Open in Timeline to edit its tracks in the timeline (p. 1054).
