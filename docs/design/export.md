@@ -569,12 +569,14 @@ Cancel:
   - The drawing is larger than `LARGEST` pixels on a side.
 - `VideoFrames::title_frame` keeps the last drawings of titles in an `Lru` (`TITLES_KEPT`). Thus a title that does not change is drawn once.
 - `burn::title_blocks` draws each `TitleBlock` of a title with the code of the burn-in (`lay_out`). `burn::title` merges the blocks into one `Sprite`.
-  - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Look`, its `bare` field).
+  - `lay_out` takes a `Typeset`: the text, its layers and its `Rules`. `Rules::Title` gives the size, the line gap, the tracking and the seat of a title. `Rules::Plain` gives the line gap of a subtitle.
+  - Why: each kind of text has its own measured rules, and one engine shapes and draws them all.
+  - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Typeset`, its `bare` field).
     - The rows of the upper line (`Laid`, its `above` field) stand above the point of the lower line.
-    - The `drop` field of `Look` brings the top of the box down to where the upper line starts.
+    - The `drop` field of `Typeset` brings the top of the box down to where the upper line starts.
   - `lay_out` strokes the outlines of the glyphs with zeno. When a glyph has no outline, it grows the drawn letters instead (`dilate`).
   - A stroke goes over the letters. An `outside` stroke goes behind them, at the same width.
-  - A title or a subtitle with a shadow or a box keeps its layers in floats (`Look` and `Sprite`, their `float` field). This is what Resolve does ([spec D65](../spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A title or a subtitle with a shadow or a box keeps its layers in floats (`Typeset` and `Sprite`, their `float` field). This is what Resolve does ([spec D65](../spec.md#12-decisions-on-gaps-and-contradictions)).
     - `lay_out` rounds the letters with their stroke to 8 bits, and the box to 8 bits. The shadow stays in floats.
     - It then lays the box, the shadow and the letters over each other in floats.
     - A title or a subtitle with no shadow and no box rounds to 8 bits once, at the end.
