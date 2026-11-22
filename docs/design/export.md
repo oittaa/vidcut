@@ -886,11 +886,15 @@ The timeline grade (`Timeline::grade`, `grade.set` with `timeline`, the Timeline
 
 The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes panel of the Color page):
 
-- `GradeNode::keys` holds the keyframes of a corrector, in the order of their frames. A mixer has none.
-  - Each `GradeKey` holds every value of the corrector, its `KeyOutput`, its windows, its `GradeKeyKind`, and its `start` and `end`.
+- `GradeNode::keys` holds the keyframes of a corrector or a Key Mixer (`GradeNode::takes_keyframes`), in the order of their frames.
+  - The other mixers have none.
+  - Each `GradeKey` holds every value of the node, its `GradeKeyKind`, and its `start` and `end`.
+  - The values of a corrector are its `Corrector` values, its `KeyInput`, its `KeyOutput` and its windows.
+  - The values of a Key Mixer are a `KeyMix` for each input and its `KeyOutput`.
   - The window list of each keyframe has the shapes of the window list of the node. `ops::grade::checked` refuses other lists.
+  - The mix list of each keyframe has one `KeyMix` for each input of the node. `ops::grade::checked` refuses other lists.
   - A keyframe of a clip grade is on a source frame, as a `Keyframe` of an effect is. A keyframe of the timeline grade is on a timeline frame.
-  - `ops::grade::checked` refuses keyframes on a mixer, frames out of order, two keyframes on one frame, and a `start` or `end` past `LAST_PROFILE`.
+  - `ops::grade::checked` refuses keyframes on the other mixers, frames out of order, two keyframes on one frame, and a `start` or `end` past `LAST_PROFILE`.
 - `GradeNode::corrector_at` gives the values on a frame:
   - Before the first keyframe, they are the values of the corrector itself.
   - After a Static keyframe, or after the last keyframe, the values of that keyframe hold.
@@ -902,18 +906,20 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
   - The Size blends by its scale (`circle_scale`, `linear_scale`), and `circle_size` or `linear_size` gives the Size back.
   - Why: on a circle, the radius moves in a straight line (spec §8.23).
   - On, Invert, Mask, the name, and a point list of another length keep the value of the keyframe before the frame.
+- `GradeNode::key_input_at` and `GradeNode::mix_at` give the Key Input and the mix of a Key Mixer in the same way (`KeyInput::blended`, `KeyMix::blended`).
+  - Invert, Mask and Matte keep the value of the keyframe before the frame.
 - `Dissolve::of` finds the joints of the curve once: where the straight line touches the start curve and the end curve.
   - `root` scans `STEPS` points for a change of sign, and then halves the step `HALVINGS` times.
   - Where no line touches both curves, the joint is where the slopes of the two curves are equal.
   - There, a line touches the curve that is farther from w = u. It ends where it meets the other curve.
-- `Grade::at` gives the grade of one frame, with no keyframes and the Key Output of that frame. Each path that draws a frame takes it:
+- `Grade::at` gives the grade of one frame, with no keyframes and the values of that frame. Each path that draws a frame takes it:
   - `Placing::new` gives `Working::graded` the clip grade at the source frame of the placement. `Picture::sampled` does the same.
   - The player gives the viewer the timeline grade at the playhead (`Shown`).
   - `VideoFrames::grading_from` gives an export the timeline frame of its first frame. Each drawn frame then sets the timeline grade of its own frame.
   - `frame.render` and the storyboard give `Finish` the timeline grade of their frame.
 - `ops::grade_keys` changes the keyframes for `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.remove`.
   - `at` is a timeline time. On a clip, `Clip::content_at` gives its source frame (`ops::grade::frame_of`).
-  - A new keyframe takes the values of `corrector_at` and `key_output_at` on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
+  - A new keyframe takes the values of the node on its frame, and the `start` and `end` of `Settings::dynamics_profile`.
 - `grade.set` and `grade.printer` change the values with `GradeNode::change_at`:
   - The keyframe on or before `at` changes (`GradeNode::changed_key`). Before the first keyframe, the corrector itself changes.
   - A Static keyframe, or the corrector itself, and the Dynamic keyframe right after it are a pair.
@@ -922,6 +928,10 @@ The keyframes of a grade (`GradeKey`, the `grade.keys` requests, the Keyframes p
 - `grade.window.set` changes a window in the same way (`GradeNode::change_window_at`, `GradeWindow::carried`).
   - Each point of a polygon or a curve is one value, and so is each softness move of a curve.
   - `grade.window.add`, `grade.window.remove`, `grade.window.convert` and a paste at the end change each window list (`GradeNode::window_lists_mut`).
+- The `key_input_` fields of `grade.set` change the Key Input in the same way (`GradeNode::change_key_input_at`, `KeyInput::carried`).
+- The `mix_` fields change an input of a Key Mixer in the same way (`GradeNode::change_mix_at`, `KeyMix::carried`).
+  - `grade.connect` and `grade.input.remove` change each mix list (`GradeNode::mix_lists_mut`).
+- All of these changes use one rule (`GradeNode::keyed_change`).
 - `grade.clear` with `node` or `keep_nodes` puts these values back to the usual values in the same way. The keyframes stay.
 - Each of these changes, and a change of the keyframes, refuses a locked node (`ops::grade::unlocked`). Requests for all nodes skip it.
   - It also puts back `KeyOutput::default`. With `palette`, only the values of that palette go back (`GradePalette`).

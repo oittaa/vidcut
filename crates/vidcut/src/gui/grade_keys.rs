@@ -1,7 +1,7 @@
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::{Value, json};
 use vidcut_core::grade_keys::{Dissolve, LAST_PROFILE};
-use vidcut_core::model::{Clip, Grade, GradeKeyKind, Project};
+use vidcut_core::model::{Clip, Grade, GradeKeyKind, GradeNode, Project};
 use vidcut_core::ops::grade::GradeOf;
 use vidcut_core::request::{GradeLevel, Page};
 use vidcut_core::shortcuts::Action;
@@ -147,9 +147,9 @@ fn with_node(node: Option<u32>, more: Value) -> Value {
     more
 }
 
-fn correctors(g: &Grade) -> Vec<u32> {
+fn keyed_nodes(g: &Grade) -> Vec<u32> {
     (g.nodes.iter().zip(1u32..))
-        .filter(|(d, _)| !d.tool.is_mixer())
+        .filter(|(d, _)| d.takes_keyframes())
         .map(|(_, n)| n)
         .collect()
 }
@@ -226,13 +226,13 @@ fn curve(ui: &mut Ui, start: u8, end: u8) {
 impl Workspace {
     fn grade_key_node(&self, g: &Grade) -> Result<Option<u32>, &'static str> {
         match self.effects_page.grade_keys.mode {
-            KeyMode::All if correctors(g).is_empty() => Err("The grade has no corrector"),
+            KeyMode::All if keyed_nodes(g).is_empty() => Err("The grade has no corrector"),
             KeyMode::All => Ok(None),
             KeyMode::Color => self
                 .current_grade_node(g)
-                .filter(|n| g.corrector(*n).is_some())
+                .filter(|n| g.node(*n).is_some_and(GradeNode::takes_keyframes))
                 .map(Some)
-                .ok_or("Select a corrector node"),
+                .ok_or("Select a corrector or a key mixer"),
         }
     }
 
@@ -337,9 +337,9 @@ impl Workspace {
         self.effects_page.grade_keys.mode = mode;
         let current = self
             .current_grade_node(&g)
-            .filter(|n| g.corrector(*n).is_some());
+            .filter(|n| g.node(*n).is_some_and(GradeNode::takes_keyframes));
         let tracks: Vec<Option<u32>> = std::iter::once(None)
-            .chain(correctors(&g).into_iter().map(Some))
+            .chain(keyed_nodes(&g).into_iter().map(Some))
             .collect();
         let mut act = None;
         egui::ScrollArea::vertical()

@@ -508,6 +508,8 @@ The bar and the Jobs button:
   - On a corrector with keyframes, the palette shows the keyframe that a change at the playhead goes to (`GradeNode::changed_at`).
   - The dragged grade changes that keyframe and the other keyframe of its pair, as `grade.set` does (`GradeNode::change_at`).
   - The Key palette does the same with the Key Output (`GradeNode::key_output_changed_at`, `GradeNode::change_key_output_at`).
+  - The Key palette does the same with the Key Input (`GradeNode::key_input_changed_at`, `GradeNode::change_key_input_at`).
+  - The Key Mixer palette does the same with the mix and the Key Output (`GradeNode::mix_changed_at`, `GradeNode::change_mix_at`).
   - The Window palette and the window overlay do the same with the windows (`GradeNode::windows_changed_at`, `GradeNode::change_window_at`).
   - The dragged grade (`Graded`) stays until the playhead comes to a frame that picks a different keyframe (`GradeNode::changed_key`).
 - After that, the palette shows the sent grade until the project has it. If the request fails, the palette shows the project again after a short time.
@@ -519,9 +521,9 @@ The bar and the Jobs button:
 - A Plus or Minus button of the bars sends `grade.printer` with the current node (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) does the same.
   - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.
 - The Keyframes panel is at the right of the palette (`Workspace::grade_keys_panel`). Its height follows the palette, and it scrolls by itself. `GradeKeys` holds its mode, the selected keyframe and a drag.
-  - It has a ruler, a Master track and a track for each corrector. A click or a drag in the ruler moves the playhead.
+  - It has a ruler, a Master track and a track for each corrector and each Key Mixer. A click or a drag in the ruler moves the playhead.
   - A Dynamic keyframe is a diamond, and a Static keyframe is a dot. On the Master track, a frame is a diamond when one of its keyframes is Dynamic.
-  - The All and Color switch (`KeyMode`) sets the correctors that get a new keyframe: each one, or the current node. A bar at the left marks that track.
+  - The All and Color switch (`KeyMode`) sets the nodes that get a new keyframe: each one with a track, or the current node. A bar at the left marks that track.
   - A drag of a keyframe sends `grade.keys.move` with `by`. The drag picks the keyframe at the press, and `by` is the move of the pointer from the press. The menus of a track and of a keyframe send `grade.keys.add`, `grade.keys.set` and `grade.keys.remove`.
   - Change Dynamic Attributes opens a window with the Start and End sliders and the curve of `Dissolve`.
   - Another clip or another grade mode clears the selection (`GradeKeys::forget`).
