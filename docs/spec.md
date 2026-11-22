@@ -3271,6 +3271,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Not measured: a key on the Output, on a Parallel Mixer or on a Layer Mixer. vidcut takes it as a gray picture there too.
     - A Parallel Mixer takes the source as the base of a gray picture.
   - Not measured: a link from the RGB output of a corrector that is off into a key input. vidcut gives the luma of the picture that it passes on.
+  - Not measured: a link from the key output of a corrector that is off into an RGB input. vidcut gives its key as a gray picture, as when it is on.
   - Not measured: a delete or an extract of a node with such links. vidcut removes the links from its key output and its links into key inputs.
   - Not measured: Add Serial, Add Parallel, Add Layer and Add Outside at a node whose RGB output goes into a key input. vidcut moves that link as it moves a link into an RGB input.
   - Not measured: the look of a link from a key output to an RGB input. vidcut colors each link by the output that it leaves.
