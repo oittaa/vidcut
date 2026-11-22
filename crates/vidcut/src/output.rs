@@ -1583,7 +1583,7 @@ fn found_paths(result: &Value) {
     for p in patterns {
         println!(
             "    {:<5}{:<10} source {}..{}  seen on {} frames, score {}, {} samples, {} gaps",
-            p["pattern"],
+            p["pattern"].as_u64().unwrap_or(0),
             text(p, "name"),
             p["first"],
             p["last"],
