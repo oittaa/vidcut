@@ -785,6 +785,7 @@ fn export_with(
                         titles::reference(t, p.height(), &drawn(t), source.round() as i64)
                     }
                     (None, Some(g)) => generators::reference(g, source.round() as i64),
+                    (None, None) if c.adjustment => generators::adjustment_reference(),
                     (None, None) => Value::Null,
                 },
             ),
@@ -1694,6 +1695,7 @@ pub struct ImportedClip {
     pub generator: Option<Value>,
     pub title: Option<Title>,
     pub title_from: Option<Value>,
+    pub adjustment: bool,
     pub picture: Option<Picture>,
     pub compound: Option<ImportedCompound>,
     pub speed: Option<Speed>,
@@ -1727,16 +1729,20 @@ impl ImportedClip {
     }
 
     pub fn is_block(&self) -> bool {
-        self.generator.is_some() || self.title.is_some() || self.compound.is_some()
+        self.generator.is_some()
+            || self.title.is_some()
+            || self.compound.is_some()
+            || self.adjustment
     }
 
     pub fn has_picture(&self) -> bool {
         self.video
             && self.title.is_none()
-            && self
-                .generator
-                .as_ref()
-                .is_none_or(|r| generators::read(r, 0).is_some())
+            && (self.adjustment
+                || self
+                    .generator
+                    .as_ref()
+                    .is_none_or(|r| generators::read(r, 0).is_some()))
     }
 
     fn has_no_media(&self) -> bool {
@@ -1786,6 +1792,7 @@ impl ImportedClip {
             generator: None,
             title: None,
             title_from: None,
+            adjustment: false,
             picture: None,
             compound: None,
             speed: None,
@@ -2468,8 +2475,11 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             }
             let (mut effects, speed) = effects::read(item);
             let reference = media_reference_of(item);
-            let block =
-                stack || plain.is_some() || schema(reference).starts_with("GeneratorReference");
+            let adjustment = generators::is_adjustment(item, reference);
+            let block = stack
+                || adjustment
+                || plain.is_some()
+                || schema(reference).starts_with("GeneratorReference");
             let mut speed = speed_of(speed, item, fps, !block || stack, &mut notes);
             if stack {
                 our_skip(&mut speed, item);
@@ -2483,6 +2493,13 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if stack {
                     c.compound = Some(compound_of(item, fps));
                     c.picture = our_picture(item);
+                } else if adjustment {
+                    c.adjustment = true;
+                    c.picture = our_picture(item);
+                    c.speed = None;
+                    if c.name == crate::model::Clip::ADJUSTMENT_CLIP {
+                        c.name.clear();
+                    }
                 } else if plain.is_some() {
                     c.generator = plain;
                 } else if let Some(mut t) =
@@ -2566,6 +2583,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         generator: None,
                         title: None,
                         title_from: None,
+                        adjustment: false,
                         picture: our_picture(item),
                         compound: None,
                         speed,
@@ -2797,6 +2815,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 generator: None,
                 title: None,
                 title_from: None,
+                adjustment: false,
                 picture: None,
                 compound: None,
                 speed,

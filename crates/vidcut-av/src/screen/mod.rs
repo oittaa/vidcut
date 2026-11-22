@@ -1051,6 +1051,8 @@ pub struct Screen {
     encoded: out::Encoded,
     spent: (std::time::Duration, std::time::Duration),
     blurred: blur::Blurred,
+    adj: Option<blur::Texture>,
+    adj_shot: Option<(String, blur::Texture)>,
     output_lut: Option<Lut>,
     drawn_output_lut: Option<Lut>,
     timeline_grade: Option<Grade>,
@@ -1218,7 +1220,71 @@ fn lettered_over(
     }
 }
 
-type Bound = (wgpu::BindGroup, Option<f64>, bool, u32);
+struct AdjLayer {
+    clip: String,
+    placing: Placing,
+    effects: Vec<Working>,
+    factor: f64,
+}
+
+enum LayerBind {
+    Ready(wgpu::BindGroup),
+    Adj(Box<AdjLayer>),
+}
+
+type Bound = (LayerBind, Option<f64>, bool, u32);
+
+fn adj_bind(
+    gpu: &Gpu,
+    blurred: &mut blur::Blurred,
+    (adj, adj_shot, src): (
+        &blur::Texture,
+        Option<&(String, blur::Texture)>,
+        &wgpu::Texture,
+    ),
+    layer: &AdjLayer,
+    (mode, adds, kernel): (u32, f64, u32),
+    encoder: &mut wgpu::CommandEncoder,
+) -> wgpu::BindGroup {
+    let shot = adj_shot
+        .filter(|(id, _)| *id == layer.clip)
+        .map(|(_, tex)| tex);
+    let how = (&layer.placing, &layer.effects[..], kernel);
+    blurred.adjust(gpu, src, adj, shot, how, encoder);
+    blur::shown_bind(
+        gpu,
+        (&adj.view, &adj.view),
+        [1.0, layer.factor, f64::from(mode), adds],
+        [7.0, 0.0, 0.0, 0.0],
+    )
+}
+
+fn draw_over(
+    encoder: &mut wgpu::CommandEncoder,
+    (canvas, canvas_texture): (&wgpu::TextureView, &wgpu::Texture),
+    below: Option<&Below>,
+    drawing: &Drawing,
+    bind: &wgpu::BindGroup,
+    whole: wgpu::Extent3d,
+) {
+    if let Some(below) = below {
+        encoder.copy_texture_to_texture(
+            canvas_texture.as_image_copy(),
+            below.texture.as_image_copy(),
+            whole,
+        );
+    }
+    let mut pass = begin(encoder, canvas, None);
+    match below {
+        Some(below) => {
+            pass.set_pipeline(&drawing.mode);
+            pass.set_bind_group(1, &below.bind, &[]);
+        }
+        None => pass.set_pipeline(&drawing.placed),
+    }
+    pass.set_bind_group(0, bind, &[]);
+    pass.draw(0..3, 0..1);
+}
 
 const OVER_ALL: f64 = 0.0;
 const IN_MIX: f64 = 2.0;
@@ -1337,6 +1403,8 @@ struct MixDraw<'a, 'm> {
     binds: &'a [Bound],
     canvases: &'a [blur::Texture],
     blurred: &'a mut blur::Blurred,
+    adj: Option<&'a blur::Texture>,
+    adj_shot: Option<&'a (String, blur::Texture)>,
     below: Option<&'a Below>,
     mattes: &'a [[Below; 2]],
     letters: &'a [Letters],
@@ -1347,13 +1415,14 @@ struct MixDraw<'a, 'm> {
     kernel: u32,
 }
 
-impl MixDraw<'_, '_> {
+impl<'a> MixDraw<'a, '_> {
     fn moved(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         mix: &Mix,
         moving: &Moving,
         depth: usize,
+        base: &'a wgpu::Texture,
     ) {
         let moves = self.moves.next().expect("made for each move");
         let views = [&moves.outgoing, &moves.incoming];
@@ -1368,7 +1437,7 @@ impl MixDraw<'_, '_> {
                 drop(begin(encoder, view, Some(wgpu::Color::TRANSPARENT)));
                 continue;
             };
-            self.mix(encoder, side, depth + 1);
+            self.mix(encoder, side, depth + 1, base);
             let bind = self.finished(encoder, side, depth + 1, IN_MIX);
             let mut pass = begin(encoder, view, Some(wgpu::Color::TRANSPARENT));
             pass.set_pipeline(&self.gpu.adding);
@@ -1387,25 +1456,56 @@ impl MixDraw<'_, '_> {
         pass.draw(0..3, 0..1);
     }
 
+    fn layer_bind(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        src: &wgpu::Texture,
+        i: usize,
+        (mode, adds): (u32, f64),
+    ) -> wgpu::BindGroup {
+        match &self.binds[i].0 {
+            LayerBind::Ready(b) => b.clone(),
+            LayerBind::Adj(a) => adj_bind(
+                self.gpu,
+                self.blurred,
+                (
+                    self.adj.expect("made for adjustment layers"),
+                    self.adj_shot,
+                    src,
+                ),
+                a,
+                (mode, adds, self.kernel),
+                encoder,
+            ),
+        }
+    }
+
     fn part_bind(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         part: &MixPart,
         depth: usize,
+        base: &'a wgpu::Texture,
     ) -> wgpu::BindGroup {
         match part {
-            MixPart::Layer(i) => self.binds[*i].0.clone(),
+            MixPart::Layer(i) => self.layer_bind(encoder, base, *i, (self.binds[*i].3, IN_MIX)),
             MixPart::Mix(inner) => {
-                self.mix(encoder, inner, depth + 1);
+                self.mix(encoder, inner, depth + 1, base);
                 self.finished(encoder, inner, depth + 1, IN_MIX)
             }
             MixPart::Title(_) => unreachable!("titles never appear inside a mask run"),
         }
     }
 
-    fn mix(&mut self, encoder: &mut wgpu::CommandEncoder, mix: &Mix, depth: usize) {
+    fn mix(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        mix: &Mix,
+        depth: usize,
+        base: &'a wgpu::Texture,
+    ) {
         if let Some(moving) = &mix.moving {
-            self.moved(encoder, mix, moving, depth);
+            self.moved(encoder, mix, moving, depth, base);
             return;
         }
         let canvases = self.canvases;
@@ -1415,8 +1515,9 @@ impl MixDraw<'_, '_> {
             for part in &mix.parts {
                 match part {
                     MixPart::Layer(i) => {
-                        let (bind, _, _, mode) = &self.binds[*i];
-                        self.lay(encoder, depth, bind, (*mode, true));
+                        let mode = self.binds[*i].3;
+                        let bind = self.layer_bind(encoder, base, *i, (mode, IN_MIX));
+                        self.lay(encoder, depth, &bind, (mode, true));
                     }
                     MixPart::Title(j) => {
                         let mut pass = begin(encoder, canvas, None);
@@ -1428,7 +1529,7 @@ impl MixDraw<'_, '_> {
                         );
                     }
                     MixPart::Mix(inner) => {
-                        self.mix(encoder, inner, depth + 1);
+                        self.mix(encoder, inner, depth + 1, base);
                         let bind = self.finished(encoder, inner, depth + 1, IN_MIX);
                         let how = (inner.placing.mode.code(), true);
                         self.lay(encoder, depth, &bind, how);
@@ -1440,13 +1541,18 @@ impl MixDraw<'_, '_> {
         let (modes, _) = resolved_mix_modes(mix, self.binds);
         let mut idx = 0;
         while idx < mix.parts.len() {
+            let src = if mix.outgoing.is_some() || idx == 0 {
+                base
+            } else {
+                &self.canvases[depth].texture
+            };
             if let Some(fg) = mask_run(&modes, idx) {
                 let pair = &self.mattes[depth];
                 for (offset, part) in mix.parts[idx..fg].iter().enumerate() {
-                    let bind = self.part_bind(encoder, part, depth);
+                    let bind = self.part_bind(encoder, part, depth, src);
                     draw_matte_step(self.gpu, encoder, pair, &bind, offset);
                 }
-                let fg_bind = self.part_bind(encoder, &mix.parts[fg], depth);
+                let fg_bind = self.part_bind(encoder, &mix.parts[fg], depth, src);
                 let target = &self.canvases[depth].view;
                 draw_matte_fg(self.gpu, encoder, target, pair, fg - idx, &fg_bind);
                 idx = fg + 1;
@@ -1455,8 +1561,8 @@ impl MixDraw<'_, '_> {
             let mode = modes[idx];
             match &mix.parts[idx] {
                 MixPart::Layer(i) => {
-                    let bind = &self.binds[*i].0;
-                    self.lay(encoder, depth, bind, (mode, false));
+                    let bind = self.layer_bind(encoder, src, *i, (mode, IN_MIX));
+                    self.lay(encoder, depth, &bind, (mode, false));
                 }
                 MixPart::Title(j) => {
                     let mut pass = begin(encoder, canvas, None);
@@ -1468,7 +1574,7 @@ impl MixDraw<'_, '_> {
                     );
                 }
                 MixPart::Mix(inner) => {
-                    self.mix(encoder, inner, depth + 1);
+                    self.mix(encoder, inner, depth + 1, src);
                     let bind = self.finished(encoder, inner, depth + 1, IN_MIX);
                     self.lay(encoder, depth, &bind, (mode, false));
                 }
@@ -1872,31 +1978,46 @@ impl Screen {
                 label: Some("vidcut picture"),
             });
         let n = layers.len();
+        let adj: Vec<bool> = (0..n)
+            .map(|i| {
+                placed
+                    .get(i)
+                    .and_then(|c| c.first())
+                    .is_some_and(|p| p.adjustment)
+            })
+            .collect();
+        let has_adj = adj.iter().any(|&a| a);
+        let frame = (f64::from(size.0), f64::from(size.1));
         let graded = (self.timeline_grade.as_ref())
             .filter(|_| n > 0)
-            .and_then(|g| Working::graded(g, frame_back((f64::from(size.0), f64::from(size.1)))));
+            .and_then(|g| Working::graded(g, frame_back(frame)));
         let (mixed, late): (Vec<TitleOver>, Vec<TitleOver>) = titles
             .iter()
             .cloned()
             .partition(|t| t.above != TitleOver::SUBTITLES);
         let nests = match layers
             .iter()
-            .any(|(p, ..)| matches!(p.sampling(), Sampling::Colors { .. }))
+            .enumerate()
+            .any(|(i, (p, ..))| !adj[i] && matches!(p.sampling(), Sampling::Colors { .. }))
         {
             true => Mixes::default(),
             false => {
                 let chains: Vec<(&[Placed], Extent)> = (0..n)
                     .map(|i| {
-                        let (_, rect, grid) = layers[i].0.placed_in(size);
                         let chain = placed.get(i).map_or(&[][..], Vec::as_slice);
-                        (chain, Extent { rect, grid })
+                        let extent = if adj[i] {
+                            Extent::whole(frame)
+                        } else {
+                            let (_, rect, grid) = layers[i].0.placed_in(size);
+                            Extent { rect, grid }
+                        };
+                        (chain, extent)
                     })
                     .collect();
                 let over: Vec<(usize, &[Placed])> = mixed
                     .iter()
                     .map(|t| (t.above, t.placed.as_slice()))
                     .collect();
-                let frame = (f64::from(size.0), f64::from(size.1));
                 Mixes::of(&chains, &over, frame)
             }
         };
@@ -1910,6 +2031,24 @@ impl Screen {
             .zip(&mut self.slots)
             .enumerate()
             .map(|(i, (&(picture, level, ..), slot))| {
+                if adj[i] {
+                    blurred.drop_layer(i);
+                    let chain = placed.get(i).expect("adjustment layer has placement");
+                    let mut placing = Placing::whole(chain, frame);
+                    placing.effects.clear();
+                    let worked = chain[0].for_effects();
+                    let effects = Placing::whole(std::slice::from_ref(&*worked), frame).effects;
+                    let factor = level.unwrap_or(1.0) * placing.level.opacity;
+                    placing.level.opacity = 1.0;
+                    let mode = placing.mode.code();
+                    let layer = AdjLayer {
+                        clip: chain[0].clip.clone(),
+                        placing,
+                        effects,
+                        factor,
+                    };
+                    return (LayerBind::Adj(Box::new(layer)), level, true, mode);
+                }
                 let made_with = match picture.sampling() {
                     Sampling::Placed { placed, .. } => Some(&placed[..]),
                     _ => None,
@@ -1968,7 +2107,7 @@ impl Screen {
                         blur::shown_bind(gpu, (view, view), shown, [3.0, 0.0, 0.0, only])
                     }
                 };
-                (bind, level, placing.is_some(), mode)
+                (LayerBind::Ready(bind), level, placing.is_some(), mode)
             })
             .collect();
         self.spent.0 += clock.elapsed();
@@ -2043,6 +2182,7 @@ impl Screen {
             || self.scoping
             || colors.is_some()
             || blending
+            || has_adj
             || n > 1
             || !nests.outer.is_empty()
             || self.output_lut.is_some()
@@ -2082,8 +2222,39 @@ impl Screen {
         while self.canvases.len() < nests.deepest {
             self.canvases.push(blur::Texture::new(gpu, size));
         }
-        if nests.blurs {
+        if nests.blurs || has_adj {
             self.blurred.make_scratch(gpu);
+        }
+        if !has_adj {
+            self.adj = None;
+        } else if self
+            .adj
+            .as_ref()
+            .is_none_or(|a| (a.texture.width(), a.texture.height()) != size)
+        {
+            self.adj = Some(blur::Texture::new(gpu, size));
+        }
+        let wanted = self.shots.takes();
+        let shot_clip = wanted.as_ref().and_then(|w| match &w.of {
+            ShotsOf::Clip(id) => Some(id.as_str()),
+            ShotsOf::Timeline => None,
+        });
+        let wants_adj_shot = shot_clip.is_some_and(|id| {
+            adj.iter().enumerate().any(|(i, &is)| {
+                is && placed
+                    .get(i)
+                    .and_then(|c| c.first())
+                    .is_some_and(|p| p.clip == id)
+            })
+        });
+        if !wants_adj_shot {
+            self.adj_shot = None;
+        } else if let Some(id) = shot_clip
+            && self.adj_shot.as_ref().is_none_or(|(kept, t)| {
+                kept != id || (t.texture.width(), t.texture.height()) != size
+            })
+        {
+            self.adj_shot = Some((id.to_string(), blur::Texture::new(gpu, size)));
         }
         if self.output_lut.is_none() {
             self.looked_up = None;
@@ -2120,7 +2291,11 @@ impl Screen {
         let kernel = if exported { RESIZE | WIDENS } else { 0 };
         let mix_mattes = self.mattes.get(top_matte_base..).unwrap_or(&[]);
         let top_matte = self.mattes.first().filter(|_| has_top_matte);
-        let breaks = |k: usize| matches!(items[k], TopItem::Mix(_)) || item_modes[k] != 0;
+        let breaks = |k: usize| {
+            matches!(items[k], TopItem::Mix(_))
+                || item_modes[k] != 0
+                || matches!(items[k], TopItem::Layer(li) if adj[li])
+        };
         let mut idx = 0;
         while idx < items.len() {
             if let Some(fg) = mask_run(&item_modes, idx) {
@@ -2128,8 +2303,24 @@ impl Screen {
                     drop(begin(&mut encoder, canvas, clear.take()));
                 }
                 let pair = top_matte.expect("made for a matte mode");
+                let adj_tex = self.adj.as_ref();
+                let adj_shot = self.adj_shot.as_ref();
                 let mut item_bind = |k: usize, encoder: &mut wgpu::CommandEncoder| match items[k] {
-                    TopItem::Layer(li) => binds[li].0.clone(),
+                    TopItem::Layer(li) => match &binds[li].0 {
+                        LayerBind::Ready(b) => b.clone(),
+                        LayerBind::Adj(a) => adj_bind(
+                            gpu,
+                            &mut self.blurred,
+                            (
+                                adj_tex.expect("made for adjustment layers"),
+                                adj_shot,
+                                canvas_texture,
+                            ),
+                            a,
+                            (binds[li].3, OVER_ALL, kernel),
+                            encoder,
+                        ),
+                    },
                     TopItem::Mix(mi) => {
                         let outer = &nests.outer[mi];
                         let mut mixing = MixDraw {
@@ -2137,6 +2328,8 @@ impl Screen {
                             binds: &binds,
                             canvases: &self.canvases,
                             blurred: &mut self.blurred,
+                            adj: adj_tex,
+                            adj_shot,
                             below: self.below.as_ref(),
                             mattes: mix_mattes,
                             letters: &self.letters,
@@ -2146,7 +2339,7 @@ impl Screen {
                             colors,
                             kernel,
                         };
-                        mixing.mix(encoder, &outer.mix, 0);
+                        mixing.mix(encoder, &outer.mix, 0, canvas_texture);
                         mixing.finished(encoder, &outer.mix, 0, OVER_ALL)
                     }
                     TopItem::FreeTitle(_) | TopItem::MixedTitle(_) => {
@@ -2172,6 +2365,8 @@ impl Screen {
                     binds: &binds,
                     canvases: &self.canvases,
                     blurred: &mut self.blurred,
+                    adj: self.adj.as_ref(),
+                    adj_shot: self.adj_shot.as_ref(),
                     below: self.below.as_ref(),
                     mattes: mix_mattes,
                     letters: &self.letters,
@@ -2181,27 +2376,46 @@ impl Screen {
                     colors,
                     kernel,
                 };
-                mixing.mix(&mut encoder, &outer.mix, 0);
+                mixing.mix(&mut encoder, &outer.mix, 0, canvas_texture);
                 let bind = mixing.finished(&mut encoder, &outer.mix, 0, OVER_ALL);
                 let mode = item_modes[idx];
                 let moded = self.below.as_ref().filter(|_| mode != 0);
-                if let Some(below) = moded {
-                    encoder.copy_texture_to_texture(
-                        canvas_texture.as_image_copy(),
-                        below.texture.as_image_copy(),
-                        whole,
-                    );
+                draw_over(
+                    &mut encoder,
+                    (canvas, canvas_texture),
+                    moded,
+                    drawing,
+                    &bind,
+                    whole,
+                );
+                idx += 1;
+                continue;
+            }
+            if let TopItem::Layer(li) = items[idx]
+                && let LayerBind::Adj(a) = &binds[li].0
+            {
+                if clear.is_some() {
+                    drop(begin(&mut encoder, canvas, clear.take()));
                 }
-                let mut pass = begin(&mut encoder, canvas, None);
-                match moded {
-                    Some(below) => {
-                        pass.set_pipeline(&drawing.mode);
-                        pass.set_bind_group(1, &below.bind, &[]);
-                    }
-                    None => pass.set_pipeline(&drawing.placed),
-                }
-                pass.set_bind_group(0, &bind, &[]);
-                pass.draw(0..3, 0..1);
+                let mode = item_modes[idx];
+                let adj_tex = self.adj.as_ref().expect("made for adjustment layers");
+                let bind = adj_bind(
+                    gpu,
+                    &mut self.blurred,
+                    (adj_tex, self.adj_shot.as_ref(), canvas_texture),
+                    a,
+                    (mode, OVER_ALL, kernel),
+                    &mut encoder,
+                );
+                let moded = self.below.as_ref().filter(|_| mode != 0);
+                draw_over(
+                    &mut encoder,
+                    (canvas, canvas_texture),
+                    moded,
+                    drawing,
+                    &bind,
+                    whole,
+                );
                 idx += 1;
                 continue;
             }
@@ -2222,7 +2436,9 @@ impl Screen {
             while idx < items.len() && (idx == first || !breaks(idx)) {
                 match items[idx] {
                     TopItem::Layer(li) => {
-                        let (bind, level, placed, _) = &binds[li];
+                        let (LayerBind::Ready(bind), level, placed, _) = &binds[li] else {
+                            unreachable!("adjustment layer handled above");
+                        };
                         let mode = item_modes[idx];
                         match level {
                             _ if mode != 0 => {
@@ -2251,12 +2467,19 @@ impl Screen {
                 idx += 1;
             }
         }
-        if let Some(wanted) = self.shots.takes() {
+        if let Some(wanted) = wanted {
             let height = wanted.height;
             let (fw, fh) = self.frame.unwrap_or(size);
             let frame = [f64::from(fw), f64::from(fh)];
             let source = match &wanted.of {
-                ShotsOf::Clip(id) => clip_shot(&self.slots, &layers, placed, id, (height, frame)),
+                ShotsOf::Clip(id) => clip_shot(
+                    &self.slots,
+                    self.adj_shot.as_ref(),
+                    &layers,
+                    placed,
+                    id,
+                    (height, frame),
+                ),
                 ShotsOf::Timeline => Some(shots::Source {
                     view: canvas.clone(),
                     size,
@@ -2350,6 +2573,7 @@ impl Screen {
 
 fn clip_shot(
     slots: &[Slot],
+    adj_shot: Option<&(String, blur::Texture)>,
     layers: &[(&Arc<Picture>, Option<f64>)],
     placed: &[Vec<Placed>],
     id: &str,
@@ -2362,15 +2586,28 @@ fn clip_shot(
             .is_some_and(|p| p.clip == id)
     };
     let i = (0..layers.len()).rev().find(ours)?;
+    let p = &placed[i][0];
+    let at = p.source as f64;
+    let grade =
+        (p.picture.grade.as_ref()).map_or_else(|| Grade::usual(frame), |g| g.at(at).into_owned());
+    if p.adjustment {
+        let (_, tex) = adj_shot.filter(|(clip, _)| clip == id)?;
+        let (w, h) = (tex.texture.width(), tex.texture.height());
+        return Some(shots::Source {
+            view: tex.view.clone(),
+            size: (w, h),
+            turn: 0,
+            aspect: f64::from(w) / f64::from(h.max(1)),
+            height,
+            frame,
+            grade,
+        });
+    }
     let picture = layers[i].0;
     if !matches!(picture.sampling(), Sampling::Own | Sampling::Rounded) {
         return None;
     }
     let (texture, _) = slots.get(i)?.converted.as_ref()?;
-    let p = &placed[i][0];
-    let at = p.source as f64;
-    let grade =
-        (p.picture.grade.as_ref()).map_or_else(|| Grade::usual(frame), |g| g.at(at).into_owned());
     let [_, _, w, h] = picture.placement(shots::LARGEST, shots::LARGEST);
     Some(shots::Source {
         view: texture.create_view(&Default::default()),

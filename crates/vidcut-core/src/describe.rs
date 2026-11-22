@@ -349,6 +349,7 @@ pub fn describe_at(
         "titles.set" => d.title_set(),
         "generators.add" => format!("Generator at {}", d.time("at")),
         "generators.set" => format!("Change generator {}", d.clips("clip")),
+        "adjustment.add" => format!("Adjustment clip at {}", d.time("at")),
         "picture.set" => d.picture_set(),
         "effects.add" => format!("Add {} to {}", d.effect_name(), d.clips("clips")),
         "effects.set" => format!("Change effect {} of {}", d.effect(), d.clips("clip")),
@@ -1063,6 +1064,9 @@ impl Words<'_> {
     }
 
     fn source_name(&self) -> String {
+        if self.params["adjustment"].as_bool() == Some(true) {
+            return crate::model::Clip::ADJUSTMENT_CLIP.to_string();
+        }
         if let Some(q) = self.params["compound"].as_str() {
             return self
                 .pooled_compound()

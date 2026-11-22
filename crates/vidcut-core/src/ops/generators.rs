@@ -118,11 +118,12 @@ pub fn add(
 ) -> Result<(String, String)> {
     add_block(
         p,
-        "generator",
+        "a generator",
         track,
         (start, duration),
         None,
         Some(generator),
+        false,
     )
 }
 

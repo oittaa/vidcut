@@ -37,7 +37,7 @@ flowchart TD
 ## The plan
 
 - `render::flatten_lanes` makes the `RenderPlan` of the timeline: video pieces, audio lanes, and a `LaneTrack` for each lane.
-  - A dissolve or a placed picture is a `VideoPiece::Mix`. A title is a `VideoPiece::Titled`.
+  - A dissolve or a placed picture is a `VideoPiece::Mix`. A title is a `VideoPiece::Titled`. An adjustment clip is a `VideoPiece::Adjustment` whose `Placed` holds `Placed::adjustment`.
   - A dip to color is one clip at a time and a `Generated::SolidColor` of its color. They add up in a `place::Mix`, as the two sides of a dissolve do.
   - A Push or a Slide is one `place::Mix` that holds a `place::Mix` for each side: the outgoing side, then the incoming side. The `render::Move` holds the way, the values and the keys of the progress (`transitions::course_played`).
     - At a gap, the missing side has no layer.
@@ -443,7 +443,7 @@ What it renders:
   - A layer takes it only from its own picture (`checked_on_own`). The effects of a compound clip can work on its mix, at the draw.
   - A `Placed` around a title under another track gives it. The cache file holds that title.
   - A `Placed` around a title on top of all tracks gives none. The cache file does not hold that title.
-- Each `VideoPiece::Source` and `VideoPiece::Generated` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
+- Each `VideoPiece::Source`, `VideoPiece::Generated` and `VideoPiece::Adjustment` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
   - In User mode, an excluded piece gives no `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime`, `Reason::Transition`, `Reason::Opacity` or `Reason::Composite`.
 - Slow media (`Reason::Media`) are of two kinds:
   - With GPU decoding on, media of a long-GOP codec that the GPU decoder does not take (vidcut-av `render_cache::slow`).

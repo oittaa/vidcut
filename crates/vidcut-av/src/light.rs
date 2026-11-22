@@ -158,6 +158,7 @@ pub fn sampled(piece: &VideoPiece, fps: Rational) -> impl Iterator<Item = f64> +
         VideoPiece::Source { frames, .. } => (false, *frames),
         VideoPiece::Black { .. }
         | VideoPiece::Generated { .. }
+        | VideoPiece::Adjustment { .. }
         | VideoPiece::Flat { .. }
         | VideoPiece::Mix { .. }
         | VideoPiece::Titled { .. } => (false, 0),

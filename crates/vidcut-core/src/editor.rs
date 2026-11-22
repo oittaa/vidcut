@@ -2622,16 +2622,26 @@ pub fn compound_context(p: &Project, k: &Compound, playhead: Option<i64>) -> Tim
 
 fn resolve_sources(p: &Project, params: &SourceParams, env: &dyn Env) -> Result<Vec<Source>> {
     let sources = if params.tape {
-        if !params.media.is_empty() || params.range.is_some() || params.compound.is_some() {
+        if !params.media.is_empty()
+            || params.range.is_some()
+            || params.compound.is_some()
+            || params.adjustment
+        {
             return Err(Error::usage(
-                "a tape-span edit takes the marked range; leave out media, compound and range",
+                "a tape-span edit takes the marked range; leave out media, compound, adjustment \
+                 and range",
             ));
         }
         tape_sources(p, params)?
     } else {
-        if params.media.is_empty() && params.generator.is_none() && params.compound.is_none() {
+        if params.media.is_empty()
+            && params.generator.is_none()
+            && params.compound.is_none()
+            && !params.adjustment
+        {
             return Err(Error::usage(
-                "media, generator or compound is required (or tape: true for the Source Tape span)",
+                "media, generator, compound or adjustment is required (or tape: true for the \
+                 Source Tape span)",
             ));
         }
         vec![source(p, params)?]
@@ -2675,9 +2685,11 @@ fn decomposing(s: Source, env: &dyn Env) -> Source {
 }
 
 fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
-    if ops::generators::source_of(params.generator, &params.settings)?.is_some() {
+    if params.adjustment
+        || ops::generators::source_of(params.generator, &params.settings)?.is_some()
+    {
         return Err(Error::usage(
-            "a tape-span edit takes the marked range; leave out generator",
+            "a tape-span edit takes the marked range; leave out generator and adjustment",
         ));
     }
     let tm = &p.tape_marks;
@@ -2705,6 +2717,7 @@ fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
             compound: None,
             decompose: false,
             inner_tracks: BTreeMap::new(),
+            adjustment: false,
         })
         .collect())
 }
@@ -2829,10 +2842,7 @@ fn tape_marks_json(p: &Project, entries: &[crate::render::TapeEntry]) -> Value {
     })
 }
 
-fn generator_source(p: &Project, params: &SourceParams, generator: Generator) -> Result<Source> {
-    if !params.media.is_empty() {
-        return Err(Error::usage("give media or generator, not both"));
-    }
+fn block_range(p: &Project, params: &SourceParams, what: &str) -> Result<(i64, i64)> {
     let frames = ops::titles::default_length(p);
     let range = match &params.range {
         None => (0, frames),
@@ -2840,10 +2850,20 @@ fn generator_source(p: &Project, params: &SourceParams, generator: Generator) ->
     };
     if range.0 < 0 || range.0 >= range.1 {
         return Err(Error::invalid(format!(
-            "source range {}..{} of a generator is empty",
+            "source range {}..{} of {what} is empty",
             range.0, range.1
         )));
     }
+    Ok(range)
+}
+
+fn generator_source(p: &Project, params: &SourceParams, generator: Generator) -> Result<Source> {
+    if !params.media.is_empty() || params.adjustment {
+        return Err(Error::usage(
+            "give one of media, generator, compound or adjustment",
+        ));
+    }
+    let range = block_range(p, params, "a generator")?;
     Ok(Source {
         media: String::new(),
         range,
@@ -2855,6 +2875,32 @@ fn generator_source(p: &Project, params: &SourceParams, generator: Generator) ->
         compound: None,
         decompose: false,
         inner_tracks: BTreeMap::new(),
+        adjustment: false,
+    })
+}
+
+fn adjustment_source(p: &Project, params: &SourceParams) -> Result<Source> {
+    if !params.media.is_empty()
+        || params.compound.is_some()
+        || ops::generators::source_of(params.generator, &params.settings)?.is_some()
+    {
+        return Err(Error::usage(
+            "give one of media, generator, compound or adjustment",
+        ));
+    }
+    let range = block_range(p, params, "an adjustment clip")?;
+    Ok(Source {
+        media: String::new(),
+        range,
+        phase: 0.0,
+        video_only: params.video_only,
+        audio_only: params.audio_only,
+        track: params.track.clone(),
+        generator: None,
+        compound: None,
+        decompose: false,
+        inner_tracks: BTreeMap::new(),
+        adjustment: true,
     })
 }
 
@@ -2877,8 +2923,10 @@ fn marked_compound(p: &Project, media: &str, compound: Option<&str>) -> Result<O
 }
 
 fn compound_source(p: &Project, params: &SourceParams, query: &str) -> Result<Source> {
-    if !params.media.is_empty() || params.generator.is_some() {
-        return Err(Error::usage("give one of media, generator or compound"));
+    if !params.media.is_empty() || params.generator.is_some() || params.adjustment {
+        return Err(Error::usage(
+            "give one of media, generator, compound or adjustment",
+        ));
     }
     let id = ops::compound::pooled_id(p, query)?;
     ops::compound::placeable(p, &id)?;
@@ -2912,6 +2960,7 @@ fn compound_source(p: &Project, params: &SourceParams, query: &str) -> Result<So
         compound: Some(id),
         decompose: false,
         inner_tracks: inner_tracks(p, k, &params.inner_tracks)?,
+        adjustment: false,
     })
 }
 
@@ -2942,6 +2991,9 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
     if let Some(query) = &params.compound {
         return compound_source(p, params, query);
     }
+    if params.adjustment {
+        return adjustment_source(p, params);
+    }
     if let Some(generator) = ops::generators::source_of(params.generator, &params.settings)? {
         return generator_source(p, params, generator);
     }
@@ -2967,6 +3019,7 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
         compound: None,
         decompose: false,
         inner_tracks: BTreeMap::new(),
+        adjustment: false,
     })
 }
 
@@ -3727,7 +3780,9 @@ fn mutate(
                     .collect()
             } else {
                 let own = match p.pooled(&src.media) {
-                    Some(m) if src.generator.is_none() => Some(marked(p, m, src)?),
+                    Some(m) if src.generator.is_none() && !src.adjustment => {
+                        Some(marked(p, m, src)?)
+                    }
                     _ => None,
                 };
                 vec![(decomposing(source(p, src)?, env), own)]
@@ -4822,6 +4877,22 @@ fn mutate(
             };
             ops::generators::set(p, &id, settings, at)?;
             Value::Null
+        }
+        Request::AdjustmentAdd {
+            at,
+            duration,
+            track,
+        } => {
+            let start = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => need(playhead, "at")?,
+            };
+            let frames = match duration {
+                Some(d) => length(p, d)?,
+                None => ops::titles::default_length(p),
+            };
+            let (id, track) = ops::titles::add_adjustment(p, track.as_deref(), start, frames)?;
+            json!({ "clip": id, "track": track })
         }
         Request::PictureSet {
             clips,
@@ -6960,6 +7031,7 @@ fn place_imported(
                     })
                 }),
                 title,
+                adjustment: c.adjustment,
                 picture,
                 compound: None,
                 speed: c.speed.clone(),
@@ -7139,6 +7211,7 @@ fn place_imported(
             effects,
             generator: None,
             title: None,
+            adjustment: false,
             picture,
             compound: None,
             speed: c.speed.clone(),
@@ -10337,6 +10410,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
     }
     if let Some(g) = &c.generator {
         v["generator"] = crate::generators::shown(g);
+    }
+    if c.adjustment {
+        v["adjustment"] = json!(true);
     }
     if let Some(t) = &c.title {
         v["title"] = json!(t);

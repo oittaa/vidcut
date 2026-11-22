@@ -906,6 +906,56 @@ impl Blurred {
         effects_into(gpu, canvas, (scratch, &mut self.worked), effects, encoder);
     }
 
+    pub(super) fn adjust(
+        &mut self,
+        gpu: &Gpu,
+        src: &wgpu::Texture,
+        adj: &Texture,
+        shot: Option<&Texture>,
+        (placing, effects, kernel): (&Placing, &[Working], u32),
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        encoder.copy_texture_to_texture(
+            src.as_image_copy(),
+            adj.texture.as_image_copy(),
+            adj.texture.size(),
+        );
+        if !placing.composed.is_empty() {
+            self.composed(gpu, adj, &placing.composed, encoder);
+        }
+        let scratch = self.scratch.as_ref().expect("made for an adjustment clip");
+        let cut = canvas_bind(gpu, adj, placing, (0.0, 0.0), kernel);
+        add(gpu, &scratch[0].view, &cut, encoder);
+        encoder.copy_texture_to_texture(
+            scratch[0].texture.as_image_copy(),
+            adj.texture.as_image_copy(),
+            adj.texture.size(),
+        );
+        let (ofx, grade) = match effects.split_last() {
+            Some((last, rest)) if matches!(last.work, Work::Grade { .. }) => (rest, Some(last)),
+            _ => (effects, None),
+        };
+        if !ofx.is_empty() {
+            effects_into(gpu, adj, (scratch, &mut self.worked), ofx, encoder);
+        }
+        if let Some(dst) = shot {
+            encoder.copy_texture_to_texture(
+                adj.texture.as_image_copy(),
+                dst.texture.as_image_copy(),
+                adj.texture.size(),
+            );
+        }
+        if let Some(g) = grade {
+            effects_into(
+                gpu,
+                adj,
+                (scratch, &mut self.worked),
+                std::slice::from_ref(g),
+                encoder,
+            );
+        }
+    }
+
     pub(super) fn composed(
         &mut self,
         gpu: &Gpu,

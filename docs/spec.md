@@ -31,6 +31,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
 - compound clips (§8.18)
+- adjustment clips (§8.24)
 - compositions of nodes on the Effects page: Blur, the six effects, and Ellipse, Rectangle and Polygon masks (§8.19)
 - the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
@@ -3623,6 +3624,61 @@ Requests: `grade.keys.add`, `grade.keys.set`, `grade.keys.move` and `grade.keys.
   - The Shift box comes later ([todo](todo/color-page.md)).
 
 Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.window.convert`, `grade.window.copy` and `grade.window.paste`.
+
+### 8.24 Adjustment clips (pp. 1145, 1154, 3375–3376; measured in Resolve Studio 21.2)
+
+- **Library and length** (measured in Resolve Studio 21.2):
+  - On the Cut page, it is in the Effects section of Effects > Video.
+  - On the Edit page, it is in Effects > Toolbox > Effects.
+  - Its default length is 5 seconds (`120` frames at 24 fps, `150` frames at 30 fps).
+  - Double-clicking it on the Cut page Smart Inserts it on V1 at the edit point nearest the playhead. It moves later clips right and moves the playhead to its end.
+  - Double-clicking it on the Edit page inserts it at the playhead on V1 and splits any clip there.
+  - Dragging it to the empty space above V1 puts it on a new V2 track.
+  - **vidcut:** the Effects tab holds Effects > Adjustment Clip, and `adjustment.add` puts one at `at` (default playhead) for `duration` (default 5 s).
+  - On the timeline, an adjustment clip has a color of its own, a blue-green. A screen capture gives `#136281`. A generator and a video clip have other colors.
+  - **vidcut:** each theme has an `adjustment` color for these clips.
+    - In a built-in theme, it has the hue of `#136281`, and the lightness and saturation of the `generator` color of the theme.
+    - A theme that takes its colors from Omarchy uses the cyan of the palette.
+- **Audio and speed** (measured in Resolve Studio 21.2):
+  - An adjustment clip has no sound and no Change Clip Speed command. Its Speed Change section in the Inspector is dimmed.
+  - **vidcut:** an adjustment clip goes only on a video track. Speed changes and motion paths are refused, and OTIO import drops any speed effect while keeping its duration.
+- **What it reads and how stacks work** (measured in Resolve Studio 21.2):
+  - An adjustment clip reads the composited frame of all enabled tracks strictly below it as an opaque RGB picture.
+  - Over an empty gap with nothing below it, the adjustment clip reads opaque black `(0, 0, 0, 1)`.
+  - Disabled clips and clips on disabled tracks pass the picture below through unchanged.
+  - Two or more stacked adjustment clips chain from bottom to top. Each adjustment clip reads the result of everything below it.
+- **Order of operations** (pp. 3375–3376; measured in Resolve Studio 21.2):
+  1. The Fusion composition runs first on the captured frame below (Blur, effect nodes and masks).
+  2. Edit Transform, Crop and Dynamic Zoom place that picture. The area outside a zoomed-out or cropped adjustment clip is black, not the picture below.
+     - Crop Softness fades the cropped edges to black before the effects run.
+  3. Edit OpenFX video effects run next in timeline frame pixels (at full frame width regardless of the clip's Zoom):
+     - With Use Alpha on, Gaussian Blur blurs the edges of a zoomed-out or cropped picture into black on both sides.
+     - With Use Alpha off, those pixels outside stay exact black `(0, 0, 0)` and the edge inside does not bleed outside.
+     - Film Grain changes only the pixels inside a zoomed-out picture, and leaves pure black `(0, 0, 0)` over an empty gap unchanged.
+     - Measured with Mosaic Blur at its defaults, at 640x360 and 1280x720: the cells keep the size and the grid of the frame.
+       - At Zoom 0.5, the cells do not get smaller. A cell across the edge of the picture has one color.
+       - At Position X 100, the picture moves and the grid does not move. This is measured at 640x360 only.
+       - At Rotation 30, the picture turns and the cells stay square to the frame.
+  4. The Color page grade runs after the Edit effects. Outside a zoomed-out picture stays black `(0, 0, 0)` with no grey border.
+     - On a zoomed-out blurred edge with Use Alpha on, the grade multiplies the halo cleanly with no dark or bright rim.
+     - Over an empty gap, the grade changes the black. An Offset of 52.6 gives `(51, 51, 51)` in an 8-bit frame.
+     - A Circle window stays at the same place on the frame at Zoom 0.5 and Zoom 1. Its soft edge is smooth, not in the cells of a Mosaic Blur.
+  5. Composite Mode and Opacity mix the opaque result (black outside any Zoom or Crop) over the tracks below in float before the 8-bit clip.
+- **Fades, transitions, markers and compound clips** (measured in Resolve Studio 21.2):
+  - An adjustment clip supports markers, clip color, enable/disable, render cache, fade handles and transitions on a track.
+  - Resolve has a fault when a Cross Dissolve leads from a gap into a zoomed-out adjustment clip ([Resolve's renders](gotchas.md#resolves-renders)). vidcut blends smoothly across every frame.
+  - An adjustment clip inside a compound clip still reads what lies below that compound clip when placed on an upper track.
+- **OpenTimelineIO interchange** (measured in Resolve Studio 21.2):
+  - Resolve exports an adjustment clip as a `Clip.2` with a `MissingReference.1`.
+    - Its first effect is an `Effect.1` with `Resolve_OTIO` `"Type": 74`, `"Effect Name": "Effect"` and no parameters.
+    - Resolve reads this file back as an offline clip ([gotchas](gotchas.md#resolves-otio-files)).
+  - Resolve reads a `GeneratorReference.1` with `generator_kind` "Adjustment Clip" as an adjustment clip.
+    - It works as an adjustment clip: at Zoom 0.5, the picture below is half size on black.
+    - Its Inspector title is "Generator - Adjustment Clip", and the timeline shows it in the color of a generator.
+    - It takes no Open FX. A drag from the Effects library does nothing, and the Effects tab of the Inspector is dimmed.
+    - An adjustment clip from the Effects library takes Open FX.
+  - **vidcut:** it writes the `GeneratorReference.1` form. It reads both forms.
+  - Transform, Crop, Composite and Retime/Scaling effects export with the same metadata keys as on a regular video clip.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

@@ -1146,7 +1146,7 @@ impl Workspace {
         };
         let speed = self.page_speed();
         let first = Frames::of(p, c).first;
-        let frame = (self.page_at() - first).clamp(0, (plan.frames - 1).max(0));
+        let frame = plan.range.0 + (self.page_at() - first).clamp(0, (plan.frames - 1).max(0));
         let gpu_pictures = self.screens.as_ref().map(|s| s.gpu_pictures());
         let ctx = ui.ctx().clone();
         let cells = self
@@ -1158,7 +1158,7 @@ impl Workspace {
         let texture = got
             .as_ref()
             .zip(self.screens.as_mut())
-            .and_then(|(g, s)| s.draw(SCREEN, &g.picture, pixels));
+            .and_then(|(g, s)| s.draw(SCREEN, (&g.picture, &g.placed), pixels));
         let painter = ui.painter_at(area);
         painter.rect_filled(picture, CornerRadius::ZERO, Color32::BLACK);
         if let Some(texture) = texture {

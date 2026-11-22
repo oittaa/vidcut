@@ -532,7 +532,7 @@ fn build(
     }));
     let mut clips = Vec::new();
     let mut put = |p: &mut Project, track: String, video: bool| {
-        let mut host = block_clip(p.alloc_clip_id(), (span.0, frames), None, None);
+        let mut host = block_clip(p.alloc_clip_id(), (span.0, frames), None, None, false);
         host.video = video;
         host.compound = Some(cid.clone());
         clips.push(host.id.clone());

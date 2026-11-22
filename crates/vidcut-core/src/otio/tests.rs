@@ -1447,3 +1447,40 @@ fn nested_cross_rate_compounds_round_trip_through_otio() {
     assert_eq!(crate::validate::everywhere(p3), Vec::<String>::new());
     assert!(crate::render::flatten(p3, 0, p3.end()).is_ok());
 }
+
+#[test]
+fn adjustment_clip_round_trips_through_otio() {
+    let mut f = Fixture::new(&[(5.0, false)]);
+    f.append("m1", 0, 50);
+    let added = f.ok(req(
+        "adjustment.add",
+        json!({"at": "0f", "duration": "50f"}),
+    ));
+    let id = added.result["clip"].as_str().unwrap().to_string();
+    f.ok(req(
+        "picture.set",
+        json!({"clips": id, "zoom": 0.5, "crop_left": 0.1, "opacity": 0.5}),
+    ));
+    f.ok(req(
+        "effects.add",
+        json!({"clips": id, "kind": "gaussian_blur"}),
+    ));
+    f.ok(req(
+        "grade.set",
+        json!({"clips": id, "offset": [0.2, 0.2, 0.2]}),
+    ));
+    let doc = export(f.editor.project(), "t", None, Locations::Absolute).unwrap();
+    let picture = f.editor.project().clip(&id).unwrap().picture.clone();
+
+    let mut f2 = Fixture::new(&[]);
+    f2.env = FakeEnv::default().with(
+        "/media/1.mp4",
+        media_info(5.0, Rational::new(25, 1).unwrap(), false),
+    );
+    f2.ok(req(
+        "timeline.import",
+        json!({"otio": doc, "mode": "replace"}),
+    ));
+    let imported = &f2.editor.project().tracks[1].clips[0];
+    assert_eq!((imported.adjustment, &imported.picture), (true, &picture));
+}

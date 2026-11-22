@@ -152,12 +152,16 @@ pub fn violations(p: &Project) -> Vec<String> {
             }
             if c.is_block() {
                 let video = (c.is_generator() && !c.is_offline()) || t.kind == TrackKind::Video;
-                if !c.media.is_empty()
-                    || c.audio.is_some()
-                    || c.video != video
-                    || (c.is_generator() && c.compound.is_some())
-                    || (c.title.is_some() && c.generator.is_some())
-                {
+                let kinds = [
+                    c.generator.is_some(),
+                    c.title.is_some(),
+                    c.compound.is_some(),
+                    c.adjustment,
+                ]
+                .into_iter()
+                .filter(|&b| b)
+                .count();
+                if !c.media.is_empty() || c.audio.is_some() || c.video != video || kinds != 1 {
                     v.push(format!("{}: a block with media, audio or no place", c.id));
                 }
                 if let Some(title) = &c.title {
@@ -166,6 +170,17 @@ pub fn violations(p: &Project) -> Vec<String> {
                     }
                     if let Err(e) = crate::ops::titles::checked(title) {
                         v.push(format!("{}: {}", c.id, e.message));
+                    }
+                }
+                if c.adjustment {
+                    if t.kind != TrackKind::Video {
+                        v.push(format!(
+                            "{}: an adjustment clip on audio track {}",
+                            c.id, t.id
+                        ));
+                    }
+                    if c.speed.is_some() {
+                        v.push(format!("{}: an adjustment clip has a speed", c.id));
                     }
                 }
                 if let Some(Generator::FourColorGradient(g)) = &c.generator

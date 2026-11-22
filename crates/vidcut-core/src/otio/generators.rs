@@ -41,6 +41,33 @@ pub fn no_media() -> Value {
     })
 }
 
+const ADJUSTMENT_TYPE: i64 = 74;
+
+pub fn is_adjustment(item: &Value, reference: &Value) -> bool {
+    let kind = reference["OTIO_SCHEMA"].as_str().unwrap_or_default();
+    let marked = || {
+        (item["effects"].as_array().into_iter().flatten())
+            .any(|e| e["metadata"][EDITOR]["Type"] == ADJUSTMENT_TYPE)
+    };
+    reference["generator_kind"] == crate::model::Clip::ADJUSTMENT_CLIP
+        || (kind.starts_with("MissingReference")
+            && reference["metadata"][EDITOR]["Media Url"].is_null()
+            && marked())
+}
+
+pub fn adjustment_reference() -> Value {
+    let kind = crate::model::Clip::ADJUSTMENT_CLIP;
+    json!({
+        "OTIO_SCHEMA": "GeneratorReference.1",
+        "metadata": { EDITOR: { "Generator Type": kind } },
+        "name": kind,
+        "available_range": null,
+        "available_image_bounds": null,
+        "generator_kind": kind,
+        "parameters": { EDITOR: [] },
+    })
+}
+
 pub fn keep_ties(reference: &mut Value, editor: &Value) {
     for (key, from) in [(CHANNELS, "Channels"), (LINK, "Link Group ID")] {
         if !editor[from].is_null() {

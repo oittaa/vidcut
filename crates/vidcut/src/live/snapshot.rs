@@ -682,6 +682,7 @@ mod tests {
             effects: None,
             generator: None,
             title: None,
+            adjustment: false,
             picture: None,
             compound: None,
             speed: None,

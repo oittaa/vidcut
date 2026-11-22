@@ -98,6 +98,7 @@ fn drawn_at(timed: &[Timed], fps: f64, size: (u32, u32), timeline: u32, t: i64) 
                     crossing: false,
                     moving: None,
                     clock: Default::default(),
+                    adjustment: false,
                 }],
             )),
         }

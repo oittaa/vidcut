@@ -1707,6 +1707,7 @@ mod tests {
             crossing: false,
             moving: None,
             clock: Default::default(),
+            adjustment: false,
         };
         let frame = (1920.0, 1080.0);
         let level = Placing::whole(&[placed], frame).level;
@@ -1741,6 +1742,7 @@ mod tests {
             crossing: false,
             moving: None,
             clock: Default::default(),
+            adjustment: false,
         };
         let placing = Placing::whole(&[placed], (1920.0, 1080.0));
         let Work::Blur(b) = &placing.effects[0].work else {
@@ -1781,6 +1783,7 @@ mod tests {
             crossing: false,
             moving: None,
             clock: Default::default(),
+            adjustment: false,
         };
         assert_eq!(detail(&[placed]), 0.4);
     }

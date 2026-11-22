@@ -2697,6 +2697,23 @@ pub enum Request {
         #[serde(default)]
         at: Option<TimeSpec>,
     },
+    /// Add an adjustment clip at `at` on `track` (or the lowest video track
+    /// above what is there, or V1 when nothing is there). Returns its clip id.
+    /// It takes effects, transform, crop, composite mode, composition and
+    /// grade over the tracks below it.
+    #[serde(rename = "adjustment.add")]
+    AdjustmentAdd {
+        /// Start time. Default: the playhead.
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        /// Length on the timeline. Default: 5 s.
+        #[serde(default)]
+        duration: Option<TimeSpec>,
+        /// Video track id. Default: the lowest free video track above what is
+        /// there, or V1.
+        #[serde(default)]
+        track: Option<String>,
+    },
 
     /// Where a clip's picture goes over the frame (`c3`, or `V2@15s`): the
     /// `position` of its middle, its `zoom` across and down, its `rotation`,
@@ -2829,12 +2846,12 @@ pub enum Request {
         at: Option<TimeSpec>,
     },
     /// Change one node of the grade of clips: footage, stills, image
-    /// sequences and compound clips. The grade works after their effects
-    /// and before their composite mode and opacity. With `timeline` in place
-    /// of `clips`, change the timeline grade. It works on the picture of all
-    /// tracks after they mix, before the subtitles. Each value given
-    /// replaces its own. The values of the Primaries palette go to a
-    /// corrector, and `mode` and `mixer` go to a mixer.
+    /// sequences, compound clips and adjustment clips. The grade works after
+    /// their effects and before their composite mode and opacity. With
+    /// `timeline` in place of `clips`, change the timeline grade. It works on
+    /// the picture of all tracks after they mix, before the subtitles. Each
+    /// value given replaces its own. The values of the Primaries palette go
+    /// to a corrector, and `mode` and `mixer` go to a mixer.
     ///
     /// On a corrector or a key mixer with keyframes, the values go to the
     /// keyframe at `at`, or the last one before it. Before the first
@@ -3316,10 +3333,10 @@ pub enum Request {
         window: usize,
     },
     /// Add an effect at its usual values after the effects of clips:
-    /// footage, stills, image sequences and compound clips. A generator takes
-    /// no effects. The effects work in their order, on the picture as its
-    /// transform and its crop put it in the frame, before its composite mode
-    /// and its opacity.
+    /// footage, stills, image sequences, compound clips and adjustment clips.
+    /// A generator takes no effects. The effects work in their order, on the
+    /// picture as its transform and its crop put it in the frame, before its
+    /// composite mode and its opacity.
     /// Returns each clip with the place of its new effect, counted from 0.
     #[serde(rename = "effects.add")]
     EffectsAdd {
@@ -3372,7 +3389,7 @@ pub enum Request {
         to: usize,
     },
     /// Add a node to the composition of a clip: footage, a still, an image
-    /// sequence or a compound clip. A clip without a composition first gets
+    /// sequence, a compound clip or an adjustment clip. A clip without a composition first gets
     /// `MediaIn1` joined to `MediaOut1`. The node's name is its tool's name
     /// and the first free number, as `Blur1`.
     ///
@@ -5853,10 +5870,12 @@ impl GeneratorSettings {
     }
 }
 
-/// What to put on the timeline: a media range or a generator, and where.
+/// What to put on the timeline: a media range, a generator, a compound clip or
+/// an adjustment clip, and where.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceParams {
-    /// Media id (`m1`). Omitted when `tape`, `generator` or `compound` is set.
+    /// Media id (`m1`). Omitted when `tape`, `generator`, `compound` or
+    /// `adjustment` is set.
     #[serde(default)]
     pub media: String,
     /// A compound clip of the Media tab (by id or name) as the source. It goes
@@ -5874,9 +5893,14 @@ pub struct SourceParams {
     pub generator: Option<GeneratorKind>,
     #[serde(flatten)]
     pub settings: GeneratorSettings,
+    /// Use an adjustment clip as the source instead of a media item. The source
+    /// is 5 s long and has no sound.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub adjustment: bool,
     /// Source range (TimeSpecs relative to the source's start). Default: the
     /// source marks of the media or the compound clip, or all of it. For a
-    /// generator: its 5 s. A range on a generator can be longer than 5 s.
+    /// generator or adjustment clip: its 5 s. A range on a generator or
+    /// adjustment clip can be longer than 5 s.
     #[serde(default)]
     pub range: Option<RangeSpec>,
     /// Leave the audio out (Video Only).
@@ -5887,7 +5911,7 @@ pub struct SourceParams {
     pub audio_only: bool,
     /// The target track. Default: V1, or A1 for audio-only clips. The next new
     /// track (`V3` when there are two) is made. On an audio track only the
-    /// audio is used. A generator goes only on a video track.
+    /// audio is used. A generator or adjustment clip goes only on a video track.
     #[serde(default)]
     pub track: Option<String>,
     /// With Decompose Compound Clips On Edit on: the timeline track for a

@@ -37,6 +37,7 @@ clip_disabled = "#1E2830"
 offline = "#BE3228"
 audio = "#0E5C58"
 generator = "#785AC8"
+adjustment = "#5AA9C8"
 compound = "#C88228"
 # Over the marked range.
 marked = "#0078963C"

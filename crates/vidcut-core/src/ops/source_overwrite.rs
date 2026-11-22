@@ -251,6 +251,9 @@ pub fn source_overwrite(
     playhead: Option<i64>,
     by_group: bool,
 ) -> Result<Placed> {
+    if src.adjustment {
+        return Err(Error::invalid("an adjustment clip has no timecode"));
+    }
     let k = match &src.compound {
         Some(id) => Some(
             p.pooled_compound(id)

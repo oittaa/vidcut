@@ -355,6 +355,8 @@ fn clip(
         theme::colors().clip_disabled
     } else if let Some(t) = tint {
         t
+    } else if c.adjustment {
+        theme::colors().adjustment
     } else if c.is_generator() {
         theme::colors().generator
     } else if c.compound.is_some() {

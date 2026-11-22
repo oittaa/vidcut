@@ -92,6 +92,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("generators.list", &["track"]),
     ("generators.add", &["kind"]),
     ("generators.set", &["clip"]),
+    ("adjustment.add", &[]),
     ("picture.get", &["clip"]),
     ("picture.set", &["clips"]),
     ("picture.clear", &["clips"]),
@@ -202,6 +203,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
 ];
 
 const GROUPS: &[(&str, &str)] = &[
+    ("adjustment", "Adjustment clips on video tracks"),
     (
         "analyze",
         "Measure media or clips: silences, shots, black, loudness, ducking, the words said",
@@ -458,6 +460,10 @@ const EXAMPLES: &[(&str, &str)] = &[
         "vidcut generators add solid_color --color '#204060' --at 10s --duration 4s",
     ),
     ("generators.set", "vidcut generators set c4 --color yellow"),
+    (
+        "adjustment.add",
+        "vidcut adjustment add\n  vidcut adjustment add --at 10s --duration 4s --track V2",
+    ),
     (
         "picture.set",
         "vidcut picture set c3 --zoom 0.33 --position 0.8,0.2\n  \

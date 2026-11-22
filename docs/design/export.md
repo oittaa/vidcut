@@ -593,6 +593,8 @@ The pictures:
 - `VideoFrames` decodes a placed layer as the player does. The shader places it at the size that it shows.
 - `place::Placing` maps each pixel of its frame back to the picture (`Placing::level`).
 - The coverage of a pixel is the product of the smoothed edges, the soft crop edges and the opacity (`place::Placing::at`).
+  - The shader finds the distance of each edge in pixels (`cut`). A coverage that is not more than the rounding error of these numbers is 0.
+  - Why: with Use Alpha off, an effect divides the colors by the alpha (`effect_taken`). A rounding error then gives the full color to a pixel outside the picture.
 - A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
 - Contiguous mask layers directly below a Foreground layer pair on the main stack and inside `MixDraw` (`mask_run`, `Screen::mattes`). Unpaired matte layers fall back to Normal and keep their opacity.
 - A transition with two sides is one `place::Mix`. `crossing` makes one `Placed` that both sides share.

@@ -34,6 +34,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 | "effects"
                 | "speed"
                 | "generators"
+                | "adjustment"
                 | "motion"
         )
     ) && !matches!(
