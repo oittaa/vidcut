@@ -68,10 +68,6 @@ classDiagram
     frame, value
     in_handle, out_handle
   }
-  class MotionPath {
-    id, name
-    samples: Vec~PathSample~
-  }
   class Transition {
     id
     from, to
@@ -135,7 +131,6 @@ classDiagram
   ClipAudio *-- "*" Keyframe : gain_keys, pan_keys
   Clip *-- "0..1" Title : title
   Clip *-- "0..1" Picture : picture
-  Clip *-- "*" MotionPath : motion
   Clip ..> Media : media id
   Clip ..> Compound : compound id
   Clip *-- "0..1" Generator : generator
@@ -403,7 +398,6 @@ Ranges and resolution:
 | marker | k1, k2 … | `Project::alloc_marker_id` |
 | carried transition | t1, t2 … | `Project::alloc_transition_id` |
 | cue | q1, q2 … | `Project::alloc_cue_id` |
-| motion path | p1, p2 … in each clip | `motion::next_id` |
 | track | V1 … then A1 …, by place | `ops::tracks`; removing one renumbers the rest |
 | subtitle track | S1 …, by place | `ops::subtitles::add_track`; removing one renumbers the rest |
 
@@ -632,7 +626,7 @@ Writing:
   - `Tool::Blur` holds a `Blur`. `Tool::Effect` holds an `EffectKind`, one of the kinds of the clip effects.
   - `Tool::Ellipse`, `Tool::Rectangle` and `Tool::Polygon` hold a `Mask`.
   - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values. `Tool::flows` gives the tools that pass a picture on, and the Tracker is one of them.
-  - A `Pattern` has a name, its own box, an offset and the id of its motion path. On a frame, its box comes from its path (`Pattern::area_at`).
+  - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
   - The Center of a `Mask` can follow a pattern of a Tracker of the same composition (`Mask.connect`, a `Connect`).
     - The center is then the middle of the pattern plus its offset. With `size`, the mask also takes the box of the pattern as its picture.
     - `ops::picture::connect_checked` refuses a connection to a pattern that is not there, and a connected mask with its own center.
@@ -654,7 +648,7 @@ Writing:
 - `ops::comp` holds the edits: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`.
   - A clip without a composition gets `Composition::plain` on its first `comp.add` or `comp.paste`.
   - `ops::comp::paste` puts the copies into a clone of the composition first. Thus a copy that is refused changes nothing.
-  - A pasted Tracker keeps only the paths that the clip has (`kept_paths`). A pasted mask keeps its connection when its Tracker is there (`kept_connect`).
+  - A pasted Tracker keeps the paths of its patterns. On a clip that takes no paths, its patterns lose them (`kept_paths`). A pasted mask keeps its connection when its Tracker is there (`kept_connect`).
   - `ops::comp::Landing` tells where the copies go: after a node, at a place, over a node, or under all the nodes.
   - Over a node, one copy takes its place and its joins (`replaced`). A join that the copy cannot take goes.
   - `comp.set` takes a `NodeChange`. Its `values` are a `KindChange`: the values of an effect's kind, which `effects.set` also takes in its `EffectChange`.
@@ -670,41 +664,41 @@ Writing:
 
 ## Motion paths
 
-- A clip of footage, a still or an image sequence can carry motion paths in `Clip.motion` ([deviation X165](../deviations.md#x165-a-clip-has-motion-paths)).
-  - `ops::motion::takes` tells which clips take them: not titles, generators, compound clips or sound.
-- A `MotionPath` tells where one thing of the source picture is on the frames of the file of the clip: its box. It has an id, a name and its samples.
-  - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). `motion.find` with `replace` takes off the paths of that subject.
-    - A path that a pattern has stays (`followed`).
-    - A found thing that such a path already follows gets no second path (`same_thing`). Its samples go into that path (`merged`).
+- Each `Pattern` of a Tracker holds its motion path in `Pattern.path`, a `MotionPath`. Without a path, the pattern is at its own box.
+  - Why: the Tracker node holds its tracking data ([spec](../spec.md#the-tracker)). Thus the paths go with the node: in a copy, at a removal and in an OTIO file.
+  - Only a clip of footage, a still or an image sequence takes paths (`ops::motion::takes`): not titles, generators, compound clips or sound. `ops::motion::violation` refuses a path on another clip.
+- A `MotionPath` tells where one thing of the source picture is on the frames of the file of the clip: its box. It holds its samples.
+  - A path that `motion.find` made also has its `Subject`, for example `Face` ([analysis](analysis.md#subjects)). Without `replace`, `motion.find` refuses a Tracker with patterns of that subject.
+    - With `replace`, the patterns of that subject stay.
+    - A found thing that such a pattern already follows gets no second pattern (`same_thing`). Its samples go into that path (`merged`).
     - Between the first and the last new sample, the path keeps only the new samples. Outside them, it keeps its old samples.
-    - Thus a second find adds the new things, and a kept path follows its thing on the frames of the new find.
-  - A path that `motion.track` made has `tracked`. A later track of the same pattern writes its samples again, and the path keeps its id and its name.
+    - Thus a second find adds the new things, and a kept pattern follows its thing on the frames of the new find.
+  - A path that `motion.track` made has `tracked`. A later track of the same pattern writes its samples again.
 - A `PathSample` holds the `frame` of the file, the `center` and the `size` of the box as fractions of the source picture, and the `rotation`.
   - The `frame` goes at the frame rate of the file. It counts from the frame where `source_in` counts from. `FileClock::file` takes a source frame to it.
   - Why: a thing is at one place on a picture of the file, at any speed that plays that picture. A track and a find look at each frame of the file.
   - Thus a trim, a slip, a split, a copy and a speed change do not change a path. A new frame rate of the timeline does not change it.
-  - `shift_source` moves the samples when the limits of a subclip change. The step in frames of the file is the step of `source_in` at the rate of the file, rounded.
+  - `shift_source` moves the samples when the limits of a subclip change (`ops::motion::shift`). The step in frames of the file is the step of `source_in` at the rate of the file, rounded.
 - `MotionPath::area_at` gives the `motion::Area` on a frame.
   - A path lasts from its first sample to its last. Before and after them it has no box. Between two samples, the box goes in a line.
 - `MotionPath::base_at` gives the box of a pattern on a frame.
   - On a path with `tracked`, it gives the first or the last sample outside the samples (`MotionPath::held_at`). Other paths use `area_at`.
   - Why: a tracked window holds its first and its last place. A Magic Mask stroke ends where its thing goes off the picture.
-- A path is not keyframes. Why: a new path must not remove the keyframes that the user set, and one path can move several things.
-- `ops::motion` holds the edits: `motion.add`, `motion.set`, `motion.remove`, `motion.find` and `motion.track`. `motion.list` reads the paths.
-  - `motion.set` removes a range of samples first (`motion::clear`). Then it puts the new samples on their frames (`motion::put`).
+- A path is not keyframes. Why: a new path must not remove the keyframes that the user set.
+- `MotionPath` compares its samples by their place in memory first. Its debug text gives only the count of its samples ([export](export.md#placed-pictures)).
+- `ops::motion` holds the edits: `motion.add`, `motion.set`, `motion.remove`, `motion.find` and `motion.track`. `motion.list` reads the patterns and their paths.
+  - Each request names the clip and the Tracker node. `motion.set` and `motion.track` also name the pattern, from 1.
+  - `motion.add` adds a pattern with a path. `motion.remove` takes the path off a pattern, and the pattern goes back to its own box.
+  - `motion.set` removes a range of samples first (`motion::clear`). Then it puts the new samples on their frames (`motion::put`). A pattern without a path gets one.
   - `comp.set` with a box and a `frame` changes the path of the pattern on that frame. Off the path, it changes the first or the last sample.
     - It also puts the samples next to that frame on the path, at their places. Why: then no other frame of the path moves.
-  - A path keeps one sample at least. `motion.remove` takes a path off.
-- A clip has at most `PATHS_KEPT` paths, and a path has at most `SAMPLES_KEPT` samples.
-- `motion::problem` is the check that the requests, `ops::paste` and `validate::violations` share.
-- `timeline.get` names the paths of a clip in `motion`.
-- A pattern of a Tracker can have a path ([compositions](#compositions)). `ops::motion::violation` refuses a pattern with a path that the clip does not have.
-  - `motion.remove` refuses a path that a pattern has.
-  - A path with `tracked` goes when nothing else uses it (`ops::motion::unused`). This occurs at a removal of its pattern, its Tracker or the composition. A trim of all its samples does the same.
-- An OTIO file keeps the paths of a clip in the `vidcut` metadata of its video item, on the same frames of the file.
-  - An import reads them back only when `motion::problem` accepts them (`our_motion`).
+  - `comp.set` with `pattern_trim` takes samples off the path. With no sample left, the pattern has no path.
+  - A path keeps one sample at least.
+- A Tracker has at most `Tracker::PATTERNS_KEPT` patterns, and a path has at most `SAMPLES_KEPT` samples.
+- `motion::samples_problem` is the check that the requests, `ops::paste`, `ops::picture::checked` and `validate::violations` share.
+- An OTIO file keeps the paths in the `Picture` of the `vidcut` metadata of the video item, on the same frames of the file.
+  - An import reads the picture back only when `ops::picture::checked` accepts it (`our_picture`).
   - An import at another frame rate keeps the samples as they are. Why: the frames of a file do not change with the frame rate of the timeline.
-  - `our_picture` reads a pattern with no path when the file does not hold that path.
 
 ## Ducking
 
@@ -774,7 +768,7 @@ The metadata:
 | Metadata | Holds |
 |---|---|
 | `vidcut` on clips, for the sound | `stream`, `gain_db`, `muted`, `pan`, `pan_on`, `equalizer`, `dialogue_leveler`, `compressor`, `noise_reduction`; `gain_keys` and `pan_keys` from the item's first source frame |
-| `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `phase`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects; the `motion` paths of a clip |
+| `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `phase`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, with the motion paths of its composition, read before Resolve's effects |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`; volume with `Key Frames`, pan with `Enabled` and `Key Frames`, and equalizer (`effects::sound`); `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling (`otio::picture`), and Dynamic Zoom, fitted, in place of carried ones; `ClipRetime` on clips via `picture::take_retime` and `picture::with_retime` |

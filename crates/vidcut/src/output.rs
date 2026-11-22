@@ -100,10 +100,12 @@ pub fn print(method: &str, r: &Response, json: bool) {
         if let Some(track) = r.result.get("track").and_then(Value::as_str) {
             println!("  on       {track}");
         }
-        if method == "motion.add"
-            && let Some(path) = r.result.get("path").and_then(Value::as_str)
-        {
-            println!("  path     {path}");
+        if method == "motion.add" {
+            println!(
+                "  pattern  {} of {}",
+                r.result["pattern"],
+                r.result["node"].as_str().unwrap_or_default()
+            );
         }
         if method == "motion.find" {
             found_paths(&r.result);
@@ -114,7 +116,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
         if method == "motion.track" {
             let v = &r.result;
             let text = |key: &str| v[key].as_str().unwrap_or("-").to_string();
-            println!("  path     {} ({})", text("id"), text("name"));
+            println!("  pattern  {} ({})", v["pattern"], text("name"));
             println!("  frames   {} to {}", v["first"], v["last"]);
             println!("  score    {}", v["score"]);
             println!("  backward {}", text("backward"));
@@ -1574,23 +1576,22 @@ fn live(method: &str, r: &Response) -> Option<()> {
 }
 
 fn found_paths(result: &Value) {
-    for clip in result["clips"].as_array().into_iter().flatten() {
-        let paths = clip["paths"].as_array().map_or(&[][..], Vec::as_slice);
-        let text = |v: &Value, k: &str| v[k].as_str().unwrap_or_default().to_string();
-        println!("  {}  {} paths", text(clip, "clip"), paths.len());
-        for p in paths {
-            println!(
-                "    {:<5}{:<10} source {}..{}  seen on {} frames, score {}, {} samples, {} gaps",
-                text(p, "id"),
-                text(p, "name"),
-                p["first"],
-                p["last"],
-                p["seen"],
-                p["score"],
-                p["count"],
-                p["gaps"].as_array().map_or(0, Vec::len)
-            );
-        }
+    let patterns = result["patterns"].as_array().map_or(&[][..], Vec::as_slice);
+    let text = |v: &Value, k: &str| v[k].as_str().unwrap_or_default().to_string();
+    let (clip, node) = (text(result, "clip"), text(result, "node"));
+    println!("  {clip} {node}  {} new patterns", patterns.len());
+    for p in patterns {
+        println!(
+            "    {:<5}{:<10} source {}..{}  seen on {} frames, score {}, {} samples, {} gaps",
+            p["pattern"],
+            text(p, "name"),
+            p["first"],
+            p["last"],
+            p["seen"],
+            p["score"],
+            p["count"],
+            p["gaps"].as_array().map_or(0, Vec::len)
+        );
     }
 }
 

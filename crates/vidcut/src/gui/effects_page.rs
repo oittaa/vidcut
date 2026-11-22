@@ -1209,7 +1209,7 @@ impl Workspace {
                     .filter(|b| b.clip == clip.id && b.node == *name && b.pattern == k);
                 let area = match held {
                     Some(b) => b.area,
-                    None => match pattern.area_at(&clip.motion, frame) {
+                    None => match pattern.area_at(frame) {
                         Some(a) => a,
                         None => continue,
                     },
@@ -1320,7 +1320,7 @@ impl Workspace {
         let frame = self
             .project_shared()
             .map_or(at, |p| Frames::of(&p, clip).file(at)) as f64;
-        let areas = |pattern: &Pattern| pattern.area_at(&clip.motion, frame);
+        let areas = |pattern: &Pattern| pattern.area_at(frame);
         let (w, h) = (f64::from(w), f64::from(h));
         let scale = f64::from(picture.width()) / w;
         let screen = |[x, y]: [f64; 2]| picture.min + vec2((x * scale) as f32, (y * scale) as f32);

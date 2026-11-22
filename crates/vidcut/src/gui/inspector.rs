@@ -1872,7 +1872,7 @@ impl Workspace {
                 if ui.button("Find").clicked() {
                     tried = true;
                     let pick = (subject, model.for_subject(subject));
-                    asked = Some(find_request(clip, &node.name, pick, &given));
+                    asked = Some(find_request(clip, node, pick, &given));
                 }
                 let blur = page_blur(clip, comp, node);
                 let button = egui::Button::new("Blur");
@@ -3742,17 +3742,19 @@ fn with_model(method: &str, params: &mut Value) {
 
 fn find_request(
     clip: &Clip,
-    tracker: &str,
+    tracker: &Node,
     (subject, model): (Subject, FindModel),
     extra: &Value,
 ) -> (&'static str, Value) {
     let mut params = json!({
-        "clips": [clip.id],
+        "clip": clip.id,
+        "node": tracker.name,
         "subject": subject,
         "model": model,
-        "tracker": tracker,
     });
-    if clip.motion.iter().any(|m| m.subject == Some(subject)) {
+    let patterns = tracker.tool.tracker().map_or(&[][..], |t| &t.patterns[..]);
+    let paths = patterns.iter().filter_map(|p| p.path.as_ref());
+    if paths.clone().any(|m| m.subject == Some(subject)) {
         params["replace"] = json!(true);
     }
     ("motion.find", with_extra(params, extra))
@@ -3761,10 +3763,7 @@ fn find_request(
 fn page_blur(clip: &Clip, comp: &Composition, tracker: &Node) -> Option<(&'static str, Value)> {
     let t = tracker.tool.tracker()?;
     let followed: Vec<_> = (t.patterns.iter().enumerate())
-        .filter_map(|(k, p)| {
-            let id = p.path.as_ref()?;
-            Some((k, clip.motion.iter().find(|m| m.id == *id)?))
-        })
+        .filter_map(|(k, p)| Some((k, p.path.as_ref()?)))
         .collect();
     if followed.is_empty() {
         return None;

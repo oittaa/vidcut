@@ -588,18 +588,17 @@ The bar and the Jobs button:
     - Advanced shows a field for the size of the picture and for each value of the path rules (`FIND_VALUES`). An empty field keeps the usual value, which the field shows.
     - Each field tells on hover what it sets, and what a lower or a higher number does.
     - Find sends the filled fields with `motion.find` (`find_extra`). A field that is not a number stops the request, and a line tells so.
-  - Find sends `motion.find` with the `tracker` (`find_request`), and with `replace` when the clip has paths of that subject.
+  - Find sends `motion.find` for the Tracker (`find_request`), with `replace` when the Tracker has patterns of that subject.
   - Blur sends one `apply` (`page_blur`): `comp.add` of a Mosaic Blur before Media Out, and a chain of masks on its effect mask.
-    - Each pattern with a path in the clip gets one mask, with `comp.set` of `connect`, Follow Size and the size `BLUR_SIZE`.
+    - Each pattern with a path gets one mask, with `comp.set` of `connect`, Follow Size and the size `BLUR_SIZE`.
     - A pattern without a path gets no mask. Such a pattern does not move. A mask on it blurs the same box on each frame.
     - The mask is a rectangle for text, a person or a vehicle, and an ellipse for a face (`boxed`).
     - With no pattern that has a path, the button is off.
   - The live core runs an `apply` with `motion.find` as a long edit (`runs_long`): it measures on a job thread first.
   - A `motion.find` and a `motion.track` of their own run as jobs (`start_encode`, kinds `find` and `track`). The Jobs window shows each with its progress, and Cancel stops it.
   - `Workspace::ask` asks before a download when a model is not there (`model_needs`, `Finding`). `Workspace::motion_prompt` shows the question that the other local models use (`ask_download`), and `with_model` then sets `download`.
-  - The rows below list the motion paths of the clip.
-  - A name goes with `motion.set` when its field loses the focus (`Naming`). Escape drops the typed name. Delete sends `motion.remove`.
-  - The rows read the paths from the shared project of the snapshot. The snapshot holds no copy of the samples.
+  - A name goes with `comp.set` when its field loses the focus (`Naming`). Escape drops the typed name.
+  - The rows read the patterns and their paths from the shared project of the snapshot. The snapshot holds no copy of the samples.
 - `Workspace::input_lut_section` shows the Input LUT row of the media of the selected clips, with a file pick and Reset. Each change is one `media.set`.
   - The Input LUT submenu of the pool's right-click menu sends the same request (`Workspace::pool_item_menu`, `Workspace::ask_input_lut`).
 - `speed_section` sends what the Change Clip Speed window sends (`SpeedDialog::params`). `Workspace::audio_section` sends `clip.set`.

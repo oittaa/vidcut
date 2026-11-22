@@ -53,7 +53,7 @@ flowchart TD
 
 ## Subjects
 
-- `motion.find` gives each thing of one `Subject` in a clip a motion path ([model](model.md#motion-paths), [deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
+- `motion.find` gives a Tracker node of a clip a pattern with a motion path for each thing of one `Subject` ([model](model.md#motion-paths), [deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
   - `Subject::Face` is a face. `Subject::Text` is a line or a block of text. `Subject::Person` is a person. `Subject::Vehicle` is a vehicle.
   - `Subject::ALL` lists the subjects.
   - The subjects differ in two places only: `subjects::Net` holds the model of each, and `Join::of` holds the rules of its paths.

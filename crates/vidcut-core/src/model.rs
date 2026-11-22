@@ -2142,37 +2142,45 @@ pub struct Clip {
     /// slow media and AI Upscale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
-    /// Its motion paths: where things in its picture are on its source
-    /// frames. Only a clip of footage, a still or an image sequence has
-    /// them. Left out when it has none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub motion: Vec<MotionPath>,
 }
 
-/// A motion path of a clip: where one area of its picture is on its source
-/// frames. A face, a number plate or another thing in the picture has one.
-/// A path that `motion.track` made holds its place: before its first sample
-/// and after its last, the area is where that sample puts it. Another path
-/// lasts from its first sample to its last: before and after them it has no
-/// area. Between two samples the area moves in a straight line.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// The motion path of a pattern of a tracker: where its thing is on the
+/// frames of the clip's file. A path that `motion.track` made holds its
+/// place: before its first sample and after its last, the area is where that
+/// sample puts it. Another path lasts from its first sample to its last:
+/// before and after them it has no area. Between two samples the area moves
+/// in a straight line.
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MotionPath {
-    /// `p<N>`, its own among the paths of the clip.
-    pub id: String,
-    /// What it follows, for example `Face 1`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
     /// The kind of thing that `motion.find` found for this path. Left out on
     /// a path that it did not make.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<Subject>,
-    /// On, `motion.track` made this path. A later track of the same area
-    /// then writes its samples again. Left out when off.
+    /// On, `motion.track` made this path. It then holds its first and its
+    /// last place. Left out when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub tracked: bool,
     /// The area on frames of the file: at least one sample, one for a
     /// frame, in the order of the frames.
     pub samples: Arc<Vec<PathSample>>,
+}
+
+impl PartialEq for MotionPath {
+    fn eq(&self, other: &Self) -> bool {
+        self.subject == other.subject
+            && self.tracked == other.tracked
+            && (Arc::ptr_eq(&self.samples, &other.samples) || self.samples == other.samples)
+    }
+}
+
+impl std::fmt::Debug for MotionPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MotionPath")
+            .field("subject", &self.subject)
+            .field("tracked", &self.tracked)
+            .field("samples", &self.samples.len())
+            .finish()
+    }
 }
 
 /// The ways that `motion.track` goes from its first frame.
@@ -4617,9 +4625,9 @@ pub struct Tracker {
     pub patterns: Vec<Pattern>,
 }
 
-/// A pattern of a tracker: a box on the clip's own picture, and the motion
-/// path that a track of the box made (`motion.track`). On each frame, the
-/// pattern is where its path puts it. Before a track, it is where its own
+/// A pattern of a tracker: a box on the clip's own picture, and its motion
+/// path (`motion.track`, `motion.find`, `motion.set`). On each frame, the
+/// pattern is where its path puts it. Without a path, it is where its own
 /// box is. A field left out is at its usual value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Pattern {
@@ -4629,11 +4637,11 @@ pub struct Pattern {
     /// `motion.track` still tracks it. Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub enabled: bool,
-    /// The id of its motion path on the clip (`motion.list`), as `p1`. A
-    /// track of the pattern makes it, and `motion.find` with `tracker` gives
-    /// a pattern for each thing it finds. Left out before a track.
+    /// Its motion path, on frames of the clip's file. A track of the
+    /// pattern makes it, and `motion.find` gives a pattern with a path for
+    /// each thing it finds. Left out before a track.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
+    pub path: Option<MotionPath>,
     /// The middle of its own box, `[x, y]` as fractions of the picture from
     /// its bottom left, each from -10 to 10. Usual: `[0.25, 0.75]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -7975,7 +7983,6 @@ impl Cue {
             retime: ClipRetime::Project,
             color: None,
             render_cache: ClipCache::Auto,
-            motion: Vec::new(),
         }
     }
 

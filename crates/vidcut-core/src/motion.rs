@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use crate::analysis::{Detections, Found, Look, Tracked};
 use crate::model::{MotionPath, PathSample, Subject};
 
-pub const PATHS_KEPT: usize = 256;
 pub const SAMPLES_KEPT: usize = 1_000_000;
 pub const REACH: f64 = 10.0;
 pub const TURN: f64 = 100_000.0;
@@ -112,6 +111,20 @@ impl MotionPath {
     pub fn span(&self) -> Option<(i64, i64)> {
         Some((self.samples.first()?.frame, self.samples.last()?.frame))
     }
+
+    pub fn held(&self, frame: f64) -> Self {
+        let at = self.base_at(frame).map(|a| PathSample {
+            frame: 0,
+            center: a.center,
+            size: a.size,
+            rotation: a.rotation,
+        });
+        Self {
+            subject: self.subject,
+            tracked: self.tracked,
+            samples: std::sync::Arc::new(at.into_iter().collect()),
+        }
+    }
 }
 
 pub fn samples_problem(samples: &[PathSample]) -> Option<String> {
@@ -131,37 +144,6 @@ pub fn samples_problem(samples: &[PathSample]) -> Option<String> {
         ));
     }
     samples.iter().find_map(PathSample::problem)
-}
-
-pub fn problem(paths: &[MotionPath]) -> Option<String> {
-    if paths.len() > PATHS_KEPT {
-        return Some(format!(
-            "a clip has {PATHS_KEPT} motion paths at most, not {}",
-            paths.len()
-        ));
-    }
-    let mut ids = HashSet::new();
-    for path in paths {
-        if number(&path.id).is_none() {
-            return Some(format!("motion path id {:?} is not p<N>", path.id));
-        }
-        if !ids.insert(path.id.as_str()) {
-            return Some(format!("two motion paths have the id {}", path.id));
-        }
-        if let Some(why) = samples_problem(&path.samples) {
-            return Some(format!("{}: {why}", path.id));
-        }
-    }
-    None
-}
-
-fn number(id: &str) -> Option<u64> {
-    id.strip_prefix('p')?.parse().ok()
-}
-
-pub fn next_id(paths: &[MotionPath]) -> String {
-    let last = paths.iter().filter_map(|p| number(&p.id)).max();
-    format!("p{}", last.map_or(1, |n| n + 1))
 }
 
 pub fn put(samples: &[PathSample], new: &[PathSample]) -> Vec<PathSample> {

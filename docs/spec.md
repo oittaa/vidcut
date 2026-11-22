@@ -2741,7 +2741,7 @@ The shapes:
   - Ctrl+A selects all the nodes. Ctrl+Shift+A selects none.
 - Alt+[ and Alt+] move the playhead to the keyframes of the active node (p. 1303).
 - The MediaIn and the MediaOut nodes can be deleted. Undo puts them back.
-- An OTIO export of Resolve holds nothing of a composition. vidcut keeps the composition in its own metadata of the clip, in the picture (§8.16).
+- An OTIO export of Resolve holds nothing of a composition. vidcut keeps the composition in its own metadata of the clip, in the picture (§8.16). The motion paths of its Tracker patterns go with it.
 
 #### The Effects page
 
@@ -2853,7 +2853,7 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
 `gui.page_time` moves and plays the playhead of the page. `comp.loop` sets Loop and Ping Pong. `player.bounds` holds play of the timeline between two frames.
 `comp.set` and `comp.key` take a `frame` of the composition. Without it, they take the frame at the playhead. `comp.paste` takes `after`, `place` or `replace`.
-`comp.set` with `connect` connects the Center of a mask to a pattern. `motion.track` tracks a pattern of a Tracker, and `motion.find` with `tracker` gives it patterns.
+`comp.set` with `connect` connects the Center of a mask to a pattern. `motion.track` tracks a pattern of a Tracker, and `motion.find` gives it patterns. Each pattern holds its path: `motion.list` reads it, and `motion.add`, `motion.set` and `motion.remove` change it.
 
 ### 8.20 Primaries palette (pp. 118, 3141–3159)
 

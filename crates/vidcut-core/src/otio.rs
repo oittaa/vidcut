@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, Compound, Grade, ImageSequence, Kept, Keyframe, Marks, Media, MotionPath,
-    Picture, Project, Section, Settings, Speed, Title, TrackKind,
+    Clip, ClipAudio, Compound, Grade, ImageSequence, Kept, Keyframe, Marks, Media, Picture,
+    Project, Section, Settings, Speed, Title, TrackKind,
 };
 use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
@@ -922,9 +922,6 @@ fn export_with(
                 if let Some(x) = &c.picture {
                     meta["picture"] = json!(x);
                 }
-                if !c.motion.is_empty() {
-                    meta["motion"] = json!(c.motion);
-                }
                 if let Some(au) = &c.audio {
                     meta["stream"] = json!(au.stream);
                     meta["gain_db"] = json!(au.gain_db);
@@ -1698,7 +1695,6 @@ pub struct ImportedClip {
     pub title: Option<Title>,
     pub title_from: Option<Value>,
     pub picture: Option<Picture>,
-    pub motion: Vec<MotionPath>,
     pub compound: Option<ImportedCompound>,
     pub speed: Option<Speed>,
     pub retime: crate::model::ClipRetime,
@@ -1791,7 +1787,6 @@ impl ImportedClip {
             title: None,
             title_from: None,
             picture: None,
-            motion: Vec::new(),
             compound: None,
             speed: None,
             retime: crate::model::ClipRetime::Project,
@@ -2392,27 +2387,9 @@ fn our_str(item: &Value, key: &str) -> Option<String> {
 }
 
 fn our_picture(item: &Value) -> Option<Picture> {
-    let mut p: Picture =
+    let p: Picture =
         serde_json::from_value(item["metadata"][VIDCUT].get("picture")?.clone()).ok()?;
-    let paths = our_motion(item);
-    let nodes = p.composition.iter_mut().flat_map(|c| c.nodes.iter_mut());
-    for n in nodes {
-        if let crate::model::Tool::Tracker(t) = &mut n.tool {
-            for pattern in &mut t.patterns {
-                let has = |id: &String| paths.iter().any(|m| m.id == *id);
-                pattern.path = pattern.path.take().filter(has);
-            }
-        }
-    }
     crate::ops::picture::checked(&p).ok().flatten()
-}
-
-fn our_motion(item: &Value) -> Vec<MotionPath> {
-    let paths = item["metadata"][VIDCUT].get("motion").cloned();
-    paths
-        .and_then(|v| serde_json::from_value::<Vec<MotionPath>>(v).ok())
-        .filter(|paths| crate::motion::problem(paths).is_none())
-        .unwrap_or_default()
 }
 
 fn marker(k: &Value, at: i64, fps: Rational) -> ImportedMarker {
@@ -2590,7 +2567,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         title: None,
                         title_from: None,
                         picture: our_picture(item),
-                        motion: our_motion(item),
                         compound: None,
                         speed,
                         retime,
@@ -2822,7 +2798,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 title: None,
                 title_from: None,
                 picture: None,
-                motion: Vec::new(),
                 compound: None,
                 speed,
                 retime: crate::model::ClipRetime::Project,

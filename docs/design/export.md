@@ -646,12 +646,11 @@ Dynamic Zoom and keyframes (D75):
 - `Effect::sampled` reads each keyed value of an effect at that frame. `Working::of` then builds the work of the effect from plain values.
 - `layer_size` fits the layer for the closer Dynamic Zoom box (`DynamicZoom::closest`) and the largest zoom key (`place::detail`).
 - The viewer and the export both take this `Placing`. Thus there is one draw path.
-- `Placed` also holds the motion paths of the patterns that the masks of its composition follow (`render::Followed`, [model](model.md#motion-paths)).
-  - `Followed::of` takes them from the clip, with a `FileClock` of the clip (`FileClock::plain`). The plan of a clip of footage then gives that clock the frame rates (`FileClock::of`).
-  - A path shares its samples with the clip (`MotionPath.samples`). Thus a placed picture copies no sample, and two plans of one project compare them by their place in memory.
-  - `Followed::frame` takes a keyframe frame to the frame of the file (`FileClock::frame`). `Pattern::area_at` then gives the box of the pattern there.
+- The composition of a `Placed` picture holds the motion paths of its patterns ([model](model.md#motion-paths)).
+  - `place::Placing` takes the keyframe frame to the frame of the file with the clock of the piece (`Placed.clock`, `FileClock::frame`). `Pattern::area_at` then gives the box of the pattern there.
   - Why: a path is on frames of the file. The keyframe frame of a clip with a speed is a frame of the retimed source.
-  - The paths are behind an `Arc`. Thus `Placed::after` copies no sample.
+  - A path shares its samples with the project, behind an `Arc`. Thus a placed picture and `Placed::after` copy no sample, and two plans of one project compare them by their place in memory.
+  - The key of a render cache holds only the paths of the patterns that masks follow (`Placed::hold`). For one frame, it holds only their boxes on that frame.
 
 Soft crop edges:
 

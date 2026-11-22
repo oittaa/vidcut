@@ -2645,10 +2645,7 @@ impl Live {
                 let subject = r.result["subject"].as_str();
                 let subject = subject.and_then(vidcut_core::model::Subject::named);
                 let many = subject.map_or("Subjects", vidcut_core::model::Subject::many);
-                let clips = r.result["clips"].as_array().into_iter().flatten();
-                let found: usize = clips
-                    .map(|c| c["paths"].as_array().map_or(0, Vec::len))
-                    .sum();
+                let found = r.result["patterns"].as_array().map_or(0, Vec::len);
                 match found {
                     0 => format!("Find {many}: none found"),
                     n => format!("Find {many}: {n} found"),
