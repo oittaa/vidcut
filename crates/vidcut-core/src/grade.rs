@@ -968,6 +968,10 @@ fn corrected(
         r.hold(whole, on, uses.over[k]);
         uses.whole[k] = whole;
         Some(mix)
+    } else if uses.all[k] == 0 {
+        r.done(x);
+        r.used(&key);
+        None
     } else {
         let on = r.take(x, passes);
         let key = match uses.over[k] {
