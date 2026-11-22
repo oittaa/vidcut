@@ -292,7 +292,7 @@ pub fn add(
         return super::speed::add_keyframe(p, ids, at);
     }
     if let Some(v) = picture_param(param) {
-        return add_picture(p, ids, v, at, value, ease);
+        return add_picture(p, ids, (v, param.on_text()), at, value, ease);
     }
     let number = Number::of(param);
     let value = number_value(param, number, value)?;
@@ -441,7 +441,7 @@ pub fn set(
         };
     }
     if let Some(v) = picture_param(param) {
-        return set_picture(p, ids, v, pick, change);
+        return set_picture(p, ids, (v, param.on_text()), pick, change);
     }
     let number = Number::of(param);
     let value = number_value(param, number, change.value)?
@@ -522,7 +522,7 @@ pub fn shift(
         return Err(Error::invalid("speed keyframes don't move"));
     }
     if let Some(v) = picture_param(param) {
-        return shift_picture(p, ids, v, pick, by, to);
+        return shift_picture(p, ids, (v, param.on_text()), pick, by, to);
     }
     let number = Number::of(param);
     shift_number(p, ids, number, pick, by, to)?;
@@ -595,7 +595,7 @@ pub fn remove(p: &mut Project, ids: &[String], param: KeyParam, pick: &Pick) -> 
         return super::speed::remove_keyframes(p, ids, pick);
     }
     if let Some(v) = picture_param(param) {
-        return remove_picture(p, ids, v, pick);
+        return remove_picture(p, ids, (v, param.on_text()), pick);
     }
     let number = Number::of(param);
     remove_number(p, ids, number, pick)?;
@@ -696,20 +696,17 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                 );
             }
             if let Some(title) = &c.title {
-                let rows = listed_values(p, c, &t.id, &title.as_picture(), Title::owns);
-                clips.extend(match title.upper {
-                    Some(_) => with_line(rows, "lower"),
-                    None => rows,
-                });
+                let lower = title.upper.is_some().then_some(LowerThirdLine::Lower);
+                let rows = listed_values(p, c, &t.id, &title.as_picture(), text_names(lower));
+                clips.extend(rows);
                 if title.upper.is_some() {
                     let picture = title.upper_view().as_picture();
-                    let rows = listed_values(p, c, &t.id, &picture, Title::owns);
-                    clips.extend(with_line(rows, "upper"));
+                    let upper = text_names(Some(LowerThirdLine::Upper));
+                    clips.extend(listed_values(p, c, &t.id, &picture, upper));
                 }
             }
             if let Some(picture) = &c.picture {
-                let own = |v: PictureValue| c.title.is_none() || !Title::owns(v);
-                clips.extend(listed_values(p, c, &t.id, picture, own));
+                clips.extend(listed_values(p, c, &t.id, picture, clip_names));
             }
         }
     }
@@ -718,7 +715,7 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
             if ids.is_none_or(|ids| ids.contains(&q.id))
                 && let Some(picture) = &q.picture
             {
-                clips.extend(listed_values(p, &q.as_clip(), &t.id, picture, |_| true));
+                clips.extend(listed_values(p, &q.as_clip(), &t.id, picture, clip_names));
             }
         }
     }
@@ -730,11 +727,17 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
     Ok(json!({ "clips": clips }))
 }
 
-fn with_line(mut rows: Vec<Value>, line: &str) -> Vec<Value> {
-    for row in &mut rows {
-        row["param"] = json!(format!("{line}_{}", row["param"].as_str().unwrap_or("")));
+type Named = (Value, bool);
+
+fn clip_names(v: PictureValue) -> Option<Named> {
+    Some((json!(v.name()), false))
+}
+
+fn text_names(line: Option<LowerThirdLine>) -> impl Fn(PictureValue) -> Option<Named> {
+    move |v| {
+        let param = KeyParam::of_text(v)?;
+        Some((json!(line.map_or(param, |l| param.for_line(l))), true))
     }
-    rows
 }
 
 pub fn on_line<T>(
@@ -762,17 +765,18 @@ fn listed_values(
     c: &Clip,
     track: &str,
     picture: &Picture,
-    shown: impl Fn(PictureValue) -> bool,
+    named: impl Fn(PictureValue) -> Option<Named>,
 ) -> Vec<Value> {
     PictureValue::ALL
         .into_iter()
-        .filter(|v| shown(*v) && picture.has_keys(*v))
-        .map(|v| {
+        .filter(|v| picture.has_keys(*v))
+        .filter_map(|v| Some((v, named(v)?)))
+        .map(|(v, (param, text))| {
             json!({
                 "clip": c.id,
                 "track": track,
-                "param": v.name(),
-                "keyframes": listed(p, c, picture, v),
+                "param": param,
+                "keyframes": listed(p, c, picture, (v, text)),
             })
         })
         .collect()
@@ -797,11 +801,11 @@ fn picture_only(p: &Project, ids: &[String], param: KeyParam) -> Result<()> {
 }
 
 fn keys_of(c: &Clip, param: KeyParam) -> &[Keyframe] {
-    match (param, picture_param(param), &c.title) {
-        (KeyParam::Speed, _, _) => &[],
-        (_, Some(v), Some(t)) if Title::owns(v) => t.keys_of(v),
-        (_, Some(v), _) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
-        (_, None, _) => Number::of(param).keys(c),
+    match (param, picture_param(param)) {
+        (KeyParam::Speed, _) => &[],
+        (_, Some(v)) if param.on_text() => c.title.as_ref().map_or(&[], |t| t.keys_of(v)),
+        (_, Some(v)) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
+        (_, None) => Number::of(param).keys(c),
     }
 }
 
@@ -812,6 +816,9 @@ fn param_name(param: KeyParam) -> String {
         KeyParam::CenterX => "center_x".to_string(),
         KeyParam::CenterY => "center_y".to_string(),
         KeyParam::Effect(q) => q.value.name(),
+        text if text.on_text() => {
+            picture_param(text).map_or(String::new(), |v| format!("text_{}", v.name()))
+        }
         _ => picture_param(param)
             .map_or("volume", PictureValue::name)
             .to_string(),
@@ -877,7 +884,7 @@ pub fn chosen(p: &Project, id: &str, picks: Option<&[KeyPicks]>) -> Result<Vec<C
         }
         let pick = Pick { frames, at: None };
         let mut taken: Vec<i64> = match picture_param(value) {
-            Some(v) => picked_name(c, keys, &pick, v)?,
+            Some(v) => picked_name(c, keys, &pick, (v, value.on_text()))?,
             None => picked_as(c, keys, &pick, &Number::of(value).name())?,
         }
         .into_iter()
@@ -904,7 +911,7 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
     for (param, frames) in picks {
         let (plain, line) = param.on_line();
         let c = &of_line(whole, line);
-        let held = picture_param(plain).and_then(|v| picture_of(c, v));
+        let held = picture_param(plain).and_then(|_| picture_of(c, plain.on_text()));
         let keys = keys_of(c, plain);
         for (i, k) in keys
             .iter()
@@ -925,7 +932,7 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
             let bent = c
                 .title
                 .as_ref()
-                .filter(|_| plain == KeyParam::Position)
+                .filter(|_| plain == KeyParam::TextPosition)
                 .and_then(|t| t.handles_at(k.frame));
             rows.push((
                 at,
@@ -1018,7 +1025,7 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
             let param = if thirds { k.param } else { k.param.on_line().0 };
             on_line(p, one, param, |p, param| {
                 set(p, one, param, &pick, &change)?;
-                if param == KeyParam::Position
+                if param == KeyParam::TextPosition
                     && let Some(t) = title_mut(p, id).filter(|t| !t.moves())
                 {
                     t.put_handles(frame, k.in_point, k.out_point);
@@ -1034,13 +1041,17 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
 fn picture_param(param: KeyParam) -> Option<PictureValue> {
     match param {
         KeyParam::Volume | KeyParam::Pan | KeyParam::CenterX | KeyParam::CenterY => None,
-        KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition => {
-            Some(PictureValue::Position)
+        KeyParam::Position
+        | KeyParam::TextPosition
+        | KeyParam::UpperPosition
+        | KeyParam::LowerPosition => Some(PictureValue::Position),
+        KeyParam::Zoom | KeyParam::TextZoom | KeyParam::UpperZoom | KeyParam::LowerZoom => {
+            Some(PictureValue::Zoom)
         }
-        KeyParam::Zoom | KeyParam::UpperZoom | KeyParam::LowerZoom => Some(PictureValue::Zoom),
-        KeyParam::Rotation | KeyParam::UpperRotation | KeyParam::LowerRotation => {
-            Some(PictureValue::Rotation)
-        }
+        KeyParam::Rotation
+        | KeyParam::TextRotation
+        | KeyParam::UpperRotation
+        | KeyParam::LowerRotation => Some(PictureValue::Rotation),
         KeyParam::Anchor => Some(PictureValue::Anchor),
         KeyParam::Pitch => Some(PictureValue::Pitch),
         KeyParam::Yaw => Some(PictureValue::Yaw),
@@ -1064,34 +1075,50 @@ fn numbers(v: PictureValue, value: KeyValue) -> Result<[f64; 2]> {
     }
 }
 
-fn holds(c: &Clip) -> bool {
-    super::picture::has_picture(c)
-}
+type Held = (PictureValue, bool);
 
-fn picture_of(c: &Clip, v: PictureValue) -> Option<Picture> {
-    match &c.title {
-        Some(t) if Title::owns(v) => Some(t.as_picture()),
-        _ => c.picture.clone(),
+fn named((v, text): Held) -> String {
+    match text {
+        true => format!("text {}", v.name()),
+        false => v.name().replace('_', " "),
     }
 }
 
-fn owned_picture(p: &Project, id: &str, v: PictureValue) -> Result<(Picture, Clip)> {
+fn holds(p: &Project, id: &str, text: bool) -> bool {
+    match text {
+        true => p.clip(id).is_some_and(|c| c.title.is_some()),
+        false => p.cue(id).is_some() || p.clip(id).is_some_and(super::picture::has_picture),
+    }
+}
+
+fn picture_of(c: &Clip, text: bool) -> Option<Picture> {
+    match text {
+        true => c.title.as_ref().map(Title::as_picture),
+        false => c.picture.clone(),
+    }
+}
+
+fn owned_picture(p: &Project, id: &str, (v, text): Held) -> Result<(Picture, Clip)> {
     if let Some(q) = p.cue(id) {
-        if v == PictureValue::Anchor {
+        if v == PictureValue::Anchor || text {
             return Err(Error::invalid(format!(
-                "{id} is a subtitle, which has no anchor keyframes"
+                "{id} is a subtitle, which has no {} keyframes",
+                named((v, text))
             )));
         }
         return Ok((q.picture.clone().unwrap_or_default(), q.as_clip()));
     }
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
-    if let Some(t) = c.title.as_ref().filter(|_| Title::owns(v)) {
+    if text {
+        let Some(t) = c.title.as_ref() else {
+            return Err(Error::invalid(format!("{id} is not a title")));
+        };
         if !t.takes_keys(v) {
             return Err(Error::invalid(format!(
                 "{id} ({}) has no {} keyframes",
                 if t.moves() { "scroll" } else { "title" },
-                v.name().replace('_', " ")
+                named((v, text))
             )));
         }
         return Ok((t.as_picture(), c.clone()));
@@ -1113,8 +1140,8 @@ fn title_mut<'a>(p: &'a mut Project, id: &str) -> Option<&'a mut Title> {
     p.tracks[ti].clips[ci].title.as_mut()
 }
 
-fn bends(c: &Clip, v: PictureValue) -> bool {
-    v == PictureValue::Position && c.title.as_ref().is_some_and(|t| !t.moves())
+fn bends(c: &Clip, (v, text): Held) -> bool {
+    text && v == PictureValue::Position && c.title.as_ref().is_some_and(|t| !t.moves())
 }
 
 fn ease_path(p: &mut Project, id: &str, frames: impl IntoIterator<Item = i64>, ease: Ease) {
@@ -1125,7 +1152,7 @@ fn ease_path(p: &mut Project, id: &str, frames: impl IntoIterator<Item = i64>, e
     }
 }
 
-fn save(p: &mut Project, id: &str, v: PictureValue, picture: &Picture) -> Result<()> {
+fn save(p: &mut Project, id: &str, text: bool, picture: &Picture) -> Result<()> {
     if let Some((ti, ci)) = p.find_cue(id) {
         super::subtitles::unlocked(p, ti)?;
         p.subtitles[ti].cues[ci].picture = super::picture::checked(picture)?;
@@ -1133,7 +1160,7 @@ fn save(p: &mut Project, id: &str, v: PictureValue, picture: &Picture) -> Result
     }
     let (ti, ci) = locate(p, id)?;
     let c = &mut p.tracks[ti].clips[ci];
-    let Some(mut t) = c.title.clone().filter(|_| Title::owns(v)) else {
+    let Some(mut t) = c.title.clone().filter(|_| text) else {
         c.picture = super::picture::checked(picture)?;
         return Ok(());
     };
@@ -1153,7 +1180,7 @@ fn save(p: &mut Project, id: &str, v: PictureValue, picture: &Picture) -> Result
 fn add_picture(
     p: &mut Project,
     ids: &[String],
-    v: PictureValue,
+    (v, text): Held,
     at: i64,
     value: Option<KeyValue>,
     ease: Option<Ease>,
@@ -1164,7 +1191,7 @@ fn add_picture(
     let value = value.map(|n| numbers(v, n)).transpose()?;
     let targets: Vec<String> = ids
         .iter()
-        .filter(|id| p.cue(id).is_some() || p.clip(id).is_some_and(holds))
+        .filter(|id| holds(p, id, text))
         .cloned()
         .collect();
     if targets.is_empty() {
@@ -1172,24 +1199,25 @@ fn add_picture(
             locate(p, id)?;
         }
         return Err(Error::invalid(format!(
-            "no clip of {} has a picture",
-            ids.join(", ")
+            "no clip of {} {}",
+            ids.join(", "),
+            if text { "is a title" } else { "has a picture" }
         )));
     }
     let mut added = Vec::new();
     for id in &targets {
-        let (mut picture, c) = owned_picture(p, id, v)?;
+        let (mut picture, c) = owned_picture(p, id, (v, text))?;
         let frame = c.content_at(at);
-        let n = value.unwrap_or_else(|| match (v, &c.title) {
+        let n = value.unwrap_or_else(|| match (v, c.title.as_ref().filter(|_| text)) {
             (PictureValue::Position, Some(t)) => t.place_at(frame as f64),
             _ => picture.channel_at(v, frame as f64),
         });
         picture.put_channel(v, frame, n);
-        let path = bends(&c, v);
+        let path = bends(&c, (v, text));
         if let Some(e) = ease.filter(|_| !path) {
             picture.mark_ease(v, frame, e);
         }
-        save(p, id, v, &picture)?;
+        save(p, id, text, &picture)?;
         if let Some(e) = ease.filter(|_| path) {
             ease_path(p, id, [frame], e);
         }
@@ -1201,7 +1229,7 @@ fn add_picture(
 fn set_picture(
     p: &mut Project,
     ids: &[String],
-    v: PictureValue,
+    (v, text): Held,
     pick: &Pick,
     change: &KeyChange,
 ) -> Result<()> {
@@ -1235,15 +1263,15 @@ fn set_picture(
         .map(|h| h.map(|h| checked_handle(h, false)).transpose())
         .transpose()?;
     for id in ids {
-        let (mut picture, c) = owned_picture(p, id, v)?;
+        let (mut picture, c) = owned_picture(p, id, (v, text))?;
         if !picture.has_keys(v) {
             return Err(Error::invalid(format!(
                 "{id} has no {} keyframes",
-                v.name().replace('_', " ")
+                named((v, text))
             )));
         }
-        let chosen = picked_name(&c, picture.keys_of(v), pick, v)?;
-        let path = bends(&c, v);
+        let chosen = picked_name(&c, picture.keys_of(v), pick, (v, text))?;
+        let path = bends(&c, (v, text));
         for frame in &chosen {
             let mut next =
                 value.unwrap_or_else(|| picture.key_value(v, *frame).unwrap_or([0.0, 0.0]));
@@ -1263,7 +1291,7 @@ fn set_picture(
                 picture.set_handle(v, *frame, false, h);
             }
         }
-        save(p, id, v, &picture)?;
+        save(p, id, text, &picture)?;
         if let Some(e) = change.ease.filter(|_| path) {
             ease_path(p, id, chosen, e);
         }
@@ -1274,7 +1302,7 @@ fn set_picture(
 fn shift_picture(
     p: &mut Project,
     ids: &[String],
-    v: PictureValue,
+    (v, text): Held,
     pick: &Pick,
     by: Option<i64>,
     to: Option<i64>,
@@ -1283,14 +1311,14 @@ fn shift_picture(
         return Err(Error::usage("give `by` or `to`"));
     }
     for id in ids {
-        let (mut picture, c) = owned_picture(p, id, v)?;
+        let (mut picture, c) = owned_picture(p, id, (v, text))?;
         if !picture.has_keys(v) {
             return Err(Error::invalid(format!(
                 "{id} has no {} keyframes",
-                v.name().replace('_', " ")
+                named((v, text))
             )));
         }
-        let chosen = picked_name(&c, picture.keys_of(v), pick, v)?;
+        let chosen = picked_name(&c, picture.keys_of(v), pick, (v, text))?;
         if to.is_some() && chosen.len() != 1 {
             return Err(Error::usage(format!(
                 "`to` moves one keyframe; {id} has {} chosen",
@@ -1312,43 +1340,44 @@ fn shift_picture(
             if !taken.insert(moved(*f)) {
                 return Err(Error::invalid(format!(
                     "{id} already has a {} keyframe on source frame {}",
-                    v.name().replace('_', " "),
+                    named((v, text)),
                     moved(*f)
                 )));
             }
         }
         picture.move_chosen(v, &chosen, moved);
-        if v == PictureValue::Position
+        if text
+            && v == PictureValue::Position
             && let Some(t) = title_mut(p, id)
         {
             t.move_handles(|f| if chosen.contains(&f) { moved(f) } else { f });
         }
-        save(p, id, v, &picture)?;
+        save(p, id, text, &picture)?;
     }
     Ok(())
 }
 
-fn remove_picture(p: &mut Project, ids: &[String], v: PictureValue, pick: &Pick) -> Result<()> {
+fn remove_picture(p: &mut Project, ids: &[String], (v, text): Held, pick: &Pick) -> Result<()> {
     for id in ids {
-        let (mut picture, c) = owned_picture(p, id, v)?;
+        let (mut picture, c) = owned_picture(p, id, (v, text))?;
         if !picture.has_keys(v) {
             return Err(Error::invalid(format!(
                 "{id} has no {} keyframes",
-                v.name().replace('_', " ")
+                named((v, text))
             )));
         }
-        let chosen = picked_name(&c, picture.keys_of(v), pick, v)?;
+        let chosen = picked_name(&c, picture.keys_of(v), pick, (v, text))?;
         picture.drop_chosen(v, &chosen);
-        save(p, id, v, &picture)?;
+        save(p, id, text, &picture)?;
     }
     Ok(())
 }
 
-fn picked_name(c: &Clip, keys: &[Keyframe], pick: &Pick, v: PictureValue) -> Result<HashSet<i64>> {
-    picked_as(c, keys, pick, &v.name().replace('_', " "))
+fn picked_name(c: &Clip, keys: &[Keyframe], pick: &Pick, held: Held) -> Result<HashSet<i64>> {
+    picked_as(c, keys, pick, &named(held))
 }
 
-fn listed(p: &Project, c: &Clip, picture: &Picture, v: PictureValue) -> Vec<Value> {
+fn listed(p: &Project, c: &Clip, picture: &Picture, (v, text): Held) -> Vec<Value> {
     picture
         .keys_of(v)
         .iter()
@@ -1369,7 +1398,10 @@ fn listed(p: &Project, c: &Clip, picture: &Picture, v: PictureValue) -> Vec<Valu
             if let Some(h) = k.out_handle {
                 row["out"] = json!(h);
             }
-            let path = c.title.as_ref().filter(|_| v == PictureValue::Position);
+            let path = c
+                .title
+                .as_ref()
+                .filter(|_| text && v == PictureValue::Position);
             if let Some(t) = path
                 && let Some(h) = t.handles_at(k.frame)
             {

@@ -1798,7 +1798,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: a title takes a speed and speed keyframes as a media clip does. Its right-click menu has no Change Speed and no Add Speed Point.
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
-  - vidcut: the Keyframes tab of a title has the rows of its clip's picture. It also has the rows Position, Zoom and Rotation of its text. The text of a scroll has only Position.
+  - vidcut: the Keyframes tab of a title has the rows of its clip's picture. It also has the rows Text Position, Text Zoom and Text Rotation. The text of a scroll has only Text Position.
     - A lower third with its lines apart has the text rows Upper Position, Upper Zoom, Upper Rotation, Lower Position, Lower Zoom and Lower Rotation.
   - Its Position keyframes take handles. The title moves at one speed along the cubic path between two keys. The details are in the [todo](todo/keyframes.md#titles).
   - A right-click on a key of Position, Zoom, Rotation or Opacity opens a menu of eases, by the place of the key:
@@ -5218,7 +5218,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - For a lower third, they work on each line about its own point (D67).
   - Each line of a lower third has its own `position`, `zoom`, `rotation` and keyframes (p. 1178):
     - `line` in `titles.set` names the line.
-    - In the `keyframes` requests, these values name the line: `upper_position`, `upper_zoom`, `upper_rotation`, `lower_position`, `lower_zoom` and `lower_rotation`.
+    - In the `keyframes` requests, `text_position`, `text_zoom` and `text_rotation` name the values of the text.
+    - These values name the line: `upper_position`, `upper_zoom`, `upper_rotation`, `lower_position`, `lower_zoom` and `lower_rotation`.
     - The Title section has Across, Down, Zoom and Rotation under Upper Line and under Lower Line.
     - The two lines go together until a request names a line. Each line then keeps its values and goes apart.
     - A request that names no line then changes the lower line.

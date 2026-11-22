@@ -279,8 +279,8 @@ The picture uses the `Keyframe` of the volume ([D81](../spec.md#12-decisions-on-
 
 **In vidcut:**
 
-- A Text title and a lower third take keyframes on the position, zoom and rotation of the text. A scroll takes them on the position of its text.
-- The other values of a title's keyframes are those of the picture of its clip, as on a media clip. Opacity is one of them.
+- A Text title and a lower third take keyframes on the position, zoom and rotation of the text: `text_position`, `text_zoom` and `text_rotation`. A scroll takes them on the position of its text.
+- The picture of its clip takes keyframes as on a media clip, with the same names. Opacity is one of them.
 - Each line of a lower third takes its own keyframes on position, zoom and rotation. `upper_position`, `lower_position` and the like in the `keyframes` requests name the line. Opacity is the whole title's.
 - The Title section has the Keyframe button on Across, Zoom and Rotation. Across holds the keyframes of Across and Down. A lower third has these buttons on each line.
 - The right-click menu of the Keyframe button of Across, Zoom and Rotation has the items of the measured menu (`key_buttons`, `eases`). It sends `keyframes.set`.
@@ -312,7 +312,6 @@ The picture uses the `Keyframe` of the volume ([D81](../spec.md#12-decisions-on-
 **To do:**
 
 - keyframes of the shadow and the background
-- the Position, Zoom and Rotation of the Transform of the clip on a title
 
 ## Subtitles
 

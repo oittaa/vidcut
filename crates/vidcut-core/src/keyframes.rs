@@ -1029,13 +1029,6 @@ pub fn drop_channel(
 }
 
 impl Title {
-    pub fn owns(v: PictureValue) -> bool {
-        matches!(
-            v,
-            PictureValue::Position | PictureValue::Zoom | PictureValue::Rotation
-        )
-    }
-
     pub fn takes_keys(&self, v: PictureValue) -> bool {
         match v {
             PictureValue::Position => true,

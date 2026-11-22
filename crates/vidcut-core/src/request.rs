@@ -5175,13 +5175,10 @@ pub enum KeyParam {
     /// The pan of a clip's sound, from -100 to 100.
     Pan,
     /// Position X and Y, one keyframe for both, as fractions of the frame.
-    /// On a lower third: both lines together, or the lower line when the
-    /// lines are apart.
     Position,
     /// Zoom X and Y, one keyframe for both. One number in `value` sets both.
-    /// On a lower third: as `position`.
     Zoom,
-    /// Rotation in degrees. On a lower third: as `position`.
+    /// Rotation in degrees.
     Rotation,
     /// The anchor point X and Y, one keyframe for both, as fractions of
     /// the picture.
@@ -5212,6 +5209,16 @@ pub enum KeyParam {
     /// `keyframes.add` skips a clip that cannot take one at `at`, and
     /// fails only when no clip can.
     Speed,
+    /// The position of a title's text, x and y, one keyframe for both. On a
+    /// lower third: both lines together, or the lower line when the lines
+    /// are apart.
+    TextPosition,
+    /// The zoom of a title's text, one number. On a lower third: as
+    /// `text_position`.
+    TextZoom,
+    /// The rotation of a title's text in degrees. On a lower third: as
+    /// `text_position`.
+    TextRotation,
     /// The position of the upper line of a lower third. The lines go apart.
     UpperPosition,
     /// The zoom of the upper line of a lower third. The lines go apart.
@@ -5240,7 +5247,7 @@ pub enum KeyParam {
 }
 
 impl KeyParam {
-    pub const ALL: [KeyParam; 23] = [
+    pub const ALL: [KeyParam; 26] = [
         KeyParam::Volume,
         KeyParam::Pan,
         KeyParam::Position,
@@ -5256,6 +5263,9 @@ impl KeyParam {
         KeyParam::CropSoftness,
         KeyParam::Opacity,
         KeyParam::Speed,
+        KeyParam::TextPosition,
+        KeyParam::TextZoom,
+        KeyParam::TextRotation,
         KeyParam::UpperPosition,
         KeyParam::UpperZoom,
         KeyParam::UpperRotation,
@@ -5268,26 +5278,42 @@ impl KeyParam {
 
     pub fn on_line(self) -> (KeyParam, Option<LowerThirdLine>) {
         match self {
-            KeyParam::UpperPosition => (KeyParam::Position, Some(LowerThirdLine::Upper)),
-            KeyParam::UpperZoom => (KeyParam::Zoom, Some(LowerThirdLine::Upper)),
-            KeyParam::UpperRotation => (KeyParam::Rotation, Some(LowerThirdLine::Upper)),
-            KeyParam::LowerPosition => (KeyParam::Position, Some(LowerThirdLine::Lower)),
-            KeyParam::LowerZoom => (KeyParam::Zoom, Some(LowerThirdLine::Lower)),
-            KeyParam::LowerRotation => (KeyParam::Rotation, Some(LowerThirdLine::Lower)),
+            KeyParam::UpperPosition => (KeyParam::TextPosition, Some(LowerThirdLine::Upper)),
+            KeyParam::UpperZoom => (KeyParam::TextZoom, Some(LowerThirdLine::Upper)),
+            KeyParam::UpperRotation => (KeyParam::TextRotation, Some(LowerThirdLine::Upper)),
+            KeyParam::LowerPosition => (KeyParam::TextPosition, Some(LowerThirdLine::Lower)),
+            KeyParam::LowerZoom => (KeyParam::TextZoom, Some(LowerThirdLine::Lower)),
+            KeyParam::LowerRotation => (KeyParam::TextRotation, Some(LowerThirdLine::Lower)),
             whole => (whole, None),
         }
     }
 
     pub fn for_line(self, line: LowerThirdLine) -> KeyParam {
         match (self, line) {
-            (KeyParam::Position, LowerThirdLine::Upper) => KeyParam::UpperPosition,
-            (KeyParam::Zoom, LowerThirdLine::Upper) => KeyParam::UpperZoom,
-            (KeyParam::Rotation, LowerThirdLine::Upper) => KeyParam::UpperRotation,
-            (KeyParam::Position, LowerThirdLine::Lower) => KeyParam::LowerPosition,
-            (KeyParam::Zoom, LowerThirdLine::Lower) => KeyParam::LowerZoom,
-            (KeyParam::Rotation, LowerThirdLine::Lower) => KeyParam::LowerRotation,
+            (KeyParam::TextPosition, LowerThirdLine::Upper) => KeyParam::UpperPosition,
+            (KeyParam::TextZoom, LowerThirdLine::Upper) => KeyParam::UpperZoom,
+            (KeyParam::TextRotation, LowerThirdLine::Upper) => KeyParam::UpperRotation,
+            (KeyParam::TextPosition, LowerThirdLine::Lower) => KeyParam::LowerPosition,
+            (KeyParam::TextZoom, LowerThirdLine::Lower) => KeyParam::LowerZoom,
+            (KeyParam::TextRotation, LowerThirdLine::Lower) => KeyParam::LowerRotation,
             (whole, _) => whole,
         }
+    }
+
+    pub fn of_text(v: crate::keyframes::PictureValue) -> Option<KeyParam> {
+        match v {
+            crate::keyframes::PictureValue::Position => Some(KeyParam::TextPosition),
+            crate::keyframes::PictureValue::Zoom => Some(KeyParam::TextZoom),
+            crate::keyframes::PictureValue::Rotation => Some(KeyParam::TextRotation),
+            _ => None,
+        }
+    }
+
+    pub fn on_text(self) -> bool {
+        matches!(
+            self.on_line().0,
+            KeyParam::TextPosition | KeyParam::TextZoom | KeyParam::TextRotation
+        )
     }
 }
 
@@ -5353,11 +5379,11 @@ pub struct CopiedKey {
     /// The Out handle, when the keyframe has one.
     #[serde(rename = "out", default, skip_serializing_if = "Option::is_none")]
     pub out_handle: Option<Handle>,
-    /// On a title's position: the handle toward the keyframe before it, a
+    /// On `text_position`: the handle toward the keyframe before it, a
     /// point in the picture. A paste on a title keeps it as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub in_point: Option<[f64; 2]>,
-    /// On a title's position: the handle toward the keyframe after it, a
+    /// On `text_position`: the handle toward the keyframe after it, a
     /// point in the picture. A paste on a title keeps it as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out_point: Option<[f64; 2]>,

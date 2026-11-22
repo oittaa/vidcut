@@ -17,8 +17,8 @@ use vidcut_core::model::{
     Composition, Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue,
     FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
     GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, Node, Pattern,
-    Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject, Title, Tool, ToolType,
-    TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    Picture, PictureTool, Project, Retime, Sharpen, Speed, Subject, Tool, ToolType, TrackKind,
+    Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -2573,9 +2573,6 @@ fn number(
 fn key_mark(f: Field, p: &Project, at: i64, chosen: &[Chosen]) -> Option<KeyMark> {
     f.channel().filter(|_| chosen.len() == 1).and_then(|v| {
         let c = p.clip(&chosen[0].id)?;
-        if c.title.is_some() && Title::owns(v) {
-            return None;
-        }
         let picture = c.picture.clone().unwrap_or_default();
         Some(mark(c, picture.keys_of(v), at))
     })

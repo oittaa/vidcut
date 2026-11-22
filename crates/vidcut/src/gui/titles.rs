@@ -6,6 +6,7 @@ use vidcut_core::model::{
     Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine,
     TitlePart,
 };
+use vidcut_core::request::KeyParam;
 
 use super::export::Ask;
 use super::inspector::{KeyClick, key_buttons, mark, next_key};
@@ -446,11 +447,10 @@ impl Workspace {
             .keys_of(v)
             .iter()
             .map(|k| c.key_time(k.frame).round() as i64);
-        let param = match line {
-            Some(LowerThirdLine::Upper) => format!("upper_{}", v.name()),
-            Some(LowerThirdLine::Lower) => format!("lower_{}", v.name()),
-            None => v.name().to_string(),
+        let Some(text) = KeyParam::of_text(v) else {
+            return;
         };
+        let param = line.map_or(text, |l| text.for_line(l));
         let mut body = json!({ "clips": [c.id], "param": param, "at": at });
         match click {
             KeyClick::Step(dir) => {

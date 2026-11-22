@@ -527,7 +527,7 @@ Writing:
   - `position_handles`: the `PositionHandles` of the position keys that have any, each with the frame of its key
 - `Title::takes_keys` tells which values take keyframes. A scroll has no zoom or rotation.
 - The `Picture` of the clip places the picture that the text is drawn on ([pictures](#pictures)). Its opacity is the opacity of the title.
-- `Title::owns` tells which values of a picture are those of the text: position, zoom and rotation. In the `keyframes` requests, the other values of a title are those of its clip's `Picture`.
+- `KeyParam::on_text` tells which values of the `keyframes` requests are those of the text: its position, zoom and rotation, and those of each line. The other values are those of the clip's `Picture`, as on every clip.
 - `Title::as_picture` gives a `Picture` with these values, and `Title::take_picture` takes them back. Thus `ops::keyframes` and the sampling use the code of `Picture`.
 - `Title::sampled` gives the title of one frame, without keyframes.
 - The upper line of a lower third can go apart from its lower line:
