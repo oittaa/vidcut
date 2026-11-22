@@ -12,22 +12,15 @@ vidcut has no such control. Its edits use the target track ([D3](../spec.md#12-d
 - By default, the controls are on V1 and A1 (p. 896).
 - A drag moves a control to another track (p. 896). Keys also move and set the controls (p. 897).
 - A click on a control turns it off. The edit then takes only the picture or only the sound (p. 898).
-- Audio Track Creation While Editing makes new audio tracks for a source with more audio tracks than the timeline (p. 896).
+- Edit > Edit Options > Automatically Create Tracks on Edit is on by default. It makes new tracks for a source with more audio tracks than the timeline (p. 896).
+  - With it off, the edit takes only the source tracks that the controls show (p. 896).
 - With Decompose Compound Clips On Edit, a compound clip or a timeline in the source shows one control for each of its tracks (p. 1055).
 
-**Measured in Resolve Studio 21.2** (Edit page, Decompose Compound Clips On Edit on):
-
-- The compound clip holds clips on V1 and V2. The V1 clip has sound.
-
-- The controls V1, V2 and A1 show at the timeline tracks of the same number. With the option off, only V1 and A1 show.
-- A drag of V2 to Video 3 puts the clip of inner V2 on V3.
-- A drop of V2 on the track of V1 swaps the two controls.
-- With V1 off, V1 of the timeline does not change. The sound of the clip on inner V1 still goes on A1.
-- With A1 off, the pictures go in, and A1 of the timeline does not change.
+**Measured:** the controls of a compound clip, in [§8.18](../spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120).
 
 **In the code:**
 
-- `SourceParams::inner_tracks` gives the timeline track of each track inside a compound clip. `null` turns a track off. The CLI, IPC and MCP have it, and the GUI does not.
+- `SourceParams::inner_tracks` gives the timeline track of each track inside a compound clip. `null` turns a track off. On a picture track, it leaves out only the picture. The CLI, IPC and MCP have it, and the GUI does not.
 - A clip on a video track carries its sound (`ClipAudio`). A control that sends the sound to a track apart from the picture needs a sound clip apart from the picture clip.
 
 **To do:**
