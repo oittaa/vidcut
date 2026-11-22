@@ -4449,13 +4449,14 @@ pub enum Request {
         wide: Option<bool>,
     },
     /// Select nodes in the node editor of the color page, by number. The
-    /// palette then shows the last one, or `current`. An empty list selects
-    /// none. Answers what `gui.state` does.
+    /// palette then shows the last one, or `current`. An empty list with no
+    /// `current` selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.grade_nodes")]
     GuiGradeNodes {
         nodes: Vec<u32>,
         /// The current node, when it is not one of `nodes`. The palette
-        /// shows it, and a delete of the selected nodes keeps it.
+        /// shows it, and a delete of the selected nodes keeps it. With an
+        /// empty `nodes`, it is the one selected node.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         current: Option<u32>,
     },

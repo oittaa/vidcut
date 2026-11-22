@@ -458,7 +458,7 @@ The bar and the Jobs button:
   - The key ports and the key links are blue (`MASK_KNOT`). A link knows the outlet that it leaves (`Wire::out`).
   - `EffectsPage::grade_nodes` holds the selection, and `gui.grade_nodes` sets it. The last one is the current node.
   - With `EffectsPage::grade_loose`, the current node is not selected (`EffectsPage::picked_grade`). A drag box that leaves out the current node sets it.
-  - Thus `Graph` takes the selected nodes and the current node apart (`Graph::current`). Delete, Ctrl+D and a drag of the selected nodes leave out a current node that is not selected.
+  - Thus `Graph` takes the selected nodes and the current node apart (`Graph::current`). Delete and a drag of the selected nodes leave out a current node that is not selected. Ctrl+D acts on it too.
   - The current node has an orange outline (`Graph::active`). The Effects page gives the accent color there.
   - In List View, the current row has a red outline (`CURRENT_ROW`). It is the red of the active angle (`ACTIVE_ANGLE`).
   - A Ctrl-click and a drag box add nodes before the current node. Thus the current node stays.

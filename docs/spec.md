@@ -3118,6 +3118,7 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - With more than one selected node, Command-D turns the selected nodes off or on. The current node is always one of them (p. 3392).
   - Option-D turns all nodes off, and then all on. After that, each node is on, also a node that was off before (p. 3392).
   - Measured in Resolve Studio 21.2: Command-D gives each selected node the opposite of the state of the current node.
+  - Measured: when the current node is not selected, Command-D also acts on the current node. Each of these nodes gets the opposite of the state of the current node.
   - Measured: Option-D turns all nodes off when one or more is on, mixers too. Else it turns all of them on.
   - vidcut: Ctrl+D and Alt+D do the same, mixers too.
   - Reset Node Grade in the menu of a node resets that node (Shift-Home).

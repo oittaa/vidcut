@@ -2409,7 +2409,7 @@ impl Workspace {
             self.delete_grade_nodes(&of, &g, &picked);
         }
         if struck(Action::SwitchSelectedNodes) {
-            let picked = self.effects_page.picked_grade().to_vec();
+            let picked = self.effects_page.grade_nodes.clone();
             let label = "Enable/Disable Selected Nodes";
             self.switch_grade_nodes(&of, &g, Some(&picked), label);
         }
