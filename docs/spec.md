@@ -3103,6 +3103,8 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured in Resolve Studio 21.2: Command-D gives each selected node the opposite of the state of the current node.
   - Measured: Option-D turns all nodes off when one or more is on, mixers too. Else it turns all of them on.
   - vidcut: Ctrl+D and Alt+D do the same, mixers too.
+  - vidcut: when the current node is not selected, Ctrl+D gives each selected node the opposite of the last selected node.
+    - Not measured: Command-D in Resolve when the current node is not selected.
   - Reset Node Grade in the menu of a node resets that node (Shift-Home).
   - Reset Grades and Keep Nodes resets each node and keeps the tree (Shift-Command-Home).
   - Reset All Grades and Nodes leaves one node at its defaults (Command-Home). The menu of the empty Node Editor has it.
