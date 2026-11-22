@@ -668,6 +668,11 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - A gain of 0 dB or −12 dB on the Notch band gives the same render.
   - In the same clip, a Hi-Pass band and a Bell band change the sound.
   - vidcut does not copy this fault. A Notch band cuts its frequency, with a fixed width (`NOTCH_Q`, [spec §9](spec.md#9-audio-pp-642-649650-743744-771-773-778779)).
+- **The Gain of a Key Mixer input does not blend between keyframes.**
+  - With keyframes at frames 20 and 40, frames 25, 30 and 35 render as frame 20. Frame 40 has the new Gain.
+  - A grade file with both keyframes written in full gives the same.
+  - In the same grade, the Output Gain of the Key Mixer blends. The Key Input Gain of a corrector also blends.
+  - vidcut does not copy this fault. `KeyMix::blended` blends the Gain and the Offset of each input ([spec §8.21](spec.md#821-color-page-nodes-pp-33853399-34093415)).
 
 ## transcribe.cpp and its models
 
