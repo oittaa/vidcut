@@ -2509,7 +2509,11 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Switching, making or duplicating a timeline closes open compound clips first. Removing an open compound from the Media tab closes it too.
     - A `.vidcut` file saves `compound_path`. Thus reopening resumes inside the open compound clip at its `start_tc`.
     - Exporting while a compound clip is open writes that compound clip with its name and no project data.
-    - Subtitles and a Timeline Color grade inside a compound clip wait in [the gaps](todo/gaps.md).
+    - While a compound clip is open, a request that changes subtitles is refused. A timeline grade is refused there too.
+  - **Subtitles and the timeline grade inside** (measured in Resolve Studio 21.2):
+    - Inside an open compound clip, Add Subtitle Track is dimmed. Add Tracks offers only video and audio tracks.
+    - On the Color page, the Timeline mode of the Node Editor shows an empty graph with no input and no output.
+    - A new node does not go into that graph. A changed value goes to no grade.
 - **Starting Timecode** (pp. 1052–1054; measured in Resolve Studio 21.2):
   - New Compound Clip, Convert In and Out to Compound Clip, and Create Compound Clip accept a Start Timecode.
   - A new compound clip defaults to `00:00:00:00` (`00:00:00;00` on a drop-frame timeline), regardless of clip placement.
@@ -2524,13 +2528,25 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
     - Opening a compound clip uses its own frame rate, drop-frame flag and `start_tc`, regardless of the host timeline.
     - OTIO keeps `source_range` zero-based for interchange and stores non-zero `start_tc` in `metadata.vidcut.start_tc`.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
-  - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
+  - The submenu has Using Clips Only and Preserving Audio Data….
+  - Preserving Audio Data… is for a nested timeline, on the Edit page and on the Fairlight page (pp. 3960–3962).
+    - It keeps the mix automation and the plugin automation of the tracks.
+    - It has three choices for the busses: New Matching Busses, Preserve Existing Paths and Leave Unassigned.
+  - For a compound clip, Preserving Audio Data… is dimmed (measured in Resolve Studio 21.2).
+    - The tests: plain sound, −6 dB on the clip inside, and −6 dB on the compound clip.
+  - vidcut: `edit.decompose` acts as Using Clips Only.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.
   - Thus a compound clip on V2 puts inner V1 on V2 and inner V2 on V3.
   - Cuts stay. A clip that was cut at In comes back as two pieces.
   - A free track is used as it is, and no track is added.
   - Where a clip is in the way, a new track goes in at the target. The clip in the way and all higher tracks move up.
   - This is the same on video tracks and on audio tracks.
+  - The settings of the compound clip itself are dropped (measured in Resolve Studio 21.2):
+    - Transform, Crop, Opacity, Composite, Dynamic Zoom and their keyframes.
+    - Its effects, its grade and its volume.
+  - Each clip keeps its time and its source frames.
+  - A compound clip with a speed change has no Decompose in Place item.
+  - vidcut: `edit.decompose` also breaks up a compound clip with a speed change. The clips inside take that speed.
 - **A transition at an edge of a compound clip** (measured in Resolve Studio 21.2.0):
   - A Cross Dissolve, a wipe, a Push, a Slide and a sound fade at an edge act as on a plain clip.
   - The dissolve uses the frames that a trim hides in the compound clip.
@@ -4267,7 +4283,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Thus a cut goes to Resolve and back with its media linked, and with its audio together with its video.
   - **A file with tracks and no clips.** Resolve Studio 21.1.2 imports it as an empty timeline, with V1, A1 and the start timecode of the file (measured).
     - `project create --from` and `timeline.import` with `new` or `replace` make an empty timeline. It takes the start timecode of the file.
-    - `timeline.import` with `append`, `compound` or `media` refuses such a file. Resolve was not measured for these modes.
+    - `timeline.import` with `append`, `compound` or `media` refuses such a file. Resolve has no such modes for an OTIO file.
+      - An import of an AAF, XML, OTIO or EDL file makes a new timeline (p. 505).
+      - An AAF file can go into the open timeline, with Import AAF to Current Timeline (pp. 513, 521).
+      - An EDL can go to a new track of a timeline, with EDL to New Track (p. 526). An OTIO file cannot.
     - A file whose clips cannot be read also refuses, and the error names them.
   - Mapping: [deviation X9](deviations.md#x9-opentimelineio-interchange), [model](design/model.md#opentimelineio).
   - **A multicam clip in a file of Resolve** (measured in Resolve Studio 21.1.2):
@@ -5370,7 +5389,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip with any keyframes shows a mark on its timeline bar.
     - Flips, the composite mode and Dynamic Zoom have no keyframes.
     - A speed change keeps each keyframe at its frame of the clip, as volume does (D81).
-    - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
     - That picture has the size of the frame, and it is made first. These facts follow (measured in Resolve Studio 21.2.0):
@@ -5413,10 +5431,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A title inside it keeps its own place, zoom and rotation in the frame of the compound clip.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
-    - `edit.decompose` gives the picture of the compound clip to each of its clips that has no picture of its own and fills the frame.
-    - With a Dynamic Zoom, a clip takes the picture only when it spans all of the compound clip.
-    - Thus each of these clips stays where it was in the compound clip, with the same size, crop and zoom.
-    - The other clips do not take the picture. A warning names them.
   - An export fits a placed picture at the size it shows, up to the size of the source. Thus a punch-in keeps the detail of the source.
   - The viewer draws it from the decoded picture with the same sums.
   - Titles keep their own place.
@@ -6083,6 +6097,10 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 
 - A grid of values gives the same picture as the Output LUT of the project.
 - It applies to clips. A gap stays black.
+- It does not apply to a Solid Color generator, a Text title or a Text+ title.
+- On a compound clip, it applies once, to the clip inside. It does not apply again to the compound clip.
+  - A clip inside at Zoom 0.5 gets it. The uncovered part of the compound clip stays black, not `T(0)`.
+- In a timeline with its own settings, the Lookup Tables section of the settings shows a warning. The LUT still applies there.
 - A picture with alpha gives `T(clamp(C / A)) * A`, and each layer gets its own `T` before the mix.
 - The Input LUT of a clip replaces it on that clip.
 - vidcut has no Input LUT of the project yet ([todo](todo/luts.md)).
