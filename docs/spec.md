@@ -2921,11 +2921,21 @@ The Color tab (pp. 2358–2360):
   - Four Corner: Top Left, Top Right, Bottom Left and Bottom Right, one color in each corner.
   - Gradient: the colors of a gradient, from its Start to its End.
 - Each color has Red, Green, Blue and Alpha rows. Usual: (0, 0, 0, 1).
+- The types share three colors. Left, Top and Top Left are one color. Right and Top Right are one color. Bottom and Bottom Left are one color.
+- Horizontal, Vertical and Four Corner blend in straight lines between the edge pixels:
+  - Horizontal: column i of a picture W pixels wide is Left × (1 − u) + Right × u, with u = i / (W − 1). Thus the first column is Left and the last column is Right.
+  - Vertical: the same from the top row to the bottom row, with the height H.
+  - Four Corner: first across, then down.
+  - The reads agree to 5 decimals at 1920 × 1080 and at 3840 × 2160.
 - Gradient Type sets the form of a gradient (p. 2359). Usual: Linear.
-  - Linear: along the straight line from Start to End.
-  - Reflect: the linear gradient, mirrored on each side of Start.
-  - Square, Cross and Radial: squares, a cross or circles about Start.
-  - Angle: a counterclockwise sweep about Start.
+  - The gradient works in pixels. Start and End are at (x × W, y × H). P is the pixel, S is Start and E is End.
+  - Linear: the projection of P − S on E − S, as a part of the length from S to E. Before Start it is below 0.
+  - Reflect: the absolute value of Linear.
+  - Square: the larger of the distances across and up from S to P, divided by the length from S to E.
+  - Cross: the smaller of the two distances, divided by the length from S to E.
+  - Radial: the distance from S to P, divided by the length from S to E.
+  - Angle: the angle of P − S, counterclockwise, in turns. With End to the right of Start, the pixels right of Start are 0 and the pixels above Start are 0.25.
+  - The reads agree with these forms to one pixel. The readout at Fit does not give a finer place.
 - Start and End: usual (0, 0.5) and (1, 0.5). The viewer shows them as two red points with a green line between them (p. 2359).
   - vidcut: the points show for a selected Background with Type Gradient. A drag moves a point.
 - The gradient bar holds the colors of the gradient (p. 2359):
@@ -2933,19 +2943,38 @@ The Color tab (pp. 2358–2360):
   - A click on the bottom of the bar adds a stop.
   - A drag moves a stop. A drag with Ctrl (Command on a Mac) copies it.
   - A drag up past the bar removes a stop.
+  - A click on the bar adds a stop with a color between the colors of its two neighbors.
+  - Between two stops the color blends in a straight line.
 - Interpolation Space sets the colors between the stops (p. 2359): RGB, HLS, HSV or LAB. Usual: RGB.
+  - HLS and HSV turn the hue the shorter way. Thus red to blue goes through magenta.
+  - LAB blends in CIE L\*a\*b\* with the D65 white. The values go to XYZ as linear values with the Rec. 709 primaries, with no gamma.
+  - LAB can give values below 0. Red to blue gives (0.587, −0.018, 0.248) at the middle.
+  - vidcut: not yet ([todo](todo/generator-nodes.md)).
 - Offset moves the gradient along its line (p. 2359). Usual: 0.
+  - The place along the line less Offset gives the color. Thus with Offset 0.25, the place 0.5 shows the color of 0.25.
 - Repeat sets what shows past the start and the end (p. 2360). Usual: Once.
   - Once: the end colors go on.
-  - Repeat: the gradient starts again.
-  - Ping-Pong: the gradient goes back and forth.
+  - Repeat: the gradient starts again. The color comes from the fractional part of the place.
+  - Ping-Pong: the gradient goes back and forth. The place −0.44 shows the color of 0.44.
 - Sub-Pixel sets the samples in each pixel (p. 2360): 1x1, 2x2, 3x3, 4x4 or 5x5. Usual: 1x1.
+  - N x N samples in each pixel are averaged. At a hard edge, 3x3 gives a mix of 1/3 and 2/3, and 5x5 a mix of 2/5 and 3/5.
+  - vidcut: not yet ([todo](todo/generator-nodes.md)).
+
+The Effect Mask:
+
+- The mask scales the color and the alpha alike. Thus an Ellipse with Soft Edge 0.1 keeps the ratio of red to alpha on its edge.
+- Apply Mask Inverted uses 1 − the mask. Multiply by Mask gives the same picture as without it.
 
 The Image tab (pp. 2401–2402):
 
 - Auto Resolution gives the picture the size of the frame format of the composition. Usual: on. The manual calls it Use Frame Format Settings (p. 2401).
   - In the composition of a clip, this size is the size of the clip's own picture, W × H.
 - Width, Height and Pixel Aspect show the size. In a composition of 1920 × 1080, they show 1920, 1080 and (1, 1).
+- Without Auto Resolution, the picture has the size of Width and Height. Its blends use that size.
+  - As the Foreground of a Merge, a picture of 400 × 300 goes pixel for pixel in the middle of a Background of 1920 × 1080.
+  - vidcut: not yet. The picture has the size of the clip's own picture ([todo](todo/generator-nodes.md)).
+- The X field of Pixel Aspect takes a value only without Auto Resolution. With (2, 1), a pixel is two units wide for a Radial gradient.
+  - vidcut: not yet ([todo](todo/generator-nodes.md)).
 - Process Mode: Full Frames, NTSC Fields, PAL/HD Fields, PAL/HD Fields (Reversed) or NTSC Fields (Reversed). Usual: Full Frames.
 - Depth: Default, int8, int16, float16 or float32. Usual: Default.
 

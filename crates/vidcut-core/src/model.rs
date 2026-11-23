@@ -4874,11 +4874,13 @@ pub enum BackgroundFill {
     /// One color, `top_left`.
     #[default]
     SolidColor,
-    /// `top_left` at the left blends into `top_right` at the right.
+    /// `top_left` at the left blends into `top_right` at the right. The
+    /// first column of pixels is `top_left`, the last is `top_right`.
     Horizontal,
-    /// `top_left` at the top blends into `bottom_left` at the bottom.
+    /// `top_left` at the top blends into `bottom_left` at the bottom. The
+    /// top row of pixels is `top_left`, the bottom row is `bottom_left`.
     Vertical,
-    /// The four colors in their corners blend across the picture.
+    /// The four colors in their corner pixels blend across, then down.
     FourCorner,
     /// The `stops` from `start` to `end`, in the form of `gradient_type`.
     Gradient,

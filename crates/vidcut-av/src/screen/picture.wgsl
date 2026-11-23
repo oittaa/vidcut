@@ -1915,7 +1915,7 @@ fn paint_along(at: vec2<f32>) -> f32 {
 
 @fragment
 fn fs_background(in: Out) -> @location(0) vec4<f32> {
-    let uv = in.position.xy / painting.more.yz;
+    let uv = floor(in.position.xy) / max(painting.more.yz - 1.0, vec2<f32>(1.0));
     let c = painting.corners;
     var color = c[0];
     switch i32(painting.how.x) {
