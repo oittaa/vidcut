@@ -4076,19 +4076,15 @@ fn alone(p: &Project, clip: &str, cut: Option<&str>) -> Result<RenderPlan> {
         .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
         .clone();
     let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
-    let input = match cut {
-        None => None,
-        Some(node) => {
-            let n = comp.and_then(|k| k.node(node));
-            let n = n.ok_or_else(|| Error::not_found(format!("{clip} has no node {node}")))?;
-            let input = n.input.clone().ok_or_else(|| {
-                Error::invalid(format!(
-                    "{node} of {clip} has no input: a track follows the picture that comes in"
-                ))
-            })?;
-            Some(input)
+    if let Some(node) = cut {
+        let n = comp.and_then(|k| k.node(node));
+        let n = n.ok_or_else(|| Error::not_found(format!("{clip} has no node {node}")))?;
+        if n.input.is_none() {
+            return Err(Error::invalid(format!(
+                "{node} of {clip} has no input: a track follows the picture that comes in"
+            )));
         }
-    };
+    }
     let frames = crate::composition::Frames::of(p, &c);
     let clock = &frames.clock;
     let mut alone = p.clone();
@@ -4134,8 +4130,8 @@ fn alone(p: &Project, clip: &str, cut: Option<&str>) -> Result<RenderPlan> {
                 .take()
                 .and_then(|p| p.composition)
                 .map(|mut composition| {
-                    if let Some(input) = &input {
-                        composition.cut_at(input);
+                    if let Some(node) = cut {
+                        composition.seen_by(node);
                     }
                     Picture {
                         composition: Some(composition),

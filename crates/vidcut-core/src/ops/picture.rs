@@ -553,6 +553,13 @@ pub fn node_checked(n: &Node) -> Result<Node> {
 
 fn plain_node_checked(n: &Node) -> Result<Node> {
     within(n.blend, (0.0, 1.0), "a node's blend is from 0 to 1")?;
+    if n.multiply_by_mask && !n.tool.multiplies() {
+        return Err(Error::invalid(format!(
+            "{} ({}) has no multiply_by_mask: only a tool takes it",
+            n.name,
+            n.tool.label()
+        )));
+    }
     if !n.place.iter().all(|v| v.is_finite()) {
         return Err(Error::invalid("a node's place is two finite numbers"));
     }

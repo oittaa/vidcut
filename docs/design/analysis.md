@@ -172,7 +172,10 @@ flowchart TD
   - Without a box of its path there, it is the own box of the pattern (`Pattern::own`).
   - The frames of a track are frames of the file (`Frames::file`), from the In to the Out of the clip.
   - A `length` keeps the track within that many frames of the composition on each side (`Start::reach`).
-- `render::node_input` gives the picture that the track reads: the composition up to the input of the Tracker (`Composition::cut_at`).
+- `render::node_input` gives the picture that the track reads: the composition up to the Tracker (`Composition::seen_by`).
+  - The Tracker in it passes its input on, with `multiply_by_mask` on. Thus the picture is clear outside the masks on its effect mask.
+  - Why: a mask on the effect mask of a Tracker limits the tracking to the inside of the mask ([spec](../spec.md#the-tracker)).
+  - It keeps only the paths that a node follows (`Composition::hold`). Why: a new path of the Tracker then does not change the plan, and a track of the same frames comes from the disk cache.
   - The plan has one frame for each frame of the file, at the rate of the file.
   - Why: the Tracker of the spec tracks the picture on its input, on each frame of the file.
 - `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:

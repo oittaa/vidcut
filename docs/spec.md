@@ -2669,6 +2669,7 @@ This section follows the Fusion page. The facts without a page are measured in R
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
+  - Multiply by Mask: off. On, the picture that the tool gives is multiplied by its masks. Outside them, the picture is clear (p. 2131).
   - A mask on the effect mask input of a mask adds the two: a + b − a × b. This is the Merge paint mode.
 - Names: the tool's name and the first free number, as `Blur1`, `GaussianBlur1`, `Ellipse1`, `Polygon1`.
 
@@ -2923,6 +2924,8 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
 - The Tracker has these inputs (pp. 2839–2840):
   - Background: the picture to track.
   - Effect Mask: a mask on it limits the tracking to the inside of the mask.
+    - vidcut: the track reads the picture on the Background input, multiplied by the masks. Outside them, the picture is clear.
+    - vidcut: the mask does not change what Find finds.
   - vidcut: the Foreground input is not built yet ([todo](todo/motion-tracking.md)).
 - A new Tracker has one pattern (p. 1783).
   - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).

@@ -502,6 +502,10 @@ impl Tool {
         matches!(self, Tool::MediaIn | Tool::MediaOut)
     }
 
+    pub fn multiplies(&self) -> bool {
+        !self.is_mask() && !self.is_media()
+    }
+
     pub fn flows(&self) -> bool {
         self.gives_picture() && self.takes(NodeInput::Input)
     }
@@ -607,6 +611,7 @@ impl Node {
             pass_through: false,
             blend: None,
             blur_alpha: true,
+            multiply_by_mask: false,
             place,
             keys: Vec::new(),
             connect: None,
@@ -819,9 +824,9 @@ impl Composition {
             .unwrap_or_default()
     }
 
-    pub fn cut_at(&mut self, input: &str) {
+    pub fn cut_at(&mut self, node: &str) {
         let mut kept: HashSet<String> = HashSet::new();
-        let mut next = vec![input.to_string()];
+        let mut next = vec![node.to_string()];
         while let Some(name) = next.pop() {
             let Some(n) = self.node(&name) else {
                 continue;
@@ -840,7 +845,16 @@ impl Composition {
         self.nodes
             .retain(|n| n.tool == Tool::MediaOut || kept.contains(&n.name));
         if let Some(out) = self.nodes.iter_mut().find(|n| n.tool == Tool::MediaOut) {
-            out.input = Some(input.to_string());
+            out.input = Some(node.to_string());
+        }
+    }
+
+    pub fn seen_by(&mut self, tracker: &str) {
+        self.cut_at(tracker);
+        self.hold(None);
+        if let Some(i) = self.index(tracker) {
+            self.nodes[i].pass_through = false;
+            self.nodes[i].multiply_by_mask = true;
         }
     }
 

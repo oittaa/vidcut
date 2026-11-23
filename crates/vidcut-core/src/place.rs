@@ -1031,6 +1031,10 @@ impl Registers {
         self.left[r] += uses;
     }
 
+    fn idle(&self, r: usize) -> bool {
+        self.left[r] == 0
+    }
+
     fn read(&mut self, r: usize) -> bool {
         self.left[r] = self.left[r].saturating_sub(1);
         self.left[r] == 0
@@ -1080,7 +1084,7 @@ fn masked(
         to: out,
     });
     regs.freed(clear, true);
-    regs.freed(made, true);
+    regs.freed(made, regs.idle(made));
     out
 }
 
@@ -1199,6 +1203,12 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                     to
                 }
             }),
+        };
+        let result = match result {
+            Some(r) if n.multiply_by_mask && n.tool.multiplies() && !n.pass_through => {
+                Some(masked(&mut stages, &mut regs, r, (masks(n), 1.0), (w, h)))
+            }
+            other => other,
         };
         if let Some(r) = result {
             regs.hold(r, uses[i]);

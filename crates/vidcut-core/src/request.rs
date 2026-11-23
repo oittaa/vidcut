@@ -6178,6 +6178,10 @@ pub struct NodeChange {
     /// How much of a `blur`, an `effect` or a `merge` shows, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<f64>,
+    /// On, the picture of a tool is multiplied by the masks on its effect
+    /// mask: outside them, it is clear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multiply_by_mask: Option<bool>,
     /// Its place in the node editor, `[x, y]` in node widths and heights.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub place: Option<[f64; 2]>,

@@ -4651,6 +4651,11 @@ pub struct Node {
     /// Off, a Gaussian Blur `effect` does not blur the alpha. Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub blur_alpha: bool,
+    /// On, the picture that a tool gives is multiplied by the masks on its
+    /// effect mask. Outside them, it is clear. A mask, `media_in` and
+    /// `media_out` do not take it. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multiply_by_mask: bool,
     /// Its place in the node editor, `[x, y]` in node widths across and
     /// node heights down.
     pub place: [f64; 2],
