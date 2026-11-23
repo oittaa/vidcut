@@ -1004,6 +1004,7 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - `Composition::picture_order` gives the nodes that feed the MediaOut node, each before the nodes that take its picture. It also counts the nodes that take each picture.
   - A node that passes its picture on (a Tracker, a tool with `pass_through`, a tool with no work) gives the register of its input. A tool works in place on the register of its input when no later node reads that register. Else it writes a free register.
   - A Merge reads two registers and writes a free register. A register goes back to the free list after its last read (`Registers::freed`).
+  - The masks of a node that makes its own picture, as the MediaIn node, go through `place::masked`: an `Op::Clear` and an `Op::Merge`. The Merge puts the picture over the clear register, with the masks.
   - A node gives no picture when its picture input has none (`Tool::gives_from`). When the MediaOut node gets no picture, or the joins make a loop, the program is one `Op::Clear`. The clip then shows nothing, and `RenderPlan::broken_composition` stops an export (`Composition::shows`).
   - It works in the pixels of the picture, upright. A size in the composition follows these pixels, not the frame.
 - `Working::of_blur` gives the work of a Blur tool:

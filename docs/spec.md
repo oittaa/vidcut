@@ -2658,6 +2658,10 @@ This section follows the Fusion page. The facts without a page are measured in R
 - The picture goes from the MediaIn node, through the tools that each input joins, to the MediaOut node.
   - Without a MediaOut node, or with nothing on its input, the clip shows nothing.
   - Measured: Resolve then stops a render with "The Fusion composition at 01:00:00:00 could not be processed successfully". An export of vidcut also stops with an error.
+- The MediaIn node has one effect mask input and one output (p. 1341).
+  - A mask on its effect mask input makes an alpha channel. The picture stays inside the mask, and the outside is clear (p. 1341).
+- The MediaOut node has one picture input (p. 2420).
+  - Measured: it also has an output. A node can take its picture, but the clip shows only what reaches the MediaOut node.
 - Tools:
   - Blur: the Blur tool of the Fusion page (pp. 2108–2111). See below.
   - Tracker: it follows patterns in the picture, and passes its input on as it is (pp. 1783–1789). See [The Tracker](#the-tracker).
