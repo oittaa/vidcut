@@ -571,7 +571,6 @@ pub struct TitlePicture {
 
 #[derive(Clone)]
 pub struct TitleOver {
-    pub above: usize,
     pub picture: Arc<TitlePicture>,
     pub dx: i32,
     pub dy: i32,
@@ -579,10 +578,6 @@ pub struct TitleOver {
     pub alpha: f32,
     pub placed: Vec<vidcut_core::render::Placed>,
     pub nth: usize,
-}
-
-impl TitleOver {
-    pub const SUBTITLES: usize = usize::MAX;
 }
 
 #[cfg(test)]

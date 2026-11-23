@@ -48,7 +48,6 @@ pub struct Gpu {
     screen_drawing: Drawing,
     wide_drawing: Drawing,
     adding: wgpu::RenderPipeline,
-    lettering_adding: wgpu::RenderPipeline,
     placed_mode: wgpu::RenderPipeline,
     matte_first: wgpu::RenderPipeline,
     matte_more: wgpu::RenderPipeline,
@@ -552,13 +551,6 @@ impl Gpu {
         };
         let lettering = lettering_in(TARGET, over);
         let lettering_wide = lettering_in(MIXING, over);
-        let lettering_adding = lettering_in(
-            MIXING,
-            wgpu::BlendState {
-                color: add(wgpu::BlendFactor::One),
-                alpha: add(wgpu::BlendFactor::One),
-            },
-        );
         let moving_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut move"),
             entries: &[
@@ -676,7 +668,6 @@ impl Gpu {
             screen_drawing,
             wide_drawing,
             adding,
-            lettering_adding,
             placed_mode,
             matte_first,
             matte_more,
@@ -1326,7 +1317,6 @@ fn resolved_mix_modes(mix: &Mix, binds: &[Bound]) -> (Vec<u32>, bool) {
         .iter()
         .map(|p| match p {
             MixPart::Layer(i) => binds[*i].3,
-            MixPart::Title(_) => 0,
             MixPart::Mix(inner) => inner.placing.mode.code(),
         })
         .collect();
@@ -1400,8 +1390,6 @@ fn draw_matte_fg(
 enum TopItem {
     Layer(usize),
     Mix(usize),
-    FreeTitle(usize),
-    MixedTitle(usize),
 }
 
 struct MixDraw<'a, 'm> {
@@ -1413,8 +1401,6 @@ struct MixDraw<'a, 'm> {
     adj_shot: Option<&'a (String, blur::Texture)>,
     below: Option<&'a Below>,
     mattes: &'a [[Below; 2]],
-    letters: &'a [Letters],
-    titles: &'a [TitleOver],
     size: (u32, u32),
     moves: &'a mut std::slice::Iter<'m, Moves>,
     colors: Option<Hdr>,
@@ -1499,7 +1485,6 @@ impl<'a> MixDraw<'a, '_> {
                 self.mix(encoder, inner, depth + 1, base);
                 self.finished(encoder, inner, depth + 1, IN_MIX)
             }
-            MixPart::Title(_) => unreachable!("titles never appear inside a mask run"),
         }
     }
 
@@ -1524,15 +1509,6 @@ impl<'a> MixDraw<'a, '_> {
                         let mode = self.binds[*i].3;
                         let bind = self.layer_bind(encoder, base, *i, (mode, IN_MIX));
                         self.lay(encoder, depth, &bind, (mode, true));
-                    }
-                    MixPart::Title(j) => {
-                        let mut pass = begin(encoder, canvas, None);
-                        lettered_over(
-                            &mut pass,
-                            &self.gpu.lettering_adding,
-                            self.letters,
-                            &self.titles[*j],
-                        );
                     }
                     MixPart::Mix(inner) => {
                         self.mix(encoder, inner, depth + 1, base);
@@ -1569,15 +1545,6 @@ impl<'a> MixDraw<'a, '_> {
                 MixPart::Layer(i) => {
                     let bind = self.layer_bind(encoder, src, *i, (mode, IN_MIX));
                     self.lay(encoder, depth, &bind, (mode, false));
-                }
-                MixPart::Title(j) => {
-                    let mut pass = begin(encoder, canvas, None);
-                    lettered_over(
-                        &mut pass,
-                        &self.gpu.lettering_wide,
-                        self.letters,
-                        &self.titles[*j],
-                    );
                 }
                 MixPart::Mix(inner) => {
                     self.mix(encoder, inner, depth + 1, src);
@@ -1792,8 +1759,7 @@ fn numbered(titles: &[TitleOver]) -> Vec<TitleOver> {
 fn same_titles(a: &[TitleOver], b: &[TitleOver]) -> bool {
     a.len() == b.len()
         && a.iter().zip(b).all(|(x, y)| {
-            x.above == y.above
-                && x.dx == y.dx
+            x.dx == y.dx
                 && x.dy == y.dy
                 && x.turn == y.turn
                 && x.alpha == y.alpha
@@ -2008,10 +1974,6 @@ impl Screen {
         let graded = (self.timeline_grade.as_ref())
             .filter(|_| n > 0)
             .and_then(|g| Working::graded(g, frame_back(frame)));
-        let (mixed, late): (Vec<TitleOver>, Vec<TitleOver>) = titles
-            .iter()
-            .cloned()
-            .partition(|t| t.above != TitleOver::SUBTITLES);
         let nests = match layers
             .iter()
             .enumerate()
@@ -2031,11 +1993,7 @@ impl Screen {
                         (chain, extent)
                     })
                     .collect();
-                let over: Vec<(usize, &[Placed])> = mixed
-                    .iter()
-                    .map(|t| (t.above, t.placed.as_slice()))
-                    .collect();
-                Mixes::of(&chains, &over, frame)
+                Mixes::of(&chains, frame)
             }
         };
         let exported = self.exported;
@@ -2139,35 +2097,19 @@ impl Screen {
                 l.place(gpu, size, t, colors);
             }
         }
-        let free: std::borrow::Cow<'_, [TitleOver]> = match nests.outer.is_empty() {
-            true => mixed.as_slice().into(),
-            false => mixed
-                .iter()
-                .enumerate()
-                .filter(|(j, _)| !nests.title_in_mix(*j) && nests.follows[*j].is_none())
-                .map(|(_, t)| t.clone())
-                .collect::<Vec<_>>()
-                .into(),
-        };
         self.moves.retain(|m| m.size == size);
         while self.moves.len() < nests.moved {
             self.moves.push(Moves::new(gpu, size));
         }
         let mut moves = self.moves.iter();
-        let mut items = Vec::with_capacity(n + mixed.len());
-        let mut item_modes = Vec::with_capacity(n + mixed.len());
+        let mut items = Vec::with_capacity(n);
+        let mut item_modes = Vec::with_capacity(n);
         let mut i = 0;
         let mut next_mix = 0;
         loop {
             while let Some(outer) = nests.outer.get(next_mix).filter(|m| m.layers.0 <= i) {
                 items.push(TopItem::Mix(next_mix));
                 item_modes.push(outer.mix.placing.mode.code());
-                for (j, follows) in nests.follows.iter().enumerate() {
-                    if *follows == Some(next_mix) {
-                        items.push(TopItem::MixedTitle(j));
-                        item_modes.push(0);
-                    }
-                }
                 i = i.max(outer.layers.1);
                 next_mix += 1;
             }
@@ -2176,13 +2118,6 @@ impl Screen {
             }
             items.push(TopItem::Layer(i));
             item_modes.push(binds[i].3);
-            let after = i + 1;
-            for (j, t) in free.iter().enumerate() {
-                if t.above == after || (after == n && t.above > after) {
-                    items.push(TopItem::FreeTitle(j));
-                    item_modes.push(0);
-                }
-            }
             i += 1;
         }
         let has_top_matte = resolve_modes(&mut item_modes);
@@ -2355,8 +2290,6 @@ impl Screen {
                             adj_shot,
                             below: self.below.as_ref(),
                             mattes: mix_mattes,
-                            letters: &self.letters,
-                            titles: &mixed,
                             size,
                             moves: &mut moves,
                             colors,
@@ -2364,9 +2297,6 @@ impl Screen {
                         };
                         mixing.mix(encoder, &outer.mix, 0, canvas_texture);
                         mixing.finished(encoder, &outer.mix, 0, OVER_ALL)
-                    }
-                    TopItem::FreeTitle(_) | TopItem::MixedTitle(_) => {
-                        unreachable!("titles never appear inside a mask run")
                     }
                 };
                 for k in idx..fg {
@@ -2392,8 +2322,6 @@ impl Screen {
                     adj_shot: self.adj_shot.as_ref(),
                     below: self.below.as_ref(),
                     mattes: mix_mattes,
-                    letters: &self.letters,
-                    titles: &mixed,
                     size,
                     moves: &mut moves,
                     colors,
@@ -2479,12 +2407,6 @@ impl Screen {
                         pass.set_bind_group(0, bind, &[]);
                         pass.draw(0..3, 0..1);
                     }
-                    TopItem::FreeTitle(ti) => {
-                        lettered_over(&mut pass, lettering, &self.letters, &free[ti]);
-                    }
-                    TopItem::MixedTitle(ti) => {
-                        lettered_over(&mut pass, lettering, &self.letters, &mixed[ti]);
-                    }
                     TopItem::Mix(_) => unreachable!(),
                 }
                 idx += 1;
@@ -2524,9 +2446,9 @@ impl Screen {
             let works = std::slice::from_ref(work);
             self.blurred.composed(gpu, &canvas, works, &mut encoder);
         }
-        if n > 0 && !late.is_empty() {
+        if n > 0 && !titles.is_empty() {
             let mut pass = begin(&mut encoder, canvas, None);
-            for t in &late {
+            for t in titles {
                 lettered_over(&mut pass, lettering, &self.letters, t);
             }
         }
@@ -4669,7 +4591,6 @@ mod tests {
 
     fn over(picture: &Arc<TitlePicture>) -> TitleOver {
         TitleOver {
-            above: 0,
             picture: picture.clone(),
             dx: 0,
             dy: 0,
