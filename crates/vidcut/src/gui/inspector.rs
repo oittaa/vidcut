@@ -17,7 +17,7 @@ use vidcut_core::model::{
     EffectType, EffectValue, FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow,
     GlowAlpha, GlowFraming, GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe,
     MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project, Retime,
-    Sharpen, Speed, Subject, Tool, ToolType, TrackKind, Upscaler, Vignette, VignetteMode,
+    Sharpen, Speed, Subject, TextPlus, Tool, ToolType, TrackKind, Upscaler, Vignette, VignetteMode,
     VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
@@ -37,6 +37,7 @@ use crate::live::PlayerId;
 
 const SAME: f64 = 1e-9;
 const FIELD_WIDTH: f32 = 76.0;
+const TEXT_SIZE_SPEED: f64 = 0.0005;
 const NAME_WIDTH: f32 = 140.0;
 const BLUR_SIZE: [f64; 2] = [1.3, 1.3];
 const BETTER_SIDE: u32 = 1920;
@@ -1187,8 +1188,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.usual(),
             Key::Effect(_, k) => k.dial().usual,
-            Key::Node(_, v, _) => node_usual(v),
-            Key::Center(_) | Key::Volume | Key::Pan => 0.0,
+            Key::Node(..) | Key::Center(_) | Key::Volume | Key::Pan => 0.0,
             Key::Speed => 100.0,
             Key::Rate | Key::Length => 0.0,
         }
@@ -1217,21 +1217,22 @@ fn node_speed(v: EffectValue) -> f64 {
         EffectValue::Blend
         | EffectValue::SubtractiveAdditive
         | EffectValue::AlphaGain
-        | EffectValue::BurnIn => 0.005,
+        | EffectValue::BurnIn
+        | EffectValue::Opacity
+        | EffectValue::ColorRed
+        | EffectValue::ColorGreen
+        | EffectValue::ColorBlue
+        | EffectValue::Tracking
+        | EffectValue::LineSpacing
+        | EffectValue::LayoutSize => 0.005,
         _ => 0.002,
     }
 }
 
-fn node_usual(v: EffectValue) -> f64 {
-    match v {
-        EffectValue::Size
-        | EffectValue::YSize
-        | EffectValue::Level
-        | EffectValue::Blend
-        | EffectValue::SubtractiveAdditive
-        | EffectValue::AlphaGain => 1.0,
-        EffectValue::Width | EffectValue::Height | EffectValue::Center => 0.5,
-        _ => 0.0,
+fn row_speed(tool: &Tool, v: EffectValue) -> Option<f64> {
+    match (tool, v) {
+        (Tool::TextPlus(_), EffectValue::Size) => Some(TEXT_SIZE_SPEED),
+        _ => None,
     }
 }
 
@@ -1273,35 +1274,34 @@ fn node_value(
         return None;
     };
     let keys = i.mark_of(slot, v);
-    if !v.pair() {
-        let f = Key::Node(k, v, 0);
-        let set = point[0] != f.usual();
-        let r = sensed_label(ui, text, set);
-        field_rest(
-            ui,
-            f,
-            i,
-            (set, point[0], lo..=hi),
-            Look::default(),
-            keys,
-            acts,
-        );
-        return Some(r);
-    }
-    let fields = [Key::Node(k, v, 0), Key::Node(k, v, 1)];
-    let usual = fields.map(Key::usual);
-    let set = point != usual;
+    let usual = n.usual_point(v).unwrap_or(point);
+    let fields = match v.pair() {
+        true => vec![Key::Node(k, v, 0), Key::Node(k, v, 1)],
+        false => vec![Key::Node(k, v, 0)],
+    };
+    let set = match v.pair() {
+        true => point != usual,
+        false => point[0] != usual[0],
+    };
+    let look = Look {
+        speed: row_speed(&n.tool, v),
+        ..Look::default()
+    };
     let r = sensed_label(ui, text, set);
     ui.horizontal(|ui| {
-        for (f, now) in fields.into_iter().zip(point) {
-            drag(ui, f, i, (now, lo..=hi), &Look::default(), acts);
+        for (f, now) in fields.iter().zip(point) {
+            drag(ui, *f, i, (now, lo..=hi), &look, acts);
         }
         if let Some(keys) = keys {
             key_acts(ui, fields[0], &keys, acts);
         }
     });
     if reset(ui, set) {
-        acts.push(node_set(slot, &v.name(), json!(usual)));
+        let to = match v.pair() {
+            true => json!(usual),
+            false => json!(usual[0]),
+        };
+        acts.push(node_set(slot, &v.name(), to));
     }
     ui.end_row();
     Some(r)
@@ -1440,6 +1440,80 @@ fn connect_menu(ui: &mut egui::Ui, now: Option<&Connect>, trackers: &[Hooked]) -
     put
 }
 
+fn text_row(ui: &mut egui::Ui, (slot, name): (usize, &str), now: &str, acts: &mut Vec<Act>) {
+    label(ui, "Styled Text", !now.is_empty());
+    let id = ui.make_persistent_id(("inspector-styled-text", slot, name));
+    let typed = ui.data_mut(|d| d.get_temp::<String>(id));
+    let mut text = typed.unwrap_or_else(|| now.to_string());
+    let field = ui.add(
+        egui::TextEdit::multiline(&mut text)
+            .desired_rows(3)
+            .desired_width(NAME_WIDTH),
+    );
+    if field.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text.clone()));
+    } else {
+        ui.data_mut(|d| d.remove::<String>(id));
+    }
+    if field.lost_focus() && text != now {
+        acts.push(node_set(slot, "text", json!(text)));
+    }
+    if reset(ui, !now.is_empty()) {
+        acts.push(node_set(slot, "text", json!("")));
+    }
+    ui.end_row();
+}
+
+fn font_row(ui: &mut egui::Ui, slot: usize, t: &TextPlus, acts: &mut Vec<Act>) {
+    let shown = (t.font.clone())
+        .or_else(vidcut_av::burn::usual_family)
+        .unwrap_or_default();
+    label(ui, "Font", t.font.is_some());
+    egui::ComboBox::from_id_salt(("inspector-text-font", slot))
+        .selected_text(&shown)
+        .show_ui(ui, |ui| {
+            for name in vidcut_av::burn::families() {
+                if ui.selectable_label(name == shown, &name).clicked() && name != shown {
+                    acts.push(node_set(slot, "font", json!(name)));
+                }
+            }
+        });
+    if reset(ui, t.font.is_some()) {
+        acts.push(node_set(slot, "font", json!("")));
+    }
+    ui.end_row();
+}
+
+fn style_row(ui: &mut egui::Ui, slot: usize, t: &TextPlus, acts: &mut Vec<Act>) {
+    let shown = t.face();
+    label(ui, "Style", t.style.is_some());
+    egui::ComboBox::from_id_salt(("inspector-text-style", slot))
+        .selected_text(shown)
+        .show_ui(ui, |ui| {
+            for name in vidcut_av::burn::styles(t.font.as_deref()) {
+                if ui.selectable_label(name == shown, &name).clicked() && name != shown {
+                    acts.push(node_set(slot, "style", json!(name)));
+                }
+            }
+        });
+    if reset(ui, t.style.is_some()) {
+        acts.push(node_set(slot, "style", json!("")));
+    }
+    ui.end_row();
+}
+
+fn ink_row(ui: &mut egui::Ui, slot: usize, t: &TextPlus, acts: &mut Vec<Act>) {
+    label(ui, "Color", t.color.is_some());
+    let mut rgb = t.ink().map(|c| c as f32);
+    if ui.color_edit_button_rgb(&mut rgb).changed() {
+        acts.push(node_set(slot, "color", json!(rgb.map(f64::from))));
+    }
+    if reset(ui, t.color.is_some()) {
+        acts.push(node_set(slot, "color", json!([1.0, 1.0, 1.0])));
+    }
+    ui.end_row();
+}
+
 fn center_row(
     ui: &mut egui::Ui,
     i: &Inspector,
@@ -1543,6 +1617,22 @@ fn node_rows(
                 );
             }
             knob(ui, i, (slot, Knob::Blend), &e, acts);
+        }
+        Tool::TextPlus(t) => {
+            text_row(ui, (slot, &n.name), &t.text, acts);
+            font_row(ui, slot, t, acts);
+            style_row(ui, slot, t, acts);
+            ink_row(ui, slot, t, acts);
+            value(ui, acts, V::Size, "Size");
+            value(ui, acts, V::Tracking, "Tracking");
+            value(ui, acts, V::LineSpacing, "Line Spacing");
+            value(ui, acts, V::VerticalAnchor, "V Anchor");
+            value(ui, acts, V::HorizontalAnchor, "H Anchor");
+            center_row(ui, i, (slot, n), trackers, acts);
+            value(ui, acts, V::LayoutSize, "Layout Size");
+            value(ui, acts, V::Angle, "Angle");
+            value(ui, acts, V::Opacity, "Opacity");
+            value(ui, acts, V::Blend, "Blend");
         }
         Tool::Merge(m) => {
             center_row(ui, i, (slot, n), trackers, acts);
@@ -2320,6 +2410,7 @@ struct Retimed {
 
 #[derive(Debug, Clone, Copy, Default)]
 struct Look<'a> {
+    speed: Option<f64>,
     off: bool,
     why: Option<&'static str>,
     timecode: Option<(&'a Project, i64)>,
@@ -2805,7 +2896,7 @@ fn drag(
                 .update_while_editing(false)
                 .clamp_existing_to_range(false)
                 .range(range)
-                .speed(f.speed())
+                .speed(look.speed.unwrap_or_else(|| f.speed()))
                 .min_decimals(fewest)
                 .max_decimals(most)
                 .prefix(f.prefix())
@@ -4095,7 +4186,7 @@ fn speed_section(
                 (!frozen && !ripple).then_some("Needs Ripple Timeline")
             },
             timecode: Some((p, dropped)),
-            dead_reset: false,
+            ..Look::default()
         };
         field(
             ui,

@@ -51,9 +51,10 @@ const TOOLS: f32 = 30.0;
 const TRANSPORT: f32 = 36.0;
 const SETTLE: f64 = 2.0;
 const SCREEN: usize = 0;
-const LIBRARY: [(&str, &[ToolType]); 5] = [
+const LIBRARY: [(&str, &[ToolType]); 6] = [
     ("Tools", &[ToolType::Blur]),
     ("Composite", &[ToolType::Merge]),
+    ("Generators", &[ToolType::TextPlus]),
     (
         "Masks",
         &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
@@ -72,7 +73,7 @@ const LIBRARY: [(&str, &[ToolType]); 5] = [
     ),
 ];
 const TOOL_ROW: [&[ToolType]; 2] = [
-    &[ToolType::Merge, ToolType::Blur],
+    &[ToolType::TextPlus, ToolType::Merge, ToolType::Blur],
     &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
 ];
 

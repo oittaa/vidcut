@@ -3,7 +3,7 @@ use crate::model::{
     ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode,
     Composition, Effect, EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha,
     GlowFraming, GlowOutput, Mask, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    Pattern, Picture, Sharpen, Tool, Vignette, VignetteMode, VignetteShape,
+    Pattern, Picture, Sharpen, TextPlus, Tool, Vignette, VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -922,6 +922,7 @@ pub enum Op {
     Clear,
     Work(Working),
     Merge(Merging),
+    Text(TextPlus),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1159,6 +1160,23 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
             Tool::MediaOut => {
                 out = first;
                 None
+            }
+            Tool::TextPlus(_) if n.pass_through => None,
+            Tool::TextPlus(t) => {
+                let to = regs.taken();
+                stages.push(Stage {
+                    op: Op::Text(t.clone()),
+                    from: Vec::new(),
+                    to,
+                });
+                let shaped = masks(n);
+                Some(masked(
+                    &mut stages,
+                    &mut regs,
+                    to,
+                    (shaped, n.mixed()),
+                    (w, h),
+                ))
             }
             t if !t.gives_from(&gives) => None,
             Tool::Merge(m) => first.map(|b| match came.get(1).copied().flatten() {

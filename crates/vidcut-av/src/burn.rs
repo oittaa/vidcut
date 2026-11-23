@@ -14,6 +14,10 @@ use vidcut_core::rich::Shift;
 use vidcut_core::slate::Coverage;
 use vidcut_core::subtitles::{Piece, Shown, rgb};
 
+mod text_plus;
+
+pub use text_plus::{Inked, Lettering, inked, styles};
+
 const CHORD_LIMIT: f32 = 1.0 / 6.0;
 const CHORD_SHORTEST: f32 = 1.0 / 256.0;
 const FAMILIES: &[&str] = &[

@@ -6,7 +6,7 @@ use crate::keyframes::{
 };
 use crate::model::{
     Blur, Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FilmGrain, GaussianBlur, Glow,
-    Keyframe, Mask, Merge, MosaicBlur, Node, Sharpen, Tool, Vignette,
+    Keyframe, Mask, Merge, MosaicBlur, Node, Sharpen, TextPlus, Tool, Vignette,
 };
 
 type Range = (f64, f64);
@@ -248,7 +248,7 @@ fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
 }
 
 impl EffectValue {
-    pub const ALL: [EffectValue; 86] = [
+    pub const ALL: [EffectValue; 91] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -335,6 +335,11 @@ impl EffectValue {
         EffectValue::SubtractiveAdditive,
         EffectValue::AlphaGain,
         EffectValue::BurnIn,
+        EffectValue::Tracking,
+        EffectValue::LineSpacing,
+        EffectValue::LayoutSize,
+        EffectValue::VerticalAnchor,
+        EffectValue::HorizontalAnchor,
     ];
 
     pub fn name(self) -> String {
@@ -691,11 +696,30 @@ fn merge_slot(m: &mut Merge, value: EffectValue) -> Slot<'_> {
     })
 }
 
+fn text_slot(t: &mut TextPlus, value: EffectValue) -> Slot<'_> {
+    use EffectValue as V;
+    Some(match value {
+        V::Size => (t.size.get_or_insert(TextPlus::SIZE), Mask::SIZES),
+        V::ColorRed => (&mut t.color.get_or_insert([1.0; 3])[0], TextPlus::COLORS),
+        V::ColorGreen => (&mut t.color.get_or_insert([1.0; 3])[1], TextPlus::COLORS),
+        V::ColorBlue => (&mut t.color.get_or_insert([1.0; 3])[2], TextPlus::COLORS),
+        V::Opacity => (t.opacity.get_or_insert(1.0), TextPlus::OPACITIES),
+        V::Tracking => (t.tracking.get_or_insert(1.0), TextPlus::SPACINGS),
+        V::LineSpacing => (t.line_spacing.get_or_insert(1.0), TextPlus::SPACINGS),
+        V::VerticalAnchor => (t.vertical_anchor.get_or_insert(0.0), TextPlus::ANCHORS),
+        V::HorizontalAnchor => (t.horizontal_anchor.get_or_insert(0.0), TextPlus::ANCHORS),
+        V::LayoutSize => (t.layout_size.get_or_insert(1.0), Mask::SIZES),
+        V::Angle => (t.angle.get_or_insert(0.0), Mask::TURNS),
+        _ => return None,
+    })
+}
+
 fn node_slot(tool: &mut Tool, value: EffectValue) -> Slot<'_> {
     match tool {
         Tool::Blur(b) => blur_slot(b, value),
         Tool::Effect(kind) => slot(kind, value),
         Tool::Merge(m) => merge_slot(m, value),
+        Tool::TextPlus(t) => text_slot(t, value),
         t if t.is_mask() => mask_slot(t, value),
         _ => None,
     }
@@ -710,6 +734,7 @@ fn node_point(tool: &mut Tool, value: EffectValue) -> Point<'_> {
     }
     let center = match tool {
         Tool::Merge(m) => &mut m.center,
+        Tool::TextPlus(t) => &mut t.center,
         t => &mut t.mask_mut()?.center,
     };
     Some((center.get_or_insert(Mask::MIDDLE), Mask::PLACES))
