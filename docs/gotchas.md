@@ -689,17 +689,6 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - On the next frame, that outer area snaps from full brightness to black.
   - vidcut blends smoothly across every frame ([spec §8.24](spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)).
 
-## Resolve's tracking
-
-These facts come from measurements in Resolve Studio 21.2, by hand.
-
-- **A mask on the Effect Mask input of a Tracker does not change the track.**
-  - The manual says that the mask "limits the tracking to certain areas" (p. 2839).
-  - A Point pattern and an IntelliTrack pattern each tracked a moving dot three times.
-  - The three runs used a mask that the dot leaves, no mask, and a mask that the dot is never in.
-  - The three paths of each pattern are the same to 6 digits. The record is section T1 of fixtures/nodes/NOTES.md in the test data.
-  - vidcut does what the manual says. The track reads the picture of the Background input, multiplied by the masks (`Composition::seen_by`, [spec §8.19](spec.md#the-tracker)).
-
 ## transcribe.cpp and its models
 
 - **Qwen3-ASR gives no times** (transcribe.cpp 0.4.2).

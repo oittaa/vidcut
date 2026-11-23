@@ -1157,7 +1157,8 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
         let first = came.first().copied().flatten();
         let gives: Vec<bool> = came.iter().map(Option::is_some).collect();
         let shaped = masks(n);
-        let multiplied = n.multiply_by_mask && n.tool.multiplies() && !n.pass_through;
+        let multiplied =
+            n.multiply_by_mask && n.tool.multiplies() && n.tool.operates() && !n.pass_through;
         let (shaped, mix, outer) = match multiplied && !shaped.is_empty() {
             true => (Vec::new(), 1.0, Some((shaped, n.mixed()))),
             false => (shaped, n.mixed(), None),
