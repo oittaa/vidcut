@@ -3,15 +3,17 @@ use crate::model::{
     ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode,
     Composition, Effect, EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha,
     GlowFraming, GlowOutput, Mask, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    Pattern, Picture, ShadingElement, Sharpen, TextPlus, Tool, Vignette, VignetteMode,
-    VignetteShape,
+    Pattern, Picture, PivotType, ReferenceTime, ShadingElement, Sharpen, TextPlus, Tool, Tracker,
+    TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
 
 pub type Areas<'a> = dyn Fn(&Pattern) -> Option<Area> + 'a;
+type Places = ([f64; 2], [f64; 2]);
 
 const LEAST_ZOOM: f64 = 1e-9;
+const LEAST_REACH: f64 = 1e-9;
 const LEAST_BAR: f64 = 0.2;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -943,11 +945,13 @@ pub struct Merging {
     pub burn: f64,
     pub blend: f64,
     pub masks: Vec<Shaping>,
+    pub replaces: bool,
 }
 
 impl Merging {
     pub fn of(m: &Merge, blend: f64, (w, h): (f64, f64), masks: Vec<Shaping>) -> Self {
         Self {
+            replaces: false,
             back: m.lookup((w, h)),
             edges: m.edges(),
             mode: m.mode(),
@@ -1096,6 +1100,76 @@ fn masked(
     out
 }
 
+fn matched(t: &Tracker, (w, h): (f64, f64), start: i64, areas: &Areas) -> [[f64; 6]; 2] {
+    let place = |a: Area| [a.center[0] * w, a.center[1] * h];
+    let on: Vec<&Pattern> = t.patterns.iter().filter(|p| p.enabled).collect();
+    let picked = (t.pivot_pattern() as usize)
+        .checked_sub(1)
+        .and_then(|k| t.patterns.get(k));
+    let seen = match t.pivot_kind() {
+        PivotType::Selected => on.iter().copied().chain(picked).collect(),
+        _ => on.clone(),
+    };
+    let spans = seen.iter().filter_map(|p| p.path.as_ref()?.span());
+    let reference = match t.reference() {
+        ReferenceTime::Start => spans.map(|s| s.0).min().map(|f| f as f64),
+        ReferenceTime::End => spans.map(|s| s.1).max().map(|f| f as f64),
+        ReferenceTime::Custom => Some(t.custom() + start as f64),
+    };
+    let both = |p: &Pattern| Some((place(p.area_at(reference?)?), place(areas(p)?)));
+    let pairs: Vec<Places> = on.iter().filter_map(|p| both(p)).collect();
+    let n = pairs.len() as f64;
+    let mean = |pick: fn(&Places) -> [f64; 2]| {
+        let [x, y] = (pairs.iter().map(pick)).fold([0.0, 0.0], |a, b| [a[0] + b[0], a[1] + b[1]]);
+        [x / n, y / n]
+    };
+    let pivots = match t.pivot_kind() {
+        PivotType::Average => (!pairs.is_empty()).then(|| (mean(|p| p.0), mean(|p| p.1))),
+        PivotType::Selected => picked.and_then(both),
+        PivotType::Manual => {
+            let [x, y] = t.manual_pivot();
+            let c = [x * w, (1.0 - y) * h];
+            Some((c, c))
+        }
+    };
+    let still = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    let Some((from, now)) = pivots else {
+        return [still, still];
+    };
+    let mut turns = Vec::new();
+    let mut ratios = Vec::new();
+    for (p0, p1) in &pairs {
+        let v0 = [p0[0] - from[0], p0[1] - from[1]];
+        let v1 = [p1[0] - now[0], p1[1] - now[1]];
+        let (r0, r1) = (v0[0].hypot(v0[1]), v1[0].hypot(v1[1]));
+        if r0 <= LEAST_REACH || r1 <= LEAST_REACH {
+            continue;
+        }
+        let turn = v1[1].atan2(v1[0]) - v0[1].atan2(v0[0]);
+        let pi = std::f64::consts::PI;
+        turns.push((turn + pi).rem_euclid(2.0 * pi) - pi);
+        ratios.push(r0 / r1);
+    }
+    let theta = match t.match_rotation && !turns.is_empty() {
+        true => turns.iter().sum::<f64>() / turns.len() as f64,
+        false => 0.0,
+    };
+    let s = match t.match_scaling && !ratios.is_empty() {
+        true => ratios.len() as f64 / ratios.iter().sum::<f64>(),
+        false => 1.0,
+    };
+    let now = if t.match_position { now } else { from };
+    let (sin, cos) = theta.sin_cos();
+    let lookup = |a: [[f64; 2]; 2], to: [f64; 2], at: [f64; 2]| {
+        let row = |k: usize| [a[k][0], a[k][1], to[k] - a[k][0] * at[0] - a[k][1] * at[1]];
+        let [x, y] = [row(0), row(1)];
+        [x[0], x[1], x[2], y[0], y[1], y[2]]
+    };
+    let undone = [[cos / s, sin / s], [-sin / s, cos / s]];
+    let done = [[s * cos, -s * sin], [s * sin, s * cos]];
+    [lookup(undone, from, now), lookup(done, now, from)]
+}
+
 pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) -> Program {
     let Some((order, uses)) = c.picture_order() else {
         return Program::clear();
@@ -1222,6 +1296,44 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                 Some(masked(&mut stages, &mut regs, to, (shaped, mix), (w, h)))
             }
             t if !t.gives_from(&gives) => None,
+            Tool::Tracker(t) => first.map(|b| {
+                let f = came.get(1).copied().flatten();
+                let merge = t.merged();
+                let moving = t.operation() == TrackerOperation::MatchMove && !n.pass_through;
+                if !moving || (merge == TrackerMerge::FgOverBg && f.is_none()) {
+                    regs.read(b);
+                    if let Some(f) = f {
+                        let last = regs.read(f);
+                        regs.freed(f, last && f != b);
+                    }
+                    return b;
+                }
+                let [fore, back] = matched(t, (w, h), c.start, areas);
+                let mut merging = Merging::of(&t.merging(), mix, (w, h), shaped);
+                let picture = match merge {
+                    TrackerMerge::BgOnly => {
+                        merging.back = Some(back);
+                        b
+                    }
+                    _ => {
+                        merging.back = f.map(|_| fore);
+                        f.unwrap_or(b)
+                    }
+                };
+                merging.replaces = merge != TrackerMerge::FgOverBg;
+                let last = [regs.read(b), f.is_some_and(|f| regs.read(f))];
+                let to = regs.taken();
+                stages.push(Stage {
+                    op: Op::Merge(merging),
+                    from: vec![b, picture],
+                    to,
+                });
+                regs.freed(b, last[0] && f != Some(b));
+                if let Some(f) = f {
+                    regs.freed(f, last[1]);
+                }
+                to
+            }),
             Tool::Merge(m) => first.map(|b| match came.get(1).copied().flatten() {
                 Some(f) if !n.pass_through => {
                     let last = [regs.read(b), regs.read(f)];

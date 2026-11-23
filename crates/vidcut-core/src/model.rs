@@ -4709,11 +4709,121 @@ pub enum Tool {
     TextPlus(TextPlus),
 }
 
-/// The patterns of a tracker, in their order. A mask names a pattern by its
-/// number in this list, from 1. From 0 to 256 of them.
+/// The patterns of a tracker and what it does with its pictures. A field
+/// left out is at its usual value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Tracker {
+    /// The patterns, in their order. A mask names a pattern by its number
+    /// in this list, from 1. From 0 to 256 of them.
     pub patterns: Vec<Pattern>,
+    /// What the tracker does with its pictures. Usual: `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<TrackerOperation>,
+    /// Which pictures a `match_move` moves and gives. Usual: `fg_over_bg`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge: Option<TrackerMerge>,
+    /// What lies around the moved picture of a `match_move`. Usual:
+    /// `canvas`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edges: Option<MergeEdges>,
+    /// The math that puts the moved foreground on the background, as on a
+    /// `merge`. Only `fg_over_bg` takes it. Usual: `normal`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_mode: Option<ApplyMode>,
+    /// Which parts of the two pictures a `normal` or a `screen` merge
+    /// keeps, as on a `merge`. Only `fg_over_bg` takes it. Usual: `over`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator: Option<MergeOperator>,
+    /// From 0 to 1, as on a `merge`. Only `fg_over_bg` takes it. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtractive_additive: Option<f64>,
+    /// Off, a `match_move` does not follow the move of the pivot. Usual:
+    /// on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub match_position: bool,
+    /// Off, a `match_move` does not follow the turn of the patterns about
+    /// the pivot. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub match_rotation: bool,
+    /// Off, a `match_move` does not follow the change of the distances of
+    /// the patterns from the pivot. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub match_scaling: bool,
+    /// The point that a `match_move` turns and sizes about. Usual:
+    /// `average`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot_type: Option<PivotType>,
+    /// The pattern of a `selected` pivot, by its number in the list, from
+    /// 1. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot_tracker: Option<u32>,
+    /// A `manual` pivot, `[x, y]` as fractions of the picture from its
+    /// bottom left, each from -10 to 10. Usual: `[0.5, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot: Option<[f64; 2]>,
+    /// The frame on which a `match_move` leaves the pictures where they
+    /// are. Usual: `start`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_time: Option<ReferenceTime>,
+    /// The frame of the composition of a `custom` reference time, from
+    /// -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_time: Option<f64>,
+}
+
+/// What a `tracker` does with its pictures.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackerOperation {
+    /// It gives its background as it is.
+    #[default]
+    None,
+    /// It moves, turns and sizes a picture as the patterns move from the
+    /// reference frame. P is the place of a pattern and C the pivot, in
+    /// pixels. The turn is the mean change of the angle of P - C, over the
+    /// patterns that are on. The size is the number of those patterns over
+    /// the sum of |P - C| on the reference frame / |P - C| now. A pattern
+    /// at the pivot is not counted.
+    MatchMove,
+}
+
+/// Which pictures the `match_move` of a `tracker` moves and gives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackerMerge {
+    /// The background, moved back to where it was on the reference frame.
+    BgOnly,
+    /// The foreground, moved with the patterns. Clear around it.
+    FgOnly,
+    /// The foreground, moved with the patterns, on the background.
+    #[default]
+    FgOverBg,
+}
+
+/// The point that the `match_move` of a `tracker` turns and sizes about.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PivotType {
+    /// The mean place of the patterns that are on.
+    #[default]
+    Average,
+    /// The pattern of `pivot_tracker`, also when it is off.
+    Selected,
+    /// The point of `pivot`, on each frame.
+    Manual,
+}
+
+/// The reference frame of the `match_move` of a `tracker`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReferenceTime {
+    /// The first frame of the paths of the patterns.
+    #[default]
+    Start,
+    /// The last frame of the paths of the patterns.
+    End,
+    /// The frame of `custom_time`.
+    Custom,
 }
 
 /// A pattern of a tracker: a box on the clip's own picture, and its motion

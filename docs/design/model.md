@@ -637,7 +637,9 @@ Writing:
   - `Tool::is_media` tells these two apart from the tools. A composition has one of each, and Copy and Pass Through leave them out.
   - `Tool::Blur` holds a `Blur`. `Tool::Effect` holds an `EffectKind`, one of the kinds of the clip effects.
   - `Tool::Ellipse`, `Tool::Rectangle` and `Tool::Polygon` hold a `Mask`.
-  - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values.
+  - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values and its Operation (`TrackerOperation`).
+    - Match Move takes a `TrackerMerge`, the edges, mode, operator and slider of a Merge, three switches, a `PivotType` and a `ReferenceTime`.
+    - `pivot_tracker` names a pattern by its number. A removal of an earlier pattern makes the number one less. A removal of that pattern sets it back to 1.
   - `Tool::Merge` holds a `Merge`: the transform of its foreground, its `MergeEdges`, its `ApplyMode`, its `MergeOperator` and its sliders.
   - `Tool::TextPlus` holds a `TextPlus`: its text, its font and face, its spacings, its anchors, its layout and its shading elements.
     - It keeps only the `ShadingElement`s that are not at their usual values. `TextPlus::element` gives any element, kept or usual.

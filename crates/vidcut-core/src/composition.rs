@@ -4,7 +4,8 @@ use crate::effect_keys::Keyed;
 use crate::model::{
     Appearance, ApplyMode, Blur, BlurClipping, BlurFilter, BorderLevel, Clip, Composition, Connect,
     EffectKind, EffectType, EffectValue, JoinStyle, Mask, Merge, MergeEdges, MergeOperator,
-    MotionPath, Node, Pattern, Project, ShadingElement, TextPlus, Tool, ToolType, Tracker,
+    MotionPath, Node, Pattern, PivotType, Project, ReferenceTime, ShadingElement, TextPlus, Tool,
+    ToolType, Tracker, TrackerMerge, TrackerOperation,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -197,10 +198,69 @@ impl Tracker {
             .unwrap_or_default()
     }
 
-    pub fn made() -> Self {
+    pub const PIVOT: [f64; 2] = [0.5, 0.5];
+    pub const TIMES: (f64, f64) = (-1e6, 1e6);
+
+    pub fn of(patterns: Vec<Pattern>) -> Self {
         Self {
-            patterns: vec![Pattern::new(format!("{} 1", Self::NAME))],
+            patterns,
+            operation: None,
+            merge: None,
+            edges: None,
+            apply_mode: None,
+            operator: None,
+            subtractive_additive: None,
+            match_position: true,
+            match_rotation: true,
+            match_scaling: true,
+            pivot_type: None,
+            pivot_tracker: None,
+            pivot: None,
+            reference_time: None,
+            custom_time: None,
         }
+    }
+
+    pub fn made() -> Self {
+        Self::of(vec![Pattern::new(format!("{} 1", Self::NAME))])
+    }
+
+    pub fn operation(&self) -> TrackerOperation {
+        self.operation.unwrap_or_default()
+    }
+
+    pub fn merged(&self) -> TrackerMerge {
+        self.merge.unwrap_or_default()
+    }
+
+    pub fn merging(&self) -> Merge {
+        Merge {
+            edges: self.edges,
+            apply_mode: self.apply_mode,
+            operator: self.operator,
+            subtractive_additive: self.subtractive_additive,
+            ..Merge::default()
+        }
+    }
+
+    pub fn pivot_kind(&self) -> PivotType {
+        self.pivot_type.unwrap_or_default()
+    }
+
+    pub fn pivot_pattern(&self) -> u32 {
+        self.pivot_tracker.unwrap_or(1)
+    }
+
+    pub fn manual_pivot(&self) -> [f64; 2] {
+        self.pivot.unwrap_or(Self::PIVOT)
+    }
+
+    pub fn reference(&self) -> ReferenceTime {
+        self.reference_time.unwrap_or_default()
+    }
+
+    pub fn custom(&self) -> f64 {
+        self.custom_time.unwrap_or(0.0)
     }
 }
 
@@ -641,6 +701,61 @@ impl MergeEdges {
     }
 }
 
+impl TrackerOperation {
+    pub const ALL: [TrackerOperation; 2] = [TrackerOperation::None, TrackerOperation::MatchMove];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TrackerOperation::None => "None",
+            TrackerOperation::MatchMove => "Match Move",
+        }
+    }
+}
+
+impl TrackerMerge {
+    pub const ALL: [TrackerMerge; 3] = [
+        TrackerMerge::BgOnly,
+        TrackerMerge::FgOnly,
+        TrackerMerge::FgOverBg,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TrackerMerge::BgOnly => "BG Only",
+            TrackerMerge::FgOnly => "FG Only",
+            TrackerMerge::FgOverBg => "FG Over BG",
+        }
+    }
+}
+
+impl PivotType {
+    pub const ALL: [PivotType; 3] = [PivotType::Average, PivotType::Selected, PivotType::Manual];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PivotType::Average => "Tracker Average",
+            PivotType::Selected => "Selected Tracker",
+            PivotType::Manual => "Manual",
+        }
+    }
+}
+
+impl ReferenceTime {
+    pub const ALL: [ReferenceTime; 3] = [
+        ReferenceTime::Start,
+        ReferenceTime::End,
+        ReferenceTime::Custom,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ReferenceTime::Start => "Start Time",
+            ReferenceTime::End => "End Time",
+            ReferenceTime::Custom => "Custom Time",
+        }
+    }
+}
+
 impl Mask {
     pub const LEVEL: f64 = 1.0;
     pub const LEVELS: (f64, f64) = (0.0, 1.0);
@@ -763,10 +878,8 @@ impl Tool {
         match self {
             Tool::MediaIn => &[NodeInput::EffectMask],
             Tool::MediaOut => &[NodeInput::Input],
-            Tool::Tracker(_) | Tool::Blur(_) | Tool::Effect(_) => {
-                &[NodeInput::Input, NodeInput::EffectMask]
-            }
-            Tool::Merge(_) => &[
+            Tool::Blur(_) | Tool::Effect(_) => &[NodeInput::Input, NodeInput::EffectMask],
+            Tool::Tracker(_) | Tool::Merge(_) => &[
                 NodeInput::Input,
                 NodeInput::Foreground,
                 NodeInput::EffectMask,
@@ -794,7 +907,10 @@ impl Tool {
     }
 
     pub fn operates(&self) -> bool {
-        !matches!(self, Tool::Tracker(_))
+        match self {
+            Tool::Tracker(t) => t.operation() != TrackerOperation::None,
+            _ => true,
+        }
     }
 
     pub fn flows(&self) -> bool {
@@ -874,16 +990,15 @@ impl Tool {
                 points: m.points.clone(),
                 ..Mask::default()
             }),
-            Tool::Tracker(t) => Tool::Tracker(Tracker {
-                patterns: t
-                    .patterns
+            Tool::Tracker(t) => Tool::Tracker(Tracker::of(
+                t.patterns
                     .iter()
                     .map(|p| Pattern {
                         offset: None,
                         ..p.clone()
                     })
                     .collect(),
-            }),
+            )),
             Tool::Merge(_) => Tool::Merge(Merge::default()),
             Tool::TextPlus(_) => Tool::TextPlus(TextPlus::default()),
         }

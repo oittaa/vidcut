@@ -1823,7 +1823,7 @@ fn fs_merge(in: Out) -> @location(0) vec4<f32> {
     let fa = taken.a * merging.slide.y;
     let additive = merging.slide.x;
     let fore = vec4<f32>(taken.rgb * (additive + (1.0 - additive) * fa), fa);
-    let merged = merge_mode(fore, back);
+    let merged = select(merge_mode(fore, back), taken, merging.how.w > 0.5);
     var amount = merging.slide.w;
     if merging.how.z > 0.5 {
         amount = amount * textureLoad(tool_mask, px, 0).r;

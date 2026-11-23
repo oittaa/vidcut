@@ -3007,15 +3007,14 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
 
 - The Tracker has these inputs (pp. 2839–2840):
   - Background: the picture to track.
+  - Foreground: a picture that the Operation puts on the background (p. 2839).
   - Effect Mask: the manual says that a mask on it limits the tracking (p. 2839). Measured, it limits only what the Operation shows:
     - The masks do not change the track, also with Multiply by Mask on. The path is the same with and without a mask.
     - With Operation None, the output is the input. The masks and Multiply by Mask do not change it.
     - With Match Move, the masks limit where the moved picture replaces the input, as on other tools. Outside them, the input shows.
     - With Match Move and Multiply by Mask on, the moved picture is multiplied by the masks. Outside them, the picture is clear.
     - The record is section T1d of `fixtures/nodes/NOTES.md` in the test data.
-    - vidcut: Match Move is not built yet ([todo](todo/motion-tracking.md)).
     - vidcut: the mask does not change what Find finds.
-  - vidcut: the Foreground input is not built yet ([todo](todo/motion-tracking.md)).
 - A new Tracker has one pattern (p. 1783).
   - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).
   - Each side of the box is from 0.001 to 0.5.
@@ -3062,10 +3061,45 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - Blur there adds a Mosaic Blur before Media Out. For each pattern that has a path, it adds a mask on the blur. The mask follows that pattern with Follow Size.
   - A pattern without a path does not move. Blur gives it no mask.
 
+The Operation of the Tracker (pp. 2848–2854). The facts without a page are measured in Resolve Studio 21.2, in sections T2 to T4 of `fixtures/nodes/NOTES.md`:
+
+- The Operation menu has None, Match Move, Corner Positioning and Perspective Positioning (p. 2848). The default is None.
+  - With None, the output is the background.
+  - vidcut: Corner Positioning and Perspective Positioning are not built yet ([todo](todo/motion-tracking.md)).
+- Match Move moves a picture with the patterns (pp. 2848–2849). It uses the places of the patterns on the reference frame and on the current frame.
+  - A place q from 0 to 1 is at q × size − 0.5 pixels. Thus 0 and 1 are the outer edges of the picture.
+  - The pivot is the mean place of the enabled patterns. This is Pivot Type Tracker Average, the default (p. 2853).
+  - With Selected Tracker, the pivot is the place of one pattern, also of a disabled pattern. With Manual, it is the point of Pivot X and Pivot Y. Their default is (0.5, 0.5).
+  - For each enabled pattern that is not at the pivot, v0 goes from the pivot to the pattern on the reference frame. v1 is the same on the current frame. Both are in pixels.
+  - The turn is the mean change of the angle from v0 to v1. Each change is from −180° to 180°.
+  - The size is the number of these patterns divided by the sum of |v0| / |v1|.
+  - The map T moves a point x to pivot(now) + size × turn(x − pivot(reference)).
+  - Position off removes the move of the pivot from T. Rotation off makes the turn 0, and Scaling off makes the size 1. All three are on (p. 2852).
+- The Merge menu has BG Only, FG Only, FG Over BG and BG Over FG (p. 2849). The default is FG Over BG.
+  - BG Only: the background, read at T(x). Thus the patterns stay where they were on the reference frame.
+  - FG Only: the foreground, read at the inverse of T. Thus it moves with the patterns. Around it, the picture is clear.
+  - FG Over BG: the moved foreground over the background. The background does not move.
+  - vidcut: BG Over FG is not built yet ([todo](todo/motion-tracking.md)).
+  - Apply Mode, Operator and Subtractive/Additive show only with FG Over BG and BG Over FG. They act as on a [Merge](#the-merge) (p. 2849).
+- Edges sets what fills the parts that the move reveals (p. 2852). The menu has Black, Wrap, Duplicate and Mirror. The default is Black.
+  - Measured with BG Only: Black leaves them clear. Wrap fills them from the other side, and Duplicate repeats the edge pixel. Mirror fills them with the mirrored picture.
+  - vidcut: the Edges act on the moved picture in each Merge choice.
+- Filter Method: Linear (p. 2852). The moved picture is read with a bilinear filter.
+  - vidcut: Linear is the only filter. Flatten Transform is not built yet ([todo](todo/motion-tracking.md)).
+- Reference Time sets the reference frame (pp. 2853–2854). The default is Start Time.
+  - Start Time: the first frame of the path. End Time: the last frame of the path.
+  - Custom Time: the frame in the Custom Time field. Set puts the frame of the playhead there, and Go moves the playhead to it.
+  - Before its first frame, a path keeps its first place. Thus Custom Time 0 gives the same as Start Time for a path that starts at frame 20.
+  - vidcut: with paths of different lengths, Start Time is the earliest first frame, and End Time is the latest last frame.
+  - vidcut: Start & End is not built yet ([todo](todo/motion-tracking.md)).
+- In Resolve, FG Only and BG Over FG give a picture of the size of the foreground. In a composition of vidcut, each picture has the size of the frame.
+- vidcut: with nothing on the Foreground input, FG Only gives a clear picture. FG Over BG then gives the background.
+
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
 `gui.page_time` moves and plays the playhead of the page. `comp.loop` sets Loop and Ping Pong. `player.bounds` holds play of the timeline between two frames.
 `comp.set` and `comp.key` take a `frame` of the composition. Without it, they take the frame at the playhead. `comp.paste` takes `after`, `place` or `replace`.
-`comp.set` with `connect` connects the Center of a mask to a pattern. `motion.track` tracks a pattern of a Tracker, and `motion.find` gives it patterns. Each pattern holds its path: `motion.list` reads it, and `motion.add`, `motion.set` and `motion.remove` change it.
+`comp.set` with `connect` connects the Center of a mask to a pattern. `comp.set` with `operation` sets the Operation of a Tracker.
+`motion.track` tracks a pattern of a Tracker, and `motion.find` gives it patterns. Each pattern holds its path: `motion.list` reads it, and `motion.add`, `motion.set` and `motion.remove` change it.
 
 ### 8.20 Primaries palette (pp. 118, 3141–3159)
 

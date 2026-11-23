@@ -512,6 +512,20 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 t.patterns.push(Pattern::new(t.free_name()));
                 left.add_pattern = false;
             }
+            given(&mut left.operation, &mut t.operation);
+            given(&mut left.merge, &mut t.merge);
+            given(&mut left.edges, &mut t.edges);
+            given(&mut left.apply_mode, &mut t.apply_mode);
+            given(&mut left.operator, &mut t.operator);
+            given(&mut left.subtractive_additive, &mut t.subtractive_additive);
+            taken(&mut left.match_position, &mut t.match_position);
+            taken(&mut left.match_rotation, &mut t.match_rotation);
+            taken(&mut left.match_scaling, &mut t.match_scaling);
+            given(&mut left.pivot_type, &mut t.pivot_type);
+            given(&mut left.pivot_tracker, &mut t.pivot_tracker);
+            given(&mut left.pivot, &mut t.pivot);
+            given(&mut left.reference_time, &mut t.reference_time);
+            given(&mut left.custom_time, &mut t.custom_time);
         }
         Tool::Merge(m) => {
             if let Some(c) = left.values.center.take() {
@@ -690,6 +704,14 @@ pub fn set(
 }
 
 fn unhooked(c: &mut Composition, tracker: &str, gone: u32) {
+    let named = c.nodes.iter_mut().find(|n| n.name == tracker);
+    if let Some(t) = named.and_then(|n| n.tool.tracker_mut()) {
+        t.pivot_tracker = match t.pivot_pattern().cmp(&gone) {
+            std::cmp::Ordering::Equal => None,
+            std::cmp::Ordering::Greater => Some(t.pivot_pattern() - 1).filter(|k| *k != 1),
+            std::cmp::Ordering::Less => t.pivot_tracker,
+        };
+    }
     for n in &mut c.nodes {
         let Some(k) = n.connect.as_mut().filter(|k| k.tracker == tracker) else {
             continue;

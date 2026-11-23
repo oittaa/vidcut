@@ -12,9 +12,10 @@ use crate::model::{
     CompositeMode, Connect, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType, EffectValue,
     FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind,
     GradeWindow, GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MergeEdges,
-    MergeOperator, Node, PathSample, PictureTool, PictureTransition, Place, Subject, SubtitleStyle,
-    TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode,
-    VignetteShape, WindowKind, ZoomBox,
+    MergeOperator, Node, PathSample, PictureTool, PictureTransition, PivotType, Place,
+    ReferenceTime, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle,
+    ToolType, TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode, VignetteShape,
+    WindowKind, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -6252,17 +6253,19 @@ pub struct NodeChange {
     /// On, a merge moves, turns and sizes its foreground the other way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invert_transform: Option<bool>,
-    /// What lies around the foreground of a merge.
+    /// What lies around the foreground of a merge, or around the moved
+    /// picture of a tracker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edges: Option<MergeEdges>,
-    /// The math that a merge puts its foreground on its background with.
+    /// The math that a merge or a tracker puts its foreground on its
+    /// background with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_mode: Option<ApplyMode>,
     /// Which parts of the two pictures a `normal` or `screen` merge keeps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator: Option<MergeOperator>,
-    /// From 0 to 1. At 0, a merge multiplies the colors of its foreground by
-    /// its alpha first.
+    /// From 0 to 1. At 0, a merge or a tracker multiplies the colors of its
+    /// foreground by its alpha first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtractive_additive: Option<f64>,
     /// What a merge multiplies the alpha of its foreground by, from 0 to 1.
@@ -6423,6 +6426,42 @@ pub struct NodeChange {
     /// has its own center again. A later pattern keeps its nodes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub remove_pattern: bool,
+    /// What a tracker does with its pictures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<TrackerOperation>,
+    /// Which pictures the `match_move` of a tracker moves and gives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge: Option<TrackerMerge>,
+    /// Off, the `match_move` of a tracker does not follow the move of the
+    /// pivot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_position: Option<bool>,
+    /// Off, the `match_move` of a tracker does not follow the turn of the
+    /// patterns about the pivot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_rotation: Option<bool>,
+    /// Off, the `match_move` of a tracker does not follow the change of the
+    /// distances of the patterns from the pivot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_scaling: Option<bool>,
+    /// The point that the `match_move` of a tracker turns and sizes about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot_type: Option<PivotType>,
+    /// The pattern of a `selected` pivot, by its number in the list, from 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot_tracker: Option<u32>,
+    /// A `manual` pivot, `[x, y]` as fractions of the picture from its
+    /// bottom left, each from -10 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot: Option<[f64; 2]>,
+    /// The frame on which the `match_move` of a tracker leaves the pictures
+    /// where they are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_time: Option<ReferenceTime>,
+    /// The frame of the composition of a `custom` reference time, from
+    /// -1000000 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_time: Option<f64>,
     /// Take the tracked samples of the pattern off: `start` takes those
     /// before `frame`, `end` those after `frame`, and `all` takes each.
     /// The box on `frame` stays as it was. With no sample left, the pattern

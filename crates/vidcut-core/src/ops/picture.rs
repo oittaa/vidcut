@@ -8,9 +8,9 @@ use crate::model::{
     ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode,
     Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind, EffectValue, FillMethod,
     FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, Merge,
-    MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project,
-    ShadingElement, Sharpen, TextPlus, Tool, TrackKind, Tracker, Vignette, VignetteMode,
-    VignetteShape, ZoomBox,
+    MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, PivotType, Project,
+    ReferenceTime, ShadingElement, Sharpen, TextPlus, Tool, TrackKind, Tracker, TrackerMerge,
+    TrackerOperation, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput};
 
@@ -765,8 +765,40 @@ fn tracker_checked(t: &Tracker) -> Result<Tracker> {
         )));
     }
     let patterns = t.patterns.iter().map(pattern_checked);
+    let patterns = patterns.collect::<Result<Vec<_>>>()?;
+    within(
+        t.subtractive_additive,
+        Merge::SLIDES,
+        "a tracker's subtractive/additive is from 0 to 1",
+    )?;
+    for v in t.pivot.into_iter().flatten() {
+        let why = "a tracker's pivot is two fractions, each from -10 to 10";
+        within(Some(v), Pattern::PLACES, why)?;
+    }
+    let why = "a tracker's custom time is from -1000000 to 1000000";
+    within(t.custom_time, Tracker::TIMES, why)?;
+    if let Some(k) = t
+        .pivot_tracker
+        .filter(|k| *k == 0 || *k as usize > patterns.len())
+    {
+        return Err(Error::invalid(format!(
+            "the tracker has no pattern {k} for its pivot"
+        )));
+    }
     Ok(Tracker {
-        patterns: patterns.collect::<Result<Vec<_>>>()?,
+        patterns,
+        operation: t.operation.filter(|o| *o != TrackerOperation::default()),
+        merge: t.merge.filter(|m| *m != TrackerMerge::default()),
+        edges: t.edges.filter(|e| *e != MergeEdges::default()),
+        apply_mode: t.apply_mode.filter(|a| *a != ApplyMode::default()),
+        operator: t.operator.filter(|o| *o != MergeOperator::default()),
+        subtractive_additive: t.subtractive_additive.filter(|v| *v != 1.0),
+        pivot_type: t.pivot_type.filter(|p| *p != PivotType::default()),
+        pivot_tracker: t.pivot_tracker.filter(|k| *k != 1),
+        pivot: t.pivot.filter(|p| *p != Tracker::PIVOT),
+        reference_time: t.reference_time.filter(|r| *r != ReferenceTime::default()),
+        custom_time: t.custom_time.filter(|v| *v != 0.0),
+        ..t.clone()
     })
 }
 

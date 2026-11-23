@@ -1002,12 +1002,12 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - A program is a list of `place::Stage` values. Each stage runs one `place::Op` on numbered registers: it reads the registers of its inputs and writes one register.
   - Register 0 holds the clip's own picture at the start. The program ends with its result in the register `Program::out`.
   - `Composition::picture_order` gives the nodes that feed the MediaOut node, each before the nodes that take its picture. It also counts the nodes that take each picture.
-  - A node that passes its picture on (a Tracker, a tool with `pass_through`, a tool with no work) gives the register of its input. A tool works in place on the register of its input when no later node reads that register. Else it writes a free register.
+  - A node that passes its picture on gives the register of its input. These are a Tracker with Operation None, a tool with `pass_through` and a tool with no work. A tool works in place on the register of its input when no later node reads that register. Else it writes a free register.
   - A Merge reads two registers and writes a free register. A register goes back to the free list after its last read (`Registers::freed`).
   - A node that makes its own picture, as the MediaIn node and a Text+, takes its masks and its Blend through `place::masked`. That gives an `Op::Clear` and an `Op::Merge`. The Merge puts the picture over the clear register, with the masks and the Blend.
   - A tool with `multiply_by_mask` and a mask works with no mask and a Blend of 1. Its picture then goes through `place::masked`, with the masks and the Blend of the tool.
   - Why: with Multiply by Mask, the tool of the spec works on the full picture, and only the multiply takes the masks and the Blend.
-  - A Tracker gives its input, with or without `multiply_by_mask` (`Tool::operates`). Why: with Operation None, the masks of the spec do not change its output.
+  - A Tracker with Operation None gives its input, with or without `multiply_by_mask` (`Tool::operates`). Why: with Operation None, the masks of the spec do not change its output.
   - `place::masked` frees the register of the picture only when no later node reads it (`Registers::idle`). Thus a tool that passes its input on keeps the register of its input for the other nodes.
   - A node gives no picture when its picture input has none (`Tool::gives_from`). When the MediaOut node gets no picture, or the joins make a loop, the program is one `Op::Clear`. The clip then shows nothing, and `RenderPlan::broken_composition` stops an export (`Composition::shows`).
   - It works in the pixels of the picture, upright. A size in the composition follows these pixels, not the frame.
@@ -1018,6 +1018,12 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
 - An effect tool gives the work of its clip effect, through `Working::of`. Its sizes follow the picture, as on a frame of the same size (`place::OnFrame`).
   - With `blur_alpha` off, a Gaussian Blur has no sigma on the alpha.
 - A Merge with a foreground gives an `Op::Merge`, which holds a `place::Merging`. Without a foreground, it gives the register of its background.
+- A Tracker with Match Move gives one `Op::Merge`. Its background is the background of the Tracker. Its masks and its Blend are those of the Tracker.
+  - `place::matched` gives the map of the move from the places of the patterns, on the reference frame and on the frame (`place::Areas`). It gives the map and its inverse.
+  - FG Over BG reads the foreground through the inverse map, with the mode, the operator and the slider of the Tracker (`Tracker::merging`). With no foreground, the Tracker gives its background.
+  - BG Only reads the background through the map, and FG Only reads the foreground through the inverse map. Their `Merging.replaces` is on: the result is the moved picture, not a sum.
+  - Why: the masks of the spec limit where the moved picture replaces the background. In BG Only and FG Only, a clear part of the moved picture stays clear there.
+  - A path gives the reference frame on frames of the file. `Composition::start` makes a Custom Time of the composition into a frame of the file.
 - A Text+ gives one `Op::Text` for each shading element that is on, back to front. The `Inking` of the op holds the text and the element.
   - An element with softness gets an `Op::Work` with a blur in the same register.
   - An `Op::Merge` puts each element over the elements behind it.
@@ -1045,6 +1051,7 @@ The draw:
   - `blur::run` runs the stages. The other registers are textures of the same size, which the `blur::Composer` keeps for the next frame. `blur::effects_into` runs the work of a stage, as it runs the effects of a layer.
   - `fs_merge` draws an `Op::Merge`. `merge_fore` reads the foreground through the map, with a bilinear filter and the edges. `merge_mode` gives the sum of the mode and the operator.
   - The masks of a Merge go into one picture before the draw (`mask_room`, `mask_made`). `fs_merge` then mixes the background and the result by the mask and Blend.
+  - With `Merging.replaces`, the result of `fs_merge` is the foreground that `merge_fore` reads, with no mode.
   - `letters_into` draws an `Op::Text`. It clears the register and copies the text into it.
     - `burn::inked` lays out the text on the CPU and draws one shading element, with premultiplied colors. It gives only the part of the picture that the element covers.
     - A fill fills the outlines of the glyphs or the boxes. An outline strokes them. Outside Only takes the fill away from the stroke.
