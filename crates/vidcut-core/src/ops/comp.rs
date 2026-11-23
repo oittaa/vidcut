@@ -4,8 +4,8 @@ use crate::composition::{Corner, Frames, cleaned};
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::model::{
-    Background, Composition, Connect, Ease, EffectValue, MotionPath, Node, PathSample, Pattern,
-    Project, ShadingElement, Tool, ToolType,
+    Background, Composition, Connect, Ease, EffectValue, FastNoise, ImageFormat, MotionPath, Node,
+    PathSample, Pattern, Project, ShadingElement, Tool, ToolType,
 };
 use crate::request::{NodeChange, NodeInput, PatternTrim};
 
@@ -549,6 +549,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             shading_applied(t.element_mut(element_of(&mut left)?), &mut left)?;
         }
         Tool::Background(b) => background_applied(b, &mut left),
+        Tool::FastNoise(f) => noise_applied(f, &mut left)?,
         Tool::MediaIn | Tool::MediaOut => {}
     }
     if left != NodeChange::default() {
@@ -580,11 +581,45 @@ fn background_applied(b: &mut Background, left: &mut NodeChange) {
     }
     given(&mut left.values.offset, &mut b.offset);
     given(&mut left.repeat, &mut b.repeat);
+    image_applied(&mut b.image, left);
+}
+
+fn image_applied(image: &mut ImageFormat, left: &mut NodeChange) {
     if let Some(mut i) = left.image.take() {
-        taken(&mut i.use_frame_format, &mut b.image.use_frame_format);
-        given(&mut i.width, &mut b.image.width);
-        given(&mut i.height, &mut b.image.height);
+        taken(&mut i.use_frame_format, &mut image.use_frame_format);
+        given(&mut i.width, &mut image.width);
+        given(&mut i.height, &mut image.height);
     }
+}
+
+fn noise_applied(f: &mut FastNoise, left: &mut NodeChange) -> Result<()> {
+    if let Some(c) = left.values.center.take() {
+        let [x, y] = c[..] else {
+            return Err(Error::invalid(
+                "a fast noise's center is two numbers, [x, y]",
+            ));
+        };
+        f.center = Some([x, y]);
+    }
+    taken(&mut left.discontinuous, &mut f.discontinuous);
+    taken(&mut left.inverted, &mut f.inverted);
+    given(&mut left.detail, &mut f.detail);
+    given(&mut left.brightness, &mut f.brightness);
+    given(&mut left.contrast, &mut f.contrast);
+    taken(&mut left.lock_xy, &mut f.lock_xy);
+    given(&mut left.scale, &mut f.scale);
+    given(&mut left.y_scale, &mut f.y_scale);
+    given(&mut left.angle, &mut f.angle);
+    given(&mut left.seethe, &mut f.seethe);
+    given(&mut left.seethe_rate, &mut f.seethe_rate);
+    given(&mut left.coloring, &mut f.coloring);
+    given(&mut left.color1, &mut f.color1);
+    given(&mut left.color2, &mut f.color2);
+    if let Some(stops) = left.stops.take() {
+        f.stops = stops;
+    }
+    image_applied(&mut f.image, left);
+    Ok(())
 }
 
 fn element_of(change: &mut NodeChange) -> Result<u8> {
@@ -955,6 +990,8 @@ pub fn reset(p: &mut Project, id: &str, name: &str) -> Result<()> {
         input: n.input.take(),
         foreground: n.foreground.take(),
         effect_mask: n.effect_mask.take(),
+        detail_map: n.detail_map.take(),
+        brightness_map: n.brightness_map.take(),
         pass_through: n.pass_through,
         connect: n.connect.take(),
         ..Node::new(&n.name, Tool::MediaIn, n.place)

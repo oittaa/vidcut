@@ -1,6 +1,6 @@
 # Generator nodes in compositions
 
-**When:** in progress. The Background tool is in the first pull request.
+**When:** in progress. The Background and the Fast Noise tools are in.
 
 The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
 
@@ -11,13 +11,14 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
 
 **What Resolve has, and vidcut does not have yet:**
 
-- The Fast Noise tool (pp. 2363–2366), with its Noise Detail Map and Noise Brightness Map inputs (p. 2403).
 - The Plasma (pp. 2379–2380), Day Sky (pp. 2360–2363) and Mandelbrot (pp. 2366–2367) tools.
 - The Background tool:
   - Interpolation Space of the gradient (p. 2359).
   - Sub-Pixel of the gradient (p. 2360).
   - Keyframes on the stops of the gradient, and its contextual menu (p. 2360).
   - Start and End as points to drag in the viewer (p. 2359).
+- The Fast Noise tool: the defaults and the noise of Resolve. vidcut uses fractal Perlin noise until a measurement gives the values.
+- A picture on a map input of the Fast Noise. vidcut takes masks there.
 - The Image tab of the generators (pp. 2401–2402):
   - Width and Height without Use Frame Format Settings.
   - Process Mode, Global In and Out, Pixel Aspect, Depth, Source Color Space and Source Gamma Space.

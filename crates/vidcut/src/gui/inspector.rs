@@ -15,12 +15,12 @@ use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Appearance, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter,
     Border, BorderLevel, CellShape, Clip, ClipRetime, CompositeMode, Composition, Connect,
-    DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue, FillMethod,
-    FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming, GlowOutput,
-    Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset, JoinStyle,
-    Keyframe, MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project,
-    Retime, ShadingElement, Sharpen, Speed, Subject, TextPlus, Tool, ToolType, TrackKind, Upscaler,
-    Vignette, VignetteMode, VignetteShape, ZoomBox,
+    DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue, FastNoise,
+    FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
+    GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
+    JoinStyle, Keyframe, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring, Pattern,
+    Picture, PictureTool, Project, Retime, ShadingElement, Sharpen, Speed, Subject, TextPlus, Tool,
+    ToolType, TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -1819,18 +1819,17 @@ fn stops_sorted(mut stops: Vec<GradientStop>, stop: usize) -> (Vec<GradientStop>
 fn gradient_rows(
     ui: &mut egui::Ui,
     (slot, name): (usize, &str),
-    b: &Background,
+    (colors, set): (&[GradientStop], bool),
     acts: &mut Vec<Act>,
 ) {
     let id = ui.make_persistent_id(("inspector-gradient", slot, name));
     let held = ui.data(|d| d.get_temp::<Dragged>(id));
     let stops = held
         .as_ref()
-        .map_or_else(|| b.colors().to_vec(), |h| h.stops.clone());
+        .map_or_else(|| colors.to_vec(), |h| h.stops.clone());
     let picked_id = id.with("picked");
     let picked = ui.data(|d| d.get_temp::<usize>(picked_id)).unwrap_or(0);
     let picked = picked.min(stops.len().saturating_sub(1));
-    let set = !b.stops.is_empty();
     label(ui, "Gradient", set);
     let width = ui.available_width().clamp(120.0, 240.0);
     let size = egui::vec2(width, GRADIENT_HIGH + STOP_HIGH);
@@ -1933,7 +1932,7 @@ fn gradient_rows(
             }
         };
         ui.data_mut(|d| d.insert_temp(picked_id, k));
-        if next != b.colors() {
+        if next != colors {
             acts.push(node_set(slot, "stops", json!(next)));
         }
     }
@@ -2002,7 +2001,8 @@ fn background_rows(
         );
         value(ui, acts, V::Start, "Start");
         value(ui, acts, V::End, "End");
-        gradient_rows(ui, (slot, &n.name), b, acts);
+        let stops = (b.colors(), !b.stops.is_empty());
+        gradient_rows(ui, (slot, &n.name), stops, acts);
         value(ui, acts, V::Offset, "Offset");
         let repeats = (
             &GradientRepeat::ALL[..],
@@ -2010,6 +2010,62 @@ fn background_rows(
         );
         let repeat = (b.repeats(), GradientRepeat::default());
         choice_row(ui, (slot, "Repeat", "repeat"), repeat, repeats, acts);
+    }
+    value(ui, acts, V::Blend, "Blend");
+}
+
+fn noise_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n, f): (usize, &Node, &FastNoise),
+    acts: &mut Vec<Act>,
+) {
+    use EffectValue as V;
+    let value = |ui: &mut egui::Ui, acts: &mut Vec<Act>, v: V, text: &str| {
+        node_value(ui, i, (slot, n), (v, text), acts);
+    };
+    let discontinuous = (slot, "Discontinuous", f.discontinuous, false);
+    check(ui, discontinuous, "discontinuous", acts);
+    check(ui, (slot, "Inverted", f.inverted, false), "inverted", acts);
+    value(ui, acts, V::Center, "Center");
+    value(ui, acts, V::Detail, "Detail");
+    value(ui, acts, V::Brightness, "Brightness");
+    value(ui, acts, V::Contrast, "Contrast");
+    check(ui, (slot, "Lock X/Y", f.lock_xy, true), "lock_xy", acts);
+    match f.lock_xy {
+        true => value(ui, acts, V::Scale, "Scale"),
+        false => {
+            value(ui, acts, V::Scale, "X Scale");
+            value(ui, acts, V::YScale, "Y Scale");
+        }
+    }
+    value(ui, acts, V::Angle, "Angle");
+    value(ui, acts, V::Seethe, "Seethe");
+    value(ui, acts, V::SeetheRate, "Seethe Rate");
+    let colorings = (
+        &NoiseColoring::ALL[..],
+        NoiseColoring::label as fn(NoiseColoring) -> &'static str,
+    );
+    let coloring = (f.colored(), NoiseColoring::default());
+    choice_row(ui, (slot, "Type", "coloring"), coloring, colorings, acts);
+    match f.colored() {
+        NoiseColoring::TwoColor => {
+            let pairs = [
+                (false, "Color 1", "color1", f.first(), FastNoise::COLOR1),
+                (true, "Color 2", "color2", f.second(), FastNoise::COLOR2),
+            ];
+            for (second, name, put, now, usual) in pairs {
+                swatch_row(ui, (slot, name, put), (now, usual), acts);
+                let channels = FastNoise::color_values(second);
+                for (v, text) in channels.into_iter().zip(["Red", "Green", "Blue", "Alpha"]) {
+                    value(ui, acts, v, text);
+                }
+            }
+        }
+        NoiseColoring::Gradient => {
+            let stops = (f.colors(), !f.stops.is_empty());
+            gradient_rows(ui, (slot, &n.name), stops, acts);
+        }
     }
     value(ui, acts, V::Blend, "Blend");
 }
@@ -2087,6 +2143,7 @@ fn node_rows(
             shading_rows(ui, i, (slot, n, t, element), acts);
         }
         Tool::Background(b) => background_rows(ui, i, (slot, n, b), acts),
+        Tool::FastNoise(f) => noise_rows(ui, i, (slot, n, f), acts),
         Tool::Merge(m) => {
             center_row(ui, i, (slot, n), trackers, acts);
             value(ui, acts, V::Size, "Size");

@@ -6,9 +6,9 @@ use crate::keyframes::{
     scale_channel, split_channel, value_at, value_paired,
 };
 use crate::model::{
-    Background, Blur, Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FilmGrain,
-    GaussianBlur, Glow, Keyframe, Mask, Merge, MosaicBlur, Node, ShadingElement, Sharpen, TextPlus,
-    Tool, Vignette,
+    Background, Blur, Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FastNoise,
+    FilmGrain, GaussianBlur, Glow, Keyframe, Mask, Merge, MosaicBlur, Node, ShadingElement,
+    Sharpen, TextPlus, Tool, Vignette,
 };
 
 type Range = (f64, f64);
@@ -250,7 +250,7 @@ fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
 }
 
 impl EffectValue {
-    pub const ALL: [EffectValue; 117] = [
+    pub const ALL: [EffectValue; 132] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -368,6 +368,21 @@ impl EffectValue {
         EffectValue::BottomRightAlpha,
         EffectValue::Start,
         EffectValue::End,
+        EffectValue::Detail,
+        EffectValue::Brightness,
+        EffectValue::Contrast,
+        EffectValue::Scale,
+        EffectValue::YScale,
+        EffectValue::Seethe,
+        EffectValue::SeetheRate,
+        EffectValue::Color1Red,
+        EffectValue::Color1Green,
+        EffectValue::Color1Blue,
+        EffectValue::Color1Alpha,
+        EffectValue::Color2Red,
+        EffectValue::Color2Green,
+        EffectValue::Color2Blue,
+        EffectValue::Color2Alpha,
     ];
 
     pub fn name(self) -> String {
@@ -843,6 +858,39 @@ fn background_slot(b: &mut Background, value: EffectValue) -> Slot<'_> {
     Some((&mut color[i], Background::COLORS))
 }
 
+fn noise_slot(f: &mut FastNoise, value: EffectValue) -> Slot<'_> {
+    use EffectValue as V;
+    Some(match value {
+        V::Detail => (
+            f.detail.get_or_insert(FastNoise::DETAIL),
+            FastNoise::DETAILS,
+        ),
+        V::Brightness => (f.brightness.get_or_insert(0.0), FastNoise::LEVELS),
+        V::Contrast => (
+            f.contrast.get_or_insert(FastNoise::CONTRAST),
+            FastNoise::LEVELS,
+        ),
+        V::Scale => (f.scale.get_or_insert(FastNoise::SCALE), FastNoise::SCALES),
+        V::YScale => (f.y_scale.get_or_insert(FastNoise::SCALE), FastNoise::SCALES),
+        V::Angle => (f.angle.get_or_insert(0.0), FastNoise::TURNS),
+        V::Seethe => (f.seethe.get_or_insert(0.0), FastNoise::SEETHES),
+        V::SeetheRate => (f.seethe_rate.get_or_insert(0.0), FastNoise::SEETHES),
+        v => {
+            let (second, i) = [false, true].into_iter().find_map(|second| {
+                let i = FastNoise::color_values(second)
+                    .iter()
+                    .position(|c| *c == v)?;
+                Some((second, i))
+            })?;
+            let color = match second {
+                false => f.color1.get_or_insert(FastNoise::COLOR1),
+                true => f.color2.get_or_insert(FastNoise::COLOR2),
+            };
+            (&mut color[i], Background::COLORS)
+        }
+    })
+}
+
 fn node_slot(tool: &mut Tool, value: EffectValue) -> Slot<'_> {
     match tool {
         Tool::Blur(b) => blur_slot(b, value),
@@ -850,6 +898,7 @@ fn node_slot(tool: &mut Tool, value: EffectValue) -> Slot<'_> {
         Tool::Merge(m) => merge_slot(m, value),
         Tool::TextPlus(t) => text_slot(t, value),
         Tool::Background(b) => background_slot(b, value),
+        Tool::FastNoise(f) => noise_slot(f, value),
         t if t.is_mask() => mask_slot(t, value),
         _ => None,
     }
@@ -873,6 +922,7 @@ fn node_point(tool: &mut Tool, value: EffectValue) -> Point<'_> {
     let center = match tool {
         Tool::Merge(m) => &mut m.center,
         Tool::TextPlus(t) => &mut t.center,
+        Tool::FastNoise(f) => &mut f.center,
         t => &mut t.mask_mut()?.center,
     };
     Some((center.get_or_insert(Mask::MIDDLE), Mask::PLACES))

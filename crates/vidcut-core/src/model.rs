@@ -4640,6 +4640,16 @@ pub struct Node {
     /// Left out, a tool works on the whole picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_mask: Option<String>,
+    /// The mask node on the detail map input of a `fast_noise`. Where the
+    /// mask is clear, the noise has no detail. Left out, the noise has its
+    /// full detail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_map: Option<String>,
+    /// The mask node on the brightness map input of a `fast_noise`. The
+    /// mask sets the level that the noise moves about. Left out, the level
+    /// is 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness_map: Option<String>,
     /// On, the node does nothing. A tool passes on the picture that comes
     /// in, and a mask passes on the masks that come in. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -4703,6 +4713,10 @@ pub enum Tool {
     /// A picture of one color or of blended colors. Its `effect_mask` crops
     /// it.
     Background(Background),
+    /// Smooth noise in one color or in blended colors. Its `effect_mask`
+    /// crops it. Masks on its `detail_map` and `brightness_map` set its
+    /// detail and its level at each pixel.
+    FastNoise(FastNoise),
 }
 
 /// The patterns of a tracker, in their order. A mask names a pattern by its
@@ -4924,6 +4938,85 @@ pub struct GradientStop {
     pub position: f64,
     /// `[r, g, b, a]`, each from -1000000 to 1000000.
     pub color: [f64; 4],
+}
+
+/// The picture of a `fast_noise` node: smooth noise, colored by two colors
+/// or by a gradient. Its level runs from 0 to 1 before the colors. A color
+/// is `[r, g, b, a]`, each from -1000000 to 1000000. A field left out is at
+/// its usual value. Its numbers can have keyframes, in the `keys` of its
+/// node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FastNoise {
+    /// On, the noise has hard lines along some of its contours. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub discontinuous: bool,
+    /// On, the level of the noise is 1 minus its level. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inverted: bool,
+    /// The middle of the noise, `[x, y]` as fractions of the picture from
+    /// its bottom left, each from -10 to 10. Usual: `[0.5, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// How many layers of finer noise it adds, from 0 to 10. A part of 1
+    /// adds a part of the next layer. 0 gives a flat level. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<f64>,
+    /// Added to the level, from -1000 to 1000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<f64>,
+    /// Scales the level about 0.5, from -1000 to 1000. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contrast: Option<f64>,
+    /// Off, `y_scale` sets how fine the noise is down. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub lock_xy: bool,
+    /// How fine the noise is across, and with `lock_xy` also down: the
+    /// cells of the noise across the width of the picture, from 0 to
+    /// 1000000. Usual: 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    /// Without `lock_xy`, how fine the noise is down, as `scale`. Usual: 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_scale: Option<f64>,
+    /// Turns the noise counterclockwise about `center`, in degrees, from
+    /// -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
+    /// Moves the noise along a third axis, so that it changes in place,
+    /// from -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seethe: Option<f64>,
+    /// Added to `seethe` on each frame of the composition, from -1000000
+    /// to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seethe_rate: Option<f64>,
+    /// How the level becomes a color. Usual: `two_color`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coloring: Option<NoiseColoring>,
+    /// The color at level 0 of `two_color`. Usual: `[0, 0, 0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color1: Option<[f64; 4]>,
+    /// The color at level 1 of `two_color`. Usual: `[1, 1, 1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color2: Option<[f64; 4]>,
+    /// The colors of `gradient` at the levels of their places, from 2 to 64
+    /// stops. Left out, black at 0 and white at 1.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stops: Vec<GradientStop>,
+    /// The size of the picture.
+    #[serde(default, skip_serializing_if = "ImageFormat::is_usual")]
+    pub image: ImageFormat,
+}
+
+/// How the level of a `fast_noise` becomes a color.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NoiseColoring {
+    /// `color1` at level 0 blends into `color2` at level 1.
+    #[default]
+    TwoColor,
+    /// The `stops` at their levels.
+    Gradient,
 }
 
 /// The size of the picture that a node makes. A field left out is at its
@@ -5260,6 +5353,7 @@ pub enum ToolType {
     Merge,
     TextPlus,
     Background,
+    FastNoise,
     MediaIn,
     MediaOut,
 }
@@ -5449,7 +5543,9 @@ pub struct EffectKeys {
 /// outline, and `extend_horizontal`, `extend_vertical` and `round` on a
 /// border. A `background` has the four channels of each of its four
 /// colors, from `top_left_red` to `bottom_right_alpha`, and `start`, `end`
-/// and `offset` of its gradient.
+/// and `offset` of its gradient. A `fast_noise` has `center`, `detail`,
+/// `brightness`, `contrast`, `scale`, `y_scale`, `angle`, `seethe`,
+/// `seethe_rate` and the four channels of `color1` and `color2`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -5572,6 +5668,21 @@ pub enum EffectValue {
     BottomRightAlpha,
     Start,
     End,
+    Detail,
+    Brightness,
+    Contrast,
+    Scale,
+    YScale,
+    Seethe,
+    SeetheRate,
+    Color1Red,
+    Color1Green,
+    Color1Blue,
+    Color1Alpha,
+    Color2Red,
+    Color2Green,
+    Color2Blue,
+    Color2Alpha,
 }
 
 /// What an effect does, with its own values.

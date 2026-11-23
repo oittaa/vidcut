@@ -2668,6 +2668,7 @@ This section follows the Fusion page. The facts without a page are measured in R
   - Merge: it puts the picture on its Foreground input over the picture on its Background input (pp. 2211–2218). See [The Merge](#the-merge).
   - Text+: it draws text on a clear picture (pp. 2381–2390). See [The Text+ tool](#the-text-tool).
   - Background: it makes a picture of one color or of blended colors (pp. 2357–2360). See [The Background tool](#the-background-tool).
+  - Fast Noise: it makes a picture of Perlin noise (pp. 2363–2366). See [The Fast Noise tool](#the-fast-noise-tool).
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
@@ -2935,10 +2936,46 @@ The Color tab (pp. 2358–2360):
   - Repeat: the gradient starts again.
   - Ping-pong: the gradient goes back and forth.
 
+#### The Fast Noise tool
+
+- The Fast Noise tool makes a picture of Perlin noise (p. 2363).
+- It has three inputs (p. 2363):
+  - Noise Detail Map: a mask there gives flat noise where the mask is black and full detail where it is white. It works before the colors.
+  - Noise Brightness Map: a mask there controls the noise map. With Detail 0, it takes the place of the noise.
+  - Effect Mask: a mask there limits the noise to the inside of the mask.
+- The Image tab is the same as on the Background (p. 2401).
+- vidcut: Blend mixes the picture with a clear picture, as on a Text+.
+
+The Noise tab (pp. 2364–2365):
+
+- Discontinuous gives hard lines along some contours of the noise.
+- Inverted gives the negative of the noise.
+- Center moves the noise.
+- Detail adds layers of finer noise. The large pattern stays.
+- Brightness and Contrast change the level of the noise before the colors.
+- Scale sets how fine the noise is. Lock X/Y off gives an X Scale and a Y Scale.
+- Angle turns the noise.
+- Seethe changes the noise in place. Seethe Rate adds to Seethe on each frame.
+
+The Color tab (p. 2366):
+
+- Two Color: the level of the noise blends the first color into the second.
+- Gradient: the level of the noise picks a color on a gradient bar. The bar works as on the Background.
+
+The manual gives no formula for the noise. vidcut uses a widely used method, fractal Perlin noise:
+
+- The noise is improved Perlin noise in three axes. Seethe is the third axis.
+- Scale is the number of noise cells across the width of the picture.
+- Each layer of Detail has half the size and half the strength of the layer before it. A part of Detail adds a part of the next layer.
+- The level is 0.5 plus half the sum of the layers. A mask on the Noise Brightness Map gives this middle level in place of 0.5.
+- Discontinuous uses the absolute value of each layer, which gives creases where the noise crosses zero.
+- Contrast scales the level about 0.5. Brightness adds to it. Inverted gives 1 minus the level.
+- The colors take the level from 0 to 1.
+
 #### Edits
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
-- Add a Text+ or a Background with a node selected: a new Merge goes after that node. The new tool joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
+- Add a Text+, a Background or a Fast Noise with a node selected: a new Merge goes after that node. The new tool joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
   - With a mask selected, no Merge comes. The Text+ joins nothing.
   - vidcut: a Media In added with a node selected does the same.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
