@@ -645,7 +645,7 @@ Writing:
   - `Tool::Background` holds a `Background`: its `BackgroundFill`, its four colors, its gradient and its `ImageFormat`.
     - `Corner` names a color and its four `EffectValue`s. Each channel of each color can have keyframes, as Start, End and Offset can.
     - A `GradientStop` is a color at a place on the gradient. `Background::color_at` gives the color between two stops. The gradient bar of the Inspector uses it.
-    - `ImageFormat` holds Use Frame Format Settings and the size in pixels.
+    - `ImageFormat` holds Auto Resolution and the size in pixels.
   - `Tool::FastNoise` holds a `FastNoise`: its noise values, its `NoiseColoring`, its two colors, its gradient stops and its `ImageFormat`.
     - Its node has two more mask inputs, `NodeInput::DetailMap` and `NodeInput::BrightnessMap`. `Composition::masks_on` gives the masks on any mask input.
   - `Tool::inputs` lists the inputs of each tool (`NodeInput`). `Tool::gives_picture` tells whether a tool gives a picture, and `Tool::feeds` whether it fits an input. Each check of a join reads them. Thus a new tool sets its inputs in one place.

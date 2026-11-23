@@ -19,9 +19,10 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
 - The Fast Noise tool: the defaults and the noise of Resolve. vidcut uses fractal Perlin noise until a measurement gives the values.
 - A picture on a map input of the Fast Noise. vidcut takes masks there.
 - The Image tab of the generators (pp. 2401–2402):
-  - Width and Height without Use Frame Format Settings.
+  - Width and Height without Auto Resolution.
   - Process Mode, Global In and Out, Pixel Aspect, Depth, Source Color Space and Source Gamma Space.
 
 **To measure in Resolve:**
 
-- The plan is in the measurement notes of the nodes (`fixtures/nodes`, step M13).
+- The math of the fills and the gradients, and Width and Height without Auto Resolution.
+- The plan: steps G2 b to l of M13 in the measurement notes of the nodes (`fixtures/nodes`).

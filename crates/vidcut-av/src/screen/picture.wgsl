@@ -1933,7 +1933,7 @@ fn fs_background(in: Out) -> @location(0) vec4<f32> {
         }
         default: {}
     }
-    return vec4<f32>(color.rgb * color.a, color.a);
+    return color;
 }
 
 struct Noising {

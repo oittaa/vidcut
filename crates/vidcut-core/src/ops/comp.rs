@@ -589,7 +589,7 @@ fn background_applied(b: &mut Background, left: &mut NodeChange) {
 
 fn image_applied(image: &mut ImageFormat, left: &mut NodeChange) {
     if let Some(mut i) = left.image.take() {
-        taken(&mut i.use_frame_format, &mut image.use_frame_format);
+        taken(&mut i.auto_resolution, &mut image.auto_resolution);
         given(&mut i.width, &mut image.width);
         given(&mut i.height, &mut image.height);
     }
