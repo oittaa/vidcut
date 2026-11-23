@@ -4700,6 +4700,9 @@ pub enum Tool {
     /// Text on a clear picture of the size of the clip's own picture. Its
     /// `effect_mask` crops it.
     TextPlus(TextPlus),
+    /// A picture of one color or of blended colors. Its `effect_mask` crops
+    /// it.
+    Background(Background),
 }
 
 /// The patterns of a tracker, in their order. A mask names a pattern by its
@@ -4812,6 +4815,142 @@ pub struct Merge {
     /// from 0 to 1. The foreground is still added in full. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+}
+
+/// The picture of a `background` node: one color, or colors that blend
+/// across it. A color is `[r, g, b, a]`, each from -1000000 to 1000000. A
+/// field left out is at its usual value. Its numbers can have keyframes, in
+/// the `keys` of its node.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Background {
+    /// How the colors fill the picture. Usual: `solid_color`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<BackgroundFill>,
+    /// The color of `solid_color`, the left of `horizontal`, the top of
+    /// `vertical` and the top left of `four_corner`. Usual: `[0, 0, 0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_left: Option<[f64; 4]>,
+    /// The right of `horizontal` and the top right of `four_corner`.
+    /// Usual: `[0, 0, 0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_right: Option<[f64; 4]>,
+    /// The bottom of `vertical` and the bottom left of `four_corner`.
+    /// Usual: `[0, 0, 0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom_left: Option<[f64; 4]>,
+    /// The bottom right of `four_corner`. Usual: `[0, 0, 0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom_right: Option<[f64; 4]>,
+    /// The form of a `gradient`. Usual: `linear`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gradient_type: Option<GradientType>,
+    /// Where a `gradient` starts, `[x, y]` as fractions of the picture from
+    /// its bottom left, each from -10 to 10. Usual: `[0, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<[f64; 2]>,
+    /// Where a `gradient` ends, as `start`. Usual: `[1, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<[f64; 2]>,
+    /// The colors of a `gradient`, from 2 to 64 stops. Left out, black at
+    /// 0 and white at 1.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stops: Vec<GradientStop>,
+    /// Moves a `gradient` along its line, as a part of its length, from
+    /// -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f64>,
+    /// What a `gradient` shows past its start and its end. Usual: `once`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<GradientRepeat>,
+    /// The size of the picture.
+    #[serde(default, skip_serializing_if = "ImageFormat::is_usual")]
+    pub image: ImageFormat,
+}
+
+/// How the colors of a `background` fill its picture.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundFill {
+    /// One color, `top_left`.
+    #[default]
+    SolidColor,
+    /// `top_left` at the left blends into `top_right` at the right.
+    Horizontal,
+    /// `top_left` at the top blends into `bottom_left` at the bottom.
+    Vertical,
+    /// The four colors in their corners blend across the picture.
+    FourCorner,
+    /// The `stops` from `start` to `end`, in the form of `gradient_type`.
+    Gradient,
+}
+
+/// The form of the gradient of a `background`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GradientType {
+    /// Along the straight line from `start` to `end`.
+    #[default]
+    Linear,
+    /// The linear gradient, mirrored on each side of `start`.
+    Reflect,
+    /// In squares about `start`.
+    Square,
+    /// In a cross about `start`.
+    Cross,
+    /// In circles about `start`.
+    Radial,
+    /// In a counterclockwise sweep about `start`.
+    Angle,
+}
+
+/// What a gradient shows when its `offset` moves it past its start and its
+/// end.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GradientRepeat {
+    /// The colors of the ends go on.
+    #[default]
+    Once,
+    /// The gradient starts again.
+    Repeat,
+    /// The gradient goes back and forth.
+    PingPong,
+}
+
+/// A color of a gradient, at a place along it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GradientStop {
+    /// Its place, from 0 (the start) to 1 (the end).
+    pub position: f64,
+    /// `[r, g, b, a]`, each from -1000000 to 1000000.
+    pub color: [f64; 4],
+}
+
+/// The size of the picture that a node makes. A field left out is at its
+/// usual value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ImageFormat {
+    /// On, the picture has the size of the clip's own picture. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub use_frame_format: bool,
+    /// Without `use_frame_format`, the width in pixels, from 1 to 32768.
+    /// Usual: the width of the clip's own picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    /// Without `use_frame_format`, the height in pixels, from 1 to 32768.
+    /// Usual: the height of the clip's own picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+}
+
+impl Default for ImageFormat {
+    fn default() -> Self {
+        Self {
+            use_frame_format: true,
+            width: None,
+            height: None,
+        }
+    }
 }
 
 /// The text of a `text_plus` node and how it lies on the picture. S is its
@@ -5102,7 +5241,8 @@ pub enum MergeOperator {
 }
 
 /// The tools that a composition takes: `blur`, the kinds of effect, the
-/// masks, `merge`, `text_plus`, and the picture coming in and going out.
+/// masks, `merge`, `text_plus`, `background`, and the picture coming in and
+/// going out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolType {
@@ -5119,6 +5259,7 @@ pub enum ToolType {
     Tracker,
     Merge,
     TextPlus,
+    Background,
     MediaIn,
     MediaOut,
 }
@@ -5306,7 +5447,9 @@ pub struct EffectKeys {
 /// shading element of a `text_plus` has `opacity`, its color, `softness_x`,
 /// `softness_y`, `shading_offset` and `priority`, with `thickness` on an
 /// outline, and `extend_horizontal`, `extend_vertical` and `round` on a
-/// border.
+/// border. A `background` has the four channels of each of its four
+/// colors, from `top_left_red` to `bottom_right_alpha`, and `start`, `end`
+/// and `offset` of its gradient.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -5411,6 +5554,24 @@ pub enum EffectValue {
     SoftnessY,
     ShadingOffset,
     Priority,
+    TopLeftRed,
+    TopLeftGreen,
+    TopLeftBlue,
+    TopLeftAlpha,
+    TopRightRed,
+    TopRightGreen,
+    TopRightBlue,
+    TopRightAlpha,
+    BottomLeftRed,
+    BottomLeftGreen,
+    BottomLeftBlue,
+    BottomLeftAlpha,
+    BottomRightRed,
+    BottomRightGreen,
+    BottomRightBlue,
+    BottomRightAlpha,
+    Start,
+    End,
 }
 
 /// What an effect does, with its own values.

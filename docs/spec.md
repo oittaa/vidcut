@@ -2663,6 +2663,7 @@ This section follows the Fusion page. The facts without a page are measured in R
   - Tracker: it follows patterns in the picture, and passes its input on as it is (pp. 1783–1789). See [The Tracker](#the-tracker).
   - Merge: it puts the picture on its Foreground input over the picture on its Background input (pp. 2211–2218). See [The Merge](#the-merge).
   - Text+: it draws text on a clear picture (pp. 2381–2390). See [The Text+ tool](#the-text-tool).
+  - Background: it makes a picture of one color or of blended colors (pp. 2357–2360). See [The Background tool](#the-background-tool).
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
@@ -2894,10 +2895,45 @@ The values of the shading elements of a new node:
 - Each of these has Opacity 1, Thickness 0.02, Join Style Rounded and Level Character.
 - Elements 5 to 8 are a white Text Fill. Their Priority is 4 to 1.
 
+#### The Background tool
+
+The facts without a page are measured in Resolve Studio 21.2.
+
+- The Background tool makes a picture of one color or of blended colors (p. 2357).
+- Its one input is an Effect Mask. A mask there limits the color to the inside of the mask (p. 2357).
+- Use Frame Format Settings gives the picture the size of the frame format of the composition (p. 2401). In the composition of a clip, this is the size of the clip's own picture, W × H.
+- The color fields take values above 1. The composition then works in 32-bit floats.
+- vidcut: Blend mixes the picture with a clear picture, as on a Text+.
+
+The Color tab (pp. 2358–2360):
+
+- Type sets how the colors fill the picture:
+  - Solid Color: one color.
+  - Horizontal: two colors, from left to right.
+  - Vertical: two colors, from top to bottom.
+  - Four Corner: four colors, one in each corner.
+  - Gradient: the colors of a gradient, from its Start to its End.
+- Gradient Type sets the form of a gradient (p. 2359):
+  - Linear: along the straight line from Start to End.
+  - Reflect: the linear gradient, mirrored on each side of Start.
+  - Square, Cross and Radial: squares, a cross or circles about Start.
+  - Angle: a counterclockwise sweep about Start.
+- The viewer shows Start and End as two red points with a green line between them (p. 2359).
+- The gradient bar holds the colors of the gradient (p. 2359):
+  - Two color stops set the start and the end color.
+  - A click on the bottom of the bar adds a stop.
+  - A drag moves a stop. A drag with Ctrl (Command on a Mac) copies it.
+  - A drag up past the bar removes a stop.
+- Offset moves the gradient along its line (p. 2359).
+- Repeat sets what shows past the start and the end (p. 2360):
+  - Once: the end colors go on.
+  - Repeat: the gradient starts again.
+  - Ping-pong: the gradient goes back and forth.
+
 #### Edits
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
-- Add a Text+ with a node selected: a new Merge goes after that node, and the Text+ joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
+- Add a Text+ or a Background with a node selected: a new Merge goes after that node. The new tool joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
   - vidcut: a Media In added with a node selected does the same.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
   - vidcut: a Tracker has no effect mask yet. A mask added with a Tracker selected joins nothing ([todo](todo/motion-tracking.md)).

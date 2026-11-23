@@ -1,10 +1,11 @@
+use crate::composition::Corner;
 use crate::effect_keys::Keyed;
 use crate::model::{
-    ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode,
-    Composition, Effect, EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha,
-    GlowFraming, GlowOutput, Mask, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    Pattern, Picture, ShadingElement, Sharpen, TextPlus, Tool, Vignette, VignetteMode,
-    VignetteShape,
+    ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
+    CellShape, CompositeMode, Composition, Effect, EffectKind, EffectType, FillMethod, FilmGrain,
+    Glow, GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop, GradientType, Mask,
+    Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, ShadingElement,
+    Sharpen, TextPlus, Tool, Vignette, VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -924,6 +925,38 @@ pub enum Op {
     Work(Working),
     Merge(Merging),
     Text(Box<Inking>),
+    Make(Box<Making>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Making {
+    Background(Painting),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Painting {
+    pub fill: BackgroundFill,
+    pub corners: [[f64; 4]; 4],
+    pub form: GradientType,
+    pub line: [[f64; 2]; 2],
+    pub stops: Vec<GradientStop>,
+    pub offset: f64,
+    pub repeat: GradientRepeat,
+}
+
+impl Painting {
+    pub fn of(b: &Background, (w, h): (f64, f64)) -> Self {
+        let pixel = |[x, y]: [f64; 2]| [x * w, (1.0 - y) * h];
+        Self {
+            fill: b.filled(),
+            corners: Corner::ALL.map(|c| b.color(c)),
+            form: b.form(),
+            line: [pixel(b.from()), pixel(b.to())],
+            stops: b.colors().to_vec(),
+            offset: b.shift(),
+            repeat: b.repeats(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1065,6 +1098,33 @@ impl Registers {
     }
 }
 
+fn masked(
+    stages: &mut Vec<Stage>,
+    regs: &mut Registers,
+    made: usize,
+    (shaped, mixed): (Vec<Shaping>, f64),
+    size: (f64, f64),
+) -> usize {
+    if shaped.is_empty() && mixed == 1.0 {
+        return made;
+    }
+    let clear = regs.taken();
+    stages.push(Stage {
+        op: Op::Clear,
+        from: Vec::new(),
+        to: clear,
+    });
+    let out = regs.taken();
+    stages.push(Stage {
+        op: Op::Merge(Merging::of(&Merge::default(), mixed, size, shaped)),
+        from: vec![clear, made],
+        to: out,
+    });
+    regs.freed(clear, true);
+    regs.freed(made, true);
+    out
+}
+
 pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) -> Program {
     let Some((order, uses)) = c.picture_order() else {
         return Program::clear();
@@ -1202,6 +1262,18 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                         Some(out)
                     }
                 }
+            }
+            Tool::Background(_) if n.pass_through => None,
+            Tool::Background(b) => {
+                let to = regs.taken();
+                let painting = Painting::of(b, (w, h));
+                stages.push(Stage {
+                    op: Op::Make(Box::new(Making::Background(painting))),
+                    from: Vec::new(),
+                    to,
+                });
+                let how = (masks(n), n.mixed());
+                Some(masked(&mut stages, &mut regs, to, how, (w, h)))
             }
             t if !t.gives_from(&gives) => None,
             Tool::Merge(m) => first.map(|b| match came.get(1).copied().flatten() {

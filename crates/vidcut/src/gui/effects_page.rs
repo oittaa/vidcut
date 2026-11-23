@@ -54,7 +54,7 @@ const SCREEN: usize = 0;
 const LIBRARY: [(&str, &[ToolType]); 6] = [
     ("Tools", &[ToolType::Blur]),
     ("Composite", &[ToolType::Merge]),
-    ("Generators", &[ToolType::TextPlus]),
+    ("Generators", &[ToolType::Background, ToolType::TextPlus]),
     (
         "Masks",
         &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
@@ -73,7 +73,12 @@ const LIBRARY: [(&str, &[ToolType]); 6] = [
     ),
 ];
 const TOOL_ROW: [&[ToolType]; 2] = [
-    &[ToolType::TextPlus, ToolType::Merge, ToolType::Blur],
+    &[
+        ToolType::Background,
+        ToolType::TextPlus,
+        ToolType::Merge,
+        ToolType::Blur,
+    ],
     &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
 ];
 
