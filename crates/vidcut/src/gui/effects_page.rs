@@ -603,6 +603,10 @@ fn grip_value(grip: Grip) -> Option<EffectValue> {
     }
 }
 
+fn pinned(n: &Node, grip: Grip) -> bool {
+    n.connect.is_some() && grip_value(grip) == Some(EffectValue::Center)
+}
+
 fn reach(grip: Grip, at: Pos2, press: Pos2, middle: Pos2) -> f32 {
     let along = |from: Pos2| {
         let (d, p) = (at - from, press - from);
@@ -1488,7 +1492,6 @@ impl Workspace {
             };
             let spots: Vec<(Grip, Pos2)> = grips(first)
                 .into_iter()
-                .filter(|(g, _)| *g != Grip::Center || node.connect.is_none())
                 .map(|(g, s)| (g, screen(s)))
                 .collect();
             draw_grips(&painter, first, &spots, turned);
@@ -1567,7 +1570,7 @@ impl Workspace {
                 return;
             };
             let n = &mut held.composition.nodes[i];
-            let joined = n.connect.is_some();
+            let still = pinned(n, held.grip);
             let to = pixel(to);
             if held.grip.turns() {
                 held.turn += swept(s.middle, held.last, to);
@@ -1577,7 +1580,7 @@ impl Workspace {
             match (&mut n.tool, &tool) {
                 (Tool::Merge(m), Tool::Merge(now)) => {
                     *m = now.clone();
-                    match (held.grip.turns(), joined) {
+                    match (held.grip.turns(), still) {
                         (true, _) => m.angle = angle,
                         (false, true) => {}
                         (false, false) => {
@@ -1589,9 +1592,10 @@ impl Workspace {
                 (t, _) => {
                     if let (Some(m), Some(now), Some(base)) = (t.mask_mut(), tool.mask(), &s.base) {
                         *m = now.clone();
-                        match held.grip.turns() {
-                            true => m.angle = angle,
-                            false => gripped(m, &tool, (held.grip, to), base, (w, h)),
+                        match (held.grip.turns(), still) {
+                            (true, _) => m.angle = angle,
+                            (false, true) => {}
+                            (false, false) => gripped(m, &tool, (held.grip, to), base, (w, h)),
                         }
                     }
                 }
@@ -1599,6 +1603,14 @@ impl Workspace {
             held.last = to;
         }
         if !resp.drag_stopped() {
+            return;
+        }
+        if held
+            .composition
+            .node(&name)
+            .is_some_and(|n| pinned(n, held.grip))
+        {
+            self.effects_page.held = None;
             return;
         }
         let change = held.composition.node(&name).and_then(|n| match &n.tool {

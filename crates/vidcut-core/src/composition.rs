@@ -919,6 +919,12 @@ impl Node {
         usual.read_point(value).map(|(p, _)| p)
     }
 
+    pub fn center_to_usual(&mut self) {
+        if let Some(to) = self.usual_point(EffectValue::Center) {
+            self.write_point(EffectValue::Center, to);
+        }
+    }
+
     pub fn join(&self, input: NodeInput) -> Option<&str> {
         match input {
             NodeInput::Input => self.input.as_deref(),

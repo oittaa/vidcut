@@ -191,6 +191,9 @@ fn kept_connect(d: &Composition, n: &mut Node, to: Option<String>) {
         let name = to.unwrap_or(k.tracker);
         tracker(&name).then_some(Connect { tracker: name, ..k })
     });
+    if n.connect.is_some() {
+        n.center_to_usual();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -417,6 +420,9 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
     taken(&mut left.place, &mut next.place);
     if let Some(connect) = left.connect.take() {
         next.connect = connect;
+        if next.connect.is_some() {
+            next.center_to_usual();
+        }
     }
     if next.tool.works() {
         given(&mut left.blend, &mut next.blend);
@@ -655,6 +661,7 @@ pub fn set(
     let mut change = change.clone();
     trimmed(p, id, name, &mut change, frame)?;
     moved_path(p, id, name, &mut change, frame)?;
+    left_point(p, id, name, &mut change, frame)?;
     let pattern = change.pattern.unwrap_or(1);
     let change = &change;
     let c = kept(p, id)?;
@@ -677,6 +684,42 @@ pub fn set(
         unhooked(c, name, pattern);
     }
     tidied(p, id)?;
+    Ok(())
+}
+
+fn left_point(
+    p: &Project,
+    id: &str,
+    name: &str,
+    change: &mut NodeChange,
+    frame: Option<i64>,
+) -> Result<()> {
+    if change.connect != Some(None) || change.values.center.is_some() {
+        return Ok(());
+    }
+    let Some(c) = p.clip(id) else {
+        return Ok(());
+    };
+    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
+    let Some(k) = comp
+        .and_then(|x| x.node(name))
+        .and_then(|n| n.connect.as_ref())
+    else {
+        return Ok(());
+    };
+    let Some(frame) = frame else {
+        return Err(Error::usage(format!(
+            "{name} stops following {}: give `frame`, whose point its center keeps",
+            k.tracker
+        )));
+    };
+    let at = Frames::of(p, c).file(frame) as f64;
+    let to = comp
+        .and_then(|x| x.pattern(k))
+        .and_then(|t| t.offset_position_at(at));
+    if let Some([x, y]) = to {
+        change.values.center = Some(vec![x, y]);
+    }
     Ok(())
 }
 

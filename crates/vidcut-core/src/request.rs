@@ -6372,8 +6372,9 @@ pub struct NodeChange {
     /// The pattern of a tracker that the node's center follows, as
     /// `{"tracker": "Tracker1", "pattern": 1}`. With `"size": true`, a
     /// mask also grows, shrinks and turns with the box of the pattern. The
-    /// node keeps its own center, and null gives it back. A node with
-    /// keyframes on its center is an error.
+    /// node's own center goes to its usual value. A node with keyframes on
+    /// its center is an error. Null stops it, with `frame`: the center then
+    /// keeps the point that it follows on that frame.
     #[serde(
         default,
         deserialize_with = "given",
