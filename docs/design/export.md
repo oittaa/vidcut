@@ -1004,6 +1004,7 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - `Composition::picture_order` gives the nodes that feed the MediaOut node, each before the nodes that take its picture. It also counts the nodes that take each picture.
   - A node that passes its picture on (a Tracker, a tool with `pass_through`, a tool with no work) gives the register of its input. A tool works in place on the register of its input when no later node reads that register. Else it writes a free register.
   - A Merge reads two registers and writes a free register. A register goes back to the free list after its last read (`Registers::freed`).
+  - A node that makes its own picture, as the MediaIn node and a Text+, takes its masks and its Blend through `place::masked`. That gives an `Op::Clear` and an `Op::Merge`. The Merge puts the picture over the clear register, with the masks and the Blend.
   - A node gives no picture when its picture input has none (`Tool::gives_from`). When the MediaOut node gets no picture, or the joins make a loop, the program is one `Op::Clear`. The clip then shows nothing, and `RenderPlan::broken_composition` stops an export (`Composition::shows`).
   - It works in the pixels of the picture, upright. A size in the composition follows these pixels, not the frame.
 - `Working::of_blur` gives the work of a Blur tool:
@@ -1013,7 +1014,7 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
 - An effect tool gives the work of its clip effect, through `Working::of`. Its sizes follow the picture, as on a frame of the same size (`place::OnFrame`).
   - With `blur_alpha` off, a Gaussian Blur has no sigma on the alpha.
 - A Merge with a foreground gives an `Op::Merge`, which holds a `place::Merging`. Without a foreground, it gives the register of its background.
-- A Text+ gives an `Op::Text` into a free register. With masks or a Blend below 1, an `Op::Clear` and an `Op::Merge` follow. The Merge puts the text over the clear register, with the masks and the Blend.
+- A Text+ gives an `Op::Text` into a free register. Its masks and its Blend then go through `place::masked`.
   - `Merge::lookup` gives the affine map from a pixel of the output to a pixel of the foreground. It holds the flip, Size, Angle, Center and Invert Transform.
   - The mode, the operator, the edges and the sliders go to the shader as they are.
 - `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.

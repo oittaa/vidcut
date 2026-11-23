@@ -887,7 +887,7 @@ pub fn composition_checked(c: &Composition) -> Result<Composition> {
         if c.nodes[..i].iter().any(|m| m.name == n.name) {
             return Err(Error::invalid(format!("two nodes are named {}", n.name)));
         }
-        let once = matches!(n.tool, Tool::MediaIn | Tool::MediaOut);
+        let once = n.tool.is_media();
         if once && c.nodes[..i].iter().any(|m| m.tool == n.tool) {
             return Err(Error::invalid(format!(
                 "a composition has one {} node",

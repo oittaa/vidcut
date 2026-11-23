@@ -1058,6 +1058,33 @@ impl Registers {
     }
 }
 
+fn masked(
+    stages: &mut Vec<Stage>,
+    regs: &mut Registers,
+    made: usize,
+    (shaped, mixed): (Vec<Shaping>, f64),
+    size: (f64, f64),
+) -> usize {
+    if shaped.is_empty() && mixed == 1.0 {
+        return made;
+    }
+    let clear = regs.taken();
+    stages.push(Stage {
+        op: Op::Clear,
+        from: Vec::new(),
+        to: clear,
+    });
+    let out = regs.taken();
+    stages.push(Stage {
+        op: Op::Merge(Merging::of(&Merge::default(), mixed, size, shaped)),
+        from: vec![clear, made],
+        to: out,
+    });
+    regs.freed(clear, true);
+    regs.freed(made, true);
+    out
+}
+
 pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) -> Program {
     let Some((order, uses)) = c.picture_order() else {
         return Program::clear();
@@ -1119,7 +1146,17 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
         let first = came.first().copied().flatten();
         let gives: Vec<bool> = came.iter().map(Option::is_some).collect();
         let result = match &n.tool {
-            Tool::MediaIn => Some(0),
+            Tool::MediaIn if n.pass_through => Some(0),
+            Tool::MediaIn => {
+                let shaped = masks(n);
+                Some(masked(
+                    &mut stages,
+                    &mut regs,
+                    0,
+                    (shaped, n.mixed()),
+                    (w, h),
+                ))
+            }
             Tool::MediaOut => {
                 out = first;
                 None
@@ -1133,27 +1170,13 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                     to,
                 });
                 let shaped = masks(n);
-                match shaped.is_empty() && n.mixed() == 1.0 {
-                    true => Some(to),
-                    false => {
-                        let clear = regs.taken();
-                        stages.push(Stage {
-                            op: Op::Clear,
-                            from: Vec::new(),
-                            to: clear,
-                        });
-                        let out = regs.taken();
-                        let merging = Merging::of(&Merge::default(), n.mixed(), (w, h), shaped);
-                        stages.push(Stage {
-                            op: Op::Merge(merging),
-                            from: vec![clear, to],
-                            to: out,
-                        });
-                        regs.freed(clear, true);
-                        regs.freed(to, true);
-                        Some(out)
-                    }
-                }
+                Some(masked(
+                    &mut stages,
+                    &mut regs,
+                    to,
+                    (shaped, n.mixed()),
+                    (w, h),
+                ))
             }
             t if !t.gives_from(&gives) => None,
             Tool::Merge(m) => first.map(|b| match came.get(1).copied().flatten() {

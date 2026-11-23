@@ -48,7 +48,7 @@ fn found(c: &Composition, id: &str, name: &str) -> Result<usize> {
 }
 
 fn one_of(c: &Composition, tool: &Tool, id: &str) -> Result<()> {
-    let once = matches!(tool, Tool::MediaIn | Tool::MediaOut);
+    let once = tool.is_media();
     match once && c.nodes.iter().any(|n| n.tool == *tool) {
         true => Err(Error::invalid(format!(
             "{id}'s composition has a {} node already",
@@ -110,13 +110,6 @@ fn insert(c: &mut Composition, mut node: Node, after: Option<&str>, id: &str) ->
             }
             node.input = Some(a.name);
         }
-        Some(a) if node.tool.is_mask() && a.tool.works() => {
-            node.place = above(c, a.place);
-            node.effect_mask = a.effect_mask.clone();
-            if let Some(i) = c.index(&a.name) {
-                c.nodes[i].effect_mask = Some(node.name.clone());
-            }
-        }
         Some(a) if node.tool.is_mask() && a.tool.is_mask() => {
             node.place = above(c, a.place);
             for n in &mut c.nodes {
@@ -125,6 +118,13 @@ fn insert(c: &mut Composition, mut node: Node, after: Option<&str>, id: &str) ->
                 }
             }
             node.effect_mask = Some(a.name);
+        }
+        Some(a) if node.tool.is_mask() && a.tool.takes(NodeInput::EffectMask) => {
+            node.place = above(c, a.place);
+            node.effect_mask = a.effect_mask.clone();
+            if let Some(i) = c.index(&a.name) {
+                c.nodes[i].effect_mask = Some(node.name.clone());
+            }
         }
         _ => node.place = apart(c),
     }
