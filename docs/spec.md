@@ -2906,41 +2906,54 @@ The facts without a page are measured in Resolve Studio 21.2.
 
 - The Background tool makes a picture of one color or of blended colors (p. 2357).
 - Its one input is an Effect Mask. A mask there limits the color to the inside of the mask (p. 2357).
-- Use Frame Format Settings gives the picture the size of the frame format of the composition (p. 2401). In the composition of a clip, this is the size of the clip's own picture, W × H.
-- The color fields take values above 1. The composition then works in 32-bit floats.
-- vidcut: Blend mixes the picture with a clear picture, as on a Text+.
+- The picture holds the colors as they are set. The colors are not multiplied by the alpha.
+  - Thus (0.2, 0.5, 0.3, 0.5) as the Foreground of a Merge over a gray of 0.1 gives (0.25, 0.55, 0.35, 1).
+- The color fields keep values above 1 and below 0. The picture keeps them too. The composition then works in 32-bit floats.
+- The Settings tab has no Blend row.
+  - vidcut: Blend mixes the picture with a clear picture, as on a Text+.
 
 The Color tab (pp. 2358–2360):
 
-- Type sets how the colors fill the picture:
-  - Solid Color: one color.
-  - Horizontal: two colors, from left to right.
-  - Vertical: two colors, from top to bottom.
-  - Four Corner: four colors, one in each corner.
+- Type sets how the colors fill the picture. Usual: Solid Color.
+  - Solid Color: one color, Color.
+  - Horizontal: Left blends into Right.
+  - Vertical: Top blends into Bottom.
+  - Four Corner: Top Left, Top Right, Bottom Left and Bottom Right, one color in each corner.
   - Gradient: the colors of a gradient, from its Start to its End.
-- Gradient Type sets the form of a gradient (p. 2359):
+- Each color has Red, Green, Blue and Alpha rows. Usual: (0, 0, 0, 1).
+- Gradient Type sets the form of a gradient (p. 2359). Usual: Linear.
   - Linear: along the straight line from Start to End.
   - Reflect: the linear gradient, mirrored on each side of Start.
   - Square, Cross and Radial: squares, a cross or circles about Start.
   - Angle: a counterclockwise sweep about Start.
-- The viewer shows Start and End as two red points with a green line between them (p. 2359).
+- Start and End: usual (0, 0.5) and (1, 0.5). The viewer shows them as two red points with a green line between them (p. 2359).
   - vidcut: the points show for a selected Background with Type Gradient. A drag moves a point.
 - The gradient bar holds the colors of the gradient (p. 2359):
-  - Two color stops set the start and the end color.
+  - Two color stops set the start and the end color. Usual: black at the left end and white at the right end. The stop at 0 is selected, with the color (0, 0, 0, 1).
   - A click on the bottom of the bar adds a stop.
   - A drag moves a stop. A drag with Ctrl (Command on a Mac) copies it.
   - A drag up past the bar removes a stop.
-- Offset moves the gradient along its line (p. 2359).
-- Repeat sets what shows past the start and the end (p. 2360):
+- Interpolation Space sets the colors between the stops (p. 2359): RGB, HLS, HSV or LAB. Usual: RGB.
+- Offset moves the gradient along its line (p. 2359). Usual: 0.
+- Repeat sets what shows past the start and the end (p. 2360). Usual: Once.
   - Once: the end colors go on.
   - Repeat: the gradient starts again.
-  - Ping-pong: the gradient goes back and forth.
+  - Ping-Pong: the gradient goes back and forth.
+- Sub-Pixel sets the samples in each pixel (p. 2360): 1x1, 2x2, 3x3, 4x4 or 5x5. Usual: 1x1.
+
+The Image tab (pp. 2401–2402):
+
+- Auto Resolution gives the picture the size of the frame format of the composition. Usual: on. The manual calls it Use Frame Format Settings (p. 2401).
+  - In the composition of a clip, this size is the size of the clip's own picture, W × H.
+- Width, Height and Pixel Aspect show the size. In a composition of 1920 × 1080, they show 1920, 1080 and (1, 1).
+- Process Mode: Full Frames, NTSC Fields, PAL/HD Fields, PAL/HD Fields (Reversed) or NTSC Fields (Reversed). Usual: Full Frames.
+- Depth: Default, int8, int16, float16 or float32. Usual: Default.
 
 #### Edits
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
 - Add a Text+ or a Background with a node selected: a new Merge goes after that node. The new tool joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
-  - With a mask selected, no Merge comes. The Text+ joins nothing.
+  - With a mask selected, no Merge comes. The Text+ or the Background joins nothing.
   - vidcut: a Media In added with a node selected does the same.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
   - vidcut: a Tracker has no effect mask yet. A mask added with a Tracker selected joins nothing ([todo](todo/motion-tracking.md)).

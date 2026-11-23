@@ -4932,12 +4932,12 @@ pub struct GradientStop {
 pub struct ImageFormat {
     /// On, the picture has the size of the clip's own picture. Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
-    pub use_frame_format: bool,
-    /// Without `use_frame_format`, the width in pixels, from 1 to 32768.
+    pub auto_resolution: bool,
+    /// Without `auto_resolution`, the width in pixels, from 1 to 32768.
     /// Usual: the width of the clip's own picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<u32>,
-    /// Without `use_frame_format`, the height in pixels, from 1 to 32768.
+    /// Without `auto_resolution`, the height in pixels, from 1 to 32768.
     /// Usual: the height of the clip's own picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u32>,
@@ -4946,7 +4946,7 @@ pub struct ImageFormat {
 impl Default for ImageFormat {
     fn default() -> Self {
         Self {
-            use_frame_format: true,
+            auto_resolution: true,
             width: None,
             height: None,
         }

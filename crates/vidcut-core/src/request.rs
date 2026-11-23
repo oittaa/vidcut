@@ -6471,11 +6471,11 @@ pub struct NodeChange {
 pub struct ImageChange {
     /// On, the picture has the size of the clip's own picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub use_frame_format: Option<bool>,
-    /// Without `use_frame_format`, the width in pixels, from 1 to 32768.
+    pub auto_resolution: Option<bool>,
+    /// Without `auto_resolution`, the width in pixels, from 1 to 32768.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<u32>,
-    /// Without `use_frame_format`, the height in pixels, from 1 to 32768.
+    /// Without `auto_resolution`, the height in pixels, from 1 to 32768.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u32>,
 }

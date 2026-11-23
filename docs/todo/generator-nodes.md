@@ -18,9 +18,10 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
   - Sub-Pixel of the gradient (p. 2360).
   - Keyframes on the stops of the gradient, and its contextual menu (p. 2360).
 - The Image tab of the generators (pp. 2401–2402):
-  - Width and Height without Use Frame Format Settings.
+  - Width and Height without Auto Resolution.
   - Process Mode, Global In and Out, Pixel Aspect, Depth, Source Color Space and Source Gamma Space.
 
 **To measure in Resolve:**
 
-- The plan is in the measurement notes of the nodes (`fixtures/nodes`, step M13).
+- The math of the fills and the gradients, and Width and Height without Auto Resolution.
+- The plan: steps G2 b to l of M13 in the measurement notes of the nodes (`fixtures/nodes`).

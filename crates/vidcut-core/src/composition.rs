@@ -254,7 +254,7 @@ impl ImageFormat {
     }
 
     pub fn size(&self, (w, h): (f64, f64)) -> (f64, f64) {
-        match self.use_frame_format {
+        match self.auto_resolution {
             true => (w, h),
             false => (
                 self.width.map_or(w, f64::from),
