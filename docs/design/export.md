@@ -1089,7 +1089,7 @@ The boxes:
 Other parts:
 
 - `render_cache::held` drops the compositions of the compound clips around a picture. They work later, at the draw, as their effects do.
-- `Composition::moves_by_itself` is true for an effect tool that moves by itself. Then `render_cache` keeps a frame for each frame of the clip.
+- `Composition::moves_by_itself` is true for an effect tool that moves by itself. It is also true for a Fast Noise whose Seethe Rate is not 0 or has keyframes. Then `render_cache` keeps a frame for each frame of the clip.
 - `export::prepare` stops an export with an error when a clip in it has a composition without a chain (`RenderPlan::broken_composition`).
 
 ## Proxies

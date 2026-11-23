@@ -1700,6 +1700,11 @@ impl Composition {
                 ..EffectType::of(kind).made()
             }
             .moves_by_itself(),
+            Tool::FastNoise(f) => {
+                !n.pass_through
+                    && (f.seethe_rate.is_some_and(|r| r != 0.0)
+                        || !n.keys_of(EffectValue::SeetheRate).is_empty())
+            }
             _ => false,
         })
     }

@@ -1823,6 +1823,10 @@ fn colors_of(tool: &Tool) -> Vec<(&'static str, [EffectValue; 4], [f64; 4])> {
         Tool::Background(b) => Corner::ALL
             .map(|c| (c.key(), c.values(), b.color(c)))
             .to_vec(),
+        Tool::FastNoise(f) => vec![
+            ("color1", FastNoise::color_values(false), f.first()),
+            ("color2", FastNoise::color_values(true), f.second()),
+        ],
         _ => Vec::new(),
     }
 }

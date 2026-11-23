@@ -1338,8 +1338,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                 for r in from {
                     regs.freed(r, true);
                 }
-                let how = (masks(n), n.mixed());
-                Some(masked(&mut stages, &mut regs, to, how, (w, h)))
+                Some(masked(&mut stages, &mut regs, to, (shaped, mix), (w, h)))
             }
             t if !t.gives_from(&gives) => None,
             Tool::Merge(m) => first.map(|b| match came.get(1).copied().flatten() {
