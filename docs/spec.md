@@ -2995,6 +2995,13 @@ The values of the shading elements of a new node:
   - Measured in Resolve Studio 21.2: the control is a dashed ring about the center. The ring keeps its size on the screen.
   - A drag on the ring turns the shape as far as the pointer turns about the center.
   - While the shape turns, the ring is red, with a line from the center at the angle.
+- The viewer shows the handles of each selected Merge. Measured in Resolve Studio 21.2:
+  - A square at the Center. A drag of it moves the Center with the pointer.
+  - An arrow to the right and an arrow up from the Center. They stay on the axes of the screen at each Angle.
+    - A drag of the right arrow changes only X. A drag of the up arrow changes only Y.
+  - A line from the Center at the Angle, and a dashed ring about the Center.
+    - A drag of either turns the foreground as far as the pointer turns about the Center. The Angle can go past 360.
+  - No handle changes Size. A drag inside the foreground, off the handles, does nothing.
 
 #### The Tracker
 

@@ -306,9 +306,11 @@ The bar and the Jobs button:
   - A drag holds the value (`Inspector::held`) and sends one `comp.set` when it stops. `Workspace::node_preview` shows the held value until then.
   - Each value has its Keyframe button. It sends `comp.key` with the `value`.
   - A Text+ shows one shading element at a time. `EffectsPage::element` holds it, and `gui.nodes` with `element` sets it. A click on the row of elements sends that request.
-- `Workspace::mask_handles` draws the handles of each selected mask with `show_view_controls` on.
+- `Workspace::node_handles` draws the handles of each selected mask with `show_view_controls` on, and of each selected Merge.
   - A drag of a handle changes a copy of the composition (`Held`). It sends one `comp.set` when it stops.
-  - A drag of the ring adds the turn of the pointer about the center on each frame (`swept`). Thus the angle can go past 360.
+  - A drag of the ring adds the turn of the pointer about the center on each frame (`swept`). Thus the angle can go past 360. The line of a Merge (`Grip::Spoke`) does the same.
+  - `merge_spots` gives the handles of a Merge. Its center and its arrows (`Grip::Across`, `Grip::Up`) move the Center by the move of the pointer (`merge_moved`). A mask's center goes to the pointer.
+  - A Center that follows a tracker pattern has no handles that move it.
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
 - On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L, the steps of a frame and a second, and the jumps.
   - The keys of `Panel::Effects` work only on the page: Pass Through, Rename and the keyframe steps of the active node.

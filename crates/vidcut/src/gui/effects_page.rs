@@ -10,7 +10,7 @@ use vidcut_core::composition::Frames;
 use vidcut_core::effect_keys::Keyed;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
-    Clip, Composition, EffectValue, Mask, Node, Pattern, Project, Tool, ToolType,
+    Clip, Composition, EffectValue, Mask, Merge, Node, Pattern, Project, Tool, ToolType,
 };
 use vidcut_core::motion::Area;
 use vidcut_core::ops::grade::GradeOf;
@@ -36,6 +36,7 @@ const DASH: f32 = 4.0;
 const JUST_BELOW: f64 = 1e-6;
 const HANDLE: f32 = 4.0;
 const RING: f32 = 27.0;
+const ARROW: f32 = 18.0;
 const RING_STEPS: usize = 48;
 const RULER: f32 = 24.0;
 const BAR: f32 = 10.0;
@@ -235,16 +236,26 @@ struct Held {
     composition: Composition,
     sent: Option<(u64, Instant)>,
     turn: f64,
+    center: [f64; 2],
     last: [f64; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Grip {
     Center,
+    Across,
+    Up,
     Width,
     Height,
     Angle,
+    Spoke,
     Point(usize),
+}
+
+impl Grip {
+    fn turns(self) -> bool {
+        matches!(self, Grip::Angle | Grip::Spoke)
+    }
 }
 
 struct Boxed {
@@ -318,7 +329,7 @@ fn boxed_to(b: &Boxed, to: [f64; 2]) -> Area {
 
 struct Shown {
     name: String,
-    base: MaskBase,
+    base: Option<MaskBase>,
     middle: [f64; 2],
     turn: f64,
     spots: Vec<(Grip, Pos2)>,
@@ -567,35 +578,131 @@ fn rounded_size(x: f64) -> f64 {
 
 fn grip_change(m: &Mask, grip: Grip) -> (&'static str, Value) {
     match grip {
-        Grip::Center => ("center", json!(m.middle())),
+        Grip::Center | Grip::Across | Grip::Up => ("center", json!(m.middle())),
         Grip::Width => ("width", json!(m.wide())),
         Grip::Height => ("height", json!(m.high())),
-        Grip::Angle => ("angle", json!(m.turn())),
+        Grip::Angle | Grip::Spoke => ("angle", json!(m.turn())),
         Grip::Point(_) => ("points", json!(m.points)),
+    }
+}
+
+fn merge_change(m: &Merge, grip: Grip) -> (&'static str, Value) {
+    match grip.turns() {
+        true => ("angle", json!(m.turn())),
+        false => ("center", json!(m.middle())),
     }
 }
 
 fn grip_value(grip: Grip) -> Option<EffectValue> {
     match grip {
-        Grip::Center => Some(EffectValue::Center),
+        Grip::Center | Grip::Across | Grip::Up => Some(EffectValue::Center),
         Grip::Width => Some(EffectValue::Width),
         Grip::Height => Some(EffectValue::Height),
-        Grip::Angle => Some(EffectValue::Angle),
+        Grip::Angle | Grip::Spoke => Some(EffectValue::Angle),
         Grip::Point(_) => None,
     }
 }
 
-fn reach(grip: Grip, at: Pos2, press: Pos2) -> f32 {
+fn reach(grip: Grip, at: Pos2, press: Pos2, middle: Pos2) -> f32 {
+    let along = |from: Pos2| {
+        let (d, p) = (at - from, press - from);
+        let t = (p.dot(d) / d.length_sq().max(1e-6)).clamp(0.0, 1.0);
+        press.distance(from + d * t)
+    };
     match grip {
         Grip::Angle => (at.distance(press) - RING).abs(),
+        Grip::Spoke => along(middle),
+        Grip::Across | Grip::Up => along(middle + (at - middle) / 2.0),
         _ => at.distance(press),
     }
+}
+
+fn merge_spots(middle: Pos2, turn: f64, connected: bool) -> Vec<(Grip, Pos2)> {
+    let spoke = middle + RING * vec2(turn.cos() as f32, -turn.sin() as f32);
+    let mut out = vec![(Grip::Angle, middle), (Grip::Spoke, spoke)];
+    if !connected {
+        out.push((Grip::Center, middle));
+        out.push((Grip::Across, middle + vec2(ARROW, 0.0)));
+        out.push((Grip::Up, middle - vec2(0.0, ARROW)));
+    }
+    out
+}
+
+fn merge_moved(m: &mut Merge, grip: Grip, start: &mut [f64; 2], d: [f64; 2], (w, h): (f64, f64)) {
+    let step = match grip {
+        Grip::Across => [d[0] / w, 0.0],
+        Grip::Up => [0.0, -d[1] / h],
+        _ => [d[0] / w, -d[1] / h],
+    };
+    let (lo, hi) = Mask::PLACES;
+    *start = [0, 1].map(|k| (start[k] + step[k]).clamp(lo, hi));
+    m.center = Some(*start);
 }
 
 fn swept(middle: [f64; 2], from: [f64; 2], to: [f64; 2]) -> f64 {
     use std::f64::consts::{PI, TAU};
     let at = |p: [f64; 2]| (middle[1] - p[1]).atan2(p[0] - middle[0]);
     ((at(to) - at(from) + PI).rem_euclid(TAU) - PI).to_degrees()
+}
+
+fn draw_ring(painter: &egui::Painter, middle: Pos2, color: Color32) {
+    let ring: Vec<Pos2> = (0..=RING_STEPS)
+        .map(|i| {
+            let a = std::f32::consts::TAU * i as f32 / RING_STEPS as f32;
+            middle + RING * vec2(a.cos(), a.sin())
+        })
+        .collect();
+    painter.extend(egui::Shape::dashed_line(
+        &ring,
+        Stroke::new(1.0, color),
+        4.0,
+        3.0,
+    ));
+}
+
+fn draw_arrow(painter: &egui::Painter, from: Pos2, tip: Pos2, stroke: Stroke) {
+    painter.line_segment([from, tip], stroke);
+    let back = (from - tip).normalized() * HANDLE * 1.5;
+    let side = back.rot90() * 0.6;
+    let head = vec![tip, tip + back + side, tip + back - side];
+    painter.add(egui::Shape::convex_polygon(
+        head,
+        stroke.color,
+        Stroke::NONE,
+    ));
+}
+
+fn draw_merge_grips(painter: &egui::Painter, middle: Pos2, spots: &[(Grip, Pos2)], turning: bool) {
+    let colors = theme::colors();
+    let stroke = Stroke::new(1.5, colors.accent);
+    for (grip, s) in spots {
+        match grip {
+            Grip::Angle => {
+                draw_ring(
+                    painter,
+                    middle,
+                    if turning { colors.error } else { colors.accent },
+                );
+            }
+            Grip::Spoke => {
+                let color = if turning { colors.error } else { colors.accent };
+                painter.line_segment([middle, *s], Stroke::new(1.5, color));
+            }
+            Grip::Center => {
+                painter.rect_stroke(
+                    Rect::from_center_size(middle, Vec2::splat(HANDLE * 2.0)),
+                    CornerRadius::ZERO,
+                    stroke,
+                    StrokeKind::Middle,
+                );
+            }
+            Grip::Across | Grip::Up => {
+                let from = middle + (*s - middle).normalized() * HANDLE;
+                draw_arrow(painter, from, *s, stroke);
+            }
+            _ => {}
+        }
+    }
 }
 
 fn draw_grips(painter: &egui::Painter, f: &Figure, spots: &[(Grip, Pos2)], turning: bool) {
@@ -610,18 +717,7 @@ fn draw_grips(painter: &egui::Painter, f: &Figure, spots: &[(Grip, Pos2)], turni
             }
             Grip::Angle => {
                 let color = if turning { colors.error } else { colors.accent };
-                let ring: Vec<Pos2> = (0..=RING_STEPS)
-                    .map(|i| {
-                        let a = std::f32::consts::TAU * i as f32 / RING_STEPS as f32;
-                        s + RING * vec2(a.cos(), a.sin())
-                    })
-                    .collect();
-                painter.extend(egui::Shape::dashed_line(
-                    &ring,
-                    Stroke::new(1.0, color),
-                    4.0,
-                    3.0,
-                ));
+                draw_ring(painter, s, color);
                 let turn = match &f.outline {
                     Outline::Ellipse { turn, .. } | Outline::Rectangle { turn, .. } => *turn,
                     Outline::Polygon { .. } => 0.0,
@@ -1171,7 +1267,7 @@ impl Workspace {
             );
         }
         self.pattern_handles(ui, area_resp, picture, (c, &comp));
-        self.mask_handles(ui, area_resp, picture, c, &comp, size);
+        self.node_handles(ui, area_resp, picture, c, &comp, size);
     }
 
     fn pattern_handles(
@@ -1307,7 +1403,7 @@ impl Workspace {
         self.send("comp.set", params);
     }
 
-    fn mask_handles(
+    fn node_handles(
         &mut self,
         ui: &mut egui::Ui,
         resp: &egui::Response,
@@ -1335,7 +1431,7 @@ impl Workspace {
             .effects_page
             .held
             .as_ref()
-            .filter(|x| x.sent.is_none() && x.clip == clip.id && x.grip == Grip::Angle)
+            .filter(|x| x.sent.is_none() && x.clip == clip.id && x.grip.turns())
             .map(|x| x.node.clone());
         let mut shown = Vec::new();
         let sampled = comp.sampled(source, frame);
@@ -1343,6 +1439,22 @@ impl Workspace {
             let Some(node) = sampled.node(name) else {
                 continue;
             };
+            let turned = turning.as_deref() == Some(name.as_str());
+            if let Tool::Merge(m) = &node.tool {
+                let [x, y] = m.middle();
+                let middle = [x * w, (1.0 - y) * h];
+                let on = screen(middle);
+                let spots = merge_spots(on, m.turn().to_radians(), node.connect.is_some());
+                draw_merge_grips(&painter, on, &spots, turned);
+                shown.push(Shown {
+                    name: name.clone(),
+                    base: None,
+                    middle,
+                    turn: m.turn(),
+                    spots,
+                });
+                continue;
+            }
             let Some(m) = node.tool.mask().filter(|m| m.show_view_controls) else {
                 continue;
             };
@@ -1360,11 +1472,10 @@ impl Workspace {
                 .filter(|(g, _)| *g != Grip::Center || node.connect.is_none())
                 .map(|(g, s)| (g, screen(s)))
                 .collect();
-            let turned = turning.as_deref() == Some(name.as_str());
             draw_grips(&painter, first, &spots, turned);
             shown.push(Shown {
                 name: name.clone(),
-                base: *base,
+                base: Some(*base),
                 middle: first.middle,
                 turn: m.turn(),
                 spots,
@@ -1383,9 +1494,10 @@ impl Workspace {
                 .iter()
                 .rev()
                 .flat_map(|s| {
+                    let middle = screen(s.middle);
                     s.spots
                         .iter()
-                        .map(move |(g, at)| (s, *g, reach(*g, *at, press)))
+                        .map(move |(g, at)| (s, *g, reach(*g, *at, press, middle)))
                 })
                 .filter(|(_, _, d)| *d <= GRIP)
                 .min_by(|a, b| a.2.total_cmp(&b.2));
@@ -1397,6 +1509,7 @@ impl Workspace {
                     composition: comp.clone(),
                     sent: None,
                     turn: s.turn,
+                    center: [s.middle[0] / w, 1.0 - s.middle[1] / h],
                     last: pixel(press),
                 });
             }
@@ -1436,15 +1549,30 @@ impl Workspace {
             };
             let n = &mut held.composition.nodes[i];
             let to = pixel(to);
-            if let (Some(m), Some(now)) = (n.tool.mask_mut(), tool.mask()) {
-                *m = now.clone();
-                match held.grip {
-                    Grip::Angle => {
-                        held.turn += swept(s.middle, held.last, to);
-                        let (lo, hi) = Mask::TURNS;
-                        m.angle = Some(held.turn.clamp(lo, hi));
+            if held.grip.turns() {
+                held.turn += swept(s.middle, held.last, to);
+            }
+            let (lo, hi) = Mask::TURNS;
+            let angle = Some(held.turn.clamp(lo, hi));
+            match (&mut n.tool, &tool) {
+                (Tool::Merge(m), Tool::Merge(now)) => {
+                    *m = now.clone();
+                    match held.grip.turns() {
+                        true => m.angle = angle,
+                        false => {
+                            let d = [to[0] - held.last[0], to[1] - held.last[1]];
+                            merge_moved(m, held.grip, &mut held.center, d, (w, h));
+                        }
                     }
-                    grip => gripped(m, &tool, (grip, to), &s.base, (w, h)),
+                }
+                (t, _) => {
+                    if let (Some(m), Some(now), Some(base)) = (t.mask_mut(), tool.mask(), &s.base) {
+                        *m = now.clone();
+                        match held.grip.turns() {
+                            true => m.angle = angle,
+                            false => gripped(m, &tool, (held.grip, to), base, (w, h)),
+                        }
+                    }
                 }
             }
             held.last = to;
@@ -1452,11 +1580,10 @@ impl Workspace {
         if !resp.drag_stopped() {
             return;
         }
-        let change = held
-            .composition
-            .node(&name)
-            .and_then(|n| n.tool.mask())
-            .map(|m| grip_change(m, held.grip));
+        let change = held.composition.node(&name).and_then(|n| match &n.tool {
+            Tool::Merge(m) => Some(merge_change(m, held.grip)),
+            t => t.mask().map(|m| grip_change(m, held.grip)),
+        });
         held.sent = Some((rev, Instant::now()));
         if let Some((key, value)) = change {
             let mut params = json!({ "clip": clip.id, "node": name, "frame": at });
