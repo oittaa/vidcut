@@ -4671,7 +4671,8 @@ pub struct Node {
     /// keyframes. A path that `motion.track` made keeps its first box
     /// before it starts and its last box after it ends. On a frame where a
     /// path of `motion.find` has no box, a mask that follows it has no
-    /// shape. Left out, the node has its own center.
+    /// shape. Left out, the node has its own center. When `comp.set` stops
+    /// the connection, the center keeps the point of that frame.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect: Option<Connect>,
 }
