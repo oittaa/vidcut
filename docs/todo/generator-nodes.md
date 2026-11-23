@@ -21,11 +21,6 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
   - Width and Height without Auto Resolution. The fields are kept, but the picture has the size of the clip's own picture.
   - Process Mode, Global In and Out, Pixel Aspect, Depth, Source Color Space and Source Gamma Space.
 
-**Faults in the Inspector, to fix with a check in the app:**
-
-- The Red, Green, Blue and Alpha rows of a Background color send a channel name. `comp set` does not take it, so the change fails.
-- A drag of a stop on the gradient bar does not sort the stops while it moves. A click can add a stop past 64.
-
 **To measure in Resolve:**
 
 - Before Interpolation Space is built: HLS and HSV with a gray stop, and with two colors of a different lightness. The reads cover red to blue only.
