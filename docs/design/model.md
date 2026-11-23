@@ -634,6 +634,7 @@ Writing:
 - A `Picture` can hold a `Composition`: the nodes that work on the clip's own picture, before its crop and its transform ([spec §8.19](../spec.md#819-compositions-pp-1332-1385-1403-1420-21082111-2472-2480-2483-24902492-2500)).
 - Each `Node` has a `name`, a `Tool`, its joins, a `place` in the node editor and its `keys`.
   - `Tool::MediaIn` is the clip's own picture. `Tool::MediaOut` is the picture that the clip shows.
+  - `Tool::is_media` tells these two apart from the tools. A composition has one of each, and Copy and Pass Through leave them out.
   - `Tool::Blur` holds a `Blur`. `Tool::Effect` holds an `EffectKind`, one of the kinds of the clip effects.
   - `Tool::Ellipse`, `Tool::Rectangle` and `Tool::Polygon` hold a `Mask`.
   - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values.

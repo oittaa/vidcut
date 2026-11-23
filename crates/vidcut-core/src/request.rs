@@ -3394,11 +3394,11 @@ pub enum Request {
     /// `MediaIn1` joined to `MediaOut1`. The node's name is its tool's name
     /// and the first free number, as `Blur1`.
     ///
-    /// With `after` a tool or `media_in`, a tool goes into the picture's way
-    /// after it, and each node that took that picture takes the new tool.
-    /// With `after` a tool other than a tracker, a mask goes on its effect
-    /// mask, after the masks that are there. With `after` a mask, a mask
-    /// goes after it in its chain. Any other new node joins nothing.
+    /// With `after` a node other than a mask, a tool goes into the picture's
+    /// way after it, and each node that took that picture takes the new tool.
+    /// With `after` a node that has an effect mask, a mask goes on it, after
+    /// the masks that are there. With `after` a mask, a mask goes after it
+    /// in its chain. Any other new node joins nothing.
     /// Returns the clip and the `node`'s name.
     #[serde(rename = "comp.add")]
     CompAdd {
@@ -3424,8 +3424,8 @@ pub enum Request {
     },
     /// Join the output of node `from` to an input of `node`, in place of
     /// what was there, or with no `from`, leave that input empty. The
-    /// `input` takes a tool or `media_in`, and the `effect_mask` takes a
-    /// mask. A join that makes a loop is an error.
+    /// `input` takes any node other than a mask, and the `effect_mask`
+    /// takes a mask. A join that makes a loop is an error.
     #[serde(rename = "comp.connect")]
     CompConnect {
         clip: ClipRef,

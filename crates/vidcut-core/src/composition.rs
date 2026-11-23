@@ -476,7 +476,7 @@ impl Tool {
 
     pub fn inputs(&self) -> &'static [NodeInput] {
         match self {
-            Tool::MediaIn => &[],
+            Tool::MediaIn => &[NodeInput::EffectMask],
             Tool::MediaOut | Tool::Tracker(_) => &[NodeInput::Input],
             Tool::Blur(_) | Tool::Effect(_) => &[NodeInput::Input, NodeInput::EffectMask],
             Tool::Merge(_) => &[
@@ -493,7 +493,11 @@ impl Tool {
     }
 
     pub fn gives_picture(&self) -> bool {
-        !matches!(self, Tool::MediaOut) && !self.is_mask()
+        !self.is_mask()
+    }
+
+    pub fn is_media(&self) -> bool {
+        matches!(self, Tool::MediaIn | Tool::MediaOut)
     }
 
     pub fn flows(&self) -> bool {
