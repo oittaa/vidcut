@@ -6,7 +6,7 @@ use crate::keyframes::{
 };
 use crate::model::{
     Blur, Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FilmGrain, GaussianBlur, Glow,
-    Keyframe, Mask, Merge, MosaicBlur, Node, Sharpen, TextPlus, Tool, Vignette,
+    Keyframe, Mask, Merge, MosaicBlur, Node, ShadingElement, Sharpen, TextPlus, Tool, Vignette,
 };
 
 type Range = (f64, f64);
@@ -248,7 +248,7 @@ fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
 }
 
 impl EffectValue {
-    pub const ALL: [EffectValue; 91] = [
+    pub const ALL: [EffectValue; 99] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -340,6 +340,14 @@ impl EffectValue {
         EffectValue::LayoutSize,
         EffectValue::VerticalAnchor,
         EffectValue::HorizontalAnchor,
+        EffectValue::Thickness,
+        EffectValue::ExtendHorizontal,
+        EffectValue::ExtendVertical,
+        EffectValue::Round,
+        EffectValue::SoftnessX,
+        EffectValue::SoftnessY,
+        EffectValue::ShadingOffset,
+        EffectValue::Priority,
     ];
 
     pub fn name(self) -> String {
@@ -350,7 +358,10 @@ impl EffectValue {
     }
 
     pub fn pair(self) -> bool {
-        matches!(self, EffectValue::Position | EffectValue::Center)
+        matches!(
+            self,
+            EffectValue::Position | EffectValue::Center | EffectValue::ShadingOffset
+        )
     }
 }
 
@@ -359,6 +370,18 @@ impl EffectKeys {
         let pair = self.value.pair();
         (&mut self.keys, pair.then_some(&mut self.y))
     }
+}
+
+fn keys_previewed<K: Keyed>(stored: &K, baseline: &K, edited: &K, frame: i64) -> K {
+    let mut out = edited.clone();
+    for k in stored.key_list() {
+        let to = edited.point(k.value);
+        out.write_point(k.value, stored.point(k.value));
+        if to != baseline.point(k.value) {
+            out.put_point(k.value, frame, to);
+        }
+    }
+    out
 }
 
 pub trait Keyed: Clone {
@@ -498,15 +521,7 @@ pub trait Keyed: Clone {
     }
 
     fn previewed(&self, baseline: &Self, edited: &Self, frame: i64) -> Self {
-        let mut out = edited.clone();
-        for k in self.key_list() {
-            let to = edited.point(k.value);
-            out.write_point(k.value, self.point(k.value));
-            if to != baseline.point(k.value) {
-                out.put_point(k.value, frame, to);
-            }
-        }
-        out
+        keys_previewed(self, baseline, edited, frame)
     }
 
     fn has_key_at(&self, frame: i64) -> bool {
@@ -700,10 +715,6 @@ fn text_slot(t: &mut TextPlus, value: EffectValue) -> Slot<'_> {
     use EffectValue as V;
     Some(match value {
         V::Size => (t.size.get_or_insert(TextPlus::SIZE), Mask::SIZES),
-        V::ColorRed => (&mut t.color.get_or_insert([1.0; 3])[0], TextPlus::COLORS),
-        V::ColorGreen => (&mut t.color.get_or_insert([1.0; 3])[1], TextPlus::COLORS),
-        V::ColorBlue => (&mut t.color.get_or_insert([1.0; 3])[2], TextPlus::COLORS),
-        V::Opacity => (t.opacity.get_or_insert(1.0), TextPlus::OPACITIES),
         V::Tracking => (t.tracking.get_or_insert(1.0), TextPlus::SPACINGS),
         V::LineSpacing => (t.line_spacing.get_or_insert(1.0), TextPlus::SPACINGS),
         V::VerticalAnchor => (t.vertical_anchor.get_or_insert(0.0), TextPlus::ANCHORS),
@@ -712,6 +723,89 @@ fn text_slot(t: &mut TextPlus, value: EffectValue) -> Slot<'_> {
         V::Angle => (t.angle.get_or_insert(0.0), Mask::TURNS),
         _ => return None,
     })
+}
+
+fn shading_slot(s: &mut ShadingElement, value: EffectValue) -> Slot<'_> {
+    use EffectValue as V;
+    let (ink, soft, rank) = (s.ink(), s.usual_soft(), s.usual_rank());
+    let colors = [V::ColorRed, V::ColorGreen, V::ColorBlue];
+    if let Some(i) = colors.iter().position(|c| *c == value) {
+        return Some((&mut s.color.get_or_insert(ink)[i], ShadingElement::COLORS));
+    }
+    Some(match value {
+        V::Opacity => (s.opacity.get_or_insert(1.0), ShadingElement::OPACITIES),
+        V::Thickness => (
+            s.thickness.get_or_insert(ShadingElement::THICKNESS),
+            ShadingElement::AMOUNTS,
+        ),
+        V::ExtendHorizontal => (
+            s.extend_horizontal.get_or_insert(0.0),
+            ShadingElement::SHIFTS,
+        ),
+        V::ExtendVertical => (s.extend_vertical.get_or_insert(0.0), ShadingElement::SHIFTS),
+        V::Round => (s.round.get_or_insert(0.0), ShadingElement::AMOUNTS),
+        V::SoftnessX => (s.softness_x.get_or_insert(soft), ShadingElement::AMOUNTS),
+        V::SoftnessY => (s.softness_y.get_or_insert(soft), ShadingElement::AMOUNTS),
+        V::Priority => (s.priority.get_or_insert(rank), ShadingElement::SHIFTS),
+        _ => return None,
+    })
+}
+
+fn shown(s: &ShadingElement, value: EffectValue) -> bool {
+    use EffectValue as V;
+    match value {
+        V::Thickness => s.outlined(),
+        V::ExtendHorizontal | V::ExtendVertical | V::Round => s.boxed(),
+        _ => true,
+    }
+}
+
+fn shading_point(s: &mut ShadingElement, value: EffectValue) -> Point<'_> {
+    let shift = s.usual_shift();
+    (value == EffectValue::ShadingOffset)
+        .then(|| (s.offset.get_or_insert(shift), ShadingElement::SHIFTS))
+}
+
+impl Keyed for ShadingElement {
+    fn key_list(&self) -> &[EffectKeys] {
+        &self.keys
+    }
+
+    fn key_list_mut(&mut self) -> &mut Vec<EffectKeys> {
+        &mut self.keys
+    }
+
+    fn read_point(&self, value: EffectValue) -> Option<([f64; 2], Range)> {
+        let mut s = self.clone();
+        match value.pair() {
+            true => shading_point(&mut s, value).map(|(p, range)| (*p, range)),
+            false => shading_slot(&mut s, value).map(|(n, range)| ([*n, 0.0], range)),
+        }
+    }
+
+    fn values(&self) -> Vec<EffectValue> {
+        EffectValue::ALL
+            .into_iter()
+            .filter(|v| shown(self, *v) && self.read_point(*v).is_some())
+            .collect()
+    }
+
+    fn write(&mut self, value: EffectValue, to: f64) {
+        let place = match value.pair() {
+            true => shading_point(self, value).map(|(p, range)| (&mut p[0], range)),
+            false => shading_slot(self, value),
+        };
+        if let Some((n, _)) = place {
+            *n = to;
+        }
+    }
+
+    fn write_point(&mut self, value: EffectValue, to: [f64; 2]) {
+        match shading_point(self, value) {
+            Some((p, _)) => *p = to,
+            None => self.write(value, to[0]),
+        }
+    }
 }
 
 fn node_slot(tool: &mut Tool, value: EffectValue) -> Slot<'_> {
@@ -743,6 +837,49 @@ fn node_point(tool: &mut Tool, value: EffectValue) -> Point<'_> {
 impl Keyed for Node {
     fn key_list(&self) -> &[EffectKeys] {
         &self.keys
+    }
+
+    fn has_keys(&self) -> bool {
+        self.keys.iter().any(|k| !k.keys.is_empty())
+            || matches!(&self.tool, Tool::TextPlus(t) if t.shading.iter().any(Keyed::has_keys))
+    }
+
+    fn previewed(&self, baseline: &Self, edited: &Self, frame: i64) -> Self {
+        let mut out = keys_previewed(self, baseline, edited, frame);
+        let tools = (&self.tool, &baseline.tool, &edited.tool);
+        if let (Tool::TextPlus(s), Tool::TextPlus(b), Tool::TextPlus(e)) = tools
+            && let Tool::TextPlus(o) = &mut out.tool
+        {
+            for k in s.shading.iter().filter(|k| k.has_keys()).map(|k| k.element) {
+                let shown = s.element(k).previewed(&b.element(k), &e.element(k), frame);
+                *o.element_mut(k) = shown;
+            }
+        }
+        out
+    }
+
+    fn adopted(&self, frame: f64) -> Self {
+        let mut n = self.clone();
+        for k in self.key_list() {
+            n.write_point(k.value, self.point_at(k.value, frame));
+        }
+        if let Tool::TextPlus(t) = &mut n.tool {
+            for s in &mut t.shading {
+                *s = s.adopted(frame);
+            }
+        }
+        n
+    }
+
+    fn sampled(&self, frame: f64) -> Self {
+        let mut n = self.adopted(frame);
+        n.keys.clear();
+        if let Tool::TextPlus(t) = &mut n.tool {
+            for s in &mut t.shading {
+                s.keys.clear();
+            }
+        }
+        n
     }
 
     fn key_list_mut(&mut self) -> &mut Vec<EffectKeys> {

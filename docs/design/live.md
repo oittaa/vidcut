@@ -305,6 +305,7 @@ The bar and the Jobs button:
 - The Inspector of the page is `Workspace::node_inspector`. It shows each selected node with the rows of its tool.
   - A drag holds the value (`Inspector::held`) and sends one `comp.set` when it stops. `Workspace::node_preview` shows the held value until then.
   - Each value has its Keyframe button. It sends `comp.key` with the `value`.
+  - A Text+ shows one shading element at a time. `EffectsPage::element` holds it, and `gui.nodes` with `element` sets it. A click on the row of elements sends that request.
 - `Workspace::mask_handles` draws the handles of each selected mask with `show_view_controls` on.
   - A drag of a handle changes a copy of the composition (`Held`). It sends one `comp.set` when it stops.
   - A drag of the ring adds the turn of the pointer about the center on each frame (`swept`). Thus the angle can go past 360.

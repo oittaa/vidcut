@@ -100,6 +100,7 @@ pub enum GuiChange {
     Primaries(PrimariesView),
     Window(usize),
     Nodes(Vec<String>),
+    Element(u8),
     GradeNodes(Vec<u32>, Option<u32>),
     NodeView {
         zoom: Option<vidcut_core::request::NodeZoom>,
@@ -164,6 +165,7 @@ pub struct GuiState {
     pub window: usize,
     pub clip: Option<String>,
     pub nodes: Vec<String>,
+    pub element: u8,
     pub grade_nodes: Vec<u32>,
     pub grade_node: Option<u32>,
     pub node_zoom: f64,
@@ -3357,8 +3359,17 @@ impl Live {
                 changes.push(GuiChange::Page(page));
                 self.gui_change(changes, |s| json!(s))
             }
-            Request::GuiNodes { nodes } => {
-                self.gui_change(vec![GuiChange::Nodes(nodes)], |s| json!(s))
+            Request::GuiNodes { nodes, element } => {
+                let elements = 1..=vidcut_core::model::ShadingElement::ELEMENTS;
+                if element.is_some_and(|e| !elements.contains(&e)) {
+                    return Step::Now(Err(Error::usage(
+                        "a text's shading elements are 1 to 8".to_string(),
+                    )));
+                }
+                let changes = std::iter::once(GuiChange::Nodes(nodes))
+                    .chain(element.map(GuiChange::Element))
+                    .collect();
+                self.gui_change(changes, |s| json!(s))
             }
             Request::GuiGradeNodes { nodes, current } => {
                 self.gui_change(vec![GuiChange::GradeNodes(nodes, current)], |s| json!(s))

@@ -12,13 +12,13 @@ use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, ClipRetime,
-    CompositeMode, Composition, Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind,
-    EffectType, EffectValue, FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow,
-    GlowAlpha, GlowFraming, GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe,
-    MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project, Retime,
-    Sharpen, Speed, Subject, TextPlus, Tool, ToolType, TrackKind, Upscaler, Vignette, VignetteMode,
-    VignetteShape, ZoomBox,
+    Appearance, ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, BorderLevel,
+    CellShape, Clip, ClipRetime, CompositeMode, Composition, Connect, DynamicZoom, Ease, EbuLevel,
+    Effect, EffectKind, EffectType, EffectValue, FillMethod, FilmGrain, FindModel, GaussianBlur,
+    Generator, Glow, GlowAlpha, GlowFraming, GlowOutput, Gradient, GrainComposite, GrainPreset,
+    JoinStyle, Keyframe, MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture,
+    PictureTool, Project, Retime, ShadingElement, Sharpen, Speed, Subject, TextPlus, Tool,
+    ToolType, TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -118,6 +118,7 @@ enum Key {
     Picture(Field),
     Effect(usize, Knob),
     Node(usize, EffectValue, usize),
+    Shading(usize, u8, EffectValue, usize),
     Center(Axis),
     Volume,
     Pan,
@@ -1130,7 +1131,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.label(),
             Key::Effect(_, k) => k.dial().label,
-            Key::Node(..) => "",
+            Key::Node(..) | Key::Shading(..) => "",
             Key::Center(Axis::X) => "Center X",
             Key::Center(Axis::Y) => "Center Y",
             Key::Volume => "Volume",
@@ -1155,7 +1156,12 @@ impl Key {
             Key::Volume => " dB",
             Key::Speed => "%",
             Key::Rate => " fps",
-            Key::Effect(..) | Key::Node(..) | Key::Center(_) | Key::Length | Key::Pan => "",
+            Key::Effect(..)
+            | Key::Node(..)
+            | Key::Shading(..)
+            | Key::Center(_)
+            | Key::Length
+            | Key::Pan => "",
         }
     }
 
@@ -1163,7 +1169,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.speed(),
             Key::Effect(_, k) => k.dial().speed,
-            Key::Node(_, v, _) => node_speed(v),
+            Key::Node(_, v, _) | Key::Shading(_, _, v, _) => node_speed(v),
             Key::Center(_) => 0.005,
             Key::Volume => 0.1,
             Key::Pan => 0.5,
@@ -1176,7 +1182,7 @@ impl Key {
         match self {
             Key::Picture(Field::Pitch | Field::Yaw) => (0, 3),
             Key::Picture(_) => (0, 2),
-            Key::Effect(..) | Key::Node(..) | Key::Center(_) => (3, 3),
+            Key::Effect(..) | Key::Node(..) | Key::Shading(..) | Key::Center(_) => (3, 3),
             Key::Volume | Key::Pan => (1, 1),
             Key::Speed => (0, 2),
             Key::Rate => (0, 3),
@@ -1188,7 +1194,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.usual(),
             Key::Effect(_, k) => k.dial().usual,
-            Key::Node(..) | Key::Center(_) | Key::Volume | Key::Pan => 0.0,
+            Key::Node(..) | Key::Shading(..) | Key::Center(_) | Key::Volume | Key::Pan => 0.0,
             Key::Speed => 100.0,
             Key::Rate | Key::Length => 0.0,
         }
@@ -1224,7 +1230,13 @@ fn node_speed(v: EffectValue) -> f64 {
         | EffectValue::ColorBlue
         | EffectValue::Tracking
         | EffectValue::LineSpacing
-        | EffectValue::LayoutSize => 0.005,
+        | EffectValue::LayoutSize
+        | EffectValue::ShadingOffset
+        | EffectValue::ExtendHorizontal
+        | EffectValue::ExtendVertical
+        | EffectValue::Round => 0.005,
+        EffectValue::SoftnessX | EffectValue::SoftnessY | EffectValue::Priority => 0.05,
+        EffectValue::Thickness => 0.0005,
         _ => 0.002,
     }
 }
@@ -1249,7 +1261,7 @@ fn node_effect(n: &Node) -> Option<Effect> {
 
 fn node_value_of(f: Key, n: &Node) -> Option<EffectValue> {
     match f {
-        Key::Node(_, v, _) => Some(v),
+        Key::Node(_, v, _) | Key::Shading(_, _, v, _) => Some(v),
         Key::Effect(_, k) => node_effect(n)
             .and_then(|e| k.keyed_value(&e))
             .map(|(v, _)| v),
@@ -1263,6 +1275,29 @@ fn sensed_label(ui: &mut egui::Ui, text: &str, set: bool) -> egui::Response {
     ui.add(egui::Label::new(text).sense(egui::Sense::click()))
 }
 
+fn element_of(f: Key) -> Option<u8> {
+    match f {
+        Key::Shading(_, e, ..) => Some(e),
+        _ => None,
+    }
+}
+
+fn element_set(slot: usize, e: u8, put: &str, value: Value) -> Act {
+    let mut params = json!({ "element": e });
+    params[put] = value;
+    Act::EffectSet(slot, params)
+}
+
+fn of_element(e: u8, acts: Vec<Act>) -> impl Iterator<Item = Act> {
+    acts.into_iter().map(move |a| match a {
+        Act::EffectSet(slot, mut params) => {
+            params["element"] = json!(e);
+            Act::EffectSet(slot, params)
+        }
+        a => a,
+    })
+}
+
 fn node_value(
     ui: &mut egui::Ui,
     i: &Inspector,
@@ -1270,22 +1305,55 @@ fn node_value(
     (v, text): (EffectValue, &str),
     acts: &mut Vec<Act>,
 ) -> Option<egui::Response> {
+    let point = n.read_point(v)?.0;
+    let usual = n.usual_point(v).unwrap_or(point);
+    let look = Look {
+        speed: row_speed(&n.tool, v),
+        ..Look::default()
+    };
+    keyed_row(ui, i, (slot, n, None), (v, text, usual), look, acts)
+}
+
+fn element_value(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, s): (usize, &ShadingElement),
+    (v, text): (EffectValue, &str),
+    acts: &mut Vec<Act>,
+) {
+    let Some((point, _)) = s.read_point(v) else {
+        return;
+    };
+    let usual = ShadingElement::new(s.element)
+        .read_point(v)
+        .map_or(point, |(p, _)| p);
+    let part = (slot, s, Some(s.element));
+    keyed_row(ui, i, part, (v, text, usual), Look::default(), acts);
+}
+
+fn keyed_row<K: Keyed>(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n, part): (usize, &K, Option<u8>),
+    (v, text, usual): (EffectValue, &str, [f64; 2]),
+    look: Look<'_>,
+    acts: &mut Vec<Act>,
+) -> Option<egui::Response> {
     let (Some(k), Some((point, (lo, hi)))) = (slot_node(slot), n.read_point(v)) else {
         return None;
     };
-    let keys = i.mark_of(slot, v);
-    let usual = n.usual_point(v).unwrap_or(point);
+    let keys = i.part_mark(slot, part, v);
+    let field = |axis: usize| match part {
+        Some(e) => Key::Shading(k, e, v, axis),
+        None => Key::Node(k, v, axis),
+    };
     let fields = match v.pair() {
-        true => vec![Key::Node(k, v, 0), Key::Node(k, v, 1)],
-        false => vec![Key::Node(k, v, 0)],
+        true => vec![field(0), field(1)],
+        false => vec![field(0)],
     };
     let set = match v.pair() {
         true => point != usual,
         false => point[0] != usual[0],
-    };
-    let look = Look {
-        speed: row_speed(&n.tool, v),
-        ..Look::default()
     };
     let r = sensed_label(ui, text, set);
     ui.horizontal(|ui| {
@@ -1301,7 +1369,10 @@ fn node_value(
             true => json!(usual),
             false => json!(usual[0]),
         };
-        acts.push(node_set(slot, &v.name(), to));
+        acts.push(match part {
+            Some(e) => element_set(slot, e, &v.name(), to),
+            None => node_set(slot, &v.name(), to),
+        });
     }
     ui.end_row();
     Some(r)
@@ -1502,16 +1573,142 @@ fn style_row(ui: &mut egui::Ui, slot: usize, t: &TextPlus, acts: &mut Vec<Act>) 
     ui.end_row();
 }
 
-fn ink_row(ui: &mut egui::Ui, slot: usize, t: &TextPlus, acts: &mut Vec<Act>) {
-    label(ui, "Color", t.color.is_some());
-    let mut rgb = t.ink().map(|c| c as f32);
+fn ink_row(ui: &mut egui::Ui, slot: usize, s: &ShadingElement, acts: &mut Vec<Act>) {
+    let set = s.ink() != s.usual_ink();
+    label(ui, "Color", set);
+    let mut rgb = s.ink().map(|c| c as f32);
     if ui.color_edit_button_rgb(&mut rgb).changed() {
-        acts.push(node_set(slot, "color", json!(rgb.map(f64::from))));
+        let to = json!(rgb.map(f64::from));
+        acts.push(element_set(slot, s.element, "color", to));
     }
-    if reset(ui, t.color.is_some()) {
-        acts.push(node_set(slot, "color", json!([1.0, 1.0, 1.0])));
+    if reset(ui, set) {
+        acts.push(element_set(slot, s.element, "color", json!(s.usual_ink())));
     }
     ui.end_row();
+}
+
+fn element_row(ui: &mut egui::Ui, now: u8, t: &TextPlus, acts: &mut Vec<Act>) {
+    label(ui, "Shading Element", false);
+    ui.horizontal(|ui| {
+        for e in 1..=ShadingElement::ELEMENTS {
+            let text = RichText::new(e.to_string());
+            let text = if t.element(e).on() { text } else { text.weak() };
+            let r = ui.selectable_label(e == now, text);
+            if r.on_hover_text(t.element(e).title()).clicked() {
+                acts.push(Act::Element(e));
+            }
+        }
+    });
+    ui.end_row();
+}
+
+fn element_name_row(
+    ui: &mut egui::Ui,
+    (slot, name): (usize, &str),
+    s: &ShadingElement,
+    acts: &mut Vec<Act>,
+) {
+    let now = s.title();
+    let set = s.name.is_some();
+    label(ui, "Name", set);
+    let id = ui.make_persistent_id(("inspector-shading-name", slot, name, s.element));
+    let typed = ui.data_mut(|d| d.get_temp::<String>(id));
+    let mut text = typed.unwrap_or_else(|| now.clone());
+    let field = ui.add(egui::TextEdit::singleline(&mut text).desired_width(NAME_WIDTH));
+    if field.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text.clone()));
+    } else {
+        ui.data_mut(|d| d.remove::<String>(id));
+    }
+    if field.lost_focus() && text != now {
+        acts.push(element_set(slot, s.element, "element_name", json!(text)));
+    }
+    if reset(ui, set) {
+        acts.push(element_set(slot, s.element, "element_name", json!("")));
+    }
+    ui.end_row();
+}
+
+fn shading_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n, t, picked): (usize, &Node, &TextPlus, u8),
+    acts: &mut Vec<Act>,
+) {
+    use EffectValue as V;
+    element_row(ui, picked, t, acts);
+    let s = t.element(picked);
+    let e = s.element;
+    let mut own = Vec::new();
+    let usual = ShadingElement::new(e);
+    check(
+        ui,
+        (slot, "Enabled", s.on(), usual.on()),
+        "enabled",
+        &mut own,
+    );
+    if !s.on() {
+        acts.extend(of_element(e, own));
+        return;
+    }
+    element_name_row(ui, (slot, &n.name), &s, &mut own);
+    let looks = (
+        &Appearance::ALL[..],
+        Appearance::label as fn(Appearance) -> &'static str,
+    );
+    choice_row(
+        ui,
+        (slot, "Appearance", "appearance"),
+        (s.look(), usual.look()),
+        looks,
+        &mut own,
+    );
+    let value = |ui: &mut egui::Ui, own: &mut Vec<Act>, v: V, text: &str| {
+        element_value(ui, i, (slot, &s), (v, text), own);
+    };
+    value(ui, &mut own, V::Opacity, "Opacity");
+    if s.outlined() {
+        value(ui, &mut own, V::Thickness, "Thickness");
+        check(
+            ui,
+            (slot, "Outside Only", s.outside_only, false),
+            "outside_only",
+            &mut own,
+        );
+        let joins = (
+            &JoinStyle::ALL[..],
+            JoinStyle::label as fn(JoinStyle) -> &'static str,
+        );
+        choice_row(
+            ui,
+            (slot, "Join Style", "join_style"),
+            (s.join(), usual.join()),
+            joins,
+            &mut own,
+        );
+    }
+    if s.boxed() {
+        let levels = (
+            &BorderLevel::ALL[..],
+            BorderLevel::label as fn(BorderLevel) -> &'static str,
+        );
+        choice_row(
+            ui,
+            (slot, "Level", "border_level"),
+            (s.reach(), usual.reach()),
+            levels,
+            &mut own,
+        );
+        value(ui, &mut own, V::ExtendHorizontal, "Extend Horizontal");
+        value(ui, &mut own, V::ExtendVertical, "Extend Vertical");
+        value(ui, &mut own, V::Round, "Round");
+    }
+    ink_row(ui, slot, &s, &mut own);
+    value(ui, &mut own, V::SoftnessX, "Softness X");
+    value(ui, &mut own, V::SoftnessY, "Softness Y");
+    value(ui, &mut own, V::Priority, "Priority");
+    value(ui, &mut own, V::ShadingOffset, "Offset");
+    acts.extend(of_element(e, own));
 }
 
 fn center_row(
@@ -1565,7 +1762,7 @@ fn center_row(
 fn node_rows(
     ui: &mut egui::Ui,
     i: &Inspector,
-    (slot, n): (usize, &Node),
+    (slot, n, element): (usize, &Node, u8),
     trackers: &[Hooked],
     acts: &mut Vec<Act>,
 ) {
@@ -1622,7 +1819,7 @@ fn node_rows(
             text_row(ui, (slot, &n.name), &t.text, acts);
             font_row(ui, slot, t, acts);
             style_row(ui, slot, t, acts);
-            ink_row(ui, slot, t, acts);
+            ink_row(ui, slot, &t.element(1), acts);
             value(ui, acts, V::Size, "Size");
             value(ui, acts, V::Tracking, "Tracking");
             value(ui, acts, V::LineSpacing, "Line Spacing");
@@ -1631,8 +1828,8 @@ fn node_rows(
             center_row(ui, i, (slot, n), trackers, acts);
             value(ui, acts, V::LayoutSize, "Layout Size");
             value(ui, acts, V::Angle, "Angle");
-            value(ui, acts, V::Opacity, "Opacity");
             value(ui, acts, V::Blend, "Blend");
+            shading_rows(ui, i, (slot, n, t, element), acts);
         }
         Tool::Merge(m) => {
             center_row(ui, i, (slot, n), trackers, acts);
@@ -1731,10 +1928,14 @@ fn node_header(ui: &mut egui::Ui, n: &Node, active: bool, acts: &mut Vec<Act>) {
 
 impl Inspector {
     fn mark_of(&self, slot: usize, v: EffectValue) -> Option<KeyMark> {
+        self.part_mark(slot, None, v)
+    }
+
+    fn part_mark(&self, slot: usize, part: Option<u8>, v: EffectValue) -> Option<KeyMark> {
         self.marks
             .iter()
-            .find(|(n, w, _)| *n == slot && *w == v)
-            .map(|(_, _, m)| m.clone())
+            .find(|(n, p, w, _)| *n == slot && *p == part && *w == v)
+            .map(|(.., m)| m.clone())
     }
 }
 
@@ -1767,7 +1968,16 @@ impl Workspace {
             let n = &comp.nodes[k];
             for v in n.values() {
                 let m = frame_mark(n.keys_of(v), at);
-                self.inspector.marks.push((node_slot(k), v, m));
+                self.inspector.marks.push((node_slot(k), None, v, m));
+            }
+            if let Tool::TextPlus(t) = &n.tool {
+                for s in (1..=ShadingElement::ELEMENTS).map(|e| t.element(e)) {
+                    for v in s.values() {
+                        let m = frame_mark(s.keys_of(v), at);
+                        let part = (node_slot(k), Some(s.element), v, m);
+                        self.inspector.marks.push(part);
+                    }
+                }
             }
         }
         let active = self.effects_page.picked().map(str::to_owned);
@@ -1775,6 +1985,7 @@ impl Workspace {
             .iter()
             .map(|&k| comp.nodes[k].sampled(source))
             .collect();
+        let element = self.effects_page.element;
         let mut all: Vec<Vec<Act>> = Vec::new();
         egui::ScrollArea::vertical()
             .auto_shrink([false, true])
@@ -1789,7 +2000,7 @@ impl Workspace {
                     } else {
                         let i = &self.inspector;
                         rows(ui, (slot, "node"), |ui| {
-                            node_rows(ui, i, (slot, n), &trackers, &mut acts);
+                            node_rows(ui, i, (slot, n, element), &trackers, &mut acts);
                         });
                     }
                     ui.separator();
@@ -2167,12 +2378,13 @@ impl Workspace {
                 }
                 Act::Toggle(f) => {
                     if let Some(v) = node_value_of(f, stored) {
-                        self.send_node("comp.key", clip, stored, json!({ "value": v }));
+                        let params = json!({ "value": v, "element": element_of(f) });
+                        self.send_node("comp.key", clip, stored, params);
                     }
                 }
                 Act::KeyEase(f, ease) => {
                     if let Some(v) = node_value_of(f, stored) {
-                        let params = json!({ "value": v, "ease": ease });
+                        let params = json!({ "value": v, "ease": ease, "element": element_of(f) });
                         self.send_node("comp.key", clip, stored, params);
                     }
                 }
@@ -2180,8 +2392,13 @@ impl Workspace {
                     let Some(v) = node_value_of(f, stored) else {
                         continue;
                     };
-                    let times = stored.keys_of(v).iter().map(|k| k.frame);
-                    if let Some(t) = next_key(times, self.page_at(), dir) {
+                    let times: Vec<i64> = match (element_of(f), &stored.tool) {
+                        (Some(e), Tool::TextPlus(t)) => {
+                            t.element(e).keys_of(v).iter().map(|k| k.frame).collect()
+                        }
+                        _ => stored.keys_of(v).iter().map(|k| k.frame).collect(),
+                    };
+                    if let Some(t) = next_key(times.into_iter(), self.page_at(), dir) {
                         self.send("gui.page_time", json!({ "at": t }));
                     }
                 }
@@ -2191,6 +2408,10 @@ impl Workspace {
                     nodes.retain(|x| *x != stored.name);
                     nodes.push(stored.name.clone());
                     self.send("gui.nodes", json!({ "nodes": nodes }));
+                }
+                Act::Element(e) => {
+                    let nodes = self.effects_page.nodes.clone();
+                    self.send("gui.nodes", json!({ "nodes": nodes, "element": e }));
                 }
                 _ => {}
             }
@@ -2217,6 +2438,18 @@ impl Workspace {
                 params[v.name()] = if v.pair() { json!(point) } else { json!(value) };
                 params
             }
+            Key::Shading(_, e, v, axis) => {
+                let Tool::TextPlus(t) = &shown.tool else {
+                    return;
+                };
+                let Some((mut point, _)) = t.element(e).read_point(v) else {
+                    return;
+                };
+                point[axis] = value;
+                let mut params = json!({ "element": e });
+                params[v.name()] = if v.pair() { json!(point) } else { json!(value) };
+                params
+            }
             Key::Effect(_, k) => {
                 let Some(e) = node_effect(shown) else {
                     return;
@@ -2236,7 +2469,7 @@ impl Workspace {
             return;
         };
         let k = match h.field {
-            Key::Node(k, ..) => k,
+            Key::Node(k, ..) | Key::Shading(k, ..) => k,
             Key::Effect(n, _) => match slot_node(n) {
                 Some(k) => k,
                 None => return,
@@ -2253,6 +2486,16 @@ impl Workspace {
                 let mut point = shown.read_point(v).map_or([0.0; 2], |(p, _)| p);
                 point[axis] = h.value;
                 n.write_point(v, point);
+            }
+            Key::Shading(_, e, v, axis) => {
+                let (Tool::TextPlus(was), Tool::TextPlus(t)) = (&shown.tool, &mut n.tool) else {
+                    return;
+                };
+                let mut point = was.element(e).read_point(v).map_or([0.0; 2], |(p, _)| p);
+                point[axis] = h.value;
+                let s = t.element_mut(e);
+                s.key_list_mut().retain(|x| x.value != v);
+                s.write_point(v, point);
             }
             Key::Effect(_, knob) => {
                 let Some(e) = node_effect(&shown) else {
@@ -2467,7 +2710,7 @@ pub struct Inspector {
     effect_picked: Option<usize>,
     effect_shut: bool,
     effects_seen: Option<(String, Vec<Effect>)>,
-    marks: Vec<(usize, EffectValue, KeyMark)>,
+    marks: Vec<(usize, Option<u8>, EffectValue, KeyMark)>,
     watched: Option<(std::sync::Weak<Project>, Vec<String>)>,
 }
 
@@ -2596,6 +2839,7 @@ enum Act {
     Tint(usize, [u8; 3], [u8; 3]),
     NodeReset,
     NodeActive,
+    Element(u8),
 }
 
 fn param_name(key: Key) -> Option<&'static str> {
@@ -4869,7 +5113,7 @@ impl Workspace {
                 });
             }
             Key::Effect(n, k) => self.send_knob(chosen, (n, k), value),
-            Key::Node(..) => {}
+            Key::Node(..) | Key::Shading(..) => {}
             Key::Center(axis) => self.send_center(axis, value, chosen),
             Key::Volume => self.send_volume(sounds, value),
             Key::Pan => self.send_pan(sounds, value),
@@ -5356,7 +5600,7 @@ impl Workspace {
     fn inspect(&mut self, act: Act, (chosen, sounds, paced): Lists<'_>) {
         let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
-            Act::NodeReset | Act::NodeActive => {}
+            Act::NodeReset | Act::NodeActive | Act::Element(_) => {}
             Act::Denoise(on) => {
                 let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
                 self.send(
@@ -5679,7 +5923,7 @@ impl Workspace {
         let gone = |k: Key| match k {
             Key::Picture(_) | Key::Center(_) => chosen.is_empty(),
             Key::Effect(n, _) => chosen.first().is_none_or(|c| c.shown.effects.len() <= n),
-            Key::Node(..) => true,
+            Key::Node(..) | Key::Shading(..) => true,
             Key::Volume | Key::Pan => sounds.is_empty(),
             Key::Speed | Key::Rate | Key::Length => paced.is_empty(),
         };

@@ -4,8 +4,8 @@ use crate::composition::{Frames, cleaned};
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::model::{
-    Composition, Connect, Ease, EffectValue, MotionPath, Node, PathSample, Pattern, Project, Tool,
-    ToolType,
+    Composition, Connect, Ease, EffectValue, MotionPath, Node, PathSample, Pattern, Project,
+    ShadingElement, Tool, ToolType,
 };
 use crate::request::{NodeChange, NodeInput, PatternTrim};
 
@@ -536,23 +536,17 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 };
                 t.center = Some([x, y]);
             }
-            if let Some(c) = left.values.color.take() {
-                let [r, g, b] = c[..] else {
-                    return Err(Error::invalid("a text's color is three numbers, [r, g, b]"));
-                };
-                t.color = Some([r, g, b]);
-            }
             taken(&mut left.text, &mut t.text);
             given(&mut left.font, &mut t.font);
             given(&mut left.style, &mut t.style);
             given(&mut left.values.size, &mut t.size);
-            given(&mut left.values.opacity, &mut t.opacity);
             given(&mut left.tracking, &mut t.tracking);
             given(&mut left.line_spacing, &mut t.line_spacing);
             given(&mut left.vertical_anchor, &mut t.vertical_anchor);
             given(&mut left.horizontal_anchor, &mut t.horizontal_anchor);
             given(&mut left.layout_size, &mut t.layout_size);
             given(&mut left.angle, &mut t.angle);
+            shading_applied(t.element_mut(element_of(&mut left)?), &mut left)?;
         }
         Tool::MediaIn | Tool::MediaOut => {}
     }
@@ -566,17 +560,92 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
     Ok(next)
 }
 
-fn named_values(n: &Node, change: &NodeChange) -> Result<Vec<EffectValue>> {
-    let values = n.values();
-    let mut probe = n.clone();
-    for v in &values {
-        probe.write(*v, f64::NAN);
+fn element_of(change: &mut NodeChange) -> Result<u8> {
+    let k = change.element.take().unwrap_or(1);
+    match (1..=ShadingElement::ELEMENTS).contains(&k) {
+        true => Ok(k),
+        false => Err(Error::invalid("a text's shading elements are 1 to 8")),
     }
-    let probe = applied(&probe, change)?;
-    Ok(values
-        .into_iter()
+}
+
+fn shading_applied(s: &mut ShadingElement, left: &mut NodeChange) -> Result<()> {
+    if let Some(c) = left.values.color.take() {
+        let [r, g, b] = c[..] else {
+            return Err(Error::invalid("a text's color is three numbers, [r, g, b]"));
+        };
+        s.color = Some([r, g, b]);
+    }
+    given(&mut left.values.opacity, &mut s.opacity);
+    given(&mut left.enabled, &mut s.enabled);
+    given(&mut left.element_name, &mut s.name);
+    given(&mut left.appearance, &mut s.appearance);
+    given(&mut left.thickness, &mut s.thickness);
+    taken(&mut left.outside_only, &mut s.outside_only);
+    given(&mut left.join_style, &mut s.join_style);
+    given(&mut left.border_level, &mut s.border_level);
+    given(&mut left.extend_horizontal, &mut s.extend_horizontal);
+    given(&mut left.extend_vertical, &mut s.extend_vertical);
+    given(&mut left.round, &mut s.round);
+    given(&mut left.softness_x, &mut s.softness_x);
+    given(&mut left.softness_y, &mut s.softness_y);
+    given(&mut left.shading_offset, &mut s.offset);
+    given(&mut left.priority, &mut s.priority);
+    Ok(())
+}
+
+fn probed<K: Keyed>(k: &mut K) -> Vec<EffectValue> {
+    let values: Vec<EffectValue> = (EffectValue::ALL.into_iter())
+        .filter(|v| k.takes(*v))
+        .collect();
+    for v in &values {
+        k.write(*v, f64::NAN);
+    }
+    values
+}
+
+fn named<K: Keyed>(values: Vec<EffectValue>, probe: &K) -> Vec<EffectValue> {
+    (values.into_iter())
         .filter(|v| probe.takes(*v) && !probe.plain(*v).is_nan())
-        .collect())
+        .collect()
+}
+
+fn named_values(n: &Node, change: &NodeChange) -> Result<(Vec<EffectValue>, Vec<EffectValue>)> {
+    let k = element_of(&mut change.clone())?;
+    let mut probe = n.clone();
+    let values = probed(&mut probe);
+    let parts = match &mut probe.tool {
+        Tool::TextPlus(t) => probed(t.element_mut(k)),
+        _ => Vec::new(),
+    };
+    let probe = applied(&probe, change)?;
+    let shaded = match &probe.tool {
+        Tool::TextPlus(t) => named(parts, &t.element(k)),
+        _ => Vec::new(),
+    };
+    Ok((named(values, &probe), shaded))
+}
+
+fn keyed_into<K: Keyed>(
+    was: &K,
+    next: &mut K,
+    named: &[EffectValue],
+    (name, frame): (&str, Option<i64>),
+) -> Result<()> {
+    let keyed: Vec<EffectValue> = was.key_list().iter().map(|k| k.value).collect();
+    for value in keyed.into_iter().filter(|v| named.contains(v)) {
+        let Some(frame) = frame else {
+            return Err(Error::usage(format!(
+                "{name}'s {} has keyframes: give `frame` for the keyframe",
+                value.name().replace('_', " ")
+            )));
+        };
+        let to = next.point(value);
+        if to != was.point_at(value, frame as f64) {
+            next.put_point(value, frame, to);
+        }
+        next.write_point(value, was.point(value));
+    }
+    Ok(())
 }
 
 pub fn set(
@@ -603,19 +672,11 @@ pub fn set(
         )));
     }
     let mut next = applied(n, change)?;
-    let named = named_values(n, change)?;
-    for value in n.keys.iter().map(|k| k.value).filter(|v| named.contains(v)) {
-        let Some(frame) = frame else {
-            return Err(Error::usage(format!(
-                "{name}'s {} has keyframes: give `frame` for the keyframe",
-                value.name().replace('_', " ")
-            )));
-        };
-        let to = next.point(value);
-        if to != n.point_at(value, frame as f64) {
-            next.put_point(value, frame, to);
-        }
-        next.write_point(value, n.point(value));
+    let (named, shaded) = named_values(n, change)?;
+    keyed_into(&*n, &mut next, &named, (name, frame))?;
+    if let (Tool::TextPlus(was), Tool::TextPlus(now)) = (&n.tool, &mut next.tool) {
+        let k = change.element.unwrap_or(1);
+        keyed_into(&was.element(k), now.element_mut(k), &shaded, (name, frame))?;
     }
     *n = node_checked(&next)?;
     if change.remove_pattern {
@@ -773,25 +834,53 @@ pub(super) fn sample_of(frame: i64, a: &crate::motion::Area) -> PathSample {
 pub fn key(
     p: &mut Project,
     id: &str,
-    name: &str,
+    (name, element): (&str, Option<u8>),
     frame: i64,
     (value, ease): (Option<EffectValue>, Option<Ease>),
 ) -> Result<Value> {
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    let label = n.tool.label().to_string();
+    let keyed = match element {
+        None => toggled(n, (name, &label), frame, (value, ease))?,
+        Some(k) => {
+            let Tool::TextPlus(t) = &mut n.tool else {
+                return Err(Error::invalid(format!(
+                    "{name} ({label}) has no shading elements"
+                )));
+            };
+            if !(1..=ShadingElement::ELEMENTS).contains(&k) {
+                return Err(Error::invalid("a text's shading elements are 1 to 8"));
+            }
+            let what = format!("{name}'s shading element {k}");
+            toggled(t.element_mut(k), (&what, &label), frame, (value, ease))?
+        }
+    };
+    *n = node_checked(n)?;
+    let mut answer = json!({ "clip": id, "node": name, "frame": frame, "keyed": keyed });
+    if let Some(k) = element {
+        answer["element"] = json!(k);
+    }
+    Ok(answer)
+}
+
+fn toggled<K: Keyed>(
+    n: &mut K,
+    (name, label): (&str, &str),
+    frame: i64,
+    (value, ease): (Option<EffectValue>, Option<Ease>),
+) -> Result<bool> {
     if n.values().is_empty() {
         return Err(Error::invalid(format!(
-            "{name} ({}) has no values to key",
-            n.tool.label()
+            "{name} ({label}) has no values to key"
         )));
     }
     if let Some(v) = value
         && !n.values().contains(&v)
     {
         return Err(Error::invalid(format!(
-            "{name} ({}) has no {}",
-            n.tool.label(),
+            "{name} ({label}) has no {}",
             v.name().replace('_', " ")
         )));
     }
@@ -810,14 +899,13 @@ pub fn key(
         }
         (Some(_), _) => {
             return Err(Error::invalid(format!(
-                "{name} of {id} has no keyframes on frame {frame}"
+                "{name} has no keyframes on frame {frame}"
             )));
         }
         (None, Some(v)) => n.toggle_value_key(v, frame),
         (None, None) => n.toggle_keys(frame),
     };
-    *n = node_checked(n)?;
-    Ok(json!({ "clip": id, "node": name, "frame": frame, "keyed": keyed }))
+    Ok(keyed)
 }
 
 pub fn looping(p: &mut Project, id: &str, on: Option<bool>, ping_pong: Option<bool>) -> Result<()> {

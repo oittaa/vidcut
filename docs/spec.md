@@ -2838,7 +2838,7 @@ The values of a new Text+ node:
 - Font: Open Sans. Style: Bold.
   - vidcut: without Open Sans, the usual sans-serif font of the system.
   - vidcut: the face is found by the words of its name: the weight, Italic or Oblique, and the width.
-- Color: white. Opacity: 1.
+- Color: white.
 - Size: 0.08. Tracking: 1. Line Spacing: 1. V Anchor: 0. H Anchor: 0.
 - Layout: Point. Center: (0.5, 0.5). Size: 1. Angle: 0.
 
@@ -2846,7 +2846,7 @@ The controls:
 
 - A line break in Styled Text starts a new line.
 - Two menus set the family and the face of the font (p. 2383).
-- Color sets the fill color of the text (p. 2383).
+- Color sets the fill color of the text (p. 2383). It is the color of shading element 1.
 - The size is relative to the width of the picture (p. 2383).
 - The Text tab has Tracking, Line Spacing, V Anchor and H Anchor (pp. 2383–2384). The Layout tab has Center, Size and Angle (p. 2387).
 
@@ -2862,6 +2862,42 @@ The size and the place of the text, with S the Size:
 - Center is in fractions of the picture, from its bottom left. Y goes up.
 - The Size of the layout scales the laid out text about Center. Angle turns it counterclockwise about Center.
 - The text is drawn at its exact place, with no step to whole pixels.
+
+The shading elements:
+
+- A Text+ draws its text with eight shading elements. Only element 1 is on in a new node (p. 2389).
+- Appearance sets what an element draws (p. 2390):
+  - Text Fill: the characters, filled.
+  - Text Outline: a line of Thickness × S × W, centered on the edges of the characters.
+  - Border Fill: a box behind the text.
+  - Border Outline: a line of Thickness × S × W, centered on the edge of the box.
+- Outside Only keeps the half of the line outside the edge (p. 2390).
+- Join Style sets the corners of a line: Sharp, Rounded or Beveled (p. 2390). Rounded is the usual style.
+- Level sets what one box goes around: Text, Line, Word or Character (p. 2390). Character is the usual level.
+  - A Character box is one advance wide.
+  - A Word, Line or Text box is the advance of its run, plus the hhea descent on the left and on the right.
+  - A box goes from the hhea ascent to the hhea descent of its lines. The Text box is as wide as the widest line.
+  - A space has no Character box.
+- Extend Horizontal and Extend Vertical change the size of each box (p. 2391). Each side moves out by 0.2 × Extend × S × W.
+- Round makes the corners of a box round (p. 2391). The radius is Round × S × W, up to half of the shorter side.
+- Offset moves the element by Offset × S × W, with Y up.
+  - The manual says that an Offset Y of 0.1 moves the element down by 10 percent of the picture (p. 2393). The measured move is up, by 0.1 × S × W.
+  - The offset turns with the Angle and scales with the Size of the layout.
+- Softness X and Softness Y blur the element across and down (p. 2392).
+  - The edge then spreads as a Gaussian of 0.000589 × W × Softness + 0.30 px.
+  - The Size of the text does not change the spread.
+- An element of a higher Priority draws over an element of a lower Priority. The slider moves an element to the front at the right (p. 2393).
+  - Of two elements with the same Priority, the lower element draws over.
+- Opacity sets how much of the element shows (p. 2390).
+
+The values of the shading elements of a new node:
+
+- 1 White Solid Fill: Text Fill, white, Priority 8.
+- 2 Red Outline: Text Outline, red, Priority 7.
+- 3 Black Shadow: Text Fill, black, Softness X and Y 5, Offset (0.05, −0.05), Priority 6.
+- 4 Blue Border: Border Fill, blue, Priority 5.
+- Each of these has Opacity 1, Thickness 0.02, Join Style Rounded and Level Character.
+- Elements 5 to 8 are a white Text Fill. Their Priority is 4 to 1.
 
 #### Edits
 

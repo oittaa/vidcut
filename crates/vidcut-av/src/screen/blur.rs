@@ -3,10 +3,10 @@ use vidcut_core::grade::{
     THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
 };
 use vidcut_core::lru::{ByBytes, Lru};
-use vidcut_core::model::{ApplyMode, MergeEdges, MergeOperator, TextPlus};
+use vidcut_core::model::{ApplyMode, MergeEdges, MergeOperator};
 use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
 use vidcut_core::place::{
-    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Merging, Op,
+    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Inking, Level, Merging, Op,
     Outline, Placing, Program, Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
 };
 use vidcut_core::window_key::{
@@ -884,12 +884,12 @@ fn lettered(gpu: &Gpu, inked: Inked) -> Lettered {
 fn letters_into(
     gpu: &Gpu,
     letters: &mut Letters,
-    (text, to): (&TextPlus, &Texture),
+    (inking, to): (&Inking, &Texture),
     encoder: &mut wgpu::CommandEncoder,
 ) {
     drop(begin(encoder, &to.view, Some(wgpu::Color::TRANSPARENT)));
     let size = to.texture.size();
-    let key = Lettering::of(text, (size.width, size.height));
+    let key = Lettering::of(&inking.text, &inking.element, (size.width, size.height));
     if !letters.contains(&key) {
         let made = crate::burn::inked(&key).map(|inked| lettered(gpu, inked));
         let pixels = made.as_ref().map_or(0, |m| {

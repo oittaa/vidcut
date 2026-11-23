@@ -1014,7 +1014,11 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
 - An effect tool gives the work of its clip effect, through `Working::of`. Its sizes follow the picture, as on a frame of the same size (`place::OnFrame`).
   - With `blur_alpha` off, a Gaussian Blur has no sigma on the alpha.
 - A Merge with a foreground gives an `Op::Merge`, which holds a `place::Merging`. Without a foreground, it gives the register of its background.
-- A Text+ gives an `Op::Text` into a free register. Its masks and its Blend then go through `place::masked`.
+- A Text+ gives one `Op::Text` for each shading element that is on, back to front. The `Inking` of the op holds the text and the element.
+  - An element with softness gets an `Op::Work` with a blur in the same register.
+  - An `Op::Merge` puts each element over the elements behind it.
+  - With no element on, an `Op::Clear` gives a clear register.
+  - The masks and the Blend of the Text+ then go through `place::masked`.
   - `Merge::lookup` gives the affine map from a pixel of the output to a pixel of the foreground. It holds the flip, Size, Angle, Center and Invert Transform.
   - The mode, the operator, the edges and the sliders go to the shader as they are.
 - `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.
@@ -1038,8 +1042,10 @@ The draw:
   - `fs_merge` draws an `Op::Merge`. `merge_fore` reads the foreground through the map, with a bilinear filter and the edges. `merge_mode` gives the sum of the mode and the operator.
   - The masks of a Merge go into one picture before the draw (`mask_room`, `mask_made`). `fs_merge` then mixes the background and the result by the mask and Blend.
   - `letters_into` draws an `Op::Text`. It clears the register and copies the text into it.
-    - `burn::inked` lays out and fills the text on the CPU, with premultiplied colors. It gives only the part of the picture that the text covers.
-    - The texture of the text stays in `Letters`, keyed by `burn::Lettering`: the text, the font, the values and the size of the picture. Thus a still text is laid out once.
+    - `burn::inked` lays out the text on the CPU and draws one shading element, with premultiplied colors. It gives only the part of the picture that the element covers.
+    - A fill fills the outlines of the glyphs or the boxes. An outline strokes them. Outside Only takes the fill away from the stroke.
+    - The texture of the element stays in `Letters`, keyed by `burn::Lettering`. The key holds the text, the font, the values of the text and of the element, and the size of the picture. Thus a still text is laid out once.
+    - The softness is a blur stage of the program, so the GPU blurs the element.
     - The text is drawn at the size of the register. Why: all sizes of a Text+ follow the picture. Thus a smaller register gives the same text, smaller.
   - `fs_composed_out` writes the result back into the converted picture, at its stored turn.
 - The converted picture then holds the alpha. Its parameters say so (`COMPOSED_ALPHA`, `COMPOSED_MODE`). Then `opacity` reads the alpha from it, and `placed` takes the colors as premultiplied.
