@@ -208,6 +208,7 @@ impl Tracker {
 impl Merge {
     pub const SIZE: f64 = 1.0;
     pub const SLIDES: (f64, f64) = (0.0, 1.0);
+    pub const Z_OFFSETS: (f64, f64) = (-1e6, 1e6);
 
     pub fn middle(&self) -> [f64; 2] {
         self.center.unwrap_or(Mask::MIDDLE)
@@ -243,6 +244,14 @@ impl Merge {
 
     pub fn burn(&self) -> f64 {
         self.burn_in.unwrap_or(0.0)
+    }
+
+    pub fn z_offset(&self) -> f64 {
+        self.foreground_z_offset.unwrap_or(0.0)
+    }
+
+    pub fn back_additive(&self) -> f64 {
+        self.background_subtractive_additive.unwrap_or(1.0)
     }
 }
 
@@ -1003,8 +1012,10 @@ impl Tool {
     pub fn inputs(&self) -> &'static [NodeInput] {
         match self {
             Tool::MediaIn => &[NodeInput::EffectMask],
-            Tool::MediaOut | Tool::Tracker(_) => &[NodeInput::Input],
-            Tool::Blur(_) | Tool::Effect(_) => &[NodeInput::Input, NodeInput::EffectMask],
+            Tool::MediaOut => &[NodeInput::Input],
+            Tool::Tracker(_) | Tool::Blur(_) | Tool::Effect(_) => {
+                &[NodeInput::Input, NodeInput::EffectMask]
+            }
             Tool::Merge(_) => &[
                 NodeInput::Input,
                 NodeInput::Foreground,
@@ -1028,6 +1039,14 @@ impl Tool {
 
     pub fn is_media(&self) -> bool {
         matches!(self, Tool::MediaIn | Tool::MediaOut)
+    }
+
+    pub fn multiplies(&self) -> bool {
+        !self.is_mask() && !self.is_media()
+    }
+
+    pub fn operates(&self) -> bool {
+        !matches!(self, Tool::Tracker(_))
     }
 
     pub fn flows(&self) -> bool {
@@ -1155,6 +1174,7 @@ impl Node {
             pass_through: false,
             blend: None,
             blur_alpha: true,
+            multiply_by_mask: false,
             place,
             keys: Vec::new(),
             connect: None,

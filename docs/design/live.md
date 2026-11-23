@@ -306,10 +306,14 @@ The bar and the Jobs button:
   - A drag holds the value (`Inspector::held`) and sends one `comp.set` when it stops. `Workspace::node_preview` shows the held value until then.
   - Each value has its Keyframe button. It sends `comp.key` with the `value`.
   - A Text+ shows one shading element at a time. `EffectsPage::element` holds it, and `gui.nodes` with `element` sets it. A click on the row of elements sends that request.
-- `Workspace::mask_handles` draws the handles of each selected mask with `show_view_controls` on.
+- `Workspace::node_handles` draws the handles of each selected mask with `show_view_controls` on, and of each selected Merge.
   - For a selected Background with Type Gradient, it draws Start and End (`Grip::Start`, `Grip::End`) and the line between them.
   - A drag of a handle changes a copy of the composition (`Held`). It sends one `comp.set` when it stops.
-  - A drag of the ring adds the turn of the pointer about the center on each frame (`swept`). Thus the angle can go past 360.
+  - A drag of the ring adds the turn of the pointer about the center on each frame (`swept`). Thus the angle can go past 360. The line of a Merge (`Grip::Spoke`) does the same.
+  - `merge_outline` gives the line around the foreground of a Merge, from the map that the render uses (`Merge::lookup`).
+  - A press takes the nearest handle (`reach`). A press inside the center square is at no distance from it. On a tie, the first handle in the list wins.
+  - `merge_spots` gives the handles of a Merge, with the center and the arrows before the line and the ring. Its center and its arrows (`Grip::Across`, `Grip::Up`) move the Center by the move of the pointer (`merge_moved`). A mask's center goes to the pointer.
+  - A Center that follows a tracker pattern shows its handles. A drag of them moves nothing and sends nothing (`pinned`).
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
 - On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L, the steps of a frame and a second, and the jumps.
   - The keys of `Panel::Effects` work only on the page: Pass Through, Rename and the keyframe steps of the active node.

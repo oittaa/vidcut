@@ -13,7 +13,7 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - vidcut has the name, the tool and Reset.
 - **The Settings tab of a tool and of a mask** (pp. 2131, 2501–2502):
   - Blend, Process When Blend Is 0.0, the channels, Apply Mask Inverted, Multiply by Mask, Motion Blur, Use GPU, Comments and Scripts.
-  - vidcut shows Blend in the one list of controls.
+  - vidcut shows Blend and Multiply by Mask in the one list of controls.
 - **The Image tab of a mask** (p. 2500):
   - Output Size: Default or Custom.
   - Clipping Mode: None or Frame. Measured: None is the usual value.
