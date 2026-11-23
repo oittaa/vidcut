@@ -2862,6 +2862,7 @@ The size and the place of the text, with S the Size:
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
 - Add a Text+ with a node selected: a new Merge goes after that node, and the Text+ joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
+  - With a mask selected, no Merge comes. The Text+ joins nothing.
   - vidcut: a Media In added with a node selected does the same.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
   - vidcut: a Tracker has no effect mask yet. A mask added with a Tracker selected joins nothing ([todo](todo/motion-tracking.md)).

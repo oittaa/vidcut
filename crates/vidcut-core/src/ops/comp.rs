@@ -146,7 +146,11 @@ pub fn add(p: &mut Project, id: &str, tool: ToolType, after: Option<&str>) -> Re
     let made = tool.made();
     one_of(c, &made, id)?;
     let name = c.free_name(made.base());
-    let merged = made.makes() && after.is_some();
+    let behind = match after {
+        Some(a) => Some(&c.nodes[found(c, id, a)?]),
+        None => None,
+    };
+    let merged = made.makes() && behind.is_some_and(|a| !a.tool.is_mask());
     let mut node = Node::new(&name, made, [0.0, 0.0]);
     let answer = match merged {
         false => {

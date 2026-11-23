@@ -3399,10 +3399,10 @@ pub enum Request {
     /// With `after` a tool other than a tracker, a mask goes on its effect
     /// mask, after the masks that are there. With `after` a mask, a mask
     /// goes after it in its chain. A tool that makes its own picture, as
-    /// `text_plus`, with `after` comes with a new merge: the merge goes in
-    /// after that node, and the new tool joins its foreground. Any other new
-    /// node joins nothing. Returns the clip and the `node`'s name, and the
-    /// `merge`'s name where one is new.
+    /// `text_plus`, with `after` a node other than a mask comes with a new
+    /// merge: the merge goes in after that node, and the new tool joins its
+    /// foreground. Any other new node joins nothing. Returns the clip and the
+    /// `node`'s name, and the `merge`'s name where one is new.
     #[serde(rename = "comp.add")]
     CompAdd {
         clip: ClipRef,
