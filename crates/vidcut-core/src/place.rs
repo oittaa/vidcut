@@ -5,16 +5,19 @@ use crate::model::{
     CellShape, CompositeMode, Composition, Effect, EffectKind, EffectType, FastNoise, FillMethod,
     FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop,
     GradientType, Mask, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring,
-    Pattern, Picture, ShadingElement, Sharpen, TextPlus, Tool, Vignette, VignetteMode,
-    VignetteShape,
+    Pattern, Picture, PivotType, ReferenceTime, ShadingElement, Sharpen, TextPlus, Tool, Tracker,
+    TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
 use crate::request::NodeInput;
 
 pub type Areas<'a> = dyn Fn(&Pattern) -> Option<Area> + 'a;
+type Places = ([f64; 2], [f64; 2]);
+type Weighed = (Places, f64);
 
 const LEAST_ZOOM: f64 = 1e-9;
+const LEAST_REACH: f64 = 1e-9;
 const LEAST_BAR: f64 = 0.2;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1018,11 +1021,13 @@ pub struct Merging {
     pub burn: f64,
     pub blend: f64,
     pub masks: Vec<Shaping>,
+    pub replaces: bool,
 }
 
 impl Merging {
     pub fn of(m: &Merge, blend: f64, (w, h): (f64, f64), masks: Vec<Shaping>) -> Self {
         Self {
+            replaces: false,
             back: m.lookup((w, h)),
             edges: m.edges(),
             mode: m.mode(),
@@ -1171,7 +1176,162 @@ fn masked(
     out
 }
 
-pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) -> Program {
+fn eased(x: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+fn smoothed(
+    at: &dyn Fn(f64) -> Option<[f64; 2]>,
+    (a, b): (f64, f64),
+    points: u32,
+    now: f64,
+) -> Option<[f64; 2]> {
+    let n = points as usize + 1;
+    let knots: Vec<[f64; 2]> = (0..=n)
+        .map(|k| at(a + (b - a) * k as f64 / n as f64))
+        .collect::<Option<_>>()?;
+    if b <= a {
+        return knots.first().copied();
+    }
+    let less = |p: [f64; 2], q: [f64; 2]| [p[0] - q[0], p[1] - q[1]];
+    let mut slopes = vec![less(knots[1], knots[0]); n + 1];
+    for k in 1..n {
+        let d = less(knots[k + 1], knots[k - 1]);
+        slopes[k] = [d[0] / 2.0, d[1] / 2.0];
+    }
+    if n > 1 {
+        let end = |c: [f64; 2], m: [f64; 2]| [(3.0 * c[0] - m[0]) / 2.0, (3.0 * c[1] - m[1]) / 2.0];
+        slopes[0] = end(less(knots[1], knots[0]), slopes[1]);
+        slopes[n] = end(less(knots[n], knots[n - 1]), slopes[n - 1]);
+    }
+    let u = ((now - a) / (b - a)).clamp(0.0, 1.0) * n as f64;
+    let j = (u.floor() as usize).min(n - 1);
+    let t = u - j as f64;
+    let (t2, t3) = (t * t, t * t * t);
+    let h = [
+        2.0 * t3 - 3.0 * t2 + 1.0,
+        t3 - 2.0 * t2 + t,
+        -2.0 * t3 + 3.0 * t2,
+        t3 - t2,
+    ];
+    let axis = |i: usize| {
+        h[0] * knots[j][i] + h[1] * slopes[j][i] + h[2] * knots[j + 1][i] + h[3] * slopes[j + 1][i]
+    };
+    Some([axis(0), axis(1)])
+}
+
+fn matched(t: &Tracker, (w, h): (f64, f64), (start, now): (i64, f64)) -> [[f64; 6]; 2] {
+    let place = |a: Area| [a.center[0] * w, a.center[1] * h];
+    let span = |p: &Pattern| p.path.as_ref().and_then(|m| m.span());
+    let on: Vec<&Pattern> = t.patterns.iter().filter(|p| p.enabled).collect();
+    let spans: Vec<(i64, i64)> = on.iter().filter_map(|p| span(p)).collect();
+    let (first, last) = (
+        spans.iter().map(|s| s.0).min(),
+        spans.iter().map(|s| s.1).max(),
+    );
+    let fade = t.fade();
+    let ramp = |d: f64| match fade > 0.0 {
+        true => eased(d / fade),
+        false => f64::from(u8::from(d > 0.0)),
+    };
+    let weight = |p: &Pattern| match span(p) {
+        None => 1.0,
+        Some((a, b)) => {
+            let rise = if Some(a) > first {
+                ramp(now - (a - 1) as f64)
+            } else {
+                1.0
+            };
+            let fall = if Some(b) < last {
+                ramp((b + 1) as f64 - now)
+            } else {
+                1.0
+            };
+            rise * fall
+        }
+    };
+    let custom = t.custom() + start as f64;
+    let reference = |p: &Pattern| {
+        let at = |f: f64| p.area_at(f).map(place);
+        match (t.reference(), span(p)) {
+            (ReferenceTime::Custom, _) => at(custom),
+            (_, None) => at(now),
+            (ReferenceTime::Start, Some((a, _))) => at(a as f64),
+            (ReferenceTime::End, Some((_, b))) => at(b as f64),
+            (ReferenceTime::StartEnd, Some((a, b))) => {
+                smoothed(&at, (a as f64, b as f64), t.intermediate(), now)
+            }
+        }
+    };
+    let both = |p: &Pattern| Some((reference(p)?, place(p.area_at(now)?)));
+    let pairs: Vec<Weighed> = on
+        .iter()
+        .filter_map(|p| Some((both(p)?, weight(p))))
+        .filter(|(_, w)| *w > 0.0)
+        .collect();
+    let total: f64 = pairs.iter().map(|(_, w)| w).sum();
+    let mean = |pick: fn(&Places) -> [f64; 2]| {
+        let sum = pairs.iter().fold([0.0, 0.0], |s, (p, w)| {
+            let [x, y] = pick(p);
+            [s[0] + w * x, s[1] + w * y]
+        });
+        [sum[0] / total, sum[1] / total]
+    };
+    let picked = (t.pivot_pattern() as usize)
+        .checked_sub(1)
+        .and_then(|k| t.patterns.get(k));
+    let pivots = match t.pivot_kind() {
+        PivotType::Average => (total > 0.0).then(|| (mean(|p| p.0), mean(|p| p.1))),
+        PivotType::Selected => picked.and_then(both),
+        PivotType::Manual => {
+            let [x, y] = t.manual_pivot();
+            let c = [x * w, (1.0 - y) * h];
+            Some((c, c))
+        }
+    };
+    let still = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    let Some((from, to)) = pivots else {
+        return [still, still];
+    };
+    let mut turns = (0.0, 0.0);
+    let mut ratios = (0.0, 0.0);
+    for ((p0, p1), wt) in &pairs {
+        let v0 = [p0[0] - from[0], p0[1] - from[1]];
+        let v1 = [p1[0] - to[0], p1[1] - to[1]];
+        let (r0, r1) = (v0[0].hypot(v0[1]), v1[0].hypot(v1[1]));
+        if r0 <= LEAST_REACH || r1 <= LEAST_REACH {
+            continue;
+        }
+        let turn = v1[1].atan2(v1[0]) - v0[1].atan2(v0[0]);
+        let pi = std::f64::consts::PI;
+        turns = (
+            turns.0 + wt * ((turn + pi).rem_euclid(2.0 * pi) - pi),
+            turns.1 + wt,
+        );
+        ratios = (ratios.0 + wt * r0 / r1, ratios.1 + wt);
+    }
+    let theta = match t.match_rotation && turns.1 > 0.0 {
+        true => turns.0 / turns.1,
+        false => 0.0,
+    };
+    let s = match t.match_scaling && ratios.0 > 0.0 {
+        true => ratios.1 / ratios.0,
+        false => 1.0,
+    };
+    let to = if t.match_position { to } else { from };
+    let (sin, cos) = theta.sin_cos();
+    let lookup = |a: [[f64; 2]; 2], to: [f64; 2], at: [f64; 2]| {
+        let row = |k: usize| [a[k][0], a[k][1], to[k] - a[k][0] * at[0] - a[k][1] * at[1]];
+        let [x, y] = [row(0), row(1)];
+        [x[0], x[1], x[2], y[0], y[1], y[2]]
+    };
+    let undone = [[cos / s, sin / s], [-sin / s, cos / s]];
+    let done = [[s * cos, -s * sin], [s * sin, s * cos]];
+    [lookup(undone, from, to), lookup(done, to, from)]
+}
+
+pub fn composed(c: &Composition, (w, h): (f64, f64), (frame, source): (i64, f64)) -> Program {
     let Some((order, uses)) = c.picture_order() else {
         return Program::clear();
     };
@@ -1191,7 +1351,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
             .filter(|m| !m.pass_through)
             .filter_map(|m| {
                 let mask = m.tool.mask()?;
-                let bases = MaskBase::all(m, c, (w, h), areas);
+                let bases = MaskBase::all(m, c, (w, h), &|p: &Pattern| p.area_at(source));
                 Some(Shaping::of(mask, &m.tool, (w, h), &bases))
             })
             .collect()
@@ -1341,6 +1501,68 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                 Some(masked(&mut stages, &mut regs, to, (shaped, mix), (w, h)))
             }
             t if !t.gives_from(&gives) => None,
+            Tool::Tracker(t) => first.map(|b| {
+                let f = came.get(1).copied().flatten();
+                let merge = t.merged();
+                let moving = t.operation() == TrackerOperation::MatchMove && !n.pass_through;
+                let fore = f.filter(|_| merge != TrackerMerge::BgOnly);
+                if !moving || (merge != TrackerMerge::BgOnly && f.is_none()) {
+                    regs.read(b);
+                    if let Some(f) = f {
+                        let last = regs.read(f);
+                        regs.freed(f, last && f != b);
+                    }
+                    return b;
+                }
+                let [undo, redo] = matched(t, (w, h), (c.start, source));
+                let base = t.merging();
+                let moved =
+                    |back: [f64; 6], replaces: bool, shaped: Vec<Shaping>, mix: f64| Merging {
+                        back: Some(back),
+                        replaces,
+                        ..Merging::of(&base, mix, (w, h), shaped)
+                    };
+                let picture = fore.unwrap_or(b);
+                let last = [regs.read(b), f.is_some_and(|f| regs.read(f))];
+                let mut to = regs.taken();
+                match merge {
+                    TrackerMerge::BgOverFg => {
+                        stages.push(Stage {
+                            op: Op::Merge(moved(redo, false, Vec::new(), 1.0)),
+                            from: vec![picture, b],
+                            to,
+                        });
+                        if !shaped.is_empty() || mix != 1.0 {
+                            let out = regs.taken();
+                            let kept = Merging {
+                                replaces: true,
+                                ..Merging::of(&Merge::default(), mix, (w, h), shaped)
+                            };
+                            stages.push(Stage {
+                                op: Op::Merge(kept),
+                                from: vec![b, to],
+                                to: out,
+                            });
+                            regs.freed(to, true);
+                            to = out;
+                        }
+                    }
+                    _ => {
+                        let lookup = if fore.is_some() { undo } else { redo };
+                        let replaces = merge != TrackerMerge::FgOverBg;
+                        stages.push(Stage {
+                            op: Op::Merge(moved(lookup, replaces, shaped, mix)),
+                            from: vec![b, picture],
+                            to,
+                        });
+                    }
+                }
+                regs.freed(b, last[0] && f != Some(b));
+                if let Some(f) = f {
+                    regs.freed(f, last[1]);
+                }
+                to
+            }),
             Tool::Merge(m) => first.map(|b| match came.get(1).copied().flatten() {
                 Some(f) if !n.pass_through => {
                     let last = [regs.read(b), regs.read(f)];
@@ -1663,8 +1885,7 @@ impl Placing {
             .map_or_else(Program::default, |c| {
                 let frame = p.clock.frame(p.source);
                 let sampled = c.sampled((frame - c.start) as f64, frame as f64);
-                let areas = |pattern: &Pattern| pattern.area_at(frame as f64);
-                composed(&sampled, pixels, p.frame, &areas)
+                composed(&sampled, pixels, (p.frame, frame as f64))
             });
         Self {
             level: own,

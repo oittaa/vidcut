@@ -464,7 +464,7 @@ fn merge_bytes(m: &Merging, masked: bool) -> Vec<u8> {
         mode,
         op,
         flag(masked),
-        0.0,
+        flag(m.replaces),
         m.additive,
         m.gain,
         m.burn,

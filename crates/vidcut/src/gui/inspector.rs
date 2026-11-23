@@ -18,9 +18,10 @@ use vidcut_core::model::{
     DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue, FastNoise,
     FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
     GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
-    JoinStyle, Keyframe, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring, Pattern,
-    Picture, PictureTool, Project, Retime, ShadingElement, Sharpen, Speed, Subject, TextPlus, Tool,
-    ToolType, TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    JoinStyle, Keyframe, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring,
+    Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement,
+    Sharpen, Speed, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
+    TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -1405,14 +1406,22 @@ fn fixed_row(ui: &mut egui::Ui, text: &str, mut now: f64) {
 }
 
 fn offset_row(ui: &mut egui::Ui, (id, text): (egui::Id, &str), now: f64) -> Option<f64> {
-    let set = now != 0.0;
+    number_row(ui, (id, text), (now, 0.0), (Pattern::PLACES, 0.001))
+}
+
+fn number_row(
+    ui: &mut egui::Ui,
+    (id, text): (egui::Id, &str),
+    (now, usual): (f64, f64),
+    ((lo, hi), speed): ((f64, f64), f64),
+) -> Option<f64> {
+    let set = now != usual;
     label(ui, text, set);
     let mut v = ui.data(|d| d.get_temp::<f64>(id)).unwrap_or(now);
-    let (lo, hi) = Pattern::PLACES;
     let r = ui.add(
         egui::DragValue::new(&mut v)
             .range(lo..=hi)
-            .speed(0.001)
+            .speed(speed)
             .max_decimals(4),
     );
     if r.dragged() {
@@ -1424,7 +1433,7 @@ fn offset_row(ui: &mut egui::Ui, (id, text): (egui::Id, &str), now: f64) -> Opti
         out = (v != now).then_some(v);
     }
     if reset(ui, set) {
-        out = Some(0.0);
+        out = Some(usual);
     }
     ui.end_row();
     out
@@ -2324,6 +2333,175 @@ fn node_rows(
     }
 }
 
+fn tracker_edge_label(e: MergeEdges) -> &'static str {
+    match e {
+        MergeEdges::Canvas => "Black",
+        e => e.label(),
+    }
+}
+
+fn operation_rows(
+    ui: &mut egui::Ui,
+    (slot, clip, node): (usize, &str, &str),
+    (t, at): (&Tracker, i64),
+    acts: &mut Vec<Act>,
+) -> Option<i64> {
+    let ops = (
+        &TrackerOperation::ALL[..],
+        TrackerOperation::label as fn(TrackerOperation) -> &'static str,
+    );
+    let op = (t.operation(), TrackerOperation::default());
+    choice_row(ui, (slot, "Operation", "operation"), op, ops, acts);
+    if t.operation() != TrackerOperation::MatchMove {
+        return None;
+    }
+    let merges = (
+        &TrackerMerge::ALL[..],
+        TrackerMerge::label as fn(TrackerMerge) -> &'static str,
+    );
+    let merge = (t.merged(), TrackerMerge::default());
+    choice_row(ui, (slot, "Merge", "merge"), merge, merges, acts);
+    let m = t.merging();
+    let base = ui.scope_id();
+    let id = |what: &str| base.with(("tracker-operation", clip, node, what));
+    if t.merged().sums() {
+        let modes = (
+            &ApplyMode::ALL[..],
+            ApplyMode::label as fn(ApplyMode) -> &'static str,
+        );
+        let mode = (m.mode(), ApplyMode::default());
+        choice_row(ui, (slot, "Apply Mode", "apply_mode"), mode, modes, acts);
+        if m.mode().has_operator() {
+            let ops = (
+                &MergeOperator::ALL[..],
+                MergeOperator::label as fn(MergeOperator) -> &'static str,
+            );
+            let op = (m.operator(), MergeOperator::default());
+            choice_row(ui, (slot, "Operator", "operator"), op, ops, acts);
+        }
+        let named = (id("additive"), "Subtractive/Additive");
+        let range = (Merge::SLIDES, 0.01);
+        if let Some(v) = number_row(ui, named, (m.additive(), 1.0), range) {
+            acts.push(node_set(slot, "subtractive_additive", json!(v)));
+        }
+    }
+    let edges = (
+        &MergeEdges::ALL[..],
+        tracker_edge_label as fn(MergeEdges) -> &'static str,
+    );
+    let edge = (m.edges(), MergeEdges::default());
+    choice_row(ui, (slot, "Edges", "edges"), edge, edges, acts);
+    let follows = [
+        ("Position", t.match_position, "match_position"),
+        ("Rotation", t.match_rotation, "match_rotation"),
+        ("Scaling", t.match_scaling, "match_scaling"),
+    ];
+    for (name, now, put) in follows {
+        check(ui, (slot, name, now, true), put, acts);
+    }
+    let pivots = (
+        &PivotType::ALL[..],
+        PivotType::label as fn(PivotType) -> &'static str,
+    );
+    let pivot = (t.pivot_kind(), PivotType::default());
+    choice_row(ui, (slot, "Pivot Type", "pivot_type"), pivot, pivots, acts);
+    match t.pivot_kind() {
+        PivotType::Selected => {
+            let k = t.pivot_pattern();
+            let shown = (k as usize).checked_sub(1).and_then(|i| t.patterns.get(i));
+            label(ui, "Pattern", k != 1);
+            egui::ComboBox::from_id_salt(("tracker-pivot", clip, node))
+                .selected_text(shown.map_or("", |p| p.name.as_str()))
+                .show_ui(ui, |ui| {
+                    for (i, p) in t.patterns.iter().enumerate() {
+                        let n = i as u32 + 1;
+                        if ui.selectable_label(n == k, p.name.as_str()).clicked() && n != k {
+                            acts.push(node_set(slot, "pivot_tracker", json!(n)));
+                        }
+                    }
+                });
+            if reset(ui, k != 1) {
+                acts.push(node_set(slot, "pivot_tracker", json!(1)));
+            }
+            ui.end_row();
+        }
+        PivotType::Manual => {
+            let now = t.manual_pivot();
+            for (axis, name) in ["Pivot X", "Pivot Y"].into_iter().enumerate() {
+                let range = (Pattern::PLACES, 0.001);
+                let usual = (now[axis], Tracker::PIVOT[axis]);
+                if let Some(v) = number_row(ui, (id(name), name), usual, range) {
+                    let mut to = now;
+                    to[axis] = v;
+                    acts.push(node_set(slot, "pivot", json!(to)));
+                }
+            }
+        }
+        PivotType::Average => {}
+    }
+    let times = (
+        &ReferenceTime::ALL[..],
+        ReferenceTime::label as fn(ReferenceTime) -> &'static str,
+    );
+    let time = (t.reference(), ReferenceTime::default());
+    choice_row(
+        ui,
+        (slot, "Reference Time", "reference_time"),
+        time,
+        times,
+        acts,
+    );
+    if t.reference() == ReferenceTime::StartEnd {
+        let named = (id("points"), "Reference Intermediate Points");
+        let now = (f64::from(t.intermediate()), 0.0);
+        let range = ((0.0, f64::from(Tracker::MOST_POINTS)), 0.1);
+        if let Some(v) = number_row(ui, named, now, range) {
+            acts.push(node_set(
+                slot,
+                "intermediate_points",
+                json!(v.round() as u32),
+            ));
+        }
+        let named = (id("fade"), "Incomplete Tracker Fade In/Out Frames");
+        let range = (Tracker::FADES, 1.0);
+        if let Some(v) = number_row(ui, named, (t.fade(), Tracker::FADE), range) {
+            acts.push(node_set(slot, "fade_frames", json!(v)));
+        }
+    }
+    if t.reference() != ReferenceTime::Custom {
+        return None;
+    }
+    let now = t.custom();
+    label(ui, "Custom Time", now != 0.0);
+    let mut go = None;
+    ui.horizontal(|ui| {
+        let key = id("custom");
+        let mut v = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(now);
+        let (lo, hi) = Tracker::TIMES;
+        let r = ui.add(egui::DragValue::new(&mut v).range(lo..=hi).speed(1.0));
+        if r.dragged() {
+            ui.data_mut(|d| d.insert_temp(key, v));
+        }
+        if r.drag_stopped() || (r.changed() && !r.dragged()) {
+            ui.data_mut(|d| d.remove::<f64>(key));
+            if v != now {
+                acts.push(node_set(slot, "custom_time", json!(v)));
+            }
+        }
+        if ui.button("Set").clicked() {
+            acts.push(node_set(slot, "custom_time", json!(at as f64)));
+        }
+        if ui.button("Go").clicked() {
+            go = Some(now.round() as i64);
+        }
+    });
+    if reset(ui, now != 0.0) {
+        acts.push(node_set(slot, "custom_time", json!(0.0)));
+    }
+    ui.end_row();
+    go
+}
+
 fn node_header(ui: &mut egui::Ui, n: &Node, active: bool, acts: &mut Vec<Act>) {
     ui.horizontal(|ui| {
         let name = RichText::new(&n.name).strong();
@@ -2427,7 +2605,8 @@ impl Workspace {
                     node_header(ui, n, on, &mut acts);
                     let slot = node_slot(k);
                     if n.tool.tracker().is_some() {
-                        self.tracker_section(ui, (&clip, &comp), &comp.nodes[k]);
+                        let node = &comp.nodes[k];
+                        self.tracker_section(ui, (&clip, &comp), node, (slot, &mut acts));
                     } else {
                         let i = &self.inspector;
                         rows(ui, (slot, "node"), |ui| {
@@ -2449,6 +2628,7 @@ impl Workspace {
         ui: &mut egui::Ui,
         (clip, comp): (&Clip, &Composition),
         node: &Node,
+        (slot, acts): (usize, &mut Vec<Act>),
     ) {
         let Some(t) = node.tool.tracker() else {
             return;
@@ -2502,6 +2682,7 @@ impl Workspace {
         let mut stop = false;
         let mut stepped = None;
         let mut asked = None;
+        let mut go = None;
         rows(ui, (0, node.name.as_str()), |ui| {
             let can = moving && !on.is_empty() && running.is_empty();
             label(ui, "Track", false);
@@ -2628,6 +2809,7 @@ impl Workspace {
                     }
                 }
             }
+            go = operation_rows(ui, (slot, &clip.id, &node.name), (t, at), acts);
             label(ui, "Multiply by Mask", node.multiply_by_mask);
             let mut multiply = node.multiply_by_mask;
             if ui.checkbox(&mut multiply, "").changed() {
@@ -2744,6 +2926,9 @@ impl Workspace {
         }
         for (method, params) in sends {
             self.send(method, params);
+        }
+        if let Some(at) = go {
+            self.send("gui.page_time", json!({ "at": at }));
         }
         if stop {
             self.inspector.stopping = Some(true);

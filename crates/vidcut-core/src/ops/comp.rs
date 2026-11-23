@@ -508,6 +508,13 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 given(&mut left.pattern_offset, &mut pattern.offset);
                 if left.remove_pattern {
                     t.patterns.remove(i);
+                    t.pivot_tracker = match t.pivot_pattern().cmp(&k) {
+                        std::cmp::Ordering::Equal => None,
+                        std::cmp::Ordering::Greater => {
+                            Some(t.pivot_pattern() - 1).filter(|p| *p != 1)
+                        }
+                        std::cmp::Ordering::Less => t.pivot_tracker,
+                    };
                     left.remove_pattern = false;
                 }
             }
@@ -515,6 +522,22 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 t.patterns.push(Pattern::new(t.free_name()));
                 left.add_pattern = false;
             }
+            given(&mut left.operation, &mut t.operation);
+            given(&mut left.merge, &mut t.merge);
+            given(&mut left.edges, &mut t.edges);
+            given(&mut left.apply_mode, &mut t.apply_mode);
+            given(&mut left.operator, &mut t.operator);
+            given(&mut left.subtractive_additive, &mut t.subtractive_additive);
+            taken(&mut left.match_position, &mut t.match_position);
+            taken(&mut left.match_rotation, &mut t.match_rotation);
+            taken(&mut left.match_scaling, &mut t.match_scaling);
+            given(&mut left.pivot_type, &mut t.pivot_type);
+            given(&mut left.pivot_tracker, &mut t.pivot_tracker);
+            given(&mut left.pivot, &mut t.pivot);
+            given(&mut left.reference_time, &mut t.reference_time);
+            given(&mut left.custom_time, &mut t.custom_time);
+            given(&mut left.intermediate_points, &mut t.intermediate_points);
+            given(&mut left.fade_frames, &mut t.fade_frames);
         }
         Tool::Merge(m) => {
             if let Some(c) = left.values.center.take() {
