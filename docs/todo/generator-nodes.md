@@ -27,9 +27,7 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
 
 **Faults in the Inspector, to fix with a check in the app:**
 
-- The Red, Green, Blue and Alpha rows of a Background color send a channel name. `comp set` does not take it, so the change fails.
-- The rows of Color 1 and Color 2 of a Fast Noise fail the same way.
-- A drag of a stop on the gradient bar does not sort the stops while it moves. A click can add a stop past 64.
+- The Red, Green, Blue and Alpha rows of Color 1 and Color 2 of a Fast Noise send a channel name. `comp set` does not take it, so the change fails.
 
 **To measure in Resolve:**
 

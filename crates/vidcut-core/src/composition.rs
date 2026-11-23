@@ -592,7 +592,7 @@ impl GradientRepeat {
         match self {
             GradientRepeat::Once => "Once",
             GradientRepeat::Repeat => "Repeat",
-            GradientRepeat::PingPong => "Ping-pong",
+            GradientRepeat::PingPong => "Ping-Pong",
         }
     }
 }

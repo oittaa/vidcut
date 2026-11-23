@@ -1306,8 +1306,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                     from: Vec::new(),
                     to,
                 });
-                let how = (masks(n), n.mixed());
-                Some(masked(&mut stages, &mut regs, to, how, (w, h)))
+                Some(masked(&mut stages, &mut regs, to, (shaped, mix), (w, h)))
             }
             Tool::FastNoise(_) if n.pass_through => None,
             Tool::FastNoise(f) => {
