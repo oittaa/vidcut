@@ -1919,6 +1919,10 @@ fn node_rows(
             }
         }
     }
+    if n.tool.multiplies() {
+        let multiply = (slot, "Multiply by Mask", n.multiply_by_mask, false);
+        check(ui, multiply, "multiply_by_mask", acts);
+    }
 }
 
 fn node_header(ui: &mut egui::Ui, n: &Node, active: bool, acts: &mut Vec<Act>) {
@@ -1934,7 +1938,10 @@ fn node_header(ui: &mut egui::Ui, n: &Node, active: bool, acts: &mut Vec<Act>) {
         }
         ui.label(dim(n.tool.label()));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let changed = n.tool != n.tool.made() || n.blend.is_some() || !n.keys.is_empty();
+            let changed = n.tool != n.tool.made()
+                || n.blend.is_some()
+                || n.multiply_by_mask
+                || !n.keys.is_empty();
             if ui
                 .add_enabled(changed, egui::Button::new("Reset"))
                 .clicked()
@@ -2216,6 +2223,12 @@ impl Workspace {
                     }
                 }
             }
+            label(ui, "Multiply by Mask", node.multiply_by_mask);
+            let mut multiply = node.multiply_by_mask;
+            if ui.checkbox(&mut multiply, "").changed() {
+                sends.push(set(json!({ "multiply_by_mask": multiply })));
+            }
+            ui.end_row();
             if !moving {
                 return;
             }

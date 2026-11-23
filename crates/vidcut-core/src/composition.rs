@@ -771,8 +771,10 @@ impl Tool {
     pub fn inputs(&self) -> &'static [NodeInput] {
         match self {
             Tool::MediaIn => &[NodeInput::EffectMask],
-            Tool::MediaOut | Tool::Tracker(_) => &[NodeInput::Input],
-            Tool::Blur(_) | Tool::Effect(_) => &[NodeInput::Input, NodeInput::EffectMask],
+            Tool::MediaOut => &[NodeInput::Input],
+            Tool::Tracker(_) | Tool::Blur(_) | Tool::Effect(_) => {
+                &[NodeInput::Input, NodeInput::EffectMask]
+            }
             Tool::Merge(_) => &[
                 NodeInput::Input,
                 NodeInput::Foreground,
@@ -794,6 +796,14 @@ impl Tool {
 
     pub fn is_media(&self) -> bool {
         matches!(self, Tool::MediaIn | Tool::MediaOut)
+    }
+
+    pub fn multiplies(&self) -> bool {
+        !self.is_mask() && !self.is_media()
+    }
+
+    pub fn operates(&self) -> bool {
+        !matches!(self, Tool::Tracker(_))
     }
 
     pub fn flows(&self) -> bool {
@@ -913,6 +923,7 @@ impl Node {
             pass_through: false,
             blend: None,
             blur_alpha: true,
+            multiply_by_mask: false,
             place,
             keys: Vec::new(),
             connect: None,

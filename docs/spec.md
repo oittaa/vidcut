@@ -2670,6 +2670,12 @@ This section follows the Fusion page. The facts without a page are measured in R
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
+  - Multiply by Mask: off (p. 2131). On, with a mask on the effect mask input:
+    - The tool works on the full picture, with no mask and no Blend.
+    - Its RGB and alpha are then multiplied by the masks and by the Blend. Outside the masks, the picture is clear.
+    - Thus a Text+ gives the same picture with Multiply by Mask on or off.
+  - With no mask on the effect mask input, Multiply by Mask changes nothing.
+  - The Settings tab of a Text+ has Multiply by Mask and no Blend. The Settings tab of a Tracker has both.
   - A mask on the effect mask input of a mask adds the two: a + b − a × b. This is the Merge paint mode.
 - Names: the tool's name and the first free number, as `Blur1`, `GaussianBlur1`, `Ellipse1`, `Polygon1`.
 
@@ -2914,7 +2920,6 @@ The values of the shading elements of a new node:
   - With a mask selected, no Merge comes. The Text+ joins nothing.
   - vidcut: a Media In added with a node selected does the same.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
-  - vidcut: a Tracker has no effect mask yet. A mask added with a Tracker selected joins nothing ([todo](todo/motion-tracking.md)).
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
@@ -2999,15 +3004,37 @@ The values of the shading elements of a new node:
   - Its arrows go to the keyframes on each side.
   - After a value has a keyframe, a change on another frame puts a keyframe there.
 - The viewer shows the edge, the center and the handles of each selected mask with Show View Controls on (p. 2491). A drag of one changes that mask.
+  - Measured in Resolve Studio 21.2: a mask whose Center is joined to a tracker shows its center at the joined point. A drag of the center moves nothing.
 - The Angle of an ellipse or a rectangle has a control in the viewer. The manual names a small circle at the end of a dashed line (p. 2493).
   - Measured in Resolve Studio 21.2: the control is a dashed ring about the center. The ring keeps its size on the screen.
   - A drag on the ring turns the shape as far as the pointer turns about the center.
   - While the shape turns, the ring is red, with a line from the center at the angle.
+- The viewer shows the handles of each selected Merge. Measured in Resolve Studio 21.2:
+  - A thin line around the foreground, after its flip, Size, Angle and Center.
+  - A square at the Center. A drag of it moves the Center with the pointer.
+  - An arrow to the right and an arrow up from the Center. They stay on the axes of the screen at each Angle.
+    - A drag of the right arrow changes only X. A drag of the up arrow changes only Y.
+  - A line from the Center at the Angle, and a dashed ring about the Center.
+    - A drag of either turns the foreground as far as the pointer turns about the Center. The Angle can go past 360.
+  - No handle changes Size. A drag inside the foreground, off the handles, does nothing.
+  - A Merge whose Center is joined to a tracker shows the same handles, at the joined point.
+    - A drag of the square or of an arrow moves nothing. It changes no value.
 
 #### The Tracker
 
 The Tracker node follows patterns in the picture on its input (pp. 1783–1789). The facts without a page are measured in Resolve Studio 21.2.
 
+- The Tracker has these inputs (pp. 2839–2840):
+  - Background: the picture to track.
+  - Effect Mask: the manual says that a mask on it limits the tracking (p. 2839). Measured, it limits only what the Operation shows:
+    - The masks do not change the track, also with Multiply by Mask on. The path is the same with and without a mask.
+    - With Operation None, the output is the input. The masks and Multiply by Mask do not change it.
+    - With Match Move, the masks limit where the moved picture replaces the input, as on other tools. Outside them, the input shows.
+    - With Match Move and Multiply by Mask on, the moved picture is multiplied by the masks. Outside them, the picture is clear.
+    - The record is section T1d of `fixtures/nodes/NOTES.md` in the test data.
+    - vidcut: Match Move is not built yet ([todo](todo/motion-tracking.md)).
+    - vidcut: the mask does not change what Find finds.
+  - vidcut: the Foreground input is not built yet ([todo](todo/motion-tracking.md)).
 - A new Tracker has one pattern (p. 1783).
   - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).
   - Each side of the box is from 0.001 to 0.5.
@@ -3047,6 +3074,7 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - The viewer shows a dashed line from the middle of the pattern to that point (p. 1789).
 - A right-click on the Center of a mask has Connect To (pp. 1789, 1804). Its menu names each Tracker, and each pattern as "IntelliTrack 1: Offset position" (Resolve Studio 21.2).
   - The Center then follows that point.
+  - Remove (vidcut: Disconnect) leaves the Center at the point that it shows on that frame. Measured on a Merge and a mask in Resolve Studio 21.2.
   - vidcut: the menu of a connected Center also has Disconnect.
   - vidcut: Follow Size makes the mask also grow and shrink with the box of the pattern.
 - vidcut: Find in the Inspector of a Tracker finds the things of a subject in the clip ([X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
