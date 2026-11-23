@@ -2867,20 +2867,21 @@ The shading elements:
   - Border Fill: a box behind the text.
   - Border Outline: a line of Thickness × S × W, centered on the edge of the box.
 - Outside Only keeps the half of the line outside the edge (p. 2390).
-- Join Style sets the corners of a line: Sharp, Rounded or Beveled. Rounded is the usual style (p. 2390).
-- Level sets what one box goes around: Text, Line, Word or Character. Character is the usual level (p. 2390).
+- Join Style sets the corners of a line: Sharp, Rounded or Beveled (p. 2390). Rounded is the usual style.
+- Level sets what one box goes around: Text, Line, Word or Character (p. 2390). Character is the usual level.
   - A Character box is one advance wide.
   - A Word, Line or Text box is the advance of its run, plus the hhea descent on the left and on the right.
   - A box goes from the hhea ascent to the hhea descent of its lines. The Text box is as wide as the widest line.
   - A space has no Character box.
-- Extend Horizontal and Extend Vertical move each side of a box out by 0.2 × Extend × S × W (p. 2391).
-- Round sets the radius of the corners of a box to Round × S × W, up to half of the shorter side (p. 2391).
-- Offset moves the element by Offset × S × W, with Y up. The manual gives the offset in parts of the picture (p. 2393).
+- Extend Horizontal and Extend Vertical change the size of each box (p. 2391). Each side moves out by 0.2 × Extend × S × W.
+- Round makes the corners of a box round (p. 2391). The radius is Round × S × W, up to half of the shorter side.
+- Offset moves the element by Offset × S × W, with Y up.
+  - The manual says that an Offset Y of 0.1 moves the element down by 10 percent of the picture (p. 2393). The measured move is up, by 0.1 × S × W.
   - The offset turns with the Angle and scales with the Size of the layout.
 - Softness X and Softness Y blur the element across and down (p. 2392).
   - The edge then spreads as a Gaussian of 0.000589 × W × Softness + 0.30 px.
   - The Size of the text does not change the spread.
-- An element of a higher Priority draws over an element of a lower Priority (p. 2393).
+- An element of a higher Priority draws over an element of a lower Priority. The slider moves an element to the front at the right (p. 2393).
   - Of two elements with the same Priority, the lower element draws over.
 - Opacity sets how much of the element shows (p. 2390).
 

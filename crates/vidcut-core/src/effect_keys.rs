@@ -372,6 +372,18 @@ impl EffectKeys {
     }
 }
 
+fn keys_previewed<K: Keyed>(stored: &K, baseline: &K, edited: &K, frame: i64) -> K {
+    let mut out = edited.clone();
+    for k in stored.key_list() {
+        let to = edited.point(k.value);
+        out.write_point(k.value, stored.point(k.value));
+        if to != baseline.point(k.value) {
+            out.put_point(k.value, frame, to);
+        }
+    }
+    out
+}
+
 pub trait Keyed: Clone {
     fn key_list(&self) -> &[EffectKeys];
 
@@ -509,15 +521,7 @@ pub trait Keyed: Clone {
     }
 
     fn previewed(&self, baseline: &Self, edited: &Self, frame: i64) -> Self {
-        let mut out = edited.clone();
-        for k in self.key_list() {
-            let to = edited.point(k.value);
-            out.write_point(k.value, self.point(k.value));
-            if to != baseline.point(k.value) {
-                out.put_point(k.value, frame, to);
-            }
-        }
-        out
+        keys_previewed(self, baseline, edited, frame)
     }
 
     fn has_key_at(&self, frame: i64) -> bool {
@@ -833,6 +837,25 @@ fn node_point(tool: &mut Tool, value: EffectValue) -> Point<'_> {
 impl Keyed for Node {
     fn key_list(&self) -> &[EffectKeys] {
         &self.keys
+    }
+
+    fn has_keys(&self) -> bool {
+        self.keys.iter().any(|k| !k.keys.is_empty())
+            || matches!(&self.tool, Tool::TextPlus(t) if t.shading.iter().any(Keyed::has_keys))
+    }
+
+    fn previewed(&self, baseline: &Self, edited: &Self, frame: i64) -> Self {
+        let mut out = keys_previewed(self, baseline, edited, frame);
+        let tools = (&self.tool, &baseline.tool, &edited.tool);
+        if let (Tool::TextPlus(s), Tool::TextPlus(b), Tool::TextPlus(e)) = tools
+            && let Tool::TextPlus(o) = &mut out.tool
+        {
+            for k in s.shading.iter().filter(|k| k.has_keys()).map(|k| k.element) {
+                let shown = s.element(k).previewed(&b.element(k), &e.element(k), frame);
+                *o.element_mut(k) = shown;
+            }
+        }
+        out
     }
 
     fn adopted(&self, frame: f64) -> Self {
