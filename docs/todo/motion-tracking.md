@@ -121,9 +121,9 @@ In this file, a path is never a track of the timeline.
   - The Blend of a Tracker (Settings tab).
   - The Operation tab, what is left (pp. 2848–2854):
     - Corner Positioning and Perspective Positioning.
-    - BG Over FG, and Start & End with Reference Intermediate Points. They wait for a measurement in Resolve.
     - The Filter Method menu and Flatten Transform.
     - Measure which values of the Operation tab take keyframes in Resolve.
+    - Measure the weights of paths of different lengths with Rotation and Scaling on, and with paths inside the render range.
   - The outputs other than Offset Position: Perspective Position, and the Steady and Unsteady values (pp. 1793–1794).
   - The Options tab: the names of the patterns, enlarge on drag and the search scale.
 - **The Tracker in the app:** run each track button, Stop Tracking, Find, Blur, Connect To and Follow Size. Take a find that asks for the download of its model.

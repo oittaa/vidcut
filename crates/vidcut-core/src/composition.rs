@@ -200,6 +200,9 @@ impl Tracker {
 
     pub const PIVOT: [f64; 2] = [0.5, 0.5];
     pub const TIMES: (f64, f64) = (-1e6, 1e6);
+    pub const MOST_POINTS: u32 = 1000;
+    pub const FADE: f64 = 25.0;
+    pub const FADES: (f64, f64) = (0.0, 1e6);
 
     pub fn of(patterns: Vec<Pattern>) -> Self {
         Self {
@@ -218,6 +221,8 @@ impl Tracker {
             pivot: None,
             reference_time: None,
             custom_time: None,
+            intermediate_points: None,
+            fade_frames: None,
         }
     }
 
@@ -261,6 +266,14 @@ impl Tracker {
 
     pub fn custom(&self) -> f64 {
         self.custom_time.unwrap_or(0.0)
+    }
+
+    pub fn intermediate(&self) -> u32 {
+        self.intermediate_points.unwrap_or(0)
+    }
+
+    pub fn fade(&self) -> f64 {
+        self.fade_frames.unwrap_or(Self::FADE)
     }
 }
 
@@ -713,10 +726,11 @@ impl TrackerOperation {
 }
 
 impl TrackerMerge {
-    pub const ALL: [TrackerMerge; 3] = [
+    pub const ALL: [TrackerMerge; 4] = [
         TrackerMerge::BgOnly,
         TrackerMerge::FgOnly,
         TrackerMerge::FgOverBg,
+        TrackerMerge::BgOverFg,
     ];
 
     pub fn label(self) -> &'static str {
@@ -724,7 +738,12 @@ impl TrackerMerge {
             TrackerMerge::BgOnly => "BG Only",
             TrackerMerge::FgOnly => "FG Only",
             TrackerMerge::FgOverBg => "FG Over BG",
+            TrackerMerge::BgOverFg => "BG Over FG",
         }
+    }
+
+    pub fn sums(self) -> bool {
+        matches!(self, TrackerMerge::FgOverBg | TrackerMerge::BgOverFg)
     }
 }
 
@@ -741,8 +760,9 @@ impl PivotType {
 }
 
 impl ReferenceTime {
-    pub const ALL: [ReferenceTime; 3] = [
+    pub const ALL: [ReferenceTime; 4] = [
         ReferenceTime::Start,
+        ReferenceTime::StartEnd,
         ReferenceTime::End,
         ReferenceTime::Custom,
     ];
@@ -750,6 +770,7 @@ impl ReferenceTime {
     pub fn label(self) -> &'static str {
         match self {
             ReferenceTime::Start => "Start Time",
+            ReferenceTime::StartEnd => "Start & End",
             ReferenceTime::End => "End Time",
             ReferenceTime::Custom => "Custom Time",
         }

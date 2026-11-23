@@ -1018,11 +1018,14 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
 - An effect tool gives the work of its clip effect, through `Working::of`. Its sizes follow the picture, as on a frame of the same size (`place::OnFrame`).
   - With `blur_alpha` off, a Gaussian Blur has no sigma on the alpha.
 - A Merge with a foreground gives an `Op::Merge`, which holds a `place::Merging`. Without a foreground, it gives the register of its background.
-- A Tracker with Match Move gives one `Op::Merge`. Its background is the background of the Tracker. Its masks and its Blend are those of the Tracker.
-  - `place::matched` gives the map of the move from the places of the patterns, on the reference frame and on the frame (`place::Areas`). It gives the map and its inverse.
-  - FG Over BG reads the foreground through the inverse map, with the mode, the operator and the slider of the Tracker (`Tracker::merging`). With no foreground, the Tracker gives its background.
+- A Tracker with Match Move gives an `Op::Merge`. Its background is the background of the Tracker. Its masks and its Blend are those of the Tracker.
+  - `place::matched` gives the map of the move and its inverse. It reads the place of each pattern on the frame of the file and at its reference.
+  - It weighs each pattern by its fade (`place::eased`). `place::smoothed` gives the reference place of Start & End: a Catmull-Rom curve through the path.
+  - FG Over BG reads the foreground through the inverse map, with the mode, the operator and the slider of the Tracker (`Tracker::merging`).
   - BG Only reads the background through the map, and FG Only reads the foreground through the inverse map. Their `Merging.replaces` is on: the result is the moved picture, not a sum.
   - Why: the masks of the spec limit where the moved picture replaces the background. In BG Only and FG Only, a clear part of the moved picture stays clear there.
+  - BG Over FG gives two stages. The first puts the background, through the map, over the foreground. With masks or a Blend, a second `Op::Merge` with `Merging.replaces` puts that result into the background.
+  - With nothing on the Foreground input, FG Only, FG Over BG and BG Over FG give the register of the background.
   - A path gives the reference frame on frames of the file. `Composition::start` makes a Custom Time of the composition into a frame of the file.
 - A Text+ gives one `Op::Text` for each shading element that is on, back to front. The `Inking` of the op holds the text and the element.
   - An element with softness gets an `Op::Work` with a blur in the same register.
@@ -1039,7 +1042,7 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
 - `Placing::over` samples the composition at the frame (`Composition::sampled`). A connected Center then holds the place of its pattern.
 - A `place::MaskBase` is the size and the turn that a mask takes as its picture (`MaskBase::all`):
   - Without `connect`, or with `connect` and no `size`, it is the whole picture (`MaskBase::whole`).
-  - With `size`, it is the box of the pattern at the frame (`MaskBase::of`). `place::composed` gets the boxes of the patterns (`place::Areas`).
+  - With `size`, it is the box of the pattern at the frame (`MaskBase::of`). `place::composed` takes the frame of the file and gives `MaskBase::all` the boxes of the patterns on it (`place::Areas`).
   - With no path at the frame, the mask has no figure. It then covers nothing, and with Invert it covers all.
   - `Shaping::figure` puts the shape of the mask about its center, in the sizes of its base. The turn of the box adds to the turn of the mask.
   - The border and the soft edge stay parts of the width of the picture. Why: a soft edge then looks the same on each box.

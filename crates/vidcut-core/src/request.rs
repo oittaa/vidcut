@@ -6454,14 +6454,22 @@ pub struct NodeChange {
     /// bottom left, each from -10 to 10.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pivot: Option<[f64; 2]>,
-    /// The frame on which the `match_move` of a tracker leaves the pictures
-    /// where they are.
+    /// Where the `match_move` of a tracker leaves the pictures where they
+    /// are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_time: Option<ReferenceTime>,
     /// The frame of the composition of a `custom` reference time, from
     /// -1000000 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_time: Option<f64>,
+    /// How many places between the ends of a path the smooth path of a
+    /// `start_end` reference time goes through, from 0 to 1000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intermediate_points: Option<u32>,
+    /// Over how many frames the weight of a pattern with a shorter path
+    /// goes from 0 to 1, from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_frames: Option<f64>,
     /// Take the tracked samples of the pattern off: `start` takes those
     /// before `frame`, `end` those after `frame`, and `all` takes each.
     /// The box on `frame` stays as it was. With no sample left, the pattern

@@ -1946,7 +1946,7 @@ fn operation_rows(
     let m = t.merging();
     let base = ui.scope_id();
     let id = |what: &str| base.with(("tracker-operation", clip, node, what));
-    if t.merged() == TrackerMerge::FgOverBg {
+    if t.merged().sums() {
         let modes = (
             &ApplyMode::ALL[..],
             ApplyMode::label as fn(ApplyMode) -> &'static str,
@@ -2033,6 +2033,23 @@ fn operation_rows(
         times,
         acts,
     );
+    if t.reference() == ReferenceTime::StartEnd {
+        let named = (id("points"), "Reference Intermediate Points");
+        let now = (f64::from(t.intermediate()), 0.0);
+        let range = ((0.0, f64::from(Tracker::MOST_POINTS)), 0.1);
+        if let Some(v) = number_row(ui, named, now, range) {
+            acts.push(node_set(
+                slot,
+                "intermediate_points",
+                json!(v.round() as u32),
+            ));
+        }
+        let named = (id("fade"), "Incomplete Tracker Fade In/Out Frames");
+        let range = (Tracker::FADES, 1.0);
+        if let Some(v) = number_row(ui, named, (t.fade(), Tracker::FADE), range) {
+            acts.push(node_set(slot, "fade_frames", json!(v)));
+        }
+    }
     if t.reference() != ReferenceTime::Custom {
         return None;
     }

@@ -3061,39 +3061,51 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - Blur there adds a Mosaic Blur before Media Out. For each pattern that has a path, it adds a mask on the blur. The mask follows that pattern with Follow Size.
   - A pattern without a path does not move. Blur gives it no mask.
 
-The Operation of the Tracker (pp. 2848–2854). The facts without a page are measured in Resolve Studio 21.2, in sections T2 to T4 of `fixtures/nodes/NOTES.md`:
+The Operation of the Tracker (pp. 2848–2854). The facts without a page are measured in Resolve Studio 21.2, in sections T2 to T4 and T7 of `fixtures/nodes/NOTES.md`:
 
 - The Operation menu has None, Match Move, Corner Positioning and Perspective Positioning (p. 2848). The default is None.
   - With None, the output is the background.
   - vidcut: Corner Positioning and Perspective Positioning are not built yet ([todo](todo/motion-tracking.md)).
-- Match Move moves a picture with the patterns (pp. 2848–2849). It uses the places of the patterns on the reference frame and on the current frame.
+- Match Move moves a picture with the patterns (pp. 2848–2849). It compares the place of each enabled pattern on the current frame with its reference place.
   - A place q from 0 to 1 is at q × size − 0.5 pixels. Thus 0 and 1 are the outer edges of the picture.
-  - The pivot is the mean place of the enabled patterns. This is Pivot Type Tracker Average, the default (p. 2853).
+  - Each pattern has a weight. The weights are below, under Reference Time.
+  - The pivot is the weighted mean place of the enabled patterns. This is Pivot Type Tracker Average, the default (p. 2853).
   - With Selected Tracker, the pivot is the place of one pattern, also of a disabled pattern. With Manual, it is the point of Pivot X and Pivot Y. Their default is (0.5, 0.5).
-  - For each enabled pattern that is not at the pivot, v0 goes from the pivot to the pattern on the reference frame. v1 is the same on the current frame. Both are in pixels.
+  - For each enabled pattern that is not at the pivot, v0 goes from the pivot to the pattern at the reference. v1 is the same on the current frame. Both are in pixels.
   - The turn is the mean change of the angle from v0 to v1. Each change is from −180° to 180°.
   - The size is the number of these patterns divided by the sum of |v0| / |v1|.
   - The map T moves a point x to pivot(now) + size × turn(x − pivot(reference)).
   - Position off removes the move of the pivot from T. Rotation off makes the turn 0, and Scaling off makes the size 1. All three are on (p. 2852).
+  - The weights are measured with Position only. vidcut: the turn and the size are weighted means with the same weights.
 - The Merge menu has BG Only, FG Only, FG Over BG and BG Over FG (p. 2849). The default is FG Over BG.
-  - BG Only: the background, read at T(x). Thus the patterns stay where they were on the reference frame.
+  - BG Only: the background, read at T(x). Thus the patterns stay where they were at the reference.
   - FG Only: the foreground, read at the inverse of T. Thus it moves with the patterns. Around it, the picture is clear.
   - FG Over BG: the moved foreground over the background. The background does not move.
-  - vidcut: BG Over FG is not built yet ([todo](todo/motion-tracking.md)).
+  - BG Over FG: the background of BG Only, over the foreground. The foreground does not move.
   - Apply Mode, Operator and Subtractive/Additive show only with FG Over BG and BG Over FG. They act as on a [Merge](#the-merge) (p. 2849).
-- Edges sets what fills the parts that the move reveals (p. 2852). The menu has Black, Wrap, Duplicate and Mirror. The default is Black.
-  - Measured with BG Only: Black leaves them clear. Wrap fills them from the other side, and Duplicate repeats the edge pixel. Mirror fills them with the mirrored picture.
-  - vidcut: the Edges act on the moved picture in each Merge choice.
+  - With nothing on the Foreground input, FG Only and FG Over BG give the background. The background does not move.
+  - vidcut: BG Over FG then also gives the background.
+- Edges sets what lies around the moved picture (p. 2852). The menu has Black, Wrap, Duplicate and Mirror. The default is Black.
+  - Black leaves it clear. Wrap fills it from the other side, and Duplicate repeats the edge pixel. Mirror fills it with the mirrored picture.
+  - The Edges act on the moved picture of each Merge choice. With Wrap or Mirror, the foreground of FG Over BG covers the whole frame.
 - Filter Method: Linear (p. 2852). The moved picture is read with a bilinear filter.
+  - The menu has Nearest Neighbor, Box, Linear, Quadratic, Cubic, Catmull-Rom, Gaussian, Mitchell, Lanczos, Sinc and Bessel. The manual does not list Nearest Neighbor.
   - vidcut: Linear is the only filter. Flatten Transform is not built yet ([todo](todo/motion-tracking.md)).
-- Reference Time sets the reference frame (pp. 2853–2854). The default is Start Time.
-  - Start Time: the first frame of the path. End Time: the last frame of the path.
-  - Custom Time: the frame in the Custom Time field. Set puts the frame of the playhead there, and Go moves the playhead to it.
+- Reference Time sets the reference place of each pattern (pp. 2853–2854). The default is Start Time.
+  - Start Time: the place on the first frame of the path of that pattern. End Time: the place on the last frame of its path.
+  - Custom Time: the place on the frame in the Custom Time field. Set puts the frame of the playhead there, and Go moves the playhead to it.
   - Before its first frame, a path keeps its first place. Thus Custom Time 0 gives the same as Start Time for a path that starts at frame 20.
-  - vidcut: with paths of different lengths, Start Time is the earliest first frame, and End Time is the latest last frame.
-  - vidcut: Start & End is not built yet ([todo](todo/motion-tracking.md)).
+  - Start & End: a smooth path through the places of the pattern on the first frame and on the last frame of its path. It does not stop the motion. It smooths it (p. 2853).
+  - With Start & End, Reference Intermediate Points adds that many places on frames evenly between. Its default is 0, and the path is then a straight line.
+  - The smooth path is a Catmull-Rom curve. At an inner place k, its tangent is (C(k + 1) − C(k − 1)) / 2. At an end, it is (3 (C(1) − C(0)) − m(1)) / 2.
+  - The slider of Reference Intermediate Points goes from 0 to 10. A typed 20 stays 20. A typed value is rounded, and a value below 0 gives 0.
+  - vidcut: Reference Intermediate Points goes from 0 to 1000.
+- Incomplete Tracker Fade In/Out Frames: 25. It shows only with Start & End, but it acts with each Reference Time.
+  - A pattern whose path starts after the first frame of the other paths fades in. Its weight is s((t − a + 1) / F), with a the first frame of its path.
+  - A pattern whose path ends before the other paths fades out. Its weight is s((b + 1 − t) / F), with b the last frame of its path.
+  - F is the Fade In/Out Frames value, and s(x) = 3x² − 2x³, with x from 0 to 1. Each other pattern has the weight 1.
+  - Measured with paths that start and end at the ends of the render range. vidcut: a path fades at an end that is not the earliest first frame or the latest last frame of the paths.
 - In Resolve, FG Only and BG Over FG give a picture of the size of the foreground. In a composition of vidcut, each picture has the size of the frame.
-- vidcut: with nothing on the Foreground input, FG Only gives a clear picture. FG Over BG then gives the background.
 
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
 `gui.page_time` moves and plays the playhead of the page. `comp.loop` sets Loop and Ping Pong. `player.bounds` holds play of the timeline between two frames.

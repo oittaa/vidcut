@@ -777,6 +777,16 @@ fn tracker_checked(t: &Tracker) -> Result<Tracker> {
     }
     let why = "a tracker's custom time is from -1000000 to 1000000";
     within(t.custom_time, Tracker::TIMES, why)?;
+    let why = "a tracker's fade frames are from 0 to 1000000";
+    within(t.fade_frames, Tracker::FADES, why)?;
+    if t.intermediate_points
+        .is_some_and(|k| k > Tracker::MOST_POINTS)
+    {
+        return Err(Error::invalid(format!(
+            "a tracker has {} intermediate points at most",
+            Tracker::MOST_POINTS
+        )));
+    }
     if let Some(k) = t
         .pivot_tracker
         .filter(|k| *k == 0 || *k as usize > patterns.len())
@@ -798,6 +808,8 @@ fn tracker_checked(t: &Tracker) -> Result<Tracker> {
         pivot: t.pivot.filter(|p| *p != Tracker::PIVOT),
         reference_time: t.reference_time.filter(|r| *r != ReferenceTime::default()),
         custom_time: t.custom_time.filter(|v| *v != 0.0),
+        intermediate_points: t.intermediate_points.filter(|k| *k != 0),
+        fade_frames: t.fade_frames.filter(|v| *v != Tracker::FADE),
         ..t.clone()
     })
 }
