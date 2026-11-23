@@ -505,6 +505,13 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 given(&mut left.pattern_offset, &mut pattern.offset);
                 if left.remove_pattern {
                     t.patterns.remove(i);
+                    t.pivot_tracker = match t.pivot_pattern().cmp(&k) {
+                        std::cmp::Ordering::Equal => None,
+                        std::cmp::Ordering::Greater => {
+                            Some(t.pivot_pattern() - 1).filter(|p| *p != 1)
+                        }
+                        std::cmp::Ordering::Less => t.pivot_tracker,
+                    };
                     left.remove_pattern = false;
                 }
             }
@@ -749,14 +756,6 @@ fn left_point(
 }
 
 fn unhooked(c: &mut Composition, tracker: &str, gone: u32) {
-    let named = c.nodes.iter_mut().find(|n| n.name == tracker);
-    if let Some(t) = named.and_then(|n| n.tool.tracker_mut()) {
-        t.pivot_tracker = match t.pivot_pattern().cmp(&gone) {
-            std::cmp::Ordering::Equal => None,
-            std::cmp::Ordering::Greater => Some(t.pivot_pattern() - 1).filter(|k| *k != 1),
-            std::cmp::Ordering::Less => t.pivot_tracker,
-        };
-    }
     for n in &mut c.nodes {
         let Some(k) = n.connect.as_mut().filter(|k| k.tracker == tracker) else {
             continue;

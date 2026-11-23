@@ -2083,9 +2083,11 @@ fn operation_rows(
         if r.dragged() {
             ui.data_mut(|d| d.insert_temp(key, v));
         }
-        if (r.drag_stopped() || (r.changed() && !r.dragged())) && v != now {
+        if r.drag_stopped() || (r.changed() && !r.dragged()) {
             ui.data_mut(|d| d.remove::<f64>(key));
-            acts.push(node_set(slot, "custom_time", json!(v)));
+            if v != now {
+                acts.push(node_set(slot, "custom_time", json!(v)));
+            }
         }
         if ui.button("Set").clicked() {
             acts.push(node_set(slot, "custom_time", json!(at as f64)));

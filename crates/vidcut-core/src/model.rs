@@ -4727,15 +4727,17 @@ pub struct Tracker {
     /// `canvas`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edges: Option<MergeEdges>,
-    /// The math that puts the moved foreground on the background, as on a
-    /// `merge`. Only `fg_over_bg` takes it. Usual: `normal`.
+    /// The math that puts one picture of a `match_move` on the other, as on
+    /// a `merge`. Only `fg_over_bg` and `bg_over_fg` take it. Usual: `normal`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_mode: Option<ApplyMode>,
     /// Which parts of the two pictures a `normal` or a `screen` merge
-    /// keeps, as on a `merge`. Only `fg_over_bg` takes it. Usual: `over`.
+    /// keeps, as on a `merge`. Only `fg_over_bg` and `bg_over_fg` take it.
+    /// Usual: `over`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator: Option<MergeOperator>,
-    /// From 0 to 1, as on a `merge`. Only `fg_over_bg` takes it. Usual: 1.
+    /// From 0 to 1, as on a `merge`. Only `fg_over_bg` and `bg_over_fg`
+    /// take it. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtractive_additive: Option<f64>,
     /// Off, a `match_move` does not follow the move of the pivot. Usual:
