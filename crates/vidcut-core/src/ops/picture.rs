@@ -8,8 +8,9 @@ use crate::model::{
     ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode,
     Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind, EffectValue, FillMethod,
     FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, Merge,
-    MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project, Sharpen,
-    TextPlus, Tool, TrackKind, Tracker, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project,
+    ShadingElement, Sharpen, TextPlus, Tool, TrackKind, Tracker, Vignette, VignetteMode,
+    VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput};
 
@@ -636,19 +637,7 @@ fn text_checked(t: &TextPlus) -> Result<TextPlus> {
         let why = "a text's center is two fractions, each from -10 to 10";
         within(Some(v), Mask::PLACES, why)?;
     }
-    for v in t.color.into_iter().flatten() {
-        within(
-            Some(v),
-            TextPlus::COLORS,
-            "a text's color is from 0 to 1000000",
-        )?;
-    }
     within(t.size, Mask::SIZES, "a text's size is from 0 to 1000000")?;
-    within(
-        t.opacity,
-        TextPlus::OPACITIES,
-        "a text's opacity is from 0 to 1",
-    )?;
     let spacings = [("tracking", t.tracking), ("line spacing", t.line_spacing)];
     for (what, v) in spacings {
         let why = format!("a text's {what} is from -1000000 to 1000000");
@@ -672,13 +661,23 @@ fn text_checked(t: &TextPlus) -> Result<TextPlus> {
         Mask::TURNS,
         "a text's angle is from -1000000 to 1000000 degrees",
     )?;
+    let mut shading = Vec::new();
+    for s in &t.shading {
+        let s = shading_checked(s)?;
+        if !s.plain() {
+            shading.push(s);
+        }
+    }
+    shading.sort_by_key(|s| s.element);
+    if shading.windows(2).any(|w| w[0].element == w[1].element) {
+        return Err(Error::invalid("a text has one of each shading element"));
+    }
     let named = |n: &Option<String>| n.clone().filter(|n| !n.trim().is_empty());
     Ok(TextPlus {
         font: named(&t.font),
         style: named(&t.style).filter(|s| s != TextPlus::STYLE),
         size: t.size.filter(|v| *v != TextPlus::SIZE),
-        color: t.color.filter(|c| *c != [1.0; 3]),
-        opacity: t.opacity.filter(|v| *v != 1.0),
+        shading,
         tracking: t.tracking.filter(|v| *v != 1.0),
         line_spacing: t.line_spacing.filter(|v| *v != 1.0),
         vertical_anchor: t.vertical_anchor.filter(|v| *v != 0.0),
@@ -687,6 +686,67 @@ fn text_checked(t: &TextPlus) -> Result<TextPlus> {
         layout_size: t.layout_size.filter(|v| *v != 1.0),
         angle: t.angle.filter(|v| *v != 0.0),
         ..t.clone()
+    })
+}
+
+fn shading_checked(s: &ShadingElement) -> Result<ShadingElement> {
+    let keys = keys_checked(s, "shading element", plain_shading_checked)?;
+    Ok(ShadingElement {
+        keys,
+        ..plain_shading_checked(s)?
+    })
+}
+
+fn plain_shading_checked(s: &ShadingElement) -> Result<ShadingElement> {
+    if !(1..=ShadingElement::ELEMENTS).contains(&s.element) {
+        return Err(Error::invalid("a text's shading elements are 1 to 8"));
+    }
+    for v in s.color.into_iter().flatten() {
+        let why = "a shading element's color is from 0 to 1000000";
+        within(Some(v), ShadingElement::COLORS, why)?;
+    }
+    let why = "a shading element's opacity is from 0 to 1";
+    within(s.opacity, ShadingElement::OPACITIES, why)?;
+    let amounts = [
+        ("thickness", s.thickness),
+        ("round", s.round),
+        ("softness x", s.softness_x),
+        ("softness y", s.softness_y),
+    ];
+    for (what, v) in amounts {
+        let why = format!("a shading element's {what} is from 0 to 1000000");
+        within(v, ShadingElement::AMOUNTS, &why)?;
+    }
+    let [x, y] = s.offset.map_or([None; 2], |o| o.map(Some));
+    let shifts = [
+        ("extend horizontal", s.extend_horizontal),
+        ("extend vertical", s.extend_vertical),
+        ("priority", s.priority),
+        ("offset", x),
+        ("offset", y),
+    ];
+    for (what, v) in shifts {
+        let why = format!("a shading element's {what} is from -1000000 to 1000000");
+        within(v, ShadingElement::SHIFTS, &why)?;
+    }
+    let usual = ShadingElement::new(s.element);
+    Ok(ShadingElement {
+        enabled: s.enabled.filter(|on| *on != usual.on()),
+        name: (s.name.clone()).filter(|n| !n.trim().is_empty() && *n != usual.usual_name()),
+        appearance: s.appearance.filter(|a| *a != usual.look()),
+        color: s.color.filter(|c| *c != usual.ink()),
+        opacity: s.opacity.filter(|v| *v != 1.0),
+        thickness: s.thickness.filter(|v| *v != ShadingElement::THICKNESS),
+        join_style: s.join_style.filter(|j| *j != usual.join()),
+        border_level: s.border_level.filter(|l| *l != usual.reach()),
+        extend_horizontal: s.extend_horizontal.filter(|v| *v != 0.0),
+        extend_vertical: s.extend_vertical.filter(|v| *v != 0.0),
+        round: s.round.filter(|v| *v != 0.0),
+        softness_x: s.softness_x.filter(|v| *v != usual.usual_soft()),
+        softness_y: s.softness_y.filter(|v| *v != usual.usual_soft()),
+        offset: s.offset.filter(|o| *o != usual.usual_shift()),
+        priority: s.priority.filter(|v| *v != usual.usual_rank()),
+        ..s.clone()
     })
 }
 

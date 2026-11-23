@@ -7,12 +7,18 @@ The Text+ tool and the Merge tool of the compositions get the rest of their cont
 **Why:**
 
 - Resolve's Text+ title and its Fusion titles are Fusion compositions with text tools (p. 1178).
-- The Text+ tool and the Merge tool have more controls than vidcut has now (pp. 2216–2218, 2383–2392).
+- The Text+ tool and the Merge tool have more controls than vidcut has now (pp. 2216–2218, 2383–2393).
 
 **What Resolve has:**
 
 - The Text+ node has these controls that vidcut does not have yet:
-  - The shading elements 2 to 8: outlines, shadows and borders (pp. 2389–2392).
+  - These controls of the shading elements (pp. 2389–2393):
+    - Sort By Z.
+    - Blending: Composite, Solid or Transparent where two characters overlap.
+    - Line Style: dashes and dots. Adapt Thickness to Perspective.
+    - Color Types Gradient and Image.
+    - Softness Glow, Softness Blend and Apply Softness to Fill Color.
+    - Offset Z, and the Pivot, Rotation, Shear and Size of each element.
   - The Frame, Circle and Path layouts, with wrap and justify (pp. 2384, 2387).
   - The Advanced Controls of the Text tab: kerning, ligatures and font features (p. 2386).
   - The Transform tab (p. 2388).

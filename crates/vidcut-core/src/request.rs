@@ -8,12 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    ApplyMode, BlendMode, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect,
-    DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType, EffectValue, FillMethod, FindModel,
-    GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GrainComposite,
-    GrainPreset, Handle, LowerThirdLine, MergeEdges, MergeOperator, Node, PathSample, PictureTool,
-    PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
-    TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape, WindowKind, ZoomBox,
+    Appearance, ApplyMode, BlendMode, BlurClipping, BlurFilter, Border, BorderLevel, CellShape,
+    CompositeMode, Connect, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType, EffectValue,
+    FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind,
+    GradeWindow, GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MergeEdges,
+    MergeOperator, Node, PathSample, PictureTool, PictureTransition, Place, Subject, SubtitleStyle,
+    TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode,
+    VignetteShape, WindowKind, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -3485,16 +3486,19 @@ pub enum Request {
         copy: Vec<Node>,
     },
     /// The Keyframe button of one value of a node of a clip's composition,
-    /// or of all its values without `value`. With a keyframe on `frame`, it
-    /// removes the keyframes of those values on that frame. Without one, it
-    /// puts a keyframe on `frame` on each of those values. With `ease`, it
-    /// only gives the keyframes on `frame` that ease. A `frame` is a frame
-    /// of the composition, as `comp.set` takes it. Without it, it is the
-    /// frame at the playhead.
+    /// or of all its values without `value`. With `element`, the values are
+    /// those of that shading element of a `text_plus`. With a keyframe on
+    /// `frame`, it removes the keyframes of those values on that frame.
+    /// Without one, it puts a keyframe on `frame` on each of those values.
+    /// With `ease`, it only gives the keyframes on `frame` that ease. A
+    /// `frame` is a frame of the composition, as `comp.set` takes it.
+    /// Without it, it is the frame at the playhead.
     #[serde(rename = "comp.key")]
     CompKey {
         clip: ClipRef,
         node: String,
+        #[serde(default)]
+        element: Option<u8>,
         #[serde(default)]
         frame: Option<i64>,
         #[serde(default)]
@@ -6287,6 +6291,60 @@ pub struct NodeChange {
     /// from 0 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout_size: Option<f64>,
+    /// The shading element of a `text_plus` that `color`, `opacity` and the
+    /// values of its element change, from 1 to 8. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element: Option<u8>,
+    /// On, the shading element draws.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// The name of the shading element. An empty name gives its usual name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element_name: Option<String>,
+    /// What the shading element draws.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<Appearance>,
+    /// The width of the outline of the shading element, as a part of the
+    /// size of the text x the width of the picture, from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thickness: Option<f64>,
+    /// On, the outline of the shading element keeps only its half outside
+    /// the edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outside_only: Option<bool>,
+    /// How the corners of the outline of the shading element are drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_style: Option<JoinStyle>,
+    /// What one border of the shading element goes around.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_level: Option<BorderLevel>,
+    /// How far the left and the right side of each border of the shading
+    /// element move out, from -1000000 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extend_horizontal: Option<f64>,
+    /// How far the top and the bottom of each border of the shading element
+    /// move out, from -1000000 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extend_vertical: Option<f64>,
+    /// How round the corners of each border of the shading element are,
+    /// from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub round: Option<f64>,
+    /// How soft the shading element is across, from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness_x: Option<f64>,
+    /// How soft the shading element is down, from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness_y: Option<f64>,
+    /// How far the shading element moves, `[x, y]` as parts of the size of
+    /// the text x the width of the picture, up, each from -1000000 to
+    /// 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shading_offset: Option<[f64; 2]>,
+    /// The place of the shading element in the stack, from -1000000 to
+    /// 1000000. A higher priority draws over a lower one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<f64>,
     /// Degrees a polygon mask is turned counterclockwise, first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub z_rotation: Option<f64>,
@@ -6545,7 +6603,8 @@ pub struct KindChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composite_type: Option<BlendMode>,
     /// How much of a Glow's composite shows, how much of a Film Grain
-    /// shows, or how much of the text of a `text_plus` shows, from 0 to 1.
+    /// shows, or how much of a shading element of a `text_plus` shows, from
+    /// 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// A Glow on the picture's negative, which gives the negative of the
@@ -6647,7 +6706,7 @@ pub struct KindChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transparency: Option<f64>,
     /// The color around a Vignette's shape, `[r, g, b]` in code values. The
-    /// color of the text of a `text_plus`, `[r, g, b]`, each from 0.
+    /// color of a shading element of a `text_plus`, `[r, g, b]`, each from 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<Vec<f64>>,
     /// How strong a Sharpen's detail of the brightness is, from 1 (no change)

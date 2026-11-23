@@ -3,7 +3,8 @@ use crate::model::{
     ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode,
     Composition, Effect, EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha,
     GlowFraming, GlowOutput, Mask, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
-    Pattern, Picture, Sharpen, TextPlus, Tool, Vignette, VignetteMode, VignetteShape,
+    Pattern, Picture, ShadingElement, Sharpen, TextPlus, Tool, Vignette, VignetteMode,
+    VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -922,7 +923,13 @@ pub enum Op {
     Clear,
     Work(Working),
     Merge(Merging),
-    Text(TextPlus),
+    Text(Box<Inking>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Inking {
+    pub text: TextPlus,
+    pub element: ShadingElement,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1126,11 +1133,52 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
             }
             Tool::TextPlus(_) if n.pass_through => None,
             Tool::TextPlus(t) => {
-                let to = regs.taken();
-                stages.push(Stage {
-                    op: Op::Text(t.clone()),
-                    from: Vec::new(),
-                    to,
+                let mut stack = None;
+                for element in t.drawn() {
+                    let spread = element.soft().map(|s| ShadingElement::spread(s, w));
+                    let to = regs.taken();
+                    let text = t.clone();
+                    stages.push(Stage {
+                        op: Op::Text(Box::new(Inking { text, element })),
+                        from: Vec::new(),
+                        to,
+                    });
+                    if spread != [0.0; 2] {
+                        let work = Work::Blur(Blurring {
+                            across: [spread[0]; 4],
+                            down: [spread[1]; 4],
+                            border: Border::Black,
+                        });
+                        stages.push(Stage {
+                            op: Op::Work(Working::plain(work, 1.0)),
+                            from: vec![to],
+                            to,
+                        });
+                    }
+                    stack = Some(match stack {
+                        None => to,
+                        Some(back) => {
+                            let out = regs.taken();
+                            let over = Merging::of(&Merge::default(), 1.0, (w, h), Vec::new());
+                            stages.push(Stage {
+                                op: Op::Merge(over),
+                                from: vec![back, to],
+                                to: out,
+                            });
+                            regs.freed(back, true);
+                            regs.freed(to, true);
+                            out
+                        }
+                    });
+                }
+                let to = stack.unwrap_or_else(|| {
+                    let to = regs.taken();
+                    stages.push(Stage {
+                        op: Op::Clear,
+                        from: Vec::new(),
+                        to,
+                    });
+                    to
                 });
                 let shaped = masks(n);
                 match shaped.is_empty() && n.mixed() == 1.0 {
