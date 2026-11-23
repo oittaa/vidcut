@@ -250,7 +250,7 @@ fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
 }
 
 impl EffectValue {
-    pub const ALL: [EffectValue; 134] = [
+    pub const ALL: [EffectValue; 136] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -339,6 +339,8 @@ impl EffectValue {
         EffectValue::BurnIn,
         EffectValue::ForegroundZOffset,
         EffectValue::BackgroundSubtractiveAdditive,
+        EffectValue::ReferenceWidth,
+        EffectValue::ReferenceHeight,
         EffectValue::Tracking,
         EffectValue::LineSpacing,
         EffectValue::LayoutSize,
@@ -753,6 +755,8 @@ fn merge_slot(m: &mut Merge, value: EffectValue) -> Slot<'_> {
             m.background_subtractive_additive.get_or_insert(1.0),
             Merge::SLIDES,
         ),
+        V::ReferenceWidth => (m.reference_width.get_or_insert(1.0), Merge::REFERENCES),
+        V::ReferenceHeight => (m.reference_height.get_or_insert(1.0), Merge::REFERENCES),
         _ => return None,
     })
 }
@@ -999,9 +1003,10 @@ impl Keyed for Node {
     }
 
     fn values(&self) -> Vec<EffectValue> {
+        let locked = |v: EffectValue| matches!(&self.tool, Tool::Merge(m) if m.locks(v));
         EffectValue::ALL
             .into_iter()
-            .filter(|v| self.read_point(*v).is_some())
+            .filter(|v| self.read_point(*v).is_some() && !locked(*v))
             .collect()
     }
 

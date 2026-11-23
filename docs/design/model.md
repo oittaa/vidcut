@@ -640,6 +640,7 @@ Writing:
   - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values.
   - `Tool::Merge` holds a `Merge`: the transform of its foreground, its `MergeEdges`, its `ApplyMode`, its `MergeOperator` and its sliders.
     - It also holds the values of its depth merge (`Merge::depth_merge`). No picture has a depth channel. Thus `place::Merging` does not take them.
+    - Its reference size (`Merge::reference`) gives the units that the Inspector shows its Center in. `place::Merging` does not take it. With `Merge::auto_resolution` on, it is the size that `composition_size` gives.
   - `Tool::TextPlus` holds a `TextPlus`: its text, its font and face, its spacings, its anchors, its layout and its shading elements.
     - It keeps only the `ShadingElement`s that are not at their usual values. `TextPlus::element` gives any element, kept or usual.
     - A `ShadingElement` has its own keyframes. `comp.set` and `comp.key` reach them with `element`.

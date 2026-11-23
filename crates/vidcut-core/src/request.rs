@@ -6278,6 +6278,17 @@ pub struct NodeChange {
     /// background, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+    /// The width that the center of a merge is shown in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_width: Option<f64>,
+    /// The height that the center of a merge is shown in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_height: Option<f64>,
+    /// On, the reference size of a merge is the size of the picture of the
+    /// clip. Turned off, the reference width and height keep that size,
+    /// unless this change gives them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_resolution: Option<bool>,
     /// On, a merge orders its two pictures by their depth channels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub depth_merge: Option<bool>,

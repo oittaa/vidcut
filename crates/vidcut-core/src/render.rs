@@ -4062,6 +4062,17 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
     }
 }
 
+pub fn composition_size(p: &Project, c: &Clip) -> (u32, u32) {
+    let own = p.media(&c.media).and_then(|m| m.info.video.as_ref());
+    own.map_or_else(
+        || {
+            let f = p.format();
+            (f.width, f.height)
+        },
+        crate::model::VideoInfo::display_size,
+    )
+}
+
 pub fn composition_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
     alone(p, clip, None)
 }
@@ -4095,11 +4106,8 @@ fn alone(p: &Project, clip: &str, cut: Option<&str>) -> Result<RenderPlan> {
     alone.settings = p.flat_settings();
     alone.timelines.clear();
     alone.recent.clear();
+    (alone.settings.width, alone.settings.height) = composition_size(p, &c);
     let own = p.media(&c.media).and_then(|m| m.info.video.as_ref());
-    if let Some((w, h)) = own.map(crate::model::VideoInfo::display_size) {
-        alone.settings.width = w;
-        alone.settings.height = h;
-    }
     if let Some(v) = own.filter(|_| clock.rates.is_some()) {
         alone.settings.fps = v.fps;
     }

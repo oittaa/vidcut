@@ -1241,6 +1241,7 @@ fn node_speed(v: EffectValue) -> f64 {
         EffectValue::SoftnessX | EffectValue::SoftnessY | EffectValue::Priority => 0.05,
         EffectValue::Thickness => 0.0005,
         EffectValue::ForegroundZOffset => 0.01,
+        EffectValue::ReferenceWidth | EffectValue::ReferenceHeight => 1.0,
         _ => 0.002,
     }
 }
@@ -1309,10 +1310,22 @@ fn node_value(
     (v, text): (EffectValue, &str),
     acts: &mut Vec<Act>,
 ) -> Option<egui::Response> {
+    node_value_in(ui, i, (slot, n), (v, text), None, acts)
+}
+
+fn node_value_in(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n): (usize, &Node),
+    (v, text): (EffectValue, &str),
+    units: Option<[f64; 2]>,
+    acts: &mut Vec<Act>,
+) -> Option<egui::Response> {
     let point = n.read_point(v)?.0;
     let usual = n.usual_point(v).unwrap_or(point);
     let look = Look {
         speed: row_speed(&n.tool, v),
+        units,
         ..Look::default()
     };
     keyed_row(ui, i, (slot, n, None), (v, text, usual), look, acts)
@@ -1380,6 +1393,15 @@ fn keyed_row<K: Keyed>(
     }
     ui.end_row();
     Some(r)
+}
+
+fn fixed_row(ui: &mut egui::Ui, text: &str, mut now: f64) {
+    label(ui, text, false);
+    ui.add_enabled_ui(false, |ui| {
+        let size = vec2(FIELD_WIDTH, ui.spacing().interact_size.y);
+        ui.add(egui::DragValue::new(&mut now).min_size(size));
+    });
+    ui.end_row();
 }
 
 fn offset_row(ui: &mut egui::Ui, (id, text): (egui::Id, &str), now: f64) -> Option<f64> {
@@ -1468,6 +1490,11 @@ const FILLS: [FillMethod; 2] = [FillMethod::Alternate, FillMethod::NonZeroWindin
 struct Hooked {
     name: String,
     patterns: Vec<String>,
+}
+
+struct Sight {
+    trackers: Vec<Hooked>,
+    pixels: [f64; 2],
 }
 
 fn hooks(comp: &Composition) -> Vec<Hooked> {
@@ -1719,11 +1746,17 @@ fn center_row(
     ui: &mut egui::Ui,
     i: &Inspector,
     (slot, n): (usize, &Node),
-    trackers: &[Hooked],
+    sight: &Sight,
     acts: &mut Vec<Act>,
 ) {
+    let trackers = &sight.trackers[..];
     let Some(k) = &n.connect else {
-        if let Some(r) = node_value(ui, i, (slot, n), (EffectValue::Center, "Center"), acts) {
+        let units = match &n.tool {
+            Tool::Merge(m) => Some(m.reference(sight.pixels)),
+            _ => None,
+        };
+        let center = (EffectValue::Center, "Center");
+        if let Some(r) = node_value_in(ui, i, (slot, n), center, units, acts) {
             r.context_menu(|ui| {
                 if let Some(v) = connect_menu(ui, None, trackers) {
                     acts.push(node_set(slot, "connect", v));
@@ -2108,7 +2141,13 @@ fn noise_rows(
     value(ui, acts, V::Blend, "Blend");
 }
 
-fn node_folds(ui: &mut egui::Ui, i: &Inspector, (slot, n): (usize, &Node), acts: &mut Vec<Act>) {
+fn node_folds(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n): (usize, &Node),
+    sight: &Sight,
+    acts: &mut Vec<Act>,
+) {
     use EffectValue as V;
     let Tool::Merge(m) = &n.tool else {
         return;
@@ -2116,6 +2155,17 @@ fn node_folds(ui: &mut egui::Ui, i: &Inspector, (slot, n): (usize, &Node), acts:
     let value = |ui: &mut egui::Ui, acts: &mut Vec<Act>, v: V, text: &str| {
         node_value(ui, i, (slot, n), (v, text), acts);
     };
+    fold(ui, (slot, "Reference Size"), |ui| {
+        if m.auto_resolution {
+            fixed_row(ui, "Width", sight.pixels[0]);
+            fixed_row(ui, "Height", sight.pixels[1]);
+        } else {
+            value(ui, acts, V::ReferenceWidth, "Width");
+            value(ui, acts, V::ReferenceHeight, "Height");
+        }
+        let auto = (slot, "Auto Resolution", m.auto_resolution, false);
+        check(ui, auto, "auto_resolution", acts);
+    });
     fold(ui, (slot, "Depth Merge"), |ui| {
         let depth = (slot, "Enable Depth Merge", m.depth_merge, false);
         check(ui, depth, "depth_merge", acts);
@@ -2129,7 +2179,7 @@ fn node_rows(
     ui: &mut egui::Ui,
     i: &Inspector,
     (slot, n, element): (usize, &Node, u8),
-    trackers: &[Hooked],
+    sight: &Sight,
     acts: &mut Vec<Act>,
 ) {
     use EffectValue as V;
@@ -2191,7 +2241,7 @@ fn node_rows(
             value(ui, acts, V::LineSpacing, "Line Spacing");
             value(ui, acts, V::VerticalAnchor, "V Anchor");
             value(ui, acts, V::HorizontalAnchor, "H Anchor");
-            center_row(ui, i, (slot, n), trackers, acts);
+            center_row(ui, i, (slot, n), sight, acts);
             value(ui, acts, V::LayoutSize, "Layout Size");
             value(ui, acts, V::Angle, "Angle");
             value(ui, acts, V::Blend, "Blend");
@@ -2200,7 +2250,7 @@ fn node_rows(
         Tool::Background(b) => background_rows(ui, i, (slot, n, b), acts),
         Tool::FastNoise(f) => noise_rows(ui, i, (slot, n, f), acts),
         Tool::Merge(m) => {
-            center_row(ui, i, (slot, n), trackers, acts);
+            center_row(ui, i, (slot, n), sight, acts);
             value(ui, acts, V::Size, "Size");
             value(ui, acts, V::Angle, "Angle");
             let flip = (slot, "Flip Horizontal", m.flip_horizontal, false);
@@ -2252,7 +2302,7 @@ fn node_rows(
             value(ui, acts, V::BorderWidth, "Border Width");
             check(ui, (slot, "Invert", m.invert, false), "invert", acts);
             check(ui, (slot, "Solid", m.solid, true), "solid", acts);
-            center_row(ui, i, (slot, n), trackers, acts);
+            center_row(ui, i, (slot, n), sight, acts);
             value(ui, acts, V::Width, "Width");
             value(ui, acts, V::Height, "Height");
             value(ui, acts, V::CornerRadius, "Corner Radius");
@@ -2336,7 +2386,13 @@ impl Workspace {
             ui.label(dim("Select a node"));
             return;
         }
-        let trackers = hooks(&comp);
+        let sight = Sight {
+            trackers: hooks(&comp),
+            pixels: {
+                let (w, h) = vidcut_core::render::composition_size(&p, &clip);
+                [w, h].map(f64::from)
+            },
+        };
         let at = self.page_at();
         let source = at as f64;
         for &k in &picked {
@@ -2375,9 +2431,9 @@ impl Workspace {
                     } else {
                         let i = &self.inspector;
                         rows(ui, (slot, "node"), |ui| {
-                            node_rows(ui, i, (slot, n, element), &trackers, &mut acts);
+                            node_rows(ui, i, (slot, n, element), &sight, &mut acts);
                         });
-                        node_folds(ui, i, (slot, n), &mut acts);
+                        node_folds(ui, i, (slot, n), &sight, &mut acts);
                     }
                     ui.separator();
                     all.push(acts);
@@ -3039,6 +3095,7 @@ struct Retimed {
 #[derive(Debug, Clone, Copy, Default)]
 struct Look<'a> {
     speed: Option<f64>,
+    units: Option<[f64; 2]>,
     off: bool,
     why: Option<&'static str>,
     timecode: Option<(&'a Project, i64)>,
@@ -3532,6 +3589,17 @@ fn drag(
                 .suffix(f.suffix())
                 .custom_parser(typed)
                 .min_size(vec2(FIELD_WIDTH, ui.spacing().interact_size.y));
+            let axis = match f {
+                Key::Node(_, _, a) | Key::Shading(_, _, _, a) => a,
+                _ => 0,
+            };
+            if let Some(u) = look.units.map(|u| u[axis]) {
+                drag = drag
+                    .custom_formatter(move |n, d| {
+                        egui::emath::format_with_decimals_in_range(n * u, d)
+                    })
+                    .custom_parser(move |t| typed(t).map(|x| x / u));
+            }
             if let Some((p, dropped)) = look.timecode {
                 let now = p.length_timecode(before.round() as i64);
                 drag = drag

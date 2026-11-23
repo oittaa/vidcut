@@ -210,6 +210,7 @@ impl Merge {
     pub const SIZE: f64 = 1.0;
     pub const SLIDES: (f64, f64) = (0.0, 1.0);
     pub const Z_OFFSETS: (f64, f64) = (-1e6, 1e6);
+    pub const REFERENCES: (f64, f64) = (1.0, 32767.0);
 
     pub fn middle(&self) -> [f64; 2] {
         self.center.unwrap_or(Mask::MIDDLE)
@@ -253,6 +254,21 @@ impl Merge {
 
     pub fn back_additive(&self) -> f64 {
         self.background_subtractive_additive.unwrap_or(1.0)
+    }
+
+    pub fn locks(&self, v: EffectValue) -> bool {
+        self.auto_resolution
+            && matches!(
+                v,
+                EffectValue::ReferenceWidth | EffectValue::ReferenceHeight
+            )
+    }
+
+    pub fn reference(&self, pixels: [f64; 2]) -> [f64; 2] {
+        match self.auto_resolution {
+            true => pixels,
+            false => [self.reference_width, self.reference_height].map(|v| v.unwrap_or(1.0)),
+        }
     }
 }
 
