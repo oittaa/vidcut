@@ -2794,6 +2794,7 @@ The other modes have no Operator. Their alpha is fa + ba × (1 − fa). Their co
   - Vivid Light: where s < 0.5, 1 − (1 − d) / 2s, or 0 at s = 0. Else d / (2 − 2s), or 1 at s = 1. Each is clamped to 0 to 1.
   - Hue: the hue of s with the HSL saturation and lightness of d.
   - Saturation: the hue and the lightness of d with the HSL saturation of s.
+    - The HSL saturation is (max − min) / (1 − |max + min − 1|). Where max + min is above 2, it is below 0.
   - Color: the Y of d with the I and the Q of s, in YIQ.
   - Luminosity: the Y of s with the I and the Q of d, in YIQ.
 - F × (1 − ba) + B × (1 − fa) + fa × ba × m(f, b):

@@ -24,4 +24,5 @@ The compositions of vidcut get a Text+ tool ([spec §8.19](../spec.md#819-compos
 
 - Dissolve at a Blend below 1.
 - Subtractive/Additive, Alpha Gain and Burn In with an Apply Mode other than Normal.
+  - With Saturation, the Inspector shows only Gain and Blend. The Inspector of vidcut shows all three sliders with each mode.
 - Invert Transform, also with a flip.
