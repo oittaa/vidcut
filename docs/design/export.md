@@ -1025,6 +1025,8 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - The masks and the Blend of the Text+ then go through `place::masked`.
   - `Merge::lookup` gives the affine map from a pixel of the output to a pixel of the foreground. It holds the flip, Size, Angle, Center and Invert Transform.
   - The mode, the operator, the edges and the sliders go to the shader as they are.
+- A Background gives an `Op::Make` into a free register. Its `place::Making` holds a `place::Painting`: the fill, the four colors, the gradient line in pixels, the stops, the offset and the repeat.
+  - `place::masked` adds the masks and the Blend, as for a Text+.
 - `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.
   - `place::Shaping` holds one mask in the pixels of the picture: a `place::Figure` for each place of the mask, its border, Solid, Level and Invert.
   - Its `place::Softening` is the blur of its soft edge.
@@ -1045,6 +1047,7 @@ The draw:
   - `blur::run` runs the stages. The other registers are textures of the same size, which the `blur::Composer` keeps for the next frame. `blur::effects_into` runs the work of a stage, as it runs the effects of a layer.
   - `fs_merge` draws an `Op::Merge`. `merge_fore` reads the foreground through the map, with a bilinear filter and the edges. `merge_mode` gives the sum of the mode and the operator.
   - The masks of a Merge go into one picture before the draw (`mask_room`, `mask_made`). `fs_merge` then mixes the background and the result by the mask and Blend.
+  - `made_into` draws an `Op::Make`. `fs_background` fills the register with the colors of a `Painting` as they are. The colors are not multiplied by their alpha. Thus a Merge adds them as premultiplied colors ([spec](../spec.md#the-background-tool)). The stops go to the shader in a storage buffer.
   - `letters_into` draws an `Op::Text`. It clears the register and copies the text into it.
     - `burn::inked` lays out the text on the CPU and draws one shading element, with premultiplied colors. It gives only the part of the picture that the element covers.
     - A fill fills the outlines of the glyphs or the boxes. An outline strokes them. Outside Only takes the fill away from the stroke.

@@ -1831,6 +1831,112 @@ fn fs_merge(in: Out) -> @location(0) vec4<f32> {
     return back * (1.0 - amount) + merged * amount;
 }
 
+struct Painting {
+    corners: array<vec4<f32>, 4>,
+    line: vec4<f32>,
+    how: vec4<f32>,
+    more: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> painting: Painting;
+@group(0) @binding(3) var<storage, read> paint_stops: array<f32>;
+
+fn paint_place(i: i32) -> f32 {
+    return paint_stops[i * 5];
+}
+
+fn paint_color(i: i32) -> vec4<f32> {
+    let k = i * 5;
+    return vec4<f32>(paint_stops[k + 1], paint_stops[k + 2], paint_stops[k + 3], paint_stops[k + 4]);
+}
+
+fn paint_ramp(t: f32) -> vec4<f32> {
+    let n = i32(painting.how.w);
+    if t <= paint_place(0) {
+        return paint_color(0);
+    }
+    for (var i = 1; i < n; i++) {
+        let after = paint_place(i);
+        if t <= after {
+            let before = paint_place(i - 1);
+            let k = select(0.0, (t - before) / (after - before), after > before);
+            return mix(paint_color(i - 1), paint_color(i), k);
+        }
+    }
+    return paint_color(n - 1);
+}
+
+fn paint_repeat(t: f32) -> f32 {
+    switch i32(painting.how.z) {
+        case 1: {
+            return t - floor(t);
+        }
+        case 2: {
+            let m = t - 2.0 * floor(t * 0.5);
+            return select(m, 2.0 - m, m > 1.0);
+        }
+        default: {
+            return clamp(t, 0.0, 1.0);
+        }
+    }
+}
+
+fn paint_along(at: vec2<f32>) -> f32 {
+    let begin = painting.line.xy;
+    let way = painting.line.zw - begin;
+    let run = length(way);
+    if run <= 0.0 {
+        return 0.0;
+    }
+    let d = at - begin;
+    switch i32(painting.how.y) {
+        case 1: {
+            return abs(dot(d, way)) / (run * run);
+        }
+        case 2: {
+            return max(abs(d.x), abs(d.y)) / run;
+        }
+        case 3: {
+            return min(abs(d.x), abs(d.y)) / run;
+        }
+        case 4: {
+            return length(d) / run;
+        }
+        case 5: {
+            let turn = atan2(-d.y, d.x) - atan2(-way.y, way.x);
+            let t = turn / 6.2831853;
+            return t - floor(t);
+        }
+        default: {
+            return dot(d, way) / (run * run);
+        }
+    }
+}
+
+@fragment
+fn fs_background(in: Out) -> @location(0) vec4<f32> {
+    let uv = floor(in.position.xy) / max(painting.more.yz - 1.0, vec2<f32>(1.0));
+    let c = painting.corners;
+    var color = c[0];
+    switch i32(painting.how.x) {
+        case 1: {
+            color = mix(c[0], c[1], uv.x);
+        }
+        case 2: {
+            color = mix(c[0], c[2], uv.y);
+        }
+        case 3: {
+            color = mix(mix(c[0], c[1], uv.x), mix(c[2], c[3], uv.x), uv.y);
+        }
+        case 4: {
+            let t = paint_along(in.position.xy) - painting.more.x;
+            color = paint_ramp(paint_repeat(t));
+        }
+        default: {}
+    }
+    return color;
+}
+
 struct Vignetting {
     first: vec4<f32>,
     color: vec4<f32>,

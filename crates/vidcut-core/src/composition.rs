@@ -2,9 +2,10 @@ use std::collections::HashSet;
 
 use crate::effect_keys::Keyed;
 use crate::model::{
-    Appearance, ApplyMode, Blur, BlurClipping, BlurFilter, BorderLevel, Clip, Composition, Connect,
-    EffectKind, EffectType, EffectValue, JoinStyle, Mask, Merge, MergeEdges, MergeOperator,
-    MotionPath, Node, Pattern, Project, ShadingElement, TextPlus, Tool, ToolType, Tracker,
+    Appearance, ApplyMode, Background, BackgroundFill, Blur, BlurClipping, BlurFilter, BorderLevel,
+    Clip, Composition, Connect, EffectKind, EffectType, EffectValue, GradientRepeat, GradientStop,
+    GradientType, ImageFormat, JoinStyle, Mask, Merge, MergeEdges, MergeOperator, MotionPath, Node,
+    Pattern, Project, ShadingElement, TextPlus, Tool, ToolType, Tracker,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -251,6 +252,240 @@ impl Merge {
 
     pub fn back_additive(&self) -> f64 {
         self.background_subtractive_additive.unwrap_or(1.0)
+    }
+}
+
+impl ImageFormat {
+    pub const PIXELS: (u32, u32) = (1, 32768);
+
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn size(&self, (w, h): (f64, f64)) -> (f64, f64) {
+        match self.auto_resolution {
+            true => (w, h),
+            false => (
+                self.width.map_or(w, f64::from),
+                self.height.map_or(h, f64::from),
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Corner {
+    pub const ALL: [Corner; 4] = [
+        Corner::TopLeft,
+        Corner::TopRight,
+        Corner::BottomLeft,
+        Corner::BottomRight,
+    ];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Corner::TopLeft => "top_left",
+            Corner::TopRight => "top_right",
+            Corner::BottomLeft => "bottom_left",
+            Corner::BottomRight => "bottom_right",
+        }
+    }
+
+    pub fn values(self) -> [EffectValue; 4] {
+        use EffectValue as V;
+        match self {
+            Corner::TopLeft => [
+                V::TopLeftRed,
+                V::TopLeftGreen,
+                V::TopLeftBlue,
+                V::TopLeftAlpha,
+            ],
+            Corner::TopRight => [
+                V::TopRightRed,
+                V::TopRightGreen,
+                V::TopRightBlue,
+                V::TopRightAlpha,
+            ],
+            Corner::BottomLeft => [
+                V::BottomLeftRed,
+                V::BottomLeftGreen,
+                V::BottomLeftBlue,
+                V::BottomLeftAlpha,
+            ],
+            Corner::BottomRight => [
+                V::BottomRightRed,
+                V::BottomRightGreen,
+                V::BottomRightBlue,
+                V::BottomRightAlpha,
+            ],
+        }
+    }
+}
+
+impl Background {
+    pub const COLOR: [f64; 4] = [0.0, 0.0, 0.0, 1.0];
+    pub const COLORS: (f64, f64) = (-1e6, 1e6);
+    pub const START: [f64; 2] = [0.0, 0.5];
+    pub const END: [f64; 2] = [1.0, 0.5];
+    pub const OFFSETS: (f64, f64) = (-1e6, 1e6);
+    pub const STOPS: (usize, usize) = (2, 64);
+    pub const STOPS_USUAL: [GradientStop; 2] = [
+        GradientStop {
+            position: 0.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+        },
+        GradientStop {
+            position: 1.0,
+            color: [1.0, 1.0, 1.0, 1.0],
+        },
+    ];
+
+    pub fn filled(&self) -> BackgroundFill {
+        self.fill.unwrap_or_default()
+    }
+
+    pub fn corner(&self, c: Corner) -> Option<[f64; 4]> {
+        match c {
+            Corner::TopLeft => self.top_left,
+            Corner::TopRight => self.top_right,
+            Corner::BottomLeft => self.bottom_left,
+            Corner::BottomRight => self.bottom_right,
+        }
+    }
+
+    pub fn corner_mut(&mut self, c: Corner) -> &mut Option<[f64; 4]> {
+        match c {
+            Corner::TopLeft => &mut self.top_left,
+            Corner::TopRight => &mut self.top_right,
+            Corner::BottomLeft => &mut self.bottom_left,
+            Corner::BottomRight => &mut self.bottom_right,
+        }
+    }
+
+    pub fn color(&self, c: Corner) -> [f64; 4] {
+        self.corner(c).unwrap_or(Self::COLOR)
+    }
+
+    pub fn shown(&self) -> &'static [Corner] {
+        match self.filled() {
+            BackgroundFill::SolidColor => &[Corner::TopLeft],
+            BackgroundFill::Horizontal => &[Corner::TopLeft, Corner::TopRight],
+            BackgroundFill::Vertical => &[Corner::TopLeft, Corner::BottomLeft],
+            BackgroundFill::FourCorner => &Corner::ALL,
+            BackgroundFill::Gradient => &[],
+        }
+    }
+
+    pub fn form(&self) -> GradientType {
+        self.gradient_type.unwrap_or_default()
+    }
+
+    pub fn from(&self) -> [f64; 2] {
+        self.start.unwrap_or(Self::START)
+    }
+
+    pub fn to(&self) -> [f64; 2] {
+        self.end.unwrap_or(Self::END)
+    }
+
+    pub fn colors(&self) -> &[GradientStop] {
+        match self.stops.is_empty() {
+            true => &Self::STOPS_USUAL,
+            false => &self.stops,
+        }
+    }
+
+    pub fn shift(&self) -> f64 {
+        self.offset.unwrap_or(0.0)
+    }
+
+    pub fn color_at(stops: &[GradientStop], t: f64) -> [f64; 4] {
+        let Some(first) = stops.first() else {
+            return Self::COLOR;
+        };
+        if t <= first.position {
+            return first.color;
+        }
+        for pair in stops.windows(2) {
+            let [a, b] = [pair[0], pair[1]];
+            if t <= b.position {
+                let k = match b.position > a.position {
+                    true => (t - a.position) / (b.position - a.position),
+                    false => 0.0,
+                };
+                return std::array::from_fn(|i| a.color[i] + (b.color[i] - a.color[i]) * k);
+            }
+        }
+        stops.last().map_or(Self::COLOR, |s| s.color)
+    }
+
+    pub fn repeats(&self) -> GradientRepeat {
+        self.repeat.unwrap_or_default()
+    }
+}
+
+impl BackgroundFill {
+    pub const ALL: [BackgroundFill; 5] = [
+        BackgroundFill::SolidColor,
+        BackgroundFill::Horizontal,
+        BackgroundFill::Vertical,
+        BackgroundFill::FourCorner,
+        BackgroundFill::Gradient,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BackgroundFill::SolidColor => "Solid Color",
+            BackgroundFill::Horizontal => "Horizontal",
+            BackgroundFill::Vertical => "Vertical",
+            BackgroundFill::FourCorner => "Four Corner",
+            BackgroundFill::Gradient => "Gradient",
+        }
+    }
+}
+
+impl GradientType {
+    pub const ALL: [GradientType; 6] = [
+        GradientType::Linear,
+        GradientType::Reflect,
+        GradientType::Square,
+        GradientType::Cross,
+        GradientType::Radial,
+        GradientType::Angle,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GradientType::Linear => "Linear",
+            GradientType::Reflect => "Reflect",
+            GradientType::Square => "Square",
+            GradientType::Cross => "Cross",
+            GradientType::Radial => "Radial",
+            GradientType::Angle => "Angle",
+        }
+    }
+}
+
+impl GradientRepeat {
+    pub const ALL: [GradientRepeat; 3] = [
+        GradientRepeat::Once,
+        GradientRepeat::Repeat,
+        GradientRepeat::PingPong,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GradientRepeat::Once => "Once",
+            GradientRepeat::Repeat => "Repeat",
+            GradientRepeat::PingPong => "Ping-Pong",
+        }
     }
 }
 
@@ -739,6 +974,7 @@ impl Tool {
             Tool::Tracker(_) => "Tracker",
             Tool::Merge(_) => "Merge",
             Tool::TextPlus(_) => "Text",
+            Tool::Background(_) => "Background",
         }
     }
 
@@ -754,6 +990,7 @@ impl Tool {
             Tool::Tracker(_) => "Tracker",
             Tool::Merge(_) => "Merge",
             Tool::TextPlus(_) => "Text+",
+            Tool::Background(_) => "Background",
         }
     }
 
@@ -764,7 +1001,11 @@ impl Tool {
     pub fn works(&self) -> bool {
         matches!(
             self,
-            Tool::Blur(_) | Tool::Effect(_) | Tool::Merge(_) | Tool::TextPlus(_)
+            Tool::Blur(_)
+                | Tool::Effect(_)
+                | Tool::Merge(_)
+                | Tool::TextPlus(_)
+                | Tool::Background(_)
         )
     }
 
@@ -780,9 +1021,11 @@ impl Tool {
                 NodeInput::Foreground,
                 NodeInput::EffectMask,
             ],
-            Tool::Ellipse(_) | Tool::Rectangle(_) | Tool::Polygon(_) | Tool::TextPlus(_) => {
-                &[NodeInput::EffectMask]
-            }
+            Tool::Ellipse(_)
+            | Tool::Rectangle(_)
+            | Tool::Polygon(_)
+            | Tool::TextPlus(_)
+            | Tool::Background(_) => &[NodeInput::EffectMask],
         }
     }
 
@@ -864,6 +1107,13 @@ impl Tool {
         }
     }
 
+    pub fn background(&self) -> Option<&Background> {
+        match self {
+            Tool::Background(b) => Some(b),
+            _ => None,
+        }
+    }
+
     pub fn mask_mut(&mut self) -> Option<&mut Mask> {
         match self {
             Tool::Ellipse(m) | Tool::Rectangle(m) | Tool::Polygon(m) => Some(m),
@@ -895,6 +1145,7 @@ impl Tool {
             }),
             Tool::Merge(_) => Tool::Merge(Merge::default()),
             Tool::TextPlus(_) => Tool::TextPlus(TextPlus::default()),
+            Tool::Background(_) => Tool::Background(Background::default()),
         }
     }
 }
@@ -1317,7 +1568,7 @@ impl Composition {
 }
 
 impl ToolType {
-    pub const ADDED: [ToolType; 13] = [
+    pub const ADDED: [ToolType; 14] = [
         ToolType::Blur,
         ToolType::GaussianBlur,
         ToolType::MosaicBlur,
@@ -1331,6 +1582,7 @@ impl ToolType {
         ToolType::Tracker,
         ToolType::Merge,
         ToolType::TextPlus,
+        ToolType::Background,
     ];
 
     pub fn made(self) -> Tool {
@@ -1349,6 +1601,7 @@ impl ToolType {
             ToolType::Tracker => Tool::Tracker(Tracker::made()),
             ToolType::Merge => Tool::Merge(Merge::default()),
             ToolType::TextPlus => Tool::TextPlus(TextPlus::default()),
+            ToolType::Background => Tool::Background(Background::default()),
             ToolType::MediaIn => Tool::MediaIn,
             ToolType::MediaOut => Tool::MediaOut,
         }

@@ -1,11 +1,11 @@
 use serde_json::{Value, json};
 
-use crate::composition::{Frames, cleaned};
+use crate::composition::{Corner, Frames, cleaned};
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::model::{
-    Composition, Connect, Ease, EffectValue, MotionPath, Node, PathSample, Pattern, Project,
-    ShadingElement, Tool, ToolType,
+    Background, Composition, Connect, Ease, EffectValue, MotionPath, Node, PathSample, Pattern,
+    Project, ShadingElement, Tool, ToolType,
 };
 use crate::request::{NodeChange, NodeInput, PatternTrim};
 
@@ -557,6 +557,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.angle, &mut t.angle);
             shading_applied(t.element_mut(element_of(&mut left)?), &mut left)?;
         }
+        Tool::Background(b) => background_applied(b, &mut left),
         Tool::MediaIn | Tool::MediaOut => {}
     }
     if left != NodeChange::default() {
@@ -567,6 +568,32 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
         )));
     }
     Ok(next)
+}
+
+fn background_applied(b: &mut Background, left: &mut NodeChange) {
+    given(&mut left.fill, &mut b.fill);
+    for c in Corner::ALL {
+        let from = match c {
+            Corner::TopLeft => &mut left.top_left,
+            Corner::TopRight => &mut left.top_right,
+            Corner::BottomLeft => &mut left.bottom_left,
+            Corner::BottomRight => &mut left.bottom_right,
+        };
+        given(from, b.corner_mut(c));
+    }
+    given(&mut left.gradient_type, &mut b.gradient_type);
+    given(&mut left.start, &mut b.start);
+    given(&mut left.end, &mut b.end);
+    if let Some(stops) = left.stops.take() {
+        b.stops = stops;
+    }
+    given(&mut left.values.offset, &mut b.offset);
+    given(&mut left.repeat, &mut b.repeat);
+    if let Some(mut i) = left.image.take() {
+        taken(&mut i.auto_resolution, &mut b.image.auto_resolution);
+        given(&mut i.width, &mut b.image.width);
+        given(&mut i.height, &mut b.image.height);
+    }
 }
 
 fn element_of(change: &mut NodeChange) -> Result<u8> {

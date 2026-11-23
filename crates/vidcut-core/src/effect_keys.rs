@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 
+use crate::composition::Corner;
 use crate::keyframes::{
     drop_channel, ease_mark, hold_channel, put_pair, retarget_channel, retime_channel,
     scale_channel, split_channel, value_at, value_paired,
 };
 use crate::model::{
-    Blur, Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FilmGrain, GaussianBlur, Glow,
-    Keyframe, Mask, Merge, MosaicBlur, Node, ShadingElement, Sharpen, TextPlus, Tool, Vignette,
+    Background, Blur, Clip, Ease, Effect, EffectKeys, EffectKind, EffectValue, FilmGrain,
+    GaussianBlur, Glow, Keyframe, Mask, Merge, MosaicBlur, Node, ShadingElement, Sharpen, TextPlus,
+    Tool, Vignette,
 };
 
 type Range = (f64, f64);
@@ -248,7 +250,7 @@ fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
 }
 
 impl EffectValue {
-    pub const ALL: [EffectValue; 101] = [
+    pub const ALL: [EffectValue; 119] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -350,6 +352,24 @@ impl EffectValue {
         EffectValue::SoftnessY,
         EffectValue::ShadingOffset,
         EffectValue::Priority,
+        EffectValue::TopLeftRed,
+        EffectValue::TopLeftGreen,
+        EffectValue::TopLeftBlue,
+        EffectValue::TopLeftAlpha,
+        EffectValue::TopRightRed,
+        EffectValue::TopRightGreen,
+        EffectValue::TopRightBlue,
+        EffectValue::TopRightAlpha,
+        EffectValue::BottomLeftRed,
+        EffectValue::BottomLeftGreen,
+        EffectValue::BottomLeftBlue,
+        EffectValue::BottomLeftAlpha,
+        EffectValue::BottomRightRed,
+        EffectValue::BottomRightGreen,
+        EffectValue::BottomRightBlue,
+        EffectValue::BottomRightAlpha,
+        EffectValue::Start,
+        EffectValue::End,
     ];
 
     pub fn name(self) -> String {
@@ -362,7 +382,11 @@ impl EffectValue {
     pub fn pair(self) -> bool {
         matches!(
             self,
-            EffectValue::Position | EffectValue::Center | EffectValue::ShadingOffset
+            EffectValue::Position
+                | EffectValue::Center
+                | EffectValue::ShadingOffset
+                | EffectValue::Start
+                | EffectValue::End
         )
     }
 }
@@ -815,12 +839,24 @@ impl Keyed for ShadingElement {
     }
 }
 
+fn background_slot(b: &mut Background, value: EffectValue) -> Slot<'_> {
+    if value == EffectValue::Offset {
+        return Some((b.offset.get_or_insert(0.0), Background::OFFSETS));
+    }
+    let (corner, i) = Corner::ALL
+        .into_iter()
+        .find_map(|c| Some((c, c.values().iter().position(|v| *v == value)?)))?;
+    let color = b.corner_mut(corner).get_or_insert(Background::COLOR);
+    Some((&mut color[i], Background::COLORS))
+}
+
 fn node_slot(tool: &mut Tool, value: EffectValue) -> Slot<'_> {
     match tool {
         Tool::Blur(b) => blur_slot(b, value),
         Tool::Effect(kind) => slot(kind, value),
         Tool::Merge(m) => merge_slot(m, value),
         Tool::TextPlus(t) => text_slot(t, value),
+        Tool::Background(b) => background_slot(b, value),
         t if t.is_mask() => mask_slot(t, value),
         _ => None,
     }
@@ -829,6 +865,14 @@ fn node_slot(tool: &mut Tool, value: EffectValue) -> Slot<'_> {
 fn node_point(tool: &mut Tool, value: EffectValue) -> Point<'_> {
     if let Tool::Effect(kind) = tool {
         return point_slot(kind, value);
+    }
+    if let Tool::Background(b) = tool {
+        let (end, usual) = match value {
+            EffectValue::Start => (&mut b.start, Background::START),
+            EffectValue::End => (&mut b.end, Background::END),
+            _ => return None,
+        };
+        return Some((end.get_or_insert(usual), Mask::PLACES));
     }
     if value != EffectValue::Center {
         return None;

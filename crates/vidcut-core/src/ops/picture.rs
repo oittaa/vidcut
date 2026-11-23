@@ -1,16 +1,16 @@
 use serde_json::{Value, json};
 
-use crate::composition::named_well;
+use crate::composition::{Corner, named_well};
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode,
-    Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind, EffectValue, FillMethod,
-    FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, Merge,
-    MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project,
-    ShadingElement, Sharpen, TextPlus, Tool, TrackKind, Tracker, Vignette, VignetteMode,
-    VignetteShape, ZoomBox,
+    ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
+    CellShape, Clip, CompositeMode, Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind,
+    EffectValue, FillMethod, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput,
+    GradientRepeat, GradientType, GrainComposite, ImageFormat, Mask, Merge, MergeEdges,
+    MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project, ShadingElement,
+    Sharpen, TextPlus, Tool, TrackKind, Tracker, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput};
 
@@ -573,12 +573,74 @@ fn plain_node_checked(n: &Node) -> Result<Node> {
         Tool::Tracker(t) => Tool::Tracker(tracker_checked(t)?),
         Tool::Merge(m) => Tool::Merge(merge_checked(m)?),
         Tool::TextPlus(t) => Tool::TextPlus(text_checked(t)?),
+        Tool::Background(b) => Tool::Background(background_checked(b)?),
         t => t.clone(),
     };
     Ok(Node {
         tool,
         blend: n.blend.filter(|v| *v != 1.0),
         ..n.clone()
+    })
+}
+
+fn background_checked(b: &Background) -> Result<Background> {
+    for c in Corner::ALL {
+        for v in b.corner(c).into_iter().flatten() {
+            let why = "a background's color is four numbers, each from -1000000 to 1000000";
+            within(Some(v), Background::COLORS, why)?;
+        }
+    }
+    for v in [b.start, b.end].into_iter().flatten().flatten() {
+        let why = "a gradient's start and end are two fractions, each from -10 to 10";
+        within(Some(v), Mask::PLACES, why)?;
+    }
+    let (fewest, most) = Background::STOPS;
+    if !b.stops.is_empty() && !(fewest..=most).contains(&b.stops.len()) {
+        return Err(Error::invalid("a gradient has from 2 to 64 stops"));
+    }
+    for s in &b.stops {
+        within(
+            Some(s.position),
+            (0.0, 1.0),
+            "a gradient stop's position is from 0 to 1",
+        )?;
+        for v in s.color {
+            let why = "a gradient stop's color is four numbers, each from -1000000 to 1000000";
+            within(Some(v), Background::COLORS, why)?;
+        }
+    }
+    within(
+        b.offset,
+        Background::OFFSETS,
+        "a gradient's offset is from -1000000 to 1000000",
+    )?;
+    let (least, largest) = ImageFormat::PIXELS;
+    for v in [b.image.width, b.image.height].into_iter().flatten() {
+        if !(least..=largest).contains(&v) {
+            return Err(Error::invalid(
+                "a picture is from 1 to 32768 pixels wide and high",
+            ));
+        }
+    }
+    let mut stops = b.stops.clone();
+    stops.sort_by(|a, b| a.position.total_cmp(&b.position));
+    let usual = |c: Corner| b.corner(c).filter(|v| *v != Background::COLOR);
+    Ok(Background {
+        fill: b.fill.filter(|f| *f != BackgroundFill::default()),
+        top_left: usual(Corner::TopLeft),
+        top_right: usual(Corner::TopRight),
+        bottom_left: usual(Corner::BottomLeft),
+        bottom_right: usual(Corner::BottomRight),
+        gradient_type: b.gradient_type.filter(|t| *t != GradientType::default()),
+        start: b.start.filter(|p| *p != Background::START),
+        end: b.end.filter(|p| *p != Background::END),
+        stops: match stops[..] == Background::STOPS_USUAL {
+            true => Vec::new(),
+            false => stops,
+        },
+        offset: b.offset.filter(|v| *v != 0.0),
+        repeat: b.repeat.filter(|r| *r != GradientRepeat::default()),
+        image: b.image,
     })
 }
 
