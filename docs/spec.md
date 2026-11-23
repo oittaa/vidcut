@@ -3008,6 +3008,7 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
 - The Tracker has these inputs (pp. 2839–2840):
   - Background: the picture to track.
   - Effect Mask: a mask on it limits the tracking to the inside of the mask.
+    - Resolve Studio 21.2 does not do this: the mask does not change the track ([gotchas](gotchas.md#resolves-tracking)). vidcut does what the manual says.
     - vidcut: the track reads the picture on the Background input, multiplied by the masks. Outside them, the picture is clear.
     - vidcut: the mask does not change what Find finds.
   - vidcut: the Foreground input is not built yet ([todo](todo/motion-tracking.md)).
