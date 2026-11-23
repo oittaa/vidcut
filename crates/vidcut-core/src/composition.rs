@@ -3,9 +3,10 @@ use std::collections::HashSet;
 use crate::effect_keys::Keyed;
 use crate::model::{
     Appearance, ApplyMode, Background, BackgroundFill, Blur, BlurClipping, BlurFilter, BorderLevel,
-    Clip, Composition, Connect, EffectKind, EffectType, EffectValue, GradientRepeat, GradientStop,
-    GradientType, ImageFormat, JoinStyle, Mask, Merge, MergeEdges, MergeOperator, MotionPath, Node,
-    Pattern, Project, ShadingElement, TextPlus, Tool, ToolType, Tracker,
+    Clip, Composition, Connect, EffectKind, EffectType, EffectValue, FastNoise, GradientRepeat,
+    GradientStop, GradientType, ImageFormat, JoinStyle, Mask, Merge, MergeEdges, MergeOperator,
+    MotionPath, Node, NoiseColoring, Pattern, Project, ShadingElement, TextPlus, Tool, ToolType,
+    Tracker,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -428,6 +429,113 @@ impl Background {
 
     pub fn repeats(&self) -> GradientRepeat {
         self.repeat.unwrap_or_default()
+    }
+}
+
+impl Default for FastNoise {
+    fn default() -> Self {
+        Self {
+            discontinuous: false,
+            inverted: false,
+            center: None,
+            detail: None,
+            brightness: None,
+            contrast: None,
+            lock_xy: true,
+            scale: None,
+            y_scale: None,
+            angle: None,
+            seethe: None,
+            seethe_rate: None,
+            coloring: None,
+            color1: None,
+            color2: None,
+            stops: Vec::new(),
+            image: ImageFormat::default(),
+        }
+    }
+}
+
+impl FastNoise {
+    pub const DETAIL: f64 = 2.0;
+    pub const DETAILS: (f64, f64) = (0.0, 10.0);
+    pub const LEVELS: (f64, f64) = (-1000.0, 1000.0);
+    pub const CONTRAST: f64 = 1.0;
+    pub const SCALE: f64 = 2.0;
+    pub const SCALES: (f64, f64) = (0.0, 1e6);
+    pub const TURNS: (f64, f64) = (-1e6, 1e6);
+    pub const SEETHES: (f64, f64) = (-1e6, 1e6);
+    pub const COLOR1: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
+    pub const COLOR2: [f64; 4] = [1.0, 1.0, 1.0, 1.0];
+
+    pub fn middle(&self) -> [f64; 2] {
+        self.center.unwrap_or(Mask::MIDDLE)
+    }
+
+    pub fn layers(&self) -> f64 {
+        self.detail.unwrap_or(Self::DETAIL)
+    }
+
+    pub fn lift(&self) -> f64 {
+        self.brightness.unwrap_or(0.0)
+    }
+
+    pub fn spread(&self) -> f64 {
+        self.contrast.unwrap_or(Self::CONTRAST)
+    }
+
+    pub fn scales(&self) -> [f64; 2] {
+        let x = self.scale.unwrap_or(Self::SCALE);
+        match self.lock_xy {
+            true => [x, x],
+            false => [x, self.y_scale.unwrap_or(Self::SCALE)],
+        }
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.angle.unwrap_or(0.0)
+    }
+
+    pub fn depth(&self, frame: i64) -> f64 {
+        self.seethe.unwrap_or(0.0) + self.seethe_rate.unwrap_or(0.0) * frame as f64
+    }
+
+    pub fn colored(&self) -> NoiseColoring {
+        self.coloring.unwrap_or_default()
+    }
+
+    pub fn first(&self) -> [f64; 4] {
+        self.color1.unwrap_or(Self::COLOR1)
+    }
+
+    pub fn second(&self) -> [f64; 4] {
+        self.color2.unwrap_or(Self::COLOR2)
+    }
+
+    pub fn colors(&self) -> &[GradientStop] {
+        match self.stops.is_empty() {
+            true => &Background::STOPS_USUAL,
+            false => &self.stops,
+        }
+    }
+
+    pub fn color_values(second: bool) -> [EffectValue; 4] {
+        use EffectValue as V;
+        match second {
+            false => [V::Color1Red, V::Color1Green, V::Color1Blue, V::Color1Alpha],
+            true => [V::Color2Red, V::Color2Green, V::Color2Blue, V::Color2Alpha],
+        }
+    }
+}
+
+impl NoiseColoring {
+    pub const ALL: [NoiseColoring; 2] = [NoiseColoring::TwoColor, NoiseColoring::Gradient];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            NoiseColoring::TwoColor => "Two Color",
+            NoiseColoring::Gradient => "Gradient",
+        }
     }
 }
 
@@ -975,6 +1083,7 @@ impl Tool {
             Tool::Merge(_) => "Merge",
             Tool::TextPlus(_) => "Text",
             Tool::Background(_) => "Background",
+            Tool::FastNoise(_) => "FastNoise",
         }
     }
 
@@ -991,6 +1100,7 @@ impl Tool {
             Tool::Merge(_) => "Merge",
             Tool::TextPlus(_) => "Text+",
             Tool::Background(_) => "Background",
+            Tool::FastNoise(_) => "Fast Noise",
         }
     }
 
@@ -1006,6 +1116,7 @@ impl Tool {
                 | Tool::Merge(_)
                 | Tool::TextPlus(_)
                 | Tool::Background(_)
+                | Tool::FastNoise(_)
         )
     }
 
@@ -1026,6 +1137,11 @@ impl Tool {
             | Tool::Polygon(_)
             | Tool::TextPlus(_)
             | Tool::Background(_) => &[NodeInput::EffectMask],
+            Tool::FastNoise(_) => &[
+                NodeInput::EffectMask,
+                NodeInput::DetailMap,
+                NodeInput::BrightnessMap,
+            ],
         }
     }
 
@@ -1114,6 +1230,13 @@ impl Tool {
         }
     }
 
+    pub fn noise(&self) -> Option<&FastNoise> {
+        match self {
+            Tool::FastNoise(f) => Some(f),
+            _ => None,
+        }
+    }
+
     pub fn mask_mut(&mut self) -> Option<&mut Mask> {
         match self {
             Tool::Ellipse(m) | Tool::Rectangle(m) | Tool::Polygon(m) => Some(m),
@@ -1146,6 +1269,7 @@ impl Tool {
             Tool::Merge(_) => Tool::Merge(Merge::default()),
             Tool::TextPlus(_) => Tool::TextPlus(TextPlus::default()),
             Tool::Background(_) => Tool::Background(Background::default()),
+            Tool::FastNoise(_) => Tool::FastNoise(FastNoise::default()),
         }
     }
 }
@@ -1171,6 +1295,8 @@ impl Node {
             input: None,
             foreground: None,
             effect_mask: None,
+            detail_map: None,
+            brightness_map: None,
             pass_through: false,
             blend: None,
             blur_alpha: true,
@@ -1201,6 +1327,8 @@ impl Node {
             NodeInput::Input => self.input.as_deref(),
             NodeInput::EffectMask => self.effect_mask.as_deref(),
             NodeInput::Foreground => self.foreground.as_deref(),
+            NodeInput::DetailMap => self.detail_map.as_deref(),
+            NodeInput::BrightnessMap => self.brightness_map.as_deref(),
         }
     }
 
@@ -1209,6 +1337,8 @@ impl Node {
             NodeInput::Input => &mut self.input,
             NodeInput::EffectMask => &mut self.effect_mask,
             NodeInput::Foreground => &mut self.foreground,
+            NodeInput::DetailMap => &mut self.detail_map,
+            NodeInput::BrightnessMap => &mut self.brightness_map,
         }
     }
 
@@ -1223,16 +1353,18 @@ impl Node {
 }
 
 impl NodeInput {
-    pub const ALL: [NodeInput; 3] = [
+    pub const ALL: [NodeInput; 5] = [
         NodeInput::Input,
         NodeInput::EffectMask,
         NodeInput::Foreground,
+        NodeInput::DetailMap,
+        NodeInput::BrightnessMap,
     ];
 
     pub fn carries_picture(self) -> bool {
         match self {
             NodeInput::Input | NodeInput::Foreground => true,
-            NodeInput::EffectMask => false,
+            NodeInput::EffectMask | NodeInput::DetailMap | NodeInput::BrightnessMap => false,
         }
     }
 
@@ -1241,6 +1373,8 @@ impl NodeInput {
             NodeInput::Input => "picture input",
             NodeInput::EffectMask => "effect mask input",
             NodeInput::Foreground => "foreground input",
+            NodeInput::DetailMap => "detail map input",
+            NodeInput::BrightnessMap => "brightness map input",
         }
     }
 }
@@ -1522,9 +1656,13 @@ impl Composition {
     }
 
     pub fn masks_of(&self, node: &Node) -> Vec<&Node> {
+        self.masks_on(node, NodeInput::EffectMask)
+    }
+
+    pub fn masks_on(&self, node: &Node, input: NodeInput) -> Vec<&Node> {
         let mut seen = HashSet::new();
         let mut masks = Vec::new();
-        let mut next = node.effect_mask.as_deref();
+        let mut next = node.join(input);
         while let Some(m) = next.and_then(|n| self.node(n)) {
             if !m.tool.is_mask() || !seen.insert(m.name.as_str()) {
                 break;
@@ -1562,13 +1700,18 @@ impl Composition {
                 ..EffectType::of(kind).made()
             }
             .moves_by_itself(),
+            Tool::FastNoise(f) => {
+                !n.pass_through
+                    && (f.seethe_rate.is_some_and(|r| r != 0.0)
+                        || !n.keys_of(EffectValue::SeetheRate).is_empty())
+            }
             _ => false,
         })
     }
 }
 
 impl ToolType {
-    pub const ADDED: [ToolType; 14] = [
+    pub const ADDED: [ToolType; 15] = [
         ToolType::Blur,
         ToolType::GaussianBlur,
         ToolType::MosaicBlur,
@@ -1583,6 +1726,7 @@ impl ToolType {
         ToolType::Merge,
         ToolType::TextPlus,
         ToolType::Background,
+        ToolType::FastNoise,
     ];
 
     pub fn made(self) -> Tool {
@@ -1602,6 +1746,7 @@ impl ToolType {
             ToolType::Merge => Tool::Merge(Merge::default()),
             ToolType::TextPlus => Tool::TextPlus(TextPlus::default()),
             ToolType::Background => Tool::Background(Background::default()),
+            ToolType::FastNoise => Tool::FastNoise(FastNoise::default()),
             ToolType::MediaIn => Tool::MediaIn,
             ToolType::MediaOut => Tool::MediaOut,
         }

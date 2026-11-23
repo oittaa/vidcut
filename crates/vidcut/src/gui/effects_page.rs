@@ -58,7 +58,14 @@ const SCREEN: usize = 0;
 const LIBRARY: [(&str, &[ToolType]); 6] = [
     ("Tools", &[ToolType::Blur]),
     ("Composite", &[ToolType::Merge]),
-    ("Generators", &[ToolType::Background, ToolType::TextPlus]),
+    (
+        "Generators",
+        &[
+            ToolType::Background,
+            ToolType::FastNoise,
+            ToolType::TextPlus,
+        ],
+    ),
     (
         "Masks",
         &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
@@ -79,6 +86,7 @@ const LIBRARY: [(&str, &[ToolType]); 6] = [
 const TOOL_ROW: [&[ToolType]; 2] = [
     &[
         ToolType::Background,
+        ToolType::FastNoise,
         ToolType::TextPlus,
         ToolType::Merge,
         ToolType::Blur,
@@ -87,6 +95,7 @@ const TOOL_ROW: [&[ToolType]; 2] = [
 ];
 
 const GRADES_LEFT_KEPT: usize = 4096;
+const DETAIL_KNOT: Color32 = Color32::from_rgb(150, 150, 150);
 
 pub(super) struct EffectsPage {
     pub(super) page: Page,
@@ -379,6 +388,8 @@ fn joins(comp: &Composition) -> Vec<Wire<String>> {
     let line = |which| match which {
         NodeInput::Input | NodeInput::Foreground => Stroke::new(1.5, theme::colors().text_dim),
         NodeInput::EffectMask => Stroke::new(1.5, MASK_KNOT),
+        NodeInput::DetailMap => Stroke::new(1.5, DETAIL_KNOT),
+        NodeInput::BrightnessMap => Stroke::new(1.5, Color32::WHITE),
     };
     let mut out = Vec::new();
     for n in &comp.nodes {
@@ -405,6 +416,8 @@ fn inlet(tool: &Tool, input: NodeInput) -> Inlet {
         NodeInput::Input => (Side::Left, PICTURE_KNOT, "Input"),
         NodeInput::Foreground => (Side::Left, RGB_KNOT, "Foreground"),
         NodeInput::EffectMask => (Side::Top, MASK_KNOT, "Effect Mask"),
+        NodeInput::DetailMap => (Side::Left, DETAIL_KNOT, "Noise Detail Map"),
+        NodeInput::BrightnessMap => (Side::Left, Color32::WHITE, "Noise Brightness Map"),
     };
     Inlet {
         slot: slot(input),
