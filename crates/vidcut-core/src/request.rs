@@ -6275,6 +6275,16 @@ pub struct NodeChange {
     /// background, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+    /// On, a merge orders its two pictures by their depth channels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth_merge: Option<bool>,
+    /// What the depth merge of a merge adds to the depth of its foreground.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreground_z_offset: Option<f64>,
+    /// As `subtractive_additive`, for the background pixels in front in the
+    /// depth merge of a merge, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_subtractive_additive: Option<f64>,
     /// The text of a `text_plus`. A line break starts a new line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -6382,7 +6392,8 @@ pub struct NodeChange {
     /// `{"tracker": "Tracker1", "pattern": 1}`. With `"size": true`, a
     /// mask also grows, shrinks and turns with the box of the pattern. The
     /// node's own center goes to its usual value. A node with keyframes on
-    /// its center is an error. Null stops it.
+    /// its center is an error. Null stops it, with `frame`: the center then
+    /// keeps the point that it follows on that frame.
     #[serde(
         default,
         deserialize_with = "given",

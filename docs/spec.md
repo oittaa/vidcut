@@ -2755,6 +2755,14 @@ The transform of the foreground (pp. 2213, 2218):
   - Duplicate: the edge pixels of the foreground, stretched out.
   - Mirror: the foreground again, mirrored in turn.
 
+The Channels tab has the Depth Merge (p. 2219):
+
+- Enable Depth Merge: off. On, the depth channels of the two pictures set which pixels are in front.
+- Foreground Z Offset: 0, from -1000000 to 1000000. It moves the depth of the foreground away or nearer.
+- Background Subtractive/Additive: 1, from 0 to 1. It is Subtractive/Additive for the pixels of the background that come in front.
+- The values and the ranges are measured in Resolve Studio 21.2.
+- Without a depth channel in a picture, Enable Depth Merge does nothing. No picture in vidcut has a depth channel. Thus these three controls change nothing.
+
 The sums use these names:
 
 - F and B are the colors of the foreground and the background, premultiplied. fa and ba are their alphas.
@@ -2996,10 +3004,21 @@ The values of the shading elements of a new node:
   - Its arrows go to the keyframes on each side.
   - After a value has a keyframe, a change on another frame puts a keyframe there.
 - The viewer shows the edge, the center and the handles of each selected mask with Show View Controls on (p. 2491). A drag of one changes that mask.
+  - Measured in Resolve Studio 21.2: a mask whose Center is joined to a tracker shows its center at the joined point. A drag of the center moves nothing.
 - The Angle of an ellipse or a rectangle has a control in the viewer. The manual names a small circle at the end of a dashed line (p. 2493).
   - Measured in Resolve Studio 21.2: the control is a dashed ring about the center. The ring keeps its size on the screen.
   - A drag on the ring turns the shape as far as the pointer turns about the center.
   - While the shape turns, the ring is red, with a line from the center at the angle.
+- The viewer shows the handles of each selected Merge. Measured in Resolve Studio 21.2:
+  - A thin line around the foreground, after its flip, Size, Angle and Center.
+  - A square at the Center. A drag of it moves the Center with the pointer.
+  - An arrow to the right and an arrow up from the Center. They stay on the axes of the screen at each Angle.
+    - A drag of the right arrow changes only X. A drag of the up arrow changes only Y.
+  - A line from the Center at the Angle, and a dashed ring about the Center.
+    - A drag of either turns the foreground as far as the pointer turns about the Center. The Angle can go past 360.
+  - No handle changes Size. A drag inside the foreground, off the handles, does nothing.
+  - A Merge whose Center is joined to a tracker shows the same handles, at the joined point.
+    - A drag of the square or of an arrow moves nothing. It changes no value.
 
 #### The Tracker
 
@@ -3054,6 +3073,7 @@ The Tracker node follows patterns in the picture on its input (pp. 1783–1789).
   - The viewer shows a dashed line from the middle of the pattern to that point (p. 1789).
 - A right-click on the Center of a mask has Connect To (pp. 1789, 1804). Its menu names each Tracker, and each pattern as "IntelliTrack 1: Offset position" (Resolve Studio 21.2).
   - The Center then follows that point.
+  - Remove (vidcut: Disconnect) leaves the Center at the point that it shows on that frame. Measured on a Merge and a mask in Resolve Studio 21.2.
   - vidcut: the menu of a connected Center also has Disconnect.
   - vidcut: Follow Size makes the mask also grow and shrink with the box of the pattern.
 - vidcut: Find in the Inspector of a Tracker finds the things of a subject in the clip ([X167](deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).

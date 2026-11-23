@@ -641,6 +641,7 @@ Writing:
     - Match Move takes a `TrackerMerge`, the edges, mode, operator and slider of a Merge, three switches, a `PivotType`, a `ReferenceTime` and the fade.
     - `pivot_tracker` names a pattern by its number. A removal of an earlier pattern makes the number one less. A removal of that pattern sets it back to 1.
   - `Tool::Merge` holds a `Merge`: the transform of its foreground, its `MergeEdges`, its `ApplyMode`, its `MergeOperator` and its sliders.
+    - It also holds the values of its depth merge (`Merge::depth_merge`). No picture has a depth channel. Thus `place::Merging` does not take them.
   - `Tool::TextPlus` holds a `TextPlus`: its text, its font and face, its spacings, its anchors, its layout and its shading elements.
     - It keeps only the `ShadingElement`s that are not at their usual values. `TextPlus::element` gives any element, kept or usual.
     - A `ShadingElement` has its own keyframes. `comp.set` and `comp.key` reach them with `element`.
@@ -650,7 +651,7 @@ Writing:
     - `Composition::sampled` writes the value of each connected Center on a frame: the middle of the pattern plus its offset (`Pattern::offset_position_at`). Thus each tool reads its Center in one way.
     - With `size`, a mask also takes the box of the pattern as its picture. Only a mask takes `size`.
     - `ops::picture::connect_checked` refuses a connection to a pattern that is not there, a node with no Center, and a connected node with its own center.
-    - `comp.set` refuses a connection of a Center with keyframes. A rename of the Tracker renames the connection. A removal of the Tracker or of the pattern takes it off.
+    - `comp.set` refuses a connection of a Center with keyframes. When it stops a connection, the Center keeps the point of the given frame (`left_point`). A rename of the Tracker renames the connection. A removal of the Tracker or of the pattern takes it off.
   - `input` names the node whose picture comes in. For a Merge, this is the background. `foreground` names the node whose picture a Merge puts on it. `effect_mask` names the last mask of a chain of masks.
 - A composition counts the frames of the file of its clip. `Composition::start` is the frame of the file that is its frame 0.
   - `ops::comp` sets it to the In of the clip when it makes the composition. A later trim does not change it.
