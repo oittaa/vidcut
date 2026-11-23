@@ -1761,6 +1761,23 @@ fn center_row(
     ui.end_row();
 }
 
+fn node_folds(ui: &mut egui::Ui, i: &Inspector, (slot, n): (usize, &Node), acts: &mut Vec<Act>) {
+    use EffectValue as V;
+    let Tool::Merge(m) = &n.tool else {
+        return;
+    };
+    let value = |ui: &mut egui::Ui, acts: &mut Vec<Act>, v: V, text: &str| {
+        node_value(ui, i, (slot, n), (v, text), acts);
+    };
+    fold(ui, (slot, "Depth Merge"), |ui| {
+        let depth = (slot, "Enable Depth Merge", m.depth_merge, false);
+        check(ui, depth, "depth_merge", acts);
+        value(ui, acts, V::ForegroundZOffset, "Foreground Z Offset");
+        let text = "Background Subtractive/Additive";
+        value(ui, acts, V::BackgroundSubtractiveAdditive, text);
+    });
+}
+
 fn node_rows(
     ui: &mut egui::Ui,
     i: &Inspector,
@@ -1867,14 +1884,6 @@ fn node_rows(
             choice_row(ui, (slot, "Edges", "edges"), edge, edges, acts);
             let invert = (slot, "Invert Transform", m.invert_transform, false);
             check(ui, invert, "invert_transform", acts);
-            fold(ui, (slot, "Depth Merge"), |ui| {
-                let depth = (slot, "Enable Depth Merge", m.depth_merge, false);
-                check(ui, depth, "depth_merge", acts);
-                value(ui, acts, V::ForegroundZOffset, "Foreground Z Offset");
-                let text = "Background Subtractive/Additive";
-                value(ui, acts, V::BackgroundSubtractiveAdditive, text);
-            });
-            ui.end_row();
         }
         t => {
             let Some(m) = t.mask() else {
@@ -2012,6 +2021,7 @@ impl Workspace {
                         rows(ui, (slot, "node"), |ui| {
                             node_rows(ui, i, (slot, n, element), &trackers, &mut acts);
                         });
+                        node_folds(ui, i, (slot, n), &mut acts);
                     }
                     ui.separator();
                     all.push(acts);
