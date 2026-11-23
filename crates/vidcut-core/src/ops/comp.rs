@@ -528,6 +528,9 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.subtractive_additive, &mut m.subtractive_additive);
             given(&mut left.alpha_gain, &mut m.alpha_gain);
             given(&mut left.burn_in, &mut m.burn_in);
+            given(&mut left.reference_width, &mut m.reference_width);
+            given(&mut left.reference_height, &mut m.reference_height);
+            taken(&mut left.auto_resolution, &mut m.auto_resolution);
             taken(&mut left.depth_merge, &mut m.depth_merge);
             given(&mut left.foreground_z_offset, &mut m.foreground_z_offset);
             given(
@@ -668,10 +671,12 @@ pub fn set(
     trimmed(p, id, name, &mut change, frame)?;
     moved_path(p, id, name, &mut change, frame)?;
     let pattern = change.pattern.unwrap_or(1);
-    let change = &change;
+    let size = p.clip(id).map(|c| crate::render::composition_size(p, c));
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    reference_kept(n, &mut change, size)?;
+    let change = &change;
     if matches!(change.connect, Some(Some(_))) && !n.keys_of(EffectValue::Center).is_empty() {
         return Err(Error::invalid(format!(
             "{name}'s center has keyframes: first remove them (comp.key), then connect it"
@@ -689,6 +694,36 @@ pub fn set(
         unhooked(c, name, pattern);
     }
     tidied(p, id)?;
+    Ok(())
+}
+
+fn reference_kept(n: &Node, change: &mut NodeChange, size: Option<(u32, u32)>) -> Result<()> {
+    let Tool::Merge(m) = &n.tool else {
+        return Ok(());
+    };
+    let auto = change.auto_resolution.unwrap_or(m.auto_resolution);
+    if auto && (change.reference_width.is_some() || change.reference_height.is_some()) {
+        return Err(Error::invalid(format!(
+            "{}'s reference size is the size of the picture while auto_resolution is on",
+            n.name
+        )));
+    }
+    let Some((w, h)) = size.filter(|_| m.auto_resolution && !auto) else {
+        return Ok(());
+    };
+    let sizes = [
+        (EffectValue::ReferenceWidth, w, &mut change.reference_width),
+        (
+            EffectValue::ReferenceHeight,
+            h,
+            &mut change.reference_height,
+        ),
+    ];
+    for (v, pixels, to) in sizes {
+        if n.keys_of(v).is_empty() {
+            to.get_or_insert(f64::from(pixels));
+        }
+    }
     Ok(())
 }
 

@@ -2749,6 +2749,16 @@ The transform of the foreground (pp. 2213, 2218):
   - Duplicate: the edge pixels of the foreground, stretched out.
   - Mirror: the foreground again, mirrored in turn.
 
+Reference Size sets the units of the Center fields. It does not change the picture (p. 2218):
+
+- Width and Height: 1, from 1 to 32767. The Center fields show x × Width and y × Height.
+- Example: with Width 100 and Height 100, the center 0.5 shows as 50.
+- The Center stays a fraction. Requests read and write the fraction.
+- Auto Resolution: off. The manual calls it Use Frame Format Settings.
+- On, Width and Height are the size of the picture of the composition: the clip's own pixels. Then they cannot be set.
+- Turned off, Auto Resolution leaves Width and Height at that size.
+- The ranges and Auto Resolution are measured in Resolve Studio 21.2.
+
 The Channels tab has the Depth Merge (p. 2219):
 
 - Enable Depth Merge: off. On, the depth channels of the two pictures set which pixels are in front.

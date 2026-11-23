@@ -4812,6 +4812,19 @@ pub struct Merge {
     /// from 0 to 1. The foreground is still added in full. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+    /// The width that the center is shown in: its x shows as x × this
+    /// width. It does not change the picture. From 1 to 32767. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_width: Option<f64>,
+    /// The height that the center is shown in: its y shows as y × this
+    /// height. From 1 to 32767. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_height: Option<f64>,
+    /// On, the reference size is the size of the picture of the clip, and
+    /// the reference width and height cannot be set. Turned off, they keep
+    /// that size. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_resolution: bool,
     /// On, the merge puts the pixels of the two pictures in the order of
     /// their depth channels. A picture without a depth channel is merged as
     /// usual, and no picture has one. Thus this changes nothing. Usual: off.
@@ -5413,6 +5426,8 @@ pub enum EffectValue {
     BurnIn,
     ForegroundZOffset,
     BackgroundSubtractiveAdditive,
+    ReferenceWidth,
+    ReferenceHeight,
     Tracking,
     LineSpacing,
     LayoutSize,
