@@ -3400,7 +3400,8 @@ pub enum Request {
     /// way after it, and each node that took that picture takes the new tool.
     /// With `after` a node that has an effect mask, a mask goes on it, after
     /// the masks that are there. With `after` a mask, a mask goes after it
-    /// in its chain. A tool that makes its own picture, as `text_plus`,
+    /// in its chain, and each mask input that took that mask takes the new
+    /// mask. A tool that makes its own picture, as `text_plus`,
     /// `background` or `fast_noise`, with `after` a node other than a mask
     /// comes with a new merge: the merge goes in after that node, and the
     /// new tool joins its foreground. Any other new node joins nothing.

@@ -112,9 +112,12 @@ fn insert(c: &mut Composition, mut node: Node, after: Option<&str>, id: &str) ->
         }
         Some(a) if node.tool.is_mask() && a.tool.is_mask() => {
             node.place = above(c, a.place);
-            for n in &mut c.nodes {
-                if n.effect_mask.as_deref() == Some(a.name.as_str()) {
-                    n.effect_mask = Some(node.name.clone());
+            let inputs = NodeInput::ALL.into_iter().filter(|i| !i.carries_picture());
+            for input in inputs {
+                for n in &mut c.nodes {
+                    if n.join(input) == Some(a.name.as_str()) {
+                        *n.join_mut(input) = Some(node.name.clone());
+                    }
                 }
             }
             node.effect_mask = Some(a.name);
