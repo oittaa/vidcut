@@ -1,16 +1,18 @@
 use serde_json::{Value, json};
 
-use crate::composition::named_well;
+use crate::composition::{Corner, named_well};
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, Clip, CompositeMode,
-    Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind, EffectValue, FillMethod,
-    FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, Merge,
-    MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, PivotType, Project,
-    ReferenceTime, ShadingElement, Sharpen, TextPlus, Tool, TrackKind, Tracker, TrackerMerge,
-    TrackerOperation, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
+    CellShape, Clip, CompositeMode, Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind,
+    EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming,
+    GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite, ImageFormat, Mask,
+    Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring, Pattern, Picture,
+    PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen, TextPlus, Tool,
+    TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode, VignetteShape,
+    ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput};
 
@@ -573,12 +575,138 @@ fn plain_node_checked(n: &Node) -> Result<Node> {
         Tool::Tracker(t) => Tool::Tracker(tracker_checked(t)?),
         Tool::Merge(m) => Tool::Merge(merge_checked(m)?),
         Tool::TextPlus(t) => Tool::TextPlus(text_checked(t)?),
+        Tool::Background(b) => Tool::Background(background_checked(b)?),
+        Tool::FastNoise(f) => Tool::FastNoise(noise_checked(f)?),
         t => t.clone(),
     };
     Ok(Node {
         tool,
         blend: n.blend.filter(|v| *v != 1.0),
         ..n.clone()
+    })
+}
+
+fn colors_checked(colors: impl IntoIterator<Item = [f64; 4]>, why: &str) -> Result<()> {
+    for v in colors.into_iter().flatten() {
+        within(Some(v), Background::COLORS, why)?;
+    }
+    Ok(())
+}
+
+fn stops_checked(stops: &[GradientStop]) -> Result<Vec<GradientStop>> {
+    let (fewest, most) = Background::STOPS;
+    if !stops.is_empty() && !(fewest..=most).contains(&stops.len()) {
+        return Err(Error::invalid("a gradient has from 2 to 64 stops"));
+    }
+    for s in stops {
+        within(
+            Some(s.position),
+            (0.0, 1.0),
+            "a gradient stop's position is from 0 to 1",
+        )?;
+    }
+    let why = "a gradient stop's color is four numbers, each from -1000000 to 1000000";
+    colors_checked(stops.iter().map(|s| s.color), why)?;
+    let mut sorted = stops.to_vec();
+    sorted.sort_by(|a, b| a.position.total_cmp(&b.position));
+    Ok(match sorted[..] == Background::STOPS_USUAL {
+        true => Vec::new(),
+        false => sorted,
+    })
+}
+
+fn image_checked(image: &ImageFormat) -> Result<()> {
+    let (least, largest) = ImageFormat::PIXELS;
+    for v in [image.width, image.height].into_iter().flatten() {
+        if !(least..=largest).contains(&v) {
+            return Err(Error::invalid(
+                "a picture is from 1 to 32768 pixels wide and high",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn background_checked(b: &Background) -> Result<Background> {
+    let why = "a background's color is four numbers, each from -1000000 to 1000000";
+    colors_checked(Corner::ALL.into_iter().filter_map(|c| b.corner(c)), why)?;
+    for v in [b.start, b.end].into_iter().flatten().flatten() {
+        let why = "a gradient's start and end are two fractions, each from -10 to 10";
+        within(Some(v), Mask::PLACES, why)?;
+    }
+    let stops = stops_checked(&b.stops)?;
+    within(
+        b.offset,
+        Background::OFFSETS,
+        "a gradient's offset is from -1000000 to 1000000",
+    )?;
+    image_checked(&b.image)?;
+    let usual = |c: Corner| b.corner(c).filter(|v| *v != Background::COLOR);
+    Ok(Background {
+        fill: b.fill.filter(|f| *f != BackgroundFill::default()),
+        top_left: usual(Corner::TopLeft),
+        top_right: usual(Corner::TopRight),
+        bottom_left: usual(Corner::BottomLeft),
+        bottom_right: usual(Corner::BottomRight),
+        gradient_type: b.gradient_type.filter(|t| *t != GradientType::default()),
+        start: b.start.filter(|p| *p != Background::START),
+        end: b.end.filter(|p| *p != Background::END),
+        stops,
+        offset: b.offset.filter(|v| *v != 0.0),
+        repeat: b.repeat.filter(|r| *r != GradientRepeat::default()),
+        image: b.image,
+    })
+}
+
+fn noise_checked(f: &FastNoise) -> Result<FastNoise> {
+    for v in f.center.into_iter().flatten() {
+        let why = "a fast noise's center is two fractions, each from -10 to 10";
+        within(Some(v), Mask::PLACES, why)?;
+    }
+    within(
+        f.detail,
+        FastNoise::DETAILS,
+        "a fast noise's detail is from 0 to 10",
+    )?;
+    for v in [f.brightness, f.contrast] {
+        let why = "a fast noise's brightness and contrast are from -1000 to 1000";
+        within(v, FastNoise::LEVELS, why)?;
+    }
+    for v in [f.scale, f.y_scale] {
+        within(
+            v,
+            FastNoise::SCALES,
+            "a fast noise's scale is from 0 to 1000000",
+        )?;
+    }
+    within(
+        f.angle,
+        FastNoise::TURNS,
+        "a fast noise's angle is from -1000000 to 1000000",
+    )?;
+    for v in [f.seethe, f.seethe_rate] {
+        let why = "a fast noise's seethe and seethe rate are from -1000000 to 1000000";
+        within(v, FastNoise::SEETHES, why)?;
+    }
+    let why = "a fast noise's color is four numbers, each from -1000000 to 1000000";
+    colors_checked([f.color1, f.color2].into_iter().flatten(), why)?;
+    let stops = stops_checked(&f.stops)?;
+    image_checked(&f.image)?;
+    Ok(FastNoise {
+        center: f.center.filter(|p| *p != Mask::MIDDLE),
+        detail: f.detail.filter(|v| *v != FastNoise::DETAIL),
+        brightness: f.brightness.filter(|v| *v != 0.0),
+        contrast: f.contrast.filter(|v| *v != FastNoise::CONTRAST),
+        scale: f.scale.filter(|v| *v != FastNoise::SCALE),
+        y_scale: f.y_scale.filter(|v| *v != FastNoise::SCALE),
+        angle: f.angle.filter(|v| *v != 0.0),
+        seethe: f.seethe.filter(|v| *v != 0.0),
+        seethe_rate: f.seethe_rate.filter(|v| *v != 0.0),
+        coloring: f.coloring.filter(|c| *c != NoiseColoring::default()),
+        color1: f.color1.filter(|c| *c != FastNoise::COLOR1),
+        color2: f.color2.filter(|c| *c != FastNoise::COLOR2),
+        stops,
+        ..f.clone()
     })
 }
 
@@ -629,6 +757,14 @@ fn merge_checked(m: &Merge) -> Result<Merge> {
             &format!("a merge's {what} is from 0 to 1"),
         )?;
     }
+    let (lo, hi) = Merge::REFERENCES;
+    for (what, v) in [("width", m.reference_width), ("height", m.reference_height)] {
+        within(
+            v,
+            Merge::REFERENCES,
+            &format!("a merge's reference {what} is from {lo} to {hi}"),
+        )?;
+    }
     let (lo, hi) = Merge::Z_OFFSETS;
     within(
         m.foreground_z_offset,
@@ -645,6 +781,8 @@ fn merge_checked(m: &Merge) -> Result<Merge> {
         subtractive_additive: m.subtractive_additive.filter(|v| *v != 1.0),
         alpha_gain: m.alpha_gain.filter(|v| *v != 1.0),
         burn_in: m.burn_in.filter(|v| *v != 0.0),
+        reference_width: m.reference_width.filter(|v| *v != 1.0),
+        reference_height: m.reference_height.filter(|v| *v != 1.0),
         foreground_z_offset: m.foreground_z_offset.filter(|v| *v != 0.0),
         background_subtractive_additive: m.background_subtractive_additive.filter(|v| *v != 1.0),
         ..m.clone()

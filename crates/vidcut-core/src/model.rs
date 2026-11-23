@@ -4640,6 +4640,16 @@ pub struct Node {
     /// Left out, a tool works on the whole picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_mask: Option<String>,
+    /// The mask node on the detail map input of a `fast_noise`. Where the
+    /// mask is clear, the noise has no detail. Left out, the noise has its
+    /// full detail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_map: Option<String>,
+    /// The mask node on the brightness map input of a `fast_noise`. The
+    /// mask sets the level that the noise moves about. Left out, the level
+    /// is 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness_map: Option<String>,
     /// On, the node does nothing. A tool passes on the picture that comes
     /// in, and a mask passes on the masks that come in. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -4708,6 +4718,13 @@ pub enum Tool {
     /// Text on a clear picture of the size of the clip's own picture. Its
     /// `effect_mask` crops it.
     TextPlus(TextPlus),
+    /// A picture of one color or of blended colors. Its `effect_mask` crops
+    /// it.
+    Background(Background),
+    /// Smooth noise in one color or in blended colors. Its `effect_mask`
+    /// crops it. Masks on its `detail_map` and `brightness_map` set its
+    /// detail and its level at each pixel.
+    FastNoise(FastNoise),
 }
 
 /// The patterns of a tracker and what it does with its pictures. A field
@@ -4727,15 +4744,17 @@ pub struct Tracker {
     /// `canvas`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edges: Option<MergeEdges>,
-    /// The math that puts the moved foreground on the background, as on a
-    /// `merge`. Only `fg_over_bg` takes it. Usual: `normal`.
+    /// The math that puts one picture of a `match_move` on the other, as on
+    /// a `merge`. Only `fg_over_bg` and `bg_over_fg` take it. Usual: `normal`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_mode: Option<ApplyMode>,
     /// Which parts of the two pictures a `normal` or a `screen` merge
-    /// keeps, as on a `merge`. Only `fg_over_bg` takes it. Usual: `over`.
+    /// keeps, as on a `merge`. Only `fg_over_bg` and `bg_over_fg` take it.
+    /// Usual: `over`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator: Option<MergeOperator>,
-    /// From 0 to 1, as on a `merge`. Only `fg_over_bg` takes it. Usual: 1.
+    /// From 0 to 1, as on a `merge`. Only `fg_over_bg` and `bg_over_fg`
+    /// take it. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtractive_additive: Option<f64>,
     /// Off, a `match_move` does not follow the move of the pivot. Usual:
@@ -4946,6 +4965,19 @@ pub struct Merge {
     /// from 0 to 1. The foreground is still added in full. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+    /// The width that the center is shown in: its x shows as x × this
+    /// width. It does not change the picture. From 1 to 32767. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_width: Option<f64>,
+    /// The height that the center is shown in: its y shows as y × this
+    /// height. From 1 to 32767. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_height: Option<f64>,
+    /// On, the reference size is the size of the picture of the clip, and
+    /// the reference width and height cannot be set or keyed. Turned off,
+    /// they keep that size. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_resolution: bool,
     /// On, the merge puts the pixels of the two pictures in the order of
     /// their depth channels. A picture without a depth channel is merged as
     /// usual, and no picture has one. Thus this changes nothing. Usual: off.
@@ -4959,6 +4991,224 @@ pub struct Merge {
     /// depth merge puts in front of the foreground, from 0 to 1. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background_subtractive_additive: Option<f64>,
+}
+
+/// The picture of a `background` node: one color, or colors that blend
+/// across it. A color is `[r, g, b, a]`, each from -1000000 to 1000000. A
+/// field left out is at its usual value. Its numbers can have keyframes, in
+/// the `keys` of its node.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Background {
+    /// How the colors fill the picture. Usual: `solid_color`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<BackgroundFill>,
+    /// The color of `solid_color`, the left of `horizontal`, the top of
+    /// `vertical` and the top left of `four_corner`. Usual: `[0, 0, 0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_left: Option<[f64; 4]>,
+    /// The right of `horizontal` and the top right of `four_corner`.
+    /// Usual: `[0, 0, 0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_right: Option<[f64; 4]>,
+    /// The bottom of `vertical` and the bottom left of `four_corner`.
+    /// Usual: `[0, 0, 0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom_left: Option<[f64; 4]>,
+    /// The bottom right of `four_corner`. Usual: `[0, 0, 0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom_right: Option<[f64; 4]>,
+    /// The form of a `gradient`. Usual: `linear`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gradient_type: Option<GradientType>,
+    /// Where a `gradient` starts, `[x, y]` as fractions of the picture from
+    /// its bottom left, each from -10 to 10. Usual: `[0, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<[f64; 2]>,
+    /// Where a `gradient` ends, as `start`. Usual: `[1, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<[f64; 2]>,
+    /// The colors of a `gradient`, from 2 to 64 stops. Left out, black at
+    /// 0 and white at 1.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stops: Vec<GradientStop>,
+    /// Moves a `gradient` along its line, as a part of its length, from
+    /// -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f64>,
+    /// What a `gradient` shows past its start and its end. Usual: `once`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<GradientRepeat>,
+    /// The size of the picture.
+    #[serde(default, skip_serializing_if = "ImageFormat::is_usual")]
+    pub image: ImageFormat,
+}
+
+/// How the colors of a `background` fill its picture.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundFill {
+    /// One color, `top_left`.
+    #[default]
+    SolidColor,
+    /// `top_left` at the left blends into `top_right` at the right. The
+    /// first column of pixels is `top_left`, the last is `top_right`.
+    Horizontal,
+    /// `top_left` at the top blends into `bottom_left` at the bottom. The
+    /// top row of pixels is `top_left`, the bottom row is `bottom_left`.
+    Vertical,
+    /// The four colors in their corner pixels blend across, then down.
+    FourCorner,
+    /// The `stops` from `start` to `end`, in the form of `gradient_type`.
+    Gradient,
+}
+
+/// The form of the gradient of a `background`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GradientType {
+    /// Along the straight line from `start` to `end`.
+    #[default]
+    Linear,
+    /// The linear gradient, mirrored on each side of `start`.
+    Reflect,
+    /// In squares about `start`.
+    Square,
+    /// In a cross about `start`.
+    Cross,
+    /// In circles about `start`.
+    Radial,
+    /// In a counterclockwise sweep about `start`.
+    Angle,
+}
+
+/// What a gradient shows when its `offset` moves it past its start and its
+/// end.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GradientRepeat {
+    /// The colors of the ends go on.
+    #[default]
+    Once,
+    /// The gradient starts again.
+    Repeat,
+    /// The gradient goes back and forth.
+    PingPong,
+}
+
+/// A color of a gradient, at a place along it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GradientStop {
+    /// Its place, from 0 (the start) to 1 (the end).
+    pub position: f64,
+    /// `[r, g, b, a]`, each from -1000000 to 1000000.
+    pub color: [f64; 4],
+}
+
+/// The picture of a `fast_noise` node: smooth noise, colored by two colors
+/// or by a gradient. Its level is 0.5 with no noise, and it is not clamped.
+/// A color is `[r, g, b, a]`, each from -1000000 to 1000000. A field left
+/// out is at its usual value. Its numbers can have keyframes, in the `keys`
+/// of its node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FastNoise {
+    /// On, the noise has hard lines along some of its contours. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub discontinuous: bool,
+    /// On, the noise changes sign before `contrast` and `brightness`. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inverted: bool,
+    /// The middle of the noise, `[x, y]` as fractions of the picture from
+    /// its bottom left, each from -10 to 10. Usual: `[0.5, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// How many layers of finer noise it adds, from 0 to 10. A part of 1
+    /// adds a part of the next layer. 0 gives a flat level. Usual: 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<f64>,
+    /// Half of it is added to the level, from -1000 to 1000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<f64>,
+    /// Scales the noise before `brightness`, from -1000 to 1000. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contrast: Option<f64>,
+    /// Off, `y_scale` sets how fine the noise is down. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub lock_xy: bool,
+    /// How fine the noise is: the cells of the noise across the width of
+    /// the picture, and with `lock_xy` also across its height, from 0 to
+    /// 1000000. Usual: 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    /// Without `lock_xy`, the cells of the noise across the height of the
+    /// picture, from 0 to 1000000. Usual: 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_scale: Option<f64>,
+    /// Turns the noise counterclockwise about `center`, in degrees, from
+    /// -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
+    /// Moves the noise along a third axis, so that it changes in place,
+    /// from -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seethe: Option<f64>,
+    /// Added to `seethe` on each frame of the composition, from -1000000
+    /// to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seethe_rate: Option<f64>,
+    /// How the level becomes a color. Usual: `two_color`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coloring: Option<NoiseColoring>,
+    /// The color at level 0 of `two_color`. Usual: `[0, 0, 0, 0]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color1: Option<[f64; 4]>,
+    /// The color at level 1 of `two_color`. Usual: `[1, 1, 1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color2: Option<[f64; 4]>,
+    /// The colors of `gradient` at the levels of their places, from 2 to 64
+    /// stops. Left out, black at 0 and white at 1.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stops: Vec<GradientStop>,
+    /// The size of the picture.
+    #[serde(default, skip_serializing_if = "ImageFormat::is_usual")]
+    pub image: ImageFormat,
+}
+
+/// How the level of a `fast_noise` becomes a color.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NoiseColoring {
+    /// `color1` at level 0 blends into `color2` at level 1.
+    #[default]
+    TwoColor,
+    /// The `stops` at their levels.
+    Gradient,
+}
+
+/// The size of the picture that a node makes. A field left out is at its
+/// usual value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ImageFormat {
+    /// On, the picture has the size of the clip's own picture. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub auto_resolution: bool,
+    /// Without `auto_resolution`, the width in pixels, from 1 to 32768.
+    /// Usual: the width of the clip's own picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    /// Without `auto_resolution`, the height in pixels, from 1 to 32768.
+    /// Usual: the height of the clip's own picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+}
+
+impl Default for ImageFormat {
+    fn default() -> Self {
+        Self {
+            auto_resolution: true,
+            width: None,
+            height: None,
+        }
+    }
 }
 
 /// The text of a `text_plus` node and how it lies on the picture. S is its
@@ -5249,7 +5499,8 @@ pub enum MergeOperator {
 }
 
 /// The tools that a composition takes: `blur`, the kinds of effect, the
-/// masks, `merge`, `text_plus`, and the picture coming in and going out.
+/// masks, `merge`, `text_plus`, `background`, and the picture coming in and
+/// going out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolType {
@@ -5266,6 +5517,8 @@ pub enum ToolType {
     Tracker,
     Merge,
     TextPlus,
+    Background,
+    FastNoise,
     MediaIn,
     MediaOut,
 }
@@ -5453,7 +5706,11 @@ pub struct EffectKeys {
 /// shading element of a `text_plus` has `opacity`, its color, `softness_x`,
 /// `softness_y`, `shading_offset` and `priority`, with `thickness` on an
 /// outline, and `extend_horizontal`, `extend_vertical` and `round` on a
-/// border.
+/// border. A `background` has the four channels of each of its four
+/// colors, from `top_left_red` to `bottom_right_alpha`, and `start`, `end`
+/// and `offset` of its gradient. A `fast_noise` has `center`, `detail`,
+/// `brightness`, `contrast`, `scale`, `y_scale`, `angle`, `seethe`,
+/// `seethe_rate` and the four channels of `color1` and `color2`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -5547,6 +5804,8 @@ pub enum EffectValue {
     BurnIn,
     ForegroundZOffset,
     BackgroundSubtractiveAdditive,
+    ReferenceWidth,
+    ReferenceHeight,
     Tracking,
     LineSpacing,
     LayoutSize,
@@ -5560,6 +5819,39 @@ pub enum EffectValue {
     SoftnessY,
     ShadingOffset,
     Priority,
+    TopLeftRed,
+    TopLeftGreen,
+    TopLeftBlue,
+    TopLeftAlpha,
+    TopRightRed,
+    TopRightGreen,
+    TopRightBlue,
+    TopRightAlpha,
+    BottomLeftRed,
+    BottomLeftGreen,
+    BottomLeftBlue,
+    BottomLeftAlpha,
+    BottomRightRed,
+    BottomRightGreen,
+    BottomRightBlue,
+    BottomRightAlpha,
+    Start,
+    End,
+    Detail,
+    Brightness,
+    Contrast,
+    Scale,
+    YScale,
+    Seethe,
+    SeetheRate,
+    Color1Red,
+    Color1Green,
+    Color1Blue,
+    Color1Alpha,
+    Color2Red,
+    Color2Green,
+    Color2Blue,
+    Color2Alpha,
 }
 
 /// What an effect does, with its own values.

@@ -3,11 +3,15 @@ use vidcut_core::grade::{
     THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
 };
 use vidcut_core::lru::{ByBytes, Lru};
-use vidcut_core::model::{ApplyMode, MergeEdges, MergeOperator};
+use vidcut_core::model::{
+    ApplyMode, BackgroundFill, GradientRepeat, GradientStop, GradientType, MergeEdges,
+    MergeOperator, NoiseColoring,
+};
 use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
 use vidcut_core::place::{
-    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Inking, Level, Merging, Op,
-    Outline, Placing, Program, Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
+    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Inking, Level, Making,
+    Merging, Noising, Op, Outline, Painting, Placing, Program, Shading, Shaping, Sharpening,
+    Softening, Tiling, Work, Working,
 };
 use vidcut_core::window_key::{
     CURVE_SAMPLE, FAR_OUTSIDE, Keying, Outline as WindowOutline, Shaped, texel_map,
@@ -103,6 +107,8 @@ pub(super) struct Pipes {
     mask_join: wgpu::RenderPipeline,
     masked: wgpu::RenderPipeline,
     merge: wgpu::RenderPipeline,
+    background: wgpu::RenderPipeline,
+    noise: wgpu::RenderPipeline,
     grade: wgpu::RenderPipeline,
     grade_stats: wgpu::RenderPipeline,
     grade_coef: wgpu::RenderPipeline,
@@ -206,6 +212,8 @@ impl Pipes {
             mask_join: pipeline(&plain, "fs_mask_join"),
             masked: pipeline(&plain, "fs_masked"),
             merge: pipeline(&plain, "fs_merge"),
+            background: pipeline(&of(&reading), "fs_background"),
+            noise: pipeline(&of(&reading), "fs_noise"),
             grade: pipeline(&plain, "fs_grade"),
             grade_stats: pipeline(&plain, "fs_grade_stats"),
             grade_coef: pipeline(&plain, "fs_grade_coef"),
@@ -462,6 +470,107 @@ fn merge_bytes(m: &Merging, masked: bool) -> Vec<u8> {
         m.burn,
         m.blend,
     ])
+}
+
+fn place_of<T: PartialEq>(all: &[T], v: &T) -> f64 {
+    all.iter().position(|a| a == v).unwrap_or_default() as f64
+}
+
+fn paint_bytes(p: &Painting, (w, h): (u32, u32)) -> Vec<u8> {
+    let [[sx, sy], [ex, ey]] = p.line;
+    let mut floats: Vec<f64> = p.corners.iter().flatten().copied().collect();
+    floats.extend([
+        sx,
+        sy,
+        ex,
+        ey,
+        place_of(&BackgroundFill::ALL, &p.fill),
+        place_of(&GradientType::ALL, &p.form),
+        place_of(&GradientRepeat::ALL, &p.repeat),
+        p.stops.len() as f64,
+        p.offset,
+        f64::from(w),
+        f64::from(h),
+        0.0,
+    ]);
+    float_bytes(&floats)
+}
+
+fn noise_bytes(n: &Noising) -> Vec<u8> {
+    let flags = [n.discontinuous, n.inverted, n.maps[0], n.maps[1]]
+        .iter()
+        .enumerate()
+        .map(|(i, on)| if *on { f64::from(1u32 << i) } else { 0.0 })
+        .sum();
+    let mut floats: Vec<f64> = n.colors.iter().flatten().copied().collect();
+    floats.extend([
+        n.middle[0],
+        n.middle[1],
+        n.cells[0],
+        n.cells[1],
+        n.turn,
+        n.detail,
+        n.depth,
+        n.brightness,
+        n.contrast,
+        flags,
+        place_of(&NoiseColoring::ALL, &n.coloring),
+        n.stops.len() as f64,
+    ]);
+    float_bytes(&floats)
+}
+
+fn stops_buffer(gpu: &Gpu, stops: &[GradientStop]) -> wgpu::Buffer {
+    let floats: Vec<f64> = (stops.iter())
+        .flat_map(|s| std::iter::once(s.position).chain(s.color))
+        .collect();
+    cells_buffer(gpu, &floats)
+}
+
+fn made_into(
+    gpu: &Gpu,
+    (making, to, spare, maps): (&Making, &Texture, &Texture, &[&Texture]),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let size = to.texture.size();
+    match making {
+        Making::Background(p) => {
+            let stops = stops_buffer(gpu, &p.stops);
+            let views = Views {
+                cells: Some(&stops),
+                ..Views::same(&spare.view)
+            };
+            let bytes = paint_bytes(p, (size.width, size.height));
+            draw_step(
+                gpu,
+                (&gpu.blur.background, &bytes),
+                views,
+                &to.view,
+                encoder,
+            );
+        }
+        Making::Noise(n) => {
+            let stops = stops_buffer(gpu, &n.stops);
+            let mut given = maps.iter();
+            let [detail, level] = n.maps.map(|on| match on {
+                true => given.next().map_or(&spare.view, |t| &t.view),
+                false => &spare.view,
+            });
+            let views = Views {
+                second: detail,
+                mask: level,
+                cells: Some(&stops),
+                ..Views::same(&spare.view)
+            };
+            draw_step(
+                gpu,
+                (&gpu.blur.noise, &noise_bytes(n)),
+                views,
+                &to.view,
+                encoder,
+            );
+        }
+    }
 }
 
 fn mask_made<'a>(
@@ -1024,6 +1133,10 @@ fn run(
                 draw_step(gpu, (&gpu.blur.merge, &bytes), views, &to.view, encoder);
             }
             Op::Text(text) => letters_into(gpu, &mut worked.letters, (text, to), encoder),
+            Op::Make(making) => {
+                let maps: Vec<&Texture> = stage.from.iter().map(|&k| at(k)).collect();
+                made_into(gpu, (making, to, &scratch[0], &maps), encoder);
+            }
         }
     }
     if program.out != 0 {

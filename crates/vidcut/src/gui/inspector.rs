@@ -8,18 +8,20 @@ use egui_phosphor::regular::{
     FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
 };
 use serde_json::{Value, json};
+use vidcut_core::composition::Corner;
 use vidcut_core::effect_keys::Keyed;
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Appearance, ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, BorderLevel,
-    CellShape, Clip, ClipRetime, CompositeMode, Composition, Connect, DynamicZoom, Ease, EbuLevel,
-    Effect, EffectKind, EffectType, EffectValue, FillMethod, FilmGrain, FindModel, GaussianBlur,
-    Generator, Glow, GlowAlpha, GlowFraming, GlowOutput, Gradient, GrainComposite, GrainPreset,
-    JoinStyle, Keyframe, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture,
-    PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement, Sharpen, Speed,
-    Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge, TrackerOperation,
-    Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    Appearance, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter,
+    Border, BorderLevel, CellShape, Clip, ClipRetime, CompositeMode, Composition, Connect,
+    DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue, FastNoise,
+    FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
+    GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
+    JoinStyle, Keyframe, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring,
+    Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement,
+    Sharpen, Speed, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
+    TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -1240,6 +1242,7 @@ fn node_speed(v: EffectValue) -> f64 {
         EffectValue::SoftnessX | EffectValue::SoftnessY | EffectValue::Priority => 0.05,
         EffectValue::Thickness => 0.0005,
         EffectValue::ForegroundZOffset => 0.01,
+        EffectValue::ReferenceWidth | EffectValue::ReferenceHeight => 1.0,
         _ => 0.002,
     }
 }
@@ -1308,10 +1311,22 @@ fn node_value(
     (v, text): (EffectValue, &str),
     acts: &mut Vec<Act>,
 ) -> Option<egui::Response> {
+    node_value_in(ui, i, (slot, n), (v, text), None, acts)
+}
+
+fn node_value_in(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n): (usize, &Node),
+    (v, text): (EffectValue, &str),
+    units: Option<[f64; 2]>,
+    acts: &mut Vec<Act>,
+) -> Option<egui::Response> {
     let point = n.read_point(v)?.0;
     let usual = n.usual_point(v).unwrap_or(point);
     let look = Look {
         speed: row_speed(&n.tool, v),
+        units,
         ..Look::default()
     };
     keyed_row(ui, i, (slot, n, None), (v, text, usual), look, acts)
@@ -1379,6 +1394,15 @@ fn keyed_row<K: Keyed>(
     }
     ui.end_row();
     Some(r)
+}
+
+fn fixed_row(ui: &mut egui::Ui, text: &str, mut now: f64) {
+    label(ui, text, false);
+    ui.add_enabled_ui(false, |ui| {
+        let size = vec2(FIELD_WIDTH, ui.spacing().interact_size.y);
+        ui.add(egui::DragValue::new(&mut now).min_size(size));
+    });
+    ui.end_row();
 }
 
 fn offset_row(ui: &mut egui::Ui, (id, text): (egui::Id, &str), now: f64) -> Option<f64> {
@@ -1475,6 +1499,11 @@ const FILLS: [FillMethod; 2] = [FillMethod::Alternate, FillMethod::NonZeroWindin
 struct Hooked {
     name: String,
     patterns: Vec<String>,
+}
+
+struct Sight {
+    trackers: Vec<Hooked>,
+    pixels: [f64; 2],
 }
 
 fn hooks(comp: &Composition) -> Vec<Hooked> {
@@ -1726,11 +1755,17 @@ fn center_row(
     ui: &mut egui::Ui,
     i: &Inspector,
     (slot, n): (usize, &Node),
-    trackers: &[Hooked],
+    sight: &Sight,
     acts: &mut Vec<Act>,
 ) {
+    let trackers = &sight.trackers[..];
     let Some(k) = &n.connect else {
-        if let Some(r) = node_value(ui, i, (slot, n), (EffectValue::Center, "Center"), acts) {
+        let units = match &n.tool {
+            Tool::Merge(m) => Some(m.reference(sight.pixels)),
+            _ => None,
+        };
+        let center = (EffectValue::Center, "Center");
+        if let Some(r) = node_value_in(ui, i, (slot, n), center, units, acts) {
             r.context_menu(|ui| {
                 if let Some(v) = connect_menu(ui, None, trackers) {
                     acts.push(node_set(slot, "connect", v));
@@ -1770,7 +1805,358 @@ fn center_row(
     ui.end_row();
 }
 
-fn node_folds(ui: &mut egui::Ui, i: &Inspector, (slot, n): (usize, &Node), acts: &mut Vec<Act>) {
+fn corner_label(fill: BackgroundFill, c: Corner) -> &'static str {
+    match (fill, c) {
+        (BackgroundFill::SolidColor, _) => "Color",
+        (BackgroundFill::Horizontal, Corner::TopLeft) => "Left",
+        (BackgroundFill::Horizontal, _) => "Right",
+        (BackgroundFill::Vertical, Corner::TopLeft) => "Top",
+        (BackgroundFill::Vertical, _) => "Bottom",
+        (_, Corner::TopLeft) => "Top Left",
+        (_, Corner::TopRight) => "Top Right",
+        (_, Corner::BottomLeft) => "Bottom Left",
+        (_, Corner::BottomRight) => "Bottom Right",
+    }
+}
+
+fn swatch_row(
+    ui: &mut egui::Ui,
+    (slot, name, put): (usize, &str, &str),
+    (now, usual): ([f64; 4], [f64; 4]),
+    acts: &mut Vec<Act>,
+) {
+    let set = now != usual;
+    label(ui, name, set);
+    let mut rgba = now.map(|v| v as f32);
+    if ui.color_edit_button_rgba_unmultiplied(&mut rgba).changed() {
+        acts.push(node_set(slot, put, json!(rgba.map(f64::from))));
+    }
+    if reset(ui, set) {
+        acts.push(node_set(slot, put, json!(usual)));
+    }
+    ui.end_row();
+}
+
+const GRADIENT_HIGH: f32 = 18.0;
+const STOP_HIGH: f32 = 10.0;
+const STOP_REACH: f32 = 6.0;
+const STOP_GONE: f32 = 12.0;
+
+#[derive(Clone, Default)]
+struct Dragged {
+    stops: Vec<GradientStop>,
+    stop: usize,
+}
+
+fn shown_color(c: [f64; 4]) -> egui::Color32 {
+    let [r, g, b, a] = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    egui::Color32::from_rgba_unmultiplied(r, g, b, a)
+}
+
+fn stops_sorted(mut stops: Vec<GradientStop>, stop: usize) -> (Vec<GradientStop>, usize) {
+    let moved = stops[stop];
+    stops.sort_by(|a, b| a.position.total_cmp(&b.position));
+    let at = stops.iter().position(|s| *s == moved).unwrap_or(0);
+    (stops, at)
+}
+
+fn colors_of(tool: &Tool) -> Vec<(&'static str, [EffectValue; 4], [f64; 4])> {
+    match tool {
+        Tool::Background(b) => Corner::ALL
+            .map(|c| (c.key(), c.values(), b.color(c)))
+            .to_vec(),
+        Tool::FastNoise(f) => vec![
+            ("color1", FastNoise::color_values(false), f.first()),
+            ("color2", FastNoise::color_values(true), f.second()),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+fn channels_folded(tool: &Tool, mut params: Value) -> Value {
+    for (put, channels, now) in colors_of(tool) {
+        for (i, v) in channels.into_iter().enumerate() {
+            let Some(x) = params.as_object_mut().and_then(|o| o.remove(&v.name())) else {
+                continue;
+            };
+            let mut color = (params.get(put).cloned())
+                .and_then(|c| serde_json::from_value::<[f64; 4]>(c).ok())
+                .unwrap_or(now);
+            color[i] = x.as_f64().unwrap_or(color[i]);
+            params[put] = json!(color);
+        }
+    }
+    params
+}
+
+fn gradient_rows(
+    ui: &mut egui::Ui,
+    (slot, name): (usize, &str),
+    (colors, set): (&[GradientStop], bool),
+    acts: &mut Vec<Act>,
+) {
+    let id = ui.make_persistent_id(("inspector-gradient", slot, name));
+    let held = ui.data(|d| d.get_temp::<Dragged>(id));
+    let (stops, dragged) = match held.as_ref() {
+        Some(h) => {
+            let (sorted, k) = stops_sorted(h.stops.clone(), h.stop);
+            (sorted, Some(k))
+        }
+        None => (colors.to_vec(), None),
+    };
+    let most = Background::STOPS.1;
+    let picked_id = id.with("picked");
+    let picked = ui.data(|d| d.get_temp::<usize>(picked_id)).unwrap_or(0);
+    let picked = dragged.unwrap_or(picked).min(stops.len().saturating_sub(1));
+    label(ui, "Gradient", set);
+    let width = ui.available_width().clamp(120.0, 240.0);
+    let size = egui::vec2(width, GRADIENT_HIGH + STOP_HIGH);
+    let (rect, r) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+    let bar = egui::Rect::from_min_size(rect.min, egui::vec2(width, GRADIENT_HIGH));
+    let painter = ui.painter_at(rect.expand(1.0));
+    let columns = width.max(2.0) as usize;
+    for k in 0..columns {
+        let t = k as f64 / (columns - 1) as f64;
+        let x = bar.left() + k as f32 * width / columns as f32;
+        let column =
+            egui::Rect::from_x_y_ranges(x..=x + width / columns as f32 + 0.5, bar.y_range());
+        painter.rect_filled(column, 0.0, shown_color(Background::color_at(&stops, t)));
+    }
+    let x_of = |s: &GradientStop| bar.left() + s.position as f32 * width;
+    for (k, s) in stops.iter().enumerate() {
+        let x = x_of(s);
+        let points = vec![
+            egui::pos2(x, bar.bottom()),
+            egui::pos2(x - STOP_HIGH * 0.5, rect.bottom()),
+            egui::pos2(x + STOP_HIGH * 0.5, rect.bottom()),
+        ];
+        let fill = if k == picked {
+            theme::colors().accent
+        } else {
+            egui::Color32::GRAY
+        };
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            fill,
+            egui::Stroke::NONE,
+        ));
+    }
+    let at = |p: egui::Pos2| f64::from(((p.x - bar.left()) / width).clamp(0.0, 1.0));
+    let near = |p: egui::Pos2| {
+        let under = p.y >= bar.bottom();
+        let close = |s: &&GradientStop| (x_of(s) - p.x).abs() <= STOP_REACH;
+        stops
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| under && close(s))
+            .map(|(k, _)| k)
+            .next()
+    };
+    let pointer = r.interact_pointer_pos();
+    if r.clicked()
+        && let Some(p) = pointer.filter(|p| p.y >= bar.bottom())
+    {
+        match near(p) {
+            Some(k) => {
+                ui.data_mut(|d| d.insert_temp(picked_id, k));
+            }
+            None if stops.len() < most => {
+                let t = at(p);
+                let mut more = stops.clone();
+                more.push(GradientStop {
+                    position: t,
+                    color: Background::color_at(&stops, t),
+                });
+                let (more, k) = stops_sorted(more, stops.len());
+                ui.data_mut(|d| d.insert_temp(picked_id, k));
+                acts.push(node_set(slot, "stops", json!(more)));
+            }
+            None => {}
+        }
+    }
+    let pressed = ui.input(|i| i.pointer.press_origin());
+    if r.drag_started()
+        && let Some(k) = pressed.and_then(near)
+    {
+        let mut start = stops.clone();
+        let copy = ui.input(|i| i.modifiers.command) && stops.len() < most;
+        let stop = match copy {
+            true => {
+                start.push(stops[k]);
+                start.len() - 1
+            }
+            false => k,
+        };
+        ui.data_mut(|d| d.insert_temp(id, Dragged { stops: start, stop }));
+    }
+    if let (Some(mut h), Some(p)) = (held, pointer)
+        && r.dragged()
+    {
+        h.stops[h.stop].position = at(p);
+        ui.data_mut(|d| d.insert_temp(id, h));
+    }
+    if r.drag_stopped()
+        && let Some(h) = ui.data_mut(|d| d.remove_temp::<Dragged>(id))
+    {
+        let gone = pointer.is_some_and(|p| p.y < bar.top() - STOP_GONE);
+        let mut next = h.stops.clone();
+        let k = match gone && next.len() > Background::STOPS.0 {
+            true => {
+                next.remove(h.stop);
+                0
+            }
+            false => {
+                let (sorted, k) = stops_sorted(next, h.stop);
+                next = sorted;
+                k
+            }
+        };
+        ui.data_mut(|d| d.insert_temp(picked_id, k));
+        if next != colors {
+            acts.push(node_set(slot, "stops", json!(next)));
+        }
+    }
+    if reset(ui, set) {
+        acts.push(node_set(slot, "stops", json!(Background::STOPS_USUAL)));
+    }
+    ui.end_row();
+    let Some(stop) = stops.get(picked) else {
+        return;
+    };
+    let now = stop.color;
+    label(ui, "Stop Color", false);
+    let mut rgba = now.map(|v| v as f32);
+    if ui.color_edit_button_rgba_unmultiplied(&mut rgba).changed() {
+        let mut next = stops.clone();
+        next[picked].color = rgba.map(f64::from);
+        acts.push(node_set(slot, "stops", json!(next)));
+    }
+    ui.end_row();
+}
+
+fn background_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n, b): (usize, &Node, &Background),
+    acts: &mut Vec<Act>,
+) {
+    use EffectValue as V;
+    let value = |ui: &mut egui::Ui, acts: &mut Vec<Act>, v: V, text: &str| {
+        node_value(ui, i, (slot, n), (v, text), acts);
+    };
+    let fills = (
+        &BackgroundFill::ALL[..],
+        BackgroundFill::label as fn(BackgroundFill) -> &'static str,
+    );
+    let fill = (b.filled(), BackgroundFill::default());
+    choice_row(ui, (slot, "Type", "fill"), fill, fills, acts);
+    for &c in b.shown() {
+        let name = corner_label(b.filled(), c);
+        swatch_row(
+            ui,
+            (slot, name, c.key()),
+            (b.color(c), Background::COLOR),
+            acts,
+        );
+        for (v, text) in c
+            .values()
+            .into_iter()
+            .zip(["Red", "Green", "Blue", "Alpha"])
+        {
+            value(ui, acts, v, text);
+        }
+    }
+    if b.filled() == BackgroundFill::Gradient {
+        let forms = (
+            &GradientType::ALL[..],
+            GradientType::label as fn(GradientType) -> &'static str,
+        );
+        let form = (b.form(), GradientType::default());
+        choice_row(
+            ui,
+            (slot, "Gradient Type", "gradient_type"),
+            form,
+            forms,
+            acts,
+        );
+        value(ui, acts, V::Start, "Start");
+        value(ui, acts, V::End, "End");
+        let stops = (b.colors(), !b.stops.is_empty());
+        gradient_rows(ui, (slot, &n.name), stops, acts);
+        value(ui, acts, V::Offset, "Offset");
+        let repeats = (
+            &GradientRepeat::ALL[..],
+            GradientRepeat::label as fn(GradientRepeat) -> &'static str,
+        );
+        let repeat = (b.repeats(), GradientRepeat::default());
+        choice_row(ui, (slot, "Repeat", "repeat"), repeat, repeats, acts);
+    }
+    value(ui, acts, V::Blend, "Blend");
+}
+
+fn noise_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n, f): (usize, &Node, &FastNoise),
+    acts: &mut Vec<Act>,
+) {
+    use EffectValue as V;
+    let value = |ui: &mut egui::Ui, acts: &mut Vec<Act>, v: V, text: &str| {
+        node_value(ui, i, (slot, n), (v, text), acts);
+    };
+    let discontinuous = (slot, "Discontinuous", f.discontinuous, false);
+    check(ui, discontinuous, "discontinuous", acts);
+    check(ui, (slot, "Inverted", f.inverted, false), "inverted", acts);
+    value(ui, acts, V::Center, "Center");
+    value(ui, acts, V::Detail, "Detail");
+    value(ui, acts, V::Brightness, "Brightness");
+    value(ui, acts, V::Contrast, "Contrast");
+    check(ui, (slot, "Lock X/Y", f.lock_xy, true), "lock_xy", acts);
+    match f.lock_xy {
+        true => value(ui, acts, V::Scale, "Scale"),
+        false => {
+            value(ui, acts, V::Scale, "X Scale");
+            value(ui, acts, V::YScale, "Y Scale");
+        }
+    }
+    value(ui, acts, V::Angle, "Angle");
+    value(ui, acts, V::Seethe, "Seethe");
+    value(ui, acts, V::SeetheRate, "Seethe Rate");
+    let colorings = (
+        &NoiseColoring::ALL[..],
+        NoiseColoring::label as fn(NoiseColoring) -> &'static str,
+    );
+    let coloring = (f.colored(), NoiseColoring::default());
+    choice_row(ui, (slot, "Type", "coloring"), coloring, colorings, acts);
+    match f.colored() {
+        NoiseColoring::TwoColor => {
+            let pairs = [
+                (false, "Color 1", "color1", f.first(), FastNoise::COLOR1),
+                (true, "Color 2", "color2", f.second(), FastNoise::COLOR2),
+            ];
+            for (second, name, put, now, usual) in pairs {
+                swatch_row(ui, (slot, name, put), (now, usual), acts);
+                let channels = FastNoise::color_values(second);
+                for (v, text) in channels.into_iter().zip(["Red", "Green", "Blue", "Alpha"]) {
+                    value(ui, acts, v, text);
+                }
+            }
+        }
+        NoiseColoring::Gradient => {
+            let stops = (f.colors(), !f.stops.is_empty());
+            gradient_rows(ui, (slot, &n.name), stops, acts);
+        }
+    }
+    value(ui, acts, V::Blend, "Blend");
+}
+
+fn node_folds(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (slot, n): (usize, &Node),
+    sight: &Sight,
+    acts: &mut Vec<Act>,
+) {
     use EffectValue as V;
     let Tool::Merge(m) = &n.tool else {
         return;
@@ -1778,6 +2164,17 @@ fn node_folds(ui: &mut egui::Ui, i: &Inspector, (slot, n): (usize, &Node), acts:
     let value = |ui: &mut egui::Ui, acts: &mut Vec<Act>, v: V, text: &str| {
         node_value(ui, i, (slot, n), (v, text), acts);
     };
+    fold(ui, (slot, "Reference Size"), |ui| {
+        if m.auto_resolution {
+            fixed_row(ui, "Width", sight.pixels[0]);
+            fixed_row(ui, "Height", sight.pixels[1]);
+        } else {
+            value(ui, acts, V::ReferenceWidth, "Width");
+            value(ui, acts, V::ReferenceHeight, "Height");
+        }
+        let auto = (slot, "Auto Resolution", m.auto_resolution, false);
+        check(ui, auto, "auto_resolution", acts);
+    });
     fold(ui, (slot, "Depth Merge"), |ui| {
         let depth = (slot, "Enable Depth Merge", m.depth_merge, false);
         check(ui, depth, "depth_merge", acts);
@@ -1791,7 +2188,7 @@ fn node_rows(
     ui: &mut egui::Ui,
     i: &Inspector,
     (slot, n, element): (usize, &Node, u8),
-    trackers: &[Hooked],
+    sight: &Sight,
     acts: &mut Vec<Act>,
 ) {
     use EffectValue as V;
@@ -1853,14 +2250,16 @@ fn node_rows(
             value(ui, acts, V::LineSpacing, "Line Spacing");
             value(ui, acts, V::VerticalAnchor, "V Anchor");
             value(ui, acts, V::HorizontalAnchor, "H Anchor");
-            center_row(ui, i, (slot, n), trackers, acts);
+            center_row(ui, i, (slot, n), sight, acts);
             value(ui, acts, V::LayoutSize, "Layout Size");
             value(ui, acts, V::Angle, "Angle");
             value(ui, acts, V::Blend, "Blend");
             shading_rows(ui, i, (slot, n, t, element), acts);
         }
+        Tool::Background(b) => background_rows(ui, i, (slot, n, b), acts),
+        Tool::FastNoise(f) => noise_rows(ui, i, (slot, n, f), acts),
         Tool::Merge(m) => {
-            center_row(ui, i, (slot, n), trackers, acts);
+            center_row(ui, i, (slot, n), sight, acts);
             value(ui, acts, V::Size, "Size");
             value(ui, acts, V::Angle, "Angle");
             let flip = (slot, "Flip Horizontal", m.flip_horizontal, false);
@@ -1912,7 +2311,7 @@ fn node_rows(
             value(ui, acts, V::BorderWidth, "Border Width");
             check(ui, (slot, "Invert", m.invert, false), "invert", acts);
             check(ui, (slot, "Solid", m.solid, true), "solid", acts);
-            center_row(ui, i, (slot, n), trackers, acts);
+            center_row(ui, i, (slot, n), sight, acts);
             value(ui, acts, V::Width, "Width");
             value(ui, acts, V::Height, "Height");
             value(ui, acts, V::CornerRadius, "Corner Radius");
@@ -2083,9 +2482,11 @@ fn operation_rows(
         if r.dragged() {
             ui.data_mut(|d| d.insert_temp(key, v));
         }
-        if (r.drag_stopped() || (r.changed() && !r.dragged())) && v != now {
+        if r.drag_stopped() || (r.changed() && !r.dragged()) {
             ui.data_mut(|d| d.remove::<f64>(key));
-            acts.push(node_set(slot, "custom_time", json!(v)));
+            if v != now {
+                acts.push(node_set(slot, "custom_time", json!(v)));
+            }
         }
         if ui.button("Set").clicked() {
             acts.push(node_set(slot, "custom_time", json!(at as f64)));
@@ -2163,7 +2564,13 @@ impl Workspace {
             ui.label(dim("Select a node"));
             return;
         }
-        let trackers = hooks(&comp);
+        let sight = Sight {
+            trackers: hooks(&comp),
+            pixels: {
+                let (w, h) = vidcut_core::render::composition_size(&p, &clip);
+                [w, h].map(f64::from)
+            },
+        };
         let at = self.page_at();
         let source = at as f64;
         for &k in &picked {
@@ -2203,9 +2610,9 @@ impl Workspace {
                     } else {
                         let i = &self.inspector;
                         rows(ui, (slot, "node"), |ui| {
-                            node_rows(ui, i, (slot, n, element), &trackers, &mut acts);
+                            node_rows(ui, i, (slot, n, element), &sight, &mut acts);
                         });
-                        node_folds(ui, i, (slot, n), &mut acts);
+                        node_folds(ui, i, (slot, n), &sight, &mut acts);
                     }
                     ui.separator();
                     all.push(acts);
@@ -2597,7 +3004,10 @@ impl Workspace {
                         self.inspector.held = None;
                     }
                 }
-                Act::EffectSet(_, params) => self.send_node("comp.set", clip, stored, params),
+                Act::EffectSet(_, params) => {
+                    let params = channels_folded(&shown.tool, params);
+                    self.send_node("comp.set", clip, stored, params);
+                }
                 Act::Tint(_, _, to) => {
                     let color = to.map(|c| f64::from(c) / 255.0);
                     self.send_node("comp.set", clip, stored, json!({ "color": color }));
@@ -2662,7 +3072,7 @@ impl Workspace {
                 point[axis] = value;
                 let mut params = json!({});
                 params[v.name()] = if v.pair() { json!(point) } else { json!(value) };
-                params
+                channels_folded(&shown.tool, params)
             }
             Key::Shading(_, e, v, axis) => {
                 let Tool::TextPlus(t) = &shown.tool else {
@@ -2880,6 +3290,7 @@ struct Retimed {
 #[derive(Debug, Clone, Copy, Default)]
 struct Look<'a> {
     speed: Option<f64>,
+    units: Option<[f64; 2]>,
     off: bool,
     why: Option<&'static str>,
     timecode: Option<(&'a Project, i64)>,
@@ -3373,6 +3784,17 @@ fn drag(
                 .suffix(f.suffix())
                 .custom_parser(typed)
                 .min_size(vec2(FIELD_WIDTH, ui.spacing().interact_size.y));
+            let axis = match f {
+                Key::Node(_, _, a) | Key::Shading(_, _, _, a) => a,
+                _ => 0,
+            };
+            if let Some(u) = look.units.map(|u| u[axis]) {
+                drag = drag
+                    .custom_formatter(move |n, d| {
+                        egui::emath::format_with_decimals_in_range(n * u, d)
+                    })
+                    .custom_parser(move |t| typed(t).map(|x| x / u));
+            }
             if let Some((p, dropped)) = look.timecode {
                 let now = p.length_timecode(before.round() as i64);
                 drag = drag

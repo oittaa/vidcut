@@ -2,10 +2,11 @@ use std::collections::HashSet;
 
 use crate::effect_keys::Keyed;
 use crate::model::{
-    Appearance, ApplyMode, Blur, BlurClipping, BlurFilter, BorderLevel, Clip, Composition, Connect,
-    EffectKind, EffectType, EffectValue, JoinStyle, Mask, Merge, MergeEdges, MergeOperator,
-    MotionPath, Node, Pattern, PivotType, Project, ReferenceTime, ShadingElement, TextPlus, Tool,
-    ToolType, Tracker, TrackerMerge, TrackerOperation,
+    Appearance, ApplyMode, Background, BackgroundFill, Blur, BlurClipping, BlurFilter, BorderLevel,
+    Clip, Composition, Connect, EffectKind, EffectType, EffectValue, FastNoise, GradientRepeat,
+    GradientStop, GradientType, ImageFormat, JoinStyle, Mask, Merge, MergeEdges, MergeOperator,
+    MotionPath, Node, NoiseColoring, Pattern, PivotType, Project, ReferenceTime, ShadingElement,
+    TextPlus, Tool, ToolType, Tracker, TrackerMerge, TrackerOperation,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -281,6 +282,7 @@ impl Merge {
     pub const SIZE: f64 = 1.0;
     pub const SLIDES: (f64, f64) = (0.0, 1.0);
     pub const Z_OFFSETS: (f64, f64) = (-1e6, 1e6);
+    pub const REFERENCES: (f64, f64) = (1.0, 32767.0);
 
     pub fn middle(&self) -> [f64; 2] {
         self.center.unwrap_or(Mask::MIDDLE)
@@ -324,6 +326,362 @@ impl Merge {
 
     pub fn back_additive(&self) -> f64 {
         self.background_subtractive_additive.unwrap_or(1.0)
+    }
+
+    pub fn locks(&self, v: EffectValue) -> bool {
+        self.auto_resolution
+            && matches!(
+                v,
+                EffectValue::ReferenceWidth | EffectValue::ReferenceHeight
+            )
+    }
+
+    pub fn reference(&self, pixels: [f64; 2]) -> [f64; 2] {
+        match self.auto_resolution {
+            true => pixels,
+            false => [self.reference_width, self.reference_height].map(|v| v.unwrap_or(1.0)),
+        }
+    }
+}
+
+impl ImageFormat {
+    pub const PIXELS: (u32, u32) = (1, 32768);
+
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn size(&self, (w, h): (f64, f64)) -> (f64, f64) {
+        match self.auto_resolution {
+            true => (w, h),
+            false => (
+                self.width.map_or(w, f64::from),
+                self.height.map_or(h, f64::from),
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Corner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Corner {
+    pub const ALL: [Corner; 4] = [
+        Corner::TopLeft,
+        Corner::TopRight,
+        Corner::BottomLeft,
+        Corner::BottomRight,
+    ];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Corner::TopLeft => "top_left",
+            Corner::TopRight => "top_right",
+            Corner::BottomLeft => "bottom_left",
+            Corner::BottomRight => "bottom_right",
+        }
+    }
+
+    pub fn values(self) -> [EffectValue; 4] {
+        use EffectValue as V;
+        match self {
+            Corner::TopLeft => [
+                V::TopLeftRed,
+                V::TopLeftGreen,
+                V::TopLeftBlue,
+                V::TopLeftAlpha,
+            ],
+            Corner::TopRight => [
+                V::TopRightRed,
+                V::TopRightGreen,
+                V::TopRightBlue,
+                V::TopRightAlpha,
+            ],
+            Corner::BottomLeft => [
+                V::BottomLeftRed,
+                V::BottomLeftGreen,
+                V::BottomLeftBlue,
+                V::BottomLeftAlpha,
+            ],
+            Corner::BottomRight => [
+                V::BottomRightRed,
+                V::BottomRightGreen,
+                V::BottomRightBlue,
+                V::BottomRightAlpha,
+            ],
+        }
+    }
+}
+
+impl Background {
+    pub const COLOR: [f64; 4] = [0.0, 0.0, 0.0, 1.0];
+    pub const COLORS: (f64, f64) = (-1e6, 1e6);
+    pub const START: [f64; 2] = [0.0, 0.5];
+    pub const END: [f64; 2] = [1.0, 0.5];
+    pub const OFFSETS: (f64, f64) = (-1e6, 1e6);
+    pub const STOPS: (usize, usize) = (2, 64);
+    pub const STOPS_USUAL: [GradientStop; 2] = [
+        GradientStop {
+            position: 0.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+        },
+        GradientStop {
+            position: 1.0,
+            color: [1.0, 1.0, 1.0, 1.0],
+        },
+    ];
+
+    pub fn filled(&self) -> BackgroundFill {
+        self.fill.unwrap_or_default()
+    }
+
+    pub fn corner(&self, c: Corner) -> Option<[f64; 4]> {
+        match c {
+            Corner::TopLeft => self.top_left,
+            Corner::TopRight => self.top_right,
+            Corner::BottomLeft => self.bottom_left,
+            Corner::BottomRight => self.bottom_right,
+        }
+    }
+
+    pub fn corner_mut(&mut self, c: Corner) -> &mut Option<[f64; 4]> {
+        match c {
+            Corner::TopLeft => &mut self.top_left,
+            Corner::TopRight => &mut self.top_right,
+            Corner::BottomLeft => &mut self.bottom_left,
+            Corner::BottomRight => &mut self.bottom_right,
+        }
+    }
+
+    pub fn color(&self, c: Corner) -> [f64; 4] {
+        self.corner(c).unwrap_or(Self::COLOR)
+    }
+
+    pub fn shown(&self) -> &'static [Corner] {
+        match self.filled() {
+            BackgroundFill::SolidColor => &[Corner::TopLeft],
+            BackgroundFill::Horizontal => &[Corner::TopLeft, Corner::TopRight],
+            BackgroundFill::Vertical => &[Corner::TopLeft, Corner::BottomLeft],
+            BackgroundFill::FourCorner => &Corner::ALL,
+            BackgroundFill::Gradient => &[],
+        }
+    }
+
+    pub fn form(&self) -> GradientType {
+        self.gradient_type.unwrap_or_default()
+    }
+
+    pub fn from(&self) -> [f64; 2] {
+        self.start.unwrap_or(Self::START)
+    }
+
+    pub fn to(&self) -> [f64; 2] {
+        self.end.unwrap_or(Self::END)
+    }
+
+    pub fn colors(&self) -> &[GradientStop] {
+        match self.stops.is_empty() {
+            true => &Self::STOPS_USUAL,
+            false => &self.stops,
+        }
+    }
+
+    pub fn shift(&self) -> f64 {
+        self.offset.unwrap_or(0.0)
+    }
+
+    pub fn color_at(stops: &[GradientStop], t: f64) -> [f64; 4] {
+        let Some(first) = stops.first() else {
+            return Self::COLOR;
+        };
+        if t <= first.position {
+            return first.color;
+        }
+        for pair in stops.windows(2) {
+            let [a, b] = [pair[0], pair[1]];
+            if t <= b.position {
+                let k = match b.position > a.position {
+                    true => (t - a.position) / (b.position - a.position),
+                    false => 0.0,
+                };
+                return std::array::from_fn(|i| a.color[i] + (b.color[i] - a.color[i]) * k);
+            }
+        }
+        stops.last().map_or(Self::COLOR, |s| s.color)
+    }
+
+    pub fn repeats(&self) -> GradientRepeat {
+        self.repeat.unwrap_or_default()
+    }
+}
+
+impl Default for FastNoise {
+    fn default() -> Self {
+        Self {
+            discontinuous: false,
+            inverted: false,
+            center: None,
+            detail: None,
+            brightness: None,
+            contrast: None,
+            lock_xy: true,
+            scale: None,
+            y_scale: None,
+            angle: None,
+            seethe: None,
+            seethe_rate: None,
+            coloring: None,
+            color1: None,
+            color2: None,
+            stops: Vec::new(),
+            image: ImageFormat::default(),
+        }
+    }
+}
+
+impl FastNoise {
+    pub const DETAIL: f64 = 2.0;
+    pub const DETAILS: (f64, f64) = (0.0, 10.0);
+    pub const LEVELS: (f64, f64) = (-1000.0, 1000.0);
+    pub const CONTRAST: f64 = 1.0;
+    pub const SCALE: f64 = 2.0;
+    pub const SCALES: (f64, f64) = (0.0, 1e6);
+    pub const TURNS: (f64, f64) = (-1e6, 1e6);
+    pub const SEETHES: (f64, f64) = (-1e6, 1e6);
+    pub const COLOR1: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
+    pub const COLOR2: [f64; 4] = [1.0, 1.0, 1.0, 1.0];
+
+    pub fn middle(&self) -> [f64; 2] {
+        self.center.unwrap_or(Mask::MIDDLE)
+    }
+
+    pub fn layers(&self) -> f64 {
+        self.detail.unwrap_or(Self::DETAIL)
+    }
+
+    pub fn lift(&self) -> f64 {
+        self.brightness.unwrap_or(0.0)
+    }
+
+    pub fn spread(&self) -> f64 {
+        self.contrast.unwrap_or(Self::CONTRAST)
+    }
+
+    pub fn scales(&self) -> [f64; 2] {
+        let x = self.scale.unwrap_or(Self::SCALE);
+        match self.lock_xy {
+            true => [x, x],
+            false => [x, self.y_scale.unwrap_or(Self::SCALE)],
+        }
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.angle.unwrap_or(0.0)
+    }
+
+    pub fn depth(&self, frame: i64) -> f64 {
+        self.seethe.unwrap_or(0.0) + self.seethe_rate.unwrap_or(0.0) * frame as f64
+    }
+
+    pub fn colored(&self) -> NoiseColoring {
+        self.coloring.unwrap_or_default()
+    }
+
+    pub fn first(&self) -> [f64; 4] {
+        self.color1.unwrap_or(Self::COLOR1)
+    }
+
+    pub fn second(&self) -> [f64; 4] {
+        self.color2.unwrap_or(Self::COLOR2)
+    }
+
+    pub fn colors(&self) -> &[GradientStop] {
+        match self.stops.is_empty() {
+            true => &Background::STOPS_USUAL,
+            false => &self.stops,
+        }
+    }
+
+    pub fn color_values(second: bool) -> [EffectValue; 4] {
+        use EffectValue as V;
+        match second {
+            false => [V::Color1Red, V::Color1Green, V::Color1Blue, V::Color1Alpha],
+            true => [V::Color2Red, V::Color2Green, V::Color2Blue, V::Color2Alpha],
+        }
+    }
+}
+
+impl NoiseColoring {
+    pub const ALL: [NoiseColoring; 2] = [NoiseColoring::TwoColor, NoiseColoring::Gradient];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            NoiseColoring::TwoColor => "Two Color",
+            NoiseColoring::Gradient => "Gradient",
+        }
+    }
+}
+
+impl BackgroundFill {
+    pub const ALL: [BackgroundFill; 5] = [
+        BackgroundFill::SolidColor,
+        BackgroundFill::Horizontal,
+        BackgroundFill::Vertical,
+        BackgroundFill::FourCorner,
+        BackgroundFill::Gradient,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BackgroundFill::SolidColor => "Solid Color",
+            BackgroundFill::Horizontal => "Horizontal",
+            BackgroundFill::Vertical => "Vertical",
+            BackgroundFill::FourCorner => "Four Corner",
+            BackgroundFill::Gradient => "Gradient",
+        }
+    }
+}
+
+impl GradientType {
+    pub const ALL: [GradientType; 6] = [
+        GradientType::Linear,
+        GradientType::Reflect,
+        GradientType::Square,
+        GradientType::Cross,
+        GradientType::Radial,
+        GradientType::Angle,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GradientType::Linear => "Linear",
+            GradientType::Reflect => "Reflect",
+            GradientType::Square => "Square",
+            GradientType::Cross => "Cross",
+            GradientType::Radial => "Radial",
+            GradientType::Angle => "Angle",
+        }
+    }
+}
+
+impl GradientRepeat {
+    pub const ALL: [GradientRepeat; 3] = [
+        GradientRepeat::Once,
+        GradientRepeat::Repeat,
+        GradientRepeat::PingPong,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            GradientRepeat::Once => "Once",
+            GradientRepeat::Repeat => "Repeat",
+            GradientRepeat::PingPong => "Ping-Pong",
+        }
     }
 }
 
@@ -875,6 +1233,8 @@ impl Tool {
             Tool::Tracker(_) => "Tracker",
             Tool::Merge(_) => "Merge",
             Tool::TextPlus(_) => "Text",
+            Tool::Background(_) => "Background",
+            Tool::FastNoise(_) => "FastNoise",
         }
     }
 
@@ -890,6 +1250,8 @@ impl Tool {
             Tool::Tracker(_) => "Tracker",
             Tool::Merge(_) => "Merge",
             Tool::TextPlus(_) => "Text+",
+            Tool::Background(_) => "Background",
+            Tool::FastNoise(_) => "Fast Noise",
         }
     }
 
@@ -900,7 +1262,12 @@ impl Tool {
     pub fn works(&self) -> bool {
         matches!(
             self,
-            Tool::Blur(_) | Tool::Effect(_) | Tool::Merge(_) | Tool::TextPlus(_)
+            Tool::Blur(_)
+                | Tool::Effect(_)
+                | Tool::Merge(_)
+                | Tool::TextPlus(_)
+                | Tool::Background(_)
+                | Tool::FastNoise(_)
         )
     }
 
@@ -914,9 +1281,16 @@ impl Tool {
                 NodeInput::Foreground,
                 NodeInput::EffectMask,
             ],
-            Tool::Ellipse(_) | Tool::Rectangle(_) | Tool::Polygon(_) | Tool::TextPlus(_) => {
-                &[NodeInput::EffectMask]
-            }
+            Tool::Ellipse(_)
+            | Tool::Rectangle(_)
+            | Tool::Polygon(_)
+            | Tool::TextPlus(_)
+            | Tool::Background(_) => &[NodeInput::EffectMask],
+            Tool::FastNoise(_) => &[
+                NodeInput::EffectMask,
+                NodeInput::DetailMap,
+                NodeInput::BrightnessMap,
+            ],
         }
     }
 
@@ -1001,6 +1375,20 @@ impl Tool {
         }
     }
 
+    pub fn background(&self) -> Option<&Background> {
+        match self {
+            Tool::Background(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    pub fn noise(&self) -> Option<&FastNoise> {
+        match self {
+            Tool::FastNoise(f) => Some(f),
+            _ => None,
+        }
+    }
+
     pub fn mask_mut(&mut self) -> Option<&mut Mask> {
         match self {
             Tool::Ellipse(m) | Tool::Rectangle(m) | Tool::Polygon(m) => Some(m),
@@ -1031,6 +1419,8 @@ impl Tool {
             )),
             Tool::Merge(_) => Tool::Merge(Merge::default()),
             Tool::TextPlus(_) => Tool::TextPlus(TextPlus::default()),
+            Tool::Background(_) => Tool::Background(Background::default()),
+            Tool::FastNoise(_) => Tool::FastNoise(FastNoise::default()),
         }
     }
 }
@@ -1056,6 +1446,8 @@ impl Node {
             input: None,
             foreground: None,
             effect_mask: None,
+            detail_map: None,
+            brightness_map: None,
             pass_through: false,
             blend: None,
             blur_alpha: true,
@@ -1086,6 +1478,8 @@ impl Node {
             NodeInput::Input => self.input.as_deref(),
             NodeInput::EffectMask => self.effect_mask.as_deref(),
             NodeInput::Foreground => self.foreground.as_deref(),
+            NodeInput::DetailMap => self.detail_map.as_deref(),
+            NodeInput::BrightnessMap => self.brightness_map.as_deref(),
         }
     }
 
@@ -1094,6 +1488,8 @@ impl Node {
             NodeInput::Input => &mut self.input,
             NodeInput::EffectMask => &mut self.effect_mask,
             NodeInput::Foreground => &mut self.foreground,
+            NodeInput::DetailMap => &mut self.detail_map,
+            NodeInput::BrightnessMap => &mut self.brightness_map,
         }
     }
 
@@ -1108,16 +1504,18 @@ impl Node {
 }
 
 impl NodeInput {
-    pub const ALL: [NodeInput; 3] = [
+    pub const ALL: [NodeInput; 5] = [
         NodeInput::Input,
         NodeInput::EffectMask,
         NodeInput::Foreground,
+        NodeInput::DetailMap,
+        NodeInput::BrightnessMap,
     ];
 
     pub fn carries_picture(self) -> bool {
         match self {
             NodeInput::Input | NodeInput::Foreground => true,
-            NodeInput::EffectMask => false,
+            NodeInput::EffectMask | NodeInput::DetailMap | NodeInput::BrightnessMap => false,
         }
     }
 
@@ -1126,6 +1524,8 @@ impl NodeInput {
             NodeInput::Input => "picture input",
             NodeInput::EffectMask => "effect mask input",
             NodeInput::Foreground => "foreground input",
+            NodeInput::DetailMap => "detail map input",
+            NodeInput::BrightnessMap => "brightness map input",
         }
     }
 }
@@ -1407,9 +1807,13 @@ impl Composition {
     }
 
     pub fn masks_of(&self, node: &Node) -> Vec<&Node> {
+        self.masks_on(node, NodeInput::EffectMask)
+    }
+
+    pub fn masks_on(&self, node: &Node, input: NodeInput) -> Vec<&Node> {
         let mut seen = HashSet::new();
         let mut masks = Vec::new();
-        let mut next = node.effect_mask.as_deref();
+        let mut next = node.join(input);
         while let Some(m) = next.and_then(|n| self.node(n)) {
             if !m.tool.is_mask() || !seen.insert(m.name.as_str()) {
                 break;
@@ -1447,13 +1851,18 @@ impl Composition {
                 ..EffectType::of(kind).made()
             }
             .moves_by_itself(),
+            Tool::FastNoise(f) => {
+                !n.pass_through
+                    && (f.seethe_rate.is_some_and(|r| r != 0.0)
+                        || !n.keys_of(EffectValue::SeetheRate).is_empty())
+            }
             _ => false,
         })
     }
 }
 
 impl ToolType {
-    pub const ADDED: [ToolType; 13] = [
+    pub const ADDED: [ToolType; 15] = [
         ToolType::Blur,
         ToolType::GaussianBlur,
         ToolType::MosaicBlur,
@@ -1467,6 +1876,8 @@ impl ToolType {
         ToolType::Tracker,
         ToolType::Merge,
         ToolType::TextPlus,
+        ToolType::Background,
+        ToolType::FastNoise,
     ];
 
     pub fn made(self) -> Tool {
@@ -1485,6 +1896,8 @@ impl ToolType {
             ToolType::Tracker => Tool::Tracker(Tracker::made()),
             ToolType::Merge => Tool::Merge(Merge::default()),
             ToolType::TextPlus => Tool::TextPlus(TextPlus::default()),
+            ToolType::Background => Tool::Background(Background::default()),
+            ToolType::FastNoise => Tool::FastNoise(FastNoise::default()),
             ToolType::MediaIn => Tool::MediaIn,
             ToolType::MediaOut => Tool::MediaOut,
         }
