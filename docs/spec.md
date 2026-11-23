@@ -2726,20 +2726,20 @@ The shapes:
 
 The facts without a page are measured in Resolve Studio 21.2.
 
-- The Merge has three inputs: Background, Foreground and Effect Mask. The output has the size of the background (p. 2211).
+- The Merge has three inputs: Background, Foreground and Effect Mask (p. 2211). The output has the size of the background (p. 2212).
 - vidcut: with nothing on the Foreground input, the Merge passes on its background.
 - A mask on the Effect Mask input limits the Merge to the inside of the mask. Outside the mask, the background shows.
 
-The transform of the foreground (pp. 2212, 2216–2217):
+The transform of the foreground (pp. 2213, 2218):
 
 - Center: (0.5, 0.5), as fractions of the background from its bottom left. Y goes up. The middle of the foreground goes there.
 - Size: 1, from 0 to 1000000. The slider goes to 5. At 1, a pixel of the foreground is a pixel of the background.
 - Angle: 0. The foreground turns counterclockwise.
 - Flip Horizontal mirrors the foreground left to right. Flip Vertical mirrors it top to bottom. Both are off.
 - The order is the flip, Size, Angle and then the move to Center. Each acts about the middle of the foreground.
-- Invert Transform: off. On, the Merge uses the inverse of its transform (p. 2217).
+- Invert Transform: off. On, the Merge uses the inverse of its transform (p. 2218).
 - Filter Method: Linear. The foreground is read with a bilinear filter.
-- Edges: Canvas. It sets what is around the foreground (p. 2217):
+- Edges: Canvas. It sets what is around the foreground (p. 2218):
   - Canvas: clear.
   - Wrap: the foreground again, as a grid.
   - Duplicate: the edge pixels of the foreground, stretched out.
@@ -2751,14 +2751,14 @@ The sums use these names:
 - f = F / fa and b = B / ba are the straight colors.
 - FG and BG are the four channels of each picture, RGB and alpha.
 
-The controls of the sums (pp. 2212–2216):
+The controls of the sums (pp. 2213–2217):
 
-- Apply Mode: Normal. It is one of 27 modes (pp. 2212–2214).
-- Operator: Over. Only Normal and Screen have an Operator (p. 2214).
+- Apply Mode: Normal. It is one of 27 modes. The manual lists 26 of them. It does not list Hard Mix, which is in the menu (pp. 2213–2215).
+- Operator: Over. Only Normal and Screen have an Operator (p. 2215).
 - Subtractive/Additive: 1. Alpha Gain: 1. Burn In: 0. Blend: 1. Each goes from 0 to 1.
-- Blend mixes the background with the result (p. 2216).
+- Blend mixes the background with the result (p. 2217).
 
-The Operators of Normal give FG × x + BG × y (p. 2214):
+The Operators of Normal give FG × x + BG × y (p. 2215):
 
 - Over: x = 1, y = 1 − fa.
 - In: x = ba, y = 0.
