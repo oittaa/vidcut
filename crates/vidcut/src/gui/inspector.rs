@@ -1226,6 +1226,7 @@ fn node_speed(v: EffectValue) -> f64 {
         | EffectValue::SubtractiveAdditive
         | EffectValue::AlphaGain
         | EffectValue::BurnIn
+        | EffectValue::BackgroundSubtractiveAdditive
         | EffectValue::Opacity
         | EffectValue::ColorRed
         | EffectValue::ColorGreen
@@ -1239,6 +1240,7 @@ fn node_speed(v: EffectValue) -> f64 {
         | EffectValue::Round => 0.005,
         EffectValue::SoftnessX | EffectValue::SoftnessY | EffectValue::Priority => 0.05,
         EffectValue::Thickness => 0.0005,
+        EffectValue::ForegroundZOffset => 0.01,
         _ => 0.002,
     }
 }
@@ -2070,6 +2072,23 @@ fn noise_rows(
     value(ui, acts, V::Blend, "Blend");
 }
 
+fn node_folds(ui: &mut egui::Ui, i: &Inspector, (slot, n): (usize, &Node), acts: &mut Vec<Act>) {
+    use EffectValue as V;
+    let Tool::Merge(m) = &n.tool else {
+        return;
+    };
+    let value = |ui: &mut egui::Ui, acts: &mut Vec<Act>, v: V, text: &str| {
+        node_value(ui, i, (slot, n), (v, text), acts);
+    };
+    fold(ui, (slot, "Depth Merge"), |ui| {
+        let depth = (slot, "Enable Depth Merge", m.depth_merge, false);
+        check(ui, depth, "depth_merge", acts);
+        value(ui, acts, V::ForegroundZOffset, "Foreground Z Offset");
+        let text = "Background Subtractive/Additive";
+        value(ui, acts, V::BackgroundSubtractiveAdditive, text);
+    });
+}
+
 fn node_rows(
     ui: &mut egui::Ui,
     i: &Inspector,
@@ -2213,6 +2232,10 @@ fn node_rows(
             }
         }
     }
+    if n.tool.multiplies() {
+        let multiply = (slot, "Multiply by Mask", n.multiply_by_mask, false);
+        check(ui, multiply, "multiply_by_mask", acts);
+    }
 }
 
 fn node_header(ui: &mut egui::Ui, n: &Node, active: bool, acts: &mut Vec<Act>) {
@@ -2228,7 +2251,10 @@ fn node_header(ui: &mut egui::Ui, n: &Node, active: bool, acts: &mut Vec<Act>) {
         }
         ui.label(dim(n.tool.label()));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let changed = n.tool != n.tool.made() || n.blend.is_some() || !n.keys.is_empty();
+            let changed = n.tool != n.tool.made()
+                || n.blend.is_some()
+                || n.multiply_by_mask
+                || !n.keys.is_empty();
             if ui
                 .add_enabled(changed, egui::Button::new("Reset"))
                 .clicked()
@@ -2315,6 +2341,7 @@ impl Workspace {
                         rows(ui, (slot, "node"), |ui| {
                             node_rows(ui, i, (slot, n, element), &trackers, &mut acts);
                         });
+                        node_folds(ui, i, (slot, n), &mut acts);
                     }
                     ui.separator();
                     all.push(acts);
@@ -2509,6 +2536,12 @@ impl Workspace {
                     }
                 }
             }
+            label(ui, "Multiply by Mask", node.multiply_by_mask);
+            let mut multiply = node.multiply_by_mask;
+            if ui.checkbox(&mut multiply, "").changed() {
+                sends.push(set(json!({ "multiply_by_mask": multiply })));
+            }
+            ui.end_row();
             if !moving {
                 return;
             }

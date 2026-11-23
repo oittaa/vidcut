@@ -250,7 +250,7 @@ fn point_slot(kind: &mut EffectKind, value: EffectValue) -> Point<'_> {
 }
 
 impl EffectValue {
-    pub const ALL: [EffectValue; 132] = [
+    pub const ALL: [EffectValue; 134] = [
         EffectValue::Blend,
         EffectValue::Strength,
         EffectValue::VerticalStrength,
@@ -337,6 +337,8 @@ impl EffectValue {
         EffectValue::SubtractiveAdditive,
         EffectValue::AlphaGain,
         EffectValue::BurnIn,
+        EffectValue::ForegroundZOffset,
+        EffectValue::BackgroundSubtractiveAdditive,
         EffectValue::Tracking,
         EffectValue::LineSpacing,
         EffectValue::LayoutSize,
@@ -746,6 +748,11 @@ fn merge_slot(m: &mut Merge, value: EffectValue) -> Slot<'_> {
         V::SubtractiveAdditive => (m.subtractive_additive.get_or_insert(1.0), Merge::SLIDES),
         V::AlphaGain => (m.alpha_gain.get_or_insert(1.0), Merge::SLIDES),
         V::BurnIn => (m.burn_in.get_or_insert(0.0), Merge::SLIDES),
+        V::ForegroundZOffset => (m.foreground_z_offset.get_or_insert(0.0), Merge::Z_OFFSETS),
+        V::BackgroundSubtractiveAdditive => (
+            m.background_subtractive_additive.get_or_insert(1.0),
+            Merge::SLIDES,
+        ),
         _ => return None,
     })
 }

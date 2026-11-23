@@ -555,6 +555,13 @@ pub fn node_checked(n: &Node) -> Result<Node> {
 
 fn plain_node_checked(n: &Node) -> Result<Node> {
     within(n.blend, (0.0, 1.0), "a node's blend is from 0 to 1")?;
+    if n.multiply_by_mask && !n.tool.multiplies() {
+        return Err(Error::invalid(format!(
+            "{} ({}) has no multiply_by_mask: only a tool takes it",
+            n.name,
+            n.tool.label()
+        )));
+    }
     if !n.place.iter().all(|v| v.is_finite()) {
         return Err(Error::invalid("a node's place is two finite numbers"));
     }
@@ -737,6 +744,10 @@ fn merge_checked(m: &Merge) -> Result<Merge> {
         ("subtractive/additive", m.subtractive_additive),
         ("alpha gain", m.alpha_gain),
         ("burn in", m.burn_in),
+        (
+            "background subtractive/additive",
+            m.background_subtractive_additive,
+        ),
     ];
     for (what, v) in slides {
         within(
@@ -745,6 +756,12 @@ fn merge_checked(m: &Merge) -> Result<Merge> {
             &format!("a merge's {what} is from 0 to 1"),
         )?;
     }
+    let (lo, hi) = Merge::Z_OFFSETS;
+    within(
+        m.foreground_z_offset,
+        Merge::Z_OFFSETS,
+        &format!("a merge's foreground z offset is from {lo} to {hi}"),
+    )?;
     Ok(Merge {
         center: m.center.filter(|c| *c != Mask::MIDDLE),
         size: m.size.filter(|v| *v != Merge::SIZE),
@@ -755,6 +772,8 @@ fn merge_checked(m: &Merge) -> Result<Merge> {
         subtractive_additive: m.subtractive_additive.filter(|v| *v != 1.0),
         alpha_gain: m.alpha_gain.filter(|v| *v != 1.0),
         burn_in: m.burn_in.filter(|v| *v != 0.0),
+        foreground_z_offset: m.foreground_z_offset.filter(|v| *v != 0.0),
+        background_subtractive_additive: m.background_subtractive_additive.filter(|v| *v != 1.0),
         ..m.clone()
     })
 }
