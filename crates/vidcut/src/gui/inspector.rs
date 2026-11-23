@@ -2810,16 +2810,13 @@ impl Workspace {
                 }
             }
             go = operation_rows(ui, (slot, &clip.id, &node.name), (t, at), acts);
-            label(ui, "Multiply by Mask", node.multiply_by_mask);
-            let mut multiply = node.multiply_by_mask;
-            if ui.checkbox(&mut multiply, "").changed() {
-                sends.push(set(json!({ "multiply_by_mask": multiply })));
-            }
-            ui.end_row();
+            let multiply = (slot, "Multiply by Mask", node.multiply_by_mask, false);
+            check(ui, multiply, "multiply_by_mask", acts);
             if !moving {
                 return;
             }
-            label(ui, "Subject", false);
+            let picked = subject != Subject::default();
+            label(ui, "Subject", picked);
             ui.horizontal(|ui| {
                 egui::ComboBox::from_id_salt(("inspector-motion-subject", &node.name))
                     .selected_text(subject.many())
@@ -2846,17 +2843,24 @@ impl Workspace {
                     open = !open;
                 }
             });
+            if reset(ui, picked) {
+                subject = Subject::default();
+            }
             ui.end_row();
             if subject == Subject::Face {
-                label(ui, "Model", false);
+                let changed = model != FindModel::default();
+                label(ui, "Model", changed);
                 dialog::switch(ui, |ui| {
                     for m in FindModel::ALL {
                         ui.selectable_value(&mut model, m, m.title());
                     }
                 });
+                if reset(ui, changed) {
+                    model = FindModel::default();
+                }
                 ui.end_row();
             }
-            label(ui, "Quality", false);
+            label(ui, "Quality", better);
             dialog::switch(ui, |ui| {
                 let quick = ui.selectable_label(!better, "Faster");
                 if quick
@@ -2875,6 +2879,9 @@ impl Workspace {
                     better = true;
                 }
             });
+            if reset(ui, better) {
+                better = false;
+            }
             ui.end_row();
             if !open {
                 return;
@@ -2906,6 +2913,9 @@ impl Workspace {
                         .desired_width(NAME_WIDTH),
                 )
                 .on_hover_text(tip.as_str());
+                if reset(ui, set) {
+                    values[i].clear();
+                }
                 ui.end_row();
             }
             if wrong {
