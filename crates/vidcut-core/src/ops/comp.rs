@@ -187,17 +187,16 @@ fn replaced(c: &mut Composition, mut node: Node, name: &str) {
     };
     let old = c.nodes.remove(i);
     node.place = old.place;
-    node.input = old.input.filter(|_| node.tool.takes_input());
-    node.effect_mask = old.effect_mask.filter(|_| node.tool.takes_mask());
-    let picture = node.tool.flows();
-    let mask = node.tool.is_mask();
+    for input in NodeInput::ALL {
+        let kept = old.join(input).filter(|_| node.tool.takes(input));
+        *node.join_mut(input) = kept.map(str::to_string);
+    }
     let patterns = node.tool.tracker().map_or(0, |t| t.patterns.len());
     for n in &mut c.nodes {
-        if n.input.as_deref() == Some(name) {
-            n.input = picture.then(|| node.name.clone());
-        }
-        if n.effect_mask.as_deref() == Some(name) {
-            n.effect_mask = mask.then(|| node.name.clone());
+        for input in NodeInput::ALL {
+            if n.join(input) == Some(name) {
+                *n.join_mut(input) = node.tool.feeds(input).then(|| node.name.clone());
+            }
         }
         if let Some(k) = n.connect.as_mut().filter(|k| k.tracker == name) {
             match (k.pattern as usize) <= patterns {
@@ -258,8 +257,9 @@ pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, to: Landing) -> Result
     if let [_] = names.as_slice()
         && let Some(mut node) = d.nodes.pop()
     {
-        node.input = None;
-        node.effect_mask = None;
+        for input in NodeInput::ALL {
+            *node.join_mut(input) = None;
+        }
         match to {
             Landing::After(a) => insert(&mut d, node, Some(a), id)?,
             Landing::Over(r) => replaced(&mut d, node, r),
@@ -270,8 +270,8 @@ pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, to: Landing) -> Result
             Landing::Apart => insert(&mut d, node, None, id)?,
         }
     } else {
-        let renamed = |old: &Option<String>| {
-            let i = nodes.iter().position(|n| Some(&n.name) == old.as_ref())?;
+        let renamed = |old: Option<&str>| {
+            let i = nodes.iter().position(|n| Some(n.name.as_str()) == old)?;
             names.get(i).cloned()
         };
         let corner = nodes.iter().fold([f64::INFINITY; 2], |a, n| {
@@ -279,8 +279,9 @@ pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, to: Landing) -> Result
         });
         for (k, n) in nodes.iter().enumerate() {
             let m = &mut d.nodes[start + k];
-            m.input = renamed(&n.input);
-            m.effect_mask = renamed(&n.effect_mask);
+            for input in NodeInput::ALL {
+                *m.join_mut(input) = renamed(n.join(input));
+            }
             m.place = [
                 n.place[0] - corner[0] + spot[0],
                 n.place[1] - corner[1] + spot[1],
@@ -302,38 +303,23 @@ pub fn connect(
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let tool = c.nodes[i].tool.clone();
-    let takes = match input {
-        NodeInput::Input => tool.takes_input(),
-        NodeInput::EffectMask => tool.takes_mask(),
-    };
-    if !takes {
+    if !tool.takes(input) {
         return Err(Error::invalid(format!(
-            "{name} ({}) has no {} input",
+            "{name} ({}) has no {}",
             tool.label(),
-            match input {
-                NodeInput::Input => "picture",
-                NodeInput::EffectMask => "effect mask",
-            }
+            input.label()
         )));
     }
     if let Some(from) = from {
         let source = &c.nodes[found(c, id, from)?].tool;
-        let fits = match input {
-            NodeInput::Input => source.works() || *source == Tool::MediaIn,
-            NodeInput::EffectMask => source.is_mask(),
-        };
-        if !fits {
+        if !source.feeds(input) {
             return Err(Error::invalid(format!(
-                "{from} ({}) does not fit: an input takes a tool or Media In, and an effect mask takes a mask",
+                "{from} ({}) does not fit: a picture input takes a node that gives a picture, and an effect mask takes a mask",
                 source.label()
             )));
         }
     }
-    let to = from.map(str::to_string);
-    match input {
-        NodeInput::Input => c.nodes[i].input = to,
-        NodeInput::EffectMask => c.nodes[i].effect_mask = to,
-    }
+    *c.nodes[i].join_mut(input) = from.map(str::to_string);
     if let Some(at) = c.loops() {
         return Err(Error::invalid(format!(
             "that join makes a loop through {at}"
@@ -357,9 +343,9 @@ pub fn rename(p: &mut Project, id: &str, name: &str, to: &str) -> Result<Value> 
         )));
     }
     for n in &mut c.nodes {
-        for join in [&mut n.input, &mut n.effect_mask] {
-            if join.as_deref() == Some(name) {
-                *join = Some(next.clone());
+        for input in NodeInput::ALL {
+            if n.join(input) == Some(name) {
+                *n.join_mut(input) = Some(next.clone());
             }
         }
         if let Some(k) = n.connect.as_mut().filter(|k| k.tracker == name) {
@@ -373,16 +359,15 @@ pub fn rename(p: &mut Project, id: &str, name: &str, to: &str) -> Result<Value> 
 pub fn remove(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let c = kept(p, id)?;
     let gone = c.nodes.remove(found(c, id, name)?);
-    let passes = gone.tool.flows();
     for n in &mut c.nodes {
         if n.connect.as_ref().is_some_and(|k| k.tracker == name) {
             n.connect = None;
         }
-        if n.input.as_deref() == Some(name) {
-            n.input = gone.input.clone().filter(|_| passes);
-        }
-        if n.effect_mask.as_deref() == Some(name) {
-            n.effect_mask = gone.effect_mask.clone().filter(|_| gone.tool.is_mask());
+        for input in NodeInput::ALL {
+            if n.join(input) == Some(name) {
+                let passes = gone.tool.takes(input) && gone.tool.feeds(input);
+                *n.join_mut(input) = gone.join(input).filter(|_| passes).map(str::to_string);
+            }
         }
     }
     tidied(p, id)?;

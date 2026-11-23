@@ -5,8 +5,8 @@ use vidcut_core::grade::{
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
 use vidcut_core::place::{
-    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Outline, Placing,
-    Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
+    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Op, Outline,
+    Placing, Program, Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
 };
 use vidcut_core::window_key::{
     CURVE_SAMPLE, FAR_OUTSIDE, Keying, Outline as WindowOutline, Shaped, texel_map,
@@ -241,7 +241,7 @@ fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
             pipeline: &pipes.sharpen,
             params: sharpen_bytes(sharpening, effect),
         }],
-        Work::Glow(_) | Work::Grain(_) | Work::Grade { .. } | Work::Clear => Vec::new(),
+        Work::Glow(_) | Work::Grain(_) | Work::Grade { .. } => Vec::new(),
     }
 }
 
@@ -820,6 +820,7 @@ impl Spot {
 pub(super) struct Composer {
     canvas: Option<Texture>,
     scratch: Option<[Texture; 2]>,
+    registers: Vec<Texture>,
     worked: Worked,
 }
 
@@ -840,7 +841,7 @@ impl Composer {
     pub(super) fn compose(
         &mut self,
         gpu: &Gpu,
-        works: &[Working],
+        program: &Program,
         encoder: &mut wgpu::CommandEncoder,
     ) {
         let Some(canvas) = self.canvas.as_ref() else {
@@ -850,7 +851,53 @@ impl Composer {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        effects_into(gpu, canvas, (scratch, &mut self.worked), works, encoder);
+        let on = (canvas, &mut self.registers);
+        run(gpu, on, (scratch, &mut self.worked), program, encoder);
+    }
+}
+
+fn run(
+    gpu: &Gpu,
+    (canvas, registers): (&Texture, &mut Vec<Texture>),
+    (scratch, worked): (&[Texture; 2], &mut Worked),
+    program: &Program,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let size = canvas.texture.size();
+    let more = program.registers() - 1;
+    registers.retain(|t| t.texture.size() == size);
+    registers.truncate(more);
+    while registers.len() < more {
+        registers.push(Texture::new(gpu, (size.width, size.height)));
+    }
+    let registers: &[Texture] = registers;
+    let at = |k: usize| match k {
+        0 => canvas,
+        k => &registers[k - 1],
+    };
+    for stage in &program.stages {
+        let to = at(stage.to);
+        match &stage.op {
+            Op::Clear => drop(begin(encoder, &to.view, Some(wgpu::Color::TRANSPARENT))),
+            Op::Work(working) => {
+                if let Some(&from) = stage.from.first().filter(|f| **f != stage.to) {
+                    encoder.copy_texture_to_texture(
+                        at(from).texture.as_image_copy(),
+                        to.texture.as_image_copy(),
+                        size,
+                    );
+                }
+                let one = std::slice::from_ref(working);
+                effects_into(gpu, to, (scratch, worked), one, encoder);
+            }
+        }
+    }
+    if program.out != 0 {
+        encoder.copy_texture_to_texture(
+            at(program.out).texture.as_image_copy(),
+            canvas.texture.as_image_copy(),
+            size,
+        );
     }
 }
 
@@ -858,6 +905,7 @@ impl Composer {
 pub(super) struct Blurred {
     size: (u32, u32),
     scratch: Option<[Texture; 2]>,
+    registers: Vec<Texture>,
     layers: Vec<Option<Texture>>,
     masks: Vec<Option<Texture>>,
     worked: Worked,
@@ -868,6 +916,7 @@ impl Blurred {
         if self.size != size {
             self.size = size;
             self.scratch = None;
+            self.registers.clear();
             self.worked = Worked::default();
             self.layers.clear();
             self.masks.clear();
@@ -920,7 +969,7 @@ impl Blurred {
             adj.texture.as_image_copy(),
             adj.texture.size(),
         );
-        if !placing.composed.is_empty() {
+        if !placing.composed.is_plain() {
             self.composed(gpu, adj, &placing.composed, encoder);
         }
         let scratch = self.scratch.as_ref().expect("made for an adjustment clip");
@@ -957,6 +1006,21 @@ impl Blurred {
     }
 
     pub(super) fn composed(
+        &mut self,
+        gpu: &Gpu,
+        canvas: &Texture,
+        program: &Program,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let size = self.size;
+        let scratch = self
+            .scratch
+            .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
+        let on = (canvas, &mut self.registers);
+        run(gpu, on, (scratch, &mut self.worked), program, encoder);
+    }
+
+    pub(super) fn worked(
         &mut self,
         gpu: &Gpu,
         canvas: &Texture,
@@ -1975,10 +2039,6 @@ fn effects_into(
         worked.masks = Some([Texture::new(gpu, room), Texture::new(gpu, room)]);
     }
     for effect in effects {
-        if matches!(effect.work, Work::Clear) {
-            drop(begin(encoder, &own.view, Some(wgpu::Color::TRANSPARENT)));
-            continue;
-        }
         let on = match (&worked.masks, effect.masks.is_empty()) {
             (Some(room), false) => Some(mask_made(gpu, (scratch, room), &effect.masks, encoder)),
             _ => None,

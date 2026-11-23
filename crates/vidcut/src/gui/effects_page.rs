@@ -342,25 +342,12 @@ enum MenuAct {
     Delete,
 }
 
-fn joined(n: &Node, which: NodeInput) -> Option<String> {
-    match which {
-        NodeInput::Input => n.input.clone(),
-        NodeInput::EffectMask => n.effect_mask.clone(),
-    }
-}
-
 fn which(slot: usize) -> NodeInput {
-    match slot {
-        1 => NodeInput::EffectMask,
-        _ => NodeInput::Input,
-    }
+    NodeInput::ALL.get(slot).copied().unwrap_or_default()
 }
 
 fn slot(which: NodeInput) -> usize {
-    match which {
-        NodeInput::Input => 0,
-        NodeInput::EffectMask => 1,
-    }
+    NodeInput::ALL.iter().position(|i| *i == which).unwrap_or(0)
 }
 
 fn joins(comp: &Composition) -> Vec<Wire<String>> {
@@ -370,12 +357,12 @@ fn joins(comp: &Composition) -> Vec<Wire<String>> {
     };
     let mut out = Vec::new();
     for n in &comp.nodes {
-        for which in [NodeInput::Input, NodeInput::EffectMask] {
-            if let Some(from) = joined(n, which) {
+        for which in NodeInput::ALL {
+            if let Some(from) = n.join(which) {
                 out.push(Wire {
                     to: n.name.clone(),
                     slot: slot(which),
-                    from,
+                    from: from.to_string(),
                     out: 0,
                     drops: true,
                     line: line(which),
@@ -386,24 +373,21 @@ fn joins(comp: &Composition) -> Vec<Wire<String>> {
     out
 }
 
+fn inlet(input: NodeInput) -> Inlet {
+    let (side, knot, name) = match input {
+        NodeInput::Input => (Side::Left, PICTURE_KNOT, "Input"),
+        NodeInput::EffectMask => (Side::Top, MASK_KNOT, "Effect Mask"),
+    };
+    Inlet {
+        slot: slot(input),
+        side,
+        knot,
+        name: name.into(),
+    }
+}
+
 fn tile(n: &Node) -> Tile<String> {
-    let mut inlets = Vec::new();
-    if n.tool.takes_input() {
-        inlets.push(Inlet {
-            slot: slot(NodeInput::Input),
-            side: Side::Left,
-            knot: PICTURE_KNOT,
-            name: "Input".into(),
-        });
-    }
-    if n.tool.takes_mask() {
-        inlets.push(Inlet {
-            slot: slot(NodeInput::EffectMask),
-            side: Side::Top,
-            knot: MASK_KNOT,
-            name: "Effect Mask".into(),
-        });
-    }
+    let inlets = n.tool.inputs().iter().map(|i| inlet(*i)).collect();
     let outlets = (!matches!(n.tool, Tool::MediaOut)).then(|| Outlet {
         slot: 0,
         name: "Output".into(),
@@ -427,10 +411,12 @@ fn tile(n: &Node) -> Tile<String> {
 }
 
 fn default_input(d: &Node, s: &Node) -> Option<NodeInput> {
-    if s.tool.is_mask() {
-        return d.tool.takes_mask().then_some(NodeInput::EffectMask);
+    let mask = s.tool.is_mask();
+    let mut fits = d.tool.inputs().iter().copied();
+    match mask {
+        true => fits.find(|i| !i.carries_picture()),
+        false => fits.find(|i| i.carries_picture() && d.join(*i).is_none()),
     }
-    (d.tool.takes_input() && d.input.is_none()).then_some(NodeInput::Input)
 }
 
 fn command(method: &str, params: Value) -> Value {
@@ -470,7 +456,7 @@ fn linked(comp: &Composition, clip: &str, l: &Link<String>) -> Vec<Value> {
         out.push(join_command(clip, (pd, which(*ps)), None));
     }
     if let Some((d, w, s)) = new {
-        let now = comp.node(&d).and_then(|n| joined(n, w));
+        let now = comp.node(&d).and_then(|n| n.join(w)).map(str::to_string);
         if now.as_deref() != Some(s.as_str()) {
             out.push(join_command(clip, (&d, w), Some(&s)));
         }

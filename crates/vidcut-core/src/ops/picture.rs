@@ -11,7 +11,7 @@ use crate::model::{
     Pattern, Picture, PictureTool, Project, Sharpen, Tool, TrackKind, Tracker, Vignette,
     VignetteMode, VignetteShape, ZoomBox,
 };
-use crate::request::DynamicZoomSet;
+use crate::request::{DynamicZoomSet, NodeInput};
 
 use super::locate;
 
@@ -796,32 +796,31 @@ pub fn composition_checked(c: &Composition) -> Result<Composition> {
                 n.tool.label()
             )));
         }
-        let joined = |join: &Option<String>, fits: fn(&Tool) -> bool, what: &str| match join {
-            None => Ok(()),
-            Some(from) => match c.node(from) {
-                None => Err(Error::invalid(format!(
-                    "{}'s {what} is {from}, which is no node",
-                    n.name
-                ))),
-                Some(m) if !fits(&m.tool) => Err(Error::invalid(format!(
-                    "{}'s {what} is {from}, a {}, which doesn't fit there",
-                    n.name,
-                    m.tool.label()
-                ))),
-                Some(_) => Ok(()),
-            },
-        };
-        if n.input.is_some() && !n.tool.takes_input() {
-            return Err(Error::invalid(format!("{} has no picture input", n.name)));
+        for input in NodeInput::ALL {
+            let Some(from) = n.join(input) else {
+                continue;
+            };
+            let what = input.label();
+            if !n.tool.takes(input) {
+                return Err(Error::invalid(format!("{} has no {what}", n.name)));
+            }
+            match c.node(from) {
+                None => {
+                    return Err(Error::invalid(format!(
+                        "{}'s {what} is {from}, which is no node",
+                        n.name
+                    )));
+                }
+                Some(m) if !m.tool.feeds(input) => {
+                    return Err(Error::invalid(format!(
+                        "{}'s {what} is {from}, a {}, which doesn't fit there",
+                        n.name,
+                        m.tool.label()
+                    )));
+                }
+                Some(_) => {}
+            }
         }
-        if n.effect_mask.is_some() && !n.tool.takes_mask() {
-            return Err(Error::invalid(format!(
-                "{} has no effect mask input",
-                n.name
-            )));
-        }
-        joined(&n.input, |t| t.flows() || *t == Tool::MediaIn, "input")?;
-        joined(&n.effect_mask, Tool::is_mask, "effect mask")?;
         connect_checked(c, n)?;
     }
     if let Some(at) = c.loops() {
