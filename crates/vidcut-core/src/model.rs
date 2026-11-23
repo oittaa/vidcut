@@ -4812,6 +4812,19 @@ pub struct Merge {
     /// from 0 to 1. The foreground is still added in full. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+    /// On, the merge puts the pixels of the two pictures in the order of
+    /// their depth channels. A picture without a depth channel is merged as
+    /// usual, and no picture has one. Thus this changes nothing. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub depth_merge: bool,
+    /// What a depth merge adds to the depth of the foreground, from
+    /// -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreground_z_offset: Option<f64>,
+    /// As `subtractive_additive`, for the pixels of the background that a
+    /// depth merge puts in front of the foreground, from 0 to 1. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_subtractive_additive: Option<f64>,
 }
 
 /// The text of a `text_plus` node and how it lies on the picture. S is its
@@ -5398,6 +5411,8 @@ pub enum EffectValue {
     SubtractiveAdditive,
     AlphaGain,
     BurnIn,
+    ForegroundZOffset,
+    BackgroundSubtractiveAdditive,
     Tracking,
     LineSpacing,
     LayoutSize,

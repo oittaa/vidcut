@@ -207,6 +207,7 @@ impl Tracker {
 impl Merge {
     pub const SIZE: f64 = 1.0;
     pub const SLIDES: (f64, f64) = (0.0, 1.0);
+    pub const Z_OFFSETS: (f64, f64) = (-1e6, 1e6);
 
     pub fn middle(&self) -> [f64; 2] {
         self.center.unwrap_or(Mask::MIDDLE)
@@ -242,6 +243,14 @@ impl Merge {
 
     pub fn burn(&self) -> f64 {
         self.burn_in.unwrap_or(0.0)
+    }
+
+    pub fn z_offset(&self) -> f64 {
+        self.foreground_z_offset.unwrap_or(0.0)
+    }
+
+    pub fn back_additive(&self) -> f64 {
+        self.background_subtractive_additive.unwrap_or(1.0)
     }
 }
 

@@ -1224,6 +1224,7 @@ fn node_speed(v: EffectValue) -> f64 {
         | EffectValue::SubtractiveAdditive
         | EffectValue::AlphaGain
         | EffectValue::BurnIn
+        | EffectValue::BackgroundSubtractiveAdditive
         | EffectValue::Opacity
         | EffectValue::ColorRed
         | EffectValue::ColorGreen
@@ -1237,6 +1238,7 @@ fn node_speed(v: EffectValue) -> f64 {
         | EffectValue::Round => 0.005,
         EffectValue::SoftnessX | EffectValue::SoftnessY | EffectValue::Priority => 0.05,
         EffectValue::Thickness => 0.0005,
+        EffectValue::ForegroundZOffset => 0.01,
         _ => 0.002,
     }
 }
@@ -1865,6 +1867,14 @@ fn node_rows(
             choice_row(ui, (slot, "Edges", "edges"), edge, edges, acts);
             let invert = (slot, "Invert Transform", m.invert_transform, false);
             check(ui, invert, "invert_transform", acts);
+            fold(ui, (slot, "Depth Merge"), |ui| {
+                let depth = (slot, "Enable Depth Merge", m.depth_merge, false);
+                check(ui, depth, "depth_merge", acts);
+                value(ui, acts, V::ForegroundZOffset, "Foreground Z Offset");
+                let text = "Background Subtractive/Additive";
+                value(ui, acts, V::BackgroundSubtractiveAdditive, text);
+            });
+            ui.end_row();
         }
         t => {
             let Some(m) = t.mask() else {

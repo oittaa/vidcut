@@ -528,6 +528,12 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.subtractive_additive, &mut m.subtractive_additive);
             given(&mut left.alpha_gain, &mut m.alpha_gain);
             given(&mut left.burn_in, &mut m.burn_in);
+            taken(&mut left.depth_merge, &mut m.depth_merge);
+            given(&mut left.foreground_z_offset, &mut m.foreground_z_offset);
+            given(
+                &mut left.background_subtractive_additive,
+                &mut m.background_subtractive_additive,
+            );
         }
         Tool::TextPlus(t) => {
             if let Some(c) = left.values.center.take() {

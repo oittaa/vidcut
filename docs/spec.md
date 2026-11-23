@@ -2749,6 +2749,14 @@ The transform of the foreground (pp. 2213, 2218):
   - Duplicate: the edge pixels of the foreground, stretched out.
   - Mirror: the foreground again, mirrored in turn.
 
+The Channels tab has the Depth Merge (p. 2219):
+
+- Enable Depth Merge: off. On, the depth channels of the two pictures set which pixels are in front.
+- Foreground Z Offset: 0, from -1000000 to 1000000. It moves the depth of the foreground away or nearer.
+- Background Subtractive/Additive: 1, from 0 to 1. It is Subtractive/Additive for the pixels of the background that come in front.
+- The values and the ranges are measured in Resolve Studio 21.2.
+- Without a depth channel in a picture, Enable Depth Merge does nothing. No picture in vidcut has a depth channel. Thus these three controls change nothing.
+
 The sums use these names:
 
 - F and B are the colors of the foreground and the background, premultiplied. fa and ba are their alphas.
