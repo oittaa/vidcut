@@ -7,17 +7,17 @@ The compositions of vidcut get a Text+ tool ([spec §8.19](../spec.md#819-compos
 **Why:**
 
 - Resolve's Text+ title and its Fusion titles are Fusion compositions with text tools (p. 1178).
-- A Merge has more controls than vidcut has now (pp. 2216–2218).
+- A Merge has more controls than vidcut has now (pp. 2217–2219).
 
 **What Resolve has:**
 
 - The Text+ node draws text into a 2D picture. Its one input is an effect mask that crops the text (p. 2381).
 - The Merge node has these controls that vidcut does not have yet:
-  - Filter Method: Linear is the only filter in vidcut. Resolve has 11 filters (p. 2216).
-  - Window Method, for the Sinc and the Bessel filters (p. 2216).
-  - Reference Size (p. 2217).
-  - Flatten Transform (p. 2217).
-  - The Channels tab and the Depth Merge (p. 2218).
+  - Filter Method: Linear is the only filter in vidcut. Resolve has 11 filters (p. 2217).
+  - Window Method, for the Sinc and the Bessel filters (p. 2217).
+  - Reference Size (p. 2218).
+  - Flatten Transform (p. 2218).
+  - The Channels tab and the Depth Merge (p. 2219).
 - In the viewer, a Merge has handles for its Center, Size and Angle.
 
 **To measure in Resolve:**
