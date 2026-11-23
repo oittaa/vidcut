@@ -173,6 +173,7 @@ flowchart TD
   - The frames of a track are frames of the file (`Frames::file`), from the In to the Out of the clip.
   - A `length` keeps the track within that many frames of the composition on each side (`Start::reach`).
 - `render::node_input` gives the picture that the track reads: the composition up to the input of the Tracker (`Composition::cut_at`).
+  - The masks on the effect mask of the Tracker are not in it. Why: they do not change the track ([spec](../spec.md#the-tracker)).
   - The plan has one frame for each frame of the file, at the rate of the file.
   - Why: the Tracker of the spec tracks the picture on its input, on each frame of the file.
 - `tracking::track` in vidcut-av measures, with the VitTrack model on the CPU:

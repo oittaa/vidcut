@@ -427,6 +427,9 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
     if next.tool.works() {
         given(&mut left.blend, &mut next.blend);
     }
+    if next.tool.multiplies() {
+        taken(&mut left.multiply_by_mask, &mut next.multiply_by_mask);
+    }
     if matches!(
         &next.tool,
         Tool::Effect(crate::model::EffectKind::GaussianBlur(_))

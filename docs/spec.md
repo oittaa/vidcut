@@ -2670,6 +2670,12 @@ This section follows the Fusion page. The facts without a page are measured in R
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
+  - Multiply by Mask: off (p. 2131). On, with a mask on the effect mask input:
+    - The tool works on the full picture, with no mask and no Blend.
+    - Its RGB and alpha are then multiplied by the masks and by the Blend. Outside the masks, the picture is clear.
+    - Thus a Text+ gives the same picture with Multiply by Mask on or off.
+  - With no mask on the effect mask input, Multiply by Mask changes nothing.
+  - The Settings tab of a Text+ has Multiply by Mask and no Blend. The Settings tab of a Tracker has both.
   - A mask on the effect mask input of a mask adds the two: a + b − a × b. This is the Merge paint mode.
 - Names: the tool's name and the first free number, as `Blur1`, `GaussianBlur1`, `Ellipse1`, `Polygon1`.
 
@@ -2906,7 +2912,6 @@ The values of the shading elements of a new node:
   - With a mask selected, no Merge comes. The Text+ joins nothing.
   - vidcut: a Media In added with a node selected does the same.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
-  - vidcut: a Tracker has no effect mask yet. A mask added with a Tracker selected joins nothing ([todo](todo/motion-tracking.md)).
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
@@ -3000,6 +3005,17 @@ The values of the shading elements of a new node:
 
 The Tracker node follows patterns in the picture on its input (pp. 1783–1789). The facts without a page are measured in Resolve Studio 21.2.
 
+- The Tracker has these inputs (pp. 2839–2840):
+  - Background: the picture to track.
+  - Effect Mask: the manual says that a mask on it limits the tracking (p. 2839). Measured, it limits only what the Operation shows:
+    - The masks do not change the track, also with Multiply by Mask on. The path is the same with and without a mask.
+    - With Operation None, the output is the input. The masks and Multiply by Mask do not change it.
+    - With Match Move, the masks limit where the moved picture replaces the input, as on other tools. Outside them, the input shows.
+    - With Match Move and Multiply by Mask on, the moved picture is multiplied by the masks. Outside them, the picture is clear.
+    - The record is section T1d of `fixtures/nodes/NOTES.md` in the test data.
+    - vidcut: Match Move is not built yet ([todo](todo/motion-tracking.md)).
+    - vidcut: the mask does not change what Find finds.
+  - vidcut: the Foreground input is not built yet ([todo](todo/motion-tracking.md)).
 - A new Tracker has one pattern (p. 1783).
   - Its box is 0.03 of the width and 0.0534 of the height of the picture. Its middle is at (0.25, 0.75).
   - Each side of the box is from 0.001 to 0.5.

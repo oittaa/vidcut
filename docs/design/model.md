@@ -671,6 +671,7 @@ Writing:
   - Over a node, one copy takes its place and its joins (`replaced`). A join that the copy cannot take goes.
   - `comp.set` takes a `NodeChange`. Its `values` are a `KindChange`: the values of an effect's kind, which `effects.set` also takes in its `EffectChange`.
   - A blur takes its `size`, a mask its `center` and `invert`, and a Gaussian Blur node its `blur_alpha`, from the `KindChange`.
+  - Only a tool takes `multiply_by_mask`: not a mask, the MediaIn node or the MediaOut node (`Tool::multiplies`).
   - Why: the names in the request are then those of the model. Each name has one field, and thus one text in the schema and in `--help`.
 - `ops::picture::composition_checked` checks the names, the joins, the loops and each node (`ops::picture::node_checked`). It is part of `ops::picture::checked`.
 - The keyframes of a node are in its `keys`, one `EffectKeys` for each `EffectValue` with keyframes.
