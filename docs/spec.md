@@ -2670,7 +2670,7 @@ This section follows the Fusion page. The facts without a page are measured in R
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
-  - Multiply by Mask: off. On, the picture that the tool gives is multiplied by its masks. Outside them, the picture is clear (p. 2131).
+  - Multiply by Mask: off (p. 2131). On, the RGB and the alpha that the tool gives are multiplied by its masks and by its Blend. Outside the masks, the picture is clear.
   - A mask on the effect mask input of a mask adds the two: a + b − a × b. This is the Merge paint mode.
 - Names: the tool's name and the first free number, as `Blur1`, `GaussianBlur1`, `Ellipse1`, `Polygon1`.
 

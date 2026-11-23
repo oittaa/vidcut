@@ -6192,7 +6192,7 @@ pub struct NodeChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<f64>,
     /// On, the picture of a tool is multiplied by the masks on its effect
-    /// mask: outside them, it is clear.
+    /// mask and by its `blend`: outside the masks, it is clear.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multiply_by_mask: Option<bool>,
     /// Its place in the node editor, `[x, y]` in node widths and heights.

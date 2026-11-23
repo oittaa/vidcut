@@ -4652,8 +4652,8 @@ pub struct Node {
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub blur_alpha: bool,
     /// On, the picture that a tool gives is multiplied by the masks on its
-    /// effect mask. Outside them, it is clear. A mask, `media_in` and
-    /// `media_out` do not take it. Usual: off.
+    /// effect mask and by its `blend`. Outside the masks, it is clear. A
+    /// mask, `media_in` and `media_out` do not take it. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub multiply_by_mask: bool,
     /// Its place in the node editor, `[x, y]` in node widths across and

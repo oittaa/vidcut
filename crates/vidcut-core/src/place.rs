@@ -1272,7 +1272,8 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
         };
         let result = match result {
             Some(r) if n.multiply_by_mask && n.tool.multiplies() && !n.pass_through => {
-                Some(masked(&mut stages, &mut regs, r, (masks(n), 1.0), (w, h)))
+                let multiplied = (masks(n), n.mixed());
+                Some(masked(&mut stages, &mut regs, r, multiplied, (w, h)))
             }
             other => other,
         };
