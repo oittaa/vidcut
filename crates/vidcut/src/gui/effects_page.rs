@@ -10,7 +10,8 @@ use vidcut_core::composition::Frames;
 use vidcut_core::effect_keys::Keyed;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
-    Clip, Composition, EffectValue, Mask, Node, Pattern, Project, Tool, ToolType,
+    Background, BackgroundFill, Clip, Composition, EffectValue, Mask, Node, Pattern, Project, Tool,
+    ToolType,
 };
 use vidcut_core::motion::Area;
 use vidcut_core::ops::grade::GradeOf;
@@ -32,6 +33,8 @@ use super::workspace::{Workspace, dim, fit};
 use crate::live::{Answer, PageClock, PageTime, PlayerId};
 
 const GRIP: f32 = 9.0;
+const GRADIENT_POINT: Color32 = Color32::from_rgb(230, 60, 60);
+const GRADIENT_LINE: Color32 = Color32::from_rgb(80, 200, 80);
 const DASH: f32 = 4.0;
 const JUST_BELOW: f64 = 1e-6;
 const HANDLE: f32 = 4.0;
@@ -259,6 +262,8 @@ enum Grip {
     Height,
     Angle,
     Point(usize),
+    Start,
+    End,
 }
 
 struct Boxed {
@@ -583,14 +588,23 @@ fn rounded_size(x: f64) -> f64 {
     x.clamp(lo, hi)
 }
 
-fn grip_change(m: &Mask, grip: Grip) -> (&'static str, Value) {
-    match grip {
+fn grip_change(tool: &Tool, grip: Grip) -> Option<(&'static str, Value)> {
+    if let Some(b) = tool.background() {
+        return match grip {
+            Grip::Start => Some(("start", json!(b.from()))),
+            Grip::End => Some(("end", json!(b.to()))),
+            _ => None,
+        };
+    }
+    let m = tool.mask()?;
+    Some(match grip {
         Grip::Center => ("center", json!(m.middle())),
         Grip::Width => ("width", json!(m.wide())),
         Grip::Height => ("height", json!(m.high())),
         Grip::Angle => ("angle", json!(m.turn())),
         Grip::Point(_) => ("points", json!(m.points)),
-    }
+        Grip::Start | Grip::End => return None,
+    })
 }
 
 fn grip_value(grip: Grip) -> Option<EffectValue> {
@@ -600,6 +614,8 @@ fn grip_value(grip: Grip) -> Option<EffectValue> {
         Grip::Height => Some(EffectValue::Height),
         Grip::Angle => Some(EffectValue::Angle),
         Grip::Point(_) => None,
+        Grip::Start => Some(EffectValue::Start),
+        Grip::End => Some(EffectValue::End),
     }
 }
 
@@ -1361,6 +1377,22 @@ impl Workspace {
             let Some(node) = sampled.node(name) else {
                 continue;
             };
+            let gradient = |b: &&Background| b.filled() == BackgroundFill::Gradient;
+            if let Some(b) = node.tool.background().filter(gradient) {
+                let ends = [b.from(), b.to()].map(|[x, y]| screen([x * w, (1.0 - y) * h]));
+                painter.line_segment(ends, Stroke::new(1.5, GRADIENT_LINE));
+                for at in ends {
+                    painter.circle_filled(at, HANDLE, GRADIENT_POINT);
+                }
+                shown.push(Shown {
+                    name: name.clone(),
+                    base: MaskBase::whole((w, h)),
+                    middle: [0.0, 0.0],
+                    turn: 0.0,
+                    spots: vec![(Grip::Start, ends[0]), (Grip::End, ends[1])],
+                });
+                continue;
+            }
             let Some(m) = node.tool.mask().filter(|m| m.show_view_controls) else {
                 continue;
             };
@@ -1465,6 +1497,16 @@ impl Workspace {
                     grip => gripped(m, &tool, (grip, to), &s.base, (w, h)),
                 }
             }
+            if let (Tool::Background(b), Some(now)) = (&mut n.tool, tool.background()) {
+                *b = now.clone();
+                let (lo, hi) = Mask::PLACES;
+                let at = [(to[0] / w).clamp(lo, hi), (1.0 - to[1] / h).clamp(lo, hi)];
+                match held.grip {
+                    Grip::Start => b.start = Some(at),
+                    Grip::End => b.end = Some(at),
+                    _ => {}
+                }
+            }
             held.last = to;
         }
         if !resp.drag_stopped() {
@@ -1473,8 +1515,7 @@ impl Workspace {
         let change = held
             .composition
             .node(&name)
-            .and_then(|n| n.tool.mask())
-            .map(|m| grip_change(m, held.grip));
+            .and_then(|n| grip_change(&n.tool, held.grip));
         held.sent = Some((rev, Instant::now()));
         if let Some((key, value)) = change {
             let mut params = json!({ "clip": clip.id, "node": name, "frame": at });

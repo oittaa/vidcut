@@ -16,7 +16,6 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
   - Interpolation Space of the gradient (p. 2359).
   - Sub-Pixel of the gradient (p. 2360).
   - Keyframes on the stops of the gradient, and its contextual menu (p. 2360).
-  - Start and End as points to drag in the viewer (p. 2359).
 - The Fast Noise tool: the defaults and the noise of Resolve. vidcut uses fractal Perlin noise until a measurement gives the values.
 - A picture on a map input of the Fast Noise. vidcut takes masks there.
 - The Image tab of the generators (pp. 2401–2402):

@@ -2925,6 +2925,7 @@ The Color tab (pp. 2358–2360):
   - Square, Cross and Radial: squares, a cross or circles about Start.
   - Angle: a counterclockwise sweep about Start.
 - The viewer shows Start and End as two red points with a green line between them (p. 2359).
+  - vidcut: the points show for a selected Background with Type Gradient. A drag moves a point.
 - The gradient bar holds the colors of the gradient (p. 2359):
   - Two color stops set the start and the end color.
   - A click on the bottom of the bar adds a stop.
