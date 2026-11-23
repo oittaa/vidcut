@@ -4821,8 +4821,8 @@ pub struct Merge {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_height: Option<f64>,
     /// On, the reference size is the size of the picture of the clip, and
-    /// the reference width and height cannot be set. Turned off, they keep
-    /// that size. Usual: off.
+    /// the reference width and height cannot be set or keyed. Turned off,
+    /// they keep that size. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_resolution: bool,
     /// On, the merge puts the pixels of the two pictures in the order of

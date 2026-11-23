@@ -697,16 +697,19 @@ pub fn set(
     Ok(())
 }
 
+fn reference_locked(name: &str) -> Error {
+    Error::invalid(format!(
+        "{name}'s reference size is the size of the picture while auto_resolution is on"
+    ))
+}
+
 fn reference_kept(n: &Node, change: &mut NodeChange, size: Option<(u32, u32)>) -> Result<()> {
     let Tool::Merge(m) = &n.tool else {
         return Ok(());
     };
     let auto = change.auto_resolution.unwrap_or(m.auto_resolution);
     if auto && (change.reference_width.is_some() || change.reference_height.is_some()) {
-        return Err(Error::invalid(format!(
-            "{}'s reference size is the size of the picture while auto_resolution is on",
-            n.name
-        )));
+        return Err(reference_locked(&n.name));
     }
     let Some((w, h)) = size.filter(|_| m.auto_resolution && !auto) else {
         return Ok(());
@@ -882,6 +885,12 @@ pub fn key(
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    if let (Tool::Merge(m), Some(EffectValue::ReferenceWidth | EffectValue::ReferenceHeight)) =
+        (&n.tool, value)
+        && m.auto_resolution
+    {
+        return Err(reference_locked(name));
+    }
     let label = n.tool.label().to_string();
     let keyed = match element {
         None => toggled(n, (name, &label), frame, (value, ease))?,

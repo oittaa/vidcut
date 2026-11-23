@@ -716,8 +716,12 @@ fn merge_slot(m: &mut Merge, value: EffectValue) -> Slot<'_> {
             m.background_subtractive_additive.get_or_insert(1.0),
             Merge::SLIDES,
         ),
-        V::ReferenceWidth => (m.reference_width.get_or_insert(1.0), Merge::REFERENCES),
-        V::ReferenceHeight => (m.reference_height.get_or_insert(1.0), Merge::REFERENCES),
+        V::ReferenceWidth if !m.auto_resolution => {
+            (m.reference_width.get_or_insert(1.0), Merge::REFERENCES)
+        }
+        V::ReferenceHeight if !m.auto_resolution => {
+            (m.reference_height.get_or_insert(1.0), Merge::REFERENCES)
+        }
         _ => return None,
     })
 }
