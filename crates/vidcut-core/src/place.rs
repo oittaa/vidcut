@@ -1121,14 +1121,14 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
             })
             .collect()
     };
-    let work = |n: &Node| {
+    let work = |n: &Node, shaped: Vec<Shaping>, mix: f64| {
         let mut working = match &n.tool {
             _ if n.pass_through => return None,
-            Tool::Blur(b) => Working::of_blur(b, n.mixed(), w)?,
+            Tool::Blur(b) => Working::of_blur(b, mix, w)?,
             Tool::Effect(kind) => {
                 let effect = Effect {
                     kind: kind.clone(),
-                    blend: n.blend,
+                    blend: Some(mix),
                     ..EffectType::of(kind).made()
                 };
                 let mut working = Working::of(&effect, &on)?;
@@ -1140,7 +1140,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
             }
             _ => return None,
         };
-        working.masks = masks(n);
+        working.masks = shaped;
         Some(working)
     };
     let media = order.iter().any(|&i| c.nodes[i].tool == Tool::MediaIn);
@@ -1156,18 +1156,15 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
             .collect();
         let first = came.first().copied().flatten();
         let gives: Vec<bool> = came.iter().map(Option::is_some).collect();
+        let shaped = masks(n);
+        let multiplied = n.multiply_by_mask && n.tool.multiplies() && !n.pass_through;
+        let (shaped, mix, outer) = match multiplied && !shaped.is_empty() {
+            true => (Vec::new(), 1.0, Some((shaped, n.mixed()))),
+            false => (shaped, n.mixed(), None),
+        };
         let result = match &n.tool {
             Tool::MediaIn if n.pass_through => Some(0),
-            Tool::MediaIn => {
-                let shaped = masks(n);
-                Some(masked(
-                    &mut stages,
-                    &mut regs,
-                    0,
-                    (shaped, n.mixed()),
-                    (w, h),
-                ))
-            }
+            Tool::MediaIn => Some(masked(&mut stages, &mut regs, 0, (shaped, mix), (w, h))),
             Tool::MediaOut => {
                 out = first;
                 None
@@ -1221,21 +1218,14 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                     });
                     to
                 });
-                let shaped = masks(n);
-                Some(masked(
-                    &mut stages,
-                    &mut regs,
-                    to,
-                    (shaped, n.mixed()),
-                    (w, h),
-                ))
+                Some(masked(&mut stages, &mut regs, to, (shaped, mix), (w, h)))
             }
             t if !t.gives_from(&gives) => None,
             Tool::Merge(m) => first.map(|b| match came.get(1).copied().flatten() {
                 Some(f) if !n.pass_through => {
                     let last = [regs.read(b), regs.read(f)];
                     let to = regs.taken();
-                    let merging = Merging::of(m, n.mixed(), (w, h), masks(n));
+                    let merging = Merging::of(m, mix, (w, h), shaped);
                     stages.push(Stage {
                         op: Op::Merge(merging),
                         from: vec![b, f],
@@ -1254,7 +1244,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                     b
                 }
             }),
-            _ => first.map(|r| match work(n) {
+            _ => first.map(|r| match work(n, shaped, mix) {
                 None => {
                     regs.read(r);
                     r
@@ -1270,12 +1260,9 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                 }
             }),
         };
-        let result = match result {
-            Some(r) if n.multiply_by_mask && n.tool.multiplies() && !n.pass_through => {
-                let multiplied = (masks(n), n.mixed());
-                Some(masked(&mut stages, &mut regs, r, multiplied, (w, h)))
-            }
-            other => other,
+        let result = match (result, outer) {
+            (Some(r), Some(outer)) => Some(masked(&mut stages, &mut regs, r, outer, (w, h))),
+            (result, _) => result,
         };
         if let Some(r) = result {
             regs.hold(r, uses[i]);

@@ -1005,7 +1005,8 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - A node that passes its picture on (a Tracker, a tool with `pass_through`, a tool with no work) gives the register of its input. A tool works in place on the register of its input when no later node reads that register. Else it writes a free register.
   - A Merge reads two registers and writes a free register. A register goes back to the free list after its last read (`Registers::freed`).
   - A node that makes its own picture, as the MediaIn node and a Text+, takes its masks and its Blend through `place::masked`. That gives an `Op::Clear` and an `Op::Merge`. The Merge puts the picture over the clear register, with the masks and the Blend.
-  - The picture of a tool with `multiply_by_mask` also goes through `place::masked`, after the stage of the tool. It takes the masks and the Blend of the tool.
+  - A tool with `multiply_by_mask` and a mask works with no mask and a Blend of 1. Its picture then goes through `place::masked`, with the masks and the Blend of the tool.
+  - Why: with Multiply by Mask, the tool of the spec works on the full picture, and only the multiply takes the masks and the Blend.
   - `place::masked` frees the register of the picture only when no later node reads it (`Registers::idle`). Thus a tool that passes its input on keeps the register of its input for the other nodes.
   - A node gives no picture when its picture input has none (`Tool::gives_from`). When the MediaOut node gets no picture, or the joins make a loop, the program is one `Op::Clear`. The clip then shows nothing, and `RenderPlan::broken_composition` stops an export (`Composition::shows`).
   - It works in the pixels of the picture, upright. A size in the composition follows these pixels, not the frame.

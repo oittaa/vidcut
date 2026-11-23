@@ -119,6 +119,7 @@ In this file, a path is never a track of the timeline.
   - A track follows no turn and no change of perspective.
   - Keyframes on X Offset and Y Offset, the Tracker Offset button of the viewer, and Select Time with Go (p. 1789).
   - The Foreground input of a Tracker.
+  - The Blend of a Tracker (Settings tab).
   - The Operation tab: Match Move, Corner Positioning, Perspective Positioning and stabilization (p. 1789).
   - The outputs other than Offset Position: Perspective Position, and the Steady and Unsteady values (pp. 1793–1794).
   - The Options tab: the names of the patterns, enlarge on drag and the search scale.
