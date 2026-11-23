@@ -29,7 +29,6 @@ The Text+ tool and the Merge tool of the compositions get the rest of their cont
   - Window Method, for the Sinc and the Bessel filters (p. 2217).
   - Reference Size (p. 2218).
   - Flatten Transform (p. 2218).
-  - The Channels tab and the Depth Merge (p. 2219).
   - Clamp Coverage, under Blend. It is on in a new Merge of Resolve Studio 21.2. The manual does not describe it.
 
 **To measure in Resolve:**
