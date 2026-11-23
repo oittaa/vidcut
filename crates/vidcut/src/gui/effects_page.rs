@@ -613,6 +613,7 @@ fn reach(grip: Grip, at: Pos2, press: Pos2, middle: Pos2) -> f32 {
         Grip::Angle => (at.distance(press) - RING).abs(),
         Grip::Spoke => along(middle),
         Grip::Across | Grip::Up => along(middle + (at - middle) / 2.0),
+        Grip::Center if (press - at).abs().max_elem() <= HANDLE => 0.0,
         _ => at.distance(press),
     }
 }
@@ -620,11 +621,11 @@ fn reach(grip: Grip, at: Pos2, press: Pos2, middle: Pos2) -> f32 {
 fn merge_spots(middle: Pos2, turn: f64) -> Vec<(Grip, Pos2)> {
     let spoke = middle + RING * vec2(turn.cos() as f32, -turn.sin() as f32);
     vec![
-        (Grip::Angle, middle),
-        (Grip::Spoke, spoke),
         (Grip::Center, middle),
         (Grip::Across, middle + vec2(ARROW, 0.0)),
         (Grip::Up, middle - vec2(0.0, ARROW)),
+        (Grip::Spoke, spoke),
+        (Grip::Angle, middle),
     ]
 }
 

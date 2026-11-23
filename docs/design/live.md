@@ -310,7 +310,8 @@ The bar and the Jobs button:
   - A drag of a handle changes a copy of the composition (`Held`). It sends one `comp.set` when it stops.
   - A drag of the ring adds the turn of the pointer about the center on each frame (`swept`). Thus the angle can go past 360. The line of a Merge (`Grip::Spoke`) does the same.
   - `merge_outline` gives the line around the foreground of a Merge, from the map that the render uses (`Merge::lookup`).
-  - `merge_spots` gives the handles of a Merge. Its center and its arrows (`Grip::Across`, `Grip::Up`) move the Center by the move of the pointer (`merge_moved`). A mask's center goes to the pointer.
+  - A press takes the nearest handle (`reach`). A press inside the center square is at no distance from it. On a tie, the first handle in the list wins.
+  - `merge_spots` gives the handles of a Merge, with the center and the arrows before the line and the ring. Its center and its arrows (`Grip::Across`, `Grip::Up`) move the Center by the move of the pointer (`merge_moved`). A mask's center goes to the pointer.
   - A Merge whose Center follows a tracker pattern shows all its handles. A drag of its center or an arrow moves nothing. When the drag stops, its own Center becomes the followed point of that frame.
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
 - On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L, the steps of a frame and a second, and the jumps.
