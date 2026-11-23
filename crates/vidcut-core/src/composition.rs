@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use crate::effect_keys::Keyed;
 use crate::model::{
     ApplyMode, Blur, BlurClipping, BlurFilter, Clip, Composition, Connect, EffectKind, EffectType,
-    EffectValue, Mask, Merge, MergeEdges, MergeOperator, MotionPath, Node, Pattern, Project, Tool,
-    ToolType, Tracker,
+    EffectValue, Mask, Merge, MergeEdges, MergeOperator, MotionPath, Node, Pattern, Project,
+    TextPlus, Tool, ToolType, Tracker,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -245,6 +245,55 @@ impl Merge {
     }
 }
 
+impl TextPlus {
+    pub const SIZE: f64 = 0.08;
+    pub const STYLE: &str = "Bold";
+    pub const COLORS: (f64, f64) = (0.0, 1e6);
+    pub const OPACITIES: (f64, f64) = (0.0, 1.0);
+    pub const SPACINGS: (f64, f64) = (-1e6, 1e6);
+    pub const ANCHORS: (f64, f64) = (-1.0, 1.0);
+
+    pub fn scale(&self) -> f64 {
+        self.size.unwrap_or(Self::SIZE)
+    }
+
+    pub fn face(&self) -> &str {
+        self.style.as_deref().unwrap_or(Self::STYLE)
+    }
+
+    pub fn ink(&self) -> [f64; 3] {
+        self.color.unwrap_or([1.0; 3])
+    }
+
+    pub fn alpha(&self) -> f64 {
+        self.opacity.unwrap_or(1.0)
+    }
+
+    pub fn track(&self) -> f64 {
+        self.tracking.unwrap_or(1.0)
+    }
+
+    pub fn spacing(&self) -> f64 {
+        self.line_spacing.unwrap_or(1.0)
+    }
+
+    pub fn anchors(&self) -> [f64; 2] {
+        [self.horizontal_anchor, self.vertical_anchor].map(|a| a.unwrap_or(0.0))
+    }
+
+    pub fn middle(&self) -> [f64; 2] {
+        self.center.unwrap_or(Mask::MIDDLE)
+    }
+
+    pub fn layout(&self) -> f64 {
+        self.layout_size.unwrap_or(1.0)
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.angle.unwrap_or(0.0)
+    }
+}
+
 impl ApplyMode {
     pub const ALL: [ApplyMode; 27] = [
         ApplyMode::Normal,
@@ -449,6 +498,7 @@ impl Tool {
             Tool::Polygon(_) => "Polygon",
             Tool::Tracker(_) => "Tracker",
             Tool::Merge(_) => "Merge",
+            Tool::TextPlus(_) => "Text",
         }
     }
 
@@ -463,6 +513,7 @@ impl Tool {
             Tool::Polygon(_) => "Polygon",
             Tool::Tracker(_) => "Tracker",
             Tool::Merge(_) => "Merge",
+            Tool::TextPlus(_) => "Text+",
         }
     }
 
@@ -471,7 +522,10 @@ impl Tool {
     }
 
     pub fn works(&self) -> bool {
-        matches!(self, Tool::Blur(_) | Tool::Effect(_) | Tool::Merge(_))
+        matches!(
+            self,
+            Tool::Blur(_) | Tool::Effect(_) | Tool::Merge(_) | Tool::TextPlus(_)
+        )
     }
 
     pub fn inputs(&self) -> &'static [NodeInput] {
@@ -484,7 +538,9 @@ impl Tool {
                 NodeInput::Foreground,
                 NodeInput::EffectMask,
             ],
-            Tool::Ellipse(_) | Tool::Rectangle(_) | Tool::Polygon(_) => &[NodeInput::EffectMask],
+            Tool::Ellipse(_) | Tool::Rectangle(_) | Tool::Polygon(_) | Tool::TextPlus(_) => {
+                &[NodeInput::EffectMask]
+            }
         }
     }
 
@@ -500,9 +556,13 @@ impl Tool {
         self.gives_picture() && self.takes(NodeInput::Input)
     }
 
+    pub fn makes(&self) -> bool {
+        self.gives_picture() && !self.takes(NodeInput::Input)
+    }
+
     pub fn gives_from(&self, came: &[bool]) -> bool {
         match self {
-            Tool::MediaIn => true,
+            t if t.makes() => true,
             t if !t.gives_picture() => false,
             _ => came.first().copied().unwrap_or(false),
         }
@@ -543,6 +603,13 @@ impl Tool {
         }
     }
 
+    pub fn text_plus(&self) -> Option<&TextPlus> {
+        match self {
+            Tool::TextPlus(t) => Some(t),
+            _ => None,
+        }
+    }
+
     pub fn mask_mut(&mut self) -> Option<&mut Mask> {
         match self {
             Tool::Ellipse(m) | Tool::Rectangle(m) | Tool::Polygon(m) => Some(m),
@@ -573,6 +640,7 @@ impl Tool {
                     .collect(),
             }),
             Tool::Merge(_) => Tool::Merge(Merge::default()),
+            Tool::TextPlus(_) => Tool::TextPlus(TextPlus::default()),
         }
     }
 }
@@ -611,9 +679,13 @@ impl Node {
         self.blend.unwrap_or(1.0)
     }
 
-    pub fn center_to_usual(&mut self) {
+    pub fn usual_point(&self, value: EffectValue) -> Option<[f64; 2]> {
         let usual = Node::new(&self.name, self.tool.made(), self.place);
-        if let Some((to, _)) = usual.read_point(EffectValue::Center) {
+        usual.read_point(value).map(|(p, _)| p)
+    }
+
+    pub fn center_to_usual(&mut self) {
+        if let Some(to) = self.usual_point(EffectValue::Center) {
             self.write_point(EffectValue::Center, to);
         }
     }
@@ -990,7 +1062,7 @@ impl Composition {
 }
 
 impl ToolType {
-    pub const ADDED: [ToolType; 12] = [
+    pub const ADDED: [ToolType; 13] = [
         ToolType::Blur,
         ToolType::GaussianBlur,
         ToolType::MosaicBlur,
@@ -1003,6 +1075,7 @@ impl ToolType {
         ToolType::Polygon,
         ToolType::Tracker,
         ToolType::Merge,
+        ToolType::TextPlus,
     ];
 
     pub fn made(self) -> Tool {
@@ -1020,6 +1093,7 @@ impl ToolType {
             ToolType::Polygon => Tool::Polygon(Mask::default()),
             ToolType::Tracker => Tool::Tracker(Tracker::made()),
             ToolType::Merge => Tool::Merge(Merge::default()),
+            ToolType::TextPlus => Tool::TextPlus(TextPlus::default()),
             ToolType::MediaIn => Tool::MediaIn,
             ToolType::MediaOut => Tool::MediaOut,
         }

@@ -146,9 +146,26 @@ pub fn add(p: &mut Project, id: &str, tool: ToolType, after: Option<&str>) -> Re
     let made = tool.made();
     one_of(c, &made, id)?;
     let name = c.free_name(made.base());
-    insert(c, Node::new(&name, made, [0.0, 0.0]), after, id)?;
+    let merged = made.makes() && after.is_some();
+    let mut node = Node::new(&name, made, [0.0, 0.0]);
+    let answer = match merged {
+        false => {
+            insert(c, node, after, id)?;
+            json!({ "clip": id, "node": name })
+        }
+        true => {
+            let merge = c.free_name(ToolType::Merge.made().base());
+            let mut joined = Node::new(&merge, ToolType::Merge.made(), [0.0, 0.0]);
+            joined.foreground = Some(name.clone());
+            insert(c, joined, after, id)?;
+            let place = c.node(&merge).map_or([0.0, 0.0], |m| m.place);
+            node.place = above(c, place);
+            c.nodes.push(node);
+            json!({ "clip": id, "node": name, "merge": merge, "nodes": [merge] })
+        }
+    };
     tidied(p, id)?;
-    Ok(json!({ "clip": id, "node": name }))
+    Ok(answer)
 }
 
 pub fn copied(p: &mut Project, id: &str, name: &str) -> Result<Node> {
@@ -507,6 +524,31 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.subtractive_additive, &mut m.subtractive_additive);
             given(&mut left.alpha_gain, &mut m.alpha_gain);
             given(&mut left.burn_in, &mut m.burn_in);
+        }
+        Tool::TextPlus(t) => {
+            if let Some(c) = left.values.center.take() {
+                let [x, y] = c[..] else {
+                    return Err(Error::invalid("a text's center is two numbers, [x, y]"));
+                };
+                t.center = Some([x, y]);
+            }
+            if let Some(c) = left.values.color.take() {
+                let [r, g, b] = c[..] else {
+                    return Err(Error::invalid("a text's color is three numbers, [r, g, b]"));
+                };
+                t.color = Some([r, g, b]);
+            }
+            taken(&mut left.text, &mut t.text);
+            given(&mut left.font, &mut t.font);
+            given(&mut left.style, &mut t.style);
+            given(&mut left.values.size, &mut t.size);
+            given(&mut left.values.opacity, &mut t.opacity);
+            given(&mut left.tracking, &mut t.tracking);
+            given(&mut left.line_spacing, &mut t.line_spacing);
+            given(&mut left.vertical_anchor, &mut t.vertical_anchor);
+            given(&mut left.horizontal_anchor, &mut t.horizontal_anchor);
+            given(&mut left.layout_size, &mut t.layout_size);
+            given(&mut left.angle, &mut t.angle);
         }
         Tool::MediaIn | Tool::MediaOut => {}
     }

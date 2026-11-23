@@ -9,7 +9,7 @@ use crate::model::{
     Composition, Crop, DynamicZoom, Effect, EffectKeys, EffectKind, EffectValue, FillMethod,
     FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, Mask, Merge,
     MergeEdges, MergeOperator, MosaicBlur, Node, Pattern, Picture, PictureTool, Project, Sharpen,
-    Tool, TrackKind, Tracker, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    TextPlus, Tool, TrackKind, Tracker, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::{DynamicZoomSet, NodeInput};
 
@@ -564,6 +564,7 @@ fn plain_node_checked(n: &Node) -> Result<Node> {
         Tool::Polygon(m) => Tool::Polygon(mask_checked(m, "polygon")?),
         Tool::Tracker(t) => Tool::Tracker(tracker_checked(t)?),
         Tool::Merge(m) => Tool::Merge(merge_checked(m)?),
+        Tool::TextPlus(t) => Tool::TextPlus(text_checked(t)?),
         t => t.clone(),
     };
     Ok(Node {
@@ -627,6 +628,65 @@ fn merge_checked(m: &Merge) -> Result<Merge> {
         alpha_gain: m.alpha_gain.filter(|v| *v != 1.0),
         burn_in: m.burn_in.filter(|v| *v != 0.0),
         ..m.clone()
+    })
+}
+
+fn text_checked(t: &TextPlus) -> Result<TextPlus> {
+    for v in t.center.into_iter().flatten() {
+        let why = "a text's center is two fractions, each from -10 to 10";
+        within(Some(v), Mask::PLACES, why)?;
+    }
+    for v in t.color.into_iter().flatten() {
+        within(
+            Some(v),
+            TextPlus::COLORS,
+            "a text's color is from 0 to 1000000",
+        )?;
+    }
+    within(t.size, Mask::SIZES, "a text's size is from 0 to 1000000")?;
+    within(
+        t.opacity,
+        TextPlus::OPACITIES,
+        "a text's opacity is from 0 to 1",
+    )?;
+    let spacings = [("tracking", t.tracking), ("line spacing", t.line_spacing)];
+    for (what, v) in spacings {
+        let why = format!("a text's {what} is from -1000000 to 1000000");
+        within(v, TextPlus::SPACINGS, &why)?;
+    }
+    let anchors = [
+        ("vertical", t.vertical_anchor),
+        ("horizontal", t.horizontal_anchor),
+    ];
+    for (what, v) in anchors {
+        let why = format!("a text's {what} anchor is from -1 to 1");
+        within(v, TextPlus::ANCHORS, &why)?;
+    }
+    within(
+        t.layout_size,
+        Mask::SIZES,
+        "a text's layout size is from 0 to 1000000",
+    )?;
+    within(
+        t.angle,
+        Mask::TURNS,
+        "a text's angle is from -1000000 to 1000000 degrees",
+    )?;
+    let named = |n: &Option<String>| n.clone().filter(|n| !n.trim().is_empty());
+    Ok(TextPlus {
+        font: named(&t.font),
+        style: named(&t.style).filter(|s| s != TextPlus::STYLE),
+        size: t.size.filter(|v| *v != TextPlus::SIZE),
+        color: t.color.filter(|c| *c != [1.0; 3]),
+        opacity: t.opacity.filter(|v| *v != 1.0),
+        tracking: t.tracking.filter(|v| *v != 1.0),
+        line_spacing: t.line_spacing.filter(|v| *v != 1.0),
+        vertical_anchor: t.vertical_anchor.filter(|v| *v != 0.0),
+        horizontal_anchor: t.horizontal_anchor.filter(|v| *v != 0.0),
+        center: t.center.filter(|c| *c != Mask::MIDDLE),
+        layout_size: t.layout_size.filter(|v| *v != 1.0),
+        angle: t.angle.filter(|v| *v != 0.0),
+        ..t.clone()
     })
 }
 

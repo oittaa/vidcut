@@ -4697,6 +4697,9 @@ pub enum Tool {
     Tracker(Tracker),
     /// The picture on its `foreground` over the picture on its `input`.
     Merge(Merge),
+    /// Text on a clear picture of the size of the clip's own picture. Its
+    /// `effect_mask` crops it.
+    TextPlus(TextPlus),
 }
 
 /// The patterns of a tracker, in their order. A mask names a pattern by its
@@ -4811,6 +4814,64 @@ pub struct Merge {
     pub burn_in: Option<f64>,
 }
 
+/// The text of a `text_plus` node and how it lies on the picture. S is its
+/// `size` and W the width of the picture. The line height of the font, from
+/// its ascent to its descent, is 0.8 × S × W. A field left out is at its
+/// usual value. Its numbers can have keyframes, in the `keys` of its node.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TextPlus {
+    /// The text. A line break starts a new line. Usual: no text.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text: String,
+    /// The font family. Usual: Open Sans where it is installed, else the
+    /// sans-serif font of the system.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
+    /// The face of the family, for example `Regular`, `Bold` or `Bold
+    /// Italic`. Usual: `Bold`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+    /// S, from 0 to 1000000. Usual: 0.08.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// The color of the text, `[r, g, b]`, each from 0. Usual: `[1, 1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[f64; 3]>,
+    /// How much of the text shows, from 0 to 1. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// The space between two characters grows by (tracking - 1) × S × W,
+    /// from -1000000 to 1000000. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracking: Option<f64>,
+    /// The baselines of two lines are 0.8 × S × W × line spacing apart, from
+    /// -1000000 to 1000000. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<f64>,
+    /// The point of the text that goes on `center`, down, from -1 to 1. At
+    /// -1 the top of the block, which is one em less the descent of the font
+    /// above the first baseline. At 1 the last baseline. In between, a
+    /// straight blend; 0 is the middle. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_anchor: Option<f64>,
+    /// The point of each line that goes on `center`, across, from -1 to 1.
+    /// At -1 the start of the line, at 1 the end of its last character's
+    /// advance, 0 the middle. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal_anchor: Option<f64>,
+    /// Where the text goes, `[x, y]` as fractions of the picture from its
+    /// bottom left, each from -10 to 10. Usual: `[0.5, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// How large the laid out text is, about `center`, from 0 to 1000000.
+    /// Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_size: Option<f64>,
+    /// Degrees the text is turned counterclockwise about `center`. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
+}
+
 /// What lies around the foreground of a `merge`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -4923,7 +4984,7 @@ pub enum MergeOperator {
 }
 
 /// The tools that a composition takes: `blur`, the kinds of effect, the
-/// masks, and the picture coming in and going out.
+/// masks, `merge`, `text_plus`, and the picture coming in and going out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolType {
@@ -4939,6 +5000,7 @@ pub enum ToolType {
     Polygon,
     Tracker,
     Merge,
+    TextPlus,
     MediaIn,
     MediaOut,
 }
@@ -5214,6 +5276,11 @@ pub enum EffectValue {
     SubtractiveAdditive,
     AlphaGain,
     BurnIn,
+    Tracking,
+    LineSpacing,
+    LayoutSize,
+    VerticalAnchor,
+    HorizontalAnchor,
 }
 
 /// What an effect does, with its own values.

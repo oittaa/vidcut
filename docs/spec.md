@@ -2662,6 +2662,7 @@ This section follows the Fusion page. The facts without a page are measured in R
   - Blur: the Blur tool of the Fusion page (pp. 2108–2111). See below.
   - Tracker: it follows patterns in the picture, and passes its input on as it is (pp. 1783–1789). See [The Tracker](#the-tracker).
   - Merge: it puts the picture on its Foreground input over the picture on its Background input (pp. 2211–2218). See [The Merge](#the-merge).
+  - Text+: it draws text on a clear picture (pp. 2381–2390). See [The Text+ tool](#the-text-tool).
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
@@ -2818,9 +2819,43 @@ vidcut, with a mode other than Normal:
 
 Resolve gives wrong values with Screen and Conjoint, Screen and Disjoint, Hue and Saturation. vidcut does not copy these faults ([gotchas](gotchas.md#resolves-renders)).
 
+#### The Text+ tool
+
+The facts without a page are measured in Resolve Studio 21.2.
+
+- The Text+ tool draws text into a 2D picture. Its one input is an Effect Mask, which crops the text (p. 2381).
+- The picture has the size of the clip's own picture, W × H. Outside the text, it is clear.
+- Blend mixes the text with a clear picture.
+
+The values of a new Text+ node:
+
+- Styled Text: no text. A line break starts a new line (p. 2383).
+- Font: Open Sans, Style Bold. Two menus set the family and the face (p. 2383).
+  - vidcut: without Open Sans, the usual sans-serif font of the system.
+  - vidcut: the face is found by the words of its name: the weight, Italic or Oblique, and the width.
+- Color: white. Opacity: 1 (pp. 2383, 2390).
+- Size: 0.08. The size follows the width of the picture (p. 2383).
+- Tracking: 1. Line Spacing: 1. V Anchor: 0. H Anchor: 0 (pp. 2383–2384).
+- Layout: Point. Center: (0.5, 0.5). Size: 1. Angle: 0 (p. 2387).
+
+The size and the place of the text, with S the Size:
+
+- The line height of the font, from its hhea ascent to its hhea descent, is 0.8 × S × W. Thus one em is 0.8 × S × W × unitsPerEm / (ascent − descent).
+- The baselines of two lines are 0.8 × S × W × Line Spacing apart. The line gap of the font is not used.
+- Tracking adds (Tracking − 1) × S × W between two characters. It adds nothing before the first or after the last.
+- The block of n lines goes from one em less the descent above the first baseline, down to the last baseline.
+- V Anchor sets the point of the block that goes on Center: −1 the top, 0 the middle, 1 the last baseline. A value between gives a straight blend.
+- H Anchor sets the point of each line that goes on Center: −1 its start, 0 its middle, 1 its end.
+  - The start is the origin of the first glyph. The end is the end of the advance of the last glyph.
+- Center is in fractions of the picture, from its bottom left. Y goes up.
+- The Size of the layout scales the laid out text about Center. Angle turns it counterclockwise about Center.
+- The text is drawn at its exact place, with no step to whole pixels.
+
 #### Edits
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
+- Add a Text+ with a node selected: a new Merge goes after that node, and the Text+ joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
+  - vidcut: a Media In added with a node selected does the same.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
   - vidcut: a Tracker has no effect mask yet. A mask added with a Tracker selected joins nothing ([todo](todo/motion-tracking.md)).
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.

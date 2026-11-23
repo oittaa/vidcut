@@ -2,8 +2,8 @@ use vidcut_core::grade::{
     Graded, Grading, HALF_KNOTS, Key, KeyFold, LOG_KNOTS, LogCurve, Pass as GradePass,
     THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
 };
-use vidcut_core::lru::Lru;
-use vidcut_core::model::{ApplyMode, MergeEdges, MergeOperator};
+use vidcut_core::lru::{ByBytes, Lru};
+use vidcut_core::model::{ApplyMode, MergeEdges, MergeOperator, TextPlus};
 use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
 use vidcut_core::place::{
     Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Merging, Op,
@@ -14,6 +14,7 @@ use vidcut_core::window_key::{
 };
 
 use super::{Gpu, MIXING, begin, grain, sharpen, vignette};
+use crate::burn::{Inked, Lettering};
 
 const KERNEL: usize = 35;
 
@@ -832,15 +833,89 @@ fn spare_ready(gpu: &Gpu, spare: &mut Spare, (w, h): (u32, u32), slots: [u32; 2]
     }
 }
 
+const LETTERS_BYTES: usize = 64 << 20;
+
+const LETTERS_ENTRY_BYTES: usize = 1 << 10;
+
+struct Lettered {
+    texture: Texture,
+    at: (u32, u32),
+}
+
+type Letters = ByBytes<Lettering, Option<Lettered>>;
+
 #[derive(Default)]
 struct Worked {
     cells: Option<vignette::Cells>,
     planes: Option<sharpen::Planes>,
     spare: Spare,
     tiles: Tiles,
+    letters: Letters,
     shrink: [f64; 2],
     frame: [f64; 2],
     masks: Option<[Texture; 2]>,
+}
+
+fn lettered(gpu: &Gpu, inked: Inked) -> Lettered {
+    let size = (inked.width, inked.height);
+    let texture = Texture::new(gpu, size);
+    let bytes: Vec<u8> = inked
+        .rgba
+        .iter()
+        .flatten()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    gpu.queue.write_texture(
+        texture.texture.as_image_copy(),
+        &bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(size.0 * 16),
+            rows_per_image: Some(size.1),
+        },
+        texture.texture.size(),
+    );
+    Lettered {
+        texture,
+        at: (inked.left, inked.top),
+    }
+}
+
+fn letters_into(
+    gpu: &Gpu,
+    letters: &mut Letters,
+    (text, to): (&TextPlus, &Texture),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    drop(begin(encoder, &to.view, Some(wgpu::Color::TRANSPARENT)));
+    let size = to.texture.size();
+    let key = Lettering::of(text, (size.width, size.height));
+    if !letters.contains(&key) {
+        let made = crate::burn::inked(&key).map(|inked| lettered(gpu, inked));
+        let pixels = made.as_ref().map_or(0, |m| {
+            let s = m.texture.texture.size();
+            (s.width * s.height) as usize
+        });
+        letters.insert(key.clone(), made, pixels * 16 + LETTERS_ENTRY_BYTES);
+        letters.fit(LETTERS_BYTES);
+    }
+    let Some(Some(made)) = letters.get(&key) else {
+        return;
+    };
+    encoder.copy_texture_to_texture(
+        made.texture.texture.as_image_copy(),
+        wgpu::TexelCopyTextureInfo {
+            texture: &to.texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d {
+                x: made.at.0,
+                y: made.at.1,
+                z: 0,
+            },
+            aspect: wgpu::TextureAspect::All,
+        },
+        made.texture.texture.size(),
+    );
 }
 
 struct Spot {
@@ -948,6 +1023,7 @@ fn run(
                 let bytes = merge_bytes(merging, on.is_some());
                 draw_step(gpu, (&gpu.blur.merge, &bytes), views, &to.view, encoder);
             }
+            Op::Text(text) => letters_into(gpu, &mut worked.letters, (text, to), encoder),
         }
     }
     if program.out != 0 {
