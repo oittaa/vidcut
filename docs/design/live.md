@@ -307,6 +307,7 @@ The bar and the Jobs button:
   - Each value has its Keyframe button. It sends `comp.key` with the `value`.
   - A Text+ shows one shading element at a time. `EffectsPage::element` holds it, and `gui.nodes` with `element` sets it. A click on the row of elements sends that request.
 - `Workspace::mask_handles` draws the handles of each selected mask with `show_view_controls` on.
+  - For a selected Background with Type Gradient, it draws Start and End (`Grip::Start`, `Grip::End`) and the line between them.
   - A drag of a handle changes a copy of the composition (`Held`). It sends one `comp.set` when it stops.
   - A drag of the ring adds the turn of the pointer about the center on each frame (`swept`). Thus the angle can go past 360.
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.

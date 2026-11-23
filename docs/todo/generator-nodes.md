@@ -17,7 +17,6 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
   - Interpolation Space of the gradient (p. 2359).
   - Sub-Pixel of the gradient (p. 2360).
   - Keyframes on the stops of the gradient, and its contextual menu (p. 2360).
-  - Start and End as points to drag in the viewer (p. 2359).
 - The Image tab of the generators (pp. 2401–2402):
   - Width and Height without Use Frame Format Settings.
   - Process Mode, Global In and Out, Pixel Aspect, Depth, Source Color Space and Source Gamma Space.
