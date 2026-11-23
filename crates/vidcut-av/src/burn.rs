@@ -309,13 +309,10 @@ fn stepped(p: [f32; 4]) -> [f32; 4] {
     [r / a, g / a, b / a, a]
 }
 
-struct Look<'a> {
+struct Typeset<'a> {
     font: Option<&'a str>,
     size: f32,
-    line: f32,
-    title_gap: Option<(&'a Title, f64)>,
-    seat: Option<Seat>,
-    spacing: (f32, f32),
+    rules: Rules<'a>,
     tracking: f32,
     case: TitleCase,
     wrap: f32,
@@ -337,6 +334,121 @@ struct Seat {
     edge: f32,
     part: TitlePart,
     anchor: [f64; 2],
+}
+
+#[derive(Clone, Copy)]
+enum Rules<'a> {
+    Plain { line: f32 },
+    Title(TitleRules<'a>),
+}
+
+#[derive(Clone, Copy)]
+struct TitleRules<'a> {
+    title: &'a Title,
+    pixel: f64,
+    spacing: f32,
+    scale: f32,
+    seat: Option<Seat>,
+}
+
+impl Rules<'_> {
+    fn line(&self) -> f32 {
+        match self {
+            Rules::Plain { line } => *line,
+            Rules::Title(_) => Title::LINE as f32,
+        }
+    }
+
+    fn seat(&self) -> Option<Seat> {
+        match self {
+            Rules::Plain { .. } => None,
+            Rules::Title(t) => t.seat,
+        }
+    }
+
+    fn scale(&self) -> f32 {
+        match self {
+            Rules::Plain { .. } => 0.0,
+            Rules::Title(t) => t.scale,
+        }
+    }
+
+    fn spacing(&self) -> f32 {
+        match self {
+            Rules::Plain { .. } => 0.0,
+            Rules::Title(t) => t.spacing,
+        }
+    }
+
+    fn lines_own(&self) -> bool {
+        matches!(self, Rules::Title(_))
+    }
+
+    fn drawn(&self, exact: f64) -> f64 {
+        match self.seat() {
+            Some(_) => Title::whole_size(exact, f64::from(self.scale())),
+            None => exact,
+        }
+    }
+
+    fn shifted(&self, full: f32) -> f32 {
+        Title::shifted_size(f64::from(full), f64::from(self.scale())) as f32
+    }
+
+    fn small(&self, px: f32) -> f32 {
+        Title::small_size(f64::from(px), f64::from(self.scale())) as f32
+    }
+
+    fn tracked(&self, system: &mut FontSystem, attrs: &Attrs<'_>, tracking: f32, full: f32) -> f32 {
+        if tracking == 0.0 {
+            return 0.0;
+        }
+        let scale = self.scale();
+        let unzoomed = full / scale;
+        let letter = letter_x_width(system, attrs, unzoomed).unwrap_or(unzoomed);
+        Title::tracking_pixels(f64::from(tracking), f64::from(letter)) as f32 * scale
+    }
+
+    fn gap(&self, system: &mut FontSystem, attrs: &Attrs<'_>, px: f32) -> f32 {
+        match self {
+            Rules::Plain { .. } => None,
+            Rules::Title(t) => face_of(system, attrs).and_then(|id| {
+                let own = font_heights(system, id, attrs.weight, !t.title.moves())?;
+                let zoom = f64::from(t.scale) / t.pixel;
+                Some(t.title.line_gap(own, f64::from(px), t.pixel, zoom) as f32)
+            }),
+        }
+        .unwrap_or(px * self.line())
+    }
+
+    fn tall(&self, system: &mut FontSystem, attrs: &Attrs<'_>, px: f32) -> f32 {
+        match self {
+            Rules::Plain { .. } => None,
+            Rules::Title(_) => face_of(system, attrs).and_then(|id| {
+                let [ascent, descent, _] = font_heights(system, id, attrs.weight, true)?;
+                Some(((ascent + descent) * f64::from(px)) as f32)
+            }),
+        }
+        .unwrap_or(px * self.line())
+    }
+
+    fn seated(&self, widest: f32, wrap: f32, lines: f32, above: f32) -> Option<[f32; 2]> {
+        let Rules::Title(t) = self else {
+            return None;
+        };
+        let s = t.seat?;
+        let pixel = t.pixel;
+        let left = t.title.seated_left(
+            s.anchor[0],
+            f64::from(s.middle),
+            f64::from(widest),
+            f64::from(wrap),
+            pixel,
+        );
+        let edge = ((f64::from(s.edge) / pixel).round() * pixel) as f32;
+        let top = block_top(edge, s.part, s.anchor[1] as f32, lines, above);
+        Some([left as f32, top.ceil()])
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -370,7 +482,7 @@ struct Frame {
 #[derive(Debug, Clone, Copy)]
 enum Markup<'a> {
     Pieces(&'a [Piece]),
-    Title(&'a str, f32),
+    Rich(&'a str, f32),
 }
 
 #[derive(Clone)]
@@ -449,7 +561,7 @@ fn lines() -> MutexGuard<'static, ByBytes<Line, Laid>> {
     LINES_KEPT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn laid_line(line: Line, look: &Look) -> Option<Laid> {
+fn laid_line(line: Line, look: &Typeset) -> Option<Laid> {
     if let Some(laid) = lines().get(&line) {
         return Some(laid.clone());
     }
@@ -1057,27 +1169,6 @@ fn letter_x_width(system: &mut FontSystem, attrs: &Attrs<'_>, size: f32) -> Opti
     Some(fitted.map_or(plain, f32::round))
 }
 
-fn line_gap(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) -> f32 {
-    look.title_gap
-        .and_then(|(title, pixel)| {
-            let id = face_of(system, attrs)?;
-            let own = font_heights(system, id, attrs.weight, !title.moves())?;
-            let zoom = f64::from(look.spacing.1) / pixel;
-            Some(title.line_gap(own, f64::from(px), pixel, zoom) as f32)
-        })
-        .unwrap_or(px * look.line)
-}
-
-fn line_tall(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) -> f32 {
-    look.title_gap
-        .and_then(|_| {
-            let id = face_of(system, attrs)?;
-            let [ascent, descent, _] = font_heights(system, id, attrs.weight, true)?;
-            Some(((ascent + descent) * f64::from(px)) as f32)
-        })
-        .unwrap_or(px * look.line)
-}
-
 fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>, seat: bool) -> Vec<f32> {
     let shifted = |g: &LayoutGlyph| g.metadata & (RAISED | LOWERED) != 0;
     let whole = run.glyphs.iter().all(shifted);
@@ -1227,9 +1318,9 @@ fn kern_words(system: &mut FontSystem, buffer: &mut Buffer) -> bool {
     changed
 }
 
-fn lay_out(look: &Look) -> Option<Laid> {
+fn lay_out(look: &Typeset) -> Option<Laid> {
     let size = look.size;
-    let line = look.line;
+    let line = look.rules.line();
     let wrap = look.wrap;
     let mut held = fonts().lock().unwrap_or_else(|e| e.into_inner());
     let f = &mut *held;
@@ -1240,13 +1331,13 @@ fn lay_out(look: &Look) -> Option<Laid> {
         None => Family::SansSerif,
     };
     let base = with_face_weight(&f.system, Attrs::new().family(family));
-    let gap = line_gap(&mut f.system, look, &base, size);
-    let tall = line_tall(&mut f.system, look, &base, size);
+    let gap = look.rules.gap(&mut f.system, &base, size);
+    let tall = look.rules.tall(&mut f.system, &base, size);
     let mut buffer = Buffer::new(&mut f.system, Metrics::new(size, gap));
     buffer.set_wrap(Wrap::WordOrGlyph);
     buffer.set_size(Some(wrap), None);
     let runs = match look.markup {
-        Markup::Title(text, _) => vidcut_core::rich::spans(text),
+        Markup::Rich(text, _) => vidcut_core::rich::spans(text),
         Markup::Pieces(..) => Vec::new(),
     };
     let faces: Vec<Option<String>> = runs
@@ -1258,9 +1349,9 @@ fn lay_out(look: &Look) -> Option<Laid> {
             .iter()
             .map(|p| p.face.as_deref().and_then(|n| installed(f, n)))
             .collect(),
-        Markup::Title(..) => Vec::new(),
+        Markup::Rich(..) => Vec::new(),
     };
-    let seat = look.seat.is_some();
+    let seat = look.rules.seat().is_some();
     let flags = if seat {
         CacheKeyFlags::DISABLE_HINTING
     } else {
@@ -1277,7 +1368,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
             size,
             line,
         ),
-        Markup::Title(_, per) => runs
+        Markup::Rich(_, per) => runs
             .iter()
             .zip(&faces)
             .flat_map(|(r, face)| {
@@ -1303,19 +1394,12 @@ fn lay_out(look: &Look) -> Option<Laid> {
                     a = a.strikethrough();
                 }
                 let full = r.look.size.map_or(size, |s| {
-                    let exact = s * f64::from(per);
-                    let drawn = if seat {
-                        Title::whole_size(exact, f64::from(look.spacing.1))
-                    } else {
-                        exact
-                    };
+                    let drawn = look.rules.drawn(s * f64::from(per));
                     (drawn as f32).max(1.0)
                 });
-                let gap = line_gap(&mut f.system, look, &a, full);
+                let gap = look.rules.gap(&mut f.system, &a, full);
                 let px = match r.look.shift {
-                    Some(_) => {
-                        Title::shifted_size(f64::from(full), f64::from(look.spacing.1)) as f32
-                    }
+                    Some(_) => look.rules.shifted(full),
                     None => full,
                 };
                 let full_bits = (full.to_bits() as usize) << FULL_SIZE_BIT;
@@ -1325,23 +1409,12 @@ fn lay_out(look: &Look) -> Option<Laid> {
                     None => 0,
                 });
                 let tracking = r.look.tracking.map_or(look.tracking, |t| t as f32);
-                let pixels = if tracking == 0.0 {
-                    0.0
-                } else {
-                    let unzoomed = full / look.spacing.1;
-                    let letter = letter_x_width(&mut f.system, &a, unzoomed).unwrap_or(unzoomed);
-                    Title::tracking_pixels(f64::from(tracking), f64::from(letter)) as f32
-                        * look.spacing.1
-                };
+                let pixels = look.rules.tracked(&mut f.system, &a, tracking, full);
                 let pieces = r.look.case.unwrap_or(look.case).pieces(&r.text, &before);
                 before.push_str(&r.text);
-                let scale = f64::from(look.spacing.1);
+                let rules = look.rules;
                 pieces.into_iter().map(move |(text, small)| {
-                    let px = if small {
-                        Title::small_size(f64::from(px), scale) as f32
-                    } else {
-                        px
-                    };
+                    let px = if small { rules.small(px) } else { px };
                     let mut b = a.clone().metrics(Metrics::new(px, gap));
                     if pixels != 0.0 {
                         b = b.letter_spacing(pixels / px);
@@ -1373,10 +1446,11 @@ fn lay_out(look: &Look) -> Option<Laid> {
         return None;
     }
     let below: Vec<f32> = match look.markup {
-        Markup::Title(text, _) => vidcut_core::rich::lines(text)
+        Markup::Rich(text, _) => vidcut_core::rich::lines(text)
             .iter()
             .map(|l| {
-                vidcut_core::rich::spacing(l).map_or(look.spacing.0, |s| s as f32) * look.spacing.1
+                let own = vidcut_core::rich::spacing(l).map_or(look.rules.spacing(), |s| s as f32);
+                own * look.rules.scale()
             })
             .collect(),
         Markup::Pieces(..) => Vec::new(),
@@ -1400,19 +1474,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
         .filter(|r| Some(r.line_i) != last)
         .map(|r| r.line_height)
         .sum();
-    let seated = look.seat.zip(look.title_gap).map(|(s, (t, pixel))| {
-        let (middle, wide, wrap) = (s.middle, widest, look.wrap);
-        let left = t.seated_left(
-            s.anchor[0],
-            f64::from(middle),
-            f64::from(wide),
-            f64::from(wrap),
-            pixel,
-        );
-        let edge = ((f64::from(s.edge) / pixel).round() * pixel) as f32;
-        let top = block_top(edge, s.part, s.anchor[1] as f32, lines, above);
-        [left as f32, top.ceil()]
-    });
+    let seated = look.rules.seated(widest, look.wrap, lines, above);
     let exact = seated.map(|at| at.map(|v| v - v.round()));
     let popped = runs.iter().find_map(|run| {
         let (x0, x1) = run
@@ -1479,13 +1541,13 @@ fn lay_out(look: &Look) -> Option<Laid> {
         top: -pad,
     };
     let white = Color::rgb(255, 255, 255);
-    let drawn_lines: Option<Vec<Vec<TextLine>>> = look.title_gap.map(|_| {
+    let drawn_lines: Option<Vec<Vec<TextLine>>> = look.rules.lines_own().then(|| {
         let nudge = exact.map_or(0.0, |at| at[0]);
         let origin = runs
             .iter()
             .flat_map(|run| run.glyphs)
             .fold(f32::MAX, |x, g| x.min(g.x));
-        let place = (look.spacing.1, origin, nudge, rise);
+        let place = (look.rules.scale(), origin, nudge, rise);
         runs.iter()
             .zip(&lifts)
             .map(|(run, lift)| text_lines(&mut f.system, run, (lift, &freed), place, white))
@@ -1665,13 +1727,12 @@ fn block(
     let (w, h) = (f64::from(width), f64::from(height));
     let size = (height as f32 * style.text_fraction() as f32).max(1.0);
     let pixel = h / f64::from(timeline.max(1));
-    let look = Look {
+    let look = Typeset {
         font: style.font.as_deref(),
         size,
-        line: SubtitleStyle::LINE as f32,
-        title_gap: None,
-        seat: None,
-        spacing: (0.0, 0.0),
+        rules: Rules::Plain {
+            line: SubtitleStyle::LINE as f32,
+        },
         tracking: 0.0,
         case: TitleCase::Mixed,
         wrap: (style.wrap_width(w, h) as f32).max(size),
@@ -1721,7 +1782,7 @@ fn block(
                 ..p.clone()
             })
             .collect();
-        let big = Look {
+        let big = Typeset {
             size: size * pop as f32,
             wrap: width as f32 * 4.0,
             stroke: look.stroke.map(|s| Edge {
@@ -1959,21 +2020,21 @@ fn title_block(
     let text = t.block_text(block.part);
     let bare = block.part == TitlePart::Backing;
     let boxed = matches!(block.part, TitlePart::Whole | TitlePart::Backing);
-    let look = Look {
+    let look = Typeset {
         font: t.style.font.as_deref(),
         size,
-        line: Title::LINE as f32,
-        title_gap: Some((t, pixel)),
-        seat: (t.kind != TitleKind::Scroll).then_some(Seat {
-            middle: (block.pivot[0] * w) as f32,
-            edge: (block.edge * h) as f32,
-            part: block.part,
-            anchor: block.anchor,
+        rules: Rules::Title(TitleRules {
+            title: t,
+            pixel,
+            spacing: t.style.line_spacing.unwrap_or(0.0) as f32,
+            scale: (pixel * zoom) as f32,
+            seat: (t.kind != TitleKind::Scroll).then_some(Seat {
+                middle: (block.pivot[0] * w) as f32,
+                edge: (block.edge * h) as f32,
+                part: block.part,
+                anchor: block.anchor,
+            }),
         }),
-        spacing: (
-            t.style.line_spacing.unwrap_or(0.0) as f32,
-            (pixel * zoom) as f32,
-        ),
         tracking: t.style.tracking.unwrap_or(0.0) as f32,
         case: t.style.case.unwrap_or_default(),
         wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
@@ -1999,7 +2060,7 @@ fn title_block(
             .as_ref()
             .filter(|_| !bare)
             .and_then(|s| shade(s, w, h)),
-        markup: Markup::Title(&text, (h * zoom) as f32),
+        markup: Markup::Rich(&text, (h * zoom) as f32),
         bare,
         drop: (h * Title::UPPER_DROP) as f32,
         float: true,
