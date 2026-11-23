@@ -8,11 +8,12 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    Appearance, ApplyMode, BlendMode, BlurClipping, BlurFilter, Border, BorderLevel, CellShape,
-    CompositeMode, Connect, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType, EffectValue,
-    FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind,
-    GradeWindow, GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MergeEdges,
-    MergeOperator, Node, PathSample, PictureTool, PictureTransition, Place, Subject, SubtitleStyle,
+    Appearance, ApplyMode, BackgroundFill, BlendMode, BlurClipping, BlurFilter, Border,
+    BorderLevel, CellShape, CompositeMode, Connect, DuckDetect, DynamicZoom, Ease, EbuLevel,
+    EffectType, EffectValue, FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming,
+    GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
+    GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MergeEdges, MergeOperator,
+    Node, NoiseColoring, PathSample, PictureTool, PictureTransition, Place, Subject, SubtitleStyle,
     TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode,
     VignetteShape, WindowKind, ZoomBox,
 };
@@ -3399,11 +3400,13 @@ pub enum Request {
     /// way after it, and each node that took that picture takes the new tool.
     /// With `after` a node that has an effect mask, a mask goes on it, after
     /// the masks that are there. With `after` a mask, a mask goes after it
-    /// in its chain. A tool that makes its own picture, as `text_plus`, with
-    /// `after` a node other than a mask comes with a new merge: the merge
-    /// goes in after that node, and the new tool joins its foreground. Any
-    /// other new node joins nothing. Returns the clip and the `node`'s name,
-    /// and the `merge`'s name where one is new.
+    /// in its chain, and each mask input that took that mask takes the new
+    /// mask. A tool that makes its own picture, as `text_plus`,
+    /// `background` or `fast_noise`, with `after` a node other than a mask
+    /// comes with a new merge: the merge goes in after that node, and the
+    /// new tool joins its foreground. Any other new node joins nothing.
+    /// Returns the clip and the `node`'s name, and the `merge`'s name where
+    /// one is new.
     #[serde(rename = "comp.add")]
     CompAdd {
         clip: ClipRef,
@@ -3428,8 +3431,9 @@ pub enum Request {
     },
     /// Join the output of node `from` to an input of `node`, in place of
     /// what was there, or with no `from`, leave that input empty. The
-    /// `input` takes any node other than a mask, and the `effect_mask`
-    /// takes a mask. A join that makes a loop is an error.
+    /// `input` and the `foreground` take any node other than a mask. The
+    /// `effect_mask`, the `detail_map` and the `brightness_map` take a
+    /// mask. A join that makes a loop is an error.
     #[serde(rename = "comp.connect")]
     CompConnect {
         clip: ClipRef,
@@ -6203,7 +6207,8 @@ pub struct NodeChange {
     /// A blur's shape, or how a mask's soft edge blurs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<BlurFilter>,
-    /// Off, a blur's `y_size` sets the blur down.
+    /// Off, a blur's `y_size` sets the blur down, and the `y_scale` of a
+    /// `fast_noise` sets how fine it is down.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lock_xy: Option<bool>,
     /// Without `lock_xy`, how much a blur blurs down, from 0 to 1000000.
@@ -6239,8 +6244,9 @@ pub struct NodeChange {
     /// The height of an ellipse or a rectangle mask.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<f64>,
-    /// Degrees an ellipse or a rectangle mask, the foreground of a merge or
-    /// the text of a `text_plus` is turned counterclockwise.
+    /// Degrees an ellipse or a rectangle mask, the foreground of a merge,
+    /// the text of a `text_plus` or the noise of a `fast_noise` is turned
+    /// counterclockwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub angle: Option<f64>,
     /// On, a merge mirrors its foreground left to right.
@@ -6451,8 +6457,100 @@ pub struct NodeChange {
     /// has no path, and it goes back to its own box.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_trim: Option<PatternTrim>,
+    /// How the colors of a `background` fill its picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<BackgroundFill>,
+    /// The top left color of a `background`, `[r, g, b, a]`, each from
+    /// -1000000 to 1000000. It is the color of `solid_color`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_left: Option<[f64; 4]>,
+    /// The top right color of a `background`, as `top_left`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_right: Option<[f64; 4]>,
+    /// The bottom left color of a `background`, as `top_left`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom_left: Option<[f64; 4]>,
+    /// The bottom right color of a `background`, as `top_left`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom_right: Option<[f64; 4]>,
+    /// The form of the gradient of a `background`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gradient_type: Option<GradientType>,
+    /// Where the gradient of a `background` starts, `[x, y]` as fractions
+    /// of the picture from its bottom left, each from -10 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<[f64; 2]>,
+    /// Where the gradient of a `background` ends, as `start`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<[f64; 2]>,
+    /// The colors of the gradient of a `background` or a `fast_noise`, from
+    /// 2 to 64 stops. They replace all the stops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stops: Option<Vec<GradientStop>>,
+    /// What the gradient of a `background` shows past its start and its
+    /// end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<GradientRepeat>,
+    /// The size of the picture of a `background` or a `fast_noise`. Each
+    /// value given replaces its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<ImageChange>,
+    /// On, a `fast_noise` has hard lines along some of its contours.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discontinuous: Option<bool>,
+    /// On, the noise of a `fast_noise` changes sign before `contrast` and `brightness`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inverted: Option<bool>,
+    /// The layers of finer noise of a `fast_noise`, from 0 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<f64>,
+    /// Half of it is added to the level of a `fast_noise`, from -1000 to 1000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<f64>,
+    /// Scales the noise of a `fast_noise` before `brightness`, from -1000 to 1000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contrast: Option<f64>,
+    /// How fine a `fast_noise` is: its cells across the width of the
+    /// picture, and with `lock_xy` also across its height, from 0 to
+    /// 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    /// Without `lock_xy`, the cells of a `fast_noise` across the height of
+    /// the picture, from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_scale: Option<f64>,
+    /// Moves a `fast_noise` along a third axis, from -1000000 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seethe: Option<f64>,
+    /// Added to the `seethe` of a `fast_noise` on each frame, from -1000000
+    /// to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seethe_rate: Option<f64>,
+    /// How the level of a `fast_noise` becomes a color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coloring: Option<NoiseColoring>,
+    /// The color at level 0 of a `two_color` `fast_noise`, as `top_left`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color1: Option<[f64; 4]>,
+    /// The color at level 1 of a `two_color` `fast_noise`, as `top_left`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color2: Option<[f64; 4]>,
     #[serde(flatten)]
     pub values: KindChange,
+}
+
+/// A change to the size of the picture that a node makes.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ImageChange {
+    /// On, the picture has the size of the clip's own picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_resolution: Option<bool>,
+    /// Without `auto_resolution`, the width in pixels, from 1 to 32768.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    /// Without `auto_resolution`, the height in pixels, from 1 to 32768.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
 }
 
 /// The samples of a pattern that `pattern_trim` takes off.
@@ -6478,6 +6576,10 @@ pub enum NodeInput {
     EffectMask,
     /// The picture that a merge puts over its background.
     Foreground,
+    /// The mask that sets the detail of a fast noise.
+    DetailMap,
+    /// The mask that sets the level of a fast noise.
+    BrightnessMap,
 }
 
 /// A change to the values of an effect's kind: each value given replaces
@@ -6675,7 +6777,9 @@ pub struct KindChange {
     /// How strong a Film Grain is, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grain_strength: Option<f64>,
-    /// The code value of a Film Grain with `grain_only`, from 0 to 1.
+    /// The code value of a Film Grain with `grain_only`, from 0 to 1. How
+    /// far the gradient of a `background` moves along its line, as a part
+    /// of its length, from -1000000 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<f64>,
     /// Moves a Film Grain to the dark side, under 0.5, or to the bright side,

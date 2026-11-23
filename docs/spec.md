@@ -2667,6 +2667,8 @@ This section follows the Fusion page. The facts without a page are measured in R
   - Tracker: it follows patterns in the picture, and passes its input on as it is (pp. 1783–1789). See [The Tracker](#the-tracker).
   - Merge: it puts the picture on its Foreground input over the picture on its Background input (pp. 2211–2218). See [The Merge](#the-merge).
   - Text+: it draws text on a clear picture (pp. 2381–2390). See [The Text+ tool](#the-text-tool).
+  - Background: it makes a picture of one color or of blended colors (pp. 2357–2360). See [The Background tool](#the-background-tool).
+  - Fast Noise: it makes a picture of Perlin noise (pp. 2363–2366). See [The Fast Noise tool](#the-fast-noise-tool).
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
@@ -2923,11 +2925,152 @@ The values of the shading elements of a new node:
 - Each of these has Opacity 1, Thickness 0.02, Join Style Rounded and Level Character.
 - Elements 5 to 8 are a white Text Fill. Their Priority is 4 to 1.
 
+#### The Background tool
+
+The facts without a page are measured in Resolve Studio 21.2.
+
+- The Background tool makes a picture of one color or of blended colors (p. 2357).
+- Its one input is an Effect Mask. A mask there limits the color to the inside of the mask (p. 2357).
+- The picture holds the colors as they are set. The colors are not multiplied by the alpha.
+  - Thus (0.2, 0.5, 0.3, 0.5) as the Foreground of a Merge over a gray of 0.1 gives (0.25, 0.55, 0.35, 1).
+- The color fields keep values above 1 and below 0. The picture keeps them too. The composition then works in 32-bit floats.
+- The Settings tab has no Blend row.
+  - vidcut: Blend mixes the picture with a clear picture, as on a Text+.
+
+The Color tab (pp. 2358–2360):
+
+- Type sets how the colors fill the picture. Usual: Solid Color.
+  - Solid Color: one color, Color.
+  - Horizontal: Left blends into Right.
+  - Vertical: Top blends into Bottom.
+  - Four Corner: Top Left, Top Right, Bottom Left and Bottom Right, one color in each corner.
+  - Gradient: the colors of a gradient, from its Start to its End.
+- Each color has Red, Green, Blue and Alpha rows. Usual: (0, 0, 0, 1).
+- The types share three colors. Left, Top and Top Left are one color. Right and Top Right are one color. Bottom and Bottom Left are one color.
+- Horizontal, Vertical and Four Corner blend in straight lines between the edge pixels:
+  - Horizontal: column i of a picture W pixels wide is Left × (1 − u) + Right × u, with u = i / (W − 1). Thus the first column is Left and the last column is Right.
+  - Vertical: the same from the top row to the bottom row, with the height H.
+  - Four Corner: first across, then down.
+  - The reads agree to 5 decimals at 1920 × 1080 and at 3840 × 2160.
+- Gradient Type sets the form of a gradient (p. 2359). Usual: Linear.
+  - The gradient works in pixels. Start and End are at (x × W, y × H). P is the pixel, S is Start and E is End.
+  - Linear: the projection of P − S on E − S, as a part of the length from S to E. Before Start it is below 0.
+  - Reflect: the absolute value of Linear.
+  - Square: the larger of the distances across and up from S to P, divided by the length from S to E.
+  - Cross: the smaller of the two distances, divided by the length from S to E.
+  - Radial: the distance from S to P, divided by the length from S to E.
+  - Angle: the angle of P − S, counterclockwise, in turns. With End to the right of Start, the pixels right of Start are 0 and the pixels above Start are 0.25.
+  - The reads agree with these forms to one pixel. The readout at Fit does not give a finer place.
+- Start and End: usual (0, 0.5) and (1, 0.5). The viewer shows them as two red points with a green line between them (p. 2359).
+  - vidcut: the points show for a selected Background with Type Gradient. A drag moves a point.
+- The gradient bar holds the colors of the gradient (p. 2359):
+  - Two color stops set the start and the end color. Usual: black at the left end and white at the right end. The stop at 0 is selected, with the color (0, 0, 0, 1).
+  - A click on the bottom of the bar adds a stop.
+  - A drag moves a stop. A drag with Ctrl (Command on a Mac) copies it.
+  - A drag up past the bar removes a stop.
+  - A click on the bar adds a stop with a color between the colors of its two neighbors.
+  - Between two stops the color blends in a straight line.
+- Interpolation Space sets the colors between the stops (p. 2359): RGB, HLS, HSV or LAB. Usual: RGB.
+  - HLS and HSV turn the hue the shorter way. Thus red to blue goes through magenta.
+  - LAB blends in CIE L\*a\*b\* with the D65 white. The values go to XYZ as linear values with the Rec. 709 primaries, with no gamma.
+  - LAB can give values below 0. Red to blue gives (0.587, −0.018, 0.248) at the middle.
+  - vidcut: not yet ([todo](todo/generator-nodes.md)).
+- Offset moves the gradient along its line (p. 2359). Usual: 0.
+  - The place along the line less Offset gives the color. Thus with Offset 0.25, the place 0.5 shows the color of 0.25.
+- Repeat sets what shows past the start and the end (p. 2360). Usual: Once.
+  - Once: the end colors go on.
+  - Repeat: the gradient starts again. The color comes from the fractional part of the place.
+  - Ping-Pong: the gradient goes back and forth. The place −0.44 shows the color of 0.44.
+- Sub-Pixel sets the samples in each pixel (p. 2360): 1x1, 2x2, 3x3, 4x4 or 5x5. Usual: 1x1.
+  - N x N samples in each pixel are averaged. At a hard edge, 3x3 gives a mix of 1/3 and 2/3, and 5x5 a mix of 2/5 and 3/5.
+  - vidcut: not yet ([todo](todo/generator-nodes.md)).
+
+The Effect Mask:
+
+- The mask scales the color and the alpha alike. Thus an Ellipse with Soft Edge 0.1 keeps the ratio of red to alpha on its edge.
+- Apply Mask Inverted uses 1 − the mask. Multiply by Mask gives the same picture as without it.
+
+The Image tab (pp. 2401–2402):
+
+- Auto Resolution gives the picture the size of the frame format of the composition. Usual: on. The manual calls it Use Frame Format Settings (p. 2401).
+  - In the composition of a clip, this size is the size of the clip's own picture, W × H.
+- Width, Height and Pixel Aspect show the size. In a composition of 1920 × 1080, they show 1920, 1080 and (1, 1).
+- Without Auto Resolution, the picture has the size of Width and Height. Its blends use that size.
+  - As the Foreground of a Merge, a picture of 400 × 300 goes pixel for pixel in the middle of a Background of 1920 × 1080.
+  - vidcut: not yet. The picture has the size of the clip's own picture ([todo](todo/generator-nodes.md)).
+- The X field of Pixel Aspect takes a value only without Auto Resolution. With (2, 1), a pixel is two units wide for a Radial gradient.
+  - vidcut: not yet ([todo](todo/generator-nodes.md)).
+- Process Mode: Full Frames, NTSC Fields, PAL/HD Fields, PAL/HD Fields (Reversed) or NTSC Fields (Reversed). Usual: Full Frames.
+- Depth: Default, int8, int16, float16 or float32. Usual: Default.
+
+#### The Fast Noise tool
+
+The facts without a page are measured in Resolve Studio 21.2.
+
+- The Fast Noise tool makes a picture of Perlin noise (p. 2363).
+- It has three inputs (p. 2363):
+  - Noise Detail Map: a mask there gives flat noise where the mask is black and full detail where it is white. It works before the colors.
+  - Noise Brightness Map: a mask there controls the noise map. With Detail 0, it takes the place of the noise.
+  - Effect Mask: a mask there limits the noise to the inside of the mask.
+- The picture holds the colors of the level as they are. The colors are not multiplied by the alpha.
+  - Thus Detail 0 with Color 1 (0, 0, 0, 0) and Color 2 (1, 1, 1, 1) gives (0.5, 0.5, 0.5, 0.5).
+- The Image tab has the same rows and the same usual values as on the Background (p. 2401).
+- The Settings tab has no Blend row. Its Layers rows also name the two maps.
+  - vidcut: Blend mixes the picture with a clear picture, as on a Text+.
+
+The Noise tab (pp. 2364–2365):
+
+- Discontinuous gives hard lines along some contours of the noise. Usual: off.
+- Inverted gives the negative of the noise. Usual: off.
+- Center moves the noise. Usual: (0.5, 0.5).
+- Detail adds layers of finer noise. The large pattern stays. Usual: 2.
+- Brightness and Contrast change the level of the noise before the colors. Usual: 0 and 1.
+- Scale sets how fine the noise is. Lock X/Y off gives an X Scale and a Y Scale. Usual: Lock X/Y on, Scale 2.
+- Angle turns the noise. Usual: 0.
+- Seethe changes the noise in place. Seethe Rate adds to Seethe on each frame. Usual: 0 and 0.
+- With Detail 0, the level is 0.5 plus half of Brightness. Contrast and Inverted do not change it.
+  - Brightness 0 gives 0.5, 0.2 gives 0.6, and −0.3 gives 0.35.
+  - Contrast 0.5 or 2, and Inverted on, give the same level in each case read.
+
+The noise with Detail 1, Color 1 (0, 0, 0, 1) and Color 2 (1, 1, 1, 1). P is 230 pixels right of Center and 98 pixels up, in 1920 × 1080:
+
+- The noise has a grid. With Scale 4, the level is 0.5 within 0.0013 at Center, 480 pixels right of it and 270 pixels up from it.
+  - Thus Scale is the number of cells across the width, and also across the height.
+- Scale multiplies the distance from Center. Scale 4 halfway to P gives the level of Scale 2 at P.
+- The noise follows the frame. At 3840 × 2160, the place of P gives the same level.
+- With Lock X/Y off, X Scale works across and Y Scale works up.
+- Center moves the noise. Angle turns it counterclockwise about Center, in pixels.
+- The level is 0.5 + Contrast × n / 2 + Brightness / 2. n is the noise, from −1 to 1. Inverted changes the sign of n.
+  - At P: 0.66658. Contrast 2: 0.83317. Contrast 2 and Brightness 0.2: 0.93317. Inverted: 0.33342. Inverted, Contrast 2 and Brightness 0.2: 0.26683.
+- The level is not clamped. Contrast 10 gives 2.16584 at P, and the color is 2.16584.
+- A part of Detail adds the same part of the next layer. At P, Detail 1.5 is the middle of Detail 1 and Detail 2.
+- Discontinuous gives the absolute value of n. At P it gives 0.33317. At a grid point it gives 0.00126.
+- Seethe 0.5 changes the level at P to 0.56616. Seethe Rate 0.1 changes nothing at frame 0. At frame 5 it gives 0.69766.
+
+The Color tab (p. 2366):
+
+- Type: Two Color or Gradient. Usual: Two Color.
+- Two Color: the level of the noise blends Color 1 into Color 2. Usual: Color 1 (0, 0, 0, 0) and Color 2 (1, 1, 1, 1).
+  - Detail 0, Brightness 0.2, Color 1 (1, 0, 0, 1) and Color 2 (0, 0, 1, 1) give (0.4, 0, 0.6, 1).
+- Gradient: the level of the noise picks a color on a gradient bar.
+  - The bar, Interpolation Space, Offset, Repeat and Sub-Pixel are as on the Background. There are no Start and End rows.
+  - Gradient Type: usual Uni.
+
+The manual and the measurements do not give the noise function of Resolve. vidcut uses a widely used method, fractal Perlin noise:
+
+- The noise is improved Perlin noise in three axes. Seethe is the third axis.
+- The grid, Scale, Center, Angle, Lock X/Y, Contrast, Brightness and Inverted are as measured. The values of the noise between the grid points differ.
+- Each layer of Detail has half the size and half the strength of the layer before it. A part of Detail adds a part of the next layer.
+- Discontinuous makes each layer 2 × |n| − 1. With one layer, the level is then |n|, as measured.
+- Seethe Rate × the frame is added to Seethe.
+- A mask on the Noise Brightness Map gives the middle level in place of 0.5.
+- The level is not clamped. Past the ends of a gradient, the colors of its end stops go on.
+
 #### Edits
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
-- Add a Text+ with a node selected: a new Merge goes after that node, and the Text+ joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
-  - With a mask selected, no Merge comes. The Text+ joins nothing.
+- Add a Text+, a Background or a Fast Noise with a node selected: a new Merge goes after that node. The new tool joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
+  - With a mask selected, no Merge comes. The Text+, the Background or the Fast Noise joins nothing.
   - vidcut: a Media In added with a node selected does the same.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.

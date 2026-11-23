@@ -1,13 +1,16 @@
+use crate::composition::Corner;
 use crate::effect_keys::Keyed;
 use crate::model::{
-    ApplyMode, BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode,
-    Composition, Effect, EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha,
-    GlowFraming, GlowOutput, Mask, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
+    ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter, Border,
+    CellShape, CompositeMode, Composition, Effect, EffectKind, EffectType, FastNoise, FillMethod,
+    FilmGrain, Glow, GlowAlpha, GlowFraming, GlowOutput, GradientRepeat, GradientStop,
+    GradientType, Mask, Media, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring,
     Pattern, Picture, ShadingElement, Sharpen, TextPlus, Tool, Vignette, VignetteMode,
     VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
+use crate::request::NodeInput;
 
 pub type Areas<'a> = dyn Fn(&Pattern) -> Option<Area> + 'a;
 
@@ -924,6 +927,78 @@ pub enum Op {
     Work(Working),
     Merge(Merging),
     Text(Box<Inking>),
+    Make(Box<Making>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Making {
+    Background(Painting),
+    Noise(Noising),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Noising {
+    pub middle: [f64; 2],
+    pub cells: [f64; 2],
+    pub turn: f64,
+    pub detail: f64,
+    pub depth: f64,
+    pub brightness: f64,
+    pub contrast: f64,
+    pub discontinuous: bool,
+    pub inverted: bool,
+    pub coloring: NoiseColoring,
+    pub colors: [[f64; 4]; 2],
+    pub stops: Vec<GradientStop>,
+    pub maps: [bool; 2],
+}
+
+impl Noising {
+    pub fn of(f: &FastNoise, (w, h): (f64, f64), frame: i64, maps: [bool; 2]) -> Self {
+        let [cx, cy] = f.middle();
+        let [sx, sy] = f.scales();
+        Self {
+            middle: [cx * w, (1.0 - cy) * h],
+            cells: [sx / w, sy / h],
+            turn: f.turn().to_radians(),
+            detail: f.layers(),
+            depth: f.depth(frame),
+            brightness: f.lift(),
+            contrast: f.spread(),
+            discontinuous: f.discontinuous,
+            inverted: f.inverted,
+            coloring: f.colored(),
+            colors: [f.first(), f.second()],
+            stops: f.colors().to_vec(),
+            maps,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Painting {
+    pub fill: BackgroundFill,
+    pub corners: [[f64; 4]; 4],
+    pub form: GradientType,
+    pub line: [[f64; 2]; 2],
+    pub stops: Vec<GradientStop>,
+    pub offset: f64,
+    pub repeat: GradientRepeat,
+}
+
+impl Painting {
+    pub fn of(b: &Background, (w, h): (f64, f64)) -> Self {
+        let pixel = |[x, y]: [f64; 2]| [x * w, (1.0 - y) * h];
+        Self {
+            fill: b.filled(),
+            corners: Corner::ALL.map(|c| b.color(c)),
+            form: b.form(),
+            line: [pixel(b.from()), pixel(b.to())],
+            stops: b.colors().to_vec(),
+            offset: b.shift(),
+            repeat: b.repeats(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1110,8 +1185,8 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
         canvas: [w, h],
         back: frame_back((w, h)),
     };
-    let masks = |n: &Node| -> Vec<Shaping> {
-        c.masks_of(n)
+    let masks_on = |n: &Node, input: NodeInput| -> Vec<Shaping> {
+        c.masks_on(n, input)
             .into_iter()
             .filter(|m| !m.pass_through)
             .filter_map(|m| {
@@ -1121,6 +1196,7 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
             })
             .collect()
     };
+    let masks = |n: &Node| masks_on(n, NodeInput::EffectMask);
     let work = |n: &Node, shaped: Vec<Shaping>, mix: f64| {
         let mut working = match &n.tool {
             _ if n.pass_through => return None,
@@ -1219,6 +1295,49 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                     });
                     to
                 });
+                Some(masked(&mut stages, &mut regs, to, (shaped, mix), (w, h)))
+            }
+            Tool::Background(_) if n.pass_through => None,
+            Tool::Background(b) => {
+                let to = regs.taken();
+                let painting = Painting::of(b, (w, h));
+                stages.push(Stage {
+                    op: Op::Make(Box::new(Making::Background(painting))),
+                    from: Vec::new(),
+                    to,
+                });
+                Some(masked(&mut stages, &mut regs, to, (shaped, mix), (w, h)))
+            }
+            Tool::FastNoise(_) if n.pass_through => None,
+            Tool::FastNoise(f) => {
+                let maps = [NodeInput::DetailMap, NodeInput::BrightnessMap].map(|input| {
+                    let shaped = masks_on(n, input);
+                    if shaped.is_empty() {
+                        return None;
+                    }
+                    let white = regs.taken();
+                    let lit = Background {
+                        top_left: Some([1.0; 4]),
+                        ..Background::default()
+                    };
+                    stages.push(Stage {
+                        op: Op::Make(Box::new(Making::Background(Painting::of(&lit, (w, h))))),
+                        from: Vec::new(),
+                        to: white,
+                    });
+                    Some(masked(&mut stages, &mut regs, white, (shaped, 1.0), (w, h)))
+                });
+                let to = regs.taken();
+                let from: Vec<usize> = maps.iter().flatten().copied().collect();
+                let noising = Noising::of(f, (w, h), frame, maps.map(|m| m.is_some()));
+                stages.push(Stage {
+                    op: Op::Make(Box::new(Making::Noise(noising))),
+                    from: from.clone(),
+                    to,
+                });
+                for r in from {
+                    regs.freed(r, true);
+                }
                 Some(masked(&mut stages, &mut regs, to, (shaped, mix), (w, h)))
             }
             t if !t.gives_from(&gives) => None,
