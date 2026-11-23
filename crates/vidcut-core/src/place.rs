@@ -1186,7 +1186,17 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
         let first = came.first().copied().flatten();
         let gives: Vec<bool> = came.iter().map(Option::is_some).collect();
         let result = match &n.tool {
-            Tool::MediaIn => Some(0),
+            Tool::MediaIn if n.pass_through => Some(0),
+            Tool::MediaIn => {
+                let shaped = masks(n);
+                Some(masked(
+                    &mut stages,
+                    &mut regs,
+                    0,
+                    (shaped, n.mixed()),
+                    (w, h),
+                ))
+            }
             Tool::MediaOut => {
                 out = first;
                 None
@@ -1241,27 +1251,13 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                     to
                 });
                 let shaped = masks(n);
-                match shaped.is_empty() && n.mixed() == 1.0 {
-                    true => Some(to),
-                    false => {
-                        let clear = regs.taken();
-                        stages.push(Stage {
-                            op: Op::Clear,
-                            from: Vec::new(),
-                            to: clear,
-                        });
-                        let out = regs.taken();
-                        let merging = Merging::of(&Merge::default(), n.mixed(), (w, h), shaped);
-                        stages.push(Stage {
-                            op: Op::Merge(merging),
-                            from: vec![clear, to],
-                            to: out,
-                        });
-                        regs.freed(clear, true);
-                        regs.freed(to, true);
-                        Some(out)
-                    }
-                }
+                Some(masked(
+                    &mut stages,
+                    &mut regs,
+                    to,
+                    (shaped, n.mixed()),
+                    (w, h),
+                ))
             }
             Tool::Background(_) if n.pass_through => None,
             Tool::Background(b) => {
