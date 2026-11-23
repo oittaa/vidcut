@@ -2952,38 +2952,50 @@ The Image tab (pp. 2401–2402):
 
 #### The Fast Noise tool
 
+The facts without a page are measured in Resolve Studio 21.2.
+
 - The Fast Noise tool makes a picture of Perlin noise (p. 2363).
 - It has three inputs (p. 2363):
   - Noise Detail Map: a mask there gives flat noise where the mask is black and full detail where it is white. It works before the colors.
   - Noise Brightness Map: a mask there controls the noise map. With Detail 0, it takes the place of the noise.
   - Effect Mask: a mask there limits the noise to the inside of the mask.
-- The Image tab is the same as on the Background (p. 2401).
-- vidcut: Blend mixes the picture with a clear picture, as on a Text+.
+- The picture holds the colors of the level as they are. The colors are not multiplied by the alpha.
+  - Thus Detail 0 with Color 1 (0, 0, 0, 0) and Color 2 (1, 1, 1, 1) gives (0.5, 0.5, 0.5, 0.5).
+- The Image tab has the same rows and the same usual values as on the Background (p. 2401).
+- The Settings tab has no Blend row. Its Layers rows also name the two maps.
+  - vidcut: Blend mixes the picture with a clear picture, as on a Text+.
 
 The Noise tab (pp. 2364–2365):
 
-- Discontinuous gives hard lines along some contours of the noise.
-- Inverted gives the negative of the noise.
-- Center moves the noise.
-- Detail adds layers of finer noise. The large pattern stays.
-- Brightness and Contrast change the level of the noise before the colors.
-- Scale sets how fine the noise is. Lock X/Y off gives an X Scale and a Y Scale.
-- Angle turns the noise.
-- Seethe changes the noise in place. Seethe Rate adds to Seethe on each frame.
+- Discontinuous gives hard lines along some contours of the noise. Usual: off.
+- Inverted gives the negative of the noise. Usual: off.
+- Center moves the noise. Usual: (0.5, 0.5).
+- Detail adds layers of finer noise. The large pattern stays. Usual: 2.
+- Brightness and Contrast change the level of the noise before the colors. Usual: 0 and 1.
+- Scale sets how fine the noise is. Lock X/Y off gives an X Scale and a Y Scale. Usual: Lock X/Y on, Scale 2.
+- Angle turns the noise. Usual: 0.
+- Seethe changes the noise in place. Seethe Rate adds to Seethe on each frame. Usual: 0 and 0.
+- With Detail 0, the level is 0.5 plus half of Brightness. Contrast and Inverted do not change it.
+  - Brightness 0 gives 0.5, 0.2 gives 0.6, and −0.3 gives 0.35.
+  - Contrast 0.5 or 2, and Inverted on, give the same level in each case read.
 
 The Color tab (p. 2366):
 
-- Two Color: the level of the noise blends the first color into the second.
-- Gradient: the level of the noise picks a color on a gradient bar. The bar works as on the Background.
+- Type: Two Color or Gradient. Usual: Two Color.
+- Two Color: the level of the noise blends Color 1 into Color 2. Usual: Color 1 (0, 0, 0, 0) and Color 2 (1, 1, 1, 1).
+  - Detail 0, Brightness 0.2, Color 1 (1, 0, 0, 1) and Color 2 (0, 0, 1, 1) give (0.4, 0, 0.6, 1).
+- Gradient: the level of the noise picks a color on a gradient bar.
+  - The bar, Interpolation Space, Offset, Repeat and Sub-Pixel are as on the Background. There are no Start and End rows.
+  - Gradient Type: usual Uni.
 
-The manual gives no formula for the noise. vidcut uses a widely used method, fractal Perlin noise:
+The manual gives no formula for the noise. vidcut uses a widely used method, fractal Perlin noise. It agrees with the measurements at Detail 0:
 
 - The noise is improved Perlin noise in three axes. Seethe is the third axis.
 - Scale is the number of noise cells across the width of the picture.
 - Each layer of Detail has half the size and half the strength of the layer before it. A part of Detail adds a part of the next layer.
-- The level is 0.5 plus half the sum of the layers. A mask on the Noise Brightness Map gives this middle level in place of 0.5.
 - Discontinuous uses the absolute value of each layer, which gives creases where the noise crosses zero.
-- Contrast scales the level about 0.5. Brightness adds to it. Inverted gives 1 minus the level.
+- Inverted changes the sign of the sum of the layers. Contrast then scales it, and Brightness adds to it.
+- The level is 0.5 plus half of that. A mask on the Noise Brightness Map gives this middle level in place of 0.5.
 - The colors take the level from 0 to 1.
 
 #### Edits

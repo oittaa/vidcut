@@ -448,15 +448,15 @@ impl Default for FastNoise {
 }
 
 impl FastNoise {
-    pub const DETAIL: f64 = 1.0;
+    pub const DETAIL: f64 = 2.0;
     pub const DETAILS: (f64, f64) = (0.0, 10.0);
     pub const LEVELS: (f64, f64) = (-1000.0, 1000.0);
     pub const CONTRAST: f64 = 1.0;
-    pub const SCALE: f64 = 10.0;
+    pub const SCALE: f64 = 2.0;
     pub const SCALES: (f64, f64) = (0.0, 1e6);
     pub const TURNS: (f64, f64) = (-1e6, 1e6);
     pub const SEETHES: (f64, f64) = (-1e6, 1e6);
-    pub const COLOR1: [f64; 4] = [0.0, 0.0, 0.0, 1.0];
+    pub const COLOR1: [f64; 4] = [0.0, 0.0, 0.0, 0.0];
     pub const COLOR2: [f64; 4] = [1.0, 1.0, 1.0, 1.0];
 
     pub fn middle(&self) -> [f64; 2] {

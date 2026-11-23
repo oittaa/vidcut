@@ -4950,7 +4950,7 @@ pub struct FastNoise {
     /// On, the noise has hard lines along some of its contours. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub discontinuous: bool,
-    /// On, the level of the noise is 1 minus its level. Usual: off.
+    /// On, the noise changes sign before `contrast` and `brightness`. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub inverted: bool,
     /// The middle of the noise, `[x, y]` as fractions of the picture from
@@ -4958,13 +4958,13 @@ pub struct FastNoise {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center: Option<[f64; 2]>,
     /// How many layers of finer noise it adds, from 0 to 10. A part of 1
-    /// adds a part of the next layer. 0 gives a flat level. Usual: 1.
+    /// adds a part of the next layer. 0 gives a flat level. Usual: 2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<f64>,
-    /// Added to the level, from -1000 to 1000. Usual: 0.
+    /// Half of it is added to the level, from -1000 to 1000. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brightness: Option<f64>,
-    /// Scales the level about 0.5, from -1000 to 1000. Usual: 1.
+    /// Scales the noise before `brightness`, from -1000 to 1000. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contrast: Option<f64>,
     /// Off, `y_scale` sets how fine the noise is down. Usual: on.
@@ -4972,10 +4972,10 @@ pub struct FastNoise {
     pub lock_xy: bool,
     /// How fine the noise is across, and with `lock_xy` also down: the
     /// cells of the noise across the width of the picture, from 0 to
-    /// 1000000. Usual: 10.
+    /// 1000000. Usual: 2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<f64>,
-    /// Without `lock_xy`, how fine the noise is down, as `scale`. Usual: 10.
+    /// Without `lock_xy`, how fine the noise is down, as `scale`. Usual: 2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y_scale: Option<f64>,
     /// Turns the noise counterclockwise about `center`, in degrees, from
@@ -4993,7 +4993,7 @@ pub struct FastNoise {
     /// How the level becomes a color. Usual: `two_color`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coloring: Option<NoiseColoring>,
-    /// The color at level 0 of `two_color`. Usual: `[0, 0, 0, 1]`.
+    /// The color at level 0 of `two_color`. Usual: `[0, 0, 0, 0]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color1: Option<[f64; 4]>,
     /// The color at level 1 of `two_color`. Usual: `[1, 1, 1, 1]`.

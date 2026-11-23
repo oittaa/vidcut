@@ -6470,16 +6470,16 @@ pub struct NodeChange {
     /// On, a `fast_noise` has hard lines along some of its contours.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discontinuous: Option<bool>,
-    /// On, the level of a `fast_noise` is 1 minus its level.
+    /// On, the noise of a `fast_noise` changes sign before `contrast` and `brightness`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inverted: Option<bool>,
     /// The layers of finer noise of a `fast_noise`, from 0 to 10.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<f64>,
-    /// Added to the level of a `fast_noise`, from -1000 to 1000.
+    /// Half of it is added to the level of a `fast_noise`, from -1000 to 1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brightness: Option<f64>,
-    /// Scales the level of a `fast_noise` about 0.5, from -1000 to 1000.
+    /// Scales the noise of a `fast_noise` before `brightness`, from -1000 to 1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contrast: Option<f64>,
     /// How fine a `fast_noise` is across, and with `lock_xy` also down: its

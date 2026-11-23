@@ -1994,17 +1994,17 @@ fn fs_noise(in: Out) -> @location(0) vec4<f32> {
     if noise_has(NOISE_LEVEL_MAP) {
         base = textureLoad(noise_level, px, 0).a;
     }
-    var v = base + 0.5 * noise_sum(turned * noising.place.zw, detail);
-    v = (v - 0.5) * noising.more.x + 0.5 + noising.how.w;
+    var n = noise_sum(turned * noising.place.zw, detail);
     if noise_has(NOISE_INVERTED) {
-        v = 1.0 - v;
+        n = -n;
     }
+    let v = base + 0.5 * (n * noising.more.x + noising.how.w);
     let t = clamp(v, 0.0, 1.0);
     var color = mix(noising.colors[0], noising.colors[1], t);
     if i32(noising.more.z) == 1 {
         color = paint_ramp(t, i32(noising.more.w));
     }
-    return vec4<f32>(color.rgb * color.a, color.a);
+    return color;
 }
 
 struct Vignetting {
