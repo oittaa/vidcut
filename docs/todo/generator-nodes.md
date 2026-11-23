@@ -11,10 +11,10 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
 
 **What Resolve has, and vidcut does not have yet:**
 
-- The Plasma (pp. 2379–2380), Day Sky (pp. 2360–2363) and Mandelbrot (pp. 2366–2367) tools.
+- The Plasma (pp. 2379–2380), Day Sky (pp. 2360–2362) and Mandelbrot (pp. 2366–2367) tools.
 - The Background tool:
-  - Interpolation Space of the gradient (p. 2359).
-  - Sub-Pixel of the gradient (p. 2360).
+  - Interpolation Space of the gradient (p. 2359). The spec gives the measured hue turn and LAB.
+  - Sub-Pixel of the gradient (p. 2360). The spec gives the measured samples.
   - Keyframes on the stops of the gradient, and its contextual menu (p. 2360).
 - The Fast Noise tool:
   - The noise of Resolve. vidcut uses fractal Perlin noise. It agrees with the measurement at Detail 0 only.
@@ -22,11 +22,15 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
   - Interpolation Space, Offset, Repeat and Sub-Pixel of its gradient, as on the Background.
 - A picture on a map input of the Fast Noise. vidcut takes masks there.
 - The Image tab of the generators (pp. 2401–2402):
-  - Width and Height without Auto Resolution.
+  - Width and Height without Auto Resolution. The fields are kept, but the picture has the size of the clip's own picture.
   - Process Mode, Global In and Out, Pixel Aspect, Depth, Source Color Space and Source Gamma Space.
+
+**Faults in the Inspector, to fix with a check in the app:**
+
+- The Red, Green, Blue and Alpha rows of a Background color send a channel name. `comp set` does not take it, so the change fails.
+- A drag of a stop on the gradient bar does not sort the stops while it moves. A click can add a stop past 64.
 
 **To measure in Resolve:**
 
-- The math of the fills and the gradients, and Width and Height without Auto Resolution.
-- The noise of the Fast Noise with Detail above 0, and its Gradient Type items.
-- The plan: steps G2 b to l and the renders of G4, in M13 of the measurement notes of the nodes (`fixtures/nodes`).
+- Before Interpolation Space is built: HLS and HSV with a gray stop, and with two colors of a different lightness. The reads cover red to blue only.
+- Angle, Square and Cross with End not right of Start. The reads have End right of Start only.
