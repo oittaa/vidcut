@@ -1011,12 +1011,12 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - Its `place::Softening` is the blur of its soft edge.
   - A `place::Figure` holds a `place::Outline` and its middle.
   - `Shaping::tilted` turns, tilts and sizes the points of a polygon on the CPU. The shader thus gets the points in pixels.
-- A `place::MaskBase` is the box that a mask takes as its picture (`MaskBase::all`):
-  - Without `connect`, it is the whole picture (`MaskBase::whole`).
-  - With `connect`, it has the size of the whole picture. Its middle is the middle of the pattern at the frame plus the offset of the pattern.
-  - With `size` also, it is the box of the pattern at the frame (`MaskBase::of`), moved by the offset. `place::composed` gets the boxes of the patterns (`place::Areas`).
+- `Placing::over` samples the composition at the frame (`Composition::sampled`). A connected Center then holds the place of its pattern.
+- A `place::MaskBase` is the size and the turn that a mask takes as its picture (`MaskBase::all`):
+  - Without `connect`, or with `connect` and no `size`, it is the whole picture (`MaskBase::whole`).
+  - With `size`, it is the box of the pattern at the frame (`MaskBase::of`). `place::composed` gets the boxes of the patterns (`place::Areas`).
   - With no path at the frame, the mask has no figure. It then covers nothing, and with Invert it covers all.
-  - `Shaping::figure` puts the shape of the mask into one base. The turn of the box adds to the turn of the mask.
+  - `Shaping::figure` puts the shape of the mask about its center, in the sizes of its base. The turn of the box adds to the turn of the mask.
   - The border and the soft edge stay parts of the width of the picture. Why: a soft edge then looks the same on each box.
 
 The draw:

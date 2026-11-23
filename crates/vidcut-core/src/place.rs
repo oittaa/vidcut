@@ -2,8 +2,8 @@ use crate::effect_keys::Keyed;
 use crate::model::{
     BlendMode, Blur, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Composition,
     Effect, EffectKind, EffectType, FillMethod, FilmGrain, Glow, GlowAlpha, GlowFraming,
-    GlowOutput, Mask, Media, MosaicBlur, Pattern, Picture, Sharpen, Tool, Vignette, VignetteMode,
-    VignetteShape,
+    GlowOutput, Mask, Media, MosaicBlur, Node, Pattern, Picture, Sharpen, Tool, Vignette,
+    VignetteMode, VignetteShape,
 };
 use crate::motion::Area;
 use crate::render::{Moving, Placed};
@@ -141,7 +141,6 @@ pub struct Figure {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MaskBase {
-    pub middle: [f64; 2],
     pub size: [f64; 2],
     pub round: f64,
     pub turn: f64,
@@ -155,7 +154,6 @@ pub fn turned([x, y]: [f64; 2], turn: f64) -> [f64; 2] {
 impl MaskBase {
     pub fn whole((w, h): (f64, f64)) -> Self {
         Self {
-            middle: [w / 2.0, h / 2.0],
             size: [w, h],
             round: w,
             turn: 0.0,
@@ -165,51 +163,37 @@ impl MaskBase {
     pub fn of(a: &Area, (w, h): (f64, f64)) -> Self {
         let size = [a.size[0] * w, a.size[1] * h];
         Self {
-            middle: [a.center[0] * w, a.center[1] * h],
             size,
             round: size[1],
             turn: a.rotation.to_radians(),
         }
     }
 
-    pub fn all(m: &Mask, comp: &Composition, (w, h): (f64, f64), areas: &Areas) -> Vec<Self> {
-        let Some(c) = &m.connect else {
+    pub fn all(n: &Node, comp: &Composition, (w, h): (f64, f64), areas: &Areas) -> Vec<Self> {
+        let Some(c) = &n.connect else {
             return vec![Self::whole((w, h))];
         };
-        let Some(p) = comp.pattern(c) else {
+        let Some(a) = comp.pattern(c).and_then(areas) else {
             return Vec::new();
         };
-        let Some(a) = areas(p) else {
-            return Vec::new();
-        };
-        let mut base = match c.size {
-            true => Self::of(&a, (w, h)),
-            false => Self {
-                middle: [a.center[0] * w, a.center[1] * h],
-                ..Self::whole((w, h))
-            },
-        };
-        let [x, y] = p.shift();
-        base.middle = [base.middle[0] + x * w, base.middle[1] - y * h];
-        vec![base]
-    }
-
-    pub fn unturned(&self) -> Self {
-        Self {
-            middle: [self.size[0] / 2.0, self.size[1] / 2.0],
-            turn: 0.0,
-            ..*self
+        match c.size {
+            true => vec![Self::of(&a, (w, h))],
+            false => vec![Self::whole((w, h))],
         }
     }
 
-    pub fn screen(&self, [x, y]: [f64; 2]) -> [f64; 2] {
-        let [dx, dy] = turned([x - self.size[0] / 2.0, y - self.size[1] / 2.0], self.turn);
-        [self.middle[0] + dx, self.middle[1] + dy]
+    pub fn unturned(&self) -> Self {
+        Self { turn: 0.0, ..*self }
     }
 
-    pub fn own(&self, [x, y]: [f64; 2]) -> [f64; 2] {
-        let [dx, dy] = turned([x - self.middle[0], y - self.middle[1]], -self.turn);
-        [dx + self.size[0] / 2.0, dy + self.size[1] / 2.0]
+    pub fn screen(&self, [x, y]: [f64; 2], [mx, my]: [f64; 2]) -> [f64; 2] {
+        let [dx, dy] = turned([x - mx, y - my], self.turn);
+        [mx + dx, my + dy]
+    }
+
+    pub fn own(&self, [x, y]: [f64; 2], [mx, my]: [f64; 2]) -> [f64; 2] {
+        let [dx, dy] = turned([x - mx, y - my], -self.turn);
+        [mx + dx, my + dy]
     }
 }
 
@@ -287,10 +271,10 @@ fn box_width(sigma: f64, count: u32) -> f64 {
 }
 
 impl Shaping {
-    pub fn figure(m: &Mask, tool: &Tool, b: &MaskBase) -> Figure {
+    pub fn figure(m: &Mask, tool: &Tool, b: &MaskBase, (fw, fh): (f64, f64)) -> Figure {
         let [cx, cy] = m.middle();
         let [w, h] = b.size;
-        let own = [cx * w, (1.0 - cy) * h];
+        let own = [cx * fw, (1.0 - cy) * fh];
         let turn = m.turn().to_radians() + b.turn;
         let outline = match tool {
             Tool::Ellipse(_) => Outline::Ellipse {
@@ -309,18 +293,18 @@ impl Shaping {
                 points: m
                     .points
                     .iter()
-                    .map(|p| b.screen(Self::tilted(m, *p, own, (w, h))))
+                    .map(|p| b.screen(Self::tilted(m, *p, own, (w, h)), own))
                     .collect(),
                 winding: m.fill_method == Some(FillMethod::NonZeroWinding),
             },
         };
         Figure {
             outline,
-            middle: b.screen(own),
+            middle: own,
         }
     }
 
-    pub fn of(m: &Mask, tool: &Tool, w: f64, bases: &[MaskBase]) -> Self {
+    pub fn of(m: &Mask, tool: &Tool, (w, h): (f64, f64), bases: &[MaskBase]) -> Self {
         let s = m.soft();
         let soft = (s > 0.0).then(|| match boxes_of(m.filter(), m.passes()) {
             Some(count) => Softening::Boxes {
@@ -333,7 +317,10 @@ impl Shaping {
             }),
         });
         Self {
-            figures: bases.iter().map(|b| Self::figure(m, tool, b)).collect(),
+            figures: bases
+                .iter()
+                .map(|b| Self::figure(m, tool, b, (w, h)))
+                .collect(),
             border: m.border() * w / 2.0,
             solid: m.solid,
             level: m.level(),
@@ -959,8 +946,8 @@ pub fn composed(c: &Composition, (w, h): (f64, f64), frame: i64, areas: &Areas) 
                 .filter(|m| !m.pass_through)
                 .filter_map(|m| {
                     let mask = m.tool.mask()?;
-                    let bases = MaskBase::all(mask, c, (w, h), areas);
-                    Some(Shaping::of(mask, &m.tool, w, &bases))
+                    let bases = MaskBase::all(m, c, (w, h), areas);
+                    Some(Shaping::of(mask, &m.tool, (w, h), &bases))
                 })
                 .collect();
             Some(working)
@@ -1230,13 +1217,9 @@ impl Placing {
             own.edge = [-1.0, -1.0, 2.0, 2.0];
         }
         let composed = p.picture.composition.as_ref().map_or(Vec::new(), |c| {
-            let at = (p.clock.frame(p.source) - c.start) as f64;
-            let sampled = Composition {
-                nodes: c.nodes.iter().map(|n| n.sampled(at)).collect(),
-                ..Composition::default()
-            };
-            let frame = p.clock.frame(p.source) as f64;
-            let areas = |pattern: &Pattern| pattern.area_at(frame);
+            let frame = p.clock.frame(p.source);
+            let sampled = c.sampled((frame - c.start) as f64, frame as f64);
+            let areas = |pattern: &Pattern| pattern.area_at(frame as f64);
             composed(&sampled, pixels, p.frame, &areas)
         });
         Self {

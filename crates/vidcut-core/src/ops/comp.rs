@@ -163,16 +163,13 @@ fn kept_paths(n: &mut Node, takes: bool) {
 }
 
 fn kept_connect(d: &Composition, n: &mut Node, to: Option<String>) {
-    let Some(m) = n.tool.mask_mut() else {
-        return;
-    };
     let tracker = |name: &str| d.node(name).and_then(|t| t.tool.tracker()).is_some();
-    m.connect = m.connect.take().and_then(|k| {
+    n.connect = n.connect.take().and_then(|k| {
         let name = to.unwrap_or(k.tracker);
         tracker(&name).then_some(Connect { tracker: name, ..k })
     });
-    if m.connect.is_some() {
-        m.center = None;
+    if n.connect.is_some() {
+        n.center_to_usual();
     }
 }
 
@@ -202,13 +199,10 @@ fn replaced(c: &mut Composition, mut node: Node, name: &str) {
         if n.effect_mask.as_deref() == Some(name) {
             n.effect_mask = mask.then(|| node.name.clone());
         }
-        let Some(m) = n.tool.mask_mut() else {
-            continue;
-        };
-        if let Some(k) = m.connect.as_mut().filter(|k| k.tracker == name) {
+        if let Some(k) = n.connect.as_mut().filter(|k| k.tracker == name) {
             match (k.pattern as usize) <= patterns {
                 true => k.tracker = node.name.clone(),
-                false => m.connect = None,
+                false => n.connect = None,
             }
         }
     }
@@ -257,8 +251,7 @@ pub fn paste(p: &mut Project, id: &str, nodes: Vec<Node>, to: Landing) -> Result
     for k in start..d.nodes.len() {
         let mut node = d.nodes[k].clone();
         kept_paths(&mut node, takes);
-        let tracker = node.tool.mask().and_then(|m| m.connect.as_ref());
-        let to = tracker.and_then(|t| copied(&t.tracker));
+        let to = node.connect.as_ref().and_then(|t| copied(&t.tracker));
         kept_connect(&d, &mut node, to);
         d.nodes[k] = node;
     }
@@ -369,8 +362,7 @@ pub fn rename(p: &mut Project, id: &str, name: &str, to: &str) -> Result<Value> 
                 *join = Some(next.clone());
             }
         }
-        let connect = n.tool.mask_mut().and_then(|m| m.connect.as_mut());
-        if let Some(k) = connect.filter(|k| k.tracker == name) {
+        if let Some(k) = n.connect.as_mut().filter(|k| k.tracker == name) {
             k.tracker = next.clone();
         }
     }
@@ -383,10 +375,8 @@ pub fn remove(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let gone = c.nodes.remove(found(c, id, name)?);
     let passes = gone.tool.flows();
     for n in &mut c.nodes {
-        if let Some(m) = n.tool.mask_mut()
-            && m.connect.as_ref().is_some_and(|k| k.tracker == name)
-        {
-            m.connect = None;
+        if n.connect.as_ref().is_some_and(|k| k.tracker == name) {
+            n.connect = None;
         }
         if n.input.as_deref() == Some(name) {
             n.input = gone.input.clone().filter(|_| passes);
@@ -416,6 +406,12 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
     let mut left = change.clone();
     taken(&mut left.pass_through, &mut next.pass_through);
     taken(&mut left.place, &mut next.place);
+    if let Some(connect) = left.connect.take() {
+        next.connect = connect;
+        if next.connect.is_some() {
+            next.center_to_usual();
+        }
+    }
     if next.tool.works() {
         given(&mut left.blend, &mut next.blend);
     }
@@ -447,12 +443,6 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             taken(&mut left.values.invert, &mut m.invert);
             taken(&mut left.solid, &mut m.solid);
             taken(&mut left.show_view_controls, &mut m.show_view_controls);
-            if let Some(connect) = left.connect.take() {
-                m.connect = connect;
-                if m.connect.is_some() {
-                    m.center = None;
-                }
-            }
             if let Some(c) = left.values.center.take() {
                 let [x, y] = c[..] else {
                     return Err(Error::invalid("a mask's center is two numbers, [x, y]"));
@@ -580,12 +570,12 @@ pub fn set(
 }
 
 fn unhooked(c: &mut Composition, tracker: &str, gone: u32) {
-    for m in c.nodes.iter_mut().filter_map(|n| n.tool.mask_mut()) {
-        let Some(k) = m.connect.as_mut().filter(|k| k.tracker == tracker) else {
+    for n in &mut c.nodes {
+        let Some(k) = n.connect.as_mut().filter(|k| k.tracker == tracker) else {
             continue;
         };
         match k.pattern.cmp(&gone) {
-            std::cmp::Ordering::Equal => m.connect = None,
+            std::cmp::Ordering::Equal => n.connect = None,
             std::cmp::Ordering::Greater => k.pattern -= 1,
             std::cmp::Ordering::Less => {}
         }
@@ -788,17 +778,13 @@ pub fn reset(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
-    let connect = n.tool.mask().and_then(|m| m.connect.clone());
-    let mut tool = n.tool.made();
-    if let Some(m) = tool.mask_mut() {
-        m.connect = connect;
-    }
     *n = Node {
         name: n.name.clone(),
-        tool,
+        tool: n.tool.made(),
         input: n.input.take(),
         effect_mask: n.effect_mask.take(),
         pass_through: n.pass_through,
+        connect: n.connect.take(),
         ..Node::new(&n.name, Tool::MediaIn, n.place)
     };
     Ok(())

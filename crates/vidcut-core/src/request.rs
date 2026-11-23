@@ -6241,11 +6241,11 @@ pub struct NodeChange {
     /// The corners of a polygon mask, each `[x, y]` from its middle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub points: Option<Vec<[f64; 2]>>,
-    /// The pattern of a tracker that a mask's center follows, as
-    /// `{"tracker": "Tracker1", "pattern": 1}`. With `"size": true`, the
+    /// The pattern of a tracker that the node's center follows, as
+    /// `{"tracker": "Tracker1", "pattern": 1}`. With `"size": true`, a
     /// mask also grows, shrinks and turns with the box of the pattern. The
-    /// mask's own center goes to `[0.5, 0.5]`. A mask with keyframes on its
-    /// center is an error. Null stops it.
+    /// node's own center goes to its usual value. A node with keyframes on
+    /// its center is an error. Null stops it.
     #[serde(
         default,
         deserialize_with = "given",
@@ -6277,7 +6277,7 @@ pub struct NodeChange {
     /// the box in the same way as `pattern_center`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_height: Option<f64>,
-    /// How far the point that a mask follows is from the middle of the
+    /// How far the point that a node follows is from the middle of the
     /// pattern, `[x, y]` as fractions of the picture, up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_offset: Option<[f64; 2]>,
@@ -6285,8 +6285,8 @@ pub struct NodeChange {
     /// first free name.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub add_pattern: bool,
-    /// On, the pattern goes from the tracker. A mask that follows it then
-    /// has its own center again. A later pattern keeps its masks.
+    /// On, the pattern goes from the tracker. A node that follows it then
+    /// has its own center again. A later pattern keeps its nodes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub remove_pattern: bool,
     /// Take the tracked samples of the pattern off: `start` takes those

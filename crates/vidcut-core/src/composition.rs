@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 
+use crate::effect_keys::Keyed;
 use crate::model::{
-    Blur, BlurClipping, BlurFilter, Clip, Composition, Connect, EffectKind, EffectType, Mask,
-    MotionPath, Node, Pattern, Project, Tool, ToolType, Tracker,
+    Blur, BlurClipping, BlurFilter, Clip, Composition, Connect, EffectKind, EffectType,
+    EffectValue, Mask, MotionPath, Node, Pattern, Project, Tool, ToolType, Tracker,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -121,7 +122,6 @@ impl Default for Mask {
             corner_radius: None,
             fill_method: None,
             points: Vec::new(),
-            connect: None,
         }
     }
 }
@@ -175,6 +175,12 @@ impl Pattern {
             None => Some(self.own()),
             Some(m) => m.base_at(frame),
         }
+    }
+
+    pub fn offset_position_at(&self, frame: f64) -> Option<[f64; 2]> {
+        let a = self.area_at(frame)?;
+        let [x, y] = self.shift();
+        Some([a.center[0] + x, 1.0 - a.center[1] + y])
     }
 }
 
@@ -398,11 +404,19 @@ impl Node {
             blur_alpha: true,
             place,
             keys: Vec::new(),
+            connect: None,
         }
     }
 
     pub fn mixed(&self) -> f64 {
         self.blend.unwrap_or(1.0)
+    }
+
+    pub fn center_to_usual(&mut self) {
+        let usual = Node::new(&self.name, self.tool.made(), self.place);
+        if let Some((to, _)) = usual.read_point(EffectValue::Center) {
+            self.write_point(EffectValue::Center, to);
+        }
     }
 
     pub fn joins(&self, name: &str) -> bool {
@@ -567,8 +581,7 @@ impl Composition {
                 continue;
             }
             next.extend(n.input.iter().chain(&n.effect_mask).cloned());
-            let tracker = n.tool.mask().and_then(|m| m.connect.as_ref());
-            next.extend(tracker.map(|c| c.tracker.clone()));
+            next.extend(n.connect.as_ref().map(|c| c.tracker.clone()));
         }
         self.nodes
             .retain(|n| n.tool == Tool::MediaOut || kept.contains(&n.name));
@@ -587,10 +600,7 @@ impl Composition {
     }
 
     pub fn followed(&self) -> Vec<(&str, u32, &MotionPath)> {
-        let connects = self
-            .nodes
-            .iter()
-            .filter_map(|n| n.tool.mask()?.connect.as_ref());
+        let connects = self.nodes.iter().filter_map(|n| n.connect.as_ref());
         let path = |k: &Connect| self.pattern(k)?.path.as_ref();
         connects
             .filter_map(|k| Some((k.tracker.as_str(), k.pattern, path(k)?)))
@@ -598,10 +608,7 @@ impl Composition {
     }
 
     pub fn hold(&mut self, frame: Option<f64>) {
-        let connects = self
-            .nodes
-            .iter()
-            .filter_map(|n| n.tool.mask()?.connect.as_ref());
+        let connects = self.nodes.iter().filter_map(|n| n.connect.as_ref());
         let on: Vec<(String, u32)> = connects.map(|k| (k.tracker.clone(), k.pattern)).collect();
         for n in &mut self.nodes {
             let name = n.name.clone();
@@ -616,6 +623,22 @@ impl Composition {
                     None => path,
                 };
             }
+        }
+    }
+
+    pub fn sampled(&self, at: f64, frame: f64) -> Composition {
+        let mut nodes: Vec<Node> = self.nodes.iter().map(|n| n.sampled(at)).collect();
+        for n in &mut nodes {
+            let to = n.connect.as_ref().and_then(|c| self.pattern(c));
+            if let Some(to) = to.and_then(|p| p.offset_position_at(frame)) {
+                n.write_point(EffectValue::Center, to);
+            }
+        }
+        Composition {
+            nodes,
+            loop_play: self.loop_play,
+            ping_pong: self.ping_pong,
+            start: self.start,
         }
     }
 

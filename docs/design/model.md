@@ -638,9 +638,10 @@ Writing:
   - `Tool::Ellipse`, `Tool::Rectangle` and `Tool::Polygon` hold a `Mask`.
   - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values. `Tool::flows` gives the tools that pass a picture on, and the Tracker is one of them.
   - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
-  - The Center of a `Mask` can follow a pattern of a Tracker of the same composition (`Mask.connect`, a `Connect`).
-    - The center is then the middle of the pattern plus its offset. With `size`, the mask also takes the box of the pattern as its picture.
-    - `ops::picture::connect_checked` refuses a connection to a pattern that is not there, and a connected mask with its own center.
+  - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).
+    - `Composition::sampled` writes the value of each connected Center on a frame: the middle of the pattern plus its offset (`Pattern::offset_position_at`). Thus each tool reads its Center in one way.
+    - With `size`, a mask also takes the box of the pattern as its picture. Only a mask takes `size`.
+    - `ops::picture::connect_checked` refuses a connection to a pattern that is not there, a node with no Center, and a connected node with its own center.
     - `comp.set` refuses a connection of a Center with keyframes. A rename of the Tracker renames the connection. A removal of the Tracker or of the pattern takes it off.
   - `input` names the node whose picture comes in. `effect_mask` names the last mask of a chain of masks.
 - A composition counts the frames of the file of its clip. `Composition::start` is the frame of the file that is its frame 0.
@@ -659,7 +660,7 @@ Writing:
 - `ops::comp` holds the edits: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`.
   - A clip without a composition gets `Composition::plain` on its first `comp.add` or `comp.paste`.
   - `ops::comp::paste` puts the copies into a clone of the composition first. Thus a copy that is refused changes nothing.
-  - A pasted Tracker keeps the paths of its patterns. On a clip that takes no paths, its patterns lose them (`kept_paths`). A pasted mask keeps its connection when its Tracker is there (`kept_connect`).
+  - A pasted Tracker keeps the paths of its patterns. On a clip that takes no paths, its patterns lose them (`kept_paths`). A pasted node keeps its connection when its Tracker is there (`kept_connect`).
   - `ops::comp::Landing` tells where the copies go: after a node, at a place, over a node, or under all the nodes.
   - Over a node, one copy takes its place and its joins (`replaced`). A join that the copy cannot take goes.
   - `comp.set` takes a `NodeChange`. Its `values` are a `KindChange`: the values of an effect's kind, which `effects.set` also takes in its `EffectChange`.

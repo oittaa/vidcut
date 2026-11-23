@@ -636,9 +636,23 @@ fn pattern_checked(p: &Pattern) -> Result<Pattern> {
 }
 
 fn connect_checked(c: &Composition, n: &Node) -> Result<()> {
-    let Some(k) = n.tool.mask().and_then(|m| m.connect.as_ref()) else {
+    let Some(k) = &n.connect else {
         return Ok(());
     };
+    let Some((own, _)) = n.read_point(EffectValue::Center) else {
+        return Err(Error::invalid(format!(
+            "{} ({}) has no center to follow a tracker",
+            n.name,
+            n.tool.label()
+        )));
+    };
+    if k.size && !n.tool.is_mask() {
+        return Err(Error::invalid(format!(
+            "{} ({}) is no mask: only a mask grows and turns with a pattern",
+            n.name,
+            n.tool.label()
+        )));
+    }
     if c.node(&k.tracker).and_then(|t| t.tool.tracker()).is_none() {
         return Err(Error::invalid(format!(
             "{} follows {}, but the composition has no tracker {}",
@@ -651,10 +665,13 @@ fn connect_checked(c: &Composition, n: &Node) -> Result<()> {
             n.name, k.pattern, k.tracker, k.tracker, k.pattern
         )));
     }
-    let own = n.tool.mask().and_then(|m| m.center);
-    if own.is_some_and(|v| v != Mask::MIDDLE) || !n.keys_of(EffectValue::Center).is_empty() {
+    let mut usual = n.clone();
+    usual.center_to_usual();
+    if usual.read_point(EffectValue::Center).map(|(p, _)| p) != Some(own)
+        || !n.keys_of(EffectValue::Center).is_empty()
+    {
         return Err(Error::invalid(format!(
-            "{} follows a tracker, so its own center is [0.5, 0.5], with no keyframes",
+            "{} follows a tracker, so its own center is at its usual value, with no keyframes",
             n.name
         )));
     }
