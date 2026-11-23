@@ -4660,8 +4660,8 @@ pub struct Node {
     pub keys: Vec<EffectKeys>,
     /// The pattern of a tracker that its `center` follows. On each frame,
     /// the center is then the middle of the pattern plus the `offset` of
-    /// the pattern, and its own center is at its usual value, with no
-    /// keyframes. A path that `motion.track` made keeps its first box
+    /// the pattern. Its own center stays, with no keyframes: without the
+    /// pattern, the node uses it again. A path that `motion.track` made keeps its first box
     /// before it starts and its last box after it ends. On a frame where a
     /// path of `motion.find` has no box, a mask that follows it has no
     /// shape. Left out, the node has its own center.

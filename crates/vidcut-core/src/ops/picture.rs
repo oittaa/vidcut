@@ -797,13 +797,13 @@ fn connect_checked(c: &Composition, n: &Node) -> Result<()> {
     let Some(k) = &n.connect else {
         return Ok(());
     };
-    let Some((own, _)) = n.read_point(EffectValue::Center) else {
+    if n.read_point(EffectValue::Center).is_none() {
         return Err(Error::invalid(format!(
             "{} ({}) has no center to follow a tracker",
             n.name,
             n.tool.label()
         )));
-    };
+    }
     if k.size && !n.tool.is_mask() {
         return Err(Error::invalid(format!(
             "{} ({}) is no mask: only a mask grows and turns with a pattern",
@@ -823,13 +823,9 @@ fn connect_checked(c: &Composition, n: &Node) -> Result<()> {
             n.name, k.pattern, k.tracker, k.tracker, k.pattern
         )));
     }
-    let mut usual = n.clone();
-    usual.center_to_usual();
-    if usual.read_point(EffectValue::Center).map(|(p, _)| p) != Some(own)
-        || !n.keys_of(EffectValue::Center).is_empty()
-    {
+    if !n.keys_of(EffectValue::Center).is_empty() {
         return Err(Error::invalid(format!(
-            "{} follows a tracker, so its own center is at its usual value, with no keyframes",
+            "{} follows a tracker, so its own center has no keyframes",
             n.name
         )));
     }

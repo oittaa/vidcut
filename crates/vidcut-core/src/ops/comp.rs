@@ -191,9 +191,6 @@ fn kept_connect(d: &Composition, n: &mut Node, to: Option<String>) {
         let name = to.unwrap_or(k.tracker);
         tracker(&name).then_some(Connect { tracker: name, ..k })
     });
-    if n.connect.is_some() {
-        n.center_to_usual();
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -420,9 +417,6 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
     taken(&mut left.place, &mut next.place);
     if let Some(connect) = left.connect.take() {
         next.connect = connect;
-        if next.connect.is_some() {
-            next.center_to_usual();
-        }
     }
     if next.tool.works() {
         given(&mut left.blend, &mut next.blend);

@@ -617,15 +617,29 @@ fn reach(grip: Grip, at: Pos2, press: Pos2, middle: Pos2) -> f32 {
     }
 }
 
-fn merge_spots(middle: Pos2, turn: f64, connected: bool) -> Vec<(Grip, Pos2)> {
+fn merge_spots(middle: Pos2, turn: f64) -> Vec<(Grip, Pos2)> {
     let spoke = middle + RING * vec2(turn.cos() as f32, -turn.sin() as f32);
-    let mut out = vec![(Grip::Angle, middle), (Grip::Spoke, spoke)];
-    if !connected {
-        out.push((Grip::Center, middle));
-        out.push((Grip::Across, middle + vec2(ARROW, 0.0)));
-        out.push((Grip::Up, middle - vec2(0.0, ARROW)));
-    }
-    out
+    vec![
+        (Grip::Angle, middle),
+        (Grip::Spoke, spoke),
+        (Grip::Center, middle),
+        (Grip::Across, middle + vec2(ARROW, 0.0)),
+        (Grip::Up, middle - vec2(0.0, ARROW)),
+    ]
+}
+
+fn merge_outline(m: &Merge, (w, h): (f64, f64)) -> Option<Vec<[f64; 2]>> {
+    let [a, b, c, d, e, f] = m.lookup((w, h))?;
+    let back = inverse([[a, b], [d, e]])?;
+    let corners = [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h], [0.0, 0.0]];
+    let out = corners.map(|[x, y]| {
+        let q = [x - c, y - f];
+        [
+            back[0][0] * q[0] + back[0][1] * q[1],
+            back[1][0] * q[0] + back[1][1] * q[1],
+        ]
+    });
+    Some(out.to_vec())
 }
 
 fn merge_moved(m: &mut Merge, grip: Grip, start: &mut [f64; 2], d: [f64; 2], (w, h): (f64, f64)) {
@@ -1444,7 +1458,11 @@ impl Workspace {
                 let [x, y] = m.middle();
                 let middle = [x * w, (1.0 - y) * h];
                 let on = screen(middle);
-                let spots = merge_spots(on, m.turn().to_radians(), node.connect.is_some());
+                if let Some(outline) = merge_outline(m, (w, h)) {
+                    let line: Vec<Pos2> = outline.into_iter().map(screen).collect();
+                    painter.add(egui::Shape::line(line, Stroke::new(1.0, accent)));
+                }
+                let spots = merge_spots(on, m.turn().to_radians());
                 draw_merge_grips(&painter, on, &spots, turned);
                 shown.push(Shown {
                     name: name.clone(),
@@ -1548,6 +1566,7 @@ impl Workspace {
                 return;
             };
             let n = &mut held.composition.nodes[i];
+            let joined = n.connect.is_some();
             let to = pixel(to);
             if held.grip.turns() {
                 held.turn += swept(s.middle, held.last, to);
@@ -1557,9 +1576,10 @@ impl Workspace {
             match (&mut n.tool, &tool) {
                 (Tool::Merge(m), Tool::Merge(now)) => {
                     *m = now.clone();
-                    match held.grip.turns() {
-                        true => m.angle = angle,
-                        false => {
+                    match (held.grip.turns(), joined) {
+                        (true, _) => m.angle = angle,
+                        (false, true) => {}
+                        (false, false) => {
                             let d = [to[0] - held.last[0], to[1] - held.last[1]];
                             merge_moved(m, held.grip, &mut held.center, d, (w, h));
                         }

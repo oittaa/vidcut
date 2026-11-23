@@ -38,4 +38,3 @@ The Text+ tool and the Merge tool of the compositions get the rest of their cont
 - Subtractive/Additive, Alpha Gain and Burn In with an Apply Mode other than Normal.
   - With Saturation, the Inspector shows only Gain and Blend. The Inspector of vidcut shows all three sliders with each mode.
 - Invert Transform, also with a flip.
-- Clamp Coverage on and off, with alphas and colors out of the range 0 to 1.
