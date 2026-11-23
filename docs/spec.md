@@ -2829,14 +2829,21 @@ The facts without a page are measured in Resolve Studio 21.2.
 
 The values of a new Text+ node:
 
-- Styled Text: no text. A line break starts a new line (p. 2383).
-- Font: Open Sans, Style Bold. Two menus set the family and the face (p. 2383).
+- Styled Text: no text.
+- Font: Open Sans. Style: Bold.
   - vidcut: without Open Sans, the usual sans-serif font of the system.
   - vidcut: the face is found by the words of its name: the weight, Italic or Oblique, and the width.
-- Color: white. Opacity: 1 (pp. 2383, 2390).
-- Size: 0.08. The size follows the width of the picture (p. 2383).
-- Tracking: 1. Line Spacing: 1. V Anchor: 0. H Anchor: 0 (pp. 2383–2384).
-- Layout: Point. Center: (0.5, 0.5). Size: 1. Angle: 0 (p. 2387).
+- Color: white. Opacity: 1.
+- Size: 0.08. Tracking: 1. Line Spacing: 1. V Anchor: 0. H Anchor: 0.
+- Layout: Point. Center: (0.5, 0.5). Size: 1. Angle: 0.
+
+The controls:
+
+- A line break in Styled Text starts a new line.
+- Two menus set the family and the face of the font (p. 2383).
+- Color sets the fill color of the text (p. 2383).
+- The size is relative to the width of the picture (p. 2383).
+- The Text tab has Tracking, Line Spacing, V Anchor and H Anchor (pp. 2383–2384). The Layout tab has Center, Size and Angle (p. 2387).
 
 The size and the place of the text, with S the Size:
 

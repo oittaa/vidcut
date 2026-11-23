@@ -239,7 +239,7 @@ pub fn inked(key: &Lettering) -> Option<Inked> {
     buffer.set_wrap(Wrap::None);
     buffer.set_text(&key.text, &attrs, Shaping::Advanced, None);
     buffer.shape_until_scroll(&mut f.system, false);
-    let count = key.text.split('\n').count();
+    let count = buffer.lines.len().max(1);
     let mut lines: Vec<Line> = (0..count)
         .map(|_| Line {
             glyphs: Vec::new(),
