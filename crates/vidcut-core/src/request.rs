@@ -8,12 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    ApplyMode, BlendMode, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect,
-    DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType, EffectValue, FillMethod, FindModel,
-    GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GrainComposite,
-    GrainPreset, Handle, LowerThirdLine, MergeEdges, MergeOperator, Node, PathSample, PictureTool,
-    PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
-    TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape, WindowKind, ZoomBox,
+    Appearance, ApplyMode, BlendMode, BlurClipping, BlurFilter, Border, BorderLevel, CellShape,
+    CompositeMode, Connect, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType, EffectValue,
+    FillMethod, FindModel, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind,
+    GradeWindow, GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MergeEdges,
+    MergeOperator, Node, PathSample, PictureTool, PictureTransition, Place, Subject, SubtitleStyle,
+    TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode,
+    VignetteShape, WindowKind, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -3398,8 +3399,11 @@ pub enum Request {
     /// way after it, and each node that took that picture takes the new tool.
     /// With `after` a node that has an effect mask, a mask goes on it, after
     /// the masks that are there. With `after` a mask, a mask goes after it
-    /// in its chain. Any other new node joins nothing.
-    /// Returns the clip and the `node`'s name.
+    /// in its chain. A tool that makes its own picture, as `text_plus`, with
+    /// `after` a node other than a mask comes with a new merge: the merge
+    /// goes in after that node, and the new tool joins its foreground. Any
+    /// other new node joins nothing. Returns the clip and the `node`'s name,
+    /// and the `merge`'s name where one is new.
     #[serde(rename = "comp.add")]
     CompAdd {
         clip: ClipRef,
@@ -3482,16 +3486,19 @@ pub enum Request {
         copy: Vec<Node>,
     },
     /// The Keyframe button of one value of a node of a clip's composition,
-    /// or of all its values without `value`. With a keyframe on `frame`, it
-    /// removes the keyframes of those values on that frame. Without one, it
-    /// puts a keyframe on `frame` on each of those values. With `ease`, it
-    /// only gives the keyframes on `frame` that ease. A `frame` is a frame
-    /// of the composition, as `comp.set` takes it. Without it, it is the
-    /// frame at the playhead.
+    /// or of all its values without `value`. With `element`, the values are
+    /// those of that shading element of a `text_plus`. With a keyframe on
+    /// `frame`, it removes the keyframes of those values on that frame.
+    /// Without one, it puts a keyframe on `frame` on each of those values.
+    /// With `ease`, it only gives the keyframes on `frame` that ease. A
+    /// `frame` is a frame of the composition, as `comp.set` takes it.
+    /// Without it, it is the frame at the playhead.
     #[serde(rename = "comp.key")]
     CompKey {
         clip: ClipRef,
         node: String,
+        #[serde(default)]
+        element: Option<u8>,
         #[serde(default)]
         frame: Option<i64>,
         #[serde(default)]
@@ -4436,7 +4443,13 @@ pub enum Request {
     /// Inspector and the viewer then show the last one. An empty list
     /// selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.nodes")]
-    GuiNodes { nodes: Vec<String> },
+    GuiNodes {
+        nodes: Vec<String>,
+        /// The shading element of a `text_plus` that the Inspector shows,
+        /// from 1 to 8. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        element: Option<u8>,
+    },
     /// The node editor of the shown page. Each value left out stays.
     /// Answers what `gui.state` does.
     #[serde(rename = "gui.node_view")]
@@ -6224,8 +6237,8 @@ pub struct NodeChange {
     /// The height of an ellipse or a rectangle mask.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<f64>,
-    /// Degrees an ellipse or a rectangle mask, or the foreground of a merge,
-    /// is turned counterclockwise.
+    /// Degrees an ellipse or a rectangle mask, the foreground of a merge or
+    /// the text of a `text_plus` is turned counterclockwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub angle: Option<f64>,
     /// On, a merge mirrors its foreground left to right.
@@ -6257,6 +6270,91 @@ pub struct NodeChange {
     /// background, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burn_in: Option<f64>,
+    /// The text of a `text_plus`. A line break starts a new line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The font family of a `text_plus`. An empty name gives the usual font.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
+    /// The face of the font family of a `text_plus`, for example `Bold
+    /// Italic`. An empty name gives the usual face, `Bold`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+    /// The space between two characters of a `text_plus` grows by
+    /// (tracking - 1) x its size x the width of the picture, from -1000000
+    /// to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracking: Option<f64>,
+    /// How far apart the lines of a `text_plus` are, as a part of the line
+    /// height of its font, from -1000000 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<f64>,
+    /// The point of the text of a `text_plus` that goes on its center, down:
+    /// -1 the top of the block, 0 its middle, 1 the last baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_anchor: Option<f64>,
+    /// The point of each line of a `text_plus` that goes on its center,
+    /// across: -1 its start, 0 its middle, 1 its end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal_anchor: Option<f64>,
+    /// How large the laid out text of a `text_plus` is, about its center,
+    /// from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_size: Option<f64>,
+    /// The shading element of a `text_plus` that `color`, `opacity` and the
+    /// values of its element change, from 1 to 8. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element: Option<u8>,
+    /// On, the shading element draws.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// The name of the shading element. An empty name gives its usual name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element_name: Option<String>,
+    /// What the shading element draws.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<Appearance>,
+    /// The width of the outline of the shading element, as a part of the
+    /// size of the text x the width of the picture, from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thickness: Option<f64>,
+    /// On, the outline of the shading element keeps only its half outside
+    /// the edge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outside_only: Option<bool>,
+    /// How the corners of the outline of the shading element are drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_style: Option<JoinStyle>,
+    /// What one border of the shading element goes around.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_level: Option<BorderLevel>,
+    /// How far the left and the right side of each border of the shading
+    /// element move out, from -1000000 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extend_horizontal: Option<f64>,
+    /// How far the top and the bottom of each border of the shading element
+    /// move out, from -1000000 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extend_vertical: Option<f64>,
+    /// How round the corners of each border of the shading element are,
+    /// from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub round: Option<f64>,
+    /// How soft the shading element is across, from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness_x: Option<f64>,
+    /// How soft the shading element is down, from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness_y: Option<f64>,
+    /// How far the shading element moves, `[x, y]` as parts of the size of
+    /// the text x the width of the picture, up, each from -1000000 to
+    /// 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shading_offset: Option<[f64; 2]>,
+    /// The place of the shading element in the stack, from -1000000 to
+    /// 1000000. A higher priority draws over a lower one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<f64>,
     /// Degrees a polygon mask is turned counterclockwise, first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub z_rotation: Option<f64>,
@@ -6514,8 +6612,9 @@ pub struct KindChange {
     /// with the picture in `advanced`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composite_type: Option<BlendMode>,
-    /// How much of a Glow's composite shows, or how much of a Film Grain
-    /// shows, from 0 to 1.
+    /// How much of a Glow's composite shows, how much of a Film Grain
+    /// shows, or how much of a shading element of a `text_plus` shows, from
+    /// 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// A Glow on the picture's negative, which gives the negative of the
@@ -6593,8 +6692,9 @@ pub struct KindChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_shape: Option<VignetteShape>,
     /// How large a Vignette's shape is, from 0.01 to 2. How much a `blur`
-    /// node blurs, how large a polygon mask is, or the size of the
-    /// foreground of a merge, from 0 to 1000000.
+    /// node blurs, how large a polygon mask is, the size of the foreground
+    /// of a merge, or the size of the text of a `text_plus`, from 0 to
+    /// 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// Turns a Vignette's shape counter-clockwise, in `advanced`, in degrees
@@ -6606,15 +6706,17 @@ pub struct KindChange {
     pub anamorphism: Option<f64>,
     /// The middle of a Vignette's shape, in `advanced`, `[x, y]` as fractions
     /// of the picture from its bottom left, each from -1000000 to 1000000.
-    /// The middle of a mask node, or where a merge puts the middle of its
-    /// foreground, the same way, each from -10 to 10.
+    /// The middle of a mask node, where a merge puts the middle of its
+    /// foreground, or where a `text_plus` puts its text, the same way, each
+    /// from -10 to 10.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center: Option<Vec<f64>>,
     /// How much of the picture shows through a Vignette's color, in
     /// `advanced`, from 0 (none) to 1 (all).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transparency: Option<f64>,
-    /// The color around a Vignette's shape, `[r, g, b]` in code values.
+    /// The color around a Vignette's shape, `[r, g, b]` in code values. The
+    /// color of a shading element of a `text_plus`, `[r, g, b]`, each from 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<Vec<f64>>,
     /// How strong a Sharpen's detail of the brightness is, from 1 (no change)

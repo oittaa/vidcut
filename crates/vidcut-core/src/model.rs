@@ -4702,6 +4702,9 @@ pub enum Tool {
     Tracker(Tracker),
     /// The picture on its `foreground` over the picture on its `input`.
     Merge(Merge),
+    /// Text on a clear picture of the size of the clip's own picture. Its
+    /// `effect_mask` crops it.
+    TextPlus(TextPlus),
 }
 
 /// The patterns of a tracker, in their order. A mask names a pattern by its
@@ -4816,6 +4819,182 @@ pub struct Merge {
     pub burn_in: Option<f64>,
 }
 
+/// The text of a `text_plus` node and how it lies on the picture. S is its
+/// `size` and W the width of the picture. The line height of the font, from
+/// its ascent to its descent, is 0.8 × S × W. A field left out is at its
+/// usual value. Its numbers can have keyframes, in the `keys` of its node.
+/// It draws its text with each of its shading elements that is on.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TextPlus {
+    /// The text. A line break starts a new line. Usual: no text.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text: String,
+    /// The font family. Usual: Open Sans where it is installed, else the
+    /// sans-serif font of the system.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
+    /// The face of the family, for example `Regular`, `Bold` or `Bold
+    /// Italic`. Usual: `Bold`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+    /// S, from 0 to 1000000. Usual: 0.08.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// The space between two characters grows by (tracking - 1) × S × W,
+    /// from -1000000 to 1000000. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracking: Option<f64>,
+    /// The baselines of two lines are 0.8 × S × W × line spacing apart, from
+    /// -1000000 to 1000000. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<f64>,
+    /// The point of the text that goes on `center`, down, from -1 to 1. At
+    /// -1 the top of the block, which is one em less the descent of the font
+    /// above the first baseline. At 1 the last baseline. In between, a
+    /// straight blend; 0 is the middle. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_anchor: Option<f64>,
+    /// The point of each line that goes on `center`, across, from -1 to 1.
+    /// At -1 the start of the line, at 1 the end of its last character's
+    /// advance, 0 the middle. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal_anchor: Option<f64>,
+    /// Where the text goes, `[x, y]` as fractions of the picture from its
+    /// bottom left, each from -10 to 10. Usual: `[0.5, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// How large the laid out text is, about `center`, from 0 to 1000000.
+    /// Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_size: Option<f64>,
+    /// Degrees the text is turned counterclockwise about `center`. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle: Option<f64>,
+    /// The shading elements that are not at their usual values, one for
+    /// each `element` at most. Usual: none, and then only element 1 is on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shading: Vec<ShadingElement>,
+}
+
+/// One of the eight shading elements of a `text_plus`: a fill, an outline
+/// or a box that it draws its text with. S is the `size` of the text and W
+/// the width of the picture. An element of a higher `priority` draws over
+/// one of a lower priority; with the same priority, the lower `element`
+/// draws over. A field left out is at the usual value of its element.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ShadingElement {
+    /// Which element, from 1 to 8.
+    pub element: u8,
+    /// On, the element draws. Usual: on for element 1, off for the others.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Its name. Usual: `White Solid Fill`, `Red Outline`, `Black Shadow`
+    /// and `Blue Border` for elements 1 to 4, then `Element 5` to `Element 8`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// What it draws. Usual: `text_outline` for element 2, `border_fill`
+    /// for element 4, else `text_fill`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<Appearance>,
+    /// Its color, `[r, g, b]`, each from 0. Usual: `[1, 0, 0]` for element 2,
+    /// `[0, 0, 0]` for element 3, `[0, 0, 1]` for element 4, else `[1, 1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[f64; 3]>,
+    /// How much of it shows, from 0 to 1. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// The width of an outline, thickness × S × W, from 0 to 1000000. The
+    /// outline is centered on the edge. Usual: 0.02.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thickness: Option<f64>,
+    /// On, an outline keeps only its half outside the edge. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outside_only: bool,
+    /// How the corners of an outline are drawn. Usual: `rounded`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_style: Option<JoinStyle>,
+    /// What one border goes around. Usual: `character`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_level: Option<BorderLevel>,
+    /// The left and the right side of each border move out by 0.2 ×
+    /// this × S × W, from -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extend_horizontal: Option<f64>,
+    /// The top and the bottom of each border move out by 0.2 × this × S × W,
+    /// from -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extend_vertical: Option<f64>,
+    /// The radius of the corners of a border, round × S × W, from 0 to
+    /// 1000000. It goes up to half of the shorter side. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub round: Option<f64>,
+    /// How soft it is across, from 0 to 1000000. Usual: 5 for element 3,
+    /// else 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness_x: Option<f64>,
+    /// How soft it is down, from 0 to 1000000. Usual: 5 for element 3,
+    /// else 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness_y: Option<f64>,
+    /// How far it moves, `[x, y]` in units of S × W, up, each from -1000000
+    /// to 1000000. It turns and sizes with the text. Usual: `[0.05, -0.05]`
+    /// for element 3, else `[0, 0]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f64; 2]>,
+    /// Its place in the stack, from -1000000 to 1000000. Usual: 9 less its
+    /// element.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<f64>,
+    /// The keyframes of its values, on frames of the composition. Left out
+    /// when it has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<EffectKeys>,
+}
+
+/// What a shading element of a `text_plus` draws.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Appearance {
+    /// The shapes of the characters, filled.
+    #[default]
+    TextFill,
+    /// A line along the edges of the characters.
+    TextOutline,
+    /// A filled box behind the text.
+    BorderFill,
+    /// A line along the edge of the box.
+    BorderOutline,
+}
+
+/// How the corners of an outline are drawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinStyle {
+    /// A point.
+    Sharp,
+    /// An arc.
+    #[default]
+    Rounded,
+    /// A straight cut.
+    Beveled,
+}
+
+/// What one border of a `text_plus` goes around. Each box is as high as
+/// its lines, from the ascent of the font to its descent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BorderLevel {
+    /// The whole text: as wide as its widest line.
+    Text,
+    /// Each line.
+    Line,
+    /// Each word.
+    Word,
+    /// Each character that is not a space: one advance wide.
+    #[default]
+    Character,
+}
+
 /// What lies around the foreground of a `merge`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -4928,7 +5107,7 @@ pub enum MergeOperator {
 }
 
 /// The tools that a composition takes: `blur`, the kinds of effect, the
-/// masks, and the picture coming in and going out.
+/// masks, `merge`, `text_plus`, and the picture coming in and going out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolType {
@@ -4944,6 +5123,7 @@ pub enum ToolType {
     Polygon,
     Tracker,
     Merge,
+    TextPlus,
     MediaIn,
     MediaOut,
 }
@@ -5127,7 +5307,11 @@ pub struct EffectKeys {
 /// composition has the values of its tool: `size` and `y_size` of a blur,
 /// and `level`, `soft_edge`, `border_width`, `center`, `width`, `height`,
 /// `angle`, `corner_radius`, `size`, `z_rotation`, `x_rotation` and
-/// `y_rotation` of a mask. A blur and an effect also have `blend`.
+/// `y_rotation` of a mask. A blur and an effect also have `blend`. A
+/// shading element of a `text_plus` has `opacity`, its color, `softness_x`,
+/// `softness_y`, `shading_offset` and `priority`, with `thickness` on an
+/// outline, and `extend_horizontal`, `extend_vertical` and `round` on a
+/// border.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -5219,6 +5403,19 @@ pub enum EffectValue {
     SubtractiveAdditive,
     AlphaGain,
     BurnIn,
+    Tracking,
+    LineSpacing,
+    LayoutSize,
+    VerticalAnchor,
+    HorizontalAnchor,
+    Thickness,
+    ExtendHorizontal,
+    ExtendVertical,
+    Round,
+    SoftnessX,
+    SoftnessY,
+    ShadingOffset,
+    Priority,
 }
 
 /// What an effect does, with its own values.

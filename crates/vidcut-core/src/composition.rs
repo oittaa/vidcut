@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use crate::effect_keys::Keyed;
 use crate::model::{
-    ApplyMode, Blur, BlurClipping, BlurFilter, Clip, Composition, Connect, EffectKind, EffectType,
-    EffectValue, Mask, Merge, MergeEdges, MergeOperator, MotionPath, Node, Pattern, Project, Tool,
-    ToolType, Tracker,
+    Appearance, ApplyMode, Blur, BlurClipping, BlurFilter, BorderLevel, Clip, Composition, Connect,
+    EffectKind, EffectType, EffectValue, JoinStyle, Mask, Merge, MergeEdges, MergeOperator,
+    MotionPath, Node, Pattern, Project, ShadingElement, TextPlus, Tool, ToolType, Tracker,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -245,6 +245,286 @@ impl Merge {
     }
 }
 
+impl TextPlus {
+    pub const SIZE: f64 = 0.08;
+    pub const STYLE: &str = "Bold";
+    pub const SPACINGS: (f64, f64) = (-1e6, 1e6);
+    pub const ANCHORS: (f64, f64) = (-1.0, 1.0);
+
+    pub fn scale(&self) -> f64 {
+        self.size.unwrap_or(Self::SIZE)
+    }
+
+    pub fn face(&self) -> &str {
+        self.style.as_deref().unwrap_or(Self::STYLE)
+    }
+
+    pub fn track(&self) -> f64 {
+        self.tracking.unwrap_or(1.0)
+    }
+
+    pub fn spacing(&self) -> f64 {
+        self.line_spacing.unwrap_or(1.0)
+    }
+
+    pub fn anchors(&self) -> [f64; 2] {
+        [self.horizontal_anchor, self.vertical_anchor].map(|a| a.unwrap_or(0.0))
+    }
+
+    pub fn middle(&self) -> [f64; 2] {
+        self.center.unwrap_or(Mask::MIDDLE)
+    }
+
+    pub fn layout(&self) -> f64 {
+        self.layout_size.unwrap_or(1.0)
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.angle.unwrap_or(0.0)
+    }
+
+    pub fn element(&self, k: u8) -> ShadingElement {
+        let kept = self.shading.iter().find(|s| s.element == k);
+        kept.cloned().unwrap_or_else(|| ShadingElement::new(k))
+    }
+
+    pub fn element_mut(&mut self, k: u8) -> &mut ShadingElement {
+        let i = match self.shading.binary_search_by_key(&k, |s| s.element) {
+            Ok(i) => i,
+            Err(i) => {
+                self.shading.insert(i, ShadingElement::new(k));
+                i
+            }
+        };
+        &mut self.shading[i]
+    }
+
+    pub fn drawn(&self) -> Vec<ShadingElement> {
+        let mut on: Vec<ShadingElement> = (1..=ShadingElement::ELEMENTS)
+            .map(|k| self.element(k))
+            .filter(ShadingElement::on)
+            .collect();
+        on.sort_by(|a, b| (a.rank().total_cmp(&b.rank())).then(b.element.cmp(&a.element)));
+        on
+    }
+}
+
+impl Appearance {
+    pub const ALL: [Appearance; 4] = [
+        Appearance::TextFill,
+        Appearance::TextOutline,
+        Appearance::BorderFill,
+        Appearance::BorderOutline,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Appearance::TextFill => "Text Fill",
+            Appearance::TextOutline => "Text Outline",
+            Appearance::BorderFill => "Border Fill",
+            Appearance::BorderOutline => "Border Outline",
+        }
+    }
+}
+
+impl JoinStyle {
+    pub const ALL: [JoinStyle; 3] = [JoinStyle::Sharp, JoinStyle::Rounded, JoinStyle::Beveled];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            JoinStyle::Sharp => "Sharp",
+            JoinStyle::Rounded => "Rounded",
+            JoinStyle::Beveled => "Beveled",
+        }
+    }
+}
+
+impl BorderLevel {
+    pub const ALL: [BorderLevel; 4] = [
+        BorderLevel::Text,
+        BorderLevel::Line,
+        BorderLevel::Word,
+        BorderLevel::Character,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BorderLevel::Text => "Text",
+            BorderLevel::Line => "Line",
+            BorderLevel::Word => "Word",
+            BorderLevel::Character => "Character",
+        }
+    }
+}
+
+struct Preset {
+    name: &'static str,
+    appearance: Appearance,
+    color: [f64; 3],
+    softness: f64,
+    offset: [f64; 2],
+}
+
+const PLAIN: Preset = Preset {
+    name: "",
+    appearance: Appearance::TextFill,
+    color: [1.0; 3],
+    softness: 0.0,
+    offset: [0.0; 2],
+};
+
+const PRESETS: [Preset; 4] = [
+    Preset {
+        name: "White Solid Fill",
+        ..PLAIN
+    },
+    Preset {
+        name: "Red Outline",
+        appearance: Appearance::TextOutline,
+        color: [1.0, 0.0, 0.0],
+        ..PLAIN
+    },
+    Preset {
+        name: "Black Shadow",
+        color: [0.0; 3],
+        softness: 5.0,
+        offset: [0.05, -0.05],
+        ..PLAIN
+    },
+    Preset {
+        name: "Blue Border",
+        appearance: Appearance::BorderFill,
+        color: [0.0, 0.0, 1.0],
+        ..PLAIN
+    },
+];
+
+impl ShadingElement {
+    pub const ELEMENTS: u8 = 8;
+    pub const THICKNESS: f64 = 0.02;
+    pub const MITER: f64 = 10.0;
+    pub const EXTEND: f64 = 0.2;
+    pub const SOFTNESS: f64 = 0.000589;
+    pub const SOFT_EDGE: f64 = 0.3;
+    pub const COLORS: (f64, f64) = (0.0, 1e6);
+    pub const OPACITIES: (f64, f64) = (0.0, 1.0);
+    pub const AMOUNTS: (f64, f64) = (0.0, 1e6);
+    pub const SHIFTS: (f64, f64) = (-1e6, 1e6);
+
+    pub fn new(element: u8) -> Self {
+        Self {
+            element,
+            ..Self::default()
+        }
+    }
+
+    fn preset(&self) -> &'static Preset {
+        let i = usize::from(self.element).wrapping_sub(1);
+        PRESETS.get(i).unwrap_or(&PLAIN)
+    }
+
+    pub fn on(&self) -> bool {
+        self.enabled.unwrap_or(self.element == 1)
+    }
+
+    pub fn usual_name(&self) -> String {
+        match self.preset().name {
+            "" => format!("Element {}", self.element),
+            name => name.to_string(),
+        }
+    }
+
+    pub fn title(&self) -> String {
+        self.name.clone().unwrap_or_else(|| self.usual_name())
+    }
+
+    pub fn look(&self) -> Appearance {
+        self.appearance.unwrap_or(self.preset().appearance)
+    }
+
+    pub fn usual_ink(&self) -> [f64; 3] {
+        self.preset().color
+    }
+
+    pub fn ink(&self) -> [f64; 3] {
+        self.color.unwrap_or(self.preset().color)
+    }
+
+    pub fn alpha(&self) -> f64 {
+        self.opacity.unwrap_or(1.0)
+    }
+
+    pub fn width(&self) -> f64 {
+        self.thickness.unwrap_or(Self::THICKNESS)
+    }
+
+    pub fn join(&self) -> JoinStyle {
+        self.join_style.unwrap_or_default()
+    }
+
+    pub fn reach(&self) -> BorderLevel {
+        self.border_level.unwrap_or_default()
+    }
+
+    pub fn extents(&self) -> [f64; 2] {
+        [self.extend_horizontal, self.extend_vertical].map(|e| e.unwrap_or(0.0))
+    }
+
+    pub fn rounding(&self) -> f64 {
+        self.round.unwrap_or(0.0)
+    }
+
+    pub fn usual_soft(&self) -> f64 {
+        self.preset().softness
+    }
+
+    pub fn soft(&self) -> [f64; 2] {
+        [self.softness_x, self.softness_y].map(|s| s.unwrap_or(self.usual_soft()))
+    }
+
+    pub fn usual_shift(&self) -> [f64; 2] {
+        self.preset().offset
+    }
+
+    pub fn shift(&self) -> [f64; 2] {
+        self.offset.unwrap_or(self.usual_shift())
+    }
+
+    pub fn usual_rank(&self) -> f64 {
+        9.0 - f64::from(self.element)
+    }
+
+    pub fn rank(&self) -> f64 {
+        self.priority.unwrap_or(self.usual_rank())
+    }
+
+    pub fn outlined(&self) -> bool {
+        matches!(
+            self.look(),
+            Appearance::TextOutline | Appearance::BorderOutline
+        )
+    }
+
+    pub fn boxed(&self) -> bool {
+        matches!(
+            self.look(),
+            Appearance::BorderFill | Appearance::BorderOutline
+        )
+    }
+
+    pub fn spread(soft: f64, width: f64) -> f64 {
+        if soft <= 0.0 {
+            return 0.0;
+        }
+        let seen = Self::SOFTNESS * width * soft + Self::SOFT_EDGE;
+        (seen * seen - 1.0 / 12.0).max(0.0).sqrt()
+    }
+
+    pub fn plain(&self) -> bool {
+        *self == Self::new(self.element)
+    }
+}
+
 impl ApplyMode {
     pub const ALL: [ApplyMode; 27] = [
         ApplyMode::Normal,
@@ -449,6 +729,7 @@ impl Tool {
             Tool::Polygon(_) => "Polygon",
             Tool::Tracker(_) => "Tracker",
             Tool::Merge(_) => "Merge",
+            Tool::TextPlus(_) => "Text",
         }
     }
 
@@ -463,6 +744,7 @@ impl Tool {
             Tool::Polygon(_) => "Polygon",
             Tool::Tracker(_) => "Tracker",
             Tool::Merge(_) => "Merge",
+            Tool::TextPlus(_) => "Text+",
         }
     }
 
@@ -471,7 +753,10 @@ impl Tool {
     }
 
     pub fn works(&self) -> bool {
-        matches!(self, Tool::Blur(_) | Tool::Effect(_) | Tool::Merge(_))
+        matches!(
+            self,
+            Tool::Blur(_) | Tool::Effect(_) | Tool::Merge(_) | Tool::TextPlus(_)
+        )
     }
 
     pub fn inputs(&self) -> &'static [NodeInput] {
@@ -486,7 +771,9 @@ impl Tool {
                 NodeInput::Foreground,
                 NodeInput::EffectMask,
             ],
-            Tool::Ellipse(_) | Tool::Rectangle(_) | Tool::Polygon(_) => &[NodeInput::EffectMask],
+            Tool::Ellipse(_) | Tool::Rectangle(_) | Tool::Polygon(_) | Tool::TextPlus(_) => {
+                &[NodeInput::EffectMask]
+            }
         }
     }
 
@@ -510,9 +797,13 @@ impl Tool {
         self.gives_picture() && self.takes(NodeInput::Input)
     }
 
+    pub fn makes(&self) -> bool {
+        self.gives_picture() && !self.takes(NodeInput::Input)
+    }
+
     pub fn gives_from(&self, came: &[bool]) -> bool {
         match self {
-            Tool::MediaIn => true,
+            t if t.makes() => true,
             t if !t.gives_picture() => false,
             _ => came.first().copied().unwrap_or(false),
         }
@@ -553,6 +844,13 @@ impl Tool {
         }
     }
 
+    pub fn text_plus(&self) -> Option<&TextPlus> {
+        match self {
+            Tool::TextPlus(t) => Some(t),
+            _ => None,
+        }
+    }
+
     pub fn mask_mut(&mut self) -> Option<&mut Mask> {
         match self {
             Tool::Ellipse(m) | Tool::Rectangle(m) | Tool::Polygon(m) => Some(m),
@@ -583,6 +881,7 @@ impl Tool {
                     .collect(),
             }),
             Tool::Merge(_) => Tool::Merge(Merge::default()),
+            Tool::TextPlus(_) => Tool::TextPlus(TextPlus::default()),
         }
     }
 }
@@ -622,9 +921,13 @@ impl Node {
         self.blend.unwrap_or(1.0)
     }
 
-    pub fn center_to_usual(&mut self) {
+    pub fn usual_point(&self, value: EffectValue) -> Option<[f64; 2]> {
         let usual = Node::new(&self.name, self.tool.made(), self.place);
-        if let Some((to, _)) = usual.read_point(EffectValue::Center) {
+        usual.read_point(value).map(|(p, _)| p)
+    }
+
+    pub fn center_to_usual(&mut self) {
+        if let Some(to) = self.usual_point(EffectValue::Center) {
             self.write_point(EffectValue::Center, to);
         }
     }
@@ -1010,7 +1313,7 @@ impl Composition {
 }
 
 impl ToolType {
-    pub const ADDED: [ToolType; 12] = [
+    pub const ADDED: [ToolType; 13] = [
         ToolType::Blur,
         ToolType::GaussianBlur,
         ToolType::MosaicBlur,
@@ -1023,6 +1326,7 @@ impl ToolType {
         ToolType::Polygon,
         ToolType::Tracker,
         ToolType::Merge,
+        ToolType::TextPlus,
     ];
 
     pub fn made(self) -> Tool {
@@ -1040,6 +1344,7 @@ impl ToolType {
             ToolType::Polygon => Tool::Polygon(Mask::default()),
             ToolType::Tracker => Tool::Tracker(Tracker::made()),
             ToolType::Merge => Tool::Merge(Merge::default()),
+            ToolType::TextPlus => Tool::TextPlus(TextPlus::default()),
             ToolType::MediaIn => Tool::MediaIn,
             ToolType::MediaOut => Tool::MediaOut,
         }

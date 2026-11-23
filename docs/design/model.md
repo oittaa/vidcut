@@ -639,6 +639,9 @@ Writing:
   - `Tool::Ellipse`, `Tool::Rectangle` and `Tool::Polygon` hold a `Mask`.
   - `Tool::Tracker` holds a `Tracker`: its list of `Pattern` values.
   - `Tool::Merge` holds a `Merge`: the transform of its foreground, its `MergeEdges`, its `ApplyMode`, its `MergeOperator` and its sliders.
+  - `Tool::TextPlus` holds a `TextPlus`: its text, its font and face, its spacings, its anchors, its layout and its shading elements.
+    - It keeps only the `ShadingElement`s that are not at their usual values. `TextPlus::element` gives any element, kept or usual.
+    - A `ShadingElement` has its own keyframes. `comp.set` and `comp.key` reach them with `element`.
   - `Tool::inputs` lists the inputs of each tool (`NodeInput`). `Tool::gives_picture` tells whether a tool gives a picture, and `Tool::feeds` whether it fits an input. Each check of a join reads them. Thus a new tool sets its inputs in one place.
   - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
   - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).

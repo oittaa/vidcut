@@ -5341,6 +5341,7 @@ fn mutate(
         Request::CompKey {
             clip,
             node,
+            element,
             frame,
             value,
             ease,
@@ -5348,7 +5349,7 @@ fn mutate(
             let id = resolve_clip(p, clip, playhead)?;
             let frame = comp_frame(p, &id, *frame, playhead)
                 .ok_or_else(|| Error::usage("comp.key needs `frame`, or a playhead"))?;
-            ops::comp::key(p, &id, node, frame, (*value, *ease))?
+            ops::comp::key(p, &id, (node, *element), frame, (*value, *ease))?
         }
         Request::CompReset { clip, node } => {
             let id = resolve_clip(p, clip, playhead)?;

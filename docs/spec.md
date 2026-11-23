@@ -2666,6 +2666,7 @@ This section follows the Fusion page. The facts without a page are measured in R
   - Blur: the Blur tool of the Fusion page (pp. 2108–2111). See below.
   - Tracker: it follows patterns in the picture, and passes its input on as it is (pp. 1783–1789). See [The Tracker](#the-tracker).
   - Merge: it puts the picture on its Foreground input over the picture on its Background input (pp. 2211–2218). See [The Merge](#the-merge).
+  - Text+: it draws text on a clear picture (pp. 2381–2390). See [The Text+ tool](#the-text-tool).
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
@@ -2824,9 +2825,87 @@ vidcut, with a mode other than Normal:
 
 Resolve gives wrong values with Screen and Conjoint, Screen and Disjoint, Hue and Saturation. vidcut does not copy these faults ([gotchas](gotchas.md#resolves-renders)).
 
+#### The Text+ tool
+
+The facts without a page are measured in Resolve Studio 21.2.
+
+- The Text+ tool draws text into a 2D picture. Its one input is an Effect Mask, which crops the text (p. 2381).
+- The picture has the size of the clip's own picture, W × H. Outside the text, it is clear.
+- Blend mixes the text with a clear picture.
+
+The values of a new Text+ node:
+
+- Styled Text: no text.
+- Font: Open Sans. Style: Bold.
+  - vidcut: without Open Sans, the usual sans-serif font of the system.
+  - vidcut: the face is found by the words of its name: the weight, Italic or Oblique, and the width.
+- Color: white.
+- Size: 0.08. Tracking: 1. Line Spacing: 1. V Anchor: 0. H Anchor: 0.
+- Layout: Point. Center: (0.5, 0.5). Size: 1. Angle: 0.
+
+The controls:
+
+- A line break in Styled Text starts a new line.
+- Two menus set the family and the face of the font (p. 2383).
+- Color sets the fill color of the text (p. 2383). It is the color of shading element 1.
+- The size is relative to the width of the picture (p. 2383).
+- The Text tab has Tracking, Line Spacing, V Anchor and H Anchor (pp. 2383–2384). The Layout tab has Center, Size and Angle (p. 2387).
+
+The size and the place of the text, with S the Size:
+
+- The line height of the font, from its hhea ascent to its hhea descent, is 0.8 × S × W. Thus one em is 0.8 × S × W × unitsPerEm / (ascent − descent).
+- The baselines of two lines are 0.8 × S × W × Line Spacing apart. The line gap of the font is not used.
+- Tracking adds (Tracking − 1) × S × W between two characters. It adds nothing before the first or after the last.
+- The block of n lines goes from one em less the descent above the first baseline, down to the last baseline.
+- V Anchor sets the point of the block that goes on Center: −1 the top, 0 the middle, 1 the last baseline. A value between gives a straight blend.
+- H Anchor sets the point of each line that goes on Center: −1 its start, 0 its middle, 1 its end.
+  - The start is the origin of the first glyph. The end is the end of the advance of the last glyph.
+- Center is in fractions of the picture, from its bottom left. Y goes up.
+- The Size of the layout scales the laid out text about Center. Angle turns it counterclockwise about Center.
+- The text is drawn at its exact place, with no step to whole pixels.
+
+The shading elements:
+
+- A Text+ draws its text with eight shading elements. Only element 1 is on in a new node (p. 2389).
+- Appearance sets what an element draws (p. 2390):
+  - Text Fill: the characters, filled.
+  - Text Outline: a line of Thickness × S × W, centered on the edges of the characters.
+  - Border Fill: a box behind the text.
+  - Border Outline: a line of Thickness × S × W, centered on the edge of the box.
+- Outside Only keeps the half of the line outside the edge (p. 2390).
+- Join Style sets the corners of a line: Sharp, Rounded or Beveled (p. 2390). Rounded is the usual style.
+- Level sets what one box goes around: Text, Line, Word or Character (p. 2390). Character is the usual level.
+  - A Character box is one advance wide.
+  - A Word, Line or Text box is the advance of its run, plus the hhea descent on the left and on the right.
+  - A box goes from the hhea ascent to the hhea descent of its lines. The Text box is as wide as the widest line.
+  - A space has no Character box.
+- Extend Horizontal and Extend Vertical change the size of each box (p. 2391). Each side moves out by 0.2 × Extend × S × W.
+- Round makes the corners of a box round (p. 2391). The radius is Round × S × W, up to half of the shorter side.
+- Offset moves the element by Offset × S × W, with Y up.
+  - The manual says that an Offset Y of 0.1 moves the element down by 10 percent of the picture (p. 2393). The measured move is up, by 0.1 × S × W.
+  - The offset turns with the Angle and scales with the Size of the layout.
+- Softness X and Softness Y blur the element across and down (p. 2392).
+  - The edge then spreads as a Gaussian of 0.000589 × W × Softness + 0.30 px.
+  - The Size of the text does not change the spread.
+- An element of a higher Priority draws over an element of a lower Priority. The slider moves an element to the front at the right (p. 2393).
+  - Of two elements with the same Priority, the lower element draws over.
+- Opacity sets how much of the element shows (p. 2390).
+
+The values of the shading elements of a new node:
+
+- 1 White Solid Fill: Text Fill, white, Priority 8.
+- 2 Red Outline: Text Outline, red, Priority 7.
+- 3 Black Shadow: Text Fill, black, Softness X and Y 5, Offset (0.05, −0.05), Priority 6.
+- 4 Blue Border: Border Fill, blue, Priority 5.
+- Each of these has Opacity 1, Thickness 0.02, Join Style Rounded and Level Character.
+- Elements 5 to 8 are a white Text Fill. Their Priority is 4 to 1.
+
 #### Edits
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
+- Add a Text+ with a node selected: a new Merge goes after that node, and the Text+ joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
+  - With a mask selected, no Merge comes. The Text+ joins nothing.
+  - vidcut: a Media In added with a node selected does the same.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.

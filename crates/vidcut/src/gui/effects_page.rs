@@ -51,9 +51,10 @@ const TOOLS: f32 = 30.0;
 const TRANSPORT: f32 = 36.0;
 const SETTLE: f64 = 2.0;
 const SCREEN: usize = 0;
-const LIBRARY: [(&str, &[ToolType]); 5] = [
+const LIBRARY: [(&str, &[ToolType]); 6] = [
     ("Tools", &[ToolType::Blur]),
     ("Composite", &[ToolType::Merge]),
+    ("Generators", &[ToolType::TextPlus]),
     (
         "Masks",
         &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
@@ -72,7 +73,7 @@ const LIBRARY: [(&str, &[ToolType]); 5] = [
     ),
 ];
 const TOOL_ROW: [&[ToolType]; 2] = [
-    &[ToolType::Merge, ToolType::Blur],
+    &[ToolType::TextPlus, ToolType::Merge, ToolType::Blur],
     &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
 ];
 
@@ -81,6 +82,7 @@ const GRADES_LEFT_KEPT: usize = 4096;
 pub(super) struct EffectsPage {
     pub(super) page: Page,
     pub(super) nodes: Vec<String>,
+    pub(super) element: u8,
     seen: Option<String>,
     alone: Option<Alone>,
     cells: Option<super::cells::Cells>,
@@ -121,6 +123,7 @@ impl Default for EffectsPage {
         Self {
             page: Page::Cut,
             nodes: Vec::new(),
+            element: 1,
             seen: None,
             alone: None,
             cells: None,
