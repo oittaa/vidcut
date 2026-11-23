@@ -1831,6 +1831,181 @@ fn fs_merge(in: Out) -> @location(0) vec4<f32> {
     return back * (1.0 - amount) + merged * amount;
 }
 
+struct Painting {
+    corners: array<vec4<f32>, 4>,
+    line: vec4<f32>,
+    how: vec4<f32>,
+    more: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> painting: Painting;
+@group(0) @binding(3) var<storage, read> paint_stops: array<f32>;
+
+fn paint_place(i: i32) -> f32 {
+    return paint_stops[i * 5];
+}
+
+fn paint_color(i: i32) -> vec4<f32> {
+    let k = i * 5;
+    return vec4<f32>(paint_stops[k + 1], paint_stops[k + 2], paint_stops[k + 3], paint_stops[k + 4]);
+}
+
+fn paint_ramp(t: f32, n: i32) -> vec4<f32> {
+    if t <= paint_place(0) {
+        return paint_color(0);
+    }
+    for (var i = 1; i < n; i++) {
+        let after = paint_place(i);
+        if t <= after {
+            let before = paint_place(i - 1);
+            let k = select(0.0, (t - before) / (after - before), after > before);
+            return mix(paint_color(i - 1), paint_color(i), k);
+        }
+    }
+    return paint_color(n - 1);
+}
+
+fn paint_repeat(t: f32) -> f32 {
+    switch i32(painting.how.z) {
+        case 1: {
+            return t - floor(t);
+        }
+        case 2: {
+            let m = t - 2.0 * floor(t * 0.5);
+            return select(m, 2.0 - m, m > 1.0);
+        }
+        default: {
+            return clamp(t, 0.0, 1.0);
+        }
+    }
+}
+
+fn paint_along(at: vec2<f32>) -> f32 {
+    let begin = painting.line.xy;
+    let way = painting.line.zw - begin;
+    let run = length(way);
+    if run <= 0.0 {
+        return 0.0;
+    }
+    let d = at - begin;
+    switch i32(painting.how.y) {
+        case 1: {
+            return abs(dot(d, way)) / (run * run);
+        }
+        case 2: {
+            return max(abs(d.x), abs(d.y)) / run;
+        }
+        case 3: {
+            return min(abs(d.x), abs(d.y)) / run;
+        }
+        case 4: {
+            return length(d) / run;
+        }
+        case 5: {
+            let turn = atan2(-d.y, d.x) - atan2(-way.y, way.x);
+            let t = turn / 6.2831853;
+            return t - floor(t);
+        }
+        default: {
+            return dot(d, way) / (run * run);
+        }
+    }
+}
+
+@fragment
+fn fs_background(in: Out) -> @location(0) vec4<f32> {
+    let uv = floor(in.position.xy) / max(painting.more.yz - 1.0, vec2<f32>(1.0));
+    let c = painting.corners;
+    var color = c[0];
+    switch i32(painting.how.x) {
+        case 1: {
+            color = mix(c[0], c[1], uv.x);
+        }
+        case 2: {
+            color = mix(c[0], c[2], uv.y);
+        }
+        case 3: {
+            color = mix(mix(c[0], c[1], uv.x), mix(c[2], c[3], uv.x), uv.y);
+        }
+        case 4: {
+            let t = paint_along(in.position.xy) - painting.more.x;
+            color = paint_ramp(paint_repeat(t), i32(painting.how.w));
+        }
+        default: {}
+    }
+    return color;
+}
+
+struct Noising {
+    colors: array<vec4<f32>, 2>,
+    place: vec4<f32>,
+    how: vec4<f32>,
+    more: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> noising: Noising;
+@group(0) @binding(14) var noise_detail: texture_2d<f32>;
+@group(0) @binding(15) var noise_level: texture_2d<f32>;
+
+const NOISE_DISCONTINUOUS: i32 = 1;
+const NOISE_INVERTED: i32 = 2;
+const NOISE_DETAIL_MAP: i32 = 4;
+const NOISE_LEVEL_MAP: i32 = 8;
+const NOISE_OCTAVES: i32 = 11;
+const NOISE_LAYERS: f32 = 17.0;
+
+fn noise_has(flag: i32) -> bool {
+    return (i32(noising.more.y) & flag) != 0;
+}
+
+fn noise_sum(at: vec2<f32>, detail: f32) -> f32 {
+    var sum = 0.0;
+    var amount = 1.0;
+    var size = 1.0;
+    for (var i = 0; i < NOISE_OCTAVES; i++) {
+        let weight = clamp(detail - f32(i), 0.0, 1.0);
+        if weight <= 0.0 {
+            break;
+        }
+        let layer = NOISE_LAYERS * f32(i);
+        var n = perlin(vec3<f32>(at * size + layer, noising.how.z * size + layer));
+        if noise_has(NOISE_DISCONTINUOUS) {
+            n = 2.0 * abs(n) - 1.0;
+        }
+        sum += weight * amount * n;
+        amount *= 0.5;
+        size *= 2.0;
+    }
+    return sum;
+}
+
+@fragment
+fn fs_noise(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let d = vec2<f32>(in.position.x - noising.place.x, noising.place.y - in.position.y);
+    let c = cos(noising.how.x);
+    let s = sin(noising.how.x);
+    let turned = vec2<f32>(c * d.x + s * d.y, c * d.y - s * d.x);
+    var detail = noising.how.y;
+    if noise_has(NOISE_DETAIL_MAP) {
+        detail *= textureLoad(noise_detail, px, 0).a;
+    }
+    var base = 0.5;
+    if noise_has(NOISE_LEVEL_MAP) {
+        base = textureLoad(noise_level, px, 0).a;
+    }
+    var n = noise_sum(turned * noising.place.zw, detail);
+    if noise_has(NOISE_INVERTED) {
+        n = -n;
+    }
+    let v = base + 0.5 * (n * noising.more.x + noising.how.w);
+    var color = mix(noising.colors[0], noising.colors[1], v);
+    if i32(noising.more.z) == 1 {
+        color = paint_ramp(v, i32(noising.more.w));
+    }
+    return color;
+}
+
 struct Vignetting {
     first: vec4<f32>,
     color: vec4<f32>,
@@ -2814,32 +2989,32 @@ fn glow_framed(at: f32, n: f32) -> f32 {
     return glow_normal((at + GLOW_EDGE) / GLOW_EDGE_WIDTH) * glow_normal((n - GLOW_EDGE - at) / GLOW_EDGE_WIDTH);
 }
 
-fn glow_hash(p: vec3<i32>) -> u32 {
+fn perlin_hash(p: vec3<i32>) -> u32 {
     var h = (u32(p.x) * 73856093u) ^ (u32(p.y) * 19349663u) ^ (u32(p.z) * 83492791u);
     h = (h ^ (h >> 13u)) * 1274126177u;
     return h ^ (h >> 16u);
 }
 
-fn glow_slope(p: vec3<i32>, f: vec3<f32>) -> f32 {
-    let k = glow_hash(p) & 15u;
+fn perlin_slope(p: vec3<i32>, f: vec3<f32>) -> f32 {
+    let k = perlin_hash(p) & 15u;
     let u = select(f.y, f.x, k < 8u);
     let v = select(select(f.z, f.x, k == 12u || k == 14u), f.y, k < 4u);
     return select(-u, u, (k & 1u) == 0u) + select(-v, v, (k & 2u) == 0u);
 }
 
-fn glow_cloud(p: vec3<f32>) -> f32 {
+fn perlin(p: vec3<f32>) -> f32 {
     let base = floor(p);
     let i = vec3<i32>(base);
     let f = p - base;
     let w = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
     let near = mix(
-        mix(glow_slope(i, f), glow_slope(i + vec3<i32>(1, 0, 0), f - vec3<f32>(1.0, 0.0, 0.0)), w.x),
-        mix(glow_slope(i + vec3<i32>(0, 1, 0), f - vec3<f32>(0.0, 1.0, 0.0)), glow_slope(i + vec3<i32>(1, 1, 0), f - vec3<f32>(1.0, 1.0, 0.0)), w.x),
+        mix(perlin_slope(i, f), perlin_slope(i + vec3<i32>(1, 0, 0), f - vec3<f32>(1.0, 0.0, 0.0)), w.x),
+        mix(perlin_slope(i + vec3<i32>(0, 1, 0), f - vec3<f32>(0.0, 1.0, 0.0)), perlin_slope(i + vec3<i32>(1, 1, 0), f - vec3<f32>(1.0, 1.0, 0.0)), w.x),
         w.y,
     );
     let far = mix(
-        mix(glow_slope(i + vec3<i32>(0, 0, 1), f - vec3<f32>(0.0, 0.0, 1.0)), glow_slope(i + vec3<i32>(1, 0, 1), f - vec3<f32>(1.0, 0.0, 1.0)), w.x),
-        mix(glow_slope(i + vec3<i32>(0, 1, 1), f - vec3<f32>(0.0, 1.0, 1.0)), glow_slope(i + vec3<i32>(1, 1, 1), f - vec3<f32>(1.0, 1.0, 1.0)), w.x),
+        mix(perlin_slope(i + vec3<i32>(0, 0, 1), f - vec3<f32>(0.0, 0.0, 1.0)), perlin_slope(i + vec3<i32>(1, 0, 1), f - vec3<f32>(1.0, 0.0, 1.0)), w.x),
+        mix(perlin_slope(i + vec3<i32>(0, 1, 1), f - vec3<f32>(0.0, 1.0, 1.0)), perlin_slope(i + vec3<i32>(1, 1, 1), f - vec3<f32>(1.0, 1.0, 1.0)), w.x),
         w.y,
     );
     return mix(near, far, w.z);
@@ -2853,7 +3028,7 @@ fn glow_atmosphere(px: vec2<f32>) -> f32 {
     for (var i = 0; i < GLOW_OCTAVES; i++) {
         let layer = GLOW_LAYERS * f32(i);
         let at = vec3<f32>(px * glowing.noise.zw * size + layer, glowing.depth.x * size + layer);
-        sum += amount * glow_cloud(at);
+        sum += amount * perlin(at);
         total += amount;
         amount *= glowing.noise.y;
         size *= 2.0;

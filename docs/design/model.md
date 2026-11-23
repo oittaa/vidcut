@@ -642,9 +642,16 @@ Writing:
     - `pivot_tracker` names a pattern by its number. A removal of an earlier pattern makes the number one less. A removal of that pattern sets it back to 1.
   - `Tool::Merge` holds a `Merge`: the transform of its foreground, its `MergeEdges`, its `ApplyMode`, its `MergeOperator` and its sliders.
     - It also holds the values of its depth merge (`Merge::depth_merge`). No picture has a depth channel. Thus `place::Merging` does not take them.
+    - Its reference size (`Merge::reference`) gives the units that the Inspector shows its Center in. `place::Merging` does not take it. With `Merge::auto_resolution` on, it is the size that `composition_size` gives.
   - `Tool::TextPlus` holds a `TextPlus`: its text, its font and face, its spacings, its anchors, its layout and its shading elements.
     - It keeps only the `ShadingElement`s that are not at their usual values. `TextPlus::element` gives any element, kept or usual.
     - A `ShadingElement` has its own keyframes. `comp.set` and `comp.key` reach them with `element`.
+  - `Tool::Background` holds a `Background`: its `BackgroundFill`, its four colors, its gradient and its `ImageFormat`.
+    - `Corner` names a color and its four `EffectValue`s. Each channel of each color can have keyframes, as Start, End and Offset can.
+    - A `GradientStop` is a color at a place on the gradient. `Background::color_at` gives the color between two stops. The gradient bar of the Inspector uses it.
+    - `ImageFormat` holds Auto Resolution and the size in pixels.
+  - `Tool::FastNoise` holds a `FastNoise`: its noise values, its `NoiseColoring`, its two colors, its gradient stops and its `ImageFormat`.
+    - Its node has two more mask inputs, `NodeInput::DetailMap` and `NodeInput::BrightnessMap`. `Composition::masks_on` gives the masks on any mask input.
   - `Tool::inputs` lists the inputs of each tool (`NodeInput`). `Tool::gives_picture` tells whether a tool gives a picture, and `Tool::feeds` whether it fits an input. Each check of a join reads them. Thus a new tool sets its inputs in one place.
   - A `Pattern` has a name, its own box, an offset and its motion path ([motion paths](#motion-paths)). On a frame, its box comes from its path (`Pattern::area_at`).
   - The Center of a node can follow a pattern of a Tracker of the same composition (`Node.connect`, a `Connect`).

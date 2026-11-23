@@ -1,11 +1,11 @@
 use serde_json::{Value, json};
 
-use crate::composition::{Frames, cleaned};
+use crate::composition::{Corner, Frames, cleaned};
 use crate::effect_keys::Keyed;
 use crate::error::{Error, Result};
 use crate::model::{
-    Composition, Connect, Ease, EffectValue, MotionPath, Node, PathSample, Pattern, Project,
-    ShadingElement, Tool, ToolType,
+    Background, Composition, Connect, Ease, EffectValue, FastNoise, ImageFormat, MotionPath, Node,
+    PathSample, Pattern, Project, ShadingElement, Tool, ToolType,
 };
 use crate::request::{NodeChange, NodeInput, PatternTrim};
 
@@ -112,9 +112,12 @@ fn insert(c: &mut Composition, mut node: Node, after: Option<&str>, id: &str) ->
         }
         Some(a) if node.tool.is_mask() && a.tool.is_mask() => {
             node.place = above(c, a.place);
-            for n in &mut c.nodes {
-                if n.effect_mask.as_deref() == Some(a.name.as_str()) {
-                    n.effect_mask = Some(node.name.clone());
+            let inputs = NodeInput::ALL.into_iter().filter(|i| !i.carries_picture());
+            for input in inputs {
+                for n in &mut c.nodes {
+                    if n.join(input) == Some(a.name.as_str()) {
+                        *n.join_mut(input) = Some(node.name.clone());
+                    }
                 }
             }
             node.effect_mask = Some(a.name);
@@ -554,6 +557,9 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.subtractive_additive, &mut m.subtractive_additive);
             given(&mut left.alpha_gain, &mut m.alpha_gain);
             given(&mut left.burn_in, &mut m.burn_in);
+            given(&mut left.reference_width, &mut m.reference_width);
+            given(&mut left.reference_height, &mut m.reference_height);
+            taken(&mut left.auto_resolution, &mut m.auto_resolution);
             taken(&mut left.depth_merge, &mut m.depth_merge);
             given(&mut left.foreground_z_offset, &mut m.foreground_z_offset);
             given(
@@ -580,6 +586,8 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
             given(&mut left.angle, &mut t.angle);
             shading_applied(t.element_mut(element_of(&mut left)?), &mut left)?;
         }
+        Tool::Background(b) => background_applied(b, &mut left),
+        Tool::FastNoise(f) => noise_applied(f, &mut left)?,
         Tool::MediaIn | Tool::MediaOut => {}
     }
     if left != NodeChange::default() {
@@ -590,6 +598,66 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
         )));
     }
     Ok(next)
+}
+
+fn background_applied(b: &mut Background, left: &mut NodeChange) {
+    given(&mut left.fill, &mut b.fill);
+    for c in Corner::ALL {
+        let from = match c {
+            Corner::TopLeft => &mut left.top_left,
+            Corner::TopRight => &mut left.top_right,
+            Corner::BottomLeft => &mut left.bottom_left,
+            Corner::BottomRight => &mut left.bottom_right,
+        };
+        given(from, b.corner_mut(c));
+    }
+    given(&mut left.gradient_type, &mut b.gradient_type);
+    given(&mut left.start, &mut b.start);
+    given(&mut left.end, &mut b.end);
+    if let Some(stops) = left.stops.take() {
+        b.stops = stops;
+    }
+    given(&mut left.values.offset, &mut b.offset);
+    given(&mut left.repeat, &mut b.repeat);
+    image_applied(&mut b.image, left);
+}
+
+fn image_applied(image: &mut ImageFormat, left: &mut NodeChange) {
+    if let Some(mut i) = left.image.take() {
+        taken(&mut i.auto_resolution, &mut image.auto_resolution);
+        given(&mut i.width, &mut image.width);
+        given(&mut i.height, &mut image.height);
+    }
+}
+
+fn noise_applied(f: &mut FastNoise, left: &mut NodeChange) -> Result<()> {
+    if let Some(c) = left.values.center.take() {
+        let [x, y] = c[..] else {
+            return Err(Error::invalid(
+                "a fast noise's center is two numbers, [x, y]",
+            ));
+        };
+        f.center = Some([x, y]);
+    }
+    taken(&mut left.discontinuous, &mut f.discontinuous);
+    taken(&mut left.inverted, &mut f.inverted);
+    given(&mut left.detail, &mut f.detail);
+    given(&mut left.brightness, &mut f.brightness);
+    given(&mut left.contrast, &mut f.contrast);
+    taken(&mut left.lock_xy, &mut f.lock_xy);
+    given(&mut left.scale, &mut f.scale);
+    given(&mut left.y_scale, &mut f.y_scale);
+    given(&mut left.angle, &mut f.angle);
+    given(&mut left.seethe, &mut f.seethe);
+    given(&mut left.seethe_rate, &mut f.seethe_rate);
+    given(&mut left.coloring, &mut f.coloring);
+    given(&mut left.color1, &mut f.color1);
+    given(&mut left.color2, &mut f.color2);
+    if let Some(stops) = left.stops.take() {
+        f.stops = stops;
+    }
+    image_applied(&mut f.image, left);
+    Ok(())
 }
 
 fn element_of(change: &mut NodeChange) -> Result<u8> {
@@ -695,10 +763,12 @@ pub fn set(
     moved_path(p, id, name, &mut change, frame)?;
     left_point(p, id, name, &mut change, frame)?;
     let pattern = change.pattern.unwrap_or(1);
-    let change = &change;
+    let size = p.clip(id).map(|c| crate::render::composition_size(p, c));
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    reference_kept(n, &mut change, size)?;
+    let change = &change;
     if matches!(change.connect, Some(Some(_))) && !n.keys_of(EffectValue::Center).is_empty() {
         return Err(Error::invalid(format!(
             "{name}'s center has keyframes: first remove them (comp.key), then connect it"
@@ -716,6 +786,39 @@ pub fn set(
         unhooked(c, name, pattern);
     }
     tidied(p, id)?;
+    Ok(())
+}
+
+fn reference_locked(name: &str) -> Error {
+    Error::invalid(format!(
+        "{name}'s reference size is the size of the picture while auto_resolution is on"
+    ))
+}
+
+fn reference_kept(n: &Node, change: &mut NodeChange, size: Option<(u32, u32)>) -> Result<()> {
+    let Tool::Merge(m) = &n.tool else {
+        return Ok(());
+    };
+    let auto = change.auto_resolution.unwrap_or(m.auto_resolution);
+    if auto && (change.reference_width.is_some() || change.reference_height.is_some()) {
+        return Err(reference_locked(&n.name));
+    }
+    let Some((w, h)) = size.filter(|_| m.auto_resolution && !auto) else {
+        return Ok(());
+    };
+    let sizes = [
+        (EffectValue::ReferenceWidth, w, &mut change.reference_width),
+        (
+            EffectValue::ReferenceHeight,
+            h,
+            &mut change.reference_height,
+        ),
+    ];
+    for (v, pixels, to) in sizes {
+        if n.keys_of(v).is_empty() {
+            to.get_or_insert(f64::from(pixels));
+        }
+    }
     Ok(())
 }
 
@@ -910,6 +1013,11 @@ pub fn key(
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    if let (Tool::Merge(m), Some(v)) = (&n.tool, value)
+        && m.locks(v)
+    {
+        return Err(reference_locked(name));
+    }
     let label = n.tool.label().to_string();
     let keyed = match element {
         None => toggled(n, (name, &label), frame, (value, ease))?,
@@ -997,6 +1105,8 @@ pub fn reset(p: &mut Project, id: &str, name: &str) -> Result<()> {
         input: n.input.take(),
         foreground: n.foreground.take(),
         effect_mask: n.effect_mask.take(),
+        detail_map: n.detail_map.take(),
+        brightness_map: n.brightness_map.take(),
         pass_through: n.pass_through,
         connect: n.connect.take(),
         ..Node::new(&n.name, Tool::MediaIn, n.place)
