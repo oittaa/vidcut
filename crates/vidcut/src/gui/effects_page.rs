@@ -375,9 +375,9 @@ fn joins(comp: &Composition) -> Vec<Wire<String>> {
 }
 
 fn inlet(tool: &Tool, input: NodeInput) -> Inlet {
-    let merge = matches!(tool, Tool::Merge(_));
+    let background = matches!(tool, Tool::Merge(_) | Tool::Tracker(_));
     let (side, knot, name) = match input {
-        NodeInput::Input if merge => (Side::Left, PICTURE_KNOT, "Background"),
+        NodeInput::Input if background => (Side::Left, PICTURE_KNOT, "Background"),
         NodeInput::Input => (Side::Left, PICTURE_KNOT, "Input"),
         NodeInput::Foreground => (Side::Left, RGB_KNOT, "Foreground"),
         NodeInput::EffectMask => (Side::Top, MASK_KNOT, "Effect Mask"),

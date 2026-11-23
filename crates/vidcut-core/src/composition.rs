@@ -477,8 +477,10 @@ impl Tool {
     pub fn inputs(&self) -> &'static [NodeInput] {
         match self {
             Tool::MediaIn => &[],
-            Tool::MediaOut | Tool::Tracker(_) => &[NodeInput::Input],
-            Tool::Blur(_) | Tool::Effect(_) => &[NodeInput::Input, NodeInput::EffectMask],
+            Tool::MediaOut => &[NodeInput::Input],
+            Tool::Tracker(_) | Tool::Blur(_) | Tool::Effect(_) => {
+                &[NodeInput::Input, NodeInput::EffectMask]
+            }
             Tool::Merge(_) => &[
                 NodeInput::Input,
                 NodeInput::Foreground,
