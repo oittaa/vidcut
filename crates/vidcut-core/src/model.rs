@@ -4651,6 +4651,13 @@ pub struct Node {
     /// Off, a Gaussian Blur `effect` does not blur the alpha. Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub blur_alpha: bool,
+    /// On, with a mask on its effect mask, a tool works on the full picture,
+    /// and its picture is then multiplied by the masks and by its `blend`.
+    /// Outside the masks, it is clear. With no mask, and on a `tracker`, it
+    /// changes nothing. A mask, `media_in` and `media_out` do not take it.
+    /// Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub multiply_by_mask: bool,
     /// Its place in the node editor, `[x, y]` in node widths across and
     /// node heights down.
     pub place: [f64; 2],
@@ -4664,7 +4671,8 @@ pub struct Node {
     /// keyframes. A path that `motion.track` made keeps its first box
     /// before it starts and its last box after it ends. On a frame where a
     /// path of `motion.find` has no box, a mask that follows it has no
-    /// shape. Left out, the node has its own center.
+    /// shape. Left out, the node has its own center. When `comp.set` stops
+    /// the connection, the center keeps the point of that frame.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connect: Option<Connect>,
 }

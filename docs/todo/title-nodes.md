@@ -28,7 +28,7 @@ The Text+ tool and the Merge tool of the compositions get the rest of their cont
   - Filter Method: Linear is the only filter in vidcut. Resolve has 11 filters (p. 2217).
   - Window Method, for the Sinc and the Bessel filters (p. 2217).
   - Flatten Transform (p. 2218).
-- In the viewer, a Merge has handles for its Center, Size and Angle.
+  - Clamp Coverage, under Blend. It is on in a new Merge of Resolve Studio 21.2. The manual does not describe it.
 
 **To measure in Resolve:**
 
