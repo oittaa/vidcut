@@ -6482,11 +6482,13 @@ pub struct NodeChange {
     /// Scales the noise of a `fast_noise` before `brightness`, from -1000 to 1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contrast: Option<f64>,
-    /// How fine a `fast_noise` is across, and with `lock_xy` also down: its
-    /// cells across the width of the picture, from 0 to 1000000.
+    /// How fine a `fast_noise` is: its cells across the width of the
+    /// picture, and with `lock_xy` also across its height, from 0 to
+    /// 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<f64>,
-    /// Without `lock_xy`, how fine a `fast_noise` is down, as `scale`.
+    /// Without `lock_xy`, the cells of a `fast_noise` across the height of
+    /// the picture, from 0 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y_scale: Option<f64>,
     /// Moves a `fast_noise` along a third axis, from -1000000 to 1000000.

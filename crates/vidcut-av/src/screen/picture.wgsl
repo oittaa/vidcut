@@ -1999,10 +1999,9 @@ fn fs_noise(in: Out) -> @location(0) vec4<f32> {
         n = -n;
     }
     let v = base + 0.5 * (n * noising.more.x + noising.how.w);
-    let t = clamp(v, 0.0, 1.0);
-    var color = mix(noising.colors[0], noising.colors[1], t);
+    var color = mix(noising.colors[0], noising.colors[1], v);
     if i32(noising.more.z) == 1 {
-        color = paint_ramp(t, i32(noising.more.w));
+        color = paint_ramp(v, i32(noising.more.w));
     }
     return color;
 }

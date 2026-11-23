@@ -959,7 +959,7 @@ impl Noising {
         let [sx, sy] = f.scales();
         Self {
             middle: [cx * w, (1.0 - cy) * h],
-            cells: [sx / w, sy / w],
+            cells: [sx / w, sy / h],
             turn: f.turn().to_radians(),
             detail: f.layers(),
             depth: f.depth(frame),

@@ -17,7 +17,7 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
   - Sub-Pixel of the gradient (p. 2360). The spec gives the measured samples.
   - Keyframes on the stops of the gradient, and its contextual menu (p. 2360).
 - The Fast Noise tool:
-  - The noise of Resolve. vidcut uses fractal Perlin noise. It agrees with the measurement at Detail 0 only.
+  - The noise function of Resolve. vidcut uses fractal Perlin noise on the measured grid.
   - Gradient Type of its gradient. The usual item is Uni. The other items are not measured yet.
   - Interpolation Space, Offset, Repeat and Sub-Pixel of its gradient, as on the Background.
 - A picture on a map input of the Fast Noise. vidcut takes masks there.
@@ -28,9 +28,13 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
 **Faults in the Inspector, to fix with a check in the app:**
 
 - The Red, Green, Blue and Alpha rows of a Background color send a channel name. `comp set` does not take it, so the change fails.
+- The rows of Color 1 and Color 2 of a Fast Noise fail the same way.
 - A drag of a stop on the gradient bar does not sort the stops while it moves. A click can add a stop past 64.
 
 **To measure in Resolve:**
 
 - Before Interpolation Space is built: HLS and HSV with a gray stop, and with two colors of a different lightness. The reads cover red to blue only.
 - Angle, Square and Cross with End not right of Start. The reads have End right of Start only.
+- Seethe Rate of the Fast Noise: the measured level at frame 5 is not the level of Seethe 5 × Seethe Rate.
+- Discontinuous of the Fast Noise with a Contrast other than 1 or a Brightness other than 0.
+- The map inputs of the Fast Noise. A link to them did not join in the measurement.

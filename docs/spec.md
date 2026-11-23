@@ -3008,6 +3008,21 @@ The Noise tab (pp. 2364–2365):
   - Brightness 0 gives 0.5, 0.2 gives 0.6, and −0.3 gives 0.35.
   - Contrast 0.5 or 2, and Inverted on, give the same level in each case read.
 
+The noise with Detail 1, Color 1 (0, 0, 0, 1) and Color 2 (1, 1, 1, 1). P is 230 pixels right of Center and 98 pixels up, in 1920 × 1080:
+
+- The noise has a grid. With Scale 4, the level is 0.5 within 0.0013 at Center, 480 pixels right of it and 270 pixels up from it.
+  - Thus Scale is the number of cells across the width, and also across the height.
+- Scale multiplies the distance from Center. Scale 4 halfway to P gives the level of Scale 2 at P.
+- The noise follows the frame. At 3840 × 2160, the place of P gives the same level.
+- With Lock X/Y off, X Scale works across and Y Scale works up.
+- Center moves the noise. Angle turns it counterclockwise about Center, in pixels.
+- The level is 0.5 + Contrast × n / 2 + Brightness / 2. n is the noise, from −1 to 1. Inverted changes the sign of n.
+  - At P: 0.66658. Contrast 2: 0.83317. Contrast 2 and Brightness 0.2: 0.93317. Inverted: 0.33342. Inverted, Contrast 2 and Brightness 0.2: 0.26683.
+- The level is not clamped. Contrast 10 gives 2.16584 at P, and the color is 2.16584.
+- A part of Detail adds the same part of the next layer. At P, Detail 1.5 is the middle of Detail 1 and Detail 2.
+- Discontinuous gives the absolute value of n. At P it gives 0.33317. At a grid point it gives 0.00126.
+- Seethe 0.5 changes the level at P to 0.56616. Seethe Rate 0.1 changes nothing at frame 0. At frame 5 it gives 0.69766.
+
 The Color tab (p. 2366):
 
 - Type: Two Color or Gradient. Usual: Two Color.
@@ -3017,15 +3032,15 @@ The Color tab (p. 2366):
   - The bar, Interpolation Space, Offset, Repeat and Sub-Pixel are as on the Background. There are no Start and End rows.
   - Gradient Type: usual Uni.
 
-The manual gives no formula for the noise. vidcut uses a widely used method, fractal Perlin noise. It agrees with the measurements at Detail 0:
+The manual and the measurements do not give the noise function of Resolve. vidcut uses a widely used method, fractal Perlin noise:
 
 - The noise is improved Perlin noise in three axes. Seethe is the third axis.
-- Scale is the number of noise cells across the width of the picture.
+- The grid, Scale, Center, Angle, Lock X/Y, Contrast, Brightness and Inverted are as measured. The values of the noise between the grid points differ.
 - Each layer of Detail has half the size and half the strength of the layer before it. A part of Detail adds a part of the next layer.
-- Discontinuous uses the absolute value of each layer, which gives creases where the noise crosses zero.
-- Inverted changes the sign of the sum of the layers. Contrast then scales it, and Brightness adds to it.
-- The level is 0.5 plus half of that. A mask on the Noise Brightness Map gives this middle level in place of 0.5.
-- The colors take the level from 0 to 1.
+- Discontinuous makes each layer 2 × |n| − 1. With one layer, the level is then |n|, as measured.
+- Seethe Rate × the frame is added to Seethe.
+- A mask on the Noise Brightness Map gives the middle level in place of 0.5.
+- The level is not clamped. Past the ends of a gradient, the colors of its end stops go on.
 
 #### Edits
 

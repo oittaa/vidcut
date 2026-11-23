@@ -4943,10 +4943,10 @@ pub struct GradientStop {
 }
 
 /// The picture of a `fast_noise` node: smooth noise, colored by two colors
-/// or by a gradient. Its level runs from 0 to 1 before the colors. A color
-/// is `[r, g, b, a]`, each from -1000000 to 1000000. A field left out is at
-/// its usual value. Its numbers can have keyframes, in the `keys` of its
-/// node.
+/// or by a gradient. Its level is 0.5 with no noise, and it is not clamped.
+/// A color is `[r, g, b, a]`, each from -1000000 to 1000000. A field left
+/// out is at its usual value. Its numbers can have keyframes, in the `keys`
+/// of its node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FastNoise {
     /// On, the noise has hard lines along some of its contours. Usual: off.
@@ -4972,12 +4972,13 @@ pub struct FastNoise {
     /// Off, `y_scale` sets how fine the noise is down. Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub lock_xy: bool,
-    /// How fine the noise is across, and with `lock_xy` also down: the
-    /// cells of the noise across the width of the picture, from 0 to
+    /// How fine the noise is: the cells of the noise across the width of
+    /// the picture, and with `lock_xy` also across its height, from 0 to
     /// 1000000. Usual: 2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<f64>,
-    /// Without `lock_xy`, how fine the noise is down, as `scale`. Usual: 2.
+    /// Without `lock_xy`, the cells of the noise across the height of the
+    /// picture, from 0 to 1000000. Usual: 2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y_scale: Option<f64>,
     /// Turns the noise counterclockwise about `center`, in degrees, from
