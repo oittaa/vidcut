@@ -2658,6 +2658,10 @@ This section follows the Fusion page. The facts without a page are measured in R
 - The picture goes from the MediaIn node, through the tools that each input joins, to the MediaOut node.
   - Without a MediaOut node, or with nothing on its input, the clip shows nothing.
   - Measured: Resolve then stops a render with "The Fusion composition at 01:00:00:00 could not be processed successfully". An export of vidcut also stops with an error.
+- The MediaIn node has one effect mask input and one output (p. 1341).
+  - A mask on its effect mask input makes an alpha channel. The picture stays inside the mask, and the outside is clear (p. 1341).
+- The MediaOut node has one picture input (p. 2420).
+  - Measured: it also has an output. A node can take its picture, but the clip shows only what reaches the MediaOut node.
 - Tools:
   - Blur: the Blur tool of the Fusion page (pp. 2108–2111). See below.
   - Tracker: it follows patterns in the picture, and passes its input on as it is (pp. 1783–1789). See [The Tracker](#the-tracker).
@@ -2795,6 +2799,7 @@ The other modes have no Operator. Their alpha is fa + ba × (1 − fa). Their co
   - Vivid Light: where s < 0.5, 1 − (1 − d) / 2s, or 0 at s = 0. Else d / (2 − 2s), or 1 at s = 1. Each is clamped to 0 to 1.
   - Hue: the hue of s with the HSL saturation and lightness of d.
   - Saturation: the hue and the lightness of d with the HSL saturation of s.
+    - The HSL saturation is (max − min) / (1 − |max + min − 1|). Where max + min is above 2, it is below 0.
   - Color: the Y of d with the I and the Q of s, in YIQ.
   - Luminosity: the Y of s with the I and the Q of d, in YIQ.
 - F × (1 − ba) + B × (1 − fa) + fa × ba × m(f, b):
@@ -2898,6 +2903,7 @@ The values of the shading elements of a new node:
 
 - Add a tool with a node selected: the tool goes after it, in its picture's way (p. 1385). With no node selected, it joins nothing.
 - Add a Text+ with a node selected: a new Merge goes after that node, and the Text+ joins the Foreground of the Merge. The Merge is then the selected node. One undo takes both away.
+  - With a mask selected, no Merge comes. The Text+ joins nothing.
   - vidcut: a Media In added with a node selected does the same.
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
   - vidcut: a Tracker has no effect mask yet. A mask added with a Tracker selected joins nothing ([todo](todo/motion-tracking.md)).

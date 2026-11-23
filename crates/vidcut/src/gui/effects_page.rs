@@ -395,11 +395,11 @@ fn inlet(tool: &Tool, input: NodeInput) -> Inlet {
 
 fn tile(n: &Node) -> Tile<String> {
     let inlets = n.tool.inputs().iter().map(|i| inlet(&n.tool, *i)).collect();
-    let outlets = (!matches!(n.tool, Tool::MediaOut)).then(|| Outlet {
+    let outlets = Outlet {
         slot: 0,
         name: "Output".into(),
         color: Color32::WHITE,
-    });
+    };
     Tile {
         key: n.name.clone(),
         label: n.name.clone(),
@@ -410,7 +410,7 @@ fn tile(n: &Node) -> Tile<String> {
         note: String::new(),
         badges: Vec::new(),
         locked: None,
-        outlets: outlets.into_iter().collect(),
+        outlets: vec![outlets],
         inlets,
         edge: None,
         shot: None,
@@ -815,7 +815,7 @@ impl Workspace {
             .nodes
             .iter()
             .filter_map(|n| comp.node(n))
-            .filter(|n| n.tool.flows() || n.tool.is_mask())
+            .filter(|n| !n.tool.is_media())
             .map(|n| {
                 let params = json!({
                     "clip": clip.id,
@@ -911,7 +911,7 @@ impl Workspace {
             .nodes
             .iter()
             .filter(|n| self.effects_page.nodes.contains(&n.name))
-            .filter(|n| n.tool.flows() || n.tool.is_mask())
+            .filter(|n| !n.tool.is_media())
             .cloned()
             .collect();
         if copied.is_empty() {
@@ -2023,7 +2023,7 @@ impl Workspace {
                 let Some(n) = comp.node(name) else {
                     return;
                 };
-                let tool = n.tool.flows() || n.tool.is_mask();
+                let tool = !n.tool.is_media();
                 let items = [
                     (MenuAct::Rename, "Rename", true),
                     (MenuAct::PassThrough, "Pass Through", tool),

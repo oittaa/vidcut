@@ -316,11 +316,13 @@ impl Player {
 
     pub fn reread_luts(&mut self) {
         let i = self.active.index();
-        if let Some(e) = self.shown_engine().filter(|_| !self.auditioning)
+        if let Some(e) = self.shown_engine().filter(|_| !self.auditioning).cloned()
             && let Some(plan) = self.contents[i].plan.clone()
-            && let Err(err) = e.set_plan(plan)
         {
-            self.contents[i].error = Some(err.to_string());
+            match e.set_plan(plan) {
+                Ok(()) => self.motion += 1,
+                Err(err) => self.contents[i].error = Some(err.to_string()),
+            }
         }
         self.prepare_other();
     }
