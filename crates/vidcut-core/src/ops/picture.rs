@@ -617,6 +617,7 @@ fn merge_checked(m: &Merge) -> Result<Merge> {
         )?;
     }
     Ok(Merge {
+        center: m.center.filter(|c| *c != Mask::MIDDLE),
         size: m.size.filter(|v| *v != Merge::SIZE),
         angle: m.angle.filter(|v| *v != 0.0),
         edges: m.edges.filter(|e| *e != MergeEdges::default()),

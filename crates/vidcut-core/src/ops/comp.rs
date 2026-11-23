@@ -95,15 +95,17 @@ fn insert(c: &mut Composition, mut node: Node, after: Option<&str>, id: &str) ->
         Some(a) => Some(c.nodes[found(c, id, a)?].clone()),
         None => None,
     };
-    let picture = |a: &Node| a.tool.flows() || a.tool == Tool::MediaIn;
     match after {
-        Some(a) if node.tool.flows() && picture(&a) => {
+        Some(a) if node.tool.flows() && a.tool.gives_picture() => {
             let spot = [a.place[0] + 1.0, a.place[1]];
             shifted(c, spot);
             node.place = spot;
-            for n in &mut c.nodes {
-                if n.input.as_deref() == Some(a.name.as_str()) {
-                    n.input = Some(node.name.clone());
+            let inputs = NodeInput::ALL.into_iter().filter(|i| i.carries_picture());
+            for input in inputs {
+                for n in &mut c.nodes {
+                    if n.join(input) == Some(a.name.as_str()) {
+                        *n.join_mut(input) = Some(node.name.clone());
+                    }
                 }
             }
             node.input = Some(a.name);
