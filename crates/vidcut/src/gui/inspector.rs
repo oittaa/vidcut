@@ -1587,22 +1587,15 @@ fn ink_row(ui: &mut egui::Ui, slot: usize, s: &ShadingElement, acts: &mut Vec<Ac
     ui.end_row();
 }
 
-fn picked_element(ui: &egui::Ui, (slot, name): (usize, &str)) -> (egui::Id, u8) {
-    let id = ui.make_persistent_id(("inspector-shading-element", slot, name));
-    let e = ui.data(|d| d.get_temp::<u8>(id)).unwrap_or(1);
-    (id, e)
-}
-
-fn element_row(ui: &mut egui::Ui, (id, now): (egui::Id, u8), t: &TextPlus) {
+fn element_row(ui: &mut egui::Ui, now: u8, t: &TextPlus, acts: &mut Vec<Act>) {
     label(ui, "Shading Element", false);
     ui.horizontal(|ui| {
         for e in 1..=ShadingElement::ELEMENTS {
-            let on = t.element(e).on();
             let text = RichText::new(e.to_string());
-            let text = if on { text.strong() } else { text };
+            let text = if t.element(e).on() { text } else { text.weak() };
             let r = ui.selectable_label(e == now, text);
             if r.on_hover_text(t.element(e).title()).clicked() {
-                ui.data_mut(|d| d.insert_temp(id, e));
+                acts.push(Act::Element(e));
             }
         }
     });
@@ -1639,13 +1632,12 @@ fn element_name_row(
 fn shading_rows(
     ui: &mut egui::Ui,
     i: &Inspector,
-    (slot, n, t): (usize, &Node, &TextPlus),
+    (slot, n, t, picked): (usize, &Node, &TextPlus, u8),
     acts: &mut Vec<Act>,
 ) {
     use EffectValue as V;
-    let picked = picked_element(ui, (slot, &n.name));
-    element_row(ui, picked, t);
-    let s = t.element(picked.1);
+    element_row(ui, picked, t, acts);
+    let s = t.element(picked);
     let e = s.element;
     let mut own = Vec::new();
     let usual = ShadingElement::new(e);
@@ -1770,7 +1762,7 @@ fn center_row(
 fn node_rows(
     ui: &mut egui::Ui,
     i: &Inspector,
-    (slot, n): (usize, &Node),
+    (slot, n, element): (usize, &Node, u8),
     trackers: &[Hooked],
     acts: &mut Vec<Act>,
 ) {
@@ -1837,7 +1829,7 @@ fn node_rows(
             value(ui, acts, V::LayoutSize, "Layout Size");
             value(ui, acts, V::Angle, "Angle");
             value(ui, acts, V::Blend, "Blend");
-            shading_rows(ui, i, (slot, n, t), acts);
+            shading_rows(ui, i, (slot, n, t, element), acts);
         }
         Tool::Merge(m) => {
             center_row(ui, i, (slot, n), trackers, acts);
@@ -1993,6 +1985,7 @@ impl Workspace {
             .iter()
             .map(|&k| comp.nodes[k].sampled(source))
             .collect();
+        let element = self.effects_page.element;
         let mut all: Vec<Vec<Act>> = Vec::new();
         egui::ScrollArea::vertical()
             .auto_shrink([false, true])
@@ -2007,7 +2000,7 @@ impl Workspace {
                     } else {
                         let i = &self.inspector;
                         rows(ui, (slot, "node"), |ui| {
-                            node_rows(ui, i, (slot, n), &trackers, &mut acts);
+                            node_rows(ui, i, (slot, n, element), &trackers, &mut acts);
                         });
                     }
                     ui.separator();
@@ -2415,6 +2408,10 @@ impl Workspace {
                     nodes.retain(|x| *x != stored.name);
                     nodes.push(stored.name.clone());
                     self.send("gui.nodes", json!({ "nodes": nodes }));
+                }
+                Act::Element(e) => {
+                    let nodes = self.effects_page.nodes.clone();
+                    self.send("gui.nodes", json!({ "nodes": nodes, "element": e }));
                 }
                 _ => {}
             }
@@ -2842,6 +2839,7 @@ enum Act {
     Tint(usize, [u8; 3], [u8; 3]),
     NodeReset,
     NodeActive,
+    Element(u8),
 }
 
 fn param_name(key: Key) -> Option<&'static str> {
@@ -5602,7 +5600,7 @@ impl Workspace {
     fn inspect(&mut self, act: Act, (chosen, sounds, paced): Lists<'_>) {
         let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
-            Act::NodeReset | Act::NodeActive => {}
+            Act::NodeReset | Act::NodeActive | Act::Element(_) => {}
             Act::Denoise(on) => {
                 let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
                 self.send(

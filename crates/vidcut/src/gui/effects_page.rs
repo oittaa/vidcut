@@ -82,6 +82,7 @@ const GRADES_LEFT_KEPT: usize = 4096;
 pub(super) struct EffectsPage {
     pub(super) page: Page,
     pub(super) nodes: Vec<String>,
+    pub(super) element: u8,
     seen: Option<String>,
     alone: Option<Alone>,
     cells: Option<super::cells::Cells>,
@@ -122,6 +123,7 @@ impl Default for EffectsPage {
         Self {
             page: Page::Cut,
             nodes: Vec::new(),
+            element: 1,
             seen: None,
             alone: None,
             cells: None,

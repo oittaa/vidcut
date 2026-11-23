@@ -4443,7 +4443,13 @@ pub enum Request {
     /// Inspector and the viewer then show the last one. An empty list
     /// selects none. Answers what `gui.state` does.
     #[serde(rename = "gui.nodes")]
-    GuiNodes { nodes: Vec<String> },
+    GuiNodes {
+        nodes: Vec<String>,
+        /// The shading element of a `text_plus` that the Inspector shows,
+        /// from 1 to 8. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        element: Option<u8>,
+    },
     /// The node editor of the shown page. Each value left out stays.
     /// Answers what `gui.state` does.
     #[serde(rename = "gui.node_view")]
