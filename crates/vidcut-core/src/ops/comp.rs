@@ -95,15 +95,17 @@ fn insert(c: &mut Composition, mut node: Node, after: Option<&str>, id: &str) ->
         Some(a) => Some(c.nodes[found(c, id, a)?].clone()),
         None => None,
     };
-    let picture = |a: &Node| a.tool.flows() || a.tool == Tool::MediaIn;
     match after {
-        Some(a) if node.tool.flows() && picture(&a) => {
+        Some(a) if node.tool.flows() && a.tool.gives_picture() => {
             let spot = [a.place[0] + 1.0, a.place[1]];
             shifted(c, spot);
             node.place = spot;
-            for n in &mut c.nodes {
-                if n.input.as_deref() == Some(a.name.as_str()) {
-                    n.input = Some(node.name.clone());
+            let inputs = NodeInput::ALL.into_iter().filter(|i| i.carries_picture());
+            for input in inputs {
+                for n in &mut c.nodes {
+                    if n.join(input) == Some(a.name.as_str()) {
+                        *n.join_mut(input) = Some(node.name.clone());
+                    }
                 }
             }
             node.input = Some(a.name);
@@ -365,8 +367,12 @@ pub fn remove(p: &mut Project, id: &str, name: &str) -> Result<()> {
         }
         for input in NodeInput::ALL {
             if n.join(input) == Some(name) {
-                let passes = gone.tool.takes(input) && gone.tool.feeds(input);
-                *n.join_mut(input) = gone.join(input).filter(|_| passes).map(str::to_string);
+                let through = match input.carries_picture() {
+                    true => NodeInput::Input,
+                    false => NodeInput::EffectMask,
+                };
+                let passes = gone.tool.takes(through) && gone.tool.feeds(input);
+                *n.join_mut(input) = gone.join(through).filter(|_| passes).map(str::to_string);
             }
         }
     }
@@ -482,6 +488,25 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
                 t.patterns.push(Pattern::new(t.free_name()));
                 left.add_pattern = false;
             }
+        }
+        Tool::Merge(m) => {
+            if let Some(c) = left.values.center.take() {
+                let [x, y] = c[..] else {
+                    return Err(Error::invalid("a merge's center is two numbers, [x, y]"));
+                };
+                m.center = Some([x, y]);
+            }
+            given(&mut left.values.size, &mut m.size);
+            given(&mut left.angle, &mut m.angle);
+            taken(&mut left.flip_horizontal, &mut m.flip_horizontal);
+            taken(&mut left.flip_vertical, &mut m.flip_vertical);
+            taken(&mut left.invert_transform, &mut m.invert_transform);
+            given(&mut left.edges, &mut m.edges);
+            given(&mut left.apply_mode, &mut m.apply_mode);
+            given(&mut left.operator, &mut m.operator);
+            given(&mut left.subtractive_additive, &mut m.subtractive_additive);
+            given(&mut left.alpha_gain, &mut m.alpha_gain);
+            given(&mut left.burn_in, &mut m.burn_in);
         }
         Tool::MediaIn | Tool::MediaOut => {}
     }
@@ -767,6 +792,7 @@ pub fn reset(p: &mut Project, id: &str, name: &str) -> Result<()> {
         name: n.name.clone(),
         tool: n.tool.made(),
         input: n.input.take(),
+        foreground: n.foreground.take(),
         effect_mask: n.effect_mask.take(),
         pass_through: n.pass_through,
         connect: n.connect.take(),

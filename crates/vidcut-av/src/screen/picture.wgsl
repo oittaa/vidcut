@@ -1522,6 +1522,315 @@ fn fs_masked(in: Out) -> @location(0) vec4<f32> {
     return mix(textureLoad(blur_start, px, 0), textureLoad(blur_source, px, 0), m);
 }
 
+struct Merging {
+    x: vec4<f32>,
+    y: vec4<f32>,
+    how: vec4<f32>,
+    slide: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> merging: Merging;
+@group(0) @binding(14) var merge_front: texture_2d<f32>;
+
+const MERGE_LUMA = vec3<f32>(0.299, 0.587, 0.114);
+
+fn merge_edge(i: i32, n: i32, edges: i32) -> i32 {
+    switch edges {
+        case 1: {
+            return ((i % n) + n) % n;
+        }
+        case 2: {
+            return clamp(i, 0, n - 1);
+        }
+        case 3: {
+            let p = ((i % (2 * n)) + 2 * n) % (2 * n);
+            return select(p, 2 * n - 1 - p, p >= n);
+        }
+        default: {
+            return i;
+        }
+    }
+}
+
+fn merge_texel(at: vec2<i32>, size: vec2<i32>, edges: i32) -> vec4<f32> {
+    let p = vec2<i32>(merge_edge(at.x, size.x, edges), merge_edge(at.y, size.y, edges));
+    if any(p < vec2<i32>(0)) || any(p >= size) {
+        return vec4<f32>(0.0);
+    }
+    return textureLoad(merge_front, p, 0);
+}
+
+fn merge_fore(at: vec2<f32>) -> vec4<f32> {
+    if merging.x.w < 0.5 {
+        return vec4<f32>(0.0);
+    }
+    let q = vec2<f32>(dot(merging.x.xy, at) + merging.x.z, dot(merging.y.xy, at) + merging.y.z);
+    let size = vec2<i32>(textureDimensions(merge_front));
+    let edges = i32(merging.y.w);
+    let base = floor(q - 0.5);
+    let t = q - 0.5 - base;
+    let i = vec2<i32>(base);
+    let a = merge_texel(i, size, edges);
+    let b = merge_texel(i + vec2<i32>(1, 0), size, edges);
+    let c = merge_texel(i + vec2<i32>(0, 1), size, edges);
+    let d = merge_texel(i + vec2<i32>(1, 1), size, edges);
+    let top = a * (1.0 - t.x) + b * t.x;
+    let bottom = c * (1.0 - t.x) + d * t.x;
+    return top * (1.0 - t.y) + bottom * t.y;
+}
+
+fn merge_operated(
+    fore: vec4<f32>,
+    back: vec4<f32>,
+    cover: array<vec4<f32>, 2>,
+    keep: f32,
+    op: i32,
+) -> vec4<f32> {
+    let cf = cover[0];
+    let cb = cover[1];
+    let k = keep * cf;
+    let one = vec4<f32>(1.0);
+    let zero = vec4<f32>(0.0);
+    var x = one;
+    var y = one - k;
+    switch op {
+        case 1: {
+            x = cb;
+            y = zero;
+        }
+        case 2: {
+            x = one - cb;
+            y = zero;
+        }
+        case 3: {
+            x = cb;
+        }
+        case 4: {
+            x = one - cb;
+        }
+        case 5: {
+            y = select(select(one - k / cb, one, cb <= zero), zero, k > cb);
+        }
+        case 6: {
+            y = select(select((one - k) / cb, zero, cb <= zero), one, k + cb < one);
+        }
+        case 7: {
+            x = zero;
+            y = k;
+        }
+        case 8: {
+            x = zero;
+        }
+        case 9: {
+            x = one - cb;
+            y = one;
+        }
+        default: {}
+    }
+    return fore * x + back * y;
+}
+
+fn merge_burn(s: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    let r = select(vec3<f32>(1.0) - (vec3<f32>(1.0) - d) / s, vec3<f32>(0.0), s == vec3<f32>(0.0));
+    return select(r, vec3<f32>(1.0), d == vec3<f32>(1.0));
+}
+
+fn merge_dodge(s: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    let r = select(d / (vec3<f32>(1.0) - s), vec3<f32>(1.0), s >= vec3<f32>(1.0));
+    return select(r, vec3<f32>(0.0), d == vec3<f32>(0.0));
+}
+
+fn merge_vivid(s: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    let one = vec3<f32>(1.0);
+    let zero = vec3<f32>(0.0);
+    let low = select(clamp(one - (one - d) / (2.0 * s), zero, one), zero, s == zero);
+    let high = select(clamp(d / (2.0 - 2.0 * s), zero, one), one, s == one);
+    return select(high, low, s < vec3<f32>(0.5));
+}
+
+fn merge_hard(test: vec3<f32>, s: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    let screen = vec3<f32>(1.0) - 2.0 * (vec3<f32>(1.0) - s) * (vec3<f32>(1.0) - d);
+    return select(screen, 2.0 * s * d, test < vec3<f32>(0.5));
+}
+
+fn merge_soft(s: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    let deep = select(sqrt(d), ((16.0 * d - 12.0) * d + 4.0) * d, d <= vec3<f32>(0.25));
+    let dark = d - (1.0 - 2.0 * s) * d * (1.0 - d);
+    let light = d + (2.0 * s - 1.0) * (deep - d);
+    return select(light, dark, s <= vec3<f32>(0.5));
+}
+
+fn merge_pattern(c: vec3<f32>) -> vec3<f32> {
+    let lo = min(min(c.r, c.g), c.b);
+    let hi = max(max(c.r, c.g), c.b);
+    if hi <= lo {
+        return vec3<f32>(1.0, 0.0, 0.0);
+    }
+    return (c - lo) / (hi - lo);
+}
+
+fn merge_hue(s: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    let lo = min(min(d.r, d.g), d.b);
+    let hi = max(max(d.r, d.g), d.b);
+    return lo + (hi - lo) * merge_pattern(s);
+}
+
+fn merge_saturation(s: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    let slo = min(min(s.r, s.g), s.b);
+    let shi = max(max(s.r, s.g), s.b);
+    let room = 1.0 - abs(slo + shi - 1.0);
+    let sat = select((shi - slo) / room, 0.0, shi <= slo || room == 0.0);
+    let dlo = min(min(d.r, d.g), d.b);
+    let dhi = max(max(d.r, d.g), d.b);
+    let light = (dlo + dhi) / 2.0;
+    let chroma = (1.0 - abs(dlo + dhi - 1.0)) * sat;
+    return light - chroma / 2.0 + chroma * merge_pattern(d);
+}
+
+fn merge_yiq(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(
+        dot(c, MERGE_LUMA),
+        dot(c, vec3<f32>(0.596, -0.274, -0.322)),
+        dot(c, vec3<f32>(0.212, -0.523, 0.311)),
+    );
+}
+
+fn merge_rgb(y: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(
+        dot(y, vec3<f32>(1.0, 0.956, 0.621)),
+        dot(y, vec3<f32>(1.0, -0.272, -0.647)),
+        dot(y, vec3<f32>(1.0, -1.105, 1.702)),
+    );
+}
+
+fn merge_mode(fore: vec4<f32>, back: vec4<f32>) -> vec4<f32> {
+    let mode = i32(merging.how.x);
+    let op = i32(merging.how.y);
+    let fa = fore.a;
+    let ba = back.a;
+    let keep = 1.0 - merging.slide.z;
+    switch mode {
+        case 0: {
+            return merge_operated(fore, back, array(vec4<f32>(fa), vec4<f32>(ba)), keep, op);
+        }
+        case 2: {
+            return merge_operated(fore, back, array(vec4<f32>(fa), vec4<f32>(ba)), keep, 0);
+        }
+        case 1: {
+            let cf = vec4<f32>(min(fore.rgb, vec3<f32>(1.0)), fa);
+            let cb = vec4<f32>(min(back.rgb, vec3<f32>(1.0)), ba);
+            return merge_operated(fore, back, array(cf, cb), keep, op);
+        }
+        case 25: {
+            return sqrt(fore * fore + back * back);
+        }
+        case 26: {
+            let sum = fore + back;
+            return select(2.0 * fore * back / sum, vec4<f32>(0.0), sum == vec4<f32>(0.0));
+        }
+        default: {}
+    }
+    let fc = fore.rgb;
+    let bc = back.rgb;
+    let f = select(fc / fa, vec3<f32>(0.0), fa <= 0.0);
+    let b = select(bc / ba, vec3<f32>(0.0), ba <= 0.0);
+    let k = keep * fa;
+    let q = bc * (1.0 - k);
+    let under = fc * (1.0 - ba) + q;
+    let one = vec3<f32>(1.0);
+    let zero = vec3<f32>(0.0);
+    var c = fc + q;
+    switch mode {
+        case 3: {
+            c = fa * min(f, bc) + q;
+        }
+        case 4: {
+            c = fc * bc + q;
+        }
+        case 5: {
+            c = merge_burn(fc + 1.0 - fa, bc);
+        }
+        case 6: {
+            c = under + fa * ba * max(zero, f + b - 1.0);
+        }
+        case 7: {
+            c = under + fa * ba * select(b, f, dot(f, MERGE_LUMA) < dot(b, MERGE_LUMA));
+        }
+        case 8: {
+            c = fa * max(f, bc) + q;
+        }
+        case 9: {
+            c = merge_dodge(fc, bc);
+        }
+        case 10: {
+            c = fa * min(one, f + bc) + q;
+        }
+        case 11: {
+            c = under + fa * ba * select(b, f, dot(f, MERGE_LUMA) > dot(b, MERGE_LUMA));
+        }
+        case 12: {
+            c = fa * merge_hard(bc, f, bc) + q;
+        }
+        case 13: {
+            c = fa * merge_soft(f, bc) + q;
+        }
+        case 14: {
+            c = fa * merge_hard(f, f, bc) + q;
+        }
+        case 15: {
+            c = fa * merge_vivid(f, bc) + q;
+        }
+        case 16: {
+            let light = select(min(one, 2.0 * f - 1.0 + bc), max(zero, 2.0 * f + bc - 1.0), f < vec3<f32>(0.5));
+            c = fa * light + q;
+        }
+        case 17: {
+            let pin = select(max(bc, 2.0 * f - 1.0), min(bc, 2.0 * f), f < vec3<f32>(0.5));
+            c = fa * pin + q;
+        }
+        case 18: {
+            let sum = f + bc;
+            c = fa * select(select(bc, zero, sum < one), one, sum > one) + q;
+        }
+        case 19: {
+            c = abs(fc - bc);
+        }
+        case 20: {
+            c = fa * (f + bc - 2.0 * f * bc) + q;
+        }
+        case 21: {
+            c = fa * merge_hue(f, bc) + q;
+        }
+        case 22: {
+            c = fa * merge_saturation(f, bc) + q;
+        }
+        case 23: {
+            c = fa * merge_rgb(vec3<f32>(merge_yiq(bc).x, merge_yiq(f).yz)) + q;
+        }
+        case 24: {
+            c = fa * merge_rgb(vec3<f32>(merge_yiq(f).x, merge_yiq(bc).yz)) + q;
+        }
+        default: {}
+    }
+    return vec4<f32>(c, fa + ba * (1.0 - k));
+}
+
+@fragment
+fn fs_merge(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let back = textureLoad(blur_source, px, 0);
+    let taken = merge_fore(in.position.xy);
+    let fa = taken.a * merging.slide.y;
+    let additive = merging.slide.x;
+    let fore = vec4<f32>(taken.rgb * (additive + (1.0 - additive) * fa), fa);
+    let merged = merge_mode(fore, back);
+    var amount = merging.slide.w;
+    if merging.how.z > 0.5 {
+        amount = amount * textureLoad(tool_mask, px, 0).r;
+    }
+    return back * (1.0 - amount) + merged * amount;
+}
+
 struct Vignetting {
     first: vec4<f32>,
     color: vec4<f32>,

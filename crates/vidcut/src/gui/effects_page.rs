@@ -22,8 +22,8 @@ use vidcut_core::shortcuts::{Action, Panel};
 
 use super::color_page::Port;
 use super::node_editor::{
-    self, End, Graph, Inlet, Link, MASK_KNOT, NodeView, Outlet, PICTURE_KNOT, Pick, Side, Spot,
-    Tile, Wire,
+    self, End, Graph, Inlet, Link, MASK_KNOT, NodeView, Outlet, PICTURE_KNOT, Pick, RGB_KNOT, Side,
+    Spot, Tile, Wire,
 };
 use super::shortcuts::Fired;
 use super::shuttle::Jkl;
@@ -51,8 +51,9 @@ const TOOLS: f32 = 30.0;
 const TRANSPORT: f32 = 36.0;
 const SETTLE: f64 = 2.0;
 const SCREEN: usize = 0;
-const LIBRARY: [(&str, &[ToolType]); 4] = [
+const LIBRARY: [(&str, &[ToolType]); 5] = [
     ("Tools", &[ToolType::Blur]),
+    ("Composite", &[ToolType::Merge]),
     (
         "Masks",
         &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
@@ -71,7 +72,7 @@ const LIBRARY: [(&str, &[ToolType]); 4] = [
     ),
 ];
 const TOOL_ROW: [&[ToolType]; 2] = [
-    &[ToolType::Blur],
+    &[ToolType::Merge, ToolType::Blur],
     &[ToolType::Rectangle, ToolType::Ellipse, ToolType::Polygon],
 ];
 
@@ -352,7 +353,7 @@ fn slot(which: NodeInput) -> usize {
 
 fn joins(comp: &Composition) -> Vec<Wire<String>> {
     let line = |which| match which {
-        NodeInput::Input => Stroke::new(1.5, theme::colors().text_dim),
+        NodeInput::Input | NodeInput::Foreground => Stroke::new(1.5, theme::colors().text_dim),
         NodeInput::EffectMask => Stroke::new(1.5, MASK_KNOT),
     };
     let mut out = Vec::new();
@@ -373,9 +374,12 @@ fn joins(comp: &Composition) -> Vec<Wire<String>> {
     out
 }
 
-fn inlet(input: NodeInput) -> Inlet {
+fn inlet(tool: &Tool, input: NodeInput) -> Inlet {
+    let merge = matches!(tool, Tool::Merge(_));
     let (side, knot, name) = match input {
+        NodeInput::Input if merge => (Side::Left, PICTURE_KNOT, "Background"),
         NodeInput::Input => (Side::Left, PICTURE_KNOT, "Input"),
+        NodeInput::Foreground => (Side::Left, RGB_KNOT, "Foreground"),
         NodeInput::EffectMask => (Side::Top, MASK_KNOT, "Effect Mask"),
     };
     Inlet {
@@ -387,7 +391,7 @@ fn inlet(input: NodeInput) -> Inlet {
 }
 
 fn tile(n: &Node) -> Tile<String> {
-    let inlets = n.tool.inputs().iter().map(|i| inlet(*i)).collect();
+    let inlets = n.tool.inputs().iter().map(|i| inlet(&n.tool, *i)).collect();
     let outlets = (!matches!(n.tool, Tool::MediaOut)).then(|| Outlet {
         slot: 0,
         name: "Output".into(),

@@ -2,8 +2,9 @@ use std::collections::HashSet;
 
 use crate::effect_keys::Keyed;
 use crate::model::{
-    Blur, BlurClipping, BlurFilter, Clip, Composition, Connect, EffectKind, EffectType,
-    EffectValue, Mask, MotionPath, Node, Pattern, Project, Tool, ToolType, Tracker,
+    ApplyMode, Blur, BlurClipping, BlurFilter, Clip, Composition, Connect, EffectKind, EffectType,
+    EffectValue, Mask, Merge, MergeEdges, MergeOperator, MotionPath, Node, Pattern, Project, Tool,
+    ToolType, Tracker,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -203,6 +204,163 @@ impl Tracker {
     }
 }
 
+impl Merge {
+    pub const SIZE: f64 = 1.0;
+    pub const SLIDES: (f64, f64) = (0.0, 1.0);
+
+    pub fn middle(&self) -> [f64; 2] {
+        self.center.unwrap_or(Mask::MIDDLE)
+    }
+
+    pub fn scale(&self) -> f64 {
+        self.size.unwrap_or(Self::SIZE)
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.angle.unwrap_or(0.0)
+    }
+
+    pub fn edges(&self) -> MergeEdges {
+        self.edges.unwrap_or_default()
+    }
+
+    pub fn mode(&self) -> ApplyMode {
+        self.apply_mode.unwrap_or_default()
+    }
+
+    pub fn operator(&self) -> MergeOperator {
+        self.operator.unwrap_or_default()
+    }
+
+    pub fn additive(&self) -> f64 {
+        self.subtractive_additive.unwrap_or(1.0)
+    }
+
+    pub fn gain(&self) -> f64 {
+        self.alpha_gain.unwrap_or(1.0)
+    }
+
+    pub fn burn(&self) -> f64 {
+        self.burn_in.unwrap_or(0.0)
+    }
+}
+
+impl ApplyMode {
+    pub const ALL: [ApplyMode; 27] = [
+        ApplyMode::Normal,
+        ApplyMode::Screen,
+        ApplyMode::Dissolve,
+        ApplyMode::Darken,
+        ApplyMode::Multiply,
+        ApplyMode::ColorBurn,
+        ApplyMode::LinearBurn,
+        ApplyMode::DarkerColor,
+        ApplyMode::Lighten,
+        ApplyMode::ColorDodge,
+        ApplyMode::LinearDodge,
+        ApplyMode::LighterColor,
+        ApplyMode::Overlay,
+        ApplyMode::SoftLight,
+        ApplyMode::HardLight,
+        ApplyMode::VividLight,
+        ApplyMode::LinearLight,
+        ApplyMode::PinLight,
+        ApplyMode::HardMix,
+        ApplyMode::Difference,
+        ApplyMode::Exclusion,
+        ApplyMode::Hue,
+        ApplyMode::Saturation,
+        ApplyMode::Color,
+        ApplyMode::Luminosity,
+        ApplyMode::Hypotenuse,
+        ApplyMode::Geometric,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ApplyMode::Normal => "Normal",
+            ApplyMode::Screen => "Screen",
+            ApplyMode::Dissolve => "Dissolve",
+            ApplyMode::Darken => "Darken",
+            ApplyMode::Multiply => "Multiply",
+            ApplyMode::ColorBurn => "Color Burn",
+            ApplyMode::LinearBurn => "Linear Burn",
+            ApplyMode::DarkerColor => "Darker Color",
+            ApplyMode::Lighten => "Lighten",
+            ApplyMode::ColorDodge => "Color Dodge",
+            ApplyMode::LinearDodge => "Linear Dodge",
+            ApplyMode::LighterColor => "Lighter Color",
+            ApplyMode::Overlay => "Overlay",
+            ApplyMode::SoftLight => "Soft Light",
+            ApplyMode::HardLight => "Hard Light",
+            ApplyMode::VividLight => "Vivid Light",
+            ApplyMode::LinearLight => "Linear Light",
+            ApplyMode::PinLight => "Pin Light",
+            ApplyMode::HardMix => "Hard Mix",
+            ApplyMode::Difference => "Difference",
+            ApplyMode::Exclusion => "Exclusion",
+            ApplyMode::Hue => "Hue",
+            ApplyMode::Saturation => "Saturation",
+            ApplyMode::Color => "Color",
+            ApplyMode::Luminosity => "Luminosity",
+            ApplyMode::Hypotenuse => "Hypotenuse",
+            ApplyMode::Geometric => "Geometric",
+        }
+    }
+
+    pub fn has_operator(self) -> bool {
+        matches!(self, ApplyMode::Normal | ApplyMode::Screen)
+    }
+}
+
+impl MergeOperator {
+    pub const ALL: [MergeOperator; 10] = [
+        MergeOperator::Over,
+        MergeOperator::In,
+        MergeOperator::HeldOut,
+        MergeOperator::Atop,
+        MergeOperator::XOr,
+        MergeOperator::Conjoint,
+        MergeOperator::Disjoint,
+        MergeOperator::Mask,
+        MergeOperator::Stencil,
+        MergeOperator::Under,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MergeOperator::Over => "Over",
+            MergeOperator::In => "In",
+            MergeOperator::HeldOut => "Held Out",
+            MergeOperator::Atop => "Atop",
+            MergeOperator::XOr => "XOr",
+            MergeOperator::Conjoint => "Conjoint",
+            MergeOperator::Disjoint => "Disjoint",
+            MergeOperator::Mask => "Mask",
+            MergeOperator::Stencil => "Stencil",
+            MergeOperator::Under => "Under",
+        }
+    }
+}
+
+impl MergeEdges {
+    pub const ALL: [MergeEdges; 4] = [
+        MergeEdges::Canvas,
+        MergeEdges::Wrap,
+        MergeEdges::Duplicate,
+        MergeEdges::Mirror,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MergeEdges::Canvas => "Canvas",
+            MergeEdges::Wrap => "Wrap",
+            MergeEdges::Duplicate => "Duplicate",
+            MergeEdges::Mirror => "Mirror",
+        }
+    }
+}
+
 impl Mask {
     pub const LEVEL: f64 = 1.0;
     pub const LEVELS: (f64, f64) = (0.0, 1.0);
@@ -290,6 +448,7 @@ impl Tool {
             Tool::Rectangle(_) => "Rectangle",
             Tool::Polygon(_) => "Polygon",
             Tool::Tracker(_) => "Tracker",
+            Tool::Merge(_) => "Merge",
         }
     }
 
@@ -303,6 +462,7 @@ impl Tool {
             Tool::Rectangle(_) => "Rectangle",
             Tool::Polygon(_) => "Polygon",
             Tool::Tracker(_) => "Tracker",
+            Tool::Merge(_) => "Merge",
         }
     }
 
@@ -311,7 +471,7 @@ impl Tool {
     }
 
     pub fn works(&self) -> bool {
-        matches!(self, Tool::Blur(_) | Tool::Effect(_))
+        matches!(self, Tool::Blur(_) | Tool::Effect(_) | Tool::Merge(_))
     }
 
     pub fn inputs(&self) -> &'static [NodeInput] {
@@ -319,6 +479,11 @@ impl Tool {
             Tool::MediaIn => &[],
             Tool::MediaOut | Tool::Tracker(_) => &[NodeInput::Input],
             Tool::Blur(_) | Tool::Effect(_) => &[NodeInput::Input, NodeInput::EffectMask],
+            Tool::Merge(_) => &[
+                NodeInput::Input,
+                NodeInput::Foreground,
+                NodeInput::EffectMask,
+            ],
             Tool::Ellipse(_) | Tool::Rectangle(_) | Tool::Polygon(_) => &[NodeInput::EffectMask],
         }
     }
@@ -371,6 +536,13 @@ impl Tool {
         }
     }
 
+    pub fn merge(&self) -> Option<&Merge> {
+        match self {
+            Tool::Merge(m) => Some(m),
+            _ => None,
+        }
+    }
+
     pub fn mask_mut(&mut self) -> Option<&mut Mask> {
         match self {
             Tool::Ellipse(m) | Tool::Rectangle(m) | Tool::Polygon(m) => Some(m),
@@ -400,6 +572,7 @@ impl Tool {
                     })
                     .collect(),
             }),
+            Tool::Merge(_) => Tool::Merge(Merge::default()),
         }
     }
 }
@@ -423,6 +596,7 @@ impl Node {
             name: name.to_string(),
             tool,
             input: None,
+            foreground: None,
             effect_mask: None,
             pass_through: false,
             blend: None,
@@ -448,6 +622,7 @@ impl Node {
         match input {
             NodeInput::Input => self.input.as_deref(),
             NodeInput::EffectMask => self.effect_mask.as_deref(),
+            NodeInput::Foreground => self.foreground.as_deref(),
         }
     }
 
@@ -455,6 +630,7 @@ impl Node {
         match input {
             NodeInput::Input => &mut self.input,
             NodeInput::EffectMask => &mut self.effect_mask,
+            NodeInput::Foreground => &mut self.foreground,
         }
     }
 
@@ -469,11 +645,15 @@ impl Node {
 }
 
 impl NodeInput {
-    pub const ALL: [NodeInput; 2] = [NodeInput::Input, NodeInput::EffectMask];
+    pub const ALL: [NodeInput; 3] = [
+        NodeInput::Input,
+        NodeInput::EffectMask,
+        NodeInput::Foreground,
+    ];
 
     pub fn carries_picture(self) -> bool {
         match self {
-            NodeInput::Input => true,
+            NodeInput::Input | NodeInput::Foreground => true,
             NodeInput::EffectMask => false,
         }
     }
@@ -482,6 +662,7 @@ impl NodeInput {
         match self {
             NodeInput::Input => "picture input",
             NodeInput::EffectMask => "effect mask input",
+            NodeInput::Foreground => "foreground input",
         }
     }
 }
@@ -809,7 +990,7 @@ impl Composition {
 }
 
 impl ToolType {
-    pub const ADDED: [ToolType; 11] = [
+    pub const ADDED: [ToolType; 12] = [
         ToolType::Blur,
         ToolType::GaussianBlur,
         ToolType::MosaicBlur,
@@ -821,6 +1002,7 @@ impl ToolType {
         ToolType::Rectangle,
         ToolType::Polygon,
         ToolType::Tracker,
+        ToolType::Merge,
     ];
 
     pub fn made(self) -> Tool {
@@ -837,6 +1019,7 @@ impl ToolType {
             ToolType::Rectangle => Tool::Rectangle(Mask::default()),
             ToolType::Polygon => Tool::Polygon(Mask::default()),
             ToolType::Tracker => Tool::Tracker(Tracker::made()),
+            ToolType::Merge => Tool::Merge(Merge::default()),
             ToolType::MediaIn => Tool::MediaIn,
             ToolType::MediaOut => Tool::MediaOut,
         }

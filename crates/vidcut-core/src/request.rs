@@ -8,12 +8,12 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    BlendMode, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect, DuckDetect,
-    DynamicZoom, Ease, EbuLevel, EffectType, EffectValue, FillMethod, FindModel, GeneratorKind,
-    GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GrainComposite, GrainPreset,
-    Handle, LowerThirdLine, Node, PathSample, PictureTool, PictureTransition, Place, Subject,
-    SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle, ToolType, TrackClip, TrackWay,
-    VignetteMode, VignetteShape, WindowKind, ZoomBox,
+    ApplyMode, BlendMode, BlurClipping, BlurFilter, Border, CellShape, CompositeMode, Connect,
+    DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType, EffectValue, FillMethod, FindModel,
+    GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GradeKeyKind, GradeWindow, GrainComposite,
+    GrainPreset, Handle, LowerThirdLine, MergeEdges, MergeOperator, Node, PathSample, PictureTool,
+    PictureTransition, Place, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
+    TitleStyle, ToolType, TrackClip, TrackWay, VignetteMode, VignetteShape, WindowKind, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -6175,7 +6175,7 @@ pub struct NodeChange {
     /// On, the node does nothing: it passes on what comes in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass_through: Option<bool>,
-    /// How much of a `blur` or an `effect` shows, from 0 to 1.
+    /// How much of a `blur`, an `effect` or a `merge` shows, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<f64>,
     /// Its place in the node editor, `[x, y]` in node widths and heights.
@@ -6220,9 +6220,39 @@ pub struct NodeChange {
     /// The height of an ellipse or a rectangle mask.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<f64>,
-    /// Degrees an ellipse or a rectangle mask is turned counterclockwise.
+    /// Degrees an ellipse or a rectangle mask, or the foreground of a merge,
+    /// is turned counterclockwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub angle: Option<f64>,
+    /// On, a merge mirrors its foreground left to right.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip_horizontal: Option<bool>,
+    /// On, a merge mirrors its foreground top to bottom.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip_vertical: Option<bool>,
+    /// On, a merge moves, turns and sizes its foreground the other way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invert_transform: Option<bool>,
+    /// What lies around the foreground of a merge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edges: Option<MergeEdges>,
+    /// The math that a merge puts its foreground on its background with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_mode: Option<ApplyMode>,
+    /// Which parts of the two pictures a `normal` or `screen` merge keeps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator: Option<MergeOperator>,
+    /// From 0 to 1. At 0, a merge multiplies the colors of its foreground by
+    /// its alpha first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtractive_additive: Option<f64>,
+    /// What a merge multiplies the alpha of its foreground by, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha_gain: Option<f64>,
+    /// How much less the alpha of the foreground of a merge covers its
+    /// background, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub burn_in: Option<f64>,
     /// Degrees a polygon mask is turned counterclockwise, first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub z_rotation: Option<f64>,
@@ -6315,11 +6345,13 @@ pub enum PatternTrim {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeInput {
-    /// The picture that comes in.
+    /// The picture that comes in: the background of a merge.
     #[default]
     Input,
     /// The mask that limits where the tool works.
     EffectMask,
+    /// The picture that a merge puts over its background.
+    Foreground,
 }
 
 /// A change to the values of an effect's kind: each value given replaces
@@ -6557,7 +6589,8 @@ pub struct KindChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border_shape: Option<VignetteShape>,
     /// How large a Vignette's shape is, from 0.01 to 2. How much a `blur`
-    /// node blurs, or how large a polygon mask is, from 0 to 1000000.
+    /// node blurs, how large a polygon mask is, or the size of the
+    /// foreground of a merge, from 0 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// Turns a Vignette's shape counter-clockwise, in `advanced`, in degrees
@@ -6569,7 +6602,8 @@ pub struct KindChange {
     pub anamorphism: Option<f64>,
     /// The middle of a Vignette's shape, in `advanced`, `[x, y]` as fractions
     /// of the picture from its bottom left, each from -1000000 to 1000000.
-    /// The middle of a mask node, the same way, each from -10 to 10.
+    /// The middle of a mask node, or where a merge puts the middle of its
+    /// foreground, the same way, each from -10 to 10.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center: Option<Vec<f64>>,
     /// How much of the picture shows through a Vignette's color, in

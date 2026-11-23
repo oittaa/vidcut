@@ -3,10 +3,11 @@ use vidcut_core::grade::{
     THUMBNAIL_GRAY, TONE_EPS, TONE_SIZE, Tap, key_blur_spread, tone_filter,
 };
 use vidcut_core::lru::Lru;
+use vidcut_core::model::{ApplyMode, MergeEdges, MergeOperator};
 use vidcut_core::model::{BlendMode, GlowOutput, KeyOutput};
 use vidcut_core::place::{
-    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Op, Outline,
-    Placing, Program, Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
+    Blurring, Boxing, Figure, GlowSpread, Glowing, GrainTile, Graining, Level, Merging, Op,
+    Outline, Placing, Program, Shading, Shaping, Sharpening, Softening, Tiling, Work, Working,
 };
 use vidcut_core::window_key::{
     CURVE_SAMPLE, FAR_OUTSIDE, Keying, Outline as WindowOutline, Shaped, texel_map,
@@ -100,6 +101,7 @@ pub(super) struct Pipes {
     shape: wgpu::RenderPipeline,
     mask_join: wgpu::RenderPipeline,
     masked: wgpu::RenderPipeline,
+    merge: wgpu::RenderPipeline,
     grade: wgpu::RenderPipeline,
     grade_stats: wgpu::RenderPipeline,
     grade_coef: wgpu::RenderPipeline,
@@ -202,6 +204,7 @@ impl Pipes {
             shape: pipeline(&of(&reading), "fs_shape"),
             mask_join: pipeline(&plain, "fs_mask_join"),
             masked: pipeline(&plain, "fs_masked"),
+            merge: pipeline(&plain, "fs_merge"),
             grade: pipeline(&plain, "fs_grade"),
             grade_stats: pipeline(&plain, "fs_grade_stats"),
             grade_coef: pipeline(&plain, "fs_grade_coef"),
@@ -420,6 +423,44 @@ fn cells_buffer(gpu: &Gpu, floats: &[f64]) -> wgpu::Buffer {
     });
     gpu.queue.write_buffer(&cells, 0, &bytes);
     cells
+}
+
+fn mask_room<'a>(
+    gpu: &Gpu,
+    masks: &'a mut Option<[Texture; 2]>,
+    size: wgpu::Extent3d,
+) -> &'a [Texture; 2] {
+    if masks.as_ref().is_some_and(|m| m[0].texture.size() != size) {
+        *masks = None;
+    }
+    let room = (size.width, size.height);
+    masks.get_or_insert_with(|| [Texture::new(gpu, room), Texture::new(gpu, room)])
+}
+
+fn merge_bytes(m: &Merging, masked: bool) -> Vec<u8> {
+    let [a, b, tx, c, d, ty] = m.back.unwrap_or_default();
+    let place = |k: Option<usize>| k.unwrap_or_default() as f64;
+    let edges = place(MergeEdges::ALL.iter().position(|e| *e == m.edges));
+    let mode = place(ApplyMode::ALL.iter().position(|e| *e == m.mode));
+    let op = place(MergeOperator::ALL.iter().position(|e| *e == m.operator));
+    float_bytes(&[
+        a,
+        b,
+        tx,
+        flag(m.back.is_some()),
+        c,
+        d,
+        ty,
+        edges,
+        mode,
+        op,
+        flag(masked),
+        0.0,
+        m.additive,
+        m.gain,
+        m.burn,
+        m.blend,
+    ])
 }
 
 fn mask_made<'a>(
@@ -889,6 +930,23 @@ fn run(
                 }
                 let one = std::slice::from_ref(working);
                 effects_into(gpu, to, (scratch, worked), one, encoder);
+            }
+            Op::Merge(merging) => {
+                let (back, fore) = (at(stage.from[0]), at(stage.from[1]));
+                let on = match merging.masks.is_empty() {
+                    true => None,
+                    false => {
+                        let room = mask_room(gpu, &mut worked.masks, size);
+                        Some(mask_made(gpu, (scratch, room), &merging.masks, encoder))
+                    }
+                };
+                let views = Views {
+                    second: &fore.view,
+                    mask: on.unwrap_or(&back.view),
+                    ..Views::same(&back.view)
+                };
+                let bytes = merge_bytes(merging, on.is_some());
+                draw_step(gpu, (&gpu.blur.merge, &bytes), views, &to.view, encoder);
             }
         }
     }
@@ -2028,20 +2086,13 @@ fn effects_into(
 ) {
     let pipes = &gpu.blur;
     let size = own.texture.size();
-    let masked = effects.iter().any(|e| !e.masks.is_empty());
-    if masked
-        && worked
-            .masks
-            .as_ref()
-            .is_none_or(|m| m[0].texture.size() != size)
-    {
-        let room = (size.width, size.height);
-        worked.masks = Some([Texture::new(gpu, room), Texture::new(gpu, room)]);
-    }
     for effect in effects {
-        let on = match (&worked.masks, effect.masks.is_empty()) {
-            (Some(room), false) => Some(mask_made(gpu, (scratch, room), &effect.masks, encoder)),
-            _ => None,
+        let on = match effect.masks.is_empty() {
+            true => None,
+            false => {
+                let room = mask_room(gpu, &mut worked.masks, size);
+                Some(mask_made(gpu, (scratch, room), &effect.masks, encoder))
+            }
         };
         let mut from = &own.view;
         let mut k = 0;

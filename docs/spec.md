@@ -2661,6 +2661,7 @@ This section follows the Fusion page. The facts without a page are measured in R
 - Tools:
   - Blur: the Blur tool of the Fusion page (pp. 2108–2111). See below.
   - Tracker: it follows patterns in the picture, and passes its input on as it is (pp. 1783–1789). See [The Tracker](#the-tracker).
+  - Merge: it puts the picture on its Foreground input over the picture on its Background input (pp. 2211–2218). See [The Merge](#the-merge).
   - The six kinds of clip effect (§8.16), with their own values. Each is a Resolve FX in the Fusion page.
 - Masks: Ellipse (p. 2472), Polygon (p. 2480) and Rectangle (p. 2490).
   - A mask on the effect mask input of a tool limits the tool to the inside of the mask (p. 1403).
@@ -2719,6 +2720,104 @@ The shapes:
   - Z Rotation, X Rotation and Y Rotation: 0. Measured: Z turns the shape counterclockwise in square pixels. Then X tilts it, and then Y.
   - The tilts have no perspective. X 60 makes the shape half as high, and Y 60 makes it half as wide.
   - Fill Method: Alternate. A part that the sides go around twice is a hole. Non Zero Winding fills it.
+
+#### The Merge
+
+The facts without a page are measured in Resolve Studio 21.2.
+
+- The Merge has three inputs: Background, Foreground and Effect Mask (p. 2211). The output has the size of the background (p. 2212).
+- vidcut: with nothing on the Foreground input, the Merge passes on its background.
+- A mask on the Effect Mask input limits the Merge to the inside of the mask. Outside the mask, the background shows.
+
+The transform of the foreground (pp. 2213, 2218):
+
+- Center: (0.5, 0.5), as fractions of the background from its bottom left. Y goes up. The middle of the foreground goes there.
+- Size: 1, from 0 to 1000000. The slider goes to 5. At 1, a pixel of the foreground is a pixel of the background.
+- Angle: 0. The foreground turns counterclockwise.
+- Flip Horizontal mirrors the foreground left to right. Flip Vertical mirrors it top to bottom. Both are off.
+- The order is the flip, Size, Angle and then the move to Center. Each acts about the middle of the foreground.
+- Invert Transform: off. On, the Merge uses the inverse of its transform (p. 2218).
+- Filter Method: Linear. The foreground is read with a bilinear filter.
+- Edges: Canvas. It sets what is around the foreground (p. 2218):
+  - Canvas: clear.
+  - Wrap: the foreground again, as a grid.
+  - Duplicate: the edge pixels of the foreground, stretched out.
+  - Mirror: the foreground again, mirrored in turn.
+
+The sums use these names:
+
+- F and B are the colors of the foreground and the background, premultiplied. fa and ba are their alphas.
+- f = F / fa and b = B / ba are the straight colors.
+- FG and BG are the four channels of each picture, RGB and alpha.
+
+The controls of the sums (pp. 2213–2217):
+
+- Apply Mode: Normal. It is one of 27 modes. The manual lists 26 of them. It does not list Hard Mix, which is in the menu (pp. 2213–2215).
+- Operator: Over. Only Normal and Screen have an Operator (p. 2215).
+- Subtractive/Additive: 1. Alpha Gain: 1. Burn In: 0. Blend: 1. Each goes from 0 to 1.
+- Blend mixes the background with the result (p. 2217).
+
+The Operators of Normal give FG × x + BG × y (p. 2215):
+
+- Over: x = 1, y = 1 − fa.
+- In: x = ba, y = 0.
+- Held Out: x = 1 − ba, y = 0.
+- Atop: x = ba, y = 1 − fa.
+- XOr: x = 1 − ba, y = 1 − fa.
+- Under: x = 1 − ba, y = 1.
+- Conjoint: FG where fa > ba. Else FG + BG × (1 − fa / ba).
+- Disjoint: FG + BG where fa + ba < 1. Else FG + BG × (1 − fa) / ba.
+- Mask: BG × fa.
+- Stencil: BG × (1 − fa).
+
+Screen uses the same sums with a coverage for each color channel. The coverage of a channel c is min(1, c), of F and of B in place of fa and ba. The alpha uses fa and ba.
+
+The sliders, with Normal and Over:
+
+- Subtractive/Additive s: the color is F × (s + (1 − s) × fa) + B × (1 − fa). The alpha is the alpha of Over.
+- Alpha Gain g: the alpha of the foreground becomes g × fa, and F stays. The color is F + B × (1 − g × fa).
+- Burn In u: the color is F + B × (1 − (1 − u) × fa). The alpha is fa + ba × (1 − (1 − u) × fa).
+
+The other modes have no Operator. Their alpha is fa + ba × (1 − fa). Their colors have these forms, with m(s, d) on each channel:
+
+- fa × m(f, B) + B × (1 − fa), with s from f and d from B:
+  - Multiply: s × d.
+  - Darken: min(s, d). Lighten: max(s, d).
+  - Pin Light: min(d, 2s) where s < 0.5. Else max(d, 2s − 1).
+  - Exclusion: s + d − 2sd.
+  - Overlay: 2sd where d < 0.5. Else 1 − 2(1 − s)(1 − d).
+  - Hard Light: the same as Overlay, with the test on s.
+  - Soft Light: d − (1 − 2s) × d × (1 − d) where s ≤ 0.5. Else d + (2s − 1) × (D − d). D is ((16d − 12) × d + 4) × d where d ≤ 0.25, else √d.
+  - Linear Dodge: min(1, s + d).
+  - Linear Light: max(0, 2s + d − 1) where s < 0.5. Else min(1, 2s − 1 + d).
+  - Hard Mix: 1 where s + d > 1, 0 where s + d < 1, else d.
+  - Vivid Light: where s < 0.5, 1 − (1 − d) / 2s, or 0 at s = 0. Else d / (2 − 2s), or 1 at s = 1. Each is clamped to 0 to 1.
+  - Hue: the hue of s with the HSL saturation and lightness of d.
+  - Saturation: the hue and the lightness of d with the HSL saturation of s.
+    - The HSL saturation is (max − min) / (1 − |max + min − 1|). Where max + min is above 2, it is below 0.
+  - Color: the Y of d with the I and the Q of s, in YIQ.
+  - Luminosity: the Y of s with the I and the Q of d, in YIQ.
+- F × (1 − ba) + B × (1 − fa) + fa × ba × m(f, b):
+  - Linear Burn: max(0, s + d − 1).
+  - Darker Color: the color, s or d, with the lower Rec. 601 luma. Lighter Color takes the higher.
+- On F and B, with no alpha in the sum:
+  - Difference: |F − B|.
+  - Color Dodge: 0 where B = 0, 1 where F ≥ 1, else B / (1 − F).
+  - Color Burn: m(F + 1 − fa, B). m(s, d) is 1 where d = 1, 0 where s = 0, else 1 − (1 − d) / s.
+- On FG and BG:
+  - Hypotenuse: √(FG² + BG²).
+  - Geometric: 2 × FG × BG / (FG + BG), and 0 where FG + BG is 0.
+- Dissolve: the same as Normal with Over.
+
+YIQ: Y = 0.299 R + 0.587 G + 0.114 B. I = 0.596 R − 0.274 G − 0.322 B. Q = 0.212 R − 0.523 G + 0.311 B.
+
+vidcut, with a mode other than Normal:
+
+- Alpha Gain multiplies fa first.
+- Subtractive/Additive then multiplies F by s + (1 − s) × fa.
+- Burn In multiplies fa by 1 − u in the cover of the background.
+
+Resolve gives wrong values with Screen and Conjoint, Screen and Disjoint, Hue and Saturation. vidcut does not copy these faults ([gotchas](gotchas.md#resolves-renders)).
 
 #### Edits
 
