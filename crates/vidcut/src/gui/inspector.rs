@@ -1816,6 +1816,31 @@ fn stops_sorted(mut stops: Vec<GradientStop>, stop: usize) -> (Vec<GradientStop>
     (stops, at)
 }
 
+fn colors_of(tool: &Tool) -> Vec<(&'static str, [EffectValue; 4], [f64; 4])> {
+    match tool {
+        Tool::Background(b) => Corner::ALL
+            .map(|c| (c.key(), c.values(), b.color(c)))
+            .to_vec(),
+        _ => Vec::new(),
+    }
+}
+
+fn channels_folded(tool: &Tool, mut params: Value) -> Value {
+    for (put, channels, now) in colors_of(tool) {
+        for (i, v) in channels.into_iter().enumerate() {
+            let Some(x) = params.as_object_mut().and_then(|o| o.remove(&v.name())) else {
+                continue;
+            };
+            let mut color = (params.get(put).cloned())
+                .and_then(|c| serde_json::from_value::<[f64; 4]>(c).ok())
+                .unwrap_or(now);
+            color[i] = x.as_f64().unwrap_or(color[i]);
+            params[put] = json!(color);
+        }
+    }
+    params
+}
+
 fn gradient_rows(
     ui: &mut egui::Ui,
     (slot, name): (usize, &str),
@@ -1824,12 +1849,17 @@ fn gradient_rows(
 ) {
     let id = ui.make_persistent_id(("inspector-gradient", slot, name));
     let held = ui.data(|d| d.get_temp::<Dragged>(id));
-    let stops = held
-        .as_ref()
-        .map_or_else(|| b.colors().to_vec(), |h| h.stops.clone());
+    let (stops, dragged) = match held.as_ref() {
+        Some(h) => {
+            let (sorted, k) = stops_sorted(h.stops.clone(), h.stop);
+            (sorted, Some(k))
+        }
+        None => (b.colors().to_vec(), None),
+    };
+    let most = Background::STOPS.1;
     let picked_id = id.with("picked");
     let picked = ui.data(|d| d.get_temp::<usize>(picked_id)).unwrap_or(0);
-    let picked = picked.min(stops.len().saturating_sub(1));
+    let picked = dragged.unwrap_or(picked).min(stops.len().saturating_sub(1));
     let set = !b.stops.is_empty();
     label(ui, "Gradient", set);
     let width = ui.available_width().clamp(120.0, 240.0);
@@ -1883,7 +1913,7 @@ fn gradient_rows(
             Some(k) => {
                 ui.data_mut(|d| d.insert_temp(picked_id, k));
             }
-            None => {
+            None if stops.len() < most => {
                 let t = at(p);
                 let mut more = stops.clone();
                 more.push(GradientStop {
@@ -1894,6 +1924,7 @@ fn gradient_rows(
                 ui.data_mut(|d| d.insert_temp(picked_id, k));
                 acts.push(node_set(slot, "stops", json!(more)));
             }
+            None => {}
         }
     }
     let pressed = ui.input(|i| i.pointer.press_origin());
@@ -1901,7 +1932,8 @@ fn gradient_rows(
         && let Some(k) = pressed.and_then(near)
     {
         let mut start = stops.clone();
-        let stop = match ui.input(|i| i.modifiers.command) {
+        let copy = ui.input(|i| i.modifiers.command) && stops.len() < most;
+        let stop = match copy {
             true => {
                 start.push(stops[k]);
                 start.len() - 1
@@ -2627,7 +2659,10 @@ impl Workspace {
                         self.inspector.held = None;
                     }
                 }
-                Act::EffectSet(_, params) => self.send_node("comp.set", clip, stored, params),
+                Act::EffectSet(_, params) => {
+                    let params = channels_folded(&shown.tool, params);
+                    self.send_node("comp.set", clip, stored, params);
+                }
                 Act::Tint(_, _, to) => {
                     let color = to.map(|c| f64::from(c) / 255.0);
                     self.send_node("comp.set", clip, stored, json!({ "color": color }));
@@ -2692,7 +2727,7 @@ impl Workspace {
                 point[axis] = value;
                 let mut params = json!({});
                 params[v.name()] = if v.pair() { json!(point) } else { json!(value) };
-                params
+                channels_folded(&shown.tool, params)
             }
             Key::Shading(_, e, v, axis) => {
                 let Tool::TextPlus(t) = &shown.tool else {
