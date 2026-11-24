@@ -128,17 +128,22 @@ fn pictures(input: &mut ffmpeg::format::context::Input, all: bool) -> (usize, Op
 const MEASURED_SECS: i64 = 2;
 const REORDERED_FRAMES: usize = 16;
 
-fn measured_rate(source: &Input, video: usize, tb: ffmpeg::Rational) -> Option<Ratio> {
+fn measured_rate(source: &Input, video: usize) -> Option<Ratio> {
     let mut input = source.open_header().ok()?;
-    let span = MEASURED_SECS * i64::from(tb.denominator()) / i64::from(tb.numerator().max(1));
     let (mut pts, mut first, mut end, mut after) = (Vec::new(), i64::MAX, None, 0);
+    let mut tb = None;
     for (stream, packet) in input.packets() {
         if stream.index() != video {
             continue;
         }
-        let Some(p) = packet.pts() else {
-            continue;
-        };
+        let p = packet.pts()?;
+        let (num, den) = *tb.get_or_insert_with(|| {
+            let t = stream.time_base();
+            (i64::from(t.numerator()), i64::from(t.denominator()))
+        });
+        if num <= 0 || den <= 0 {
+            return None;
+        }
         pts.push(p);
         first = first.min(p);
         if end.is_some() {
@@ -146,18 +151,29 @@ fn measured_rate(source: &Input, video: usize, tb: ffmpeg::Rational) -> Option<R
             if after == REORDERED_FRAMES {
                 break;
             }
-        } else if p - first >= span {
+        } else if p.saturating_sub(first) >= MEASURED_SECS * den / num {
             end = Some(p);
         }
     }
+    let (num, den) = tb?;
     let end = end.or_else(|| pts.iter().max().copied())?;
-    let frames = pts.iter().filter(|&&p| p <= end).count();
-    let ticks = end - first;
-    (frames > 1 && ticks > 0).then(|| {
-        ratio(ffmpeg::Rational::from(
-            (frames - 1) as f64 / (ticks as f64 * f64::from(tb)),
-        ))
-    })
+    let frames = pts.iter().filter(|&&p| p <= end).count() as i64;
+    let ticks = end.saturating_sub(first);
+    if frames < 2 || ticks <= 0 {
+        return None;
+    }
+    let mut rate = (0, 0);
+    // SAFETY: av_reduce writes only the two integers that it is given.
+    unsafe {
+        ffmpeg::ffi::av_reduce(
+            &mut rate.0,
+            &mut rate.1,
+            (frames - 1).saturating_mul(den),
+            ticks.saturating_mul(num),
+            i64::from(i32::MAX),
+        )
+    };
+    (rate.0 > 0 && rate.1 > 0).then_some(rate)
 }
 
 pub fn pixel_depth(name: &str) -> u8 {
@@ -391,9 +407,8 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
 
     let best_video = input.streams().best(media::Type::Video).map(|s| s.index());
     let measured = best_video
-        .filter(|&i| !still && stated.get(i).is_none_or(|r| r.0 <= 0 || r.1 <= 0))
-        .and_then(|i| input.stream(i))
-        .and_then(|s| measured_rate(source, s.index(), s.time_base()));
+        .filter(|&i| file && !still && stated.get(i).is_none_or(|r| r.0 <= 0 || r.1 <= 0))
+        .and_then(|i| measured_rate(source, i));
     let mut video = None;
     let mut audio = Vec::new();
     for stream in input.streams() {
