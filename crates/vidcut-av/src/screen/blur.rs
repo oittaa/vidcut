@@ -260,6 +260,16 @@ fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
     }
 }
 
+fn auto_floats(g: &Grading) -> Vec<f64> {
+    let Some(a) = &g.auto else {
+        return vec![0.0; 12];
+    };
+    let mut floats = vec![1.0, 0.0, 0.0, 0.0];
+    floats.extend(a.lift);
+    floats.extend(a.weight);
+    floats
+}
+
 fn grade_bytes(g: &Grading, blend: f64) -> Vec<u8> {
     let row = |r: [f64; 3]| [r[0], r[1], r[2], 0.0];
     let mut floats = vec![g.boost, blend, 0.0, 0.0];
@@ -304,6 +314,7 @@ fn grade_bytes(g: &Grading, blend: f64) -> Vec<u8> {
         }
         None => floats.extend(std::iter::repeat_n(0.0, 4 + TONE_SIZE)),
     }
+    floats.extend(auto_floats(g));
     float_bytes(&floats)
 }
 
@@ -1728,7 +1739,9 @@ fn grade_into(
         let [Some(a), Some(b)] = GRADE_SLOTS.map(|slot| spare.peek(&(w, h, slot))) else {
             return;
         };
-        let guide = float_bytes(&[TONE_EPS, f64::from(w), f64::from(h), 0.0]);
+        let mut guide = vec![TONE_EPS, f64::from(w), f64::from(h), 0.0];
+        guide.extend(auto_floats(g));
+        let guide = float_bytes(&guide);
         let stats = (&gpu.blur.grade_stats, &guide[..]);
         draw_step(gpu, stats, Views::same(&own.view), &a.view, encoder);
         let width = f64::from(2 * filter.radius + 1);

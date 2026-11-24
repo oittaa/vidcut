@@ -4497,6 +4497,22 @@ pub struct Corrector {
     /// Where the Highlight range of the Log mode starts, below 1. Usual:
     /// 0.55.
     pub high_range: f64,
+    /// The Auto Color tool of the viewer Tools. Left out until that tool
+    /// runs on this corrector, and after its reset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_color: Option<AutoColor>,
+}
+
+/// The Auto Color tool of a corrector: a Lift and a Gain of its own, apart
+/// from the Lift and the Gain of the Primaries palette.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AutoColor {
+    /// The tool changes the picture. Off, it keeps its values.
+    pub on: bool,
+    /// Lift of red, green, blue and the master.
+    pub lift: [f64; 4],
+    /// Gain of red, green, blue and the master.
+    pub gain: [f64; 4],
 }
 
 impl Default for Corrector {
@@ -4522,13 +4538,22 @@ impl Default for Corrector {
             log_highlight: [0.0; 3],
             low_range: 0.333,
             high_range: 0.55,
+            auto_color: None,
         }
     }
 }
 
 impl Corrector {
     pub fn is_usual(&self) -> bool {
-        *self == Self::default()
+        let tool = self.auto_tool().is_none();
+        tool && Self {
+            auto_color: None,
+            ..self.clone()
+        } == Self::default()
+    }
+
+    pub fn auto_tool(&self) -> Option<&AutoColor> {
+        self.auto_color.as_ref().filter(|a| a.on)
     }
 }
 

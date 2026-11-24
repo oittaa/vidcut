@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use crate::auto_color::Balance;
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Corrector, Grade, GradeKey, GradeLink, GradeNode, GradeTool, GradeWindow, KeyInput,
-    KeyMix, KeyOutput, Project, WindowKind,
+    AutoColor, Clip, Corrector, Grade, GradeKey, GradeLink, GradeNode, GradeTool, GradeWindow,
+    KeyInput, KeyMix, KeyOutput, Project, WindowKind,
 };
 use crate::preferences::ColorPrefs;
 use crate::request::{
@@ -60,6 +60,9 @@ impl GradeChange {
         put(&mut g.midtone_detail, self.midtone_detail);
         put(&mut g.low_range, self.low_range);
         put(&mut g.high_range, self.high_range);
+        if let (Some(on), Some(a)) = (self.auto_color_on, &mut g.auto_color) {
+            a.on = on;
+        }
         g
     }
 }
@@ -538,7 +541,14 @@ pub fn set(
         let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
         edited(p, one, |g| {
             if !change.is_empty() {
-                changed(g, n, frame, |c| change.changed(c))?;
+                let mut had = true;
+                changed(g, n, frame, |c| {
+                    had = c.auto_color.is_some();
+                    change.changed(c)
+                })?;
+                if change.auto_color_on.is_some() && !had {
+                    return Err(no_auto_tool(n));
+                }
             }
             if node_change.changes_key() {
                 key_changed(g, n, frame, |k| node_change.key_changed(k))?;
@@ -651,7 +661,11 @@ fn cleared(
         return Ok(());
     }
     if resets(GradePalette::Primaries) {
-        changed(g, n, frame, |_| Corrector::default())?;
+        let kept = palette.is_some();
+        changed(g, n, frame, |c| Corrector {
+            auto_color: c.auto_color.clone().filter(|_| kept),
+            ..Corrector::default()
+        })?;
     }
     if resets(GradePalette::Key) {
         key_changed(g, n, frame, |_| KeyOutput::default())?;
@@ -699,17 +713,61 @@ pub fn printer(
 pub fn auto_color(
     p: &mut Project,
     of: &GradeOf,
-    (n, at): (u32, Option<i64>),
+    (n, at, tool): (u32, Option<i64>, bool),
     balance: Balance,
 ) -> Result<()> {
     let frame = at.map(|t| frame_of(p, of, t)).transpose()?;
     edited(p, of, |g| {
-        changed(g, n, frame, |c| Corrector {
-            lift: balance.lift,
-            gain: balance.gain,
-            ..c.clone()
+        changed(g, n, frame, |c| match tool {
+            true => Corrector {
+                auto_color: Some(AutoColor {
+                    on: true,
+                    lift: balance.lift,
+                    gain: balance.gain,
+                }),
+                ..c.clone()
+            },
+            false => Corrector {
+                lift: balance.lift,
+                gain: balance.gain,
+                ..c.clone()
+            },
         })
     })
+}
+
+pub fn auto_color_removed(
+    p: &mut Project,
+    of: &[GradeOf],
+    (n, palette): (Option<u32>, Option<GradePalette>),
+    at: Option<i64>,
+) -> Result<()> {
+    let n = match (n, palette) {
+        (Some(n), None) => n,
+        _ => return Err(Error::usage("`auto_color` needs `node` and no `palette`")),
+    };
+    for one in of {
+        let frame = at.map(|t| frame_of(p, one, t)).transpose()?;
+        edited(p, one, |g| {
+            let mut had = false;
+            changed(g, n, frame, |c| {
+                had = c.auto_color.is_some();
+                Corrector {
+                    auto_color: None,
+                    ..c.clone()
+                }
+            })?;
+            match had {
+                true => Ok(()),
+                false => Err(no_auto_tool(n)),
+            }
+        })?;
+    }
+    Ok(())
+}
+
+fn no_auto_tool(n: u32) -> Error {
+    Error::invalid(format!("node {n} has no Auto Color tool"))
 }
 
 pub fn get(p: &Project, of: &GradeOf, at: Option<i64>) -> Result<Value> {

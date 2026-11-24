@@ -218,6 +218,24 @@ pub struct Grading {
     pub contrast: ContrastCurve,
     pub logs: [Option<LogCurve>; 3],
     pub color: [[f64; 3]; 3],
+    pub auto: Option<ToolGrading>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolGrading {
+    pub lift: [f64; 4],
+    pub weight: [f64; 4],
+}
+
+impl ToolGrading {
+    fn of(a: &crate::model::AutoColor) -> Self {
+        let mut lift = [0.0; 4];
+        let mut weight = [0.0; 4];
+        for i in 0..4 {
+            (lift[i], weight[i], _) = wheel(a.lift[i], 0.0, a.gain[i]);
+        }
+        Self { lift, weight }
+    }
 }
 
 fn product(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
@@ -1278,6 +1296,7 @@ impl Grading {
             contrast: ContrastCurve::of(g.contrast, g.pivot),
             logs: std::array::from_fn(|i| LogCurve::of(channel(i), g.low_range, g.high_range)),
             color: color_matrix(g.saturation / 50.0, (g.hue - 50.0) / 50.0),
+            auto: g.auto_tool().map(ToolGrading::of),
         }
     }
 }
