@@ -312,7 +312,9 @@ The bar and the Jobs button:
   - The last node of `EffectsPage::nodes` is the active node. After a box select, `gui.nodes` with `active` false leaves no active node (`EffectsPage::loose`). The Inspector then shows only the header of each node.
   - A drag holds the value (`Inspector::held`) and sends one `comp.set` when it stops. `Workspace::node_preview` shows the held value until then.
   - Each value has its Keyframe button. It sends `comp.key` with the `value`.
-  - The header of a locked node (`Node::locked`) shows its rows disabled. `comp.set` refuses a change of its values, and `comp.key` and `comp.reset` refuse the node. Its handles in the viewer move nothing (`pinned`).
+  - The header of a locked node (`Node::locked`) shows its rows disabled. `comp.set` refuses a change of its values, and `comp.key` and `comp.reset` refuse the node.
+    - A drag in the viewer does not take its handles or the boxes of its patterns.
+    - The `motion` requests refuse a locked Tracker (`ops::motion::unlocked`).
   - A Text+ shows one shading element at a time. `EffectsPage::element` holds it, and `gui.nodes` with `element` sets it. A click on the row of elements sends that request.
 - `Workspace::node_handles` draws the handles of each selected mask with `show_view_controls` on, and of each selected Merge.
   - For a selected Background with Type Gradient, it draws Start and End (`Grip::Start`, `Grip::End`) and the line between them.

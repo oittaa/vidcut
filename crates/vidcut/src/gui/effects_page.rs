@@ -1744,6 +1744,7 @@ impl Workspace {
             let hit = spots
                 .iter()
                 .rev()
+                .filter(|(name, ..)| !comp.node(name).is_some_and(|n| n.locked))
                 .find_map(|(name, k, r, area)| Some((name, *k, edge_at(*r, press)?, *area)));
             if let Some((name, k, edge, area)) = hit {
                 let start = place(press);
@@ -1902,6 +1903,7 @@ impl Workspace {
             let near = shown
                 .iter()
                 .rev()
+                .filter(|s| !comp.node(&s.name).is_some_and(|n| n.locked))
                 .flat_map(|s| {
                     let middle = screen(s.middle);
                     s.spots

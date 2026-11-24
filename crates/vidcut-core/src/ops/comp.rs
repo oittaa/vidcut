@@ -807,7 +807,7 @@ fn node_of<'a>(p: &'a Project, id: &str, name: &str) -> Option<&'a Node> {
         .and_then(|c| c.node(name))
 }
 
-fn locked(name: &str) -> Error {
+pub(super) fn locked(name: &str) -> Error {
     Error::invalid(format!(
         "{name} is locked: first unlock it (comp.set with locked false)"
     ))

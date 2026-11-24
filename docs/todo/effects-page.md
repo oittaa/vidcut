@@ -10,7 +10,7 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
 
 - **The node header in the Inspector:**
   - Resolve has Set Color, Versions and Pin (pp. 1313–1314).
-  - vidcut has the switch, the name, the tool, Reset and Lock.
+  - vidcut has the switch, the name, the tool, Lock and Reset.
 - **The Settings tab of a tool and of a mask** (pp. 2131, 2501–2502):
   - Blend, Process When Blend Is 0.0, the channels, Apply Mask Inverted, Multiply by Mask, Motion Blur, Use GPU, Comments and Scripts.
   - vidcut shows Blend and Multiply by Mask in the one list of controls.

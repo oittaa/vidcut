@@ -48,7 +48,16 @@ fn tracker_of<'a>(c: &'a Clip, tracker: &str) -> Result<&'a Tracker> {
     t.ok_or_else(|| no_tracker(&c.id, tracker))
 }
 
+fn unlocked(c: &Clip, tracker: &str) -> Result<()> {
+    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
+    match comp.and_then(|x| x.node(tracker)).is_some_and(|n| n.locked) {
+        true => Err(super::comp::locked(tracker)),
+        false => Ok(()),
+    }
+}
+
 fn tracker_mut<'a>(c: &'a mut Clip, tracker: &str) -> Result<&'a mut Tracker> {
+    unlocked(c, tracker)?;
     let id = c.id.clone();
     let comp = c.picture.as_mut().and_then(|x| x.composition.as_mut());
     let node = comp.and_then(|x| x.nodes.iter_mut().find(|n| n.name == tracker));
@@ -309,6 +318,7 @@ pub fn findable(
     if !takes(c) {
         return Err(no_picture(id));
     }
+    unlocked(c, tracker)?;
     let old = of_subject(tracker_of(c, tracker)?, subject);
     if !old.is_empty() && !replace {
         return Err(Error::invalid(format!(
@@ -401,6 +411,7 @@ pub fn start(
         (lo, f.file((frame + n).min(f.mark_out)) + 1)
     });
     let at = f.file(frame);
+    unlocked(c, tracker)?;
     let pattern = pattern_of(c, tracker, k)?;
     let own = pattern.area_at(at as f64);
     let own = own.unwrap_or_else(|| pattern.own());

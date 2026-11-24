@@ -4655,8 +4655,8 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pass_through: bool,
     /// On, the values of the node do not change. `comp.set` then takes
-    /// only `place`, `pass_through` and `locked`, and `comp.key` and
-    /// `comp.reset` refuse the node. Usual: off.
+    /// only `place`, `pass_through` and `locked`. `comp.key`, `comp.reset`
+    /// and the `motion` requests refuse the node. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
     /// How much of a `blur`, an `effect` or a `merge` shows, from 0 (the
