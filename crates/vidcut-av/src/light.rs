@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use vidcut_core::fingerprint::Origin;
+use vidcut_core::lru::ByBytes;
 use vidcut_core::model::{ColorSpace, Hdr, LightLevel};
 use vidcut_core::render::{Image, VideoPiece};
 use vidcut_core::time::Rational;
@@ -658,32 +659,37 @@ struct Ranks {
     pairs: Vec<u32>,
 }
 
+const RANKS_BYTES: usize = 64 << 20;
+
 fn ranks(r: &Reading, bits: u32) -> Arc<Ranks> {
-    type Made = Mutex<HashMap<[u64; 7], Arc<Ranks>>>;
-    static MADE: OnceLock<Made> = OnceLock::new();
-    let mut made = MADE.get_or_init(Default::default).lock().unwrap();
-    made.entry(r.key())
-        .or_insert_with(|| {
-            let n = 1u16 << bits;
-            let reds: Vec<f64> = (0..n).map(|cr| r.red(cr)).collect();
-            let blues: Vec<f64> = (0..n).map(|cb| r.blue(cb)).collect();
-            let mut less: Vec<(f64, u32)> = (0..u32::from(n) * u32::from(n))
-                .map(|p| {
-                    let (cb, cr) = ((p >> bits) as usize, (p & u32::from(n - 1)) as usize);
-                    (r.less_green(reds[cr], blues[cb]), p)
-                })
-                .collect();
-            less.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-            let mut rank = vec![0u32; less.len()];
-            for (i, &(_, p)) in less.iter().enumerate() {
-                rank[p as usize] = i as u32;
-            }
-            Arc::new(Ranks {
-                rank: rank.into(),
-                pairs: less.into_iter().map(|(_, p)| p).collect(),
-            })
+    static RANKS_KEPT: Mutex<ByBytes<[u64; 7], Arc<Ranks>>> = Mutex::new(ByBytes::new());
+    let key = r.key();
+    let mut kept = RANKS_KEPT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(ranks) = kept.get(&key) {
+        return ranks.clone();
+    }
+    let n = 1u16 << bits;
+    let reds: Vec<f64> = (0..n).map(|cr| r.red(cr)).collect();
+    let blues: Vec<f64> = (0..n).map(|cb| r.blue(cb)).collect();
+    let mut less: Vec<(f64, u32)> = (0..u32::from(n) * u32::from(n))
+        .map(|p| {
+            let (cb, cr) = ((p >> bits) as usize, (p & u32::from(n - 1)) as usize);
+            (r.less_green(reds[cr], blues[cb]), p)
         })
-        .clone()
+        .collect();
+    less.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+    let mut rank = vec![0u32; less.len()];
+    for (i, &(_, p)) in less.iter().enumerate() {
+        rank[p as usize] = i as u32;
+    }
+    let ranks = Arc::new(Ranks {
+        rank: rank.into(),
+        pairs: less.into_iter().map(|(_, p)| p).collect(),
+    });
+    let bytes = (ranks.rank.len() + ranks.pairs.len()) * std::mem::size_of::<u32>();
+    kept.insert(key, ranks.clone(), bytes);
+    kept.fit(RANKS_BYTES);
+    ranks
 }
 
 struct Read {

@@ -14,9 +14,9 @@ use crate::model::{
     GlowOutput, GradeKeyKind, GradeWindow, GradientRepeat, GradientStop, GradientType,
     GrainComposite, GrainPreset, Handle, JoinStyle, LowerThirdLine, MergeEdges, MergeOperator,
     Node, NoiseColoring, PathSample, PictureTool, PictureTransition, PivotType, Place,
-    ReferenceTime, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle,
-    ToolType, TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode, VignetteShape,
-    WindowKind, ZoomBox,
+    ReferenceTime, SubPixel, Subject, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
+    TitleStyle, ToolType, TrackClip, TrackWay, TrackerMerge, TrackerOperation, VignetteMode,
+    VignetteShape, WindowKind, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -4445,11 +4445,16 @@ pub enum Request {
         window: Option<usize>,
     },
     /// Select nodes in the node editor of the effects page, by name. The
-    /// Inspector and the viewer then show the last one. An empty list
-    /// selects none. Answers what `gui.state` does.
+    /// last one is the active node. An empty list selects none. Answers
+    /// what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes {
         nodes: Vec<String>,
+        /// False: no node is active, and the Inspector shows only the
+        /// header of each node. A box select in the node editor does this.
+        /// Left out, the last node is active.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active: Option<bool>,
         /// The shading element of a `text_plus` that the Inspector shows,
         /// from 1 to 8. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6561,10 +6566,14 @@ pub struct NodeChange {
     /// 2 to 64 stops. They replace all the stops.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stops: Option<Vec<GradientStop>>,
-    /// What the gradient of a `background` shows past its start and its
-    /// end.
+    /// What the gradient of a `background` or a `fast_noise` shows past
+    /// its ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeat: Option<GradientRepeat>,
+    /// The samples of the gradient of a `background` or a `fast_noise` in
+    /// each pixel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_pixel: Option<SubPixel>,
     /// The size of the picture of a `background` or a `fast_noise`. Each
     /// value given replaces its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6853,7 +6862,8 @@ pub struct KindChange {
     pub grain_strength: Option<f64>,
     /// The code value of a Film Grain with `grain_only`, from 0 to 1. How
     /// far the gradient of a `background` moves along its line, as a part
-    /// of its length, from -1000000 to 1000000.
+    /// of its length, from -1000000 to 1000000. How far the levels of the
+    /// gradient of a `fast_noise` move, from -1000000 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<f64>,
     /// Moves a Film Grain to the dark side, under 0.5, or to the bright side,

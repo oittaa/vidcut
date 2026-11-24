@@ -99,7 +99,7 @@ pub enum GuiChange {
     Palette(GradePalette),
     Primaries(PrimariesView),
     Window(usize),
-    Nodes(Vec<String>),
+    Nodes(Vec<String>, bool),
     Element(u8),
     GradeNodes(Vec<u32>, Option<u32>),
     NodeView {
@@ -177,6 +177,7 @@ pub struct GuiState {
     pub window: usize,
     pub clip: Option<String>,
     pub nodes: Vec<String>,
+    pub node: Option<String>,
     pub element: u8,
     pub grade_nodes: Vec<u32>,
     pub grade_node: Option<u32>,
@@ -3372,14 +3373,18 @@ impl Live {
                 changes.push(GuiChange::Page(page));
                 self.gui_change(changes, |s| json!(s))
             }
-            Request::GuiNodes { nodes, element } => {
+            Request::GuiNodes {
+                nodes,
+                active,
+                element,
+            } => {
                 let elements = 1..=vidcut_core::model::ShadingElement::ELEMENTS;
                 if element.is_some_and(|e| !elements.contains(&e)) {
                     return Step::Now(Err(Error::usage(
                         "a text's shading elements are 1 to 8".to_string(),
                     )));
                 }
-                let changes = std::iter::once(GuiChange::Nodes(nodes))
+                let changes = std::iter::once(GuiChange::Nodes(nodes, active.unwrap_or(true)))
                     .chain(element.map(GuiChange::Element))
                     .collect();
                 self.gui_change(changes, |s| json!(s))
