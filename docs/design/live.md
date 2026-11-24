@@ -324,7 +324,7 @@ The bar and the Jobs button:
   - A Center that follows a tracker pattern shows its handles. A drag of them moves nothing and sends nothing (`pinned`).
 - A tool from the Effects Library goes in with `comp.add`. The new node then becomes the selection through `gui.nodes`.
 - On the page, the keys go to `Workspace::effects_keys`: play, stop, J, K, L, the steps of a frame and a second, and the jumps.
-  - The keys of `Panel::Effects` work only on the page: Pass Through, Rename and the keyframe steps of the active node.
+  - The keys of `Panel::Effects` work only on the page: Pass Through, Rename, Original Size and the keyframe steps of the active node.
   - They also jump to the ends of the source and of the clip.
   - A key of `Panel::Effects` wins over the same key of `Panel::App`. Thus Shift+Left goes to the start of the source, not one second back.
   - Delete, Copy, Cut, Paste and the selection keys act on the nodes there.
