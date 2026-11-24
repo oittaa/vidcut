@@ -886,6 +886,7 @@ fn noise_slot(f: &mut FastNoise, value: EffectValue) -> Slot<'_> {
         V::Angle => (f.angle.get_or_insert(0.0), FastNoise::TURNS),
         V::Seethe => (f.seethe.get_or_insert(0.0), FastNoise::SEETHES),
         V::SeetheRate => (f.seethe_rate.get_or_insert(0.0), FastNoise::SEETHES),
+        V::Offset => (f.offset.get_or_insert(0.0), Background::OFFSETS),
         v => {
             let (second, i) = [false, true].into_iter().find_map(|second| {
                 let i = FastNoise::color_values(second)

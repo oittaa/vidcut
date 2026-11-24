@@ -5038,6 +5038,9 @@ pub struct Background {
     /// What a `gradient` shows past its start and its end. Usual: `once`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repeat: Option<GradientRepeat>,
+    /// The samples of a `gradient` in each pixel. Usual: `1x1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_pixel: Option<SubPixel>,
     /// The size of the picture.
     #[serde(default, skip_serializing_if = "ImageFormat::is_usual")]
     pub image: ImageFormat,
@@ -5093,6 +5096,28 @@ pub enum GradientRepeat {
     Repeat,
     /// The gradient goes back and forth.
     PingPong,
+}
+
+/// How many samples a gradient takes across and down in each pixel. The
+/// colors of the samples are averaged.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub enum SubPixel {
+    /// One sample.
+    #[default]
+    #[serde(rename = "1x1")]
+    One,
+    /// 2 by 2 samples.
+    #[serde(rename = "2x2")]
+    Two,
+    /// 3 by 3 samples.
+    #[serde(rename = "3x3")]
+    Three,
+    /// 4 by 4 samples.
+    #[serde(rename = "4x4")]
+    Four,
+    /// 5 by 5 samples.
+    #[serde(rename = "5x5")]
+    Five,
 }
 
 /// A color of a gradient, at a place along it.
@@ -5168,6 +5193,16 @@ pub struct FastNoise {
     /// stops. Left out, black at 0 and white at 1.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stops: Vec<GradientStop>,
+    /// Moves the level of `gradient` along its stops: the level less the
+    /// offset gives the color. From -1000000 to 1000000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f64>,
+    /// What `gradient` shows below level 0 and above level 1. Usual: `once`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<GradientRepeat>,
+    /// The samples of `gradient` in each pixel. Usual: `1x1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_pixel: Option<SubPixel>,
     /// The size of the picture.
     #[serde(default, skip_serializing_if = "ImageFormat::is_usual")]
     pub image: ImageFormat,

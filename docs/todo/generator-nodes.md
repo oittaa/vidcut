@@ -20,13 +20,12 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
   - Plasma: the size of the rings follows the width of the picture.
 - The Background tool:
   - Interpolation Space of the gradient (p. 2359). The spec gives the measured hue turn, HLS, HSV and LAB.
-  - Sub-Pixel of the gradient (p. 2360). The spec gives the measured samples.
   - Keyframes on the stops of the gradient, and its contextual menu (p. 2360). The spec gives the measured menu and the blend of the stops.
 - The Fast Noise tool:
   - The noise function of Resolve. vidcut uses fractal Perlin noise on the measured grid.
   - Discontinuous with a Contrast other than 1. At Contrast 2, the read is twice |n|, the level of Contrast 1. vidcut gives 2 × |n| − 0.5 ([spec](../spec.md#the-fast-noise-tool)).
   - Gradient Type of its gradient: seven items, and the usual item is Uni ([spec](../spec.md#the-fast-noise-tool)).
-  - Interpolation Space, Offset, Repeat and Sub-Pixel of its gradient, as on the Background.
+  - Interpolation Space of its gradient, as on the Background.
 - A picture on a map input of the Fast Noise. vidcut takes masks there.
 - The Image tab of the generators (pp. 2401–2402):
   - Width and Height without Auto Resolution. The fields are kept, but the picture has the size of the clip's own picture.
