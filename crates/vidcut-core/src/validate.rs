@@ -430,7 +430,7 @@ fn timelines(p: &Project, v: &mut Vec<String>) {
             v.push(format!(
                 "timeline id {} is not t1 to t{}",
                 t.id,
-                p.next_id.timeline - 1
+                p.next_id.timeline.saturating_sub(1)
             ));
         }
         if !t.bin.is_empty() && !p.bins.contains(&t.bin) {

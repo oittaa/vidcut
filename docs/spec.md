@@ -3154,6 +3154,8 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
+- Ctrl+1 sets the Node Editor back to its usual scale (p. 1310).
+  - In Resolve, Ctrl+1 in a viewer sets the viewer to 100 percent (p. 1290). vidcut has no zoom of the viewer yet. Thus Ctrl+1 acts on the Node Editor from all of the page.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
   - With several nodes selected, a Rename window opens for each node in turn (p. 1416).
 - Copy (Ctrl+C) and Cut (Ctrl+X) take the selected tools and masks, with their values at that moment.
