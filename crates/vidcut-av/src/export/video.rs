@@ -1216,7 +1216,12 @@ impl Source {
     }
 
     fn seek_ahead(&mut self, first: i64, reading: Reading) -> Result<()> {
-        let rate = self.reader.frame_rate().expect("a frame rate");
+        let rate = self.reader.frame_rate().ok_or_else(|| {
+            Error::Invalid(format!(
+                "{}: no frame rate",
+                self.reader.input().path().display()
+            ))
+        })?;
         let fps = f64::from(rate.numerator()) / f64::from(rate.denominator());
         let start =
             self.reader.first_pts().unwrap_or(0) as f64 * self.tick + (first as f64 - 0.5) / fps;

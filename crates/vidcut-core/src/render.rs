@@ -1281,7 +1281,9 @@ impl VideoPiece {
         let Self::Source { per_frame, .. } = self else {
             return None;
         };
-        Rational::new(per_frame.num() * fps.num(), per_frame.den() * fps.den()).ok()
+        let num = per_frame.num().checked_mul(fps.num())?;
+        let den = per_frame.den().checked_mul(fps.den())?;
+        Rational::new(num, den).ok()
     }
     pub fn frames(&self) -> i64 {
         match self {
