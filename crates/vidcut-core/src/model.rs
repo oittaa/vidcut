@@ -5105,16 +5105,18 @@ pub struct GradientStop {
 }
 
 /// The picture of a `fast_noise` node: smooth noise, colored by two colors
-/// or by a gradient. Its level is 0.5 with no noise, and it is not clamped.
+/// or by a gradient. Its level is 0.5 with no noise, or 0 with
+/// `discontinuous`, and it is not clamped.
 /// A color is `[r, g, b, a]`, each from -1000000 to 1000000. A field left
 /// out is at its usual value. Its numbers can have keyframes, in the `keys`
 /// of its node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FastNoise {
-    /// On, the noise has hard lines along some of its contours. Usual: off.
+    /// On, each layer of the noise is its absolute value, with hard lines
+    /// along some of its contours. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub discontinuous: bool,
-    /// On, the noise changes sign before `contrast` and `brightness`. Usual: off.
+    /// On, the level before `brightness` is taken from 1. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub inverted: bool,
     /// The middle of the noise, `[x, y]` as fractions of the picture from

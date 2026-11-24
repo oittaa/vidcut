@@ -1970,7 +1970,7 @@ fn noise_sum(at: vec2<f32>, detail: f32) -> f32 {
         let layer = NOISE_LAYERS * f32(i);
         var n = perlin(vec3<f32>(at * size + layer, noising.how.z * size + layer));
         if noise_has(NOISE_DISCONTINUOUS) {
-            n = 2.0 * abs(n) - 1.0;
+            n = abs(n);
         }
         sum += weight * amount * n;
         amount *= 0.5;
@@ -1994,11 +1994,12 @@ fn fs_noise(in: Out) -> @location(0) vec4<f32> {
     if noise_has(NOISE_LEVEL_MAP) {
         base = textureLoad(noise_level, px, 0).a;
     }
-    var n = noise_sum(turned * noising.place.zw, detail);
+    let n = noise_sum(turned * noising.place.zw, detail) * noising.more.x;
+    var x = select(0.5 + 0.5 * n, n, noise_has(NOISE_DISCONTINUOUS));
     if noise_has(NOISE_INVERTED) {
-        n = -n;
+        x = 1.0 - x;
     }
-    let v = base + 0.5 * (n * noising.more.x + noising.how.w);
+    let v = x + base - 0.5 + 0.5 * noising.how.w;
     var color = mix(noising.colors[0], noising.colors[1], v);
     if i32(noising.more.z) == 1 {
         color = paint_ramp(v, i32(noising.more.w));

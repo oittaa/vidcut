@@ -3117,7 +3117,10 @@ The noise with Detail 1, Color 1 (0, 0, 0, 1) and Color 2 (1, 1, 1, 1). P is 230
 - The level is not clamped. Contrast 10 gives 2.16584 at P, and the color is 2.16584.
 - A part of Detail adds the same part of the next layer. At P, Detail 1.5 is the middle of Detail 1 and Detail 2.
 - Discontinuous gives the absolute value of n. At P it gives 0.33317. At a grid point it gives 0.00126.
-  - With Discontinuous, Contrast 2 gives 0.66634 at P, twice the level of Contrast 1. Brightness 0.2 gives 0.43317, 0.1 more.
+  - With Discontinuous, the level is Contrast × |n| + Brightness / 2. Contrast 2 gives 0.66634 at P, twice the level of Contrast 1. Brightness 0.2 gives 0.43317, 0.1 more.
+  - With Discontinuous, Inverted gives 1 − Contrast × |n| + Brightness / 2. A second read at P gave 0.33286. Inverted then gave 0.66714, with Contrast 2 0.33428, and with Brightness 0.2 0.76714.
+  - With Discontinuous and Detail 0, the level is Brightness / 2. Contrast 2 gives 0, and Brightness 0.2 gives 0.1.
+  - With Discontinuous, Contrast also multiplies the level of two layers. Detail 2 gives 0.45626 at P, and with Contrast 2 0.91251.
 - Seethe 0.5 changes the level at P to 0.56616. Seethe Rate 0.1 changes nothing at frame 0. At frame 5 it gives 0.69766, and at frame 10 0.71979.
   - Seethe 0.0167 gives 0.67782 at P, 0.02 gives 0.67994, and 0.0208 gives 0.68045. Thus frame 5 does not give the level of any of these Seethe values.
 
@@ -3136,10 +3139,10 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - The noise is improved Perlin noise in three axes. Seethe is the third axis.
 - The grid, Scale, Center, Angle, Lock X/Y, Contrast, Brightness and Inverted are as measured. The values of the noise between the grid points differ.
 - Each layer of Detail has half the size and half the strength of the layer before it. A part of Detail adds a part of the next layer.
-- Discontinuous makes each layer 2 × |n| − 1. With one layer, the level is then |n|, as measured.
-  - With Contrast 2 and one layer, the level is 2 × |n| − 0.5. The read at P is twice |n| ([todo](todo/generator-nodes.md)).
+- Discontinuous makes each layer |n|. The level before Brightness is then Contrast × the sum of the layers. Without Discontinuous, it is 0.5 + Contrast × the sum / 2.
+- Inverted takes the level before Brightness from 1. Without Discontinuous, this changes the sign of n, as measured.
 - Seethe Rate × the frame is added to Seethe.
-- A mask on the Noise Brightness Map gives the middle level in place of 0.5.
+- A mask on the Noise Brightness Map adds its level − 0.5 to the level. Thus without Discontinuous, it gives the middle level in place of 0.5.
 - The level is not clamped. Past the ends of a gradient, the colors of its end stops go on.
 
 #### Edits
