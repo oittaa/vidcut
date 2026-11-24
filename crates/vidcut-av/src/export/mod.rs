@@ -26,6 +26,7 @@ use vidcut_core::model::{Grade, Hdr, SubtitleStyle};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 use vidcut_core::time::Rational;
 
+use crate::decode::ffmpeg_rate;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use audio::AudioMix;
@@ -1267,7 +1268,7 @@ fn encode(
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
     let started = Instant::now();
-    let fps = ffmpeg::Rational(plan.fps.num() as i32, plan.fps.den() as i32);
+    let fps = ffmpeg_rate(plan.fps);
     let times = (fps.invert(), Some(fps));
     let mut octx = format::output_as(part, settings.container.muxer())
         .ctx(|| format!("creating {}", output.display()))?;

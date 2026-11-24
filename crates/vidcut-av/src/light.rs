@@ -129,7 +129,7 @@ impl Span {
         else {
             return None;
         };
-        let input = crate::export::video::input_of(path, image.as_ref(), piece.media_rate(fps));
+        let input = Input::of(path, image.as_ref(), piece.media_rate(fps));
         if matches!(image, Some(Image::Still)) {
             return Some(Self {
                 input,
@@ -941,13 +941,9 @@ fn origin(input: &Input, space: ColorSpace) -> Origin {
     let origin = vidcut_core::fingerprint::origin(path, size, mtime);
     let origin = match input {
         Input::File { .. } => origin,
-        Input::Sequence {
-            first,
-            rate: (num, den),
-            ..
-        } => Origin {
-            name: format!("{}-{first}-{num}-{den}", origin.name).into(),
-            text: format!("{} {first} {num}/{den}", origin.text).into(),
+        Input::Sequence { first, rate, .. } => Origin {
+            name: format!("{}-{first}-{}-{}", origin.name, rate.num(), rate.den()).into(),
+            text: format!("{} {first} {}/{}", origin.text, rate.num(), rate.den()).into(),
         },
     };
     match space {
@@ -1109,7 +1105,7 @@ mod tests {
             &Input::Sequence {
                 pattern: PathBuf::from("/media/f_%04d.exr"),
                 first: 1,
-                rate: (24, 1),
+                rate: Rational::new(24, 1).unwrap(),
             },
             ColorSpace::Tagged,
         );

@@ -4,6 +4,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
+use vidcut_core::model::Media;
+use vidcut_core::render::{self, Image};
+use vidcut_core::time::Rational;
 
 mod openexr;
 pub(crate) mod standalone;
@@ -213,13 +216,31 @@ where
 pub enum Input {
     File {
         path: PathBuf,
-        rate: Option<(i32, i32)>,
+        rate: Option<Rational>,
     },
     Sequence {
         pattern: PathBuf,
         first: u64,
-        rate: (i32, i32),
+        rate: Rational,
     },
+}
+
+pub fn ffmpeg_rate(rate: Rational) -> ffmpeg::Rational {
+    let (mut num, mut den) = (0, 0);
+    // SAFETY: av_reduce writes only the two integers that it is given.
+    unsafe {
+        ffmpeg::ffi::av_reduce(
+            &mut num,
+            &mut den,
+            rate.num(),
+            rate.den(),
+            i64::from(i32::MAX),
+        )
+    };
+    match num > 0 {
+        true => ffmpeg::Rational(num, den),
+        false => ffmpeg::Rational(1, i32::MAX),
+    }
 }
 
 impl Input {
@@ -230,6 +251,25 @@ impl Input {
         }
     }
 
+    pub fn of(path: &Path, image: Option<&Image>, rate: Option<Rational>) -> Self {
+        match image {
+            Some(Image::Sequence(numbered)) => Input::Sequence {
+                pattern: numbered.pattern.clone(),
+                first: numbered.first,
+                rate: numbered.rate,
+            },
+            Some(Image::Still) | None => Input::File {
+                path: path.to_path_buf(),
+                rate,
+            },
+        }
+    }
+
+    pub fn of_media(m: &Media) -> Self {
+        let rate = m.info.video.as_ref().map(|v| v.fps);
+        Self::of(&m.path, render::image_of(m).as_ref(), rate)
+    }
+
     pub fn path(&self) -> &Path {
         match self {
             Input::File { path, .. } => path,
@@ -238,18 +278,10 @@ impl Input {
     }
 
     pub fn rate(&self) -> Option<ffmpeg::Rational> {
-        let (num, den) = match self {
-            Input::File { rate, .. } => (*rate)?,
-            Input::Sequence { rate, .. } => *rate,
-        };
-        (num > 0 && den > 0).then_some(ffmpeg::Rational(num, den))
-    }
-
-    pub fn rate_of(num: i64, den: i64) -> (i32, i32) {
-        let mut rate = (0, 0);
-        // SAFETY: av_reduce writes only the two integers that it is given.
-        unsafe { ffmpeg::ffi::av_reduce(&mut rate.0, &mut rate.1, num, den, i64::from(i32::MAX)) };
-        rate
+        match self {
+            Input::File { rate, .. } => rate.map(ffmpeg_rate),
+            Input::Sequence { rate, .. } => Some(ffmpeg_rate(*rate)),
+        }
     }
 
     pub fn open(&self) -> Result<format::context::Input> {
@@ -326,13 +358,17 @@ fn open_file_header(path: &Path) -> Result<format::context::Input> {
     }
 }
 
-fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format::context::Input> {
+fn open_sequence(pattern: &Path, first: u64, rate: Rational) -> Result<format::context::Input> {
     let what = || format!("opening {}", pattern.display());
     let mut options = ffmpeg::Dictionary::new();
     options.set("pattern_type", "sequence");
     options.set("start_number", &first.to_string());
     options.set("start_number_range", "1");
-    options.set("framerate", &format!("{}/{}", rate.0, rate.1));
+    let rate = ffmpeg_rate(rate);
+    options.set(
+        "framerate",
+        &format!("{}/{}", rate.numerator(), rate.denominator()),
+    );
     let path = std::ffi::CString::new(pattern.as_os_str().as_encoded_bytes())
         .map_err(|_| Error::Invalid(format!("{}: a NUL in the name", pattern.display())))?;
     unsafe {

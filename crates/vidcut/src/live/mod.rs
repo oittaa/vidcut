@@ -932,7 +932,7 @@ fn make_thumbs(
     if crate::thumbcache::has_thumbs(&file) {
         return Ok(true);
     }
-    let input = crate::env::input_of(media);
+    let input = vidcut_av::decode::Input::of_media(media);
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     let decoder = decoder.as_ref();
     let (count, (w, h)) = (crate::thumbcache::THUMBS, crate::thumbcache::THUMB_SIZE);

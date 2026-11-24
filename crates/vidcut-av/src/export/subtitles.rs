@@ -5,6 +5,7 @@ use vidcut_core::model::{Picture, Place, SubtitleStyle};
 use vidcut_core::subtitles::{Tag, Token, three_letter, tokens, vtt_settings};
 use vidcut_core::time::Rational;
 
+use crate::decode::ffmpeg_rate;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, ffi, format};
 
@@ -313,7 +314,7 @@ impl SubtitleOut {
         let id = codec_id(name).expect("a known codec");
         let codec = ffmpeg::encoder::find(id)
             .ok_or_else(|| Error::Missing(format!("this FFmpeg has no {name} encoder")))?;
-        let frame_tb = ffmpeg::Rational(fps.den() as i32, fps.num() as i32);
+        let frame_tb = ffmpeg_rate(fps).invert();
         let mut ctx = ffmpeg::codec::context::Context::new_with_codec(codec)
             .encoder()
             .subtitle()

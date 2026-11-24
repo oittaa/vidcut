@@ -1,7 +1,9 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::decode::Input;
+use vidcut_core::time::Rational;
+
+use crate::decode::{Input, ffmpeg_rate};
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, media};
 
@@ -179,11 +181,11 @@ fn measured_rate(source: &Input, video: usize) -> Option<Ratio> {
     if fields < 1 || ticks <= 0 {
         return None;
     }
-    let rate = Input::rate_of(
+    let exact = Rational::new(
         fields.saturating_mul(den),
         ticks.saturating_mul(num).saturating_mul(2),
     );
-    (rate.0 > 0 && rate.1 > 0).then_some(rate)
+    Some(ratio(ffmpeg_rate(exact.ok()?)))
 }
 
 pub fn pixel_depth(name: &str) -> u8 {
@@ -333,13 +335,14 @@ pub fn probe_sequence(
     pattern: &Path,
     first: u64,
     count: u64,
-    rate: (i32, i32),
+    exact: Rational,
 ) -> Result<MediaInfo> {
     let source = Input::Sequence {
         pattern: pattern.to_path_buf(),
         first,
-        rate,
+        rate: exact,
     };
+    let rate = ratio(ffmpeg_rate(exact));
     let mut info = probe_input(&source, None)?;
     let opened = sequence_frames(&info, rate).ok_or_else(|| {
         Error::Invalid(format!(

@@ -36,7 +36,7 @@ pub fn slow(gpu: Option<&crate::hw::GpuDecoder>, path: &Path, codec: &str) -> bo
     let Some(id) = ffmpeg::codec::decoder::find_by_name(codec).map(|c| c.id()) else {
         return false;
     };
-    let input = crate::export::video::input_of(path, None, None);
+    let input = Input::file(path);
     !crate::decode::gpu_takes(id, gpu, || crate::decode::h264_open_gop(&input))
 }
 

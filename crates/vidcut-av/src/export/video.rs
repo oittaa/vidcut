@@ -47,20 +47,6 @@ impl Clock {
     }
 }
 
-pub(crate) fn input_of(path: &Path, image: Option<&Image>, rate: Option<Rational>) -> Input {
-    match image {
-        Some(Image::Sequence(numbered)) => Input::Sequence {
-            pattern: numbered.pattern.clone(),
-            first: numbered.first,
-            rate: Input::rate_of(numbered.rate.num(), numbered.rate.den()),
-        },
-        Some(Image::Still) | None => Input::File {
-            path: path.to_path_buf(),
-            rate: rate.map(|r| Input::rate_of(r.num(), r.den())),
-        },
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Pictures {
     Video,
@@ -3037,7 +3023,7 @@ impl VideoFrames {
         let Some(clock) = Clock::of_piece(piece, self.fps) else {
             return Ok(None);
         };
-        let input = input_of(path, None, piece.media_rate(self.fps));
+        let input = Input::of(path, None, piece.media_rate(self.fps));
         let target = clock.target(piece.position(0));
         let s = match self.open.iter().position(|s| s.reader.input() == &input) {
             Some(s) => s,
@@ -3141,7 +3127,7 @@ impl VideoFrames {
             let pictures = Pictures::of(image.as_ref());
             let still = pictures == Pictures::Still;
             let from = if still { 0 } else { layer.position(0) };
-            let input = input_of(path, image.as_ref(), layer.media_rate(self.fps));
+            let input = Input::of(path, image.as_ref(), layer.media_rate(self.fps));
             let target = clock.target(from);
             let free: Vec<usize> = (0..self.open.len())
                 .filter(|&s| {
@@ -3283,7 +3269,7 @@ impl VideoFrames {
                 continue;
             };
             let (color_space, upscale) = (*color_space, *upscale);
-            let input = input_of(path, image.as_ref(), layer.media_rate(self.fps));
+            let input = Input::of(path, image.as_ref(), layer.media_rate(self.fps));
             let free = |s: &usize| {
                 !used[*s]
                     && self.open[*s].reader.input() == &input

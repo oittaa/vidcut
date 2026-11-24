@@ -2110,7 +2110,7 @@ pub fn upscale_of(m: MediaUpscale, s: &Settings) -> Upscale {
     }
 }
 
-fn image_of(m: &Media) -> Option<Image> {
+pub fn image_of(m: &Media) -> Option<Image> {
     let v = m.info.video.as_ref()?;
     match &m.sequence {
         Some(s) => Some(Image::Sequence(Box::new(Numbered {
