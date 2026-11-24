@@ -28,6 +28,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
+- Auto Color, with the legacy method (§8.25, X174)
 - video effects: the four groups of the Effects tab, with keyframes of their values (§8.16)
 - generators: the twelve kinds of the Generators section (§8.17)
 - compound clips (§8.18)
@@ -40,7 +41,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 **Later (later):**
 - other effects, other transitions, other titles, other generators
 - keyframes other than Transform, Crop, Composite, speed, the clip volume, effect values and the Position, Zoom, Rotation and Opacity of a title
-- color ([todo](todo/auto-color.md)), the Fusion tools that §8.19 does not have
+- the Fusion tools that §8.19 does not have
 - LUT files other than `.cube` ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
@@ -1829,6 +1830,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - An OpenTimelineIO export writes a tool that is off at its usual values.
     - The right-click menu of the clip has Transform, Crop, Reset Transform and Reset Crop.
     - Dynamic Zoom has no switch (X70).
+    - Auto Color comes after them ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)).
 - **Transform** (p. 767):
   - A drag inside the box of the clip moves it.
   - A drag on a corner resizes it in proportion. A drag on a side stretches or squeezes it in one direction.
@@ -2782,7 +2784,18 @@ A picture on the effect mask input of a tool (p. 2463). Measured in Resolve Stud
   - Saturation: (max − min) / max, 0.8.
   - Coverage: 0. A Background has no coverage channel.
   - Luminance: 0.114 × R + 0.587 × G + 0.299 × B, 0.674. Hue: the hue of (B, G, R), 30° as 0.08333. Both swap red and blue ([gotchas](gotchas.md#resolves-fusion-page)).
-- vidcut: an effect mask input takes only a mask ([todo](todo/effects-page.md)).
+- The range gives the mask (r − Low) / (High − Low), clipped to 0 and 1. r is the level of the Channel.
+  - A Linear gradient from black to white, Channel Red: at r 0.70046, Low 0.25 and High 0.75 gave 0.90092.
+  - Low equal to High gives a hard step. Low cannot pass High.
+  - A High typed below Low sets Low to it. A Low typed above High sets High to it.
+- Clip White off lets the mask go above 1. A Red of 1.5 gave 1 with Clip White on, and 1.5 with it off.
+- Clip Black off changes nothing. A Red of −0.5 gave 0 with Clip Black on and off.
+- Fit Mask puts a picture of another size in the frame. The reads used a 960 × 1080 picture in a 1920 × 1080 frame:
+  - Crop, Inside and Height keep its size, in the middle of the frame. Outside the picture, the mask is 0.
+  - Stretch fills the frame.
+  - Width and Outside scale it by 2 on the two axes, in the middle of the frame.
+- vidcut: a picture on the effect mask input of a tool gives the mask as measured. Luminance and Hue use the Rec. 601 luma and the true hue.
+- vidcut: each picture of a composition has the size of the frame. Thus there is no Fit Mask row ([todo](todo/effects-page.md)).
 
 #### The Merge
 
@@ -3184,8 +3197,10 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - A drop on a node joins its input. A mask joins the effect mask input.
   - When the main input is joined, a drop joins the next input. For a node with one input, that can be the effect mask input (p. 1395).
   - Measured in Resolve Studio 21.2: a Background dropped on a Blur with its input joined joins the effect mask input. The join is blue.
-  - Measured: a Background dropped on a Merge with its Background and Foreground joined joins nothing. The manual says that the third join goes to the effect mask input (p. 1403).
-  - vidcut: a drop joins only an empty input, and only a mask joins an effect mask input ([todo](todo/effects-page.md)).
+  - Measured: a Background dropped on a Merge with its Background and Foreground joined joins the effect mask input, in 3 of 3 tries. The manual gives the same (p. 1403).
+  - Measured: a Background dropped on a Merge with only its Background joined joins the Foreground. A Background dropped on a Blur with an empty input joins the input.
+  - Measured: a drop joins only a free input. An Ellipse dropped on a Blur with a Rectangle on its effect mask joins nothing.
+  - Measured: a Background dropped on an Ellipse with an empty effect mask joins nothing. The effect mask of a mask takes only a mask.
   - A pointer on a knot shows its name.
 - Part and move a join (pp. 1400–1401):
   - A pointer on a join shows the half under it in blue.
@@ -4287,6 +4302,82 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - **vidcut:** it writes the `GeneratorReference.1` form. It reads both forms.
   - Transform, Crop, Composite and Retime/Scaling effects export with the same metadata keys as on a regular video clip.
 
+### 8.25 Auto Color (pp. 117, 771, 3128–3129; measured in Resolve Studio 21.2)
+
+- The manual:
+  - The Color section of the Cut page viewer Tools has one control, Auto Color (p. 771).
+  - Auto Color balances the blacks and the whites of the current clip. It uses the frame at the playhead (pp. 771, 3128).
+  - On the Color page, the A button of the Primaries palette and Color > Auto Color (Option-Shift-C) do it (p. 3129).
+  - Auto Color uses the DaVinci Neural Engine. It is made for Rec. 709 at a gamma of 2.4 (p. 3128).
+  - Use Legacy Auto Color in the Color panel of the User Preferences sets the A button to the earlier method (pp. 117, 3129).
+  - The earlier method neutralizes the RGB balance of the darkest and of the brightest levels (p. 3129).
+  - Then it sets Master Lift and Master Gain to reach 0 and 100 percent (p. 3129).
+- **The result**, measured with float renders and 65-point table exports:
+  - The result is one node with one tool, Auto Color. The CDL of the clip stays the identity.
+  - The tool holds six numbers E and three numbers W.
+  - The tool can go off and on again. Off, the clip has no change, within 1.5e-5.
+  - The change is not one curve for each channel.
+  - Each pixel x = (r, g, b) goes through these steps:
+    1. v = E0 x + E1.
+    2. v = sign(v) |v|^E2, for each channel.
+    3. y = 0.299 r + 0.587 g + 0.114 b of v. Then v = y + (1 + E3)(v − y).
+    4. v = E4 v.
+    5. v = E5 + (1 − E5) v.
+    6. Channel c becomes v_c × mean(W) / W_c.
+  - Steps 3 to 5 can go in any order. No other order of the steps fits.
+  - The renders fit these steps within 7.0e-7, also outside 0..1. Thus there is no clamp.
+- **The analysis** that makes E and W:
+  - E0, E1 and E3 are multiples of 1/1024 or of 1/4096.
+  - A flat gray of 0.5 gets E5 = −1.0. A ramp from 0 to 1 gets E0 = 0.928 and E1 = 0.055, which compress it.
+  - No stretch of the levels gives these values. With the manual, this agrees with a trained network. Its weights are not available. Thus vidcut cannot match the analysis.
+  - The same picture at 1920 × 1080 and at 3840 × 2160 gives the same values within 0.004.
+  - At 588 × 260, 30 black and 30 white pixels change W. At the larger sizes, they do not.
+- **Use Legacy Auto Color**, measured:
+  - With the preference on, the A button and Color > Auto Color (Alt+Shift+C) give the earlier method.
+  - The Auto Color button of the Cut page viewer Tools and the script command stay on the neural method with the preference on.
+  - The result is one node with Lift and Gain of red, green, blue and the master. Gamma and Offset keep their usual values.
+  - The node shows the badge of the Primaries, not the badge of the Auto Color tool.
+  - Each channel of the source picture uses its own values only.
+  - For each channel, b = floor(99 × clamp(v, 0, 1)) of each pixel. k is 19.25 % of the pixels.
+  - B is the mean of the k smallest b, divided by 99. W is the mean of the k largest b, divided by 99.
+  - The black point is lo = B. The white point is hi = W + (1 − B) / 99.
+  - The stored Lift is −lo / (1 − lo), but −2 at least. The Lift field shows half of it. The Gain is 1 / hi.
+  - The master gives lo = 0.299 lo_R + 0.587 lo_G + 0.114 lo_B, and the same for hi. The error is 5.5e-4.
+  - These rules give the ramps and the test pictures within 0.4 / 99. They give flat pictures and pictures of two equal halves exactly.
+  - Not matched: the levels 0.1, 0.5 and 0.7 come out 0.196 / 99 higher than floor(99 v).
+  - Not matched: pictures with two levels at 10 % and 90 % of the pixels fit a share of 25 %.
+  - Not matched: a clip at Zoom 0.5, with black bars, gets the Lift 0.01 on each channel.
+  - On a clip with Gain and Offset, all values of Lift and Gain are new. The Offset stays.
+  - The analysis then sees the output of the node with the Offset, and with Lift and Gain at their usual values.
+  - 1920 × 1080 and 3840 × 2160 give the same points for most values. 588 × 260 differs by up to 0.0016.
+  - Not matched: a second run changed only Lift B, from −0.08 to −0.09 in the field.
+  - Two runs, then one Ctrl+Z, take back both. Redo then gives nothing back ([gotchas](gotchas.md#resolves-edits)).
+- **The Color tool of the Cut page viewer Tools**, measured:
+  - It has a switch, an Auto Color button and a reset icon. None of them has a tooltip.
+  - Auto Color always adds the neural Auto Color tool to node 1, also with Use Legacy Auto Color on.
+  - The button does not stay lit. The Color icon of the Tools gets a red dot. The clip in the timeline gets a color badge.
+  - A second click changes nothing that shows. Each click is one undo step of the Color page.
+  - Ctrl+Z on the Cut page does not take back Auto Color. It takes back the last switch to another timeline.
+  - The switch off greys out Auto Color and the reset icon, and the clip shows the source.
+    - Node 1 keeps the Auto Color tool. The red dot turns white.
+    - The switch on gives back the result.
+  - The reset icon removes the Auto Color tool from node 1, also one that the A button added.
+- An OpenTimelineIO export holds no grade of a clip and nothing of Auto Color. The files before and after the A button are the same.
+- **vidcut** uses the legacy method above for each Auto Color ([X174](deviations.md#x174-auto-color-uses-the-legacy-method)).
+  - `grade.auto_color` runs it on a corrector of the grade of a clip. Left out, the node is node 1, and the frame is at the playhead.
+  - The A button of the Primaries palette, Color > Auto Color and Alt+Shift+C run it on the current node.
+  - The Auto Color button of the viewer Tools runs it on node 1. The button does not stay lit.
+    - It is greyed out on a title or a generator, which takes no grade.
+  - The viewer Tools have no Color tool with a switch and a reset ([todo](todo/auto-color.md)).
+  - The analysis reads one frame of the clip alone, after the nodes up to that corrector.
+    - The Lift and Gain of that corrector are at their usual values.
+    - Other clips, the opacity, the composite mode and the timeline grade do not change the frame.
+    - Transitions do not change it. A clip or a track that is off still gives its frame.
+  - The result replaces all Lift and Gain values of the corrector, as the legacy method of Resolve does.
+  - Each run is one undo step. Redo gives it back.
+  - The grade of the timeline has no Auto Color.
+  - An OpenTimelineIO file of vidcut keeps the result in the vidcut metadata of the grade.
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
@@ -4843,6 +4934,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste; after a click in the Keyframes tab or the keyframe tray, the keyframes (§2) |
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
+| Alt+Shift+C | Color page: Auto Color on the current node ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | Shift+V† | Select one clip under the playhead (§8.1) |

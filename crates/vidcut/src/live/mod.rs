@@ -2104,6 +2104,19 @@ impl Live {
                 Ok(())
             }));
         }
+        if let Request::GradeAutoColor { .. } = &envelope.request {
+            let looks = vidcut_core::editor::auto_color_looks(p, &envelope.request, playhead);
+            if looks.is_empty() {
+                return None;
+            }
+            return Some(plain(move || {
+                use vidcut_core::Env;
+                for plan in &looks {
+                    AvEnv::new().auto_balance(plan)?;
+                }
+                Ok(())
+            }));
+        }
         if let Request::MotionTrack { .. } = &envelope.request {
             let looks = vidcut_core::editor::track_looks(p, &envelope.request, playhead);
             return Some(Box::new(move || {
@@ -3789,6 +3802,7 @@ impl Live {
             },
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
+            | Request::GradeAutoColor { .. }
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
             | Request::EditRippleDeleteWords { quiet: true, .. } => {
@@ -5855,6 +5869,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::SubtitlesTimeWords { .. }
         | Request::ClipNormalize { .. }
         | Request::EditDetectSceneCuts { .. }
+        | Request::GradeAutoColor { .. }
         | Request::MotionFind { .. }
         | Request::MotionTrack { .. }
         | Request::EditRippleDeleteWords { quiet: true, .. }

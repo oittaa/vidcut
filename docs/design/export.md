@@ -869,6 +869,12 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
   - The alpha of the first input stays. The correctors do not change the alpha, so all inputs have the same alpha.
 - `grade.set` and `grade.get` refuse a title or a generator. The Color page takes its clip with `topmost_by` and `takes_effects`, so it skips them.
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
+- `grade.auto_color` runs the legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
+  - `editor::auto_color_looks` makes the `RenderPlan` of one frame: the clip alone, with the grade up to the corrector, and its Lift and Gain reset.
+  - That frame has no transitions and no timeline grade. The clip and its track are on, as in `render::flatten_clip`.
+  - `Env::auto_balance` renders that frame in float (`still::floats`). `BALANCES` keeps the results of recent plans.
+  - `auto_color::balance` makes the Lift and Gain from the pixels. It is the one place of the method, so that another method can take its place ([todo](../todo/auto-color.md)).
+  - `ops::grade::auto_color` writes the Lift and Gain with `GradeNode::change_at`.
 - `Grading::of` changes the values of a corrector into the numbers that `fs_grade` uses:
   - Temp and Tint give one 3×3 matrix. It adapts the white of 6500 K to the new white, with the Bradford cone matrix.
   - The new white is at 6500 K minus Temp, in CIE 1960 uv. `ISOTEMPERATURE` is the table of Robertson (1968). `white_xyz` reads it linearly in mired.
@@ -1058,7 +1064,9 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
 - A Fast Noise gives an `Op::Make` with a `place::Noising`. It holds the center in pixels, the noise cells for each pixel and the turn. It also holds the depth of Seethe at the frame, the levels, the colors, and the offset, the repeat and the samples of its gradient.
   - A mask on a map input first gives a white `Painting` through `place::masked`, in its own register. The `from` of the `Op::Make` holds these registers.
   - `place::masked` then adds the masks and the Blend.
-- `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.
+- `Working.masks` holds the masks of a tool, a `place::Masks`. Its shapes come from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.
+  - A picture on the effect mask of a tool gives `Masks.picture`, a `place::Picturing`: the register of that picture, its Channel, its range and its Clip.
+  - `Composition::mask_picture` names that node, and `Composition::picture_order` runs it first and counts it as a read. A node that gives no picture there gives a clear register.
   - `place::Shaping` holds one mask in the pixels of the picture: a `place::Figure` for each place of the mask, its border, Solid, Level and Invert.
   - Its `place::Softening` is the blur of its soft edge.
   - A `place::Figure` holds a `place::Outline` and its middle.
@@ -1098,6 +1106,7 @@ The draw:
 The masks:
 
 - `blur::mask_made` makes the mask of a tool before its passes. It uses the two pictures of the passes and two pictures of `Worked.masks`.
+  - A picture on the effect mask comes first. `fs_picture_mask` takes the level of its Channel and maps the range: (r − low) / (high − low), with a hard step when low is high. The mask is never below 0, and Clip White keeps it at 1 at most.
   - It draws each figure of a mask into one picture before the soft edge. `fs_shape` keeps the larger cover of the figures there.
 - `fs_shape` draws the coverage of one mask from the distance to its edge. Each edge thus fades over one pixel.
   - `ellipse_distance` finds the nearest point of the ellipse by Newton steps. `box_distance` gives the distance to a box with round corners.

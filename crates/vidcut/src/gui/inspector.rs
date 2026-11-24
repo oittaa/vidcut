@@ -19,10 +19,11 @@ use vidcut_core::model::{
     DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue, FastNoise,
     FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
     GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
-    JoinStyle, Keyframe, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring,
-    Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement,
-    Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
-    TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    JoinStyle, Keyframe, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
+    NoiseColoring, Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime, Retime,
+    ShadingElement, Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind,
+    Tracker, TrackerMerge, TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape,
+    ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -2219,7 +2220,7 @@ fn node_folds(
 fn node_rows(
     ui: &mut egui::Ui,
     i: &Inspector,
-    (slot, n, element): (usize, &Node, u8),
+    (slot, n, element, pictured): (usize, &Node, u8, bool),
     sight: &Sight,
     acts: &mut Vec<Act>,
 ) {
@@ -2362,6 +2363,50 @@ fn node_rows(
         let multiply = (slot, "Multiply by Mask", n.multiply_by_mask, false);
         check(ui, multiply, "multiply_by_mask", acts);
     }
+    if pictured {
+        picture_mask_rows(ui, slot, n, acts);
+    }
+}
+
+fn picture_mask_rows(ui: &mut egui::Ui, slot: usize, n: &Node, acts: &mut Vec<Act>) {
+    let channels = (
+        &MaskChannel::ALL[..],
+        MaskChannel::name as fn(MaskChannel) -> &'static str,
+    );
+    let channel = (n.mask_channel(), MaskChannel::default());
+    choice_row(
+        ui,
+        (slot, "Channel", "mask_channel"),
+        channel,
+        channels,
+        acts,
+    );
+    let range = n.mask_range();
+    for (k, name) in ["Low", "High"].into_iter().enumerate() {
+        let id = ui.scope_id().with(("mask-range", slot, k));
+        let now = (range[k], Node::MASK_RANGE[k]);
+        if let Some(v) = number_row(ui, (id, name), now, (Node::MASK_RANGES, 0.01)) {
+            let to = match k {
+                0 => [v, range[1].max(v)],
+                _ => [range[0].min(v), v],
+            };
+            acts.push(node_set(slot, "mask_range", json!(to)));
+        }
+    }
+    let clip = n.mask_clip();
+    label(ui, "Clip", clip != [true; 2]);
+    let mut to = clip;
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut to[0], "Black");
+        ui.checkbox(&mut to[1], "White");
+    });
+    if reset(ui, clip != [true; 2]) {
+        to = [true; 2];
+    }
+    if to != clip {
+        acts.push(node_set(slot, "mask_clip", json!(to)));
+    }
+    ui.end_row();
 }
 
 fn tracker_edge_label(e: MergeEdges) -> &'static str {
@@ -2561,6 +2606,9 @@ fn node_header(
             let changed = n.tool != n.tool.made()
                 || n.blend.is_some()
                 || n.multiply_by_mask
+                || n.mask_channel.is_some()
+                || n.mask_range.is_some()
+                || n.mask_clip.is_some()
                 || !n.keys.is_empty();
             if ui
                 .add_enabled(changed && !n.locked, egui::Button::new("Reset"))
@@ -2672,9 +2720,11 @@ impl Workspace {
                         });
                     } else if open {
                         let i = &self.inspector;
+                        let pictured = comp.mask_picture(&comp.nodes[k]).is_some();
                         ui.add_enabled_ui(!n.locked, |ui| {
                             rows(ui, (slot, "node"), |ui| {
-                                node_rows(ui, i, (slot, n, element), &sight, &mut acts);
+                                let row = (slot, n, element, pictured);
+                                node_rows(ui, i, row, &sight, &mut acts);
                             });
                             node_folds(ui, i, (slot, n), &sight, &mut acts);
                         });
@@ -2877,6 +2927,9 @@ impl Workspace {
             go = operation_rows(ui, (slot, &clip.id, &node.name), (t, at), acts);
             let multiply = (slot, "Multiply by Mask", node.multiply_by_mask, false);
             check(ui, multiply, "multiply_by_mask", acts);
+            if comp.mask_picture(node).is_some() {
+                picture_mask_rows(ui, slot, node, acts);
+            }
             if !moving {
                 return;
             }

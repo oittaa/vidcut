@@ -548,11 +548,15 @@ pub(super) fn view_on_menu(
 }
 
 fn default_input(d: &Node, s: &Node) -> Option<NodeInput> {
-    let mask = s.tool.is_mask();
-    let mut fits = d.tool.inputs().iter().copied();
-    match mask {
-        true => fits.find(|i| !i.carries_picture()),
-        false => fits.find(|i| i.carries_picture() && d.join(*i).is_none()),
+    let inputs = d.tool.inputs().iter().copied();
+    let mask = inputs.clone().find(|i| !i.carries_picture());
+    let free = |i: &NodeInput| d.join(*i).is_none() && d.tool.takes_from(*i, &s.tool);
+    match s.tool.is_mask() {
+        true => mask.filter(free),
+        false => inputs
+            .filter(|i| i.carries_picture())
+            .chain(mask)
+            .find(free),
     }
 }
 

@@ -1699,6 +1699,7 @@ impl Workspace {
         let (mut palette_picked, mut mode_picked) = (None, None);
         let mut changes: Vec<Change> = Vec::new();
         let mut reset = false;
+        let mut auto = false;
         ui.horizontal(|ui| {
             ui.strong(name);
             ui.label(format!("Node {n:02}"));
@@ -1728,6 +1729,9 @@ impl Workspace {
                 }
             }
             ui.separator();
+            if let GradeOf::Clip(_) = &of {
+                auto = ui.button("A").on_hover_text("Auto Color").clicked();
+            }
             reset = ui.button("Reset").clicked();
             ui.separator();
             let log = mode == PrimariesView::Log;
@@ -1820,6 +1824,11 @@ impl Workspace {
             let params = Map::from_iter([(field, target), node, at, part]);
             self.send("grade.clear", Value::Object(params));
             return palette == GradePalette::Primaries;
+        }
+        if auto && !locked {
+            self.effects_page.graded = None;
+            self.auto_color(&of, n);
+            return true;
         }
         if !changes.is_empty() {
             let (inputs, changes): (Vec<Change>, Vec<Change>) = changes
@@ -2167,6 +2176,17 @@ impl Workspace {
 
     pub(super) fn color_menu(&mut self, ui: &mut Ui) {
         let page = self.effects_page.page == Page::Color && self.project().is_some();
+        let key = self
+            .snap
+            .bindings
+            .first(Action::AutoColor)
+            .unwrap_or_default();
+        let auto = egui::Button::new("Auto Color").shortcut_text(key);
+        if ui.add_enabled(page, auto).clicked() {
+            self.grade_keys_struck(&[Action::AutoColor]);
+            ui.close();
+        }
+        ui.separator();
         for (menu, size) in [
             ("Full Printer Light", 1.0),
             ("Half Printer Light", 0.5),
@@ -2386,6 +2406,11 @@ impl Workspace {
                 self.grade_node_act(&of, &g, (act, n));
             }
         }
+        if let Some(n) = corrector
+            && struck(Action::AutoColor)
+        {
+            self.auto_color(&of, n);
+        }
         if let Some(n) = corrector {
             if struck(Action::Copy) {
                 self.send("grade.copy", params(&of, "clip", json!({ "node": n })));
@@ -2424,6 +2449,17 @@ impl Workspace {
                 self.grade_field_act(&of, &g, act);
             }
         }
+    }
+
+    fn auto_color(&mut self, of: &GradeOf, n: u32) {
+        let GradeOf::Clip(id) = of else {
+            return;
+        };
+        let at = self.snap.timeline.position;
+        self.send(
+            "grade.auto_color",
+            json!({ "clip": id, "node": n, "at": at }),
+        );
     }
 
     fn switch_grade_nodes(&mut self, of: &GradeOf, g: &Grade, picked: Option<&[u32]>, label: &str) {

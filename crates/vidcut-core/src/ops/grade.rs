@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 
+use crate::auto_color::Balance;
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, Corrector, Grade, GradeKey, GradeLink, GradeNode, GradeTool, GradeWindow, KeyInput,
@@ -432,7 +433,7 @@ pub(super) fn edited(
     store(p, of, &g)
 }
 
-pub(super) fn no_node(n: u32) -> Error {
+pub(crate) fn no_node(n: u32) -> Error {
     Error::not_found(format!("the grade has no node {n}"))
 }
 
@@ -693,6 +694,22 @@ pub fn printer(
         })?;
     }
     Ok(())
+}
+
+pub fn auto_color(
+    p: &mut Project,
+    of: &GradeOf,
+    (n, at): (u32, Option<i64>),
+    balance: Balance,
+) -> Result<()> {
+    let frame = at.map(|t| frame_of(p, of, t)).transpose()?;
+    edited(p, of, |g| {
+        changed(g, n, frame, |c| Corrector {
+            lift: balance.lift,
+            gain: balance.gain,
+            ..c.clone()
+        })
+    })
 }
 
 pub fn get(p: &Project, of: &GradeOf, at: Option<i64>) -> Result<Value> {
