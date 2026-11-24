@@ -107,7 +107,19 @@ pub enum GuiChange {
         list: Option<bool>,
         wide: Option<bool>,
     },
+    Viewers {
+        left: Option<String>,
+        right: Option<String>,
+        shown: Option<vidcut_core::request::Viewers>,
+    },
     PageTime(PageTime),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct ViewerState {
+    pub left: Option<String>,
+    pub right: Option<String>,
+    pub shown: vidcut_core::request::Viewers,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -171,6 +183,7 @@ pub struct GuiState {
     pub node_zoom: f64,
     pub node_list: bool,
     pub node_wide: bool,
+    pub viewers: ViewerState,
     pub time: Option<PageClock>,
     pub edit: Option<EditPoint>,
     pub edits: Vec<EditPoint>,
@@ -3376,6 +3389,10 @@ impl Live {
             }
             Request::GuiNodeView { zoom, list, wide } => {
                 let change = GuiChange::NodeView { zoom, list, wide };
+                self.gui_change(vec![change], |s| json!(s))
+            }
+            Request::GuiViewers { left, right, shown } => {
+                let change = GuiChange::Viewers { left, right, shown };
                 self.gui_change(vec![change], |s| json!(s))
             }
             Request::GuiPageTime { at, fast, speed } => {

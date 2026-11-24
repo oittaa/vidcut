@@ -197,6 +197,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("gui.page", &["page"]),
     ("gui.nodes", &["nodes"]),
     ("gui.grade_nodes", &["nodes"]),
+    ("gui.viewers", &["left", "right"]),
     ("gui.page_time", &["at"]),
     ("gui.target", &["track"]),
     ("gui.trim_editor", &["at"]),

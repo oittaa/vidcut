@@ -2502,8 +2502,8 @@ fn operation_rows(
     go
 }
 
-fn node_header(ui: &mut egui::Ui, n: &Node, active: bool, acts: &mut Vec<Act>) {
-    ui.horizontal(|ui| {
+fn node_header(ui: &mut egui::Ui, n: &Node, (active, view): (bool, View<'_>), acts: &mut Vec<Act>) {
+    let header = ui.horizontal(|ui| {
         let name = RichText::new(&n.name).strong();
         let name = if active {
             name.color(theme::colors().accent)
@@ -2527,7 +2527,14 @@ fn node_header(ui: &mut egui::Ui, n: &Node, active: bool, acts: &mut Vec<Act>) {
             }
         });
     });
+    header.response.container_context_menu(|ui| {
+        if let Some(side) = super::effects_page::view_on_menu(ui, view.0, view.1, &n.name) {
+            acts.push(Act::ViewOn(side));
+        }
+    });
 }
+
+type View<'a> = (&'a [String; 3], &'a [Option<String>; 2]);
 
 impl Inspector {
     fn mark_of(&self, slot: usize, v: EffectValue) -> Option<KeyMark> {
@@ -2595,6 +2602,8 @@ impl Workspace {
             .map(|&k| comp.nodes[k].sampled(source))
             .collect();
         let element = self.effects_page.element;
+        let viewed = self.viewers_now();
+        let keys = super::effects_page::view_keys(&self.snap.bindings);
         let mut all: Vec<Vec<Act>> = Vec::new();
         egui::ScrollArea::vertical()
             .auto_shrink([false, true])
@@ -2602,7 +2611,7 @@ impl Workspace {
                 for (&k, n) in picked.iter().zip(&shown) {
                     let mut acts = Vec::new();
                     let on = active.as_deref() == Some(n.name.as_str());
-                    node_header(ui, n, on, &mut acts);
+                    node_header(ui, n, (on, (&keys, &viewed)), &mut acts);
                     let slot = node_slot(k);
                     if n.tool.tracker().is_some() {
                         let node = &comp.nodes[k];
@@ -3039,6 +3048,7 @@ impl Workspace {
                     }
                 }
                 Act::NodeReset => self.send_node("comp.reset", clip, stored, json!({})),
+                Act::ViewOn(side) => self.view_on(&stored.name, side),
                 Act::NodeActive => {
                     let mut nodes = self.effects_page.nodes.clone();
                     nodes.retain(|x| *x != stored.name);
@@ -3476,6 +3486,7 @@ enum Act {
     Tint(usize, [u8; 3], [u8; 3]),
     NodeReset,
     NodeActive,
+    ViewOn(Option<usize>),
     Element(u8),
 }
 
@@ -6248,7 +6259,7 @@ impl Workspace {
     fn inspect(&mut self, act: Act, (chosen, sounds, paced): Lists<'_>) {
         let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
-            Act::NodeReset | Act::NodeActive | Act::Element(_) => {}
+            Act::NodeReset | Act::NodeActive | Act::ViewOn(_) | Act::Element(_) => {}
             Act::Denoise(on) => {
                 let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
                 self.send(

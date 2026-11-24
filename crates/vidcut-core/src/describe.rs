@@ -665,6 +665,7 @@ pub fn describe_at(
         "gui.close" => format!("Close {}", d.text("panel")),
         "gui.page" => format!("Show the {} page", d.text("page")),
         "gui.nodes" => format!("Select nodes {}", d.list("nodes").join(", ")),
+        "gui.viewers" => format!("Viewers: {}", compact(params)),
         "gui.page_time" => format!("Effects page playhead: {}", compact(params)),
         "gui.target" => format!("Target track {}", d.text("track")),
         "gui.timeline" => format!("Timeline view: {}", compact(params)),

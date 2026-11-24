@@ -366,6 +366,9 @@ impl Workspace {
                 live::GuiChange::NodeView { zoom, list, wide } => {
                     self.set_node_view(zoom, list, wide)
                 }
+                live::GuiChange::Viewers { left, right, shown } => {
+                    self.set_viewers([left, right], shown)?
+                }
                 live::GuiChange::PageTime(t) => self.page_time(t)?,
             }
         }
@@ -499,6 +502,7 @@ impl Workspace {
             node_zoom: self.node_zoom(),
             node_list: self.effects_page.grade_list,
             node_wide: self.effects_page.grade_wide,
+            viewers: self.viewer_state(),
             time: self.page_clock(),
             edit,
             edits,
@@ -2116,6 +2120,7 @@ impl Workspace {
         if self.snap.project.as_ref().map(|p| &p.path) != self.timeline.project.as_ref() {
             let path = self.snap.project.as_ref().map(|p| p.path.clone());
             self.timeline.switch_project(path);
+            self.effects_page.switch_project();
         }
         let tracks = self.project().map_or(0, |p| p.tracks.len());
         if tracks < self.timeline.tracks {

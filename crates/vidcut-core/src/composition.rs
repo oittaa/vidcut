@@ -1676,9 +1676,23 @@ impl Composition {
             .unwrap_or_default()
     }
 
-    pub fn cut_at(&mut self, input: &str) {
+    pub fn cut_at(&mut self, node: &str) {
+        let input = match self.node(node) {
+            Some(n) if n.tool.is_mask() => {
+                let white = Tool::Background(Background {
+                    top_left: Some([1.0; 4]),
+                    ..Background::default()
+                });
+                let name = self.free_name(white.base());
+                let mut plate = Node::new(&name, white, [0.0, 0.0]);
+                plate.effect_mask = Some(node.to_string());
+                self.nodes.push(plate);
+                name
+            }
+            _ => node.to_string(),
+        };
         let mut kept: HashSet<String> = HashSet::new();
-        let mut next = vec![input.to_string()];
+        let mut next = vec![input.clone()];
         while let Some(name) = next.pop() {
             let Some(n) = self.node(&name) else {
                 continue;
@@ -1696,8 +1710,14 @@ impl Composition {
         }
         self.nodes
             .retain(|n| n.tool == Tool::MediaOut || kept.contains(&n.name));
-        if let Some(out) = self.nodes.iter_mut().find(|n| n.tool == Tool::MediaOut) {
-            out.input = Some(input.to_string());
+        match self.nodes.iter_mut().find(|n| n.tool == Tool::MediaOut) {
+            Some(out) => out.input = Some(input),
+            None => {
+                let name = self.free_name(Tool::MediaOut.base());
+                let mut out = Node::new(&name, Tool::MediaOut, [0.0, 0.0]);
+                out.input = Some(input);
+                self.nodes.push(out);
+            }
         }
     }
 

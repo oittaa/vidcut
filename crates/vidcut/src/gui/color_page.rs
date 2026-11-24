@@ -773,6 +773,7 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
         inlets: Vec::new(),
         edge: Some(Edge::Left),
         shot: None,
+        views: None,
     }];
     for (d, n) in g.nodes.iter().zip(1u32..) {
         let (label, inlets, outlets, shot) = match &d.tool {
@@ -816,6 +817,7 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
             inlets,
             edge: None,
             shot,
+            views: None,
         });
     }
     out.push(Tile {
@@ -832,6 +834,7 @@ fn tiles(g: &Grade, shots: Option<&NodeShots>) -> Vec<Tile<Port>> {
         inlets: vec![input(0, "Output".into())],
         edge: Some(Edge::Right),
         shot: None,
+        views: None,
     });
     out
 }
@@ -2742,6 +2745,7 @@ impl Workspace {
             selected: &selected,
             current: current.as_ref(),
             active: CURRENT,
+            viewers: [None, None],
         };
         let mut node_act: Option<(NodeAct, u32)> = None;
         let mut field_act: Option<FieldAct> = None;
