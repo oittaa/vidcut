@@ -309,6 +309,7 @@ The bar and the Jobs button:
   - With Ping Pong, `Player::bounce` plays back from the edge where play stopped (`Wrap::PingPong`). The tick of the live thread calls it.
   - Each move and each play goes through `gui.page_time`. Thus a script and the GUI take one path.
 - The Inspector of the page is `Workspace::node_inspector`. It shows each selected node with the rows of its tool.
+  - The last node of `EffectsPage::nodes` is the active node. After a box select, `gui.nodes` with `active` false leaves no active node (`EffectsPage::loose`). The Inspector then shows only the header of each node.
   - A drag holds the value (`Inspector::held`) and sends one `comp.set` when it stops. `Workspace::node_preview` shows the held value until then.
   - Each value has its Keyframe button. It sends `comp.key` with the `value`.
   - An effect tool uses the rows of the effect sections. `effect_main` adds its rows to the one grid of the node, and `effect_folds` puts its folds below that grid.

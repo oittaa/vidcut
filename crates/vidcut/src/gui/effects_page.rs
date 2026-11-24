@@ -105,6 +105,7 @@ const DETAIL_KNOT: Color32 = Color32::from_rgb(150, 150, 150);
 pub(super) struct EffectsPage {
     pub(super) page: Page,
     pub(super) nodes: Vec<String>,
+    loose: bool,
     pub(super) element: u8,
     seen: Option<String>,
     viewed: Lru<String, [Option<String>; 2], VIEWERS_KEPT>,
@@ -150,6 +151,7 @@ impl Default for EffectsPage {
         Self {
             page: Page::Cut,
             nodes: Vec::new(),
+            loose: false,
             element: 1,
             seen: None,
             viewed: Lru::new(),
@@ -194,7 +196,15 @@ impl Default for EffectsPage {
 
 impl EffectsPage {
     pub(super) fn picked(&self) -> Option<&str> {
-        self.nodes.last().map(String::as_str)
+        self.nodes
+            .last()
+            .filter(|_| !self.loose)
+            .map(String::as_str)
+    }
+
+    pub(super) fn select(&mut self, nodes: Vec<String>) {
+        self.nodes = nodes;
+        self.loose = false;
     }
 
     pub(super) fn pick_grade(&mut self, nodes: Vec<u32>, loose: bool) {
@@ -874,7 +884,7 @@ impl Workspace {
         self.sync_bounds();
     }
 
-    pub(super) fn pick_nodes(&mut self, nodes: Vec<String>) -> Result<(), String> {
+    pub(super) fn pick_nodes(&mut self, nodes: Vec<String>, active: bool) -> Result<(), String> {
         let p = self.project_shared().ok_or("Open a project first")?;
         let clip = self
             .effects_clip()
@@ -889,6 +899,7 @@ impl Workspace {
             kept.retain(|k| *k != n);
             kept.push(n);
         }
+        self.effects_page.loose = !active && !kept.is_empty();
         self.effects_page.nodes = kept;
         self.effects_page.seen = Some(clip.id.clone());
         Ok(())
@@ -1019,7 +1030,7 @@ impl Workspace {
         let clip = self.effects_clip();
         if clip != self.effects_page.seen {
             self.effects_page.seen = clip;
-            self.effects_page.nodes.clear();
+            self.effects_page.select(Vec::new());
             self.effects_page.graph.stop();
             self.effects_page.away = None;
             self.effects_page.replacing = None;
@@ -1069,15 +1080,16 @@ impl Workspace {
                     *v = Some(node.clone());
                 }
             }
-            self.effects_page.nodes = match then {
-                Then::Select => all.unwrap_or_else(|| vec![node]),
-                Then::Renamed(old) => self
-                    .effects_page
-                    .nodes
-                    .iter()
-                    .map(|n| if *n == old { node.clone() } else { n.clone() })
-                    .collect(),
-            };
+            match then {
+                Then::Select => self.effects_page.select(all.unwrap_or_else(|| vec![node])),
+                Then::Renamed(old) => {
+                    for n in &mut self.effects_page.nodes {
+                        if *n == old {
+                            *n = node.clone();
+                        }
+                    }
+                }
+            }
         }
         if !self.effects_page.asked.is_empty() || self.effects_page.held.is_some() {
             ctx.request_repaint();
@@ -1133,7 +1145,8 @@ impl Workspace {
             .iter()
             .map(|n| command("comp.remove", json!({ "clip": clip.id, "node": n })))
             .collect();
-        self.effects_page.nodes = self.before_nodes(&comp, &gone);
+        let before = self.before_nodes(&comp, &gone);
+        self.effects_page.select(before);
         self.send_all(commands, "Delete Nodes");
     }
 
@@ -1316,10 +1329,11 @@ impl Workspace {
     }
 
     fn select_all(&mut self, on: bool) {
-        self.effects_page.nodes = match (on, self.page_clip()) {
+        let all = match (on, self.page_clip()) {
             (true, Some((_, comp))) => comp.nodes.iter().map(|n| n.name.clone()).collect(),
             _ => Vec::new(),
         };
+        self.effects_page.select(all);
     }
 
     fn menu_act(&mut self, act: MenuAct, node: String) {
@@ -2536,7 +2550,11 @@ impl Workspace {
             tiles: comp.nodes.iter().map(|n| tile(n, &viewed)).collect(),
             wires: joins(&comp),
             selected: &self.effects_page.nodes,
-            current: self.effects_page.nodes.last(),
+            current: self
+                .effects_page
+                .nodes
+                .last()
+                .filter(|_| !self.effects_page.loose),
             active: theme::colors().accent,
             viewers: self.effects_page.viewer_rects,
         };
@@ -2583,13 +2601,15 @@ impl Workspace {
             },
         );
         if let Some((inside, off)) = done.band {
+            let kept = (self.effects_page.picked()).filter(|n| !inside.iter().any(|i| i == n));
+            let active = off && kept.is_some();
             let mut nodes = self.effects_page.nodes.clone();
             if off {
                 nodes.retain(|n| !inside.contains(n));
             } else {
                 nodes = inside;
             }
-            self.send("gui.nodes", json!({ "nodes": nodes }));
+            self.send("gui.nodes", json!({ "nodes": nodes, "active": active }));
         }
         if let Some(at) = done.spot {
             self.effects_page.spot = Some((clip.id.clone(), at));
@@ -2612,7 +2632,7 @@ impl Workspace {
             .collect();
         self.send_all(moves, "Move Nodes");
         if let Some(name) = done.pointed {
-            self.effects_page.nodes = vec![name];
+            self.effects_page.select(vec![name]);
         }
         if let Some((name, side)) = done.viewed {
             self.toggle_view(&name, side);
