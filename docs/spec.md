@@ -3075,6 +3075,8 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
+- Lock (Ctrl+L): no changes can be made to the node (pp. 1313, 1424). Its values in the Inspector and its handles in the viewer do not change. The node shows a lock badge (p. 1424).
+  - vidcut: a locked node can still be moved, renamed, joined, deleted and passed through.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
   - With several nodes selected, a Rename window opens for each node in turn (p. 1416).
 - Copy (Ctrl+C) and Cut (Ctrl+X) take the selected tools and masks, with their values at that moment.
@@ -3089,7 +3091,7 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - The copy takes the place and the joins of that node. vidcut: a join that the copy cannot take goes.
   - vidcut: the item works when one node is copied.
 - Move (p. 1414): a drag of a node moves it. A drag of a selected node moves all the selected nodes.
-- A right-click on a node opens a menu: Rename, Pass Through, Copy, Paste and Delete.
+- A right-click on a node opens a menu: Rename, Pass Through, Locked, Copy, Paste and Delete.
 - Join (pp. 1394–1397):
   - Drag from an output to an input, or from an input to an output.
   - A drop on a node joins its input. A mask joins the effect mask input.
@@ -3178,6 +3180,8 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - A click on a tool in the Effects Library adds it after the active node (p. 1287).
 - The Inspector shows the controls of each selected node (pp. 1313–1314).
   - Each node has a header with its name and Reset (p. 1314). A click on the name makes it the active node (p. 1391).
+  - A switch at the left of the header turns a tool on and off. It is the same as Pass Through (p. 1424).
+  - The Lock button at the right of the header locks the node (p. 1313).
   - The controls of a tool are in the order of the manual (pp. 2110–2111, 2474–2475, 2481–2483, 2491–2493).
 - Each value has a Keyframe button at its right (p. 1519).
   - It puts a keyframe at the playhead. On a keyframe, it removes the keyframe.

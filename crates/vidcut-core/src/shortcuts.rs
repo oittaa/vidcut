@@ -148,6 +148,7 @@ actions! {
     DynamicTrim "dynamic_trim",
     Snapping "snapping",
     PassThrough "pass_through",
+    LockNode "lock_node",
     RenameNode "rename_node",
     ViewLeft "view_left",
     ViewRight "view_right",
@@ -192,6 +193,7 @@ impl Action {
         match self {
             Action::SelectSentence => Panel::Transcription,
             Action::PassThrough
+            | Action::LockNode
             | Action::RenameNode
             | Action::ViewLeft
             | Action::ViewRight
@@ -1411,6 +1413,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Ctrl+P"],
         "Pass through",
         Some("The selected nodes do nothing, or work again."),
+    ),
+    own(
+        Nodes,
+        Action::LockNode,
+        &["Ctrl+L"],
+        "Lock",
+        Some("The values of the selected nodes do not change, or change again."),
     ),
     own(
         Nodes,

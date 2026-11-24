@@ -6225,6 +6225,9 @@ pub struct NodeChange {
     /// On, the node does nothing: it passes on what comes in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass_through: Option<bool>,
+    /// On, the values of the node do not change until it is unlocked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
     /// How much of a `blur`, an `effect` or a `merge` shows, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<f64>,

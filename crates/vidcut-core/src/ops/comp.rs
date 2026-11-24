@@ -420,6 +420,7 @@ fn applied(n: &Node, change: &NodeChange) -> Result<Node> {
     let mut next = n.clone();
     let mut left = change.clone();
     taken(&mut left.pass_through, &mut next.pass_through);
+    taken(&mut left.locked, &mut next.locked);
     taken(&mut left.place, &mut next.place);
     if let Some(connect) = left.connect.take() {
         next.connect = connect;
@@ -758,6 +759,16 @@ pub fn set(
     if *change == NodeChange::default() {
         return Err(Error::usage("comp.set needs a value to change"));
     }
+    let modes = NodeChange {
+        place: change.place,
+        pass_through: change.pass_through,
+        locked: change.locked,
+        ..NodeChange::default()
+    };
+    let unlocks = change.locked == Some(false);
+    if *change != modes && !unlocks && node_of(p, id, name).is_some_and(|n| n.locked) {
+        return Err(locked(name));
+    }
     let mut change = change.clone();
     trimmed(p, id, name, &mut change, frame)?;
     moved_path(p, id, name, &mut change, frame)?;
@@ -787,6 +798,19 @@ pub fn set(
     }
     tidied(p, id)?;
     Ok(())
+}
+
+fn node_of<'a>(p: &'a Project, id: &str, name: &str) -> Option<&'a Node> {
+    p.clip(id)
+        .and_then(|c| c.picture.as_ref())
+        .and_then(|x| x.composition.as_ref())
+        .and_then(|c| c.node(name))
+}
+
+fn locked(name: &str) -> Error {
+    Error::invalid(format!(
+        "{name} is locked: first unlock it (comp.set with locked false)"
+    ))
 }
 
 fn reference_locked(name: &str) -> Error {
@@ -1013,6 +1037,9 @@ pub fn key(
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    if n.locked {
+        return Err(locked(name));
+    }
     if let (Tool::Merge(m), Some(v)) = (&n.tool, value)
         && m.locks(v)
     {
@@ -1099,6 +1126,9 @@ pub fn reset(p: &mut Project, id: &str, name: &str) -> Result<()> {
     let c = kept(p, id)?;
     let i = found(c, id, name)?;
     let n = &mut c.nodes[i];
+    if n.locked {
+        return Err(locked(name));
+    }
     *n = Node {
         name: n.name.clone(),
         tool: n.tool.made(),

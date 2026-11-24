@@ -9,8 +9,8 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
 **To do:**
 
 - **The node header in the Inspector:**
-  - Resolve has Set Color, Versions, Pin, Lock and Reset (pp. 1313–1314), and a switch that turns the node on and off (p. 1424).
-  - vidcut has the name, the tool and Reset.
+  - Resolve has Set Color, Versions and Pin (pp. 1313–1314).
+  - vidcut has the switch, the name, the tool, Reset and Lock.
 - **The Settings tab of a tool and of a mask** (pp. 2131, 2501–2502):
   - Blend, Process When Blend Is 0.0, the channels, Apply Mask Inverted, Multiply by Mask, Motion Blur, Use GPU, Comments and Scripts.
   - vidcut shows Blend and Multiply by Mask in the one list of controls.
@@ -29,7 +29,7 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - Shift+Space opens Select Tool (p. 1386).
   - = and − zoom the viewer (p. 1290). Ctrl+1 sets the scale of the Node Editor (p. 1310).
   - Ctrl+F is Find (p. 1421).
-  - Ctrl+L locks a node (p. 1424). Ctrl+Shift+V pastes an instance (p. 1413). Ctrl+G makes a group (p. 1427).
+  - Ctrl+Shift+V pastes an instance (p. 1413). Ctrl+G makes a group (p. 1427).
 - **The render range** (pp. 1294, 1297):
   - Ctrl-drag on the ruler, a drag of a yellow line, and Set Render Range and Auto Render Range in the menu of the ruler.
   - A drag of a node to the ruler, and the Render Start and Render End fields at the left of the transport.
