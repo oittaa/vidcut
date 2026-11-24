@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Stroke, Vec2, pos2, vec2};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    Clip, CompositeMode, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
+    AutoColor, Clip, CompositeMode, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind,
+    ZoomBox,
 };
 use vidcut_core::ops::grade::GradeOf;
 use vidcut_core::ops::picture::{has_picture, takes_effects, zoom_shown};
@@ -27,6 +28,8 @@ const TURN_BAND: f32 = 12.0;
 const STEP: f64 = 15.0;
 const NOTCH_ZOOM: f64 = 1.1;
 const STILL: Duration = Duration::from_millis(400);
+const TOOL_DOT: f32 = 3.0;
+const TOOL_DOT_ON: Color32 = Color32::from_rgb(230, 50, 50);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Side {
@@ -102,6 +105,7 @@ struct Wheeled {
 pub struct Grab {
     pub(crate) tool: Option<PictureTool>,
     pub(crate) row: bool,
+    pub(crate) color: bool,
     held: Option<Held>,
     wheel: Option<Wheeled>,
     landing: Option<(String, Picture, Instant, Picture)>,
@@ -747,6 +751,13 @@ impl Workspace {
 
     pub(super) fn show_picture_tool(&mut self, tool: PictureTool) {
         self.timeline.picture_grab.tool = Some(tool);
+        self.timeline.picture_grab.color = false;
+        self.select_shown();
+    }
+
+    pub(super) fn show_color_tool(&mut self) {
+        self.timeline.picture_grab.tool = None;
+        self.timeline.picture_grab.color = true;
         self.select_shown();
     }
 
@@ -787,10 +798,18 @@ impl Workspace {
                 self.picture_tool(t);
             }
         }
-        ui.separator();
         let graded = self.graded(clip.as_ref());
-        self.auto_color_button(ui, graded.as_deref());
+        let kept = clip.as_ref().and_then(|(id, p)| {
+            let frame = self.grade_frame(&GradeOf::Clip(id.clone())) as f64;
+            let node = p.grade.as_ref()?.node(1)?;
+            node.corrector_at(frame)?.auto_color.clone()
+        });
+        self.color_tool_button(ui, graded.is_some(), kept.as_ref());
         let Some(tool) = self.timeline.picture_grab.tool else {
+            if self.timeline.picture_grab.color {
+                ui.separator();
+                self.color_tools(ui, graded.as_deref(), kept);
+            }
             return;
         };
         ui.separator();
@@ -858,13 +877,51 @@ impl Workspace {
         takes_effects(p.clip(id)?).then(|| id.clone())
     }
 
-    fn auto_color_button(&mut self, ui: &mut egui::Ui, clip: Option<&str>) {
-        let b = egui::Button::new("Auto Color");
-        if ui.add_enabled(clip.is_some(), b).clicked()
-            && let Some(id) = clip
-        {
+    fn color_tool_button(&mut self, ui: &mut egui::Ui, graded: bool, kept: Option<&AutoColor>) {
+        let g = &self.timeline.picture_grab;
+        let lit = g.color && g.tool.is_none();
+        let r = ui.add_enabled(graded || lit, egui::Button::selectable(lit, "Color"));
+        if let Some(a) = kept {
+            let at = r.rect.right_top() + vec2(-2.0 * TOOL_DOT, 2.0 * TOOL_DOT);
+            let dot = match a.on {
+                true => TOOL_DOT_ON,
+                false => Color32::WHITE,
+            };
+            ui.painter().circle_filled(at, TOOL_DOT, dot);
+        }
+        if r.clicked() {
+            match lit {
+                true => self.timeline.picture_grab.color = false,
+                false => self.show_color_tool(),
+            }
+        }
+    }
+
+    fn color_tools(&mut self, ui: &mut egui::Ui, clip: Option<&str>, kept: Option<AutoColor>) {
+        let on = kept.as_ref().is_none_or(|a| a.on);
+        let mut switch = on;
+        let used = kept.is_some();
+        let shown = ui.add_enabled(used, egui::Checkbox::without_text(&mut switch));
+        let mut sent = None;
+        if shown.clicked() {
+            sent = Some(("grade.set", json!({ "node": 1, "auto_color_on": switch })));
+        }
+        let run = egui::Button::new("Auto Color");
+        if ui.add_enabled(clip.is_some() && on, run).clicked() {
+            sent = Some(("grade.auto_color", json!({ "node": 1, "tool": true })));
+        }
+        let reset = egui::Button::new("Reset");
+        if ui.add_enabled(used && on, reset).clicked() {
+            sent = Some(("grade.clear", json!({ "node": 1, "auto_color": true })));
+        }
+        if let (Some((method, mut params)), Some(id)) = (sent, clip) {
+            let key = match method {
+                "grade.auto_color" => "clip",
+                _ => "clips",
+            };
+            params[key] = json!(id);
             self.end_picture_wheel();
-            self.send("grade.auto_color", json!({ "clip": id, "node": 1 }));
+            self.send(method, params);
         }
     }
 

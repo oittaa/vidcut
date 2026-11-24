@@ -2194,12 +2194,18 @@ struct Grading {
     color: array<vec4<f32>, 3>,
     tone: vec4<f32>,
     curve: array<vec4<f32>, 256>,
+    auto_how: vec4<f32>,
+    auto_lift: vec4<f32>,
+    auto_weight: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> grading: Grading;
 
 struct Guide {
     eps: vec4<f32>,
+    auto_how: vec4<f32>,
+    auto_lift: vec4<f32>,
+    auto_weight: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> guiding: Guide;
@@ -2210,8 +2216,19 @@ const TONE_TOP: f32 = 2.0;
 
 const TONE_GAIN: f32 = 4.0;
 
+fn grade_auto(c: vec3<f32>, how: vec4<f32>, l: vec4<f32>, w: vec4<f32>) -> vec3<f32> {
+    if how.x < 0.5 {
+        return c;
+    }
+    let f = w.xyz * (l.xyz + (1.0 - l.xyz) * c);
+    let y = w.w * (l.w + (1.0 - l.w) * dot(c, BT709));
+    return f + (y - dot(f, BT709));
+}
+
 fn grade_luma(at: vec2<i32>) -> f32 {
-    return dot(effect_taken(textureLoad(blur_source, at, 0), 0.0).rgb, BT709);
+    let c = effect_taken(textureLoad(blur_source, at, 0), 0.0).rgb;
+    let g = guiding;
+    return dot(grade_auto(c, g.auto_how, g.auto_lift, g.auto_weight), BT709);
 }
 
 @fragment
@@ -2378,7 +2395,8 @@ fn grade_boost(v: vec3<f32>) -> vec3<f32> {
 fn fs_grade(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let was = effect_taken(textureLoad(blur_start, px, 0), 0.0);
-    let x = grade_boost(grade_tone(px, was.rgb));
+    let into = grade_auto(was.rgb, grading.auto_how, grading.auto_lift, grading.auto_weight);
+    let x = grade_boost(grade_tone(px, into));
     let v = vec3<f32>(dot(grading.temp[0].xyz, x), dot(grading.temp[1].xyz, x), dot(grading.temp[2].xyz, x));
     let l = grading.lift;
     let w = grading.weight;

@@ -446,6 +446,9 @@ pub fn describe_at(
         },
         "grade.set" if d.flag("timeline") => "Change the timeline grade".into(),
         "grade.set" => format!("Change the grade of {}", d.clips("clips")),
+        "grade.clear" if d.flag("auto_color") => {
+            format!("Reset the Auto Color of {}", d.clips("clips"))
+        }
         "grade.clear" if d.flag("timeline") => "Reset the timeline grade".into(),
         "grade.clear" => format!("Reset the grade of {}", d.clips("clips")),
         "grade.auto_color" => format!("Auto Color on {}", d.clips("clip")),
