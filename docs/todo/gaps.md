@@ -29,3 +29,4 @@ What [the spec](../spec.md) describes and vidcut does not do.
 - In the render queue: the pencil that edits a job, Show All Projects and Review Before Upload (pp. 4130–4132)
 - In the render queue: Reveal in Media Storage in the right-click menu, and Refresh in the "..." menu (pp. 4131–4132)
 - Don't show until next copy in Paste Attributes ([§8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212))
+- Paste Attributes of a copied speed that has keyframes ([§8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212))
