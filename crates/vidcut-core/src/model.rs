@@ -5571,15 +5571,17 @@ pub enum BlurFilter {
     FastGaussian,
 }
 
-/// What a `blur` takes from beyond the edges of the picture.
+/// What a `blur` takes from beyond the edges of the picture, and where a
+/// mask is made.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BlurClipping {
-    /// Clear black. The edges of the picture fade.
+    /// Clear black, so the edges of a blurred picture fade. A mask is also
+    /// made beyond the picture.
     None,
-    /// The pixels of the edge, repeated.
+    /// The pixels of the edge, repeated. Not for a mask.
     Domain,
-    /// The pixels of the edge, repeated.
+    /// The pixels of the edge, repeated. A mask is made in the picture only.
     #[default]
     Frame,
 }
@@ -5661,6 +5663,12 @@ pub struct Mask {
     /// Which parts a `polygon` whose sides cross covers. Usual: `alternate`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill_method: Option<FillMethod>,
+    /// Where it is made: `none` or `frame`. `none` also makes it beyond the
+    /// picture, so the soft edge of a part outside reaches in. `frame` makes
+    /// it in the picture only, and its soft edge repeats the edge pixels.
+    /// Usual: `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipping: Option<BlurClipping>,
     /// The corners of a `polygon`, in their order. Each is `[x, y]` from its
     /// middle: x as a fraction of the width of the picture, and y as a
     /// fraction of its height, up. From 3 to 128 of them. With fewer, it

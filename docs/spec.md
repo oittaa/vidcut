@@ -2749,7 +2749,7 @@ The Image tab of a mask (pp. 2500–2501). Measured in Resolve Studio 21.2:
   - Frame: the mask is cut at the frame. The Soft Edge repeats the edge pixels of the frame.
   - A rectangle 1.2 wide with Soft Edge 0.1 gives 0.98908 in the first column with None, and 0.99896 with Frame. With Frame, each column that was read is 0.99896.
 - A viewed mask shows "int8" at the top right of the viewer.
-- vidcut: the Soft Edge repeats the edge pixels, as Frame does ([todo](todo/effects-page.md)).
+- vidcut: Clipping Mode is the last row of a mask, with None and Frame. Usual: None. Output Size is not built yet ([todo](todo/effects-page.md)).
 
 The shapes:
 

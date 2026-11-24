@@ -253,6 +253,7 @@ pub struct Shaping {
     pub level: f64,
     pub invert: bool,
     pub soft: Option<Softening>,
+    pub beyond: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -333,6 +334,7 @@ impl Shaping {
             level: m.level(),
             invert: m.invert,
             soft,
+            beyond: m.clipping() == BlurClipping::None,
         }
     }
 

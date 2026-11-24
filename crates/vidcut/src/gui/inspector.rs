@@ -2325,6 +2325,12 @@ fn node_rows(
                 let now = (m.fill_method.unwrap_or_default(), FillMethod::default());
                 choice_row(ui, (slot, "Fill Method", "fill_method"), now, fills, acts);
             }
+            let modes = (
+                &BlurClipping::MASK[..],
+                BlurClipping::name as fn(BlurClipping) -> &'static str,
+            );
+            let mode = (m.clipping(), BlurClipping::None);
+            choice_row(ui, (slot, "Clipping Mode", "clipping"), mode, modes, acts);
         }
     }
     if n.tool.multiplies() {
