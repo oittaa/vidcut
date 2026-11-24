@@ -52,7 +52,7 @@ pub(crate) fn input_of(path: &Path, image: Option<&Image>, rate: Option<Rational
         Some(Image::Sequence(numbered)) => Input::Sequence {
             pattern: numbered.pattern.clone(),
             first: numbered.first,
-            rate: (numbered.rate.num() as i32, numbered.rate.den() as i32),
+            rate: Input::rate_of(numbered.rate.num(), numbered.rate.den()),
         },
         Some(Image::Still) | None => Input::File {
             path: path.to_path_buf(),

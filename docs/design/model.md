@@ -257,7 +257,8 @@ Frame rate of a file:
   - `decode::Input` keeps the rate, and `Input::rate` gives it.
   - `env::input_of` sets it from the media's `fps`.
   - An export sets it from the timeline: `VideoPiece::media_rate` multiplies the rate of the timeline by the frames of media for each frame.
-  - `Input::rate_of` fits each rate into the 32-bit numbers of FFmpeg. A rate that does not fit gets the nearest fraction that fits.
+  - `Rational::times` removes the common factors before it multiplies. Thus the product is exact when the rate fits 64 bits.
+  - `Input::rate_of` fits each rate into the 32-bit numbers of FFmpeg, also the rate of an image sequence. A rate that does not fit gets the nearest fraction that fits.
   - `VideoReader::frame_rate`, the proxies, the thumbnails and the analyses use `Input::rate`.
   - Why: a reader that asks FFmpeg for the rate can get a rate that is not the media's rate.
 

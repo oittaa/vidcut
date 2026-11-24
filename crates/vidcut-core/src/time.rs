@@ -65,6 +65,14 @@ impl Rational {
         }
     }
 
+    pub fn times(self, other: Self) -> Option<Self> {
+        let (a, b) = (gcd(self.num, other.den), gcd(other.num, self.den));
+        Some(Self {
+            num: (self.num / a).checked_mul(other.num / b)?,
+            den: (self.den / b).checked_mul(other.den / a)?,
+        })
+    }
+
     pub fn new(num: i64, den: i64) -> Result<Self, TimeError> {
         if num <= 0 || den <= 0 {
             return Err(TimeError::Rate(format!("{num}/{den}")));
