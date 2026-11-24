@@ -57,6 +57,8 @@ flowchart TD
   - An export shows the clips of removed media as Media Offline. Its report then has the note `media_offline`, with the names of the media (`Project::offline_in`).
   - Before an export, the GUI asks when a clip of the timeline uses removed media (`ask_offline`). Cancel stops the export.
 - **Render Speed:** `paced` wraps the progress of `run_decoding_on`. It waits before it reports a frame that is early for `render_speed`. Why: the progress comes once for each frame, in each path of the encode.
+  - The time starts at the first frame of each pass. Thus the setup of the encoders gives no frames at full speed.
+  - It waits in short steps (`PACE_STEP`) and stops when the export is cancelled.
   - A count that goes down starts a new pass, and the time starts again.
 - **Models:** `session::export_media` first checks the models of Voice Isolation, Upscale, Retime Process and the Process of each Smooth Cut. A missing model needs `download`.
 

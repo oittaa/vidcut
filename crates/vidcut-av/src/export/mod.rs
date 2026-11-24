@@ -626,7 +626,7 @@ pub fn run_decoding_on(
         decoder,
         subtitles,
         cancel,
-        &mut paced(settings.render_speed, progress),
+        &mut paced(settings.render_speed, cancel, progress),
     )?;
     if !settings.container.image_sequence() {
         part.keep(output)?;
@@ -1254,20 +1254,28 @@ impl Writer {
     }
 }
 
+const PACE_STEP: Duration = Duration::from_millis(50);
+
 fn paced<'a>(
     limit: Option<std::num::NonZeroU32>,
+    cancel: &'a AtomicBool,
     progress: &'a mut dyn FnMut(Progress),
 ) -> impl FnMut(Progress) + 'a {
-    let mut since = (Instant::now(), 0);
+    let mut since: Option<(Instant, u8, i64, i64)> = None;
     move |p: Progress| {
         if let Some(fps) = limit.filter(|_| !p.measuring) {
-            if p.frames < since.1 {
-                since.0 = Instant::now();
-            }
-            since.1 = p.frames;
-            let due = Duration::from_secs_f64(p.frames as f64 / f64::from(fps.get()));
-            if let Some(wait) = due.checked_sub(since.0.elapsed()) {
-                std::thread::sleep(wait);
+            let (start, first) = match since {
+                Some((start, pass, first, last)) if pass == p.pass && p.frames >= last => {
+                    (start, first)
+                }
+                _ => (Instant::now(), p.frames),
+            };
+            since = Some((start, p.pass, first, p.frames));
+            let due = Duration::from_secs_f64((p.frames - first) as f64 / f64::from(fps.get()));
+            while !cancel.load(Ordering::Relaxed)
+                && let Some(wait) = due.checked_sub(start.elapsed()).filter(|w| !w.is_zero())
+            {
+                std::thread::sleep(wait.min(PACE_STEP));
             }
         }
         progress(p);
