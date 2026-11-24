@@ -3129,7 +3129,10 @@ The noise with Detail 1, Color 1 (0, 0, 0, 1) and Color 2 (1, 1, 1, 1). P is 230
 - The level is not clamped. Contrast 10 gives 2.16584 at P, and the color is 2.16584.
 - A part of Detail adds the same part of the next layer. At P, Detail 1.5 is the middle of Detail 1 and Detail 2.
 - Discontinuous gives the absolute value of n. At P it gives 0.33317. At a grid point it gives 0.00126.
-  - With Discontinuous, Contrast 2 gives 0.66634 at P, twice the level of Contrast 1. Brightness 0.2 gives 0.43317, 0.1 more.
+  - With Discontinuous, the level is Contrast × |n| + Brightness / 2. Contrast 2 gives 0.66634 at P, twice the level of Contrast 1. Brightness 0.2 gives 0.43317, 0.1 more.
+  - With Discontinuous, Inverted gives 1 − Contrast × |n| + Brightness / 2. A second read at P gave 0.33286. Inverted then gave 0.66714, with Contrast 2 0.33428, and with Brightness 0.2 0.76714.
+  - With Discontinuous and Detail 0, the level is Brightness / 2. Contrast 2 gives 0, and Brightness 0.2 gives 0.1.
+  - With Discontinuous, Contrast also multiplies the level of two layers. Detail 2 gives 0.45626 at P, and with Contrast 2 0.91251.
 - Seethe 0.5 changes the level at P to 0.56616. Seethe Rate 0.1 changes nothing at frame 0. At frame 5 it gives 0.69766, and at frame 10 0.71979.
   - Seethe 0.0167 gives 0.67782 at P, 0.02 gives 0.67994, and 0.0208 gives 0.68045. Thus frame 5 does not give the level of any of these Seethe values.
 
@@ -3150,10 +3153,10 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - The noise is improved Perlin noise in three axes. Seethe is the third axis.
 - The grid, Scale, Center, Angle, Lock X/Y, Contrast, Brightness and Inverted are as measured. The values of the noise between the grid points differ.
 - Each layer of Detail has half the size and half the strength of the layer before it. A part of Detail adds a part of the next layer.
-- Discontinuous makes each layer 2 × |n| − 1. With one layer, the level is then |n|, as measured.
-  - With Contrast 2 and one layer, the level is 2 × |n| − 0.5. The read at P is twice |n| ([todo](todo/generator-nodes.md)).
+- Discontinuous makes each layer |n|. The level before Brightness is then Contrast × the sum of the layers. Without Discontinuous, it is 0.5 + Contrast × the sum / 2.
+- Inverted takes the level before Brightness from 1. Without Discontinuous, this changes the sign of n, as measured.
 - Seethe Rate × the frame is added to Seethe.
-- A mask on the Noise Brightness Map gives the middle level in place of 0.5.
+- A mask on the Noise Brightness Map adds its level − 0.5 to the level. Thus without Discontinuous, it gives the middle level in place of 0.5.
 - The level is not clamped. Past the ends of a gradient, the colors of its end stops go on.
 
 #### Edits
@@ -3165,6 +3168,11 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
+- Lock (Ctrl+L): no changes can be made to the node (pp. 1313, 1424). The node shows a lock badge at the right of its name (p. 1424).
+  - Measured in Resolve Studio 21.2: a locked node refuses a typed value, a drag of a value and Reset.
+  - A locked node can still be renamed, moved, joined, deleted and passed through.
+  - vidcut: a drag of its handles in the viewer changes nothing, as the node takes no change (p. 1313). This is not measured.
+  - The Keyframe button of a locked node adds a key with the value 0 in Resolve ([gotchas](gotchas.md#resolves-edits)). vidcut refuses it.
 - Ctrl+1 sets the Node Editor back to its usual scale (p. 1310).
   - In Resolve, Ctrl+1 in a viewer sets the viewer to 100 percent (p. 1290). vidcut has no zoom of the viewer yet. Thus Ctrl+1 acts on the Node Editor from all of the page.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
@@ -3181,7 +3189,7 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - The copy takes the place and the joins of that node. vidcut: a join that the copy cannot take goes.
   - vidcut: the item works when one node is copied.
 - Move (p. 1414): a drag of a node moves it. A drag of a selected node moves all the selected nodes.
-- A right-click on a node opens a menu: Rename, Pass Through, Copy, Paste and Delete.
+- A right-click on a node opens a menu: Rename, Pass Through, Locked, Copy, Paste and Delete.
 - Join (pp. 1394–1397):
   - Drag from an output to an input, or from an input to an output.
   - A drop on a node joins its input. A mask joins the effect mask input.
@@ -3302,6 +3310,8 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - A click on a tool in the Effects Library adds it after the active node (p. 1287).
 - The Inspector shows the controls of each selected node (pp. 1313–1314).
   - Each node has a header with its name and Reset (p. 1314). A click on the name makes it the active node (p. 1391).
+  - A switch at the left of the header turns a tool on and off. It is the same as Pass Through (p. 1424).
+  - The Lock button at the right of the header locks the node (p. 1313). Measured: it is left of Reset.
   - The controls of a tool are in the order of the manual (pp. 2110–2111, 2474–2475, 2481–2483, 2491–2493).
   - Measured in Resolve Studio 21.2: the Center of a Vignette is one row with an X and a Y field. The viewer shows no point for it.
 - Each value has a Keyframe button at its right (p. 1519).

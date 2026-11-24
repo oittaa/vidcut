@@ -1546,6 +1546,7 @@ impl Node {
             detail_map: None,
             brightness_map: None,
             pass_through: false,
+            locked: false,
             blend: None,
             blur_alpha: true,
             multiply_by_mask: false,

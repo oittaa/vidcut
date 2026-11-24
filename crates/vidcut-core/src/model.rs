@@ -4656,6 +4656,11 @@ pub struct Node {
     /// in, and a mask passes on the masks that come in. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pass_through: bool,
+    /// On, the values of the node do not change. `comp.set` then takes
+    /// only `place`, `pass_through` and `locked`. `comp.key`, `comp.reset`
+    /// and the `motion` requests refuse the node. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
     /// How much of a `blur`, an `effect` or a `merge` shows, from 0 (the
     /// picture on its `input`) to 1 (all of the tool). Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5147,16 +5152,18 @@ pub struct GradientStop {
 }
 
 /// The picture of a `fast_noise` node: smooth noise, colored by two colors
-/// or by a gradient. Its level is 0.5 with no noise, and it is not clamped.
+/// or by a gradient. Its level is 0.5 with no noise, or 0 with
+/// `discontinuous`, and it is not clamped.
 /// A color is `[r, g, b, a]`, each from -1000000 to 1000000. A field left
 /// out is at its usual value. Its numbers can have keyframes, in the `keys`
 /// of its node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FastNoise {
-    /// On, the noise has hard lines along some of its contours. Usual: off.
+    /// On, each layer of the noise is its absolute value, with hard lines
+    /// along some of its contours. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub discontinuous: bool,
-    /// On, the noise changes sign before `contrast` and `brightness`. Usual: off.
+    /// On, the level before `brightness` is taken from 1. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub inverted: bool,
     /// The middle of the noise, `[x, y]` as fractions of the picture from
