@@ -540,6 +540,7 @@ The bar and the Jobs button:
 - A Plus or Minus button of the bars sends `grade.printer` with the current node (`Workspace::printer_point`). An item of the Color menu (`Workspace::color_menu`) does the same.
 - The A button of the Primaries palette, Color > Auto Color and its key send `grade.auto_color` with the current node and the playhead (`Workspace::auto_color`).
   - The Color tool of the viewer Tools works on node 1 (`Workspace::color_tools`). Auto Color sends `grade.auto_color` with `tool`. The switch sends `grade.set` with `auto_color_on`. Reset sends `grade.clear` with `auto_color`.
+  - The controls and the dot show node 1 at the playhead (`GradeNode::corrector_at`), as the three requests change it there.
   - `Workspace::color_tool_button` paints the dot of the tool: red while it is on and white while it is off.
   - `Live::measuring` renders the frame on a worker thread first. The edit then reads the result from `BALANCES`.
   - A dragged grade of the same clip gets the same move. Thus the palette does not jump back.

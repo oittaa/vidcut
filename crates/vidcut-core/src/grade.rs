@@ -879,13 +879,13 @@ impl Uses {
 
     fn twice(&self, node: &GradeNode, c: &Corrector, k: usize) -> bool {
         let seen = self.kept(k) > 0 || self.tapped;
-        node.on && !c.is_usual() && self.over[k] > 0 && seen && self.partial(k)
+        node.on && !c.changes_nothing() && self.over[k] > 0 && seen && self.partial(k)
     }
 
     fn own(&self, node: &GradeNode, k: usize) -> usize {
         match &node.tool {
             GradeTool::Corrector(c) if node.on => {
-                let own = !c.is_usual() && (self.twice(node, c, k) || self.over[k] == 0);
+                let own = !c.changes_nothing() && (self.twice(node, c, k) || self.over[k] == 0);
                 usize::from(own) + self.over[k] + usize::from(self.tapped)
             }
             _ => 0,
@@ -995,7 +995,7 @@ fn corrected(
     }
     let key = uses.keys[k].clone();
     let none = key == Key::Flat(0.0);
-    if c.is_usual() || none {
+    if c.changes_nothing() || none {
         r.alias(k, x, uses.all[k]);
         (!none).then_some(r.holder[k])
     } else if uses.twice(node, c, k) {

@@ -4545,6 +4545,10 @@ impl Default for Corrector {
 
 impl Corrector {
     pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn changes_nothing(&self) -> bool {
         let tool = self.auto_tool().is_none();
         tool && Self {
             auto_color: None,

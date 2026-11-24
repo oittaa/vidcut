@@ -799,9 +799,11 @@ impl Workspace {
             }
         }
         let graded = self.graded(clip.as_ref());
-        let kept = clip
-            .as_ref()
-            .and_then(|(_, p)| p.grade.as_ref()?.corrector(1)?.auto_color.clone());
+        let kept = clip.as_ref().and_then(|(id, p)| {
+            let frame = self.grade_frame(&GradeOf::Clip(id.clone())) as f64;
+            let node = p.grade.as_ref()?.node(1)?;
+            node.corrector_at(frame)?.auto_color.clone()
+        });
         self.color_tool_button(ui, graded.is_some(), kept.as_ref());
         let Some(tool) = self.timeline.picture_grab.tool else {
             if self.timeline.picture_grab.color {
