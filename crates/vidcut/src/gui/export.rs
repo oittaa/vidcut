@@ -3121,7 +3121,7 @@ pub(super) fn file_tab(ui: &mut egui::Ui, d: &mut Render) {
             super::dialog::row(ui, "First Frame", |ui| {
                 let mut own = v.first_frame.is_some();
                 if ui.add(egui::Checkbox::without_text(&mut own)).changed() {
-                    v.first_frame = own.then_some(0);
+                    v.first_frame = own.then_some(1);
                 }
                 if let Some(first) = &mut v.first_frame {
                     ui.add(egui::DragValue::new(first));

@@ -4734,6 +4734,16 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - File Name shows the name of the file. Location has Browse (p. 4113).
   - Render is Single clip or Individual clips (p. 4114). Single clip renders the range into one file. Individual clips renders one file for each clip.
   - The Video, Audio and File tabs hold the other settings (pp. 4115–4127). Advanced Settings and Subtitle Settings are closed by default (measured).
+- **File tab** (pp. 4125–4127; measured with MP4 and EXR):
+  - Single clip: Filename uses (Custom name or Timeline name), Custom name, File suffix and File subfolder.
+  - Then Use 8 digits in the filename, Each clip starts at frame 1 (off), Render without timecode (off) and Start timeline timecode at 01:00:00:00 (off).
+  - Then Replace existing files in place (greyed with MP4) and Render speed (Maximum). With EXR and Single clip, the tab is empty.
+  - Individual clips: Filename uses (Custom name or Source name), Custom name ("Untitled") and File suffix.
+  - Then Use unique filenames (off), Add source frame count to filename (on) and File subfolder.
+  - Then Use 8 digits, Each clip starts at frame 1 (off), and Replace existing files in place (greyed with MP4, off with EXR).
+  - Then Place clips in separate folders (off), Preserve source directory levels (on) with Preserve 0 and From tail, and Preserved Path (greyed).
+  - Then Use commercial workflow (off) and Render speed (Maximum).
+  - With Source name, File Name reads "SourceName". Custom name, File suffix and Add source frame count go away. Use unique filenames stays.
 - **Range** (pp. 4128–4129):
   - The Render menu has Entire Timeline and In/Out Range.
   - I and O set the In and the Out. IN and OUT show the first and the last frame. DURATION counts the frames (p. 4129).
@@ -4787,6 +4797,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A job that renders cannot be removed, and Clear All is greyed while jobs render.
   - The right-click menu has no Reveal in Media Storage, because vidcut has no Media Storage.
   - Individual clips names the files with a template. The File tab has Filename Digits and First Frame for image sequences, and Replace Files.
+  - Filename Digits is 8 by default. First Frame is 1 when it is turned on.
+  - The other rows of the File tab wait for a measurement of the file names that they give ([todo](todo/export-file-tab.md)).
   - The other parts of the page are in [gaps](todo/gaps.md).
 
 ## 11. Keyboard shortcuts
