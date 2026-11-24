@@ -632,6 +632,11 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
 
 These facts come from measurements in Resolve Studio 21.2, by hand and through its scripting API.
 
+- **The Keyframe button of a locked node on the Fusion page adds a key with the value 0.**
+  - A Blur with Blur Size 5 was locked. A click on the Keyframe button of Blur Size added a key, and Blur Size showed 0.
+  - One undo took back both. The same click after an unlock added a key at 5.
+  - A locked node refuses the other changes of its values: a typed value, a drag and Reset.
+  - vidcut does not copy this fault. `comp.key` refuses a locked node, as `comp.set` and `comp.reset` do ([spec §8.19](spec.md#edits)).
 - **Convert In and Out to Compound Clip changes locked tracks.**
   - It cuts the clips of a locked track at the marks, and takes the part in the range inside.
   - It cuts a cue of a locked subtitle track at the marks. Both parts stay on that track.

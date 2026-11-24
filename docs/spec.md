@@ -3075,8 +3075,11 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
-- Lock (Ctrl+L): no changes can be made to the node (pp. 1313, 1424). Its values in the Inspector and its handles in the viewer do not change. The node shows a lock badge (p. 1424).
-  - vidcut: a locked node can still be moved, renamed, joined, deleted and passed through.
+- Lock (Ctrl+L): no changes can be made to the node (pp. 1313, 1424). The node shows a lock badge at the right of its name (p. 1424).
+  - Measured in Resolve Studio 21.2: a locked node refuses a typed value, a drag of a value and Reset.
+  - A locked node can still be renamed, moved, joined, deleted and passed through.
+  - vidcut: a drag of its handles in the viewer changes nothing, as the node takes no change (p. 1313). This is not measured.
+  - The Keyframe button of a locked node adds a key with the value 0 in Resolve ([gotchas](gotchas.md#resolves-edits)). vidcut refuses it.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
   - With several nodes selected, a Rename window opens for each node in turn (p. 1416).
 - Copy (Ctrl+C) and Cut (Ctrl+X) take the selected tools and masks, with their values at that moment.
@@ -3181,7 +3184,7 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - The Inspector shows the controls of each selected node (pp. 1313–1314).
   - Each node has a header with its name and Reset (p. 1314). A click on the name makes it the active node (p. 1391).
   - A switch at the left of the header turns a tool on and off. It is the same as Pass Through (p. 1424).
-  - The Lock button at the right of the header locks the node (p. 1313).
+  - The Lock button at the right of the header locks the node (p. 1313). Measured: it is left of Reset.
   - The controls of a tool are in the order of the manual (pp. 2110–2111, 2474–2475, 2481–2483, 2491–2493).
 - Each value has a Keyframe button at its right (p. 1519).
   - It puts a keyframe at the playhead. On a keyframe, it removes the keyframe.
