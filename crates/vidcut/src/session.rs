@@ -395,6 +395,9 @@ pub fn run_with(
                 Request::MotionFind { .. } | Request::MotionTrack { .. } => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-subjects")?;
                 }
+                Request::PictureStabilize { .. } if !envelope.dry_run => {
+                    work_first(&store, &envelope, &env, hooks, "vidcut-stabilize")?;
+                }
                 Request::SubtitlesTimeWords { .. } => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-transcribe")?;
                 }

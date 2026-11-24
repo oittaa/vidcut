@@ -3889,6 +3889,209 @@ pub struct Picture {
     /// its usual values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grade: Option<Grade>,
+    /// The values of its stabilization and the correction that
+    /// `picture.stabilize` made. The correction moves the cropped picture,
+    /// before its transform and its Dynamic Zoom. Left out at the usual
+    /// values with no correction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stabilization: Option<Stabilization>,
+}
+
+/// The stabilization of a clip's picture.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Stabilization {
+    #[serde(flatten)]
+    pub values: Stabilizing,
+    /// Turned off, the correction stays on the clip and does nothing.
+    /// Usual: on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub off: bool,
+    /// The correction that `picture.stabilize` made, with the values that
+    /// it used. A change of a value changes nothing until
+    /// `picture.stabilize` runs again. Left out before it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub made: Option<Stabilized>,
+}
+
+/// The values that set how `picture.stabilize` steadies a picture. Each is
+/// left out at its usual value.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Stabilizing {
+    /// The motion that the analysis finds and takes out. Usual:
+    /// `perspective`.
+    #[serde(default, skip_serializing_if = "StabilizeMode::is_usual")]
+    pub mode: StabilizeMode,
+    /// On, the picture holds the view of the first frame. The cropping
+    /// ratio, the smoothing and the strength do nothing. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub camera_lock: bool,
+    /// On, the picture is zoomed so that no edge shows in the frame. Usual:
+    /// on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub zoom: bool,
+    /// The share of the width and the height of the picture that stays in
+    /// the frame at the most, from 0.25 to 1. Lower values allow more
+    /// correction and more zoom. At 1 there is no correction. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cropping_ratio: Option<f64>,
+    /// How smooth the camera path becomes, from 0.25 to 1. Higher values
+    /// take out slower motion too. Usual: 0.25.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smooth: Option<f64>,
+    /// How much of the correction the picture gets, from -1 to 1. At 0 it
+    /// gets none. Below 0 the motion grows. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strength: Option<f64>,
+}
+
+impl Default for Stabilizing {
+    fn default() -> Self {
+        Self {
+            mode: StabilizeMode::default(),
+            camera_lock: false,
+            zoom: true,
+            cropping_ratio: None,
+            smooth: None,
+            strength: None,
+        }
+    }
+}
+
+impl Stabilizing {
+    pub const CROPPING_RATIO: (f64, f64) = (0.25, 1.0);
+    pub const SMOOTH: (f64, f64) = (0.25, 1.0);
+    pub const STRENGTH: (f64, f64) = (-1.0, 1.0);
+    pub const USUAL_CROPPING_RATIO: f64 = 0.5;
+    pub const USUAL_SMOOTH: f64 = 0.25;
+    pub const USUAL_STRENGTH: f64 = 1.0;
+
+    pub fn cropping_ratio(&self) -> f64 {
+        self.cropping_ratio.unwrap_or(Self::USUAL_CROPPING_RATIO)
+    }
+
+    pub fn smooth(&self) -> f64 {
+        self.smooth.unwrap_or(Self::USUAL_SMOOTH)
+    }
+
+    pub fn strength(&self) -> f64 {
+        self.strength.unwrap_or(Self::USUAL_STRENGTH)
+    }
+
+    pub fn normal(self) -> Self {
+        Self {
+            cropping_ratio: self
+                .cropping_ratio
+                .filter(|v| *v != Self::USUAL_CROPPING_RATIO),
+            smooth: self.smooth.filter(|v| *v != Self::USUAL_SMOOTH),
+            strength: self.strength.filter(|v| *v != Self::USUAL_STRENGTH),
+            ..self
+        }
+    }
+
+    pub fn is_usual(&self) -> bool {
+        self.normal() == Self::default()
+    }
+}
+
+/// The motion that a stabilization finds and takes out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StabilizeMode {
+    /// Moves, turns, zooms and the perspective of the camera.
+    #[default]
+    Perspective,
+    /// Moves, turns and zooms of the camera.
+    Similarity,
+    /// Moves of the camera across and up and down.
+    Translation,
+}
+
+impl StabilizeMode {
+    pub const ALL: [Self; 3] = [Self::Perspective, Self::Similarity, Self::Translation];
+
+    pub fn is_usual(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Perspective => "perspective",
+            Self::Similarity => "similarity",
+            Self::Translation => "translation",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Perspective => "Perspective",
+            Self::Similarity => "Similarity",
+            Self::Translation => "Translation",
+        }
+    }
+}
+
+/// The correction of each frame of the file that a stabilization made.
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Stabilized {
+    /// The values that made it.
+    #[serde(flatten)]
+    pub with: Stabilizing,
+    /// The frame of the file of the first correction. The frames before it
+    /// take the first correction, and the frames after the last take the
+    /// last.
+    pub first: i64,
+    /// One correction for each frame, from `first`: the map from a point
+    /// of the corrected picture to the point of the picture that shows
+    /// there, `[a, b, c, d, e, f, g, h]` of the matrix `[[a, b, c], [d, e,
+    /// f], [g, h, 1]]`, in fractions of the picture from its top left.
+    pub frames: Arc<Vec<[f32; 8]>>,
+}
+
+impl PartialEq for Stabilized {
+    fn eq(&self, other: &Self) -> bool {
+        self.with == other.with
+            && self.first == other.first
+            && (Arc::ptr_eq(&self.frames, &other.frames) || self.frames == other.frames)
+    }
+}
+
+impl std::fmt::Debug for Stabilized {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut hasher = std::hash::DefaultHasher::new();
+        for v in self.frames.iter().flatten() {
+            v.to_bits().hash(&mut hasher);
+        }
+        f.debug_struct("Stabilized")
+            .field("with", &self.with)
+            .field("first", &self.first)
+            .field("frames", &self.frames.len())
+            .field("digest", &hasher.finish())
+            .finish()
+    }
+}
+
+impl Stabilized {
+    pub fn at(&self, frame: i64) -> Option<[f32; 8]> {
+        let last = self.frames.len().checked_sub(1)?;
+        let i = (frame - self.first).clamp(0, last as i64) as usize;
+        self.frames.get(i).copied()
+    }
+}
+
+impl Stabilization {
+    pub fn is_usual(&self) -> bool {
+        self.values.is_usual() && !self.off && self.made.is_none()
+    }
+
+    pub fn working(&self) -> Option<&Stabilized> {
+        self.made.as_ref().filter(|_| !self.off)
+    }
+
+    pub fn ready(&self) -> bool {
+        self.made
+            .as_ref()
+            .is_some_and(|m| m.with.normal() == self.values.normal())
+    }
 }
 
 /// A grade: the nodes of the color page. The picture comes in, goes through
@@ -7731,7 +7934,8 @@ impl CompositeMode {
 
 /// Which of a picture's tools: `transform` (its position, zoom, rotation,
 /// anchor, pitch, yaw and flips), `crop` (its sides and softness),
-/// `dynamic_zoom` or `composite` (its composite mode and opacity).
+/// `dynamic_zoom`, `composite` (its composite mode and opacity) or
+/// `stabilization` (its values and its correction).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PictureTool {
@@ -7741,6 +7945,7 @@ pub enum PictureTool {
     DynamicZoom,
     Composite,
     Composition,
+    Stabilization,
 }
 
 impl Picture {

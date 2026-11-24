@@ -44,6 +44,7 @@ pub mod sequence;
 pub mod shortcuts;
 pub mod slate;
 pub mod speakers;
+pub mod stabilize;
 pub mod steps;
 pub mod store;
 pub mod subtitles;

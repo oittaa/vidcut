@@ -10,11 +10,11 @@ use crate::model::{
     EffectValue, FastNoise, FillMethod, FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming,
     GlowOutput, GradientRepeat, GradientStop, GradientType, GrainComposite, ImageFormat, Mask,
     MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring, Pattern,
-    Picture, PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen, SubPixel,
-    TextPlus, Tool, TrackKind, Tracker, TrackerMerge, TrackerOperation, Vignette, VignetteMode,
-    VignetteShape, ZoomBox,
+    Picture, PictureTool, PivotType, Project, ReferenceTime, ShadingElement, Sharpen,
+    Stabilization, Stabilizing, SubPixel, TextPlus, Tool, TrackKind, Tracker, TrackerMerge,
+    TrackerOperation, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
-use crate::request::{DynamicZoomSet, NodeInput};
+use crate::request::{DynamicZoomSet, NodeInput, StabilizationSet};
 
 use super::locate;
 
@@ -28,6 +28,10 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
     if let Some(z) = &p.dynamic_zoom {
         zoom_checked(z)?;
     }
+    let stabilization = match &p.stabilization {
+        Some(s) => stabilization_checked(s)?,
+        None => None,
+    };
     if let Some(why) = crate::keyframes::picture_problem(p) {
         return Err(Error::invalid(why));
     }
@@ -55,6 +59,7 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
             .as_ref()
             .map(composition_checked)
             .transpose()?,
+        stabilization,
         ..p.clone()
     };
     Ok((!out.is_usual()).then_some(out))
@@ -1235,6 +1240,97 @@ pub fn composition_checked(c: &Composition) -> Result<Composition> {
     })
 }
 
+fn stabilization_checked(s: &Stabilization) -> Result<Option<Stabilization>> {
+    let v = &s.values;
+    within(
+        v.cropping_ratio,
+        Stabilizing::CROPPING_RATIO,
+        "a stabilization's cropping_ratio is from 0.25 to 1",
+    )?;
+    within(
+        v.smooth,
+        Stabilizing::SMOOTH,
+        "a stabilization's smooth is from 0.25 to 1",
+    )?;
+    within(
+        v.strength,
+        Stabilizing::STRENGTH,
+        "a stabilization's strength is from -1 to 1",
+    )?;
+    if let Some(m) = &s.made {
+        let finite = m.frames.iter().flatten().all(|v| v.is_finite());
+        if m.frames.is_empty() || !finite {
+            return Err(Error::invalid(
+                "a stabilization's correction has a finite map for each frame",
+            ));
+        }
+    }
+    let out = Stabilization {
+        values: v.normal(),
+        off: s.off,
+        made: s.made.clone().map(|m| crate::model::Stabilized {
+            with: m.with.normal(),
+            ..m
+        }),
+    };
+    Ok((!out.is_usual()).then_some(out))
+}
+
+pub fn footage(p: &Project, ti: usize, c: &Clip) -> Result<crate::model::Media> {
+    takes(p, ti, c)?;
+    let media = p
+        .media(&c.media)
+        .filter(|m| !c.is_block() && m.info.video.is_some() && !m.is_still());
+    media.cloned().ok_or_else(|| {
+        Error::invalid(format!(
+            "{} is not footage: only a clip from a video file takes a stabilization",
+            c.id
+        ))
+    })
+}
+
+pub fn stabilizable(
+    p: &Project,
+    id: &str,
+    set: &StabilizationSet,
+) -> Result<(crate::model::Media, Stabilization)> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    let media = footage(p, ti, c)?;
+    let old = c.picture.as_ref().and_then(|x| x.stabilization.clone());
+    let next = set.on(&old.unwrap_or_default());
+    let checked = stabilization_checked(&next)?.unwrap_or_default();
+    Ok((media, checked))
+}
+
+pub fn stabilized(
+    p: &mut Project,
+    id: &str,
+    values: Stabilization,
+    s: crate::stabilize::Steadied,
+) -> Result<Value> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &mut p.tracks[ti].clips[ci];
+    let mut picture = c.picture.clone().unwrap_or_default();
+    picture.stabilization = Some(Stabilization {
+        made: Some(s.made),
+        ..values
+    });
+    c.picture = checked(&picture)?;
+    let shown = |m: crate::stabilize::Motion| json!({ "motion": rounded(m.motion), "shake": rounded(m.shake) });
+    Ok(json!({
+        "clip": id,
+        "frames": s.frames,
+        "zoom": rounded(s.zoom),
+        "before": shown(s.before),
+        "after": shown(s.after),
+    }))
+}
+
+fn rounded(v: f64) -> f64 {
+    (v * 1000.0).round() / 1000.0
+}
+
 fn zoom_checked(z: &DynamicZoom) -> Result<()> {
     for b in [z.start, z.end] {
         if !b
@@ -1291,6 +1387,7 @@ pub struct PictureChange {
     pub crop_off: Option<bool>,
     pub crop_softness: Option<f64>,
     pub dynamic_zoom: Option<Option<DynamicZoomSet>>,
+    pub stabilization: Option<StabilizationSet>,
     pub composite_mode: Option<CompositeMode>,
     pub opacity: Option<f64>,
 }
@@ -1368,6 +1465,9 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
     if let Some(z) = change.dynamic_zoom {
         p.dynamic_zoom = z.map(|z| z.on(p.dynamic_zoom.unwrap_or_default()));
     }
+    if let Some(s) = change.stabilization {
+        p.stabilization = Some(s.on(&p.stabilization.take().unwrap_or_default()));
+    }
     if let Some(m) = change.composite_mode {
         p.composite_mode = Some(m);
     }
@@ -1377,7 +1477,7 @@ pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
     p
 }
 
-const NEEDS: &str = "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop, crop softness, switch, Dynamic Zoom, composite mode or opacity";
+const NEEDS: &str = "picture.set needs a position, zoom, rotation, anchor, pitch, yaw, flip, crop, crop softness, switch, Dynamic Zoom, composite mode, opacity or stabilization";
 
 pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i64>) -> Result<()> {
     if change.is_empty() {
@@ -1389,6 +1489,9 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
         let (ti, ci) = locate(p, id)?;
         let c = &p.tracks[ti].clips[ci];
         takes(p, ti, c)?;
+        if change.stabilization.is_some() {
+            footage(p, ti, c)?;
+        }
         let old = c.picture.clone().unwrap_or_default();
         let next = changed(&old, change);
         let frame = at.map(|t| c.content_at(t));
@@ -1430,6 +1533,10 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
         }
         if next.dynamic_zoom != old.dynamic_zoom {
             picture.dynamic_zoom = next.dynamic_zoom;
+            wrote = true;
+        }
+        if change.stabilization.is_some() {
+            picture.stabilization = next.stabilization.clone();
             wrote = true;
         }
         if next.mode() != old.mode() {
@@ -1494,6 +1601,7 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
             effects: old.effects,
             composition: old.composition,
             grade: old.grade,
+            stabilization: old.stabilization,
             ..Picture::default()
         },
         PictureTool::Crop => {
@@ -1519,6 +1627,10 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
             opacity_keys: Vec::new(),
             ..old
         },
+        PictureTool::Stabilization => Picture {
+            stabilization: None,
+            ..old
+        },
     }
 }
 
@@ -1532,6 +1644,13 @@ pub fn working(p: Picture) -> Picture {
     }
     p.transform_off = false;
     p.crop_off = false;
+    p.stabilization = p
+        .stabilization
+        .and_then(|s| s.working().cloned())
+        .map(|made| Stabilization {
+            made: Some(made),
+            ..Stabilization::default()
+        });
     p
 }
 
@@ -1557,7 +1676,25 @@ pub fn shown(c: &Clip) -> Value {
         "dynamic_zoom": p.dynamic_zoom.as_ref().map(zoom_shown),
         "composite_mode": p.mode(),
         "opacity": p.opaque(),
+        "stabilization": stabilization_shown(p.stabilization.as_ref()),
         "effects": p.effects.iter().map(effect_shown).collect::<Vec<_>>(),
+    })
+}
+
+pub fn stabilization_shown(s: Option<&Stabilization>) -> Value {
+    let usual = Stabilization::default();
+    let s = s.unwrap_or(&usual);
+    let v = &s.values;
+    json!({
+        "on": !s.off,
+        "mode": v.mode,
+        "camera_lock": v.camera_lock,
+        "zoom": v.zoom,
+        "cropping_ratio": v.cropping_ratio(),
+        "smooth": v.smooth(),
+        "strength": v.strength(),
+        "stabilized": s.made.is_some(),
+        "changed": s.made.is_some() && !s.ready(),
     })
 }
 
@@ -1711,6 +1848,11 @@ pub fn violation(p: &Project, ti: usize, c: &Clip) -> Option<String> {
     }
     if c.generates() && picture.composition.is_some() {
         return Some(format!("{} is a generator, which has no composition", c.id));
+    }
+    if picture.stabilization.is_some()
+        && let Err(e) = footage(p, ti, c)
+    {
+        return Some(e.message);
     }
     checked(picture)
         .err()

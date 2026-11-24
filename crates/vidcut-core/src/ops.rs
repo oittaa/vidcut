@@ -2856,6 +2856,10 @@ fn shift_source(c: &mut Clip, (per, file_by): (crate::time::Rational, i64)) {
     if let Some(k) = c.picture.as_mut().and_then(|x| x.composition.as_mut()) {
         k.start += file_by;
     }
+    let steady = c.picture.as_mut().and_then(|x| x.stabilization.as_mut());
+    if let Some(m) = steady.and_then(|s| s.made.as_mut()) {
+        m.first += file_by;
+    }
     if c.speed.is_some() {
         return;
     }

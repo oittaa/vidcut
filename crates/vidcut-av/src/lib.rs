@@ -42,6 +42,7 @@ pub mod render_cache;
 pub mod route;
 pub mod screen;
 pub mod speech_api;
+pub mod stabilize;
 pub(crate) mod stretch;
 pub mod subjects;
 pub mod testdata;

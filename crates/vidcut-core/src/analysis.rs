@@ -47,6 +47,9 @@ impl Bytes<'_> {
     fn u64(&mut self) -> Option<u64> {
         self.take().map(u64::from_le_bytes)
     }
+    fn u32(&mut self) -> Option<u32> {
+        self.take().map(u32::from_le_bytes)
+    }
     fn f64(&mut self) -> Option<f64> {
         self.take().map(f64::from_le_bytes)
     }
@@ -192,6 +195,48 @@ pub struct Follow {
     pub area: [f32; 4],
     pub backward: bool,
     pub forward: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shaky {
+    pub mode: crate::model::StabilizeMode,
+    pub frames: (i64, i64),
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Shake {
+    pub size: (u32, u32),
+    pub steps: Vec<[f32; 8]>,
+}
+
+impl Shake {
+    const TAG: &'static [u8; 4] = b"vcs1";
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Self::TAG.to_vec();
+        out.extend_from_slice(&self.size.0.to_le_bytes());
+        out.extend_from_slice(&self.size.1.to_le_bytes());
+        out.extend_from_slice(&(self.steps.len() as u64).to_le_bytes());
+        for v in self.steps.iter().flatten() {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        out
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        let mut r = Bytes(b.strip_prefix(Self::TAG)?);
+        let size = (r.u32()?, r.u32()?);
+        let n = usize::try_from(r.u64()?).ok()?;
+        let mut steps = Vec::new();
+        for _ in 0..n {
+            let mut m = [0.0; 8];
+            for v in &mut m {
+                *v = r.f32()?;
+            }
+            steps.push(m);
+        }
+        Some(Self { size, steps })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

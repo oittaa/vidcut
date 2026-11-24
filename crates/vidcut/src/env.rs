@@ -4,7 +4,8 @@ use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vidcut_core::analysis::{
-    AudioLevels, Detections, Look, Loudness, PictureStats, SoundMatch, Tracked, VoiceActivity,
+    AudioLevels, Detections, Look, Loudness, PictureStats, Shake, Shaky, SoundMatch, Tracked,
+    VoiceActivity,
 };
 use vidcut_core::auto_color::Balance;
 use vidcut_core::disk_cache::{self, Kind};
@@ -34,6 +35,7 @@ struct Memos {
     voices: Memo<VoiceActivity>,
     subjects: Memo<Detections>,
     tracks: Memo<Tracked>,
+    shakes: Memo<Shake>,
     transcripts: Mutex<Lru<(Origin, u32), Vec<Kept>, MEMOS_KEPT>>,
 }
 
@@ -501,6 +503,28 @@ impl Env for AvEnv {
         download: bool,
     ) -> Result<Arc<Tracked>> {
         self.track(media, plan, follow, download).map(|(_, v)| v)
+    }
+
+    fn shake(&self, media: &Media, plan: &RenderPlan, look: Shaky) -> Result<Arc<Shake>> {
+        let picture = serde_json::to_vec(plan).unwrap_or_default();
+        let key = format!(
+            "{}-{}-{}-{}-{}",
+            vidcut_av::stabilize::name(),
+            vidcut_core::fingerprint::digest(&picture),
+            look.mode.name(),
+            look.frames.0,
+            look.frames.1,
+        );
+        measured(
+            &self.memos.shakes,
+            analysis_file(media, &key),
+            || {
+                let decoder = crate::preferences::gpu_decoding().own_decoder();
+                vidcut_av::stabilize::measure(plan, &look, decoder.as_ref(), &media.path)
+            },
+            Shake::to_bytes,
+            Shake::from_bytes,
+        )
     }
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness> {

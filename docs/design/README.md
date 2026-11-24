@@ -129,6 +129,7 @@ A clip skips each step that it does not use. The steps run in this order:
   - Without an AI upscaler, an interlaced frame is woven as that frame is placed.
   - With an AI upscaler, the weave and the enlargement come before the choice.
 - `Screen::draw` places the picture and mixes the layers (`place::Placing`, `screen::kernel`, [export](export.md#placed-pictures)).
+  - The correction of a stabilization goes into the same map from the frame to the source (`Placed::steadied`, [analysis](analysis.md#stabilization)). Thus the picture is sampled once.
   - A transition's two sides, and each clip placed over another, are layers of the same draw.
   - A title is a layer of the same draw, as a generator is ([export](export.md#titles)). Burned subtitles are draws in that same pass (`fs_title`).
   - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, `fs_vignette`, `fs_sharpen`, [export](export.md#effects)).
@@ -151,7 +152,7 @@ The AI stages get the picture in the timeline color space (`Single`).
 vidcut has none of the other stages of the spec:
 
 - Camera Raw, Lens Correction and Fusion;
-- Input Sizing, Image Stabilization and the Pre-Clip and Post-Clip grades of a group;
+- Input Sizing and the Pre-Clip and Post-Clip grades of a group;
 - Open FX, the Resolve FX other than Gaussian Blur, Mosaic Blur, Glow, Film Grain, Vignette and Sharpen, Output Sizing and Data Burn-In.
 
 ### LUT files

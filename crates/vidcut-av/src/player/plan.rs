@@ -416,7 +416,7 @@ fn placed_now(piece: &VideoPiece, k: i64) -> Option<Keyed> {
                 .iter()
                 .map(|p| {
                     let at = p.source_after(k);
-                    let moves = p.picture.is_keyed() || p.follows();
+                    let moves = p.picture.is_keyed() || p.follows() || p.steadied().is_some();
                     let boxes = p.stamp_at(at);
                     (moves.then_some(at), p.run.map(|r| r.after(k)), boxes)
                 })

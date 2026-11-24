@@ -743,6 +743,18 @@ impl Placed {
         if let Some(c) = self.picture.composition.as_mut() {
             c.hold(frame);
         }
+        let at = self.clock.frame(self.source);
+        let made = self.picture.stabilization.as_mut();
+        if one && let Some(m) = made.and_then(|s| s.made.as_mut()) {
+            m.frames = Arc::new(m.at(at).into_iter().collect());
+            m.first = at;
+        }
+    }
+
+    pub fn steadied(&self) -> Option<[f64; 8]> {
+        let s = self.picture.stabilization.as_ref()?.working()?;
+        let back = s.at(self.clock.frame(self.source))?;
+        Some(back.map(f64::from))
     }
 
     fn keeps_cover(&self) -> bool {
@@ -4106,6 +4118,10 @@ pub fn node_output(p: &Project, clip: &str, node: &str) -> Result<RenderPlan> {
         .node(node)
         .ok_or_else(|| Error::not_found(format!("{clip} has no node {node}")))?;
     alone(p, clip, (n.tool != Tool::MediaOut).then_some(node))
+}
+
+pub fn own_picture(p: &Project, clip: &str) -> Result<RenderPlan> {
+    alone(p, clip, None)
 }
 
 fn node_of<'a>(p: &'a Project, clip: &str, node: &str) -> Result<&'a Node> {

@@ -312,7 +312,7 @@ impl Shown {
                     .max_by(|a, b| a.of(&z).size.total_cmp(&b.of(&z).size))
                     .map(Hold::ZoomMove)
             }
-            PictureTool::Composite | PictureTool::Composition => None,
+            PictureTool::Composite | PictureTool::Composition | PictureTool::Stabilization => None,
         }
     }
 
@@ -817,7 +817,10 @@ impl Workspace {
         let switch = match tool {
             PictureTool::Transform => Some(("transform_off", pic.transform_off)),
             PictureTool::Crop => Some(("crop_off", pic.crop_off)),
-            PictureTool::DynamicZoom | PictureTool::Composite | PictureTool::Composition => None,
+            PictureTool::DynamicZoom
+            | PictureTool::Composite
+            | PictureTool::Composition
+            | PictureTool::Stabilization => None,
         };
         if let Some((key, off)) = switch {
             let mut on = !off;
@@ -1315,7 +1318,7 @@ impl Workspace {
                 }
             }
             PictureTool::DynamicZoom => paint_boxes(&painter, s),
-            PictureTool::Composite | PictureTool::Composition => {}
+            PictureTool::Composite | PictureTool::Composition | PictureTool::Stabilization => {}
         }
         if let Some(h) = &self.timeline.picture_grab.held {
             let guide = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 140));

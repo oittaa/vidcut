@@ -2123,6 +2123,19 @@ impl Live {
                 Ok(())
             }));
         }
+        if let Request::PictureStabilize { .. } = &envelope.request {
+            let looks = vidcut_core::editor::stabilize_looks(p, &envelope.request, playhead);
+            if looks.is_empty() {
+                return None;
+            }
+            return Some(plain(move || {
+                use vidcut_core::Env;
+                for (media, plan, look) in &looks {
+                    AvEnv::new().shake(media, plan, *look)?;
+                }
+                Ok(())
+            }));
+        }
         if let Request::MotionTrack { .. } = &envelope.request {
             let looks = vidcut_core::editor::track_looks(p, &envelope.request, playhead);
             return Some(Box::new(move || {
@@ -2889,6 +2902,11 @@ impl Live {
                     true => format!("Track: {frames} frames, then stopped"),
                     false => format!("Track: {frames} frames"),
                 }
+            }
+            "picture.stabilize" => {
+                let frames = r.result["frames"].as_i64().unwrap_or(0);
+                let zoom = r.result["zoom"].as_f64().unwrap_or(1.0) * 100.0;
+                format!("Stabilize: {frames} frames, zoom {zoom:.0}%")
             }
             "media.add_folder" => folder_notice(&r.result),
             "subtitles.import"
@@ -3824,11 +3842,21 @@ impl Live {
                 Some(measure) => Step::Encode(measure, Box::new(envelope), "Track".into(), "track"),
                 None => Step::Now(self.edit(envelope, job.origin)),
             },
+            Request::PictureStabilize { .. } if !envelope.dry_run => {
+                match self.measuring(&envelope) {
+                    Some(measure) => {
+                        let title = "Stabilize".into();
+                        Step::Encode(measure, Box::new(envelope), title, "stabilize")
+                    }
+                    None => Step::Now(self.edit(envelope, job.origin)),
+                }
+            }
             Request::EditRippleDeleteSilence { .. }
             | Request::EditDetectSceneCuts { .. }
             | Request::GradeAutoColor { .. }
             | Request::MotionFind { .. }
             | Request::MotionTrack { .. }
+            | Request::PictureStabilize { .. }
             | Request::EditRippleDeleteWords { quiet: true, .. } => {
                 match self.measuring(&envelope) {
                     Some(measure) => Step::Measure(measure, Box::new(envelope), None),
@@ -5918,6 +5946,7 @@ fn runs_long(r: &Request) -> bool {
         | Request::GradeAutoColor { .. }
         | Request::MotionFind { .. }
         | Request::MotionTrack { .. }
+        | Request::PictureStabilize { .. }
         | Request::EditRippleDeleteWords { quiet: true, .. }
         | Request::TrackSet {
             duck: Some(Some(_)),

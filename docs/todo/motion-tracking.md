@@ -48,7 +48,7 @@ In this file, a path is never a track of the timeline.
 - `motion.find` finds the faces, the text, the people and the vehicles of a clip with detector models ([deviation X167](../deviations.md#x167-vidcut-finds-the-faces-and-the-text-of-a-clip)).
 - `motion.track` tracks a pattern of a Tracker node ([spec](../spec.md#the-tracker)).
 - A title follows no motion path. A composition has no text node.
-- No request analyzes the motion of the camera. [Stabilization](stabilization.md) needs such an analysis.
+- `picture.stabilize` analyzes the motion of the camera ([spec §8.27](../spec.md#827-stabilization-pp-295-737738-769-923924-12091210-35023503-measured-in-resolve-studio-212)). The Color page has no Tracker palette.
 - A [subject mask](subject-masks.md) is a matte that a motion path can move.
 
 **How:**

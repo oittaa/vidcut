@@ -1749,8 +1749,9 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], extent: Extent) -
         0.0,
         0.0,
     ];
+    let back = leaned(affine, [u0, v0], [k * sx, k * sy], p.pitch(), p.yaw());
     Level {
-        back: leaned(affine, [u0, v0], [k * sx, k * sy], p.pitch(), p.yaw()),
+        back: placed.steadied().map_or(back, |s| chain(&back, &s)),
         shown: crop,
         edge,
         soft,

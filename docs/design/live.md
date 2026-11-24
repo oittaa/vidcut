@@ -641,6 +641,11 @@ The bar and the Jobs button:
   - `Act::Drag` stops a drag at the start of `SpeedDialog::PERCENT`.
   - The Ease row shows `ops::speed::section_eases` and sends `speed.ease` for each clip (`Workspace::ease_sections`).
   - `speed_keys` draws the diamond and the arrows of the header. They act as the keyframe buttons of the picture and volume fields.
+- `Workspace::stabilization_section` shows the Stabilization section for the selected clips of video files (`ops::picture::footage`).
+  - Each change sends `picture.set` with `stabilization` for all of them. Reset sends `picture.clear`.
+  - A dragged number keeps its value in `Drag` until the release. Thus one drag is one undo step.
+  - Stabilize sends one `picture.stabilize` for each clip whose correction does not have its values (`Stabilization::ready`).
+  - `picture.stabilize` runs as a job of kind `stabilize`, as `motion.track` does. Stabilize is grey while such a job runs.
 - With several clips, `number`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.
 - `key_diamond` draws each Keyframe button. It has the color `KEY_ON` when the playhead is on a keyframe. The mark on a clip with keyframes has this color too, and the clip's name starts after the mark.
 
