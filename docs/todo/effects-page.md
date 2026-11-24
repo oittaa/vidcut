@@ -14,10 +14,7 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
 - **The Settings tab of a tool and of a mask** (pp. 2131, 2501–2502):
   - Blend, Process When Blend Is 0.0, the channels, Apply Mask Inverted, Multiply by Mask, Motion Blur, Use GPU, Comments and Scripts.
   - vidcut shows Blend and Multiply by Mask in the one list of controls.
-- **The Image tab of a mask** (pp. 2500–2501, [spec](../spec.md#the-masks)):
-  - Output Size: Default or Custom, with the rows of Custom.
-  - Clipping Mode: None or Frame. None is the usual value.
-  - The Soft Edge of vidcut repeats the edge pixels of the mask, as Frame does. None makes the mask beyond the frame.
+- **Output Size of a mask** (pp. 2500–2501, [spec](../spec.md#the-masks)): Default or Custom, with the rows of Custom.
 - **Paint Mode of a mask:** it has 11 modes, and Merge is the usual mode (p. 2474). The spec gives the measured forms ([spec](../spec.md#the-masks)).
   - Replace follows the manual: the areas where the new mask is 0 keep the input mask (p. 2465, [gotchas](../gotchas.md#resolves-fusion-page)).
   - vidcut always uses Merge.

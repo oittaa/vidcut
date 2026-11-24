@@ -6253,7 +6253,8 @@ pub struct NodeChange {
     /// How many boxes a `multi_box` blur or soft edge uses, from 1 to 64.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passes: Option<u32>,
-    /// What a blur takes from beyond the edges of the picture.
+    /// What a blur takes from beyond the edges of the picture, or where a
+    /// mask is made: `none` or `frame`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clipping: Option<BlurClipping>,
     /// Which of red, green, blue and alpha a blur blurs, `[r, g, b, a]`.

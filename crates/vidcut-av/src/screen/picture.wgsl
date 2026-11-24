@@ -1501,6 +1501,7 @@ fn fs_shape(in: Out) -> @location(0) vec4<f32> {
 
 struct Joining {
     how: vec4<f32>,
+    at: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> joining: Joining;
@@ -1509,7 +1510,7 @@ struct Joining {
 @fragment
 fn fs_mask_join(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
-    let s = textureLoad(blur_source, px, 0).r;
+    let s = textureLoad(blur_source, px + vec2<i32>(joining.at.xy), 0).r;
     let shape = select(s, 1.0 - s, joining.how.y > 0.5);
     let a = select(textureLoad(blur_start, px, 0).r, 0.0, joining.how.z > 0.5);
     return vec4<f32>(joining.how.x * shape + a * (1.0 - shape));
