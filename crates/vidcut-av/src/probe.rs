@@ -162,17 +162,7 @@ fn measured_rate(source: &Input, video: usize) -> Option<Ratio> {
     if frames < 2 || ticks <= 0 {
         return None;
     }
-    let mut rate = (0, 0);
-    // SAFETY: av_reduce writes only the two integers that it is given.
-    unsafe {
-        ffmpeg::ffi::av_reduce(
-            &mut rate.0,
-            &mut rate.1,
-            (frames - 1).saturating_mul(den),
-            ticks.saturating_mul(num),
-            i64::from(i32::MAX),
-        )
-    };
+    let rate = Input::rate_of((frames - 1).saturating_mul(den), ticks.saturating_mul(num));
     (rate.0 > 0 && rate.1 > 0).then_some(rate)
 }
 

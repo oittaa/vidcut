@@ -245,6 +245,13 @@ impl Input {
         (num > 0 && den > 0).then_some(ffmpeg::Rational(num, den))
     }
 
+    pub fn rate_of(num: i64, den: i64) -> (i32, i32) {
+        let mut rate = (0, 0);
+        // SAFETY: av_reduce writes only the two integers that it is given.
+        unsafe { ffmpeg::ffi::av_reduce(&mut rate.0, &mut rate.1, num, den, i64::from(i32::MAX)) };
+        rate
+    }
+
     pub fn open(&self) -> Result<format::context::Input> {
         let mut input = self.open_header()?;
         find_stream_info(&mut input, self.path())?;

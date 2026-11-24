@@ -249,14 +249,15 @@ Frame rate of a file:
   - Why the packets more: a frame out of order comes at most that many packets late in H.264 and HEVC.
   - A video packet with no timestamp stops the measurement, and the rate of FFmpeg stays. Thus a file with no timestamps is not read to its end.
   - The rate is the number of frames in that span, divided by the length of the span.
-  - `av_reduce` makes the fraction from these whole numbers. Why: a fraction from a decimal number can get very large terms.
   - Why that length: a timestamp in milliseconds then moves the rate by less than half the step from 24 to 23.976 fps.
+  - `Input::rate_of` makes the fraction from these whole numbers with `av_reduce`. Why: a fraction from a decimal number can get very large terms.
   - Both rates of the stream (`avg_frame_rate`, `r_frame_rate`) get the measured rate. Thus the file shows a constant rate.
 - `Input::open` does both steps for the other readers.
 - The rate from `probe` is the one rate of the media. All readers use it.
   - `decode::Input` keeps the rate, and `Input::rate` gives it.
   - `env::input_of` sets it from the media's `fps`.
   - An export sets it from the timeline: `VideoPiece::media_rate` multiplies the rate of the timeline by the frames of media for each frame.
+  - `Input::rate_of` fits each rate into the 32-bit numbers of FFmpeg. A rate that does not fit gets the nearest fraction that fits.
   - `VideoReader::frame_rate`, the proxies, the thumbnails and the analyses use `Input::rate`.
   - Why: a reader that asks FFmpeg for the rate can get a rate that is not the media's rate.
 

@@ -56,7 +56,7 @@ pub(crate) fn input_of(path: &Path, image: Option<&Image>, rate: Option<Rational
         },
         Some(Image::Still) | None => Input::File {
             path: path.to_path_buf(),
-            rate: rate.map(|r| (r.num() as i32, r.den() as i32)),
+            rate: rate.map(|r| Input::rate_of(r.num(), r.den())),
         },
     }
 }
