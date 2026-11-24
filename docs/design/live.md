@@ -685,6 +685,9 @@ The bar and the Jobs button:
 - With the keys, Ctrl+C and Ctrl+X send `keyframes.copy` or `keyframes.cut`. The core keeps the keyframes that come back as its clipboard, in place of the clips.
 - With the keys, Ctrl+V sends `keyframes.paste` with the selected clips while the clipboard holds keyframes (`Snapshot::key_clipboard`). It never pastes clips there.
 - Without the keys, Ctrl+V pastes no keyframes.
+- `clip.paste_attributes` without `from` and `copied` takes the first clip of the clipboard. The live core fills it in (`edit_at`).
+  - Each copy of clips gives `Snapshot::copied_clip`: its name, the boxes to check and a count of the copies.
+  - `Workspace::attributes_window` keeps the last choices for the same copy (`PasteChoice`).
 - The keyframe tray (`Workspace::keyframe_tray`) draws the same track rows under the lower timeline, on its `Scale`.
   - The tray and the tab share one `Editor`. Thus a selection in one shows in the other.
   - `Editor::tray` tells which of the two draws. A box and the ease menu stay in the one where they started.

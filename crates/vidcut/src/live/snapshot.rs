@@ -166,6 +166,13 @@ impl PoolView {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CopiedClip {
+    pub name: String,
+    pub picked: Vec<vidcut_core::request::ClipAttribute>,
+    pub copy: u64,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Selection {
     pub clips: Vec<String>,
@@ -262,6 +269,7 @@ pub struct Snapshot {
     pub selection: Selection,
     pub pool: PoolView,
     pub clipboard: usize,
+    pub copied_clip: Option<Arc<CopiedClip>>,
     pub key_clipboard: usize,
     pub node_clipboard: bool,
     pub window_clipboard: Option<vidcut_core::model::WindowKind>,

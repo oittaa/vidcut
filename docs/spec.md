@@ -49,7 +49,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
-- Mixer FX other than the Ducker, Paste Attributes, guides
+- Mixer FX other than the Ducker, guides
 - interchange formats: DRT, AAF, XML
 
 ## 2. Layout (pp. 636–637)
@@ -4392,6 +4392,48 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The grade of the timeline has no Auto Color.
   - An OpenTimelineIO file of vidcut keeps the result in the vidcut metadata of the grade.
 
+### 8.26 Paste Attributes (pp. 1155–1156; measured in Resolve Studio 21.2)
+
+- Edit > Paste Attributes... (Alt+V) opens a window for the selected clips. The right-click menu of a clip has it too. It gives the clips parts of the copied clip.
+- The window, as measured:
+  - From: the name of the copied clip. To: the count of the clips, for example "1 Video and 1 Audio Clips".
+  - Keyframes: Maintain Timing or Stretch to Fit.
+  - Clip Attributes: Clip Color, Flags and Markers.
+  - All Video Attributes: Composition Mode, Opacity, Position, Rotation Angle, Anchor Point, Pitch and Yaw.
+    - Zoom, with Scale X and Scale Y.
+    - Crop, with Left, Right, Top, Bottom, Softness and Retain Image Position.
+    - Flip, with V Flip and H Flip.
+    - Retime Process, Motion Estimation, Plugins, Color Correction and Fusion Effects.
+  - All Audio Attributes: Volume, Plugins and Equalizer.
+  - Retime Effects, with Ripple Sequence under it. Ripple Sequence is grey while Retime Effects is off.
+  - Don't show until next copy, Cancel and Apply.
+- At the first open, Clip Color and the changed attributes of the copied clip are checked. Retime Effects is not checked.
+- A group box with some items checked shows a dash. A click on a group box sets all of its items.
+- The window keeps the last choices at the next open.
+- Paste Attributes is one step in History.
+- Maintain Timing keeps each keyframe at its distance from the start of the clip.
+- Stretch to Fit multiplies that distance by the length of the clip, over the length of the copied clip.
+- Resolve puts each pasted keyframe one frame early ([gotchas](gotchas.md#resolves-edits)).
+- Retime Effects with Ripple Sequence off keeps the length of the clip.
+- With Ripple Sequence on, the clip takes the length of its new speed. The clips after it move.
+- `videoPlugins` by script replaces the effects of the clip: Gaussian Blur and Mosaic became Gaussian Blur only.
+- `audioVolume` by script gives only the volume. `audioEqualizer` gives the equalizer, and `colorCorrection` gives the grade.
+- Edit > Remove Attributes... has the same boxes, and Voice Isolation, Dialogue Leveler and Music Remixer.
+  - It has no From, no To and no Keyframes. Nothing is checked at open.
+  - Remove of Zoom gives Zoom 1.000 with no keyframes. Crop and Opacity stay.
+- vidcut:
+  - `clip.paste_attributes` and `clip.remove_attributes` do it, with the names of `ClipAttribute`.
+  - The GUI sends the first copied clip. A script gives `from` or `copied`.
+  - The window has the groups of the measure. vidcut has no clip Flags, clip Markers, Retain Image Position, Motion Estimation or Music Remixer.
+  - Plugins is Effects, and Fusion Effects is Effects Page. Retime Effects is Speed, with Ripple Timeline.
+  - Effects of the audio are the compressor and Noise Reduction.
+  - Each keyframe goes to the same distance, not one frame early.
+  - A composition keeps its keyframes at their distance from the start with both Keyframes choices.
+  - A clip takes only what it can have. A clip with no sound takes no volume, and a clip with no source takes no speed.
+  - A generator takes no effects, grade or composition.
+  - A copied speed with keyframes does not paste. The request gives an error.
+  - Clip Color gives the color that the copied clip shows.
+
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
@@ -4413,7 +4455,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - It runs DPDFNet (Apache-2.0) on the CPU of this computer. It runs live in playback, and the same in an export.
     - It works on any number of channels, each channel alone.
     - A clip left unset follows its track. A clip that is off stays off on a track that is on.
-    - Voice Isolation in the right-click menu of a clip, or Alt + V, turns the switch on or off for the selected clips.
+    - Voice Isolation in the right-click menu of a clip, or Alt+A, turns the switch on or off for the selected clips.
     - The strip of the Mixer does it for a track. An Amount field beside each one sets the Amount.
     - The model, 10 MB, is downloaded the first time, after a question.
     - An OTIO file keeps the switches and the Amounts in the metadata of vidcut. Its export tells that other editors do not hear them.
@@ -5028,6 +5070,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 
 | Alt+Delete | Lift the selection (D9) |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste; after a click in the Keyframes tab or the keyframe tray, the keyframes (§2) |
+| Alt+V | Paste Attributes (§8.26) |
+| Alt+A | Voice Isolation of the selected clips on or off (§9) |
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+] | Color page: add a Static keyframe to the grade ([§8.22](#822-color-page-keyframes-pp-34533465)) |
 | Alt+Shift+C | Color page: Auto Color on the current node ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)) |

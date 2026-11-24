@@ -261,6 +261,8 @@ pub struct TimelineView {
     pub leveler: Option<super::leveler::GainDrag>,
     pub compressor: Option<super::compressor::CompressorDialog>,
     pub noise: Option<super::noise::NoiseDialog>,
+    pub attributes: Option<super::attributes::AttributesDialog>,
+    pub paste_last: Option<super::attributes::PasteChoice>,
     pub boring_dialog: Option<(f64, i64)>,
     pub dynamic: Option<tools::Dynamic>,
     pub strip_drag: Option<(EditSel, i64)>,
@@ -325,6 +327,8 @@ impl Default for TimelineView {
             leveler: None,
             compressor: None,
             noise: None,
+            attributes: None,
+            paste_last: None,
             normalize_last: None,
             boring_dialog: None,
             dynamic: None,
@@ -3039,6 +3043,17 @@ impl Workspace {
             "edit.cut",
             json!({ "clips": clips }),
         );
+        let pasted = self.snap.copied_clip.is_some();
+        let paste = bindings.named("Paste Attributes…", Action::PasteAttributes);
+        let mut attributes = None;
+        if ui.add_enabled(pasted, egui::Button::new(paste)).clicked() {
+            attributes = Some(true);
+            ui.close();
+        }
+        if ui.button("Remove Attributes…").clicked() {
+            attributes = Some(false);
+            ui.close();
+        }
         item(
             ui,
             &bindings.named("Delete", Action::Delete),
@@ -3065,6 +3080,11 @@ impl Workspace {
                 "edit.decompose",
                 json!({ "clips": [c.id] }),
             );
+        }
+        match attributes {
+            Some(true) => self.open_paste_attributes(clips.clone()),
+            Some(false) => self.open_remove_attributes(clips.clone()),
+            None => {}
         }
         ui.separator();
         if ui.button("New Compound Clip…").clicked() {

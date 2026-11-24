@@ -120,6 +120,7 @@ actions! {
     Copy "copy",
     Cut "cut",
     Paste "paste",
+    PasteAttributes "paste_attributes",
     PictureOff "picture_off",
     Transform "transform",
     Crop "crop",
@@ -1097,6 +1098,15 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     own(
         Clips,
+        Action::PasteAttributes,
+        &["Alt+V"],
+        "Paste attributes",
+        Some(
+            "Opens Paste Attributes for the selected clips: the chosen parts of the first copied clip go to them.",
+        ),
+    ),
+    own(
+        Clips,
         Action::PictureOff,
         &["D"],
         "Picture off or on",
@@ -1148,7 +1158,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     own(
         Clips,
         Action::VoiceIsolation,
-        &["Alt+V"],
+        &["Alt+A"],
         "Voice Isolation on or off",
         Some("Takes background noise out of the selected clips' voices."),
     ),

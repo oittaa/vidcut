@@ -1,3 +1,4 @@
+pub mod attributes;
 pub mod comp;
 pub mod compound;
 pub mod conform;
