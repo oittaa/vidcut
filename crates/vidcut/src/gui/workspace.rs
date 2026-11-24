@@ -1465,6 +1465,21 @@ impl Workspace {
         };
     }
 
+    fn undo_keys(&mut self, fired: &Fired) {
+        if fired.pressed(Action::Undo) {
+            match &mut self.timeline.silence {
+                Some(d) => d.undo(),
+                None => self.send("history.undo", json!({})),
+            }
+        }
+        if fired.pressed(Action::Redo) {
+            match &mut self.timeline.silence {
+                Some(d) => d.redo(),
+                None => self.send("history.redo", json!({})),
+            }
+        }
+    }
+
     fn keys(&mut self, ctx: &egui::Context) {
         super::dialog::take_forwarded_keys(ctx);
         self.key_focus(ctx);
@@ -1535,6 +1550,7 @@ impl Workspace {
         }
         if self.effects_page.page == Page::Effects {
             self.effects_keys(&fired, &input);
+            self.undo_keys(&fired);
             return;
         }
         let viewer = self.snap.viewer;
@@ -1756,18 +1772,7 @@ impl Workspace {
                 self.delete_key(lift);
             }
         }
-        if fired.pressed(Action::Undo) {
-            match &mut self.timeline.silence {
-                Some(d) => d.undo(),
-                None => self.send("history.undo", json!({})),
-            }
-        }
-        if fired.pressed(Action::Redo) {
-            match &mut self.timeline.silence {
-                Some(d) => d.redo(),
-                None => self.send("history.redo", json!({})),
-            }
-        }
+        self.undo_keys(&fired);
         if fired.pressed(Action::Import) {
             self.import_media();
         }
