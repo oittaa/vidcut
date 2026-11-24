@@ -4881,6 +4881,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - 4 digits with Each clip starts at frame 1 gives `m-red0001.exr` to `m-red0096.exr`.
   - Replace existing files in place, with a movie source, writes the frames as usual. The source does not change.
   - Render speed has 1, 2, 5, 10, 25, 50, 75, 100 and Maximum.
+  - 48 frames take 10.24 s at 5, 2.25 s at 25, 1.24 s at 100 and 0.74 s at Maximum. 48 frames at 5, 25 and 100 frames a second take 9.6, 1.92 and 0.48 s.
+  - Thus each number is a limit in frames a second. The rest of each time is 0.3 to 0.8 s that each render takes.
+  - The manual says that Render speed limits the speed to 1 to 50 percent of full speed (p. 4127). The measure does not agree.
   - Individual clips adds Render timeline effects and Render at source resolution to the Video tab.
 - **Range** (pp. 4128–4129):
   - The Render menu has Entire Timeline and In/Out Range.
@@ -4953,7 +4956,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A job that renders cannot be removed, also not by Clear Rendered. Clear All is greyed while jobs render.
   - The right-click menu has no Reveal in Media Storage, because vidcut has no Media Storage.
   - With Individual clips, the File tab has Filename Uses, Custom Name, File Suffix, Unique Names, Source Frame Count and File Subfolder.
-  - Then Filename Digits, First Frame for image sequences, Replace Files, Separate Folders, Source Folder Levels and Count Levels.
+  - Then Filename Digits, First Frame for image sequences, Replace Files, Separate Folders, Source Folder Levels, Count Levels and Render Speed.
   - The requests have the same fields: `name`, `source_names`, `suffix`, `unique`, `no_frame_count`, `subfolder`, `separate_folders`, `source_levels` and `levels_from`.
   - The Custom Name takes `{source}` and the other parts of `name`. It is `{source}` by default.
   - The frame count is the source timecode of the clip's first frame, as a frame count at the rate of the source. Filename Digits sets its digits, also for a movie. It is 8 by default.
@@ -4967,7 +4970,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The folders go in the measured order: the Source Folder Levels, the folder of Separate Folders, then the File Subfolder.
   - An export refuses Unique Names with Source Name. With an image sequence, it refuses Source Name, File Suffix, Unique Names and no frame count.
   - Count Levels After Head drops the first levels of the path, with the drive as level 1. It needs a path with a drive letter.
-  - With Single clip, the File tab has Filename Digits and First Frame for image sequences, and Replace Files.
+  - With Single clip, the File tab has Filename Digits and First Frame for image sequences, Replace Files and Render Speed.
+  - Render Speed limits the export to that number of frames in each second. Maximum gives no limit. The menu has the measured numbers.
+  - `render_speed` of the settings takes each number from 1. Left out, it is Maximum.
   - The other rows of the File tab wait for a measurement ([todo](todo/export-file-tab.md)).
   - The other parts of the page are in [gaps](todo/gaps.md).
 

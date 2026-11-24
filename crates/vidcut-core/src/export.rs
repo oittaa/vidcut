@@ -664,6 +664,10 @@ pub struct ExportSettings {
     /// 3 ms fades where audio is cut, so cuts don't click.
     #[serde(default = "yes")]
     pub declick: bool,
+    /// Render Speed: the most frames that the export renders in a second.
+    /// Left out: as fast as it can.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_speed: Option<std::num::NonZeroU32>,
 }
 
 fn yes() -> bool {
@@ -796,6 +800,7 @@ fn av(container: Container, v: VideoSettings, a: AudioSettings) -> ExportSetting
         video: Some(v),
         audio: Some(a),
         declick: true,
+        render_speed: None,
     }
 }
 
@@ -805,6 +810,7 @@ fn frames(container: Container, v: VideoSettings) -> ExportSettings {
         video: Some(v),
         audio: None,
         declick: true,
+        render_speed: None,
     }
 }
 
@@ -814,6 +820,7 @@ fn audio_only(container: Container, a: AudioSettings) -> ExportSettings {
         video: None,
         audio: Some(a),
         declick: true,
+        render_speed: None,
     }
 }
 
