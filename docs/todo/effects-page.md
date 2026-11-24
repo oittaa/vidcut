@@ -28,6 +28,7 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - The Luminance and the Hue channels use the Rec. 601 luma and the true hue ([gotchas](../gotchas.md#resolves-fusion-page)).
   - vidcut joins only an empty input, and only a mask to an effect mask input.
 - **The active node after a box select:** measured: Resolve then has no active node, and the Inspector shows the headers closed. vidcut makes the last node active.
+- **A delete of a viewed node:** measured: Resolve puts the node on its input in that viewer ([spec](../spec.md#the-effects-page)). vidcut empties the viewer.
 - **The Center of a Vignette:** measured: one row with an X and a Y field, and no point in the viewer. vidcut shows Center X and Center Y in two rows.
 - **Page keys that vidcut does not have:**
   - Shift+Space opens Select Tool (p. 1386).
