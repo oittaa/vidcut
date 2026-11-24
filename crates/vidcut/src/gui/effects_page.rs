@@ -2860,6 +2860,11 @@ impl Workspace {
         if mine.pressed(Action::NextNodeKeyframe) {
             self.node_key_step(1);
         }
+        if mine.pressed(Action::NodeOriginalSize) {
+            self.effects_page
+                .graph
+                .ask(vidcut_core::request::NodeZoom::Original);
+        }
         if self.tracks_running().is_empty() {
             self.node_keys(fired, &mine);
         }

@@ -155,6 +155,7 @@ actions! {
     ClearViewers "clear_viewers",
     PreviousNodeKeyframe "previous_node_keyframe",
     NextNodeKeyframe "next_node_keyframe",
+    NodeOriginalSize "node_original_size",
     AddSerialNode "add_serial_node",
     AddNodeBefore "add_node_before",
     AddParallelNode "add_parallel_node",
@@ -200,6 +201,7 @@ impl Action {
             | Action::ClearViewers
             | Action::PreviousNodeKeyframe
             | Action::NextNodeKeyframe
+            | Action::NodeOriginalSize
             | Action::SourceStart
             | Action::SourceEnd
             | Action::ClipIn
@@ -1462,6 +1464,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Alt+]"],
         "Next keyframe of the node",
         Some("The playhead goes to the next keyframe of the active node."),
+    ),
+    own(
+        Nodes,
+        Action::NodeOriginalSize,
+        &["Ctrl+1"],
+        "Original Size",
+        Some("The node editor goes back to its usual scale."),
     ),
     own(
         Nodes,
