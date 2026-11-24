@@ -6004,6 +6004,7 @@ fn is_edit_function(r: &Request) -> bool {
             | Request::EditInsert { .. }
             | Request::EditOverwrite { .. }
             | Request::EditRippleOverwrite { .. }
+            | Request::EditCloseUp { .. }
             | Request::EditSourceOverwrite { .. }
             | Request::EditPaste { .. }
     )

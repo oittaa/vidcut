@@ -424,6 +424,15 @@ Ranges and resolution:
 - The GUI sends no `range` for media (`edit_from`). The core then reads `Media.marks`, and it can tell source marks from no marks.
 - The GUI sends `range` for a generator with marks. Why: its marks are in the live session, not in the project.
 
+## Close Up
+
+`ops::close_up` holds `edit.close_up`. The behavior is in [spec §7.2](../spec.md#72-edit-functions).
+
+- The copy is a clone of the clip. `Clip::move_head` moves its start, so it stays in sync.
+- `track_above` gives the track, as for `place_on_top`.
+- The result is a `Placed`, as for Source Overwrite. `playhead_after_edit` seeks to its `playhead`.
+- With no clip at the frame, the result is empty. Why: nothing changes, as in the measurements.
+
 ## Ids
 
 | Thing | Id | Made by |

@@ -792,6 +792,11 @@ impl Workspace {
             .then_some("This Camera Has No Frames Between the Marks")
     }
 
+    pub(super) fn close_up(&mut self) {
+        let at = self.snap.timeline.position;
+        self.send("edit.close_up", json!({ "at": at }));
+    }
+
     pub(super) fn edit_function(&mut self, method: &str) {
         if self.multi_on()
             && let Some(refusal) = self.multi_refusal(method)
@@ -1780,6 +1785,9 @@ impl Workspace {
             if fired.pressed(action) {
                 self.edit_function(method);
             }
+        }
+        if fired.pressed(Action::CloseUp) {
+            self.close_up();
         }
         if fired.pressed(Action::Dissolve) {
             self.send("edit.dissolve", self.dissolve_target());

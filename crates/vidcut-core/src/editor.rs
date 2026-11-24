@@ -3792,6 +3792,26 @@ fn mutate(
             v["track"] = json!(track);
             v
         }
+        Request::EditCloseUp { at } => {
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            let at = if p.marks.is_empty() {
+                need(at, "at")?
+            } else {
+                at.unwrap_or(0)
+            };
+            match ops::close_up(p, at)? {
+                Some(placed) => json!({
+                    "clip": placed.clip,
+                    "track": placed.track,
+                    "reference": placed.reference,
+                    "playhead": placed.playhead,
+                }),
+                None => json!({}),
+            }
+        }
         Request::EditSourceOverwrite {
             source: src,
             at,

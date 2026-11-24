@@ -654,6 +654,11 @@ These facts come from measurements in Resolve Studio 21.2, by hand and through i
   - Ctrl+Shift+Z then gives nothing back. The Edit menu shows Redo.
   - vidcut: each run of Auto Color is one undo step, and Redo gives it back.
 
+- **Close Up leaves the Out frame out.**
+  - With a timeline Out at frame 200 alone, the copy ends before frame 200.
+  - With an In at 220 and an Out at 260, the copy covers frames 220 to 259.
+  - The other edits put the Out frame in the clip (spec D16).
+  - vidcut puts the Out frame in the copy, as in the other edits ([spec §7.2](spec.md#72-edit-functions)).
 - **Paste Attributes puts each keyframe one frame early.**
   - The copied clip has Zoom keys on its first and its last frame. Maintain Timing onto the next clip puts the first key one frame before that clip.
   - The first frame of that clip then reads 1.001, not 1.000.

@@ -1,8 +1,8 @@
-# Smart Reframe and Close Up
+# Smart Reframe
 
 **When:** not decided.
 
-Smart Reframe and Close Up are later Cut page work ([spec §1](../spec.md#1-scope), [§7.2](../spec.md#72-edit-functions)). vidcut has neither.
+Smart Reframe is later Cut page work ([spec §1](../spec.md#1-scope)). vidcut does not have it.
 
 **Why:**
 
@@ -19,10 +19,8 @@ Smart Reframe and Close Up are later Cut page work ([spec §1](../spec.md#1-scop
 
 **To do:**
 
-- Measure Smart Reframe and Close Up in Resolve, including the values they store.
 - Smart Reframe keeps a person, or a point the user chooses, inside the framing aspect.
 - Store that move as Transform keyframes when the measured values fit them.
-- Close Up fills the frame with the face, as that edit does in the manual.
 - The analysis runs on this computer.
 - A missing model uses the download check and the SHA-256 check of the other local models.
 - The CLI, IPC and MCP perform the same action as the GUI.

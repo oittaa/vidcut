@@ -289,6 +289,7 @@ pub fn category(kind: &str) -> &'static str {
         | "edit.smart_insert"
         | "edit.ripple_overwrite"
         | "edit.place_on_top"
+        | "edit.close_up"
         | "edit.source_overwrite"
         | "edit.paste"
         | "edit.replace" => "Edits in",

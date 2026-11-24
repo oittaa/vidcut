@@ -45,7 +45,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - LUT files other than `.cube` ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
-- Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
+- Smart Reframe ([todo](todo/smart-reframe.md))
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
@@ -890,7 +890,32 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - **`tape` across files:** each file lines up by itself, and the edit is one step.
     - **Several selected pool items:** each file lines up by itself, the timeline marks hold for all of them (`keep_marks`), and the edit is one step.
     - **A generator as the source:** it has timecode 00:00:00:00 and 5 s of frames, as a still has one timecode. A timeline Out can make it longer. `group` refuses it.
-- **Close Up (later).**
+- **Close Up** (pp. 698–699; measured in Resolve Studio 21.2):
+  - It puts a copy of a timeline clip on a track above that clip, in sync, as a closer shot.
+  - The manual says that the incoming clip goes in. In the measurements, the edit used the timeline clip. A source with marks did not change the result.
+  - **The clip** is the top clip at a frame. The frame is the first of these: the timeline In, the frame of a lone timeline Out, the playhead.
+  - **The range:**
+    - With no marks, it starts at the playhead and is 5 seconds long: 120 frames at 24 fps, 125 frames at 25 fps.
+    - With an In alone, it goes from the In to the end of the clip.
+    - With an Out alone, it goes from the start of the clip to the Out.
+    - With an In and an Out, it goes from the In to the Out.
+    - It stops at the end of the clip.
+  - **The copy:**
+    - At each timeline frame, it shows the same source frame as the clip.
+    - It has no sound. Its Zoom is 2.0, its Position is in the middle, and it has no keyframes.
+    - The manual says about 150%, and a face detection that puts a face in the frame. In the measurements, the Zoom was 2.0, and a person off the middle stayed off the middle.
+  - **Track:** the first video track above the highest track with a clip in the range, as for Place On Top (D24). It never fills a free lower track.
+    - Each new video track also makes one empty audio track.
+  - **After the edit,** the timeline marks clear, and the playhead goes to the end of the copy.
+    - One undo takes back the copy, the new tracks and the move of the playhead.
+  - With no clip at the frame, nothing changes, and no message shows.
+  - It has no default key. The manual names no key for it.
+  - vidcut: the Out frame is in the copy, as in the other edits (D16). Resolve leaves it out ([gotchas](gotchas.md#resolves-edits)).
+  - vidcut: these cases are not measured:
+    - **A range past the end of the clip:** it stops at the end of the clip.
+    - **A clip with its own Zoom, Position, effects or grade:** the copy has the usual picture at Zoom 2.0, with no effects and no grade.
+    - **A generator, a title or a compound clip:** it is copied in the same way.
+    - **A disabled clip, or a clip on a hidden track:** it does not count. The clip below it counts.
 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
 - **Onto an empty timeline, or left of the first clip:** the clip becomes the first clip.
@@ -5159,7 +5184,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - With a gap or a clip with no sound there, the `head` or `tail` stays. It gets shorter when it would overlap other sound.
   - Reason: sound does not overlap on a track.
 - **D15. Playhead after an edit function.**
-  - After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the playhead moves to the frame after the new clips.
+  - After Smart Insert, Append, Overwrite, Ripple Overwrite, Close Up or Paste, the playhead moves to the frame after the new clips.
   - The Viewer keeps its mode, so Q reviews the result (p. 696).
   - A drop does not move the playhead.
   - This is the behavior of the Edit page.
