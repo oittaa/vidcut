@@ -3200,8 +3200,11 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
     - A viewed mask shows as a white shape on black.
     - The size of the picture shows at the top right of the viewer.
     - The viewers are not in the undo history. Undo of a delete does not put the node back in the viewer.
-    - A delete of a viewed Blur put the node on its input in that viewer. A delete of a viewed mask with no input left its viewer empty.
-    - vidcut: a delete of a viewed node empties its viewer ([todo](todo/effects-page.md)).
+    - A delete of a viewed node puts the node on its input in that viewer. On a mask, this is the node on its Effect Mask input. With no such node, the viewer is empty.
+      - A delete of a viewed Blur put the node on its input in that viewer. A delete of a viewed Merge put its Background node there.
+      - A delete of a viewed Rectangle with an Ellipse on its Effect Mask put the Ellipse there. A delete of a viewed mask with no input left its viewer empty.
+      - In Background6 → Blur1 → Blur2, a delete of Blur1 and Blur2 together put Background6 in the viewer of Blur2.
+      - A delete of a node in the two viewers put its input in both.
     - A change to another page and back keeps the viewers.
 - Two dots at the bottom left of a node put the node in a viewer (pp. 1290, 1392–1393). Measured in Resolve Studio 21.2:
   - The left dot is the left viewer. A white dot shows that the node is in that viewer.
