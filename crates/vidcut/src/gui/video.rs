@@ -134,6 +134,7 @@ impl Viewer {
             crate::threads::Work::Interactive,
             move || {
                 let gpu = made.get_or_init(|| Gpu::new(&device, &queue).behind(gate));
+                repaint();
                 run(&s, gpu, &repaint)
             },
         )

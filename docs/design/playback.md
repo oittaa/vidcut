@@ -395,7 +395,7 @@ Faders:
 - `Cells` gives each frame its own engine on the media of the clip (`render::tape`, no sound), with `ManualOutput`. The engines keep their pictures in the cache of the viewer.
 - In each UI frame, `Player::follow` gives each engine its frame and the speed of the trim. The engine decodes ahead as if it plays.
 - The windows behind decode on `vidcut-play-windows`: one at a time across the followed players, and none while a player moves forward.
-- `Screens` draws the cells with `Screen` on the UI thread, with the viewer's `Gpu` (`Viewer::gpu`). Until the viewer thread makes it, the cells show nothing.
+- `Screens` draws the cells with `Screen` on the UI thread, with the viewer's `Gpu` (`Viewer::gpu`). Until the viewer thread makes it, the cells show nothing. Then the thread asks the UI for a frame.
 - The submissions of the cells go through the gate of that `Gpu`. The UI thread holds the gate open in `logic` and `ui`, so they pass at once.
 - Multi Source, the Sync Bin grid and the Sync Clips window use the same `Cells`. It has no limit of cells. Each engine gets one part of the cache for each cell in use, four parts at the least.
 - The Sync Clips window has one more engine for its sound, on the real output. Its plan has a black picture, so it decodes no frames (`render::places_sound`).
