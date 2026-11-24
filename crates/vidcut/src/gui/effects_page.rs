@@ -99,6 +99,7 @@ const TOOL_ROW: [&[ToolType]; 2] = [
 ];
 
 const GRADES_LEFT_KEPT: usize = 4096;
+const VIEWERS_KEPT: usize = 4096;
 const DETAIL_KNOT: Color32 = Color32::from_rgb(150, 150, 150);
 
 pub(super) struct EffectsPage {
@@ -106,8 +107,7 @@ pub(super) struct EffectsPage {
     pub(super) nodes: Vec<String>,
     pub(super) element: u8,
     seen: Option<String>,
-    pub(super) viewed: [Option<String>; 2],
-    viewed_clip: Option<String>,
+    viewed: Lru<String, [Option<String>; 2], VIEWERS_KEPT>,
     pub(super) shown: Viewers,
     active_viewer: Option<usize>,
     viewer_rects: [Option<Rect>; 2],
@@ -152,8 +152,7 @@ impl Default for EffectsPage {
             nodes: Vec::new(),
             element: 1,
             seen: None,
-            viewed: [None, None],
-            viewed_clip: None,
+            viewed: Lru::new(),
             shown: Viewers::Both,
             active_viewer: None,
             viewer_rects: [None, None],
@@ -906,16 +905,14 @@ impl Workspace {
         let Some((clip, comp)) = self.page_clip() else {
             return [None, None];
         };
-        if self.effects_page.viewed_clip.as_deref() != Some(clip.id.as_str()) {
+        let Some(viewed) = self.effects_page.viewed.peek(&clip.id) else {
             let out = comp.nodes.iter().find(|n| n.tool == Tool::MediaOut);
             return [None, out.map(|n| n.name.clone())];
-        }
+        };
         let waiting = !self.effects_page.asked.is_empty();
-        let kept = |v: &Option<String>| v.clone().filter(|n| waiting || comp.node(n).is_some());
-        [
-            kept(&self.effects_page.viewed[0]),
-            kept(&self.effects_page.viewed[1]),
-        ]
+        viewed
+            .clone()
+            .map(|v| v.filter(|n| waiting || comp.node(n).is_some()))
     }
 
     pub(super) fn viewer_state(&self) -> crate::live::ViewerState {
@@ -939,19 +936,18 @@ impl Workspace {
                 if let Some(missing) = wanted.into_iter().find(|n| comp.node(n).is_none()) {
                     return Err(format!("{} has no node {missing}", clip.id));
                 }
-                self.effects_page.viewed_clip = Some(clip.id);
+                for (v, n) in viewed.iter_mut().zip(names) {
+                    if let Some(n) = n {
+                        *v = (!n.is_empty()).then_some(n);
+                    }
+                }
+                self.effects_page.viewed.insert(clip.id, viewed);
             }
             None if names.iter().any(Option::is_some) => {
                 return Err("There is no clip at the playhead".into());
             }
             None => {}
         }
-        for (v, n) in viewed.iter_mut().zip(names) {
-            if let Some(n) = n {
-                *v = (!n.is_empty()).then_some(n);
-            }
-        }
-        self.effects_page.viewed = viewed;
         if let Some(shown) = shown {
             self.effects_page.shown = shown;
         }
@@ -1017,8 +1013,12 @@ impl Workspace {
             self.effects_page.view = (0.0, 1.0);
             self.leave_inspector();
         }
-        self.effects_page.viewed = self.viewers_now();
-        self.effects_page.viewed_clip = self.page_clip().map(|(c, _)| c.id);
+        if let Some(id) = self.effects_page.seen.clone() {
+            let now = self.viewers_now();
+            if self.effects_page.viewed.peek(&id) != Some(&now) {
+                self.effects_page.viewed.insert(id, now);
+            }
+        }
         self.sync_bounds();
         if let Some((at, since)) = self.effects_page.held.as_ref().and_then(|h| h.sent)
             && (at != rev || since.elapsed().as_secs_f64() > SETTLE)
@@ -1047,11 +1047,12 @@ impl Workspace {
                     .filter_map(|v| v.as_str().map(str::to_owned))
                     .collect()
             });
-            if let Then::Renamed(old) = &then {
-                for v in &mut self.effects_page.viewed {
-                    if v.as_ref() == Some(old) {
-                        *v = Some(node.clone());
-                    }
+            if let Then::Renamed(old) = &then
+                && let Some(id) = self.effects_page.seen.clone()
+                && let Some(viewed) = self.effects_page.viewed.get_mut(&id)
+            {
+                for v in viewed.iter_mut().filter(|v| v.as_ref() == Some(old)) {
+                    *v = Some(node.clone());
                 }
             }
             self.effects_page.nodes = match then {
@@ -1409,10 +1410,12 @@ impl Workspace {
         }
         self.effects_page.viewer_rects = rects;
         if let Some(press) = ui.input(|i| {
-            i.pointer
-                .any_pressed()
-                .then(|| i.pointer.press_origin())
-                .flatten()
+            i.events.iter().find_map(|e| match e {
+                egui::Event::PointerButton {
+                    pos, pressed: true, ..
+                } => Some(*pos),
+                _ => None,
+            })
         }) {
             self.effects_page.active_viewer = self.viewer_at(press);
         }

@@ -3110,7 +3110,8 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - The Effects page shows the composition of the topmost visible clip at the playhead (p. 1332).
 - The viewer shows that clip alone, at the size of its own picture (p. 1332).
 - There are two viewers, side by side (p. 1288). Each viewer shows the output of one node, or nothing.
-  - When the page shows a new clip, the left viewer is empty. The right viewer shows the MediaOut node (p. 1290).
+  - The left viewer of a clip that was not on the page before is empty. The right viewer shows the MediaOut node (p. 1290).
+  - Measured in Resolve Studio 21.2: each clip keeps the nodes of its viewers. A change to another clip and back shows them again.
   - The title bar of a viewer shows the name of its node (p. 1291). vidcut also shows the name of the clip.
   - The Viewer button at the right of a title bar keeps only that viewer. A second click shows the two viewers again (p. 1288).
   - Measured in Resolve Studio 21.2:
