@@ -1240,7 +1240,9 @@ impl Workspace {
                         .desired_width(260.0)
                         .show(ui);
                     let edit = output.response;
-                    edit.request_focus();
+                    if !edit.has_focus() {
+                        edit.request_focus();
+                    }
                     if s.focus {
                         let mut state = output.state;
                         let all = egui::text::CCursorRange::two(
