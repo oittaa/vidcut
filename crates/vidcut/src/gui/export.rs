@@ -30,10 +30,24 @@ impl Ask {
         method: &str,
         params: Value,
     ) -> Self {
+        Self::send_json(live, ctx, json!({ "method": method, "params": params }))
+    }
+
+    pub(super) fn send_dry(
+        live: &live::Handle,
+        ctx: &egui::Context,
+        method: &str,
+        params: Value,
+    ) -> Self {
+        let envelope = json!({ "method": method, "params": params, "dry_run": true });
+        Self::send_json(live, ctx, envelope)
+    }
+
+    fn send_json(live: &live::Handle, ctx: &egui::Context, envelope: Value) -> Self {
+        let envelope = Envelope::from_json(envelope);
         let slot = Arc::new(Mutex::new(None));
         let stop = Arc::new(AtomicBool::new(false));
         let (out, halt, live, ctx) = (slot.clone(), stop.clone(), live.clone(), ctx.clone());
-        let envelope = Envelope::from_json(json!({ "method": method, "params": params }));
         let _ = crate::threads::spawn("vidcut-ask", crate::threads::Work::Interactive, move || {
             let mut going = |_| !halt.load(Ordering::Relaxed);
             let result = envelope
@@ -174,6 +188,9 @@ pub struct ExportUi {
     pub(super) render: Option<Box<Render>>,
     render_wanted: bool,
     pub(super) viewer_before: Option<vidcut_core::request::ViewerMode>,
+    pub(super) selected: Vec<String>,
+    pub(super) job_details: bool,
+    pub(super) queue: Option<super::export_page::QueueStep>,
     starting: Option<Starting>,
     pub show_jobs: bool,
     jobs_seen: std::collections::HashMap<String, JobState>,
@@ -231,6 +248,15 @@ struct Starting {
     ask: Option<Ask>,
     weights: bool,
     offline: Vec<String>,
+}
+
+impl Starting {
+    fn method(&self) -> &'static str {
+        match self.from {
+            From::Quick => "export.start",
+            From::Page => "render.add",
+        }
+    }
 }
 
 enum Otio {
@@ -367,7 +393,7 @@ fn fixed_format(c: VideoCodec) -> bool {
     )
 }
 
-fn name<T: serde::Serialize>(v: &T) -> String {
+pub(super) fn name<T: serde::Serialize>(v: &T) -> String {
     serde_json::to_value(v)
         .ok()
         .and_then(|v| v.as_str().map(String::from))
@@ -478,7 +504,7 @@ pub(super) fn near_center(ctx: &egui::Context, w: f32, h: f32) -> egui::Pos2 {
     )
 }
 
-fn clock(secs: f64) -> String {
+pub(super) fn clock(secs: f64) -> String {
     let s = secs.max(0.0).round() as u64;
     if s >= 3600 {
         format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
@@ -888,16 +914,20 @@ impl Workspace {
                 if download {
                     s.params["download"] = json!(true);
                 }
-                s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));
+                s.ask = Some(Ask::send(&self.live, ctx, s.method(), s.params.clone()));
             }
         }
         if let Some(ask) = &s.ask
             && let Some(r) = ask.take()
         {
             match r {
-                Ok(_) => match s.from {
+                Ok(r) => match s.from {
                     From::Quick => self.export.quick = None,
-                    From::Page => {}
+                    From::Page => {
+                        if let Some(id) = r.result["id"].as_str() {
+                            self.export.selected = vec![id.to_string()];
+                        }
+                    }
                 },
                 Err(e) => match s.from {
                     From::Quick => {
@@ -938,13 +968,12 @@ impl Workspace {
         if !super::upscale::needed(&retimes, &upscalers).is_empty() {
             s.weights = true;
         } else {
-            s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));
+            s.ask = Some(Ask::send(&self.live, ctx, s.method(), s.params.clone()));
         }
     }
 
     pub(super) fn start_render(&mut self, ctx: &egui::Context, d: &mut Render) {
-        let mut params = d.params();
-        params["background"] = json!(true);
+        let params = d.params();
         d.error = None;
         self.folders.remember(Kind::Exports, &d.output());
         let mut s = Starting {

@@ -354,6 +354,8 @@ impl Workspace {
                 }
                 live::GuiChange::Primaries(view) => self.effects_page.primaries = view,
                 live::GuiChange::Window(w) => self.effects_page.window = w,
+                live::GuiChange::QueueJobs(jobs) => self.select_queue_jobs(jobs)?,
+                live::GuiChange::JobDetails(on) => self.export.job_details = on,
                 live::GuiChange::Nodes(nodes, active) => self.pick_nodes(nodes, active)?,
                 live::GuiChange::Element(e) => self.effects_page.element = e,
                 live::GuiChange::GradeNodes(nodes, current) => {
@@ -510,6 +512,8 @@ impl Workspace {
                 .into_iter()
                 .filter_map(|(panel, open)| open.then_some(panel))
                 .collect(),
+            jobs: self.export.selected.clone(),
+            job_details: self.export.job_details,
         }
     }
 

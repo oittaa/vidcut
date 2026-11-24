@@ -34,6 +34,7 @@ pub struct Project {
     pub bins: Vec<String>,
     pub groups: Vec<SyncGroup>,
     pub speakers: Speakers,
+    pub queue: Vec<RenderJob>,
 }
 
 /// A whole project: its media and its timelines.
@@ -83,6 +84,10 @@ pub struct ProjectFile {
     /// words given to another (`speakers.*`).
     #[serde(default)]
     pub speakers: Speakers,
+    /// The render queue of the Export page, from the top. Left out when it
+    /// is empty.
+    #[serde(default)]
+    pub queue: Vec<RenderJob>,
 }
 
 #[derive(Serialize)]
@@ -109,6 +114,8 @@ struct ProjectOut<'a> {
     groups: &'a [SyncGroup],
     #[serde(skip_serializing_if = "Speakers::is_empty")]
     speakers: &'a Speakers,
+    #[serde(skip_serializing_if = "<[RenderJob]>::is_empty")]
+    queue: &'a [RenderJob],
 }
 
 impl Serialize for Project {
@@ -139,6 +146,7 @@ impl Serialize for Project {
             bins: &self.bins,
             groups: &self.groups,
             speakers: &self.speakers,
+            queue: &self.queue,
         }
         .serialize(s)
     }
@@ -164,6 +172,7 @@ impl From<ProjectFile> for Project {
             bins: f.bins,
             groups: f.groups,
             speakers: f.speakers,
+            queue: f.queue,
         };
         p.check_out();
         p
@@ -221,6 +230,36 @@ impl RenderRange {
     pub fn is_entire(&self) -> bool {
         *self == Self::Entire
     }
+}
+
+/// A job of the render queue: an export of a timeline that waits for a
+/// render.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RenderJob {
+    /// `r<N>`. The Export page names a job by its place: Job 1 is at the
+    /// top.
+    pub id: String,
+    /// The timeline that it renders.
+    pub timeline: String,
+    /// What it renders and how. Its `range` is in frames of the timeline,
+    /// as the range was when the job was added.
+    pub export: crate::request::ExportParams,
+    /// What its last render gave. Left out before its first render and
+    /// after `render.clear_status`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<RenderStatus>,
+}
+
+/// What the last render of a job gave.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RenderStatus {
+    /// The render wrote its files in `seconds`.
+    Completed { seconds: f64 },
+    /// The render was stopped.
+    Cancelled,
+    /// The render failed with `error`.
+    Failed { error: String },
 }
 
 /// The settings that a timeline has in the place of the project's.
@@ -9015,6 +9054,7 @@ impl Project {
             bins: Vec::new(),
             groups: Vec::new(),
             speakers: Default::default(),
+            queue: Vec::new(),
         }
     }
 

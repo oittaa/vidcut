@@ -106,6 +106,7 @@ fn execute(cli: &Cli, envelope: Envelope) -> Result<Response> {
     if matches!(
         envelope.request.method().as_str(),
         "export.start"
+            | "render.start"
             | "proxy.generate"
             | "subtitles.transcribe"
             | "analyze.words"

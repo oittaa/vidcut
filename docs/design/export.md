@@ -498,6 +498,17 @@ Voice Isolation:
   - The range comes from the `RenderRange` of the open timeline. `in_out` sends `in..out`, with `start` or `end` in place of a mark that is not set.
   - On the page, the viewer shows the timeline. Why: the page renders the timeline. Another page gives back the earlier mode.
 
+The render queue:
+
+- `Project.queue` holds the jobs (`RenderJob`) in the project file. Thus a job and its status stay after a quit.
+- `render.add` keeps the open timeline and the export params of the job (`ops::render::add`). It fixes the range in frames. Why: a later change of the marks does not change a job.
+- `queue::plan` picks the jobs that `render.start` renders. It opens the timeline of each job in a copy of the project (`ops::render::source`).
+  - It finds the files that are there with `export::prepare`, as the export does. Thus it also finds the frames of an image sequence and the subtitle files.
+  - A completed job without `again`, or a file without `replace`, makes `Plan::refuse` refuse the request. A dry run returns the plan instead. The page asks its two prompts from it.
+- In a running GUI, `Live::start_queue` starts one export job for each queue job, from the top. `JobInfo::render` names the queue job.
+- When the export job ends, the core records its result with `render.ended` (`queue::status`). Without a GUI, `render.start` renders the jobs one after the other, and records each result.
+- Each change of the queue goes through the history, as any edit does. The result of a render does too.
+
 Cancel:
 
 - `jobs.cancel`, or a foreground client that leaves, sets the cancel flag of the job ([live](live.md#jobs)).

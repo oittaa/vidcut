@@ -3742,6 +3742,63 @@ pub enum Request {
     /// marks are set, otherwise the whole timeline.
     #[serde(rename = "export.start")]
     ExportStart(ExportParams),
+    /// Add a job to the render queue of the Export page: an export of the
+    /// open timeline, as `export.start` takes it, that waits for
+    /// `render.start`. The range is fixed now, in frames of the timeline.
+    /// The job goes at the bottom. Returns its `id`.
+    #[serde(rename = "render.add")]
+    RenderAdd(ExportParams),
+    /// The jobs of the render queue, from the top: the `id`, `timeline`,
+    /// `export` and `status` of each.
+    #[serde(rename = "render.list")]
+    RenderList {},
+    /// Render jobs of the render queue, one after the other from the top.
+    /// Each render is a job of `jobs.*`. Its result becomes the `status` of
+    /// its queue job. With a running GUI, it returns at once with `started`:
+    /// the queue id and the job id of each render. Without one, it returns
+    /// when the renders end, with `rendered`: the queue id and the status of
+    /// each. Both list the `skipped` jobs. A dry run returns the jobs to
+    /// `render`, the `completed` ones and the `existing` files.
+    #[serde(rename = "render.start")]
+    RenderStart {
+        /// Ids like `r1`. Left out: all jobs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jobs: Option<OneOrMany<String>>,
+        /// True renders a completed job again. False skips it. Left out, a
+        /// completed job is an error.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        again: Option<bool>,
+        /// Write over files that are there, for the jobs that are not
+        /// completed. Without it, such a file is an error.
+        #[serde(default)]
+        replace: bool,
+    },
+    /// Remove jobs from the render queue. A job that renders is refused.
+    #[serde(rename = "render.remove")]
+    RenderRemove { jobs: OneOrMany<String> },
+    /// Move a job of the render queue to a place, from 1 at the top.
+    #[serde(rename = "render.move")]
+    RenderMove { job: String, to: usize },
+    /// Remove the completed jobs from the render queue. With `all`, remove
+    /// every job.
+    #[serde(rename = "render.clear")]
+    RenderClear {
+        #[serde(default)]
+        all: bool,
+    },
+    /// Clear the status of jobs of the render queue. Left out: all jobs.
+    #[serde(rename = "render.clear_status")]
+    RenderClearStatus {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jobs: Option<OneOrMany<String>>,
+    },
+    /// Record the result of a render of a job of the render queue.
+    /// `render.start` sends it when each render ends.
+    #[serde(rename = "render.ended")]
+    RenderEnded {
+        job: String,
+        status: crate::model::RenderStatus,
+    },
     /// Render one frame as PNG: the timeline at `at`, with `media` that
     /// media's frame at `at` (source time), or with `generator` the frame of
     /// that generator as a source of 5 s.
@@ -4444,6 +4501,14 @@ pub enum Request {
         /// stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window: Option<usize>,
+        /// The selected jobs of the render queue (`r1`). Render then renders
+        /// them, and with none, all jobs. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jobs: Option<Vec<String>>,
+        /// Two more lines on each job of the render queue: the size, codec
+        /// and frame rate, and the audio and the length. Left out, it stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        job_details: Option<bool>,
     },
     /// Select nodes in the node editor of the effects page, by name. The
     /// last one is the active node. An empty list selects none. Answers
@@ -4523,7 +4588,8 @@ pub enum Request {
     /// the In), the
     /// grade of the color page and its nodes selected (`grade_nodes`), the
     /// edit points selected, the target track, the timeline's zoom and
-    /// Timeline Options, and the windows open.
+    /// Timeline Options, the windows open, and the selected `jobs` of the
+    /// render queue with `job_details`.
     #[serde(rename = "gui.state")]
     GuiState {},
     /// What an edit takes from the source. The two icons at the left of the edit buttons.
@@ -7551,6 +7617,8 @@ impl Request {
                     | Self::ModelsCheck { .. }
                     | Self::ExportPlan(_)
                     | Self::ExportStart(_)
+                    | Self::RenderList {}
+                    | Self::RenderStart { .. }
                     | Self::FrameRender { .. }
                     | Self::FrameScope { .. }
                     | Self::PresetsList {}
@@ -7621,7 +7689,7 @@ impl Request {
                 .chain(search.iter_mut())
                 .chain(unpack.iter_mut())
                 .collect(),
-            Self::ExportPlan(p) | Self::ExportStart(p) => vec![&mut p.output],
+            Self::ExportPlan(p) | Self::ExportStart(p) | Self::RenderAdd(p) => vec![&mut p.output],
             Self::FrameRender { out, .. }
             | Self::FrameScope { out, .. }
             | Self::StoryboardRender { out, .. }

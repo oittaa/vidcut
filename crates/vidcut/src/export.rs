@@ -591,7 +591,7 @@ impl Output {
         }
     }
 
-    fn taken(&self) -> Option<PathBuf> {
+    pub(crate) fn taken(&self) -> Option<PathBuf> {
         if !self.settings.container.image_sequence() {
             return Some(self.path.clone()).filter(|file| file.exists());
         }

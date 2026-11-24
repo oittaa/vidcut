@@ -313,6 +313,15 @@ pub fn run_with(
             };
             answer(crate::preferences::set_scopes(patch, envelope.dry_run)?)
         }
+        Request::RenderStart {
+            jobs,
+            again,
+            replace,
+        } => {
+            let store = open(project)?;
+            let jobs = jobs.as_ref().map(|j| j.to_vec());
+            render_queue(&store, jobs.as_deref(), *again, *replace, dry_run, hooks)?
+        }
         Request::ExportStart(params) if params.background => {
             return Err(Error::no_instance(
                 "background exports run in a vidcut GUI (they would stop with this \
@@ -395,6 +404,56 @@ pub fn run_with(
     response.via = "headless".into();
     response.dry_run |= dry_run;
     Ok(response)
+}
+
+fn render_queue(
+    store: &Store,
+    jobs: Option<&[String]>,
+    again: Option<bool>,
+    replace: bool,
+    dry_run: bool,
+    hooks: &mut Hooks<'_>,
+) -> Result<Response> {
+    let env = AvEnv::for_project(store.path());
+    let editor = store.load_project()?;
+    let plan = crate::queue::plan(editor.project(), &env.proxy_dir(), jobs, again, replace)?;
+    if dry_run {
+        return Ok(answer(plan.json()));
+    }
+    plan.refuse(again)?;
+    let mut rendered = Vec::new();
+    let mut failed = None;
+    for picked in &plan.render {
+        if hooks.cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let clock = std::time::Instant::now();
+        let result = export_media(
+            &picked.project,
+            store.path(),
+            &picked.params,
+            hooks,
+            &mut |_| Ok(()),
+        );
+        let status = crate::queue::status(&result, clock.elapsed().as_secs_f64());
+        let ended = Envelope::new(Request::RenderEnded {
+            job: picked.job.clone(),
+            status: status.clone(),
+        });
+        store.transact(|editor| editor.apply(ended, &env, None))?;
+        rendered.push(json!({ "job": picked.job, "status": status }));
+        if let Err(e) = result
+            && failed.is_none()
+        {
+            failed = Some(Error::new(e.code, format!("{}: {}", picked.job, e.message)));
+        }
+    }
+    match failed {
+        Some(e) => Err(e),
+        None => Ok(answer(
+            json!({ "rendered": rendered, "skipped": plan.skipped }),
+        )),
+    }
 }
 
 fn work_first(

@@ -53,6 +53,8 @@ pub struct JobInfo {
     pub result: Option<Value>,
     pub error: Option<Error>,
     pub details: JobDetails,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub render: Option<String>,
     #[serde(skip)]
     pub(crate) clock: Instant,
 }
@@ -174,6 +176,7 @@ impl JobInfo {
             result: None,
             error: None,
             details: JobDetails::default(),
+            render: None,
             clock: Instant::now(),
         }
     }

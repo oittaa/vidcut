@@ -3230,6 +3230,23 @@ fn mutate(
             ops::timelines::set(p, set)?;
             Value::Null
         }
+        Request::RenderAdd(export) => json!({ "id": ops::render::add(p, export.clone())? }),
+        Request::RenderRemove { jobs } => {
+            json!({ "removed": ops::render::remove(p, &jobs.to_vec())? })
+        }
+        Request::RenderMove { job, to } => {
+            ops::render::move_to(p, job, *to)?;
+            Value::Null
+        }
+        Request::RenderClear { all } => json!({ "removed": ops::render::clear(p, *all) }),
+        Request::RenderClearStatus { jobs } => {
+            ops::render::clear_status(p, jobs.as_ref().map(|j| j.to_vec()).as_deref())?;
+            Value::Null
+        }
+        Request::RenderEnded { job, status } => {
+            ops::render::ended(p, job, status.clone())?;
+            Value::Null
+        }
         Request::CompoundOpen { clip, compound } => match (clip, compound) {
             (Some(clip), None) => {
                 let id = resolve_clip(p, clip, playhead)?;
@@ -8855,6 +8872,7 @@ pub fn query(
         ),
         Request::BinsList {} => json!(p.bins),
         Request::TimelineList {} => ops::timelines::list(p),
+        Request::RenderList {} => ops::render::list(p),
         Request::GradeCopy {
             clip,
             timeline,
@@ -9476,6 +9494,7 @@ pub fn query(
         | Request::Doctor {}
         | Request::ExportPlan(_)
         | Request::ExportStart(_)
+        | Request::RenderStart { .. }
         | Request::FrameRender { .. }
         | Request::FrameScope { .. }
         | Request::StoryboardRender { .. }
