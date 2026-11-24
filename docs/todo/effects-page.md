@@ -24,7 +24,6 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - An effect mask input also takes the picture of a tool (pp. 2463, 2472). Its Settings tab then has Fit Mask, Channel, a Low and High range, and Clip ([spec](../spec.md#the-masks)).
   - The Luminance and the Hue channels use the Rec. 601 luma and the true hue ([gotchas](../gotchas.md#resolves-fusion-page)).
   - vidcut joins only an empty input, and only a mask to an effect mask input.
-- **A delete of a viewed node:** measured: Resolve puts the node on its input in that viewer ([spec](../spec.md#the-effects-page)). vidcut empties the viewer.
 - **Page keys that vidcut does not have:**
   - = and − zoom the viewer, and Ctrl+1 in a viewer sets it to 100 percent (p. 1290).
   - Ctrl+F is Find (p. 1421).

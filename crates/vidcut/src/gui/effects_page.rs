@@ -556,6 +556,18 @@ fn default_input(d: &Node, s: &Node) -> Option<NodeInput> {
     }
 }
 
+fn kept_input(comp: &Composition, node: &str, gone: &[String]) -> Option<String> {
+    let input = |n: &Node| match n.tool.is_mask() {
+        true => n.effect_mask.clone(),
+        false => n.input.clone(),
+    };
+    let mut next = comp.node(node).and_then(input);
+    while let Some(n) = next.clone().filter(|n| gone.contains(n)) {
+        next = comp.node(&n).and_then(input);
+    }
+    next
+}
+
 fn command(method: &str, params: Value) -> Value {
     json!({ "method": method, "params": params })
 }
@@ -1172,9 +1184,18 @@ impl Workspace {
             .iter()
             .map(|n| command("comp.remove", json!({ "clip": clip.id, "node": n })))
             .collect();
+        let mut views = json!({});
+        for (side, v) in self.viewers_now().iter().enumerate() {
+            if let Some(v) = v.as_ref().filter(|v| gone.contains(v)) {
+                views[SIDES[side]] = json!(kept_input(&comp, v, &gone).unwrap_or_default());
+            }
+        }
         let before = self.before_nodes(&comp, &gone);
         self.effects_page.select(before);
         self.send_all(commands, "Delete Nodes");
+        if views != json!({}) {
+            self.send("gui.viewers", views);
+        }
     }
 
     fn pass_through(&mut self) {
