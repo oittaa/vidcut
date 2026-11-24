@@ -126,7 +126,23 @@ fn pictures(input: &mut ffmpeg::format::context::Input, all: bool) -> (usize, Op
 }
 
 const MEASURED_SECS: i64 = 2;
-const REORDERED_FRAMES: usize = 16;
+const REORDERED_FRAMES: i64 = 16;
+
+fn fields_of(stream: &ffmpeg::Stream) -> i64 {
+    // SAFETY: the stream, its codec parameters and its parser belong to an open input, read only.
+    unsafe {
+        let st = stream.as_ptr();
+        let parser = ffmpeg::ffi::av_stream_get_parser(st);
+        let desc = ffmpeg::ffi::avcodec_descriptor_get((*(*st).codecpar).codec_id);
+        match parser.is_null()
+            || desc.is_null()
+            || (*desc).props & ffmpeg::ffi::AV_CODEC_PROP_FIELDS == 0
+        {
+            true => 2,
+            false => i64::from((*parser).repeat_pict) + 1,
+        }
+    }
+}
 
 fn measured_rate(source: &Input, video: usize) -> Option<Ratio> {
     let mut input = source.open_header().ok()?;
@@ -144,11 +160,12 @@ fn measured_rate(source: &Input, video: usize) -> Option<Ratio> {
         if num <= 0 || den <= 0 {
             return None;
         }
-        pts.push(p);
+        let fields = fields_of(&stream);
+        pts.push((p, fields));
         first = first.min(p);
         if end.is_some() {
-            after += 1;
-            if after == REORDERED_FRAMES {
+            after += fields;
+            if after >= 2 * REORDERED_FRAMES {
                 break;
             }
         } else if p.saturating_sub(first) >= MEASURED_SECS * den / num {
@@ -156,13 +173,16 @@ fn measured_rate(source: &Input, video: usize) -> Option<Ratio> {
         }
     }
     let (num, den) = tb?;
-    let end = end.or_else(|| pts.iter().max().copied())?;
-    let frames = pts.iter().filter(|&&p| p <= end).count() as i64;
+    let end = end.or_else(|| pts.iter().map(|&(p, _)| p).max())?;
+    let fields: i64 = pts.iter().filter(|&&(p, _)| p < end).map(|&(_, f)| f).sum();
     let ticks = end.saturating_sub(first);
-    if frames < 2 || ticks <= 0 {
+    if fields < 1 || ticks <= 0 {
         return None;
     }
-    let rate = Input::rate_of((frames - 1).saturating_mul(den), ticks.saturating_mul(num));
+    let rate = Input::rate_of(
+        fields.saturating_mul(den),
+        ticks.saturating_mul(num).saturating_mul(2),
+    );
     (rate.0 > 0 && rate.1 > 0).then_some(rate)
 }
 
