@@ -601,6 +601,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
   - A click or a drag in the timeline area switches to Timeline (p. 681).
 
 ### 4.2 Transport (pp. 640, 687–688, 870–872)
+- The buttons are those of the viewers of the Edit page (p. 870): Previous, Play Reverse, Stop, Play Forward, Next and Loop.
+  - In vidcut, Play Reverse or Play Forward is lit while the viewer plays in its direction.
 - §11 gives the keys.
 - J/K/L shuttle (pp. 696, 871; D54):
   - Each repeated J or L makes the speed higher, from 2× to 64×.
