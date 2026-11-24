@@ -566,6 +566,26 @@ fn plain_node_checked(n: &Node) -> Result<Node> {
     if !n.place.iter().all(|v| v.is_finite()) {
         return Err(Error::invalid("a node's place is two finite numbers"));
     }
+    let picture_mask = n.mask_channel.is_some() || n.mask_range.is_some() || n.mask_clip.is_some();
+    if picture_mask && !n.tool.takes_picture_mask() {
+        return Err(Error::invalid(format!(
+            "{} ({}) has no mask_channel, mask_range or mask_clip: only a tool takes them",
+            n.name,
+            n.tool.label()
+        )));
+    }
+    for v in n.mask_range.into_iter().flatten() {
+        within(
+            Some(v),
+            Node::MASK_RANGES,
+            "a mask range is from -1000000 to 1000000",
+        )?;
+    }
+    if n.mask_range.is_some_and(|[low, high]| low > high) {
+        return Err(Error::invalid(
+            "the low of a mask range is at most its high",
+        ));
+    }
     let tool = match &n.tool {
         Tool::Blur(b) => Tool::Blur(blur_checked(b)?),
         Tool::Effect(kind) => Tool::Effect(kind_checked(kind)?),
@@ -1174,7 +1194,7 @@ pub fn composition_checked(c: &Composition) -> Result<Composition> {
                         n.name
                     )));
                 }
-                Some(m) if !m.tool.feeds(input) => {
+                Some(m) if !n.tool.takes_from(input, &m.tool) => {
                     return Err(Error::invalid(format!(
                         "{}'s {what} is {from}, a {}, which doesn't fit there",
                         n.name,

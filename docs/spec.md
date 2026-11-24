@@ -2782,7 +2782,18 @@ A picture on the effect mask input of a tool (p. 2463). Measured in Resolve Stud
   - Saturation: (max − min) / max, 0.8.
   - Coverage: 0. A Background has no coverage channel.
   - Luminance: 0.114 × R + 0.587 × G + 0.299 × B, 0.674. Hue: the hue of (B, G, R), 30° as 0.08333. Both swap red and blue ([gotchas](gotchas.md#resolves-fusion-page)).
-- vidcut: an effect mask input takes only a mask ([todo](todo/effects-page.md)).
+- The range gives the mask (r − Low) / (High − Low), clipped to 0 and 1. r is the level of the Channel.
+  - A Linear gradient from black to white, Channel Red: at r 0.70046, Low 0.25 and High 0.75 gave 0.90092.
+  - Low equal to High gives a hard step. Low cannot pass High.
+  - A High typed below Low sets Low to it. A Low typed above High sets High to it.
+- Clip White off lets the mask go above 1. A Red of 1.5 gave 1 with Clip White on, and 1.5 with it off.
+- Clip Black off changes nothing. A Red of −0.5 gave 0 with Clip Black on and off.
+- Fit Mask puts a picture of another size in the frame. The reads used a 960 × 1080 picture in a 1920 × 1080 frame:
+  - Crop, Inside and Height keep its size, in the middle of the frame. Outside the picture, the mask is 0.
+  - Stretch fills the frame.
+  - Width and Outside scale it by 2 on the two axes, in the middle of the frame.
+- vidcut: a picture on the effect mask input of a tool gives the mask as measured. Luminance and Hue use the Rec. 601 luma and the true hue.
+- vidcut: each picture of a composition has the size of the frame. Thus there is no Fit Mask row ([todo](todo/effects-page.md)).
 
 #### The Merge
 
@@ -3171,8 +3182,10 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - A drop on a node joins its input. A mask joins the effect mask input.
   - When the main input is joined, a drop joins the next input. For a node with one input, that can be the effect mask input (p. 1395).
   - Measured in Resolve Studio 21.2: a Background dropped on a Blur with its input joined joins the effect mask input. The join is blue.
-  - Measured: a Background dropped on a Merge with its Background and Foreground joined joins nothing. The manual says that the third join goes to the effect mask input (p. 1403).
-  - vidcut: a drop joins only an empty input, and only a mask joins an effect mask input ([todo](todo/effects-page.md)).
+  - Measured: a Background dropped on a Merge with its Background and Foreground joined joins the effect mask input, in 3 of 3 tries. The manual gives the same (p. 1403).
+  - Measured: a Background dropped on a Merge with only its Background joined joins the Foreground. A Background dropped on a Blur with an empty input joins the input.
+  - Measured: a drop joins only a free input. An Ellipse dropped on a Blur with a Rectangle on its effect mask joins nothing.
+  - Measured: a Background dropped on an Ellipse with an empty effect mask joins nothing. The effect mask of a mask takes only a mask.
   - A pointer on a knot shows its name.
 - Part and move a join (pp. 1400–1401):
   - A pointer on a join shows the half under it in blue.

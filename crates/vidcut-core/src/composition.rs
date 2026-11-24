@@ -4,9 +4,9 @@ use crate::effect_keys::Keyed;
 use crate::model::{
     Appearance, ApplyMode, Background, BackgroundFill, Blur, BlurClipping, BlurFilter, BorderLevel,
     Clip, Composition, Connect, EffectKind, EffectType, EffectValue, FastNoise, GradientRepeat,
-    GradientStop, GradientType, ImageFormat, JoinStyle, Mask, Merge, MergeEdges, MergeOperator,
-    MotionPath, Node, NoiseColoring, Pattern, PivotType, Project, ReferenceTime, ShadingElement,
-    TextPlus, Tool, ToolType, Tracker, TrackerMerge, TrackerOperation,
+    GradientStop, GradientType, ImageFormat, JoinStyle, Mask, MaskChannel, Merge, MergeEdges,
+    MergeOperator, MotionPath, Node, NoiseColoring, Pattern, PivotType, Project, ReferenceTime,
+    ShadingElement, TextPlus, Tool, ToolType, Tracker, TrackerMerge, TrackerOperation,
 };
 use crate::motion::Area;
 use crate::render::FileClock;
@@ -101,6 +101,32 @@ impl BlurClipping {
             Self::None => "None",
             Self::Domain => "Domain",
             Self::Frame => "Frame",
+        }
+    }
+}
+
+impl MaskChannel {
+    pub const ALL: [MaskChannel; 8] = [
+        MaskChannel::Red,
+        MaskChannel::Green,
+        MaskChannel::Blue,
+        MaskChannel::Alpha,
+        MaskChannel::Hue,
+        MaskChannel::Luminance,
+        MaskChannel::Saturation,
+        MaskChannel::Coverage,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Red => "Red",
+            Self::Green => "Green",
+            Self::Blue => "Blue",
+            Self::Alpha => "Alpha",
+            Self::Hue => "Hue",
+            Self::Luminance => "Luminance",
+            Self::Saturation => "Saturation",
+            Self::Coverage => "Coverage",
         }
     }
 }
@@ -1346,6 +1372,19 @@ impl Tool {
         }
     }
 
+    pub fn takes_picture_mask(&self) -> bool {
+        self.takes(NodeInput::EffectMask) && !self.is_mask()
+    }
+
+    pub fn takes_from(&self, input: NodeInput, source: &Tool) -> bool {
+        match input {
+            NodeInput::EffectMask if self.takes_picture_mask() => {
+                source.is_mask() || source.gives_picture()
+            }
+            _ => source.feeds(input),
+        }
+    }
+
     pub fn tracker(&self) -> Option<&Tracker> {
         match self {
             Tool::Tracker(t) => Some(t),
@@ -1445,6 +1484,9 @@ impl EffectType {
 }
 
 impl Node {
+    pub const MASK_RANGE: [f64; 2] = [0.0, 1.0];
+    pub const MASK_RANGES: (f64, f64) = (-1e6, 1e6);
+
     pub fn new(name: &str, tool: Tool, place: [f64; 2]) -> Self {
         Self {
             name: name.to_string(),
@@ -1458,6 +1500,9 @@ impl Node {
             blend: None,
             blur_alpha: true,
             multiply_by_mask: false,
+            mask_channel: None,
+            mask_range: None,
+            mask_clip: None,
             place,
             keys: Vec::new(),
             connect: None,
@@ -1466,6 +1511,18 @@ impl Node {
 
     pub fn mixed(&self) -> f64 {
         self.blend.unwrap_or(1.0)
+    }
+
+    pub fn mask_channel(&self) -> MaskChannel {
+        self.mask_channel.unwrap_or_default()
+    }
+
+    pub fn mask_range(&self) -> [f64; 2] {
+        self.mask_range.unwrap_or(Node::MASK_RANGE)
+    }
+
+    pub fn mask_clip(&self) -> [bool; 2] {
+        self.mask_clip.unwrap_or([true; 2])
     }
 
     pub fn usual_point(&self, value: EffectValue) -> Option<[f64; 2]> {
@@ -1820,9 +1877,11 @@ impl Composition {
             }
             seen[i] = true;
             stack.push((i, true));
+            let mask = self.mask_picture(&self.nodes[i]).map(|m| m.name.as_str());
             let from = self.nodes[i]
                 .pictures()
                 .flatten()
+                .chain(mask)
                 .filter_map(|n| self.index(n));
             for j in from.collect::<Vec<_>>().into_iter().rev() {
                 uses[j] += 1;
@@ -1830,6 +1889,14 @@ impl Composition {
             }
         }
         Some((order, uses))
+    }
+
+    pub fn mask_picture(&self, node: &Node) -> Option<&Node> {
+        if !node.tool.takes_picture_mask() {
+            return None;
+        }
+        self.node(node.effect_mask.as_deref()?)
+            .filter(|m| !m.tool.is_mask())
     }
 
     pub fn masks_of(&self, node: &Node) -> Vec<&Node> {

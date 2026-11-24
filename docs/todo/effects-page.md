@@ -19,11 +19,7 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - Replace follows the manual: the areas where the new mask is 0 keep the input mask (p. 2465, [gotchas](../gotchas.md#resolves-fusion-page)).
   - vidcut always uses Merge.
 - **Border Style of a rectangle:** the joins, the ends, Position and Length ([spec](../spec.md#the-masks)). vidcut has none.
-- **A drop on a node:**
-  - When the main input is joined, Resolve joins the next free input. That can be the effect mask input (p. 1395). The spec gives the measured drops ([spec](../spec.md#edits)).
-  - An effect mask input also takes the picture of a tool (pp. 2463, 2472). Its Settings tab then has Fit Mask, Channel, a Low and High range, and Clip ([spec](../spec.md#the-masks)).
-  - The Luminance and the Hue channels use the Rec. 601 luma and the true hue ([gotchas](../gotchas.md#resolves-fusion-page)).
-  - vidcut joins only an empty input, and only a mask to an effect mask input.
+- **Fit Mask of a picture on an effect mask** (p. 2465, [spec](../spec.md#the-masks)): Crop, Stretch, Inside, Width, Height and Outside. It needs pictures of other sizes, as the Image tab of the generators gives ([todo](generator-nodes.md)).
 - **The active node after a box select:** measured: Resolve then has no active node, and the Inspector shows the headers closed. vidcut makes the last node active.
 - **A delete of a viewed node:** measured: Resolve puts the node on its input in that viewer ([spec](../spec.md#the-effects-page)). vidcut empties the viewer.
 - **The Center of a Vignette:** measured: one row with an X and a Y field, and no point in the viewer. vidcut shows Center X and Center Y in two rows.
@@ -46,5 +42,6 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
 
 **To measure in Resolve:**
 
+- Keyframes on Low and High of a picture on an effect mask. vidcut keeps one value for each.
 - Clear in the menu of a version button. The read did not show what it does.
 - A Ctrl-drag on the ruler. In the measurement, it moved the playhead only, and Ctrl possibly did not reach Resolve.

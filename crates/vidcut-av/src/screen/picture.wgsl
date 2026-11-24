@@ -1516,6 +1516,57 @@ fn fs_mask_join(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(joining.how.x * shape + a * (1.0 - shape));
 }
 
+struct Picking {
+    how: vec4<f32>,
+    range: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> picking: Picking;
+
+fn picked_hue(c: vec3<f32>) -> f32 {
+    let most = max(c.r, max(c.g, c.b));
+    let spread = most - min(c.r, min(c.g, c.b));
+    if spread <= 0.0 {
+        return 0.0;
+    }
+    var h = 4.0 + (c.r - c.g) / spread;
+    if most == c.r {
+        h = (c.g - c.b) / spread;
+    } else if most == c.g {
+        h = 2.0 + (c.b - c.r) / spread;
+    }
+    return fract(h / 6.0 + 1.0);
+}
+
+fn picked_level(c: vec4<f32>, channel: i32) -> f32 {
+    switch channel {
+        case 0: { return c.r; }
+        case 1: { return c.g; }
+        case 2: { return c.b; }
+        case 3: { return c.a; }
+        case 4: { return picked_hue(c.rgb); }
+        case 5: { return dot(c.rgb, BT601); }
+        case 6: {
+            let most = max(c.r, max(c.g, c.b));
+            return select(0.0, (most - min(c.r, min(c.g, c.b))) / most, most > 0.0);
+        }
+        default: { return 0.0; }
+    }
+}
+
+@fragment
+fn fs_picture_mask(in: Out) -> @location(0) vec4<f32> {
+    let c = textureLoad(blur_source, vec2<i32>(in.position.xy), 0);
+    let r = picked_level(c, i32(picking.how.x));
+    let low = picking.range.x;
+    let wide = picking.range.y - low;
+    var m = max(select(select(0.0, 1.0, r > low), (r - low) / wide, wide > 0.0), 0.0);
+    if picking.how.y > 0.5 {
+        m = min(m, 1.0);
+    }
+    return vec4<f32>(m);
+}
+
 @fragment
 fn fs_masked(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
