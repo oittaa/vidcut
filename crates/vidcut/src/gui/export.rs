@@ -323,6 +323,7 @@ pub(super) struct Render {
     frame_count: bool,
     unique: Option<UniqueAs>,
     subfolder: String,
+    separate_folders: bool,
     source_levels: u32,
     levels_from: LevelsFrom,
     pub(super) name: String,
@@ -578,6 +579,7 @@ impl Render {
             frame_count: true,
             unique: None,
             subfolder: String::new(),
+            separate_folders: false,
             source_levels: 0,
             levels_from: LevelsFrom::Tail,
             name,
@@ -639,6 +641,9 @@ impl Render {
         }
         if !self.subfolder.trim().is_empty() {
             p["subfolder"] = json!(self.subfolder.trim());
+        }
+        if self.separate_folders {
+            p["separate_folders"] = json!(true);
         }
         if self.source_levels > 0 {
             p["source_levels"] = json!(self.source_levels);
@@ -3211,6 +3216,9 @@ fn clip_name_rows(ui: &mut egui::Ui, d: &mut Render) {
 }
 
 fn clip_folder_rows(ui: &mut egui::Ui, d: &mut Render) {
+    super::dialog::row(ui, "Separate Folders", |ui| {
+        ui.add(egui::Checkbox::without_text(&mut d.separate_folders))
+    });
     super::dialog::row(ui, "Source Folder Levels", |ui| {
         ui.add(egui::DragValue::new(&mut d.source_levels).range(0..=99))
     });

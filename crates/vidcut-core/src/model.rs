@@ -9970,6 +9970,10 @@ impl Track {
         }
     }
 
+    pub fn number(&self) -> usize {
+        self.id[1..].parse().unwrap_or(1)
+    }
+
     pub fn has_sound(&self) -> bool {
         self.kind == TrackKind::Audio || self.clips.iter().any(|c| c.audio.is_some())
     }

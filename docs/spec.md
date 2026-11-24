@@ -4870,6 +4870,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Thus the parts of a name go in this order: unique prefix, name, frame count, file suffix, unique suffix.
   - File subfolder `sub` gives `sub\m-red00000000.mp4`.
   - Place clips in separate folders gives `Event__0001_0001\m-red00000000.mp4`, then `Event__0001_0002` and so on.
+  - A clip on V2 gives `Event__0002_0001\…`. Thus the folder is `Event__`, the track, `_` and the place on the track, 4 digits each.
   - Preserve source directory levels 0 makes no folders. After an Add with 0, the box is off again.
   - Preserve 1 with From tail (picked) keeps the folder that holds the source file: `stills\m-red00000000.mp4`.
   - Preserve 1 with After head keeps all the folders but the drive: `Users\…\stills\m-red00000000.mp4`.
@@ -4952,8 +4953,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - A job that renders cannot be removed, also not by Clear Rendered. Clear All is greyed while jobs render.
   - The right-click menu has no Reveal in Media Storage, because vidcut has no Media Storage.
   - With Individual clips, the File tab has Filename Uses, Custom Name, File Suffix, Unique Names, Source Frame Count and File Subfolder.
-  - Then Filename Digits, First Frame for image sequences, Replace Files, Source Folder Levels and Count Levels.
-  - The requests have the same fields: `name`, `source_names`, `suffix`, `unique`, `no_frame_count`, `subfolder`, `source_levels` and `levels_from`.
+  - Then Filename Digits, First Frame for image sequences, Replace Files, Separate Folders, Source Folder Levels and Count Levels.
+  - The requests have the same fields: `name`, `source_names`, `suffix`, `unique`, `no_frame_count`, `subfolder`, `separate_folders`, `source_levels` and `levels_from`.
   - The Custom Name takes `{source}` and the other parts of `name`. It is `{source}` by default.
   - The frame count is the source timecode of the clip's first frame, as a frame count at the rate of the source. Filename Digits sets its digits, also for a movie. It is 8 by default.
   - In the name of a movie, a name that ends in a digit gets `_` before the frame count. An image sequence does not get it.
@@ -4962,7 +4963,8 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An image sequence numbers its frames from the source frame. First Frame is 1 when it is turned on.
   - Each clip renders at the frame rate of the timeline ([X175](deviations.md#x175-individual-clips-render-at-the-frame-rate-of-the-timeline)).
   - The parts of a name go in the measured order: unique prefix, name, frame count, File Suffix, unique suffix.
-  - The folders go in the measured order: the Source Folder Levels, then the File Subfolder.
+  - Separate Folders puts each file in a folder of its own, as measured. An audio track counts by its own number: A2 and V2 both give `0002`.
+  - The folders go in the measured order: the Source Folder Levels, the folder of Separate Folders, then the File Subfolder.
   - An export refuses Unique Names with Source Name. With an image sequence, it refuses Source Name, File Suffix, Unique Names and no frame count.
   - Count Levels After Head drops the first levels of the path, with the drive as level 1. It needs a path with a drive letter.
   - With Single clip, the File tab has Filename Digits and First Frame for image sequences, and Replace Files.

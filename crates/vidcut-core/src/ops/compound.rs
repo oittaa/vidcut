@@ -150,7 +150,7 @@ fn sounds(whole: &[Track]) -> Vec<(String, Track)> {
                 under += 1;
                 under
             }
-            TrackKind::Audio => under + number(t),
+            TrackKind::Audio => under + t.number(),
         };
         sound.push((
             t.id.clone(),
@@ -170,10 +170,6 @@ fn sounds(whole: &[Track]) -> Vec<(String, Track)> {
         ));
     }
     sound
-}
-
-fn number(t: &Track) -> usize {
-    t.id[1..].parse().unwrap_or(1)
 }
 
 pub(crate) fn end_of(whole: &[Track]) -> i64 {
@@ -782,7 +778,7 @@ fn spread(
             }
             (None, None) => continue,
             (Some(Some(to)), _) => slot(to),
-            (None, Some(base)) => slot(base) + number(inner) - 1,
+            (None, Some(base)) => slot(base) + inner.number() - 1,
         };
         if !taken.insert((inner.kind == TrackKind::Video, n)) {
             return Err(Error::invalid(format!(
@@ -796,7 +792,7 @@ fn spread(
         lay_down(p, (ti, lay), inner, &parts, &mut made);
     }
     for (track, s) in heard {
-        let mut n = slot(s) + number(track) - 1;
+        let mut n = slot(s) + track.number() - 1;
         while !taken.insert((false, n)) {
             n += 1;
         }

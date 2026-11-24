@@ -8,7 +8,6 @@
 
 - The frame count of an interlaced clip. No rule explains the measured counts of `interlaced-tff.mov` ([§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)). Its EXR renders also have more files than the clip has frames. Runs: an interlaced source with a start timecode, and one at 29.97.
 - An EXR of a source whose name ends in a digit. A movie name gets `_` before the count. Run: the EXR names of such a source.
-- Place clips in separate folders gives `Event__0001_0001`. The last number is the place of the clip. Run: a clip on V2 with separate folders, to find what the first number is.
 - The rows that vidcut refuses together. Runs:
   - Use unique filenames with Source name.
   - EXR with Source name, File suffix, Use unique filenames, and Add source frame count off, one at a time.

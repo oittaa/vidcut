@@ -5044,9 +5044,14 @@ pub struct ExportParams {
     #[serde(default)]
     pub unique: Option<UniqueAs>,
     /// A folder for the per-clip files, in the folders that
-    /// `source_levels` makes.
+    /// `source_levels` and `separate_folders` make.
     #[serde(default)]
     pub subfolder: Option<String>,
+    /// Put each per-clip file in a folder of its own: `Event__`, the number
+    /// of its track and its place on the track, 4 digits each
+    /// (`Event__0001_0002`). It goes in the `source_levels` folders.
+    #[serde(default)]
+    pub separate_folders: bool,
     /// The number of folders of each clip's source path to make again in
     /// `output`. 0 makes none.
     #[serde(default)]
