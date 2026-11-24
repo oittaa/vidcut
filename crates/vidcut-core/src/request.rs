@@ -960,8 +960,9 @@ pub enum Request {
     },
     /// The timelines of the project, in the order they were made: each
     /// one's `id`, `name`, `bin`, `start` timecode, frame rate, size and
-    /// length, and `own` when it has its own settings. `open` is the id of
-    /// the open one, and `recent` lists the ids, the last opened first.
+    /// length, `own` when it has its own settings, and `render` when the
+    /// Export page renders its In/Out range. `open` is the id of the open
+    /// one, and `recent` lists the ids, the last opened first.
     #[serde(rename = "timeline.list")]
     TimelineList {},
     /// Make an empty timeline and open it. Returns its `id`.
@@ -4428,8 +4429,8 @@ pub enum Request {
     /// Close the GUI.
     #[serde(rename = "gui.quit")]
     GuiQuit {},
-    /// Open a window for the person at the GUI: `quick_export`, `export`,
-    /// `jobs`, `mixer`, `preferences`, `history` (the undo history),
+    /// Open a window for the person at the GUI: `quick_export`, `jobs`,
+    /// `mixer`, `preferences`, `history` (the undo history),
     /// `help` (the keyboard shortcuts, and what each upscaler and Retime
     /// Process does), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
@@ -4448,9 +4449,9 @@ pub enum Request {
     #[serde(rename = "gui.close")]
     GuiClose { panel: GuiPanel },
     /// Show a page of the window: `cut`; `effects`, the node editor of
-    /// the composition of the topmost clip at the playhead; or `color`, the
-    /// primary correction of that clip or of the timeline. Answers what
-    /// `gui.state` does.
+    /// the composition of the topmost clip at the playhead; `color`, the
+    /// primary correction of that clip or of the timeline; or `export`, the
+    /// render settings and the render queue. Answers what `gui.state` does.
     #[serde(rename = "gui.page")]
     GuiPage {
         page: Page,
@@ -5700,6 +5701,9 @@ pub enum Page {
     /// The primary correction of the clip at the playhead or of the
     /// timeline, its viewer and the timeline.
     Color,
+    /// The render settings, the viewer and the timeline with the range to
+    /// render, and the render queue.
+    Export,
 }
 
 /// A zoom of a node editor.
@@ -5747,8 +5751,6 @@ pub enum GuiPanel {
     /// Quick Export.
     #[serde(alias = "quick-export")]
     QuickExport,
-    /// The Export dialog.
-    Export,
     /// Export jobs with their progress.
     Jobs,
     /// The Mixer: track faders, mute, solo and meters.
@@ -6093,6 +6095,9 @@ pub struct TimelineSet {
     /// that uses the project's settings gets its own first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own: Option<TimelineFormat>,
+    /// What the Export page renders of it: `entire` or `in_out`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<crate::model::RenderRange>,
 }
 
 /// Settings of a timeline. The frame rate and drop-frame change only while

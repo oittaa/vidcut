@@ -190,6 +190,9 @@ pub struct Timeline {
     /// before the subtitles. Left out at its usual value.
     #[serde(default)]
     pub grade: Option<Grade>,
+    /// What the Export page renders of it. Left out when it is `entire`.
+    #[serde(default)]
+    pub render: RenderRange,
     /// Video tracks `V1…` first, then audio tracks `A1…`.
     pub tracks: Vec<Track>,
     /// Timeline In/Out marks.
@@ -200,6 +203,24 @@ pub struct Timeline {
     /// Subtitle tracks `S1…`, from the one nearest the video up.
     #[serde(default)]
     pub subtitles: Vec<SubtitleTrack>,
+}
+
+/// What the Export page renders of a timeline.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderRange {
+    /// The whole timeline.
+    #[default]
+    Entire,
+    /// From the In to the Out of the timeline. Without an In, from its
+    /// start. Without an Out, to its end.
+    InOut,
+}
+
+impl RenderRange {
+    pub fn is_entire(&self) -> bool {
+        *self == Self::Entire
+    }
 }
 
 /// The settings that a timeline has in the place of the project's.
@@ -244,6 +265,8 @@ struct TimelineOut<'a> {
     own: Option<TimelineSettings>,
     #[serde(skip_serializing_if = "Option::is_none")]
     grade: Option<&'a Grade>,
+    #[serde(skip_serializing_if = "RenderRange::is_entire")]
+    render: RenderRange,
     tracks: &'a [Track],
     #[serde(skip_serializing_if = "Marks::is_empty")]
     marks: &'a Marks,
@@ -262,6 +285,7 @@ impl<'a> TimelineOut<'a> {
             start_tc: t.start_tc,
             own: t.own,
             grade: t.grade.as_ref(),
+            render: t.render,
             tracks: s.tracks,
             marks: s.marks,
             markers: s.markers,
@@ -9323,6 +9347,7 @@ impl Project {
             start_tc: self.settings.first_hour(),
             own: None,
             grade: None,
+            render: RenderRange::Entire,
             tracks: Self::fresh_tracks(),
             marks: Marks::default(),
             markers: Vec::new(),

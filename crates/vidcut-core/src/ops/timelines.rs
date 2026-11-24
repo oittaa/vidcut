@@ -55,6 +55,9 @@ pub fn list(p: &Project) -> Value {
             if t.own.is_some() {
                 v["own"] = json!(true);
             }
+            if !t.render.is_entire() {
+                v["render"] = json!(t.render);
+            }
             v
         })
         .collect();
@@ -275,6 +278,9 @@ pub fn set(p: &mut Project, s: &TimelineSet) -> Result<()> {
     let mut all = p.take_timelines();
     let t = all.iter_mut().find(|t| t.id == id).expect("found");
     (t.own, t.start_tc) = (own, start);
+    if let Some(r) = s.render {
+        t.render = r;
+    }
     if let Some(r) = super::conform::Rates::new(before.fps, after.fps) {
         t.markers
             .iter_mut()

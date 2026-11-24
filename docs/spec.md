@@ -36,7 +36,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. The pr
 - compositions of nodes on the Effects page: Blur, the six effects, and Ellipse, Rectangle and Polygon masks (§8.19)
 - the input LUT of a media item and of the project, and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - the Video Monitor LUT, the Color Viewer LUT and the Scopes LUT ([§13](#the-lut-tables))
-- Quick Export, plus our Export dialog
+- Quick Export (§10) and the Export page (§10.1)
 
 **Later (later):**
 - other effects, other transitions, other titles, other generators
@@ -4665,7 +4665,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
 
 - **Flow:** File > Quick Export or the toolbar button. Then a preset from the icon row, Export, a file name and a progress dialog.
 - **Range:** the timeline In–Out range if it is set, else the whole timeline.
-- **Output:** one file. Individual clips are for the Deliver page, and for our Export dialog.
+- **Output:** one file. Individual clips are for the Export page (§10.1).
 - **Preset models** (Deliver page):
   - H.264 Master (QuickTime, AAC 320 kb/s)
   - H.265 Master (Main10)
@@ -4675,7 +4675,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - TikTok (vertical 1080×1920)
 - **User presets:** you can add them to the Quick Export row.
 - **In vidcut:**
-  - The Quick Export row, the Export dialog and jobs are deviation X3.
+  - The Quick Export row, the Export page and jobs are deviation X3.
   - The suggested file name is the name of the project.
   - AAC takes 96 to 320 kb/s, and 320 by default.
   - The sample rate of AAC is the project's by default. The other choices are 44100 Hz and 48000 Hz.
@@ -4687,7 +4687,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With a timeline of an odd side, one factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.
     - With a custom size, the picture fits into the rounded size with one draw.
     - Resolve Studio 21.1.2 writes these sizes at 1281 x 721 with H.264 and H.265, on a timeline and as a custom size. It writes 258 x 258 for 257 x 257 with H.264. Other odd sizes were not measured.
-    - The Export dialog and the report of the export show both sizes.
+    - The Export page and the report of the export show both sizes.
   - DNxHR LB, SQ, HQ and HQX round an odd width up to even. They keep an odd height.
     - A size of 1281 x 721 gives a file of 1282 x 721. A size of 1283 x 723 gives a file of 1284 x 723.
     - Resolve Studio 21.1.2 does this with these four. Its DNxHR 444 keeps 1281 x 721.
@@ -4709,9 +4709,9 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - With Straight, TIFF, OpenEXR and ProRes 4444 still hold premultiplied colors.
     - A PNG holds straight colors in both modes.
   - **In vidcut:**
-    - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export dialog shows both only for ProRes 4444, 4444 XQ, TIFF and OpenEXR.
+    - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export page shows both only for ProRes 4444, 4444 XQ, TIFF and OpenEXR.
     - Straight writes straight colors in a TIFF and in ProRes 4444 and 4444 XQ ([X146](deviations.md#x146-straight-prores-4444-holds-straight-colors)).
-    - OpenEXR takes only Premultiplied. An export refuses Straight with it, and the Export dialog lists only Premultiplied. Why: the OpenEXR format takes premultiplied colors, so another program reads a straight file wrongly.
+    - OpenEXR takes only Premultiplied. An export refuses Straight with it, and the Export page lists only Premultiplied. Why: the OpenEXR format takes premultiplied colors, so another program reads a straight file wrongly.
     - An export refuses `video.alpha` in another format. It does not change a setting without a word.
     - DNxHR 444 has no alpha ([X136](deviations.md#x136-dnxhr-444-exports-without-alpha)).
     - With it off, the export composites over black, and the file has no alpha channel.
@@ -4728,7 +4728,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - ProRes 422 HQ into ProRes 422 copies no frame.
     - H.264 copies no frame, also with cuts on key frames.
   - **In vidcut:**
-    - `video.bypass_reencode` is the box. It is off by default. The Export dialog shows it under Advanced.
+    - `video.bypass_reencode` is the box. It is off by default. The Export page shows it under Advanced.
     - The export copies a frame when one clip shows a frame of its file with no change:
       - The clip fills the frame. It has no Transform, Cropping, composite mode, opacity or effect.
       - The clip plays at normal speed, with the Nearest retime.
@@ -4758,7 +4758,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Exports read the original media by default, also while the viewer plays proxies.
   - With the box on, an export reads proxy files instead of the originals where proxies exist.
   - **In vidcut:**
-    - `video.use_proxy_media` is the box. It is off by default. The Export dialog shows it under Advanced.
+    - `video.use_proxy_media` is the box. It is off by default. The Export page shows it under Advanced.
     - For each video clip, the export reads its fresh proxy when that file is on disk, else the original.
     - Sound stays on the originals.
     - The plan and the export report emit a `proxy_media` note with the media that read proxies, or a fallback notice when none did.
@@ -4799,7 +4799,7 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - `video.profile` of a TIFF is `rgb8` or `rgb16` (the default), each also with `_packbits`, `_lzw` or `_deflate`.
     - `video.profile` of an OpenEXR is `half` (the default) or `float`, each also with `_rle`, `_zip1`, `_zip16`, `_piz`, `_dwaa` or `_dwab`. `_zip16` is ZIP.
     - With no suffix, the file has no compression.
-    - `video.compression_level` is the Compression Level of DWAA and DWAB, from 0 to 300. Unset, it is 45. The Export dialog shows it only for these two.
+    - `video.compression_level` is the Compression Level of DWAA and DWAB, from 0 to 300. Unset, it is 45. The Export page shows it only for these two.
     - An export refuses `video.compression_level` with another profile. It does not drop a setting without a word.
     - A half OpenEXR holds each value rounded to the nearest half float, as Resolve's files do.
     - The ZIP level of an OpenEXR is always 4, the default. A `_deflate` TIFF has zlib level 6.
@@ -4812,6 +4812,37 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
     - The files hold no sound. An export with sound settings is refused ([X147](deviations.md#x147-an-image-sequence-refuses-sound-settings)).
     - The ExtraSamples tag of a TIFF with alpha follows the Alpha Mode: 1 for Premultiplied and 2 for Straight ([gotchas](gotchas.md#ffmpeg-encoding-and-muxing)).
     - A frame file name that the system refuses stops the export before the encode starts.
+### 10.1 Export page (pp. 4103–4132; measured in Resolve Studio 21.2)
+
+- **Layout** (the Deliver page, measured):
+  - The Render Settings panel is on the left, at the full height. Its title is "Render Settings - " and the name of the preset. A "..." menu is at its right.
+  - The viewer is in the middle. Its header has a menu of the timelines. A row under it shows IN, OUT and DURATION.
+  - The timeline is under the viewer. Its toolbar has "Render" and the menu of the range.
+  - The Render Queue is on the right, at half the height by default. With no jobs, it shows "No jobs in queue".
+  - Estimated File Size and Add to Render Queue are at the bottom of the Render Settings.
+- **Render Settings** (pp. 4104–4127):
+  - The preset menu is at the top (p. 4104). The "..." menu saves, updates, imports, exports and deletes presets (pp. 4111–4113).
+  - File Name shows the name of the file. Location has Browse (p. 4113).
+  - Render is Single clip or Individual clips (p. 4114). Single clip renders the range into one file. Individual clips renders one file for each clip.
+  - The Video, Audio and File tabs hold the other settings (pp. 4115–4127). Advanced Settings and Subtitle Settings are closed by default (measured).
+- **Range** (pp. 4128–4129):
+  - The Render menu has Entire Timeline and In/Out Range.
+  - I and O set the In and the Out. IN and OUT show the first and the last frame. DURATION counts the frames (p. 4129).
+  - Measured: In 01:00:01:07 and Out 01:00:03:09 give DURATION 00:00:02:03. Thus the Out frame is in the range.
+  - In Individual clips, the In and the Out snap to the nearest clip edge (p. 4129).
+  - Measured: In/Out Range with no marks shows the whole timeline. A pick of Entire Timeline removes the marks.
+  - Measured: each timeline keeps its own choice.
+- **Render Queue** (pp. 4130–4132): Add to Render Queue adds a job with the settings and the range (p. 4130).
+- **In vidcut:**
+  - The Export page is `gui.page` with `export`. The Export button of the bar opens it.
+  - On the page, the viewer shows the timeline. When another page opens, the viewer gets its earlier mode again.
+  - The range of each timeline is the `render` of `timeline.set`: `entire` or `in_out`. A new timeline renders the entire timeline.
+  - In/Out Range uses the marks that are set. Without an In, it starts at the start of the timeline. Without an Out, it goes to the end.
+  - Entire Timeline keeps the marks ([todo](todo/render-queue.md)).
+  - The Render Settings also show the live plan and the export as a shell command ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
+  - Add to Render Queue starts the export at once ([todo](todo/render-queue.md)). The queue shows the media exports of the running GUI, with their progress.
+  - Individual clips names the files with a template. The File tab has Filename Digits and First Frame for image sequences, and Replace Files.
+  - The other parts of the page are in [gaps](todo/gaps.md).
 
 ## 11. Keyboard shortcuts
 
@@ -5275,7 +5306,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Most of the picture has 10 bits or more.
     - The 10 bits of the codec play widely (not H.264).
   - The plan tells why.
-  - When an HDR timeline is tone-mapped and the user did not ask for it, the Export dialog tells so, with an Export HDR button.
+  - When an HDR timeline is tone-mapped and the user did not ask for it, the Export page tells so, with an Export HDR button.
   - An HDR export of an SDR timeline has only SDR pictures. Thus its HDR metadata is the metadata of SDR pictures (D46).
 - **D45. Passes** (§10; Resolve's multi-pass option is on the Deliver page).
   - Two passes bring an export closer to a target bitrate, and spread its bits better.
@@ -5297,7 +5328,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Without given light levels, PQ output gets the MaxCLL and MaxFALL of its own frames.
     - A first pass draws the frames as the encode does, and measures them. The encode then writes these values.
     - The export has no HDR10+ and no Dolby Vision.
-    - When the user asks for HDR10+ or Dolby Vision, the report and the export window name what the export drops.
+    - When the user asks for HDR10+ or Dolby Vision, the report and the Export page name what the export drops.
   - The report of the export tells where each value comes from: given, from the sources, or measured.
 - **D47. Drop-frame timecode** (§4.3).
   - At 29.97, 59.94 and 119.88 fps, record timecode can count drop-frame, as Resolve's project settings offer.
