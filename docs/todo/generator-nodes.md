@@ -12,12 +12,19 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
 **What Resolve has, and vidcut does not have yet:**
 
 - The Plasma (pp. 2379–2380), Day Sky (pp. 2360–2362) and Mandelbrot (pp. 2366–2367) tools.
+  - The reads of Resolve Studio 21.2 are in sections M14 and M15 of `fixtures/nodes/NOTES.md` in the test data.
+  - Mandelbrot: Grad Method is Continuous Potential or Iterations. Usual: Continuous Potential.
+  - Mandelbrot: Gradient Curve, usual 0.125. With Continuous Potential, one point reads 0.69726 at 0.125, 0.70278 at 0.25, 0.71373 at 0.5 and 0.73504 at 1.0.
+  - Mandelbrot: the scale of the pattern follows the width of the picture.
+  - Plasma: Operation is Add, Subtract, Multiply, Divide, Maximum, Minimum or Difference. Usual: Add.
+  - Plasma: the size of the rings follows the width of the picture.
 - The Background tool:
-  - Interpolation Space of the gradient (p. 2359). The spec gives the measured hue turn and LAB.
-  - Keyframes on the stops of the gradient, and its contextual menu (p. 2360).
+  - Interpolation Space of the gradient (p. 2359). The spec gives the measured hue turn, HLS, HSV and LAB.
+  - Keyframes on the stops of the gradient, and its contextual menu (p. 2360). The spec gives the measured menu and the blend of the stops.
 - The Fast Noise tool:
   - The noise function of Resolve. vidcut uses fractal Perlin noise on the measured grid.
-  - Gradient Type of its gradient. The usual item is Uni. The other items are not measured yet.
+  - Discontinuous with a Contrast other than 1. At Contrast 2, the read is twice |n|, the level of Contrast 1. vidcut gives 2 × |n| − 0.5 ([spec](../spec.md#the-fast-noise-tool)).
+  - Gradient Type of its gradient: seven items, and the usual item is Uni ([spec](../spec.md#the-fast-noise-tool)).
   - Interpolation Space of its gradient, as on the Background.
 - A picture on a map input of the Fast Noise. vidcut takes masks there.
 - The Image tab of the generators (pp. 2401–2402):
@@ -26,8 +33,6 @@ The compositions get the generator nodes of the Fusion page (pp. 2356–2405).
 
 **To measure in Resolve:**
 
-- Before Interpolation Space is built: HLS and HSV with a gray stop, and with two colors of a different lightness. The reads cover red to blue only.
-- Angle, Square and Cross with End not right of Start. The reads have End right of Start only.
-- Seethe Rate of the Fast Noise: the measured level at frame 5 is not the level of Seethe 5 × Seethe Rate.
-- Discontinuous of the Fast Noise with a Contrast other than 1 or a Brightness other than 0.
-- The map inputs of the Fast Noise. A link to them did not join in the measurement.
+- Seethe Rate of the Fast Noise. The level at frame 5 is not the level of any Seethe value that was read ([spec](../spec.md#the-fast-noise-tool)).
+- What the Gradient Type items of the Fast Noise other than Uni do.
+- The map inputs of the Fast Noise. A link to them did not join in two measurements.
