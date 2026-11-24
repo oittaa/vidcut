@@ -2027,7 +2027,7 @@ impl Workspace {
                     json!({ "media": m, key: value.clamp(0, frames) }),
                 );
             }
-            None if is_in && self.effects_page.page == Page::Cut => self.mark_in_out(key, value),
+            None if self.effects_page.page == Page::Cut => self.mark_in_out(key, value),
             None => self.send("marks.set", json!({ key: value })),
         }
     }
@@ -2108,6 +2108,7 @@ impl Workspace {
         }
         match self.snap.source_at() {
             Some((media, _)) => self.send("media.marks.clear", json!({ "media": media })),
+            None if self.effects_page.page == Page::Cut => self.export_clear_marks(),
             None => self.send("marks.clear", json!({})),
         }
     }

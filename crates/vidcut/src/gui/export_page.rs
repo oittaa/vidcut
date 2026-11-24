@@ -1,6 +1,6 @@
 use eframe::egui::{self, RichText};
 use serde_json::json;
-use vidcut_core::model::{RenderJob, RenderRange, RenderStatus};
+use vidcut_core::model::{RenderJob, RenderRange, RenderStatus, TrackKind};
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{RangeEnd, TimeSpec};
 
@@ -108,27 +108,29 @@ impl Workspace {
 
     pub(super) fn export_mark(&self, is_in: bool) {
         let frame = self.snap.timeline.position;
-        let (key, value) = match (is_in, self.clip_under(frame)) {
-            (true, Some((a, _))) => ("in", a),
-            (false, Some((_, b))) => ("out", b),
-            (true, None) => ("in", frame),
-            (false, None) => ("out", frame + 1),
+        let per_clip = self.export.render.as_ref().is_some_and(|d| d.per_clip);
+        let (key, value) = match (per_clip, is_in) {
+            (false, true) => ("in", frame),
+            (false, false) => ("out", frame + 1),
+            (true, _) => {
+                let Some((a, b)) = self.clip_under(frame) else {
+                    return;
+                };
+                if is_in { ("in", a) } else { ("out", b) }
+            }
         };
         self.mark_in_out(key, value);
     }
 
     fn clip_under(&self, frame: i64) -> Option<(i64, i64)> {
-        if !self.export.render.as_ref().is_some_and(|d| d.per_clip) {
-            return None;
-        }
         let p = self.project()?;
-        let mut under = p
-            .tracks
-            .iter()
-            .flat_map(|t| &t.clips)
-            .filter(|c| !c.is_block() && c.start <= frame && frame < c.end());
-        let c = under.next()?;
-        under.next().is_none().then(|| (c.start, c.end()))
+        let video = (p.tracks.iter().rev()).filter(|t| t.kind == TrackKind::Video);
+        let audio = (p.tracks.iter()).filter(|t| t.kind == TrackKind::Audio);
+        video.chain(audio).find_map(|t| {
+            (t.clips.iter())
+                .find(|c| !c.is_block() && c.start <= frame && frame < c.end())
+                .map(|c| (c.start, c.end()))
+        })
     }
 
     pub(super) fn mark_in_out(&self, key: &str, value: i64) {

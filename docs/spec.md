@@ -4880,8 +4880,14 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Measured: O alone does the same. IN then reads the start of the timeline.
   - Measured: Alt+X on the page clears the marks and switches Render to Entire Timeline.
   - Measured: I on the Cut page switches Render from Entire Timeline to In/Out Range.
+  - Measured: O on the Cut page does the same. IN then reads the start of the timeline.
+  - Measured: Alt+X on the Cut page, with In/Out Range picked, switches Render to Entire Timeline.
+  - Measured: one Ctrl+Z after I on the Cut page removes the mark, and Render goes back to Entire Timeline.
   - Measured: with Single clip, I and O go at the playhead.
   - Measured: with Individual clips, they snap to the clip under the playhead. I goes to its first frame, and O to its last frame.
+  - Measured: I near the end of a clip goes to the start of that clip, not to the nearest clip start.
+  - Measured: with clips on V1 and V2 under the playhead, I and O snap to the V2 clip. In a gap, they set no mark.
+  - Measured: Add to Render Queue leaves the playhead. After a render, the playhead is at the In.
 - **Undo and save** (measured):
   - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
   - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
@@ -4917,9 +4923,12 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - `entire` also clears the marks of the timeline.
   - On the page, I and O switch Entire Timeline to In/Out Range, in one undo step with the mark.
   - With Individual clips, I and O on the page go to the first and the last frame of the clip under the playhead.
-  - With no clip or with two or more clips under the playhead, they go at the playhead ([todo](todo/export-page-checks.md)).
+  - With two or more clips under the playhead, they use the clip of the top video track. Where no video clip is, they use the clip of the top audio track.
+  - With no clip under the playhead, they set no mark.
   - On the page, Alt+X sets Entire Timeline, which clears the marks.
-  - On the Cut page, I switches Entire Timeline to In/Out Range, in one undo step with the mark.
+  - On the Cut page, I and O switch Entire Timeline to In/Out Range, in one undo step with the mark.
+  - On the Cut page, Alt+X with In/Out Range sets Entire Timeline, which clears the marks.
+  - After a render of the open timeline, the playhead goes to the first frame of the range that the job rendered.
   - The Render Settings also show the live plan and the export as a shell command ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - The queue is `render.add`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it. A change of the queue is not an undo step.
   - `render.add` refuses a file that is there, unless `overwrite`. A dry run returns the files that are there. With Replace Files on, Add asks nothing.

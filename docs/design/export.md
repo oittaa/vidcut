@@ -502,6 +502,7 @@ Voice Isolation:
   - The range comes from the `RenderRange` of the open timeline. `in_out` sends `in..out`, with `start` or `end` in place of a mark that is not set.
   - On the page, the viewer shows the timeline. Why: the page renders the timeline. Another page gives back the earlier mode.
   - On the page, `Workspace::mark` and `Workspace::clear_marks` call `export_mark` and `export_clear_marks`. Thus the keys and the Mark In, Mark Out and Clear buttons of the viewer follow the rules of the page.
+  - On the Cut page, timeline marks go through `mark_in_out` and `export_clear_marks` too. Why: there, the marks also switch the render range.
 
 The render queue:
 
@@ -513,6 +514,7 @@ The render queue:
   - A completed job without `again`, or a file without `replace`, makes `Plan::refuse` refuse the request. A dry run returns the plan instead. The page asks its two prompts from it.
 - In a running GUI, `Live::start_queue` starts one export job for each queue job, from the top. `JobInfo::render` names the queue job.
 - When the export job ends, the core records its result with `render.ended` (`queue::status`). Without a GUI, `render.start` renders the jobs one after the other, and records each result.
+- After a job of the open timeline completes, `Live::rendered_from` gives the first frame of its range, and the timeline playhead goes there.
 - A change of the queue is not an undo step. `Editor::apply` sends each request of `Request::in_queue` to `ops::render::change`. It changes the project and its `rev`, but it adds no step.
   - The store saves the project as it saves an edit. The history file then gets only the hash of the new project file.
   - An undo step changes only the fields of its edit. Thus an undo keeps the queue.
