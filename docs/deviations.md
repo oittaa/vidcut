@@ -1524,7 +1524,8 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
 - **Resolve:**
   - By default, Auto Color uses the DaVinci Neural Engine (pp. 771, 3128).
   - Use Legacy Auto Color in the Color panel of the User Preferences selects the earlier method (pp. 117, 3129).
-  - Measured: with the preference on, only Color > Auto Color uses the earlier method ([spec §8.25](spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)).
+  - Measured: with the preference on, the A button and Color > Auto Color use the earlier method.
+  - The Auto Color button of the Cut page viewer Tools stays on the neural method ([spec §8.25](spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)).
 - **vidcut:**
   - Each Auto Color uses the legacy method: `grade.auto_color`, the A button, Color > Auto Color and the viewer Tools.
   - There is no preference.

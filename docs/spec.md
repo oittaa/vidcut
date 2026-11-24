@@ -4172,9 +4172,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - The same picture at 1920 × 1080 and at 3840 × 2160 gives the same values within 0.004.
   - At 588 × 260, 30 black and 30 white pixels change W. At the larger sizes, they do not.
 - **Use Legacy Auto Color**, measured:
-  - With the preference on, Color > Auto Color (Alt+Shift+C) gives the earlier method.
-  - The A button and the script command stay on the neural method with the preference on. This is against p. 117.
+  - With the preference on, the A button and Color > Auto Color (Alt+Shift+C) give the earlier method.
+  - The Auto Color button of the Cut page viewer Tools and the script command stay on the neural method with the preference on.
   - The result is one node with Lift and Gain of red, green, blue and the master. Gamma and Offset keep their usual values.
+  - The node shows the badge of the Primaries, not the badge of the Auto Color tool.
   - Each channel of the source picture uses its own values only.
   - For each channel, b = floor(99 × clamp(v, 0, 1)) of each pixel. k is 19.25 % of the pixels.
   - B is the mean of the k smallest b, divided by 99. W is the mean of the k largest b, divided by 99.
@@ -4188,15 +4189,29 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On a clip with Gain and Offset, all values of Lift and Gain are new. The Offset stays.
   - The analysis then sees the output of the node with the Offset, and with Lift and Gain at their usual values.
   - 1920 × 1080 and 3840 × 2160 give the same points for most values. 588 × 260 differs by up to 0.0016.
-- An OpenTimelineIO export holds no grade of a clip. Its clip metadata is empty. Auto Color itself in the file is not measured.
+  - Not matched: a second run changed only Lift B, from −0.08 to −0.09 in the field.
+  - Two runs, then one Ctrl+Z, take back both. Redo then gives nothing back ([gotchas](gotchas.md#resolves-edits)).
+- **The Color tool of the Cut page viewer Tools**, measured:
+  - It has a switch, an Auto Color button and a reset icon. None of them has a tooltip.
+  - Auto Color always adds the neural Auto Color tool to node 1, also with Use Legacy Auto Color on.
+  - The button does not stay lit. The Color icon of the Tools gets a red dot. The clip in the timeline gets a color badge.
+  - A second click changes nothing that shows. Each click is one undo step of the Color page.
+  - Ctrl+Z on the Cut page does not take back Auto Color. It takes back the last switch to another timeline.
+  - The switch off greys out Auto Color and the reset icon, and the clip shows the source.
+    - Node 1 keeps the Auto Color tool. The red dot turns white.
+    - The switch on gives back the result.
+  - The reset icon removes the Auto Color tool from node 1, also one that the A button added.
+- An OpenTimelineIO export holds no grade of a clip and nothing of Auto Color. The files before and after the A button are the same.
 - **vidcut** uses the legacy method above for each Auto Color ([X174](deviations.md#x174-auto-color-uses-the-legacy-method)).
   - `grade.auto_color` runs it on a corrector of the grade of a clip. Left out, the node is node 1, and the frame is at the playhead.
   - The A button of the Primaries palette, Color > Auto Color and Alt+Shift+C run it on the current node.
-  - The Auto Color button of the viewer Tools runs it on node 1. The button does not stay lit ([todo](todo/auto-color.md)).
+  - The Auto Color button of the viewer Tools runs it on node 1. The button does not stay lit.
+  - The viewer Tools have no Color tool with a switch and a reset ([todo](todo/auto-color.md)).
   - The analysis reads one frame of the clip alone, after the nodes up to that corrector.
     - The Lift and Gain of that corrector are at their usual values.
     - Other clips, the opacity, the composite mode and the timeline grade do not change the frame.
-  - The result replaces all Lift and Gain values of the corrector, as the legacy method of Resolve does. Undo takes it back.
+  - The result replaces all Lift and Gain values of the corrector, as the legacy method of Resolve does.
+  - Each run is one undo step. Redo gives it back.
   - The grade of the timeline has no Auto Color.
   - An OpenTimelineIO file of vidcut keeps the result in the vidcut metadata of the grade.
 
