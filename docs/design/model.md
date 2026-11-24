@@ -254,15 +254,19 @@ Frame rate of a file:
     - For a codec with fields (`AV_CODEC_PROP_FIELDS`), a packet has the fields that its parser gives: `repeat_pict` plus 1.
     - Each other packet has 2 fields.
     - Why: an H.264 stream that is coded in fields has a packet and a timestamp for each field. Thus a count of packets gives two times the rate.
-  - `Input::rate_of` makes the fraction from these whole numbers with `av_reduce`. Why: a fraction from a decimal number can get very large terms.
+  - The rate is a `Rational` of these whole numbers. Why: a fraction from a decimal number can get very large terms.
   - Both rates of the stream (`avg_frame_rate`, `r_frame_rate`) get the measured rate. Thus the file shows a constant rate.
 - `Input::open` does both steps for the other readers.
 - The rate from `probe` is the one rate of the media. All readers use it.
-  - `decode::Input` keeps the rate, and `Input::rate` gives it.
-  - `env::input_of` sets it from the media's `fps`.
+  - `decode::Input` keeps the rate as a `Rational`, and `Input::rate` gives it.
+  - `Input::of` is the one builder of an input from a path, its image sequence and its rate. Each reader uses it.
+  - `Input::of_media` gives `Input::of` the media's `fps` and its image sequence (`render::image_of`).
   - An export sets it from the timeline: `VideoPiece::media_rate` multiplies the rate of the timeline by the frames of media for each frame.
   - `Rational::times` removes the common factors before it multiplies. Thus the product is exact when the rate fits 64 bits.
-  - `Input::rate_of` fits each rate into the 32-bit numbers of FFmpeg, also the rate of an image sequence. A rate that does not fit gets the nearest fraction that fits.
+  - `ffmpeg_rate` is the one conversion of a `Rational` to the 32-bit fraction of FFmpeg. It uses `av_reduce`.
+    - A rate that does not fit gets the nearest fraction that fits.
+    - The readers, the probe, the measured rate and the writers (export, bypass, subtitles, OpenEXR, proxies) all use it.
+    - Why: one conversion gives one result, and a fix to it fixes each user.
   - `VideoReader::frame_rate`, the proxies, the thumbnails and the analyses use `Input::rate`.
   - Why: a reader that asks FFmpeg for the rate can get a rate that is not the media's rate.
 

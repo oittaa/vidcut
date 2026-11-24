@@ -5,7 +5,7 @@ use vidcut_core::export::EncoderChoice;
 use vidcut_core::model::{ColorSpace, Hdr};
 use vidcut_core::preferences::{CacheCodec, ProxyCodec};
 
-use crate::decode::{Input, VideoReader};
+use crate::decode::{Input, VideoReader, ffmpeg_rate};
 use crate::error::{Context, Error, Result};
 use crate::export::encode::{self, Availability, Pass, Passes, Upload, VideoEncoder};
 use crate::export::make::{Fitting, Maker};
@@ -694,9 +694,8 @@ pub(crate) fn encode_plan(
     };
     let (w, h) = (plan.width, plan.height);
     let fps = plan.fps;
-    let num = |n: i64| i32::try_from(n).unwrap_or(i32::MAX);
-    let src_tb = ffmpeg::Rational(num(fps.den()), num(fps.num()));
-    let rate = Some(ffmpeg::Rational(num(fps.num()), num(fps.den())));
+    let src_tb = ffmpeg_rate(fps).invert();
+    let rate = Some(ffmpeg_rate(fps));
     let shown = Shown {
         dest: tmp,
         total: plan.frames,

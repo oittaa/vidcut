@@ -12,6 +12,7 @@ use vidcut_core::time::Rational;
 
 use super::subtitles::Cue;
 use super::video::Clock;
+use crate::decode::ffmpeg_rate;
 use crate::error::{Error, Result};
 use crate::ffmpeg::packet::{Mut, Ref};
 use crate::ffmpeg::{self, Rescale, codec, ffi, format};
@@ -736,7 +737,7 @@ impl Copying {
             spans,
             files,
             fps: plan.fps,
-            stream_tb: ffmpeg::Rational(plan.fps.den() as i32, plan.fps.num() as i32),
+            stream_tb: ffmpeg_rate(plan.fps).invert(),
             reader: None,
             at: 0,
             start: None,
@@ -759,7 +760,10 @@ impl Copying {
         }
         match i32::try_from(d) {
             Ok(d) => ffmpeg::Rational(1, d),
-            Err(_) => ffmpeg::Rational(fps.1 as i32, (fps.0 * TICKS_PER_FRAME) as i32),
+            Err(_) => ffmpeg_rate(
+                Rational::new(fps.0.saturating_mul(TICKS_PER_FRAME), fps.1).unwrap_or(self.fps),
+            )
+            .invert(),
         }
     }
 
@@ -776,7 +780,7 @@ impl Copying {
     }
 
     fn frame_tb(&self) -> ffmpeg::Rational {
-        ffmpeg::Rational(self.fps.den() as i32, self.fps.num() as i32)
+        ffmpeg_rate(self.fps).invert()
     }
 
     pub(crate) fn run_at(&mut self, j: i64, cancel: &AtomicBool) -> Result<Option<Run>> {

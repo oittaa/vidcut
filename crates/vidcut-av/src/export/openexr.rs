@@ -8,6 +8,7 @@ use ::exr::prelude::{
 use vidcut_core::export::{DWA_LEVEL, VideoSettings};
 use vidcut_core::time::Rational;
 
+use crate::decode::ffmpeg_rate;
 use crate::error::{Error, Result};
 
 pub(super) struct Writer {
@@ -40,6 +41,7 @@ impl Writer {
     pub(super) fn new(v: &VideoSettings, (width, height): (u32, u32), fps: Rational) -> Self {
         let (half, compression) =
             chosen(v.profile.as_deref().unwrap_or("half"), v.compression_level);
+        let rate = ffmpeg_rate(fps);
         Self {
             half,
             compression,
@@ -48,7 +50,7 @@ impl Writer {
                 true => &COLORS_ALPHA,
                 false => &COLORS,
             },
-            fps: (fps.num() as i32, fps.den() as u32),
+            fps: (rate.numerator(), rate.denominator().unsigned_abs()),
         }
     }
 

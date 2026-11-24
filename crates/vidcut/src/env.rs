@@ -277,24 +277,6 @@ fn analysis_file(media: &Media, what: &str) -> (PathBuf, Origin) {
     (Kind::Analysis.file(&origin, what), origin)
 }
 
-pub fn input_of(m: &Media) -> vidcut_av::decode::Input {
-    use vidcut_av::decode::Input;
-    match (&m.sequence, &m.info.video) {
-        (Some(s), Some(v)) => Input::Sequence {
-            pattern: m.path.parent().unwrap_or(Path::new("")).join(&s.pattern),
-            first: s.first,
-            rate: Input::rate_of(v.fps.num(), v.fps.den()),
-        },
-        (None, video) => Input::File {
-            path: m.path.clone(),
-            rate: video
-                .as_ref()
-                .map(|v| Input::rate_of(v.fps.num(), v.fps.den())),
-        },
-        (Some(_), None) => Input::file(&m.path),
-    }
-}
-
 impl Env for AvEnv {
     fn probe(&self, path: &Path) -> Result<ProbedMedia> {
         let canonical = vidcut_core::dirs::canonical(path)
@@ -351,7 +333,7 @@ impl Env for AvEnv {
             &dir.join(&sequence.pattern),
             sequence.first,
             sequence.count,
-            vidcut_av::decode::Input::rate_of(rate.num(), rate.den()),
+            rate,
         )
         .map_err(|e| Error::media(e.to_string()))?;
         probed.info = convert(&info)?;
@@ -416,7 +398,11 @@ impl Env for AvEnv {
             analysis_file(media, &key),
             || {
                 let decoder = crate::preferences::gpu_decoding().own_decoder();
-                vidcut_av::analysis::picture_stats(&input_of(media), pictures, decoder.as_ref())
+                vidcut_av::analysis::picture_stats(
+                    &vidcut_av::decode::Input::of_media(media),
+                    pictures,
+                    decoder.as_ref(),
+                )
             },
             PictureStats::to_bytes,
             PictureStats::from_bytes,
@@ -499,7 +485,7 @@ impl Env for AvEnv {
             analysis_file(media, &key),
             || {
                 let decoder = crate::preferences::gpu_decoding().own_decoder();
-                let input = input_of(media);
+                let input = vidcut_av::decode::Input::of_media(media);
                 vidcut_av::subjects::find(&input, subject, look, decoder.as_ref(), &dir)
             },
             Detections::to_bytes,
@@ -727,7 +713,7 @@ impl Env for AvEnv {
             let total = Some((v.duration * v.fps.as_f64()).round().max(0.0) as u64);
             let decoder = crate::preferences::gpu_decoding().own_decoder();
             let written = vidcut_av::proxy::write(
-                &input_of(media),
+                &vidcut_av::decode::Input::of_media(media),
                 w,
                 h,
                 &path,
