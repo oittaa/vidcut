@@ -105,6 +105,11 @@ This file lists the FFmpeg, driver, OS, library and Resolve behavior that vidcut
   - Without a check, the file comes in as a still of 2×2 pixels, and its picture never renders.
   - Thus `probe` refuses a file that `webp_pipe` reads, when the animation flag of its VP8X chunk is on (`animated_webp`). The message says that the file needs FFmpeg 9.0.
   - FFmpeg 9 reads a file with this flag with `webp_anim`. Thus the refusal does not occur there.
+- **FFmpeg makes up a frame rate for a stream whose file states none** (9.0.1, `avformat_find_stream_info`).
+  - An example is a Matroska file without a frame duration in its track (`DefaultDuration`).
+  - A 60 fps HEVC stream with timestamps in milliseconds gets 62.5 fps (125/2).
+  - A 60 fps AV1 stream of 4K frames gets no average rate, and 1000 fps as its other rate. 1000 is one over the time base.
+  - Thus `probe` measures the rate of such a file from its timestamps ([model](design/model.md)).
 - **`AVHWDeviceContext.user_opaque` is FFmpeg's** on the devices that `av_hwdevice_ctx_create` makes.
   - VA-API keeps its DRM file there, and frees the file through that pointer.
   - vidcut uses the field only on the CUDA devices that it allocates itself (`CudaDevice::with_own_stream`).

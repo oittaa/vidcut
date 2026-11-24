@@ -211,7 +211,10 @@ where
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Input {
-    File(PathBuf),
+    File {
+        path: PathBuf,
+        rate: Option<(i32, i32)>,
+    },
     Sequence {
         pattern: PathBuf,
         first: u64,
@@ -220,17 +223,45 @@ pub enum Input {
 }
 
 impl Input {
+    pub fn file(path: &Path) -> Self {
+        Input::File {
+            path: path.to_path_buf(),
+            rate: None,
+        }
+    }
+
     pub fn path(&self) -> &Path {
         match self {
-            Input::File(p) => p,
+            Input::File { path, .. } => path,
             Input::Sequence { pattern, .. } => pattern,
         }
     }
 
+    pub fn rate(&self) -> Option<ffmpeg::Rational> {
+        let (num, den) = match self {
+            Input::File { rate, .. } => (*rate)?,
+            Input::Sequence { rate, .. } => *rate,
+        };
+        (num > 0 && den > 0).then_some(ffmpeg::Rational(num, den))
+    }
+
+    pub fn rate_of(num: i64, den: i64) -> (i32, i32) {
+        let mut rate = (0, 0);
+        // SAFETY: av_reduce writes only the two integers that it is given.
+        unsafe { ffmpeg::ffi::av_reduce(&mut rate.0, &mut rate.1, num, den, i64::from(i32::MAX)) };
+        rate
+    }
+
     pub fn open(&self) -> Result<format::context::Input> {
+        let mut input = self.open_header()?;
+        find_stream_info(&mut input, self.path())?;
+        Ok(input)
+    }
+
+    pub fn open_header(&self) -> Result<format::context::Input> {
         crate::init();
         match self {
-            Input::File(p) => open_file(p),
+            Input::File { path, .. } => open_file_header(path),
             Input::Sequence {
                 pattern,
                 first,
@@ -240,7 +271,26 @@ impl Input {
     }
 }
 
+pub fn find_stream_info(input: &mut format::context::Input, path: &Path) -> Result<()> {
+    // SAFETY: an open input's context.
+    let ret =
+        unsafe { ffmpeg::ffi::avformat_find_stream_info(input.as_mut_ptr(), std::ptr::null_mut()) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: format!("opening {}", path.display()),
+            source: ffmpeg::Error::from(ret),
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn open_file(path: &Path) -> Result<format::context::Input> {
+    let mut input = open_file_header(path)?;
+    find_stream_info(&mut input, path)?;
+    Ok(input)
+}
+
+fn open_file_header(path: &Path) -> Result<format::context::Input> {
     if vidcut_core::store::from_another_system(path) {
         return Err(Error::Invalid(format!(
             "{} is a path on another kind of system: relink the media",
@@ -249,8 +299,31 @@ pub(crate) fn open_file(path: &Path) -> Result<format::context::Input> {
     }
     let what = || format!("opening {}", path.display());
     let file = std::fs::File::open(path).map_err(|e| Error::Invalid(format!("{}: {e}", what())))?;
-    let io = format::context::StreamIo::from_read_seek(file).ctx(what)?;
-    format::input_from_stream(io, Some(&path.to_string_lossy()), None).ctx(what)
+    let mut io = format::context::StreamIo::from_read_seek(file).ctx(what)?;
+    let name = std::ffi::CString::new(path.to_string_lossy().as_bytes())
+        .map_err(|_| Error::Invalid(format!("{}: a NUL in the name", path.display())))?;
+    // SAFETY: a new context that reads through `io`, which the wrapped input keeps.
+    unsafe {
+        let mut ctx = ffmpeg::ffi::avformat_alloc_context();
+        if ctx.is_null() {
+            return Err(Error::Invalid(format!("{}: no memory", what())));
+        }
+        (*ctx).pb = io.as_mut_ptr();
+        (*ctx).flags |= ffmpeg::ffi::AVFMT_FLAG_CUSTOM_IO;
+        let ret = ffmpeg::ffi::avformat_open_input(
+            &mut ctx,
+            name.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        );
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: what(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(format::context::Input::wrap_with_custom_io(ctx, io))
+    }
 }
 
 fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format::context::Input> {
@@ -269,14 +342,6 @@ fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format:
         let ret = ffmpeg::ffi::avformat_open_input(&mut ctx, path.as_ptr(), image2, &mut opts);
         drop(ffmpeg::Dictionary::own(opts));
         if ret < 0 {
-            return Err(Error::Ffmpeg {
-                context: what(),
-                source: ffmpeg::Error::from(ret),
-            });
-        }
-        let ret = ffmpeg::ffi::avformat_find_stream_info(ctx, std::ptr::null_mut());
-        if ret < 0 {
-            ffmpeg::ffi::avformat_close_input(&mut ctx);
             return Err(Error::Ffmpeg {
                 context: what(),
                 source: ffmpeg::Error::from(ret),
@@ -639,7 +704,11 @@ fn remembered(source: &Input, scan: impl FnOnce(&Input) -> Option<bool>) -> bool
     let known = || KNOWN.lock().unwrap_or_else(|e| e.into_inner());
     let meta = std::fs::metadata(source.path()).ok();
     let mtime = meta.as_ref().and_then(|m| m.modified().ok());
-    let key = format!("{source:?}|{:?}|{mtime:?}", meta.map(|m| m.len()));
+    let key = format!(
+        "{}|{:?}|{mtime:?}",
+        source.path().display(),
+        meta.map(|m| m.len())
+    );
     let kept = known().get(&key).copied();
     if let Some(open) = kept {
         return open;
@@ -881,7 +950,7 @@ pub fn stream_rotation(params: &codec::Parameters) -> u16 {
 
 impl VideoReader {
     pub fn open(path: &Path) -> Result<Self> {
-        Self::open_input(&Input::File(path.to_path_buf()))
+        Self::open_input(&Input::file(path))
     }
 
     pub fn open_input(source: &Input) -> Result<Self> {
@@ -1160,8 +1229,7 @@ impl VideoReader {
     }
 
     pub fn frame_rate(&self) -> Option<ffmpeg::Rational> {
-        let r = self.input.stream(self.stream)?.avg_frame_rate();
-        (r.numerator() > 0 && r.denominator() > 0).then_some(r)
+        self.source.rate()
     }
 
     pub fn first_props(&self) -> Option<FrameProps> {
@@ -1461,7 +1529,7 @@ mod tests {
     fn held(name: &str, open: bool) -> (std::thread::JoinHandle<bool>, Arc<Barrier>) {
         let barrier = Arc::new(Barrier::new(2));
         let at = barrier.clone();
-        let source = Input::File(name.into());
+        let source = Input::file(name.as_ref());
         let thread = std::thread::spawn(move || {
             remembered(&source, |_| {
                 at.wait();
@@ -1475,7 +1543,7 @@ mod tests {
 
     fn meanwhile(name: &str, open: bool) -> Result<bool, mpsc::RecvTimeoutError> {
         let (tx, rx) = mpsc::channel();
-        let source = Input::File(name.into());
+        let source = Input::file(name.as_ref());
         std::thread::spawn(move || tx.send(remembered(&source, |_| Some(open))));
         rx.recv_timeout(std::time::Duration::from_secs(30))
     }

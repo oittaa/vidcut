@@ -877,9 +877,15 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 - `grade.auto_color` runs the legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
   - `editor::auto_color_looks` makes the `RenderPlan` of one frame: the clip alone, with the grade up to the corrector, and its Lift and Gain reset.
   - That frame has no transitions and no timeline grade. The clip and its track are on, as in `render::flatten_clip`.
+  - With `tool`, the corrector is at its usual values in that frame. Thus the analysis reads the picture that comes into it.
   - `Env::auto_balance` renders that frame in float (`still::floats`). `BALANCES` keeps the results of recent plans.
   - `auto_color::balance` makes the Lift and Gain from the pixels. It is the one place of the method, so that another method can take its place ([todo](../todo/auto-color.md)).
-  - `ops::grade::auto_color` writes the Lift and Gain with `GradeNode::change_at`.
+  - `ops::grade::auto_color` writes the Lift and Gain with `GradeNode::change_at`. With `tool`, it writes the `AutoColor` of the corrector.
+- The Auto Color tool (`Corrector::auto_color`) has its own Lift and Gain.
+  - `ToolGrading` gives their numbers with `wheel`, at Gamma 0. The tool has no Offset and a Lum Mix of 100.
+  - `fs_grade` applies the tool first, before step 1. `fs_grade_stats` also applies it. Thus the tone stage filters the luma that it changes.
+  - A tool that is off keeps its values and does nothing. `Corrector::changes_nothing` does not count it, and the render plan uses that test.
+  - `Corrector::is_usual` counts a tool that is off. Thus a keyframe that holds only such a tool keeps it in the project file.
 - `Grading::of` changes the values of a corrector into the numbers that `fs_grade` uses:
   - Temp and Tint give one 3×3 matrix. It adapts the white of 6500 K to the new white, with the Bradford cone matrix.
   - The new white is at 6500 K minus Temp, in CIE 1960 uv. `ISOTEMPERATURE` is the table of Robertson (1968). `white_xyz` reads it linearly in mired.

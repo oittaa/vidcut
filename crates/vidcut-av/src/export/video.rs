@@ -47,14 +47,17 @@ impl Clock {
     }
 }
 
-pub(crate) fn input_of(path: &Path, image: Option<&Image>) -> Input {
+pub(crate) fn input_of(path: &Path, image: Option<&Image>, rate: Option<Rational>) -> Input {
     match image {
         Some(Image::Sequence(numbered)) => Input::Sequence {
             pattern: numbered.pattern.clone(),
             first: numbered.first,
             rate: (numbered.rate.num() as i32, numbered.rate.den() as i32),
         },
-        Some(Image::Still) | None => Input::File(path.to_path_buf()),
+        Some(Image::Still) | None => Input::File {
+            path: path.to_path_buf(),
+            rate: rate.map(|r| Input::rate_of(r.num(), r.den())),
+        },
     }
 }
 
@@ -572,7 +575,7 @@ impl Source {
                         (Some(k), Pictures::Sequence { count }) if k + 1 < count as i64 => {
                             let first = match self.reader.input() {
                                 Input::Sequence { first, .. } => *first,
-                                Input::File(_) => 0,
+                                Input::File { .. } => 0,
                             };
                             format!(
                                 ": picture {} of {count} (file number {}) is missing",
@@ -1213,7 +1216,12 @@ impl Source {
     }
 
     fn seek_ahead(&mut self, first: i64, reading: Reading) -> Result<()> {
-        let rate = self.reader.frame_rate().expect("a frame rate");
+        let rate = self.reader.frame_rate().ok_or_else(|| {
+            Error::Invalid(format!(
+                "{}: no frame rate",
+                self.reader.input().path().display()
+            ))
+        })?;
         let fps = f64::from(rate.numerator()) / f64::from(rate.denominator());
         let start =
             self.reader.first_pts().unwrap_or(0) as f64 * self.tick + (first as f64 - 0.5) / fps;
@@ -3029,7 +3037,7 @@ impl VideoFrames {
         let Some(clock) = Clock::of_piece(piece, self.fps) else {
             return Ok(None);
         };
-        let input = input_of(path, None);
+        let input = input_of(path, None, piece.media_rate(self.fps));
         let target = clock.target(piece.position(0));
         let s = match self.open.iter().position(|s| s.reader.input() == &input) {
             Some(s) => s,
@@ -3133,7 +3141,7 @@ impl VideoFrames {
             let pictures = Pictures::of(image.as_ref());
             let still = pictures == Pictures::Still;
             let from = if still { 0 } else { layer.position(0) };
-            let input = input_of(path, image.as_ref());
+            let input = input_of(path, image.as_ref(), layer.media_rate(self.fps));
             let target = clock.target(from);
             let free: Vec<usize> = (0..self.open.len())
                 .filter(|&s| {
@@ -3275,7 +3283,7 @@ impl VideoFrames {
                 continue;
             };
             let (color_space, upscale) = (*color_space, *upscale);
-            let input = input_of(path, image.as_ref());
+            let input = input_of(path, image.as_ref(), layer.media_rate(self.fps));
             let free = |s: &usize| {
                 !used[*s]
                     && self.open[*s].reader.input() == &input

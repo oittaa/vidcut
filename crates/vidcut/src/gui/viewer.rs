@@ -1473,6 +1473,7 @@ impl Workspace {
             trim.map(|_| T::TrimOut),
             Some(T::Jog),
             Some(T::Previous),
+            Some(T::Reverse),
             Some(T::Stop),
             Some(T::Play),
             Some(T::Next),
@@ -1504,6 +1505,7 @@ impl Workspace {
                 T::TrimOut,
                 T::Next,
                 T::Previous,
+                T::Reverse,
                 T::Stop,
                 T::Play,
                 T::SafeArea,
@@ -1511,7 +1513,14 @@ impl Workspace {
             group: |t| match t {
                 T::Tools => 5,
                 T::TrimOut => 0,
-                T::Jog | T::Previous | T::Stop | T::Play | T::Next | T::Loop | T::FastReview => 1,
+                T::Jog
+                | T::Previous
+                | T::Reverse
+                | T::Stop
+                | T::Play
+                | T::Next
+                | T::Loop
+                | T::FastReview => 1,
                 T::TrimIn => 2,
                 T::MarkIn | T::MarkOut | T::Clear | T::Speed => 3,
                 T::SafeArea => 6,
@@ -1543,6 +1552,14 @@ impl Workspace {
                         }
                         r
                     }
+                    T::Reverse => {
+                        let on = player.playing && player.speed < 0.0;
+                        let r = ui.selectable_label(on, big("◀"));
+                        if r.clicked() {
+                            ws.send("player.play", json!({ "speed": -1.0 }));
+                        }
+                        r
+                    }
                     T::Stop => {
                         let r = ui.button(big("⏹"));
                         if r.clicked() {
@@ -1551,10 +1568,10 @@ impl Workspace {
                         r
                     }
                     T::Play => {
-                        let play = if player.playing { "⏸" } else { "▶" };
-                        let r = ui.button(big(play));
+                        let on = player.playing && player.speed > 0.0;
+                        let r = ui.selectable_label(on, big("▶"));
                         if r.clicked() {
-                            ws.send("player.toggle", json!({}));
+                            ws.send("player.play", json!({ "speed": 1.0 }));
                         }
                         r
                     }
@@ -1965,6 +1982,7 @@ enum Transport {
     TrimOut,
     Jog,
     Previous,
+    Reverse,
     Stop,
     Play,
     Next,

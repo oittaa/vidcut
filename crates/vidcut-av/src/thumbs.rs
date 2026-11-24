@@ -120,7 +120,7 @@ fn strip_on(
         path: path.to_path_buf(),
     };
 
-    let rate = stream_rate(&input.stream(index).expect("found"));
+    let rate = source.rate().map_or(0.0, f64::from);
     let pictures = pictures.filter(|n| *n > 0);
     if let Some(n) = pictures
         && rate > 0.0
@@ -264,15 +264,6 @@ impl Fit {
         )?;
         Ok(Image::of(&out))
     }
-}
-
-fn stream_rate(stream: &format::stream::Stream) -> f64 {
-    let avg = f64::from(stream.avg_frame_rate());
-    if avg.is_finite() && avg > 0.0 {
-        return avg;
-    }
-    let tb = f64::from(stream.time_base());
-    if tb > 0.0 { 1.0 / tb } else { 0.0 }
 }
 
 fn one_sequence_picture(

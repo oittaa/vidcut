@@ -236,6 +236,31 @@ Stills ([D38](../spec.md#12-decisions-on-gaps-and-contradictions)):
 - An animated WebP of more frames lasts as long as its frames do. Why: `webp_anim` reports no duration.
 - `probe` refuses an animated WebP that `webp_pipe` reads ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)).
 
+Frame rate of a file:
+
+- `probe` takes the frame rate that the file states.
+  - It reads the rates of the streams after the header only (`Input::open_header`).
+  - Then `decode::find_stream_info` runs FFmpeg's `avformat_find_stream_info`.
+  - Why: for a file that states no rate, FFmpeg's step makes a rate up from a few packets. That rate can be far off ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)).
+- For a file that states no rate, `measured_rate` gets the rate from the timestamps of the frames.
+  - An image sequence is not measured. Its rate is the rate that it is opened with.
+  - It opens the file again, and reads from the start. Why: other steps of `probe` read packets from the first input.
+  - It reads the packets of the first `MEASURED_SECS` of the video, and `REORDERED_FRAMES` packets more.
+  - Why the packets more: a frame out of order comes at most that many packets late in H.264 and HEVC.
+  - A video packet with no timestamp stops the measurement, and the rate of FFmpeg stays. Thus a file with no timestamps is not read to its end.
+  - The rate is the number of frames in that span, divided by the length of the span.
+  - Why that length: a timestamp in milliseconds then moves the rate by less than half the step from 24 to 23.976 fps.
+  - `Input::rate_of` makes the fraction from these whole numbers with `av_reduce`. Why: a fraction from a decimal number can get very large terms.
+  - Both rates of the stream (`avg_frame_rate`, `r_frame_rate`) get the measured rate. Thus the file shows a constant rate.
+- `Input::open` does both steps for the other readers.
+- The rate from `probe` is the one rate of the media. All readers use it.
+  - `decode::Input` keeps the rate, and `Input::rate` gives it.
+  - `env::input_of` sets it from the media's `fps`.
+  - An export sets it from the timeline: `VideoPiece::media_rate` multiplies the rate of the timeline by the frames of media for each frame.
+  - `Input::rate_of` fits each rate into the 32-bit numbers of FFmpeg. A rate that does not fit gets the nearest fraction that fits.
+  - `VideoReader::frame_rate`, the proxies, the thumbnails and the analyses use `Input::rate`.
+  - Why: a reader that asks FFmpeg for the rate can get a rate that is not the media's rate.
+
 Multicam layout:
 
 - `multicam::layout` works out where the files of a multicam clip lie (spec §3).

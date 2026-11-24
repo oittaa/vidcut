@@ -5014,11 +5014,15 @@ fn mutate(
             node,
             keep_nodes,
             palette,
+            auto_color,
             at,
         } => {
             let of = grades_of(p, clips, *timeline, playhead)?;
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
-            ops::grade::clear(p, &of, (*node, *keep_nodes, *palette), at)?;
+            match auto_color {
+                true => ops::grade::auto_color_removed(p, &of, (*node, *palette), at)?,
+                false => ops::grade::clear(p, &of, (*node, *keep_nodes, *palette), at)?,
+            }
             Value::Null
         }
         Request::GradePrinter {
@@ -5036,12 +5040,17 @@ fn mutate(
             ops::grade::printer(p, &of, n, (*color, *points), &lights)?;
             Value::Null
         }
-        Request::GradeAutoColor { clip, node, at } => {
+        Request::GradeAutoColor {
+            clip,
+            node,
+            at,
+            tool,
+        } => {
             let of = grade_of(p, clip, false, playhead)?;
             let n = node.unwrap_or(1);
             let at = time_or_playhead(p, at.as_ref(), playhead)?;
-            let plan = auto_color_plan(p, &of, n, at)?;
-            ops::grade::auto_color(p, &of, (n, at), env.auto_balance(&plan)?)?;
+            let plan = auto_color_plan(p, &of, (n, *tool), at)?;
+            ops::grade::auto_color(p, &of, (n, at, *tool), env.auto_balance(&plan)?)?;
             Value::Null
         }
         Request::GradeAdd {
@@ -8279,19 +8288,25 @@ fn track_start(
 pub type TrackLook = (Media, RenderPlan, crate::analysis::Follow, bool);
 
 pub fn auto_color_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<RenderPlan> {
-    let Request::GradeAutoColor { clip, node, at } = request else {
+    let Request::GradeAutoColor {
+        clip,
+        node,
+        at,
+        tool,
+    } = request
+    else {
         return Vec::new();
     };
     let of = grade_of(p, clip, false, playhead);
     let at = time_or_playhead(p, at.as_ref(), playhead);
-    let plan = of.and_then(|of| auto_color_plan(p, &of, node.unwrap_or(1), at?));
+    let plan = of.and_then(|of| auto_color_plan(p, &of, (node.unwrap_or(1), *tool), at?));
     plan.into_iter().collect()
 }
 
 fn auto_color_plan(
     p: &Project,
     of: &ops::grade::GradeOf,
-    n: u32,
+    (n, tool): (u32, bool),
     at: Option<i64>,
 ) -> Result<RenderPlan> {
     let ops::grade::GradeOf::Clip(id) = of else {
@@ -8310,6 +8325,9 @@ fn auto_color_plan(
     let frame = ops::grade::frame_of(p, of, t)?;
     let mut g = ops::grade::stored(p, of)?.at(frame as f64).into_owned();
     match g.node_mut(n).map(|d| &mut d.tool) {
+        Some(crate::model::GradeTool::Corrector(c)) if tool => {
+            **c = crate::model::Corrector::default();
+        }
         Some(crate::model::GradeTool::Corrector(c)) => {
             let usual = crate::model::Corrector::default();
             (c.lift, c.gain) = (usual.lift, usual.gain);

@@ -285,7 +285,13 @@ pub fn input_of(m: &Media) -> vidcut_av::decode::Input {
             first: s.first,
             rate: (v.fps.num() as i32, v.fps.den() as i32),
         },
-        _ => Input::File(m.path.clone()),
+        (None, video) => Input::File {
+            path: m.path.clone(),
+            rate: video
+                .as_ref()
+                .map(|v| Input::rate_of(v.fps.num(), v.fps.den())),
+        },
+        (Some(_), None) => Input::file(&m.path),
     }
 }
 
