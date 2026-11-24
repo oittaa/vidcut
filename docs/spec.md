@@ -4863,12 +4863,19 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - Source name gives `m-red.mp4`. Add source frame count off gives the same name.
   - File suffix `_x` gives `m-red00000000_x.mp4`.
   - Use unique filenames adds the row "Add a unique name as", with Prefix (picked) and Suffix.
-  - Prefix gives `V1-0001_m-red.mp4`, and Suffix gives `m-red_V1-0001.mp4`. The number is the place of the clip on its track. The frame count goes.
+  - Prefix gives `V1-0001_m-red00000010.mp4`, and Suffix gives `m-red00000010_V1-0001.mp4`. The number is the place of the clip on its track.
+  - Each file gets the unique part, also a file whose name does not clash with another.
+  - One run gave `V1-0001_m-red.mp4` and `m-red_V1-0001.mp4`, with no frame count. Its Filename uses was not recorded.
+  - With File suffix `_x`, Prefix gives `V1-0001_m-red00000010_x.mp4`, and Suffix gives `m-red00000010_x_V1-0001.mp4`.
+  - Thus the parts of a name go in this order: unique prefix, name, frame count, file suffix, unique suffix.
   - File subfolder `sub` gives `sub\m-red00000000.mp4`.
   - Place clips in separate folders gives `Event__0001_0001\m-red00000000.mp4`, then `Event__0001_0002` and so on.
   - Preserve source directory levels 0 makes no folders. After an Add with 0, the box is off again.
   - Preserve 1 with From tail (picked) keeps the folder that holds the source file: `stills\m-red00000000.mp4`.
   - Preserve 1 with After head keeps all the folders but the drive: `Users\…\stills\m-red00000000.mp4`.
+  - Preserve 2 with After head also drops `Users`: `eero\Downloads\…\stills\m-red00000010.mp4`. Thus the drive is level 1.
+  - File subfolder `sub`, Place clips in separate folders and Preserve 1 From tail together give `stills\Event__0001_0001\sub\m-red00000010.mp4`.
+  - Thus the folders go in this order: the preserved folders, the folder of the clip, the subfolder.
   - An EXR names each frame by its source frame, in 8 digits: `m-red00000000.exr` to `m-red00000095.exr`.
   - 4 digits with Each clip starts at frame 1 gives `m-red0001.exr` to `m-red0096.exr`.
   - Replace existing files in place, with a movie source, writes the frames as usual. The source does not change.
@@ -4954,9 +4961,10 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - An export of one movie file refuses `video.filename_digits`, because its name has no frame number.
   - An image sequence numbers its frames from the source frame. First Frame is 1 when it is turned on.
   - Each clip renders at the frame rate of the timeline ([X175](deviations.md#x175-individual-clips-render-at-the-frame-rate-of-the-timeline)).
-  - The rows go together only as measured. An export refuses File Subfolder with Source Folder Levels, and File Suffix with Unique Names.
-  - It also refuses Unique Names with Source Name. With an image sequence, it refuses Source Name, File Suffix, Unique Names and no frame count.
-  - Count Levels After Head takes only 1 level, on a path with a drive letter.
+  - The parts of a name go in the measured order: unique prefix, name, frame count, File Suffix, unique suffix.
+  - The folders go in the measured order: the Source Folder Levels, then the File Subfolder.
+  - An export refuses Unique Names with Source Name. With an image sequence, it refuses Source Name, File Suffix, Unique Names and no frame count.
+  - Count Levels After Head drops the first levels of the path, with the drive as level 1. It needs a path with a drive letter.
   - With Single clip, the File tab has Filename Digits and First Frame for image sequences, and Replace Files.
   - The other rows of the File tab wait for a measurement ([todo](todo/export-file-tab.md)).
   - The other parts of the page are in [gaps](todo/gaps.md).
