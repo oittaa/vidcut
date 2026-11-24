@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
-    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, Compound, DuckDetect,
-    Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, Node, Picture,
-    PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode,
-    TimelineColors, Title, Tool, Track, TrackKind, Transition, Upscale,
+    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ClipScaling, ColorSpace, CompositeMode,
+    Compound, DuckDetect, Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, Node,
+    Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
+    SmoothMode, TimelineColors, Title, Tool, Track, TrackKind, Transition, Upscale,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -497,6 +497,7 @@ impl Smooth {
                 composite_mode: self.mode,
                 ..Picture::default()
             },
+            mapped: None,
             run: None,
             source: 0,
             frame: 0,
@@ -543,6 +544,12 @@ pub struct CacheFrames {
 pub struct Placed {
     pub clip: String,
     pub picture: Picture,
+    /// How much larger the scaling of its clip makes its picture than the
+    /// fit into the frame, `[x, y]` across and down, about the middle of
+    /// the frame. Its picture's own `scaling` is left out. Left out at the
+    /// fit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mapped: Option<[f64; 2]>,
     /// Where the piece's first frame is in the clip, for a picture with a
     /// Dynamic Zoom.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -586,6 +593,13 @@ pub struct Placed {
 
 fn zero_i64(n: &i64) -> bool {
     *n == 0
+}
+
+fn unscaled(picture: Picture) -> Picture {
+    Picture {
+        scaling: ClipScaling::Project,
+        ..picture
+    }
 }
 
 /// The way from a keyframe position of a clip to the frame of its file that
@@ -680,11 +694,12 @@ impl FileClock {
 
 impl Placed {
     pub fn of(clip: &Clip, picture: Picture, run: Run) -> Self {
-        let picture = crate::ops::picture::working(picture);
+        let picture = unscaled(crate::ops::picture::working(picture));
         Self {
             clip: clip.id.clone(),
             run: picture.dynamic_zoom.map(|_| run),
             picture,
+            mapped: None,
             source: clip.content_at(clip.start),
             frame: 0,
             start: clip.start,
@@ -698,11 +713,12 @@ impl Placed {
     }
 
     pub fn at(clip: &Clip, picture: Picture, run: Run, time: i64) -> Self {
-        let picture = crate::ops::picture::working(picture);
+        let picture = unscaled(crate::ops::picture::working(picture));
         let run = picture.dynamic_zoom.map(|_| run);
         Self {
             clip: clip.id.clone(),
             picture,
+            mapped: None,
             run,
             source: clip.content_at(time),
             frame: time - clip.start,
@@ -746,7 +762,11 @@ impl Placed {
     }
 
     fn keeps_cover(&self) -> bool {
-        !self.crossing && self.ramp.is_none() && self.picture.is_usual()
+        !self.crossing && self.ramp.is_none() && self.mapped.is_none() && self.picture.is_usual()
+    }
+
+    pub fn mapped_rect(&self, rect: [f64; 4], frame: (f64, f64)) -> [f64; 4] {
+        crate::place::mapped_rect(rect, self.mapped, frame)
     }
 
     pub fn source_after(&self, k: i64) -> i64 {
@@ -757,6 +777,7 @@ impl Placed {
         Self {
             clip: self.clip.clone(),
             picture: self.picture.clone(),
+            mapped: self.mapped,
             run: self.run.map(|r| r.after(k)),
             source: self.source_after(k),
             frame: self.frame + if self.ready { k } else { k - self.start },
@@ -786,6 +807,7 @@ impl Placed {
                 grade: self.picture.grade.clone(),
                 ..Picture::default()
             },
+            mapped: None,
             run: None,
             source: self.source,
             frame: self.frame,
@@ -2349,6 +2371,7 @@ fn crossing(d: &transitions::Playing, inside: bool) -> Option<Placed> {
     joins.then(|| Placed {
         clip: d.transition.id.clone(),
         picture: Picture::default(),
+        mapped: None,
         run: None,
         source: 0,
         frame: 0,
@@ -3486,11 +3509,20 @@ struct VideoPlan<'a> {
 impl VideoPlan<'_> {
     fn fills(&self, c: &Clip) -> bool {
         let (pool, s) = (&self.pool, &self.p.flat_settings());
+        let media = pool.get(c.media.as_str());
         c.picture.as_ref().is_none_or(Picture::is_usual)
-            && (c.draws()
-                || pool
-                    .get(c.media.as_str())
-                    .is_some_and(|m| crate::place::fills(m, (s.width, s.height))))
+            && media.is_none_or(|m| self.mapped(c, m).is_none())
+            && (c.draws() || media.is_some_and(|m| crate::place::fills(m, (s.width, s.height))))
+    }
+
+    fn mapped(&self, c: &Clip, m: &Media) -> Option<[f64; 2]> {
+        let v = m.info.video.as_ref()?;
+        let own = c
+            .picture
+            .as_ref()
+            .map_or(ClipScaling::Project, |x| x.scaling);
+        let frame = (self.p.width(), self.p.height());
+        crate::place::map_of(v, own.or(self.p.scaling()), frame)
     }
 
     fn picture(&self, c: &Clip, (nest, crossed): Nesting, x: i64, y: i64) -> Result<VideoPiece> {
@@ -3549,6 +3581,7 @@ impl VideoPlan<'_> {
         let mut placed = placed_of(c, nest, fills, crossed, x);
         if let Some(own) = placed.first_mut().filter(|o| o.clip == c.id) {
             own.clock = FileClock::of(self.p, c);
+            own.mapped = self.mapped(c, m);
         }
         Ok(VideoPiece::Source {
             media: c.media.clone(),
@@ -3625,6 +3658,7 @@ impl<'a> Span<'a> {
             (Some(across), true) => {
                 let own = Placed {
                     picture: Picture::default(),
+                    mapped: None,
                     ramp: Some(ramp),
                     crossing: false,
                     moving: None,
@@ -3818,6 +3852,7 @@ impl<'a> Span<'a> {
             let (ramp, chain) = self.sided(d, falling);
             let own = chain.first().map(|c| Placed {
                 picture: Picture::default(),
+                mapped: None,
                 crossing: false,
                 moving: None,
                 clock: Default::default(),

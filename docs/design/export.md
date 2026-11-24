@@ -231,7 +231,7 @@ Notes:
 
 - `plan_copies` checks the whole output first. When the export can copy nothing, it gives the reason in the `BypassNote`.
 - `Copying::new` walks the pieces of the plan. `copyable` takes a piece that shows one file with no change:
-  - a `VideoPiece::Source` that fills the frame
+  - a `VideoPiece::Source` that fills the frame, with no map of its scaling (`Placed.mapped`)
   - with `video.alpha`, a `VideoPiece::Mix` of one such source over black
 - `File::open` checks each file once against the `Output`: codec, size, pixel layout, profile, colors, field order, pixel shape and rotation.
   - A file that does not match goes into the `Refused` list with its reason.
@@ -624,8 +624,13 @@ The plan:
 
 - A placed clip ([spec D75](../spec.md#12-decisions-on-gaps-and-contradictions)) is a source piece with `placed` pictures (`render::Placed`). They are the picture of its clip, then the pictures of the compound clips around it.
 - `Placed::of` and `Placed::at` take the picture through `ops::picture::working`. It puts a transform or a crop that is off back at its usual values. Thus the export, the viewer and the OpenTimelineIO export draw the same picture.
+- `Placed.mapped` holds the map of the clip's scaling over the fit ([spec](../spec.md#input-scaling-pp-292293)). `VideoPlan` sets it from the probed size of the media (`place::map_of`).
+  - Why the probed size: a proxy or an upscale has another size. The map must not change with it.
+  - `place::level` and `Placing::over` take the fitted rectangle, then map it about the middle of the frame (`place::mapped_rect`).
+  - Thus each later stage works on the mapped picture. A stage does not know the scaling.
+  - A clip with a map never takes the place of the layers below (`VideoPlan::fills`).
 - `render::flatten_lanes` lays it over the tracks below, as an `Over` of a `VideoPiece::Mix` without a ramp.
-- A clip at its usual values goes over the same way where its fitted picture leaves bars. Black is under it when no other layer is. A bar can be a part of a pixel ([spec §13](../spec.md#the-fit-to-the-timeline)).
+- A clip at its usual values goes over the same way where its mapped picture leaves bars. Black is under it when no other layer is. A bar can be a part of a pixel ([spec §13](../spec.md#the-fit-to-the-timeline)).
 - Where its fitted picture leaves no bar ([spec §13](../spec.md#the-limit-for-a-thin-bar)), it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
 - A picture with an alpha channel (`VideoInfo::alpha`) fills the frame only with the Alpha Mode None (`Media::opaque`). Otherwise it goes over the layers below by its Alpha Mode ([playback](playback.md#gpu-pictures)).
 
@@ -687,7 +692,7 @@ Dynamic Zoom and keyframes (D75):
 - `Placed` also holds the keyframe frame of the piece (`source`). On a clip with a speed, it is a frame of the retimed source.
 - `Picture::sampled` reads each keyed value of the picture at that frame.
 - `Effect::sampled` reads each keyed value of an effect at that frame. `Working::of` then builds the work of the effect from plain values.
-- `layer_size` fits the layer for the closer Dynamic Zoom box (`DynamicZoom::closest`) and the largest zoom key (`place::detail`).
+- `layer_size` fits the layer for the closer Dynamic Zoom box (`DynamicZoom::closest`), the largest zoom key and the map (`place::detail`).
 - The viewer and the export both take this `Placing`. Thus there is one draw path.
 - The composition of a `Placed` picture holds the motion paths of its patterns ([model](model.md#motion-paths)).
   - `place::Placing` takes the keyframe frame to the frame of the file with the clock of the piece (`Placed.clock`, `FileClock::frame`). `Pattern::area_at` then gives the box of the pattern there.
@@ -698,7 +703,7 @@ Dynamic Zoom and keyframes (D75):
 Soft crop edges:
 
 - `place::Level` holds the crop (`shown`), the hard edges that it draws (`edge`), its soft edges (`place::Soft`) and its `opacity`.
-- The crop softness and the width of the fitted picture give the length of the fade. A softness above 0 grows `edge` past the crop by the fade.
+- The crop softness and the width of the mapped picture give the length of the fade. A softness above 0 grows `edge` past the crop by the fade.
 - `place::Placing::bounds` and `place::Placing::share` use `edge`. The handles in the viewer use `shown`.
 
 ## Effects
@@ -711,7 +716,7 @@ The effects of a picture ([spec §8.16](../spec.md#816-effects-pp-765-3526-3536)
   - An effect that is off, or at a blend of 0, is left out (`Working::of`).
 - `place::OnFrame` holds what an effect takes from the placement at the frame:
   - The width of the canvas, multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it.
-  - The size of the picture on the frame: its fitted size, multiplied by each Zoom X and each Zoom Y.
+  - The size of the picture on the frame: its mapped size, multiplied by each Zoom X and each Zoom Y.
   - The middle of the picture on the frame, through the levels. A Dynamic Zoom box does not move it.
   - The rotation of the picture (`OnFrame.turn`).
 - `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas, and the border.

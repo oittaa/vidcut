@@ -15,8 +15,8 @@ use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Appearance, ApplyMode, Background, BackgroundFill, BlendMode, Blur, BlurClipping, BlurFilter,
-    Border, BorderLevel, CellShape, Clip, ClipRetime, CompositeMode, Composition, Connect,
-    DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue, FastNoise,
+    Border, BorderLevel, CellShape, Clip, ClipRetime, ClipScaling, CompositeMode, Composition,
+    Connect, DynamicZoom, Ease, EbuLevel, Effect, EffectKind, EffectType, EffectValue, FastNoise,
     FillMethod, FilmGrain, FindModel, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
     GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
     JoinStyle, Keyframe, MaskChannel, Merge, MergeEdges, MergeOperator, MosaicBlur, Node,
@@ -26,7 +26,7 @@ use vidcut_core::model::{
     ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
-use vidcut_core::place::fitted;
+use vidcut_core::place::mapped;
 use vidcut_core::time::TimeSpec;
 use vidcut_core::validate::{GAIN, PAN};
 
@@ -865,7 +865,7 @@ impl Direction {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Shape {
     pub(super) frame: [f64; 2],
-    pub(super) fitted: [f64; 2],
+    pub(super) mapped: [f64; 2],
 }
 
 impl Field {
@@ -992,7 +992,7 @@ impl Field {
             .map(|f| p.sampled(f as f64));
         let p = owned.as_ref().unwrap_or(p);
         let ([x, y], [zx, zy], c) = (p.place(), p.scale(), p.crop);
-        let ([w, h], [fw, fh], [ax, ay]) = (s.frame, s.fitted, p.pivot());
+        let ([w, h], [fw, fh], [ax, ay]) = (s.frame, s.mapped, p.pivot());
         let b = self.zoom_box(&p.dynamic_zoom.unwrap_or_default());
         match self {
             Field::Zoom | Field::ZoomX => zx * 100.0,
@@ -1044,7 +1044,7 @@ impl Field {
     }
 
     fn range(self, s: &Shape) -> RangeInclusive<f64> {
-        let ([w, h], [fw, fh]) = (s.frame, s.fitted);
+        let ([w, h], [fw, fh]) = (s.frame, s.mapped);
         let (reach, turns, lean, soft) =
             (Picture::REACH, Picture::TURNS, Picture::LEAN, Picture::SOFT);
         let (box_reach, box_size) = (DynamicZoom::REACH, DynamicZoom::SIZE);
@@ -1092,7 +1092,7 @@ impl Field {
             .map(|_| p.pivot_at(at))
             .unwrap_or_else(|| p.pivot());
         let ([x, y], [zx, zy], [ax, ay]) = (place, scale, pivot);
-        let ([w, h], [fw, fh]) = (s.frame, s.fitted);
+        let ([w, h], [fw, fh]) = (s.frame, s.mapped);
         let zoom = |v: f64| (v / 100.0).clamp(Picture::ZOOM.0, Picture::ZOOM.1);
         let at = |v: f64| v.clamp(0.5 - Picture::REACH, 0.5 + Picture::REACH);
         let box_at = |v: f64| v.clamp(-DynamicZoom::REACH, DynamicZoom::REACH);
@@ -3313,12 +3313,17 @@ pub(super) fn shape(p: &Project, c: &Clip) -> Shape {
         .filter(|v| v.width > 0 && v.height > 0)
         .map_or(frame, |v| {
             let sar = (v.sar[0], v.sar[1]);
-            let [_, _, fw, fh] = fitted((v.width, v.height), sar, v.rotation, (w, h));
+            let scaling = c
+                .picture
+                .as_ref()
+                .map_or(ClipScaling::Project, |q| q.scaling);
+            let to = scaling.or(p.scaling());
+            let [_, _, fw, fh] = mapped(to, (v.width, v.height), sar, v.rotation, (w, h));
             [fw.max(1.0), fh.max(1.0)]
         });
     Shape {
         frame,
-        fitted: size,
+        mapped: size,
     }
 }
 
@@ -3575,6 +3580,7 @@ enum Act {
     Boxes,
     Ease(Ease),
     Mode(CompositeMode),
+    Scaling(ClipScaling),
     Swap,
     Clear(PictureTool),
     Switch(PictureTool, bool),
@@ -4201,6 +4207,36 @@ fn composite(
         ui.end_row();
         number(ui, Field::Opacity, i, p, at, chosen, acts);
     });
+}
+
+fn scaling(ui: &mut egui::Ui, chosen: &[Chosen], acts: &mut Vec<Act>) {
+    let now = chosen[0].shown.scaling;
+    let set = chosen.iter().any(|c| !c.shown.scaling.is_project());
+    let header = |ui: &mut egui::Ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_enabled(set, egui::Button::new("Reset")).clicked()
+        })
+        .inner
+    };
+    let cleared = group(ui, "Scaling", header, |ui| {
+        label(ui, "Scaling", set);
+        egui::ComboBox::from_id_salt("inspector-scaling")
+            .selected_text(now.title())
+            .show_ui(ui, |ui| {
+                for s in ClipScaling::ALL {
+                    if ui.selectable_label(s == now, s.title()).clicked() && s != now {
+                        acts.push(Act::Scaling(s));
+                    }
+                }
+            });
+        if reset(ui, set) {
+            acts.push(Act::Scaling(ClipScaling::Project));
+        }
+        ui.end_row();
+    });
+    if cleared {
+        acts.push(Act::Scaling(ClipScaling::Project));
+    }
 }
 
 fn dynamic_zoom(
@@ -6608,6 +6644,12 @@ impl Workspace {
                     ..c.shown.clone()
                 })
             }),
+            Act::Scaling(scaling) => self.send_pictures(chosen, |c| {
+                Some(Picture {
+                    scaling,
+                    ..c.shown.clone()
+                })
+            }),
             Act::Swap => self.send_pictures(chosen, |c| {
                 let z = c.shown.dynamic_zoom?;
                 Some(Picture {
@@ -6852,6 +6894,7 @@ impl Workspace {
                     crop(ui, i, p, at, &chosen, &mut acts);
                     dynamic_zoom(ui, i, p, at, &chosen, boxes, &mut acts);
                     composite(ui, i, p, at, &chosen, &mut acts);
+                    scaling(ui, &chosen, &mut acts);
                     self.input_lut_section(ui, p, &chosen);
                     self.upscale_section(ui, p, &chosen);
                 }

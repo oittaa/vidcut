@@ -2757,18 +2757,19 @@ pub enum Request {
     /// Where a clip's picture goes over the frame (`c3`, or `V2@15s`): the
     /// `position` of its middle, its `zoom` across and down, its `rotation`,
     /// its `anchor`, its `pitch`, its `yaw`, its flips, its `crop`, its
-    /// `dynamic_zoom` (null when it has none), its `composite_mode` and its
-    /// `opacity`, every value given, usual ones too.
+    /// `dynamic_zoom` (null when it has none), its `composite_mode`, its
+    /// `opacity` and its `scaling`, every value given, usual ones too.
     #[serde(rename = "picture.get")]
     PictureGet { clip: ClipRef },
-    /// Move, zoom, turn, pitch, yaw, flip, crop, mix or fade clips' pictures,
-    /// or give them a Dynamic Zoom: footage, stills, image sequences,
-    /// compound clips, generators and titles. On a title, this is the
-    /// picture of the timeline's size that its text is drawn on; its text
-    /// has its own place (`titles.set`). Each field given replaces its own.
-    /// At its usual values a picture is fitted into the frame; the tracks
-    /// below show wherever it doesn't cover the frame: in its bars, around
-    /// it, where it is cropped and through its soft edges and its opacity.
+    /// Move, zoom, turn, pitch, yaw, flip, crop, scale, mix or fade clips'
+    /// pictures, or give them a Dynamic Zoom: footage, stills, image
+    /// sequences, compound clips, generators and titles. On a title, this is
+    /// the picture of the timeline's size that its text is drawn on; its
+    /// text has its own place (`titles.set`). Each field given replaces its
+    /// own. At its usual values a picture goes into the frame by the scaling
+    /// of the timeline; the tracks below show wherever it doesn't cover the
+    /// frame: in its bars, around it, where it is cropped and through its
+    /// soft edges and its opacity.
     #[serde(rename = "picture.set")]
     PictureSet {
         clips: OneOrMany<ClipRef>,
@@ -2843,6 +2844,11 @@ pub enum Request {
         /// (all of it).
         #[serde(default)]
         opacity: Option<f64>,
+        /// How it goes into the frame before its crop and its transform:
+        /// `project` (the scaling of the timeline), `crop` (at its own
+        /// size), `fit`, `fill` or `stretch`.
+        #[serde(default)]
+        scaling: Option<crate::model::ClipScaling>,
         /// Where a change of a value that has keyframes goes, as a
         /// keyframe: the playhead by default (decision D75). A value with
         /// no keyframes ignores it.
@@ -6387,6 +6393,10 @@ pub struct TimelineFormat {
     /// The timeline color space (decision D50).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeline_colors: Option<crate::model::TimelineColors>,
+    /// How the pictures of its clips go into its frame, for the clips that
+    /// follow it: `crop` (at their own size), `fit`, `fill` or `stretch`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scaling: Option<crate::model::Scaling>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -6418,6 +6428,12 @@ pub struct ProjectSet {
     /// converts to its own colors (decision D50).
     #[serde(default)]
     pub timeline_colors: Option<crate::model::TimelineColors>,
+    /// How the pictures of clips go into the frame of each timeline that
+    /// uses the project's settings, for the clips that follow it: `crop`
+    /// (at their own size, with no resizing), `fit` (the default), `fill`
+    /// or `stretch`.
+    #[serde(default)]
+    pub scaling: Option<crate::model::Scaling>,
     /// The Retime Process of the clips that follow the project: `auto`
     /// (the default), `nearest`, `frame_blend`, `ai_fast`, `ai_slow` or
     /// `macos`. `auto` gives slow motion the AI of the computer that plays

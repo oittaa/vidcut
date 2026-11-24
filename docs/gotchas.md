@@ -384,17 +384,18 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
 - **Pan, Tilt and the crop are fractions of Resolve's picture,** not of the frame.
   - Resolve's picture is the source, sized by the `scale` of Retime and Scaling.
   - The scripting API gives `scale` these numbers:
-    - 0: the project's setting (fit in a new project).
+    - 0: the setting of the timeline (fit in a new project).
     - 1: crop.
     - 2: fit.
     - 3: fill.
     - 4: stretch.
   - Crop maps a source pixel to a frame pixel. Only square pixels were measured.
-  - Only 3 (fill) was checked in a file.
+  - A clip at 0 has no Retime and Scaling. The file does not hold the setting of the timeline.
   - Pan is in picture widths to the right, and Tilt in picture heights up.
   - The zoom is across and down the picture.
-  - vidcut writes `scale` 2. Thus Resolve fits a clip, whatever its project says.
-  - vidcut reads crop, fill and stretch as a zoom.
+  - vidcut reads and writes `scale` as the `scaling` of the clip. It writes no `scale` for `project`.
+  - Thus Resolve uses its own timeline setting for a clip at `project`.
+  - Measured in Resolve Studio 21.2.
   - The picture of a compound clip is the frame.
 - **Retime and Scaling also holds `retime process` and `motion estimation mode`.**
   - `retime process` (`UInt`, default 0): 0 Project Settings, 1 Nearest, 2 Frame Blend, 3 Optical Flow.
@@ -476,7 +477,7 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - vidcut writes the keys at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
   - Resolve reads the earlier key as the start and the later key as the end, whatever their times.
   - The box is in fractions of Resolve's picture, as Pan and Tilt are.
-  - vidcut reads a crop, fill or stretch as a zoom after the box, and that zoom scales the box with the picture. Thus `otio::picture` reads and writes the box as it is.
+  - Thus `otio::picture` reads and writes the box as it is, with any `scale`.
 - **Resolve reads a Bezier handle of a keyframe only in its own form.**
   - It writes `"OutBez": {"OutBez": [20.0, 0.0], "Variant Type": "POINTF"}`, and `InBez` in the same way.
   - The first number is the time from the keyframe in frames. The second is a value in the units of the parameter.

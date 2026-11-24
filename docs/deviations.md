@@ -555,6 +555,7 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
   - There is no Reset for one value.
   - Position X and Y are timeline pixels from the middle, with Y up.
   - A picture narrower than the frame moves less than its number. On a 4:3 picture in a 16:9 timeline, Position X 200 moves it 150 pixels.
+  - The width is the width that the scaling of the clip gives ([spec](spec.md#input-scaling-pp-292293)).
   - Crop is in pixels of the fitted picture. Zoom is a factor, and Rotation is in degrees.
   - The Audio panel has Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (pp. 743–744).
   - The manual names no Mute in the Audio panel (pp. 742–744).
@@ -592,10 +593,11 @@ A feature that vidcut adds, and that Resolve does not have, is not a deviation. 
     - The Audio section has no Pitch or Music Remixer.
   - **Units:**
     - Position X and Y are frame pixels from the middle of the frame, with Y up. Thus Position X 200 moves every picture 200 frame pixels, whatever its shape.
+    - Thus a new scaling of a clip keeps the place of its picture. In Resolve, the picture moves.
     - Zoom is in percent, as the viewer shows it while the user zooms.
-    - Anchor X and Y are pixels of the fitted picture from its middle, with Y up. At 100% zoom, these are frame pixels.
+    - Anchor X and Y are pixels of the mapped picture from its middle, with Y up. At 100% zoom, these are frame pixels.
     - The zoom of a Dynamic Zoom box is in percent. The X and Y of a box are where the middle of the picture is at the start or at the end.
-    - They are in pixels of the fitted picture from the middle of the clip, with Y up. A new zoom of a box keeps the middle of the picture in place.
+    - They are in pixels of the mapped picture from the middle of the clip, with Y up. A new zoom of a box keeps the middle of the picture in place.
 - **Why:**
   - The switches of the other sections are not made yet ([gaps](todo/gaps.md)).
   - The Titles tab of the Cut page is in the place of the Media Pool. The Inspector goes beside it. Thus the viewer and the timeline keep their size.
