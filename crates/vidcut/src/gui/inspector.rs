@@ -4,8 +4,8 @@ use std::time::Instant;
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LINE_LEFT, ARROW_LINE_RIGHT, ARROW_UP,
-    ARROWS_LEFT_RIGHT, CARET_LEFT, CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT, CHECK, DIAMOND,
-    FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
+    ARROWS_LEFT_RIGHT, CARET_DOWN, CARET_LEFT, CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT,
+    CHECK, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
 };
 use serde_json::{Value, json};
 use vidcut_core::composition::Corner;
@@ -2502,9 +2502,15 @@ fn operation_rows(
     go
 }
 
-fn node_header(ui: &mut egui::Ui, n: &Node, (active, view): (bool, View<'_>), acts: &mut Vec<Act>) {
+fn node_header(
+    ui: &mut egui::Ui,
+    n: &Node,
+    (active, open, view): (bool, bool, View<'_>),
+    acts: &mut Vec<Act>,
+) {
     let header = ui.horizontal(|ui| {
-        let name = RichText::new(&n.name).strong();
+        let caret = if open { CARET_DOWN } else { CARET_RIGHT };
+        let name = RichText::new(format!("{caret} {}", n.name)).strong();
         let name = if active {
             name.color(theme::colors().accent)
         } else {
@@ -2597,6 +2603,7 @@ impl Workspace {
             }
         }
         let active = self.effects_page.picked().map(str::to_owned);
+        let open = active.is_some();
         let shown: Vec<Node> = picked
             .iter()
             .map(|&k| comp.nodes[k].sampled(source))
@@ -2611,12 +2618,12 @@ impl Workspace {
                 for (&k, n) in picked.iter().zip(&shown) {
                     let mut acts = Vec::new();
                     let on = active.as_deref() == Some(n.name.as_str());
-                    node_header(ui, n, (on, (&keys, &viewed)), &mut acts);
+                    node_header(ui, n, (on, open, (&keys, &viewed)), &mut acts);
                     let slot = node_slot(k);
-                    if n.tool.tracker().is_some() {
+                    if open && n.tool.tracker().is_some() {
                         let node = &comp.nodes[k];
                         self.tracker_section(ui, (&clip, &comp), node, (slot, &mut acts));
-                    } else {
+                    } else if open {
                         let i = &self.inspector;
                         rows(ui, (slot, "node"), |ui| {
                             node_rows(ui, i, (slot, n, element), &sight, &mut acts);

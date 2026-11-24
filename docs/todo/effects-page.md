@@ -24,7 +24,6 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - When the main input is joined, Resolve joins the next free input. That can be the effect mask input (p. 1395).
   - An effect mask input also takes the picture of a tool (pp. 2463, 2472).
   - vidcut joins only an empty input, and only a mask to an effect mask input.
-- **The active node after a box select:** measured: Resolve then has no active node, and the Inspector shows the headers closed. vidcut makes the last node active.
 - **The Center of a Vignette:** measured: one row with an X and a Y field, and no point in the viewer. vidcut shows Center X and Center Y in two rows.
 - **Page keys that vidcut does not have:**
   - Shift+Space opens Select Tool (p. 1386).

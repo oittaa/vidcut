@@ -4445,11 +4445,16 @@ pub enum Request {
         window: Option<usize>,
     },
     /// Select nodes in the node editor of the effects page, by name. The
-    /// Inspector and the viewer then show the last one. An empty list
-    /// selects none. Answers what `gui.state` does.
+    /// last one is the active node. An empty list selects none. Answers
+    /// what `gui.state` does.
     #[serde(rename = "gui.nodes")]
     GuiNodes {
         nodes: Vec<String>,
+        /// False: no node is active, and the Inspector shows only the
+        /// header of each node. A box select in the node editor does this.
+        /// Left out, the last node is active.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active: Option<bool>,
         /// The shading element of a `text_plus` that the Inspector shows,
         /// from 1 to 8. Left out, it stays.
         #[serde(default, skip_serializing_if = "Option::is_none")]

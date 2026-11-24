@@ -3100,6 +3100,7 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - A drag of a half takes that end of the join. A drop on a knot or a node joins it there. A drop on an empty place parts the join.
 - Select (pp. 1390–1391):
   - A drag on the empty Node Editor selects the nodes in its box. A Ctrl-drag takes them out of the selection.
+  - Measured in Resolve Studio 21.2: after a box select, no node is active. The Inspector shows the header of each selected node, closed.
   - Ctrl+A selects all the nodes. Ctrl+Shift+A selects none.
 - Alt+[ and Alt+] move the playhead to the keyframes of the active node (p. 1303).
 - The MediaIn and the MediaOut nodes can be deleted. Undo puts them back.
