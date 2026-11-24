@@ -18,7 +18,7 @@ use vidcut_core::ops::grade::GradeOf;
 use vidcut_core::ops::picture::takes_effects;
 use vidcut_core::place::{Figure, MaskBase, Outline, Shaping, turned};
 use vidcut_core::render::RenderPlan;
-use vidcut_core::request::{GradeLevel, GradePalette, NodeInput, Page, PrimariesView};
+use vidcut_core::request::{GradeLevel, GradePalette, NodeInput, Page, PrimariesView, Viewers};
 use vidcut_core::shortcuts::{Action, Panel};
 
 use super::color_page::Port;
@@ -54,7 +54,11 @@ const PLAYHEAD: Color32 = Color32::from_rgb(230, 60, 60);
 const TOOLS: f32 = 30.0;
 const TRANSPORT: f32 = 36.0;
 const SETTLE: f64 = 2.0;
-const SCREEN: usize = 0;
+const SIDES: [&str; 2] = ["left", "right"];
+const VIEWER_NAMES: [&str; 2] = ["Left Viewer", "Right Viewer"];
+const ACTIVE_VIEWER: Color32 = Color32::from_rgb(200, 40, 40);
+const TITLE: f32 = 24.0;
+const VIEWER_GAP: f32 = 4.0;
 const LIBRARY: [(&str, &[ToolType]); 6] = [
     ("Tools", &[ToolType::Blur]),
     ("Composite", &[ToolType::Merge]),
@@ -102,7 +106,12 @@ pub(super) struct EffectsPage {
     pub(super) nodes: Vec<String>,
     pub(super) element: u8,
     seen: Option<String>,
-    alone: Option<Alone>,
+    pub(super) viewed: [Option<String>; 2],
+    viewed_clip: Option<String>,
+    pub(super) shown: Viewers,
+    active_viewer: Option<usize>,
+    viewer_rects: [Option<Rect>; 2],
+    alone: [Option<Alone>; 2],
     cells: Option<super::cells::Cells>,
     held: Option<Held>,
     pub(super) graded: Option<super::color_page::Graded>,
@@ -143,7 +152,12 @@ impl Default for EffectsPage {
             nodes: Vec::new(),
             element: 1,
             seen: None,
-            alone: None,
+            viewed: [None, None],
+            viewed_clip: None,
+            shown: Viewers::Both,
+            active_viewer: None,
+            viewer_rects: [None, None],
+            alone: [None, None],
             cells: None,
             held: None,
             graded: None,
@@ -195,7 +209,9 @@ impl EffectsPage {
     }
 
     pub(super) fn leave(&mut self) {
-        self.alone = None;
+        self.alone = [None, None];
+        self.active_viewer = None;
+        self.viewer_rects = [None, None];
         self.held = None;
         self.boxed = None;
         self.graph.stop();
@@ -214,6 +230,7 @@ impl EffectsPage {
 struct Alone {
     rev: u64,
     clip: String,
+    node: String,
     wanted: Option<Composition>,
     plan: RenderPlan,
 }
@@ -369,6 +386,7 @@ enum Then {
 
 #[derive(Debug, Clone, Copy)]
 enum MenuAct {
+    View(Option<usize>),
     Rename,
     PassThrough,
     Copy,
@@ -427,7 +445,7 @@ fn inlet(tool: &Tool, input: NodeInput) -> Inlet {
     }
 }
 
-fn tile(n: &Node) -> Tile<String> {
+fn tile(n: &Node, viewed: &[Option<String>; 2]) -> Tile<String> {
     let inlets = n.tool.inputs().iter().map(|i| inlet(&n.tool, *i)).collect();
     let outlets = Outlet {
         slot: 0,
@@ -448,7 +466,42 @@ fn tile(n: &Node) -> Tile<String> {
         inlets,
         edge: None,
         shot: None,
+        views: Some(
+            viewed
+                .clone()
+                .map(|v| v.as_deref() == Some(n.name.as_str())),
+        ),
     }
+}
+
+pub(super) fn view_keys(b: &vidcut_core::shortcuts::Bindings) -> [String; 3] {
+    [Action::ClearViewers, Action::ViewLeft, Action::ViewRight]
+        .map(|a| b.first(a).unwrap_or_default())
+}
+
+pub(super) fn view_on_menu(
+    ui: &mut egui::Ui,
+    keys: &[String; 3],
+    viewed: &[Option<String>; 2],
+    name: &str,
+) -> Option<Option<usize>> {
+    let mut picked = None;
+    ui.menu_button("View On", |ui| {
+        let on = [0, 1].map(|i| viewed[i].as_deref() == Some(name));
+        let rows = [
+            (None, "None", false),
+            (Some(0), VIEWER_NAMES[0], on[0]),
+            (Some(1), VIEWER_NAMES[1], on[1]),
+        ];
+        for ((side, text, checked), key) in rows.into_iter().zip(keys) {
+            let button = egui::Button::selectable(checked, text).shortcut_text(key.as_str());
+            if ui.add(button).clicked() {
+                picked = Some(side);
+                ui.close();
+            }
+        }
+    });
+    picked
 }
 
 fn default_input(d: &Node, s: &Node) -> Option<NodeInput> {
@@ -849,6 +902,108 @@ impl Workspace {
         c
     }
 
+    pub(super) fn viewers_now(&self) -> [Option<String>; 2] {
+        let Some((clip, comp)) = self.page_clip() else {
+            return [None, None];
+        };
+        if self.effects_page.viewed_clip.as_deref() != Some(clip.id.as_str()) {
+            let out = comp.nodes.iter().find(|n| n.tool == Tool::MediaOut);
+            return [None, out.map(|n| n.name.clone())];
+        }
+        let waiting = !self.effects_page.asked.is_empty();
+        let kept = |v: &Option<String>| v.clone().filter(|n| waiting || comp.node(n).is_some());
+        [
+            kept(&self.effects_page.viewed[0]),
+            kept(&self.effects_page.viewed[1]),
+        ]
+    }
+
+    pub(super) fn viewer_state(&self) -> crate::live::ViewerState {
+        let [left, right] = self.viewers_now();
+        crate::live::ViewerState {
+            left,
+            right,
+            shown: self.effects_page.shown,
+        }
+    }
+
+    pub(super) fn set_viewers(
+        &mut self,
+        names: [Option<String>; 2],
+        shown: Option<Viewers>,
+    ) -> Result<(), String> {
+        let mut viewed = self.viewers_now();
+        match self.page_clip() {
+            Some((clip, comp)) => {
+                let wanted = names.iter().flatten().filter(|n| !n.is_empty());
+                if let Some(missing) = wanted.into_iter().find(|n| comp.node(n).is_none()) {
+                    return Err(format!("{} has no node {missing}", clip.id));
+                }
+                self.effects_page.viewed_clip = Some(clip.id);
+            }
+            None if names.iter().any(Option::is_some) => {
+                return Err("There is no clip at the playhead".into());
+            }
+            None => {}
+        }
+        for (v, n) in viewed.iter_mut().zip(names) {
+            if let Some(n) = n {
+                *v = (!n.is_empty()).then_some(n);
+            }
+        }
+        self.effects_page.viewed = viewed;
+        if let Some(shown) = shown {
+            self.effects_page.shown = shown;
+        }
+        Ok(())
+    }
+
+    fn set_view(&mut self, side: usize, node: &str) {
+        let mut params = json!({});
+        params[SIDES[side]] = json!(node);
+        self.send("gui.viewers", params);
+    }
+
+    fn toggle_view(&mut self, node: &str, side: usize) {
+        let on = self.viewers_now()[side].as_deref() == Some(node);
+        self.set_view(side, if on { "" } else { node });
+    }
+
+    pub(super) fn view_on(&mut self, node: &str, side: Option<usize>) {
+        match side {
+            Some(side) => self.toggle_view(node, side),
+            None => {
+                let viewed = self.viewers_now();
+                let mut params = json!({});
+                for (side, v) in viewed.iter().enumerate() {
+                    if v.as_deref() == Some(node) {
+                        params[SIDES[side]] = json!("");
+                    }
+                }
+                if params != json!({}) {
+                    self.send("gui.viewers", params);
+                }
+            }
+        }
+    }
+
+    fn empty_viewers(&mut self) {
+        let params = match self.effects_page.active_viewer {
+            Some(side) => {
+                let mut params = json!({});
+                params[SIDES[side]] = json!("");
+                params
+            }
+            None => json!({ "left": "", "right": "" }),
+        };
+        self.send("gui.viewers", params);
+    }
+
+    fn viewer_at(&self, at: Pos2) -> Option<usize> {
+        let rects = &self.effects_page.viewer_rects;
+        rects.iter().position(|r| r.is_some_and(|r| r.contains(at)))
+    }
+
     fn settle_page(&mut self, ctx: &egui::Context) {
         let rev = self.project().map_or(0, |p| p.rev);
         let clip = self.effects_clip();
@@ -862,6 +1017,8 @@ impl Workspace {
             self.effects_page.view = (0.0, 1.0);
             self.leave_inspector();
         }
+        self.effects_page.viewed = self.viewers_now();
+        self.effects_page.viewed_clip = self.page_clip().map(|(c, _)| c.id);
         self.sync_bounds();
         if let Some((at, since)) = self.effects_page.held.as_ref().and_then(|h| h.sent)
             && (at != rev || since.elapsed().as_secs_f64() > SETTLE)
@@ -890,6 +1047,13 @@ impl Workspace {
                     .filter_map(|v| v.as_str().map(str::to_owned))
                     .collect()
             });
+            if let Then::Renamed(old) = &then {
+                for v in &mut self.effects_page.viewed {
+                    if v.as_ref() == Some(old) {
+                        *v = Some(node.clone());
+                    }
+                }
+            }
             self.effects_page.nodes = match then {
                 Then::Select => all.unwrap_or_else(|| vec![node]),
                 Then::Renamed(old) => self
@@ -1145,6 +1309,7 @@ impl Workspace {
 
     fn menu_act(&mut self, act: MenuAct, node: String) {
         match act {
+            MenuAct::View(side) => self.view_on(&node, side),
             MenuAct::Rename => self.start_rename(),
             MenuAct::PassThrough => self.pass_through(),
             MenuAct::Copy => self.copy_node(false),
@@ -1216,32 +1381,40 @@ impl Workspace {
         if let (Some(p), Some(c)) = (&p, &clip) {
             self.page_tick(ui.ctx(), p, c);
         }
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(vidcut_core::composition::MEDIA_OUT).strong());
-            if let (Some(p), Some(c)) = (&p, &clip) {
-                ui.label(dim(p.clip_name(c).unwrap_or_else(|| c.id.clone())));
-            }
-        });
         let avail = ui.available_rect_before_wrap();
         let below = RULER + BAR + TRANSPORT + TOOLS + 12.0;
-        let area = Rect::from_min_max(
+        let all = Rect::from_min_max(
             avail.min,
-            pos2(avail.max.x, (avail.max.y - below).max(avail.min.y + 40.0)),
+            pos2(
+                avail.max.x,
+                (avail.max.y - below).max(avail.min.y + 40.0 + TITLE),
+            ),
         );
-        let area_resp = ui.allocate_rect(area, Sense::click_and_drag());
-        let painter = ui.painter_at(area);
-        painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
-        match (&p, &clip) {
-            (Some(p), Some(c)) => self.effects_picture(ui, &area_resp, area, (p, c)),
-            _ => {
-                painter.text(
-                    area.center(),
-                    Align2::CENTER_CENTER,
-                    "No clip at the playhead",
-                    FontId::proportional(14.0),
-                    theme::colors().text_dim,
-                );
-            }
+        ui.allocate_rect(all, Sense::hover());
+        let sides: &[usize] = match self.effects_page.shown {
+            Viewers::Both => &[0, 1],
+            Viewers::Left => &[0],
+            Viewers::Right => &[1],
+        };
+        let count = sides.len() as f32;
+        let width = (all.width() - VIEWER_GAP * (count - 1.0)) / count;
+        let viewed = self.viewers_now();
+        let mut rects = [None, None];
+        for (k, side) in sides.iter().copied().enumerate() {
+            let at = all.min + vec2(k as f32 * (width + VIEWER_GAP), 0.0);
+            let r = Rect::from_min_size(at, vec2(width, all.height()));
+            rects[side] = Some(r);
+            let shown = (p.as_deref(), clip.as_ref());
+            self.one_viewer(ui, (side, r), shown, viewed[side].as_deref());
+        }
+        self.effects_page.viewer_rects = rects;
+        if let Some(press) = ui.input(|i| {
+            i.pointer
+                .any_pressed()
+                .then(|| i.pointer.press_origin())
+                .flatten()
+        }) {
+            self.effects_page.active_viewer = self.viewer_at(press);
         }
         ui.add_space(4.0);
         self.time_ruler(ui, p.as_deref(), clip.as_ref());
@@ -1249,31 +1422,130 @@ impl Workspace {
         self.tool_row(ui);
     }
 
-    fn alone_plan(&mut self, p: &Project, c: &Clip, comp: &Composition) -> Option<RenderPlan> {
+    fn one_viewer(
+        &mut self,
+        ui: &mut egui::Ui,
+        (side, r): (usize, Rect),
+        (p, clip): (Option<&Project>, Option<&Clip>),
+        node: Option<&str>,
+    ) {
+        let colors = theme::colors();
+        let bar = Rect::from_min_size(r.min, vec2(r.width(), TITLE));
+        let area = Rect::from_min_max(pos2(r.min.x, bar.max.y), r.max);
+        let painter = ui.painter_at(r);
+        painter.rect_filled(bar, CornerRadius::ZERO, colors.panel);
+        if self.effects_page.active_viewer == Some(side) {
+            let top = Rect::from_min_size(bar.min, vec2(bar.width(), 2.0));
+            painter.rect_filled(top, CornerRadius::ZERO, ACTIVE_VIEWER);
+        }
+        if let (Some(name), Some(p), Some(c)) = (node, p, clip) {
+            let clip_name = p.clip_name(c).unwrap_or_else(|| c.id.clone());
+            let font = FontId::proportional(13.0);
+            let strong = painter.layout_no_wrap(format!("{name}  "), font.clone(), colors.text);
+            let faint = painter.layout_no_wrap(clip_name, font, colors.text_dim);
+            let wide = strong.size().x + faint.size().x;
+            let left = pos2(
+                bar.center().x - wide / 2.0,
+                bar.center().y - strong.size().y / 2.0,
+            );
+            let after = left + vec2(strong.size().x, 0.0);
+            painter.galley(left, strong, colors.text);
+            painter.galley(after, faint, colors.text_dim);
+        }
+        let one = self.effects_page.shown != Viewers::Both;
+        let (icon, tip) = match one {
+            true => (
+                egui_phosphor::regular::SQUARE_SPLIT_HORIZONTAL,
+                "Two Viewers",
+            ),
+            false => (egui_phosphor::regular::SQUARE, "One Viewer"),
+        };
+        let button = Rect::from_center_size(
+            pos2(bar.max.x - TITLE / 2.0 - 2.0, bar.center().y),
+            Vec2::splat(TITLE - 4.0),
+        );
+        let hit = ui
+            .interact(
+                button,
+                ui.scope_id().with(("viewer-mode", side)),
+                Sense::click(),
+            )
+            .on_hover_text(tip);
+        let tint = if hit.hovered() {
+            colors.text
+        } else {
+            colors.text_dim
+        };
+        painter.text(
+            button.center(),
+            Align2::CENTER_CENTER,
+            icon,
+            FontId::proportional(14.0),
+            tint,
+        );
+        if hit.clicked() {
+            let shown = match (one, side) {
+                (true, _) => Viewers::Both,
+                (false, 0) => Viewers::Left,
+                (false, _) => Viewers::Right,
+            };
+            self.send("gui.viewers", json!({ "shown": shown }));
+        }
+        let area_resp = ui.interact(
+            area,
+            ui.scope_id().with(("viewer-area", side)),
+            Sense::click_and_drag(),
+        );
+        painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
+        match (p, clip, node) {
+            (Some(p), Some(c), Some(node)) => {
+                self.effects_picture(ui, (side, &area_resp), area, (p, c), node)
+            }
+            (Some(_), None, _) => {
+                painter.text(
+                    area.center(),
+                    Align2::CENTER_CENTER,
+                    "No clip at the playhead",
+                    FontId::proportional(14.0),
+                    colors.text_dim,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn alone_plan(
+        &mut self,
+        (p, c): (&Project, &Clip),
+        comp: &Composition,
+        (side, node): (usize, &str),
+    ) -> Option<RenderPlan> {
         let stored = c.picture.as_ref().and_then(|x| x.composition.as_ref());
         let wanted = (stored.unwrap_or(&Composition::plain()) != comp).then(|| comp.clone());
-        if let Some(a) = &self.effects_page.alone
+        if let Some(a) = &self.effects_page.alone[side]
             && a.rev == p.rev
             && a.clip == c.id
+            && a.node == node
             && a.wanted == wanted
         {
             return Some(a.plan.clone());
         }
         let plan = match &wanted {
-            None => vidcut_core::render::composition_alone(p, &c.id),
+            None => vidcut_core::render::node_output(p, &c.id, node),
             Some(comp) => {
                 let mut q = p.clone();
                 if let Some((ti, ci)) = q.find_clip(&c.id) {
                     let x = &mut q.tracks[ti].clips[ci];
                     x.picture.get_or_insert_with(Default::default).composition = Some(comp.clone());
                 }
-                vidcut_core::render::composition_alone(&q, &c.id)
+                vidcut_core::render::node_output(&q, &c.id, node)
             }
         }
         .ok()?;
-        self.effects_page.alone = Some(Alone {
+        self.effects_page.alone[side] = Some(Alone {
             rev: p.rev,
             clip: c.id.clone(),
+            node: node.to_string(),
             wanted,
             plan: plan.clone(),
         });
@@ -1283,12 +1555,13 @@ impl Workspace {
     fn effects_picture(
         &mut self,
         ui: &mut egui::Ui,
-        area_resp: &egui::Response,
+        (side, area_resp): (usize, &egui::Response),
         area: Rect,
         (p, c): (&Project, &Clip),
+        node: &str,
     ) {
         let comp = self.page_composition(c);
-        let Some(plan) = self.alone_plan(p, c, &comp) else {
+        let Some(plan) = self.alone_plan((p, c), &comp, (side, node)) else {
             return;
         };
         let size = (plan.width, plan.height);
@@ -1306,12 +1579,12 @@ impl Workspace {
             .effects_page
             .cells
             .get_or_insert_with(|| super::cells::Cells::new(ctx, gpu_pictures.unwrap_or_default()));
-        let got = cells.show_plan(0, plan, frame, speed);
+        let got = cells.show_plan(side, plan, frame, speed);
         let pixels = [picture.width(), picture.height()].map(|x| (x * ppp).round() as u32);
         let texture = got
             .as_ref()
             .zip(self.screens.as_mut())
-            .and_then(|(g, s)| s.draw(SCREEN, (&g.picture, &g.placed), pixels));
+            .and_then(|(g, s)| s.draw(side, (&g.picture, &g.placed), pixels));
         let painter = ui.painter_at(area);
         painter.rect_filled(picture, CornerRadius::ZERO, Color32::BLACK);
         if let Some(texture) = texture {
@@ -1322,6 +1595,13 @@ impl Workspace {
                 Color32::WHITE,
             );
         }
+        painter.text(
+            area.right_top() + vec2(-6.0, 4.0),
+            Align2::RIGHT_TOP,
+            format!("{}x{}", size.0, size.1),
+            FontId::proportional(11.0),
+            theme::colors().text_dim,
+        );
         self.pattern_handles(ui, area_resp, picture, (c, &comp));
         self.node_handles(ui, area_resp, picture, c, &comp, size);
     }
@@ -2226,13 +2506,15 @@ impl Workspace {
             return;
         };
         let comp = self.page_composition(&clip);
+        let viewed = self.viewers_now();
+        let keys = view_keys(&self.snap.bindings);
         let one_copied = self.effects_page.copied.len() == 1;
         let can_paste = !self.effects_page.copied.is_empty();
         let mut menu: Option<(MenuAct, String)> = None;
         let mut paste_here = false;
         let graph = Graph {
             salt: format!("effects-node-{}", clip.id),
-            tiles: comp.nodes.iter().map(tile).collect(),
+            tiles: comp.nodes.iter().map(|n| tile(n, &viewed)).collect(),
             wires: joins(&comp),
             selected: &self.effects_page.nodes,
             current: self.effects_page.nodes.last(),
@@ -2247,6 +2529,9 @@ impl Workspace {
                     return;
                 };
                 let tool = !n.tool.is_media();
+                if let Some(side) = view_on_menu(ui, &keys, &viewed, name) {
+                    menu = Some((MenuAct::View(side), name.clone()));
+                }
                 let items = [
                     (MenuAct::Rename, "Rename", true),
                     (MenuAct::PassThrough, "Pass Through", tool),
@@ -2309,6 +2594,15 @@ impl Workspace {
         if let Some(name) = done.pointed {
             self.effects_page.nodes = vec![name];
         }
+        if let Some((name, side)) = done.viewed {
+            self.toggle_view(&name, side);
+        }
+        if let Some((name, at)) = done.flung
+            && let Some(side) = self.viewer_at(at)
+        {
+            self.set_view(side, &name);
+            self.send("gui.nodes", json!({ "nodes": [] }));
+        }
         if let Some((act, node)) = menu {
             self.menu_act(act, node);
         }
@@ -2369,6 +2663,19 @@ impl Workspace {
     fn node_keys(&mut self, fired: &Fired, mine: &Fired) {
         if mine.pressed(Action::PassThrough) {
             self.pass_through();
+        }
+        for (side, action) in [Action::ViewLeft, Action::ViewRight]
+            .into_iter()
+            .enumerate()
+        {
+            if mine.struck(action)
+                && let Some(node) = self.effects_page.picked().map(str::to_string)
+            {
+                self.toggle_view(&node, side);
+            }
+        }
+        if mine.struck(Action::ClearViewers) {
+            self.empty_viewers();
         }
         if mine.struck(Action::RenameNode) {
             self.start_rename();

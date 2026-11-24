@@ -29,7 +29,7 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
 - **Page keys that vidcut does not have:**
   - Shift+Space opens Select Tool (p. 1386).
   - = and − zoom the viewer (p. 1290). Ctrl+1 sets the scale of the Node Editor (p. 1310).
-  - Ctrl+F is Find (p. 1421). 1, 2 and ` put a node in a viewer (p. 1393).
+  - Ctrl+F is Find (p. 1421).
   - Ctrl+L locks a node (p. 1424). Ctrl+Shift+V pastes an instance (p. 1413). Ctrl+G makes a group (p. 1427).
 - **The render range** (pp. 1294, 1297):
   - Ctrl-drag on the ruler, a drag of a yellow line, and Set Render Range and Auto Render Range in the menu of the ruler.

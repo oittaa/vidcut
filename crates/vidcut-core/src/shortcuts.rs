@@ -149,6 +149,9 @@ actions! {
     Snapping "snapping",
     PassThrough "pass_through",
     RenameNode "rename_node",
+    ViewLeft "view_left",
+    ViewRight "view_right",
+    ClearViewers "clear_viewers",
     PreviousNodeKeyframe "previous_node_keyframe",
     NextNodeKeyframe "next_node_keyframe",
     AddSerialNode "add_serial_node",
@@ -190,6 +193,9 @@ impl Action {
             Action::SelectSentence => Panel::Transcription,
             Action::PassThrough
             | Action::RenameNode
+            | Action::ViewLeft
+            | Action::ViewRight
+            | Action::ClearViewers
             | Action::PreviousNodeKeyframe
             | Action::NextNodeKeyframe
             | Action::SourceStart
@@ -1412,6 +1418,27 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["F2"],
         "Rename the selected nodes",
         None,
+    ),
+    own(
+        Nodes,
+        Action::ViewLeft,
+        &["1"],
+        "Node in the left viewer",
+        Some("The active node goes in the left viewer, or leaves it."),
+    ),
+    own(
+        Nodes,
+        Action::ViewRight,
+        &["2"],
+        "Node in the right viewer",
+        Some("The active node goes in the right viewer, or leaves it."),
+    ),
+    own(
+        Nodes,
+        Action::ClearViewers,
+        &["`"],
+        "Empty the viewers",
+        Some("Empties the active viewer, or both viewers."),
     ),
     own(
         Nodes,

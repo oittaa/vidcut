@@ -3109,6 +3109,31 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 
 - The Effects page shows the composition of the topmost visible clip at the playhead (p. 1332).
 - The viewer shows that clip alone, at the size of its own picture (p. 1332).
+- There are two viewers, side by side (p. 1288). Each viewer shows the output of one node, or nothing.
+  - When the page shows a new clip, the left viewer is empty. The right viewer shows the MediaOut node (p. 1290).
+  - The title bar of a viewer shows the name of its node (p. 1291). vidcut also shows the name of the clip.
+  - The Viewer button at the right of a title bar keeps only that viewer. A second click shows the two viewers again (p. 1288).
+  - Measured in Resolve Studio 21.2:
+    - The hidden viewer keeps its node.
+    - A node can be in the two viewers at the same time. A new node goes in no viewer.
+    - A viewed mask shows as a white shape on black.
+    - The size of the picture shows at the top right of the viewer.
+    - The viewers are not in the undo history. Delete of a viewed node empties its viewer. Undo does not put the node back in the viewer.
+    - A change to another page and back keeps the viewers.
+- Two dots at the bottom left of a node put the node in a viewer (pp. 1290, 1392–1393). Measured in Resolve Studio 21.2:
+  - The left dot is the left viewer. A white dot shows that the node is in that viewer.
+  - The dots show while the node is in a viewer. Else they show only while the pointer is on the node.
+  - The dots keep their size at each zoom of the Node Editor.
+  - A click on a dot puts the node in that viewer, or takes it out. The node that was in that viewer goes out.
+  - A click on a dot does not change the selection.
+- Other ways to put a node in a viewer (p. 1290):
+  - 1 and 2 put the active node in the left or the right viewer, or take it out.
+  - View On, in the menu of a node and in the menu of its header in the Inspector: None, Left Viewer and Right Viewer.
+    - None takes the node out of the two viewers. A check mark shows each viewer of the node (Resolve Studio 21.2).
+  - A drag of a node onto a viewer puts the node there. The node stays at its place in the Node Editor.
+    - Measured in Resolve Studio 21.2: after the drop, the Inspector is empty.
+- A click on a viewer makes it the active viewer. A thin red line shows at its top (p. 1291).
+  - ` empties the active viewer. With no active viewer, it empties the two viewers (p. 1291).
 - The Effects Library is at the left and the Inspector is at the right. Both take the full height (p. 1287).
 - The Node Editor is under the viewer (p. 1287).
 - The Time Ruler and the transport controls are under the viewer (p. 1293).
@@ -3156,7 +3181,8 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - It puts a keyframe at the playhead. On a keyframe, it removes the keyframe.
   - Its arrows go to the keyframes on each side.
   - After a value has a keyframe, a change on another frame puts a keyframe there.
-- The viewer shows the edge, the center and the handles of each selected mask with Show View Controls on (p. 2491). A drag of one changes that mask.
+- Each viewer with a picture shows the edge, the center and the handles of each selected mask with Show View Controls on (p. 2491). A drag of one changes that mask.
+  - Measured in Resolve Studio 21.2: the handles show whatever node the viewer shows.
   - Measured in Resolve Studio 21.2: a mask whose Center is joined to a tracker shows its center at the joined point. A drag of the center moves nothing.
 - The Angle of an ellipse or a rectangle has a control in the viewer. The manual names a small circle at the end of a dashed line (p. 2493).
   - Measured in Resolve Studio 21.2: the control is a dashed ring about the center. The ring keeps its size on the screen.
@@ -3281,6 +3307,7 @@ The Operation of the Tracker (pp. 2848–2854). The facts without a page are mea
 - In Resolve, FG Only and BG Over FG give a picture of the size of the foreground. In a composition of vidcut, each picture has the size of the frame.
 
 Requests: `comp.add`, `comp.set`, `comp.connect`, `comp.rename`, `comp.remove`, `comp.paste`, `comp.key`, `comp.reset` and `comp.loop`. `picture.clear` with `composition` takes it off. `gui.page` shows the page, and `gui.nodes` selects nodes.
+`gui.viewers` sets the nodes of the two viewers, and shows one viewer or the two viewers.
 `gui.page_time` moves and plays the playhead of the page. `comp.loop` sets Loop and Ping Pong. `player.bounds` holds play of the timeline between two frames.
 `comp.set` and `comp.key` take a `frame` of the composition. Without it, they take the frame at the playhead. `comp.paste` takes `after`, `place` or `replace`.
 `comp.set` with `connect` connects the Center of a mask to a pattern. `comp.set` with `operation` sets the Operation of a Tracker.

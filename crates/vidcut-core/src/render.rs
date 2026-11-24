@@ -9,9 +9,9 @@ use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
     AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, Compound, DuckDetect,
-    Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, Picture, PictureTransition,
-    Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode, TimelineColors, Title,
-    Track, TrackKind, Transition, Upscale,
+    Generator, Grade, Gradient, Hdr, Keyframe, Media, MediaUpscale, Node, Picture,
+    PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode,
+    TimelineColors, Title, Tool, Track, TrackKind, Transition, Upscale,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -4078,28 +4078,45 @@ pub fn composition_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
 }
 
 pub fn node_input(p: &Project, clip: &str, node: &str) -> Result<RenderPlan> {
-    alone(p, clip, Some(node))
+    let input = node_of(p, clip, node)?.input.clone().ok_or_else(|| {
+        Error::invalid(format!(
+            "{node} of {clip} has no input: a track follows the picture that comes in"
+        ))
+    })?;
+    alone(p, clip, Some(&input))
 }
 
-fn alone(p: &Project, clip: &str, cut: Option<&str>) -> Result<RenderPlan> {
+pub fn node_output(p: &Project, clip: &str, node: &str) -> Result<RenderPlan> {
+    let c = p
+        .clip(clip)
+        .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?;
+    let plain = crate::model::Composition::plain();
+    let comp = c
+        .picture
+        .as_ref()
+        .and_then(|x| x.composition.as_ref())
+        .unwrap_or(&plain);
+    let n = comp
+        .node(node)
+        .ok_or_else(|| Error::not_found(format!("{clip} has no node {node}")))?;
+    alone(p, clip, (n.tool != Tool::MediaOut).then_some(node))
+}
+
+fn node_of<'a>(p: &'a Project, clip: &str, node: &str) -> Result<&'a Node> {
+    p.clip(clip)
+        .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
+        .picture
+        .as_ref()
+        .and_then(|x| x.composition.as_ref())
+        .and_then(|k| k.node(node))
+        .ok_or_else(|| Error::not_found(format!("{clip} has no node {node}")))
+}
+
+fn alone(p: &Project, clip: &str, input: Option<&str>) -> Result<RenderPlan> {
     let c = p
         .clip(clip)
         .ok_or_else(|| Error::not_found(format!("no clip {clip}")))?
         .clone();
-    let comp = c.picture.as_ref().and_then(|x| x.composition.as_ref());
-    let input = match cut {
-        None => None,
-        Some(node) => {
-            let n = comp.and_then(|k| k.node(node));
-            let n = n.ok_or_else(|| Error::not_found(format!("{clip} has no node {node}")))?;
-            let input = n.input.clone().ok_or_else(|| {
-                Error::invalid(format!(
-                    "{node} of {clip} has no input: a track follows the picture that comes in"
-                ))
-            })?;
-            Some(input)
-        }
-    };
     let frames = crate::composition::Frames::of(p, &c);
     let clock = &frames.clock;
     let mut alone = p.clone();

@@ -33,6 +33,13 @@ const CURRENT_ROW: Color32 = super::viewer::ACTIVE_ANGLE;
 pub(super) const PICTURE_KNOT: Color32 = Color32::from_rgb(230, 200, 60);
 pub(super) const MASK_KNOT: Color32 = Color32::from_rgb(90, 140, 230);
 pub(super) const RGB_KNOT: Color32 = Color32::from_rgb(120, 210, 120);
+const VIEW_PILL: Vec2 = vec2(28.0, 14.0);
+const VIEW_DOT: f32 = 4.0;
+const VIEW_PILL_COLOR: Color32 = Color32::from_rgb(8, 8, 9);
+const VIEW_TIPS: [[&str; 2]; 2] = [
+    ["Show in Left Viewer", "Shown in Left Viewer"],
+    ["Show in Right Viewer", "Shown in Right Viewer"],
+];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Side {
@@ -87,6 +94,7 @@ pub(super) struct Tile<K> {
     pub(super) inlets: Vec<Inlet>,
     pub(super) edge: Option<Edge>,
     pub(super) shot: Option<Shot>,
+    pub(super) views: Option<[bool; 2]>,
 }
 
 pub(super) struct Wire<K> {
@@ -145,6 +153,8 @@ pub(super) struct Done<K> {
     pub(super) unlink: Option<(K, usize)>,
     pub(super) spot: Option<[f64; 2]>,
     pub(super) dropped: Option<Dropped<K>>,
+    pub(super) viewed: Option<(K, usize)>,
+    pub(super) flung: Option<(K, Pos2)>,
 }
 
 pub(super) enum Dropped<K> {
@@ -465,6 +475,8 @@ impl<K> Done<K> {
             unlink: None,
             spot: None,
             dropped: None,
+            viewed: None,
+            flung: None,
         }
     }
 }
@@ -595,6 +607,44 @@ pub(super) fn list<K: Clone + PartialEq + Hash + Debug>(
     });
     view.naming = naming.filter(|n| graph.tiles.iter().any(|t| t.key == n.key));
     done
+}
+
+fn view_dots(
+    ui: &Ui,
+    painter: &egui::Painter,
+    (r, id): (Rect, egui::Id),
+    views: [bool; 2],
+    near: bool,
+) -> Option<usize> {
+    let pill = Rect::from_min_size(pos2(r.left() + 4.0, r.bottom() + 2.0), VIEW_PILL);
+    let step = VIEW_PILL.x / 2.0;
+    let dots = [0, 1].map(|i| {
+        let at = pill.left_center() + vec2(step * (i as f32 + 0.5), 0.0);
+        Rect::from_center_size(at, Vec2::splat(step))
+    });
+    let hits = [0, 1].map(|i| ui.interact(dots[i], id.with(("view", i)), Sense::click()));
+    let over = ui.rect_contains_pointer(pill);
+    if !(near || over || views.contains(&true)) {
+        return None;
+    }
+    painter.rect_filled(pill, CornerRadius::same(7), VIEW_PILL_COLOR);
+    let ring = Stroke::new(1.0, theme::colors().text_dim);
+    let mut clicked = None;
+    for (i, hit) in hits.into_iter().enumerate() {
+        let fill = if views[i] {
+            Color32::WHITE
+        } else {
+            Color32::BLACK
+        };
+        painter.circle(dots[i].center(), VIEW_DOT, fill, ring);
+        if hit
+            .on_hover_text(VIEW_TIPS[i][usize::from(views[i])])
+            .clicked()
+        {
+            clicked = Some(i);
+        }
+    }
+    clicked
 }
 
 pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
@@ -891,6 +941,12 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             done.pointed = Some(t.key.clone());
         }
         node_resp.context_menu(|ui| node_menu(ui, &t.key));
+        if let Some(views) = t.views {
+            let near = node_resp.hovered();
+            if let Some(i) = view_dots(ui, &painter, (r, id), views, near) {
+                done.viewed = Some((t.key.clone(), i));
+            }
+        }
         if inserting.is_some() && view.moving.as_ref().is_some_and(|m| m.node == t.key) {
             let plus = FontId::proportional(18.0 * z.clamp(0.6, 1.4));
             painter.text(r.center_top(), Align2::CENTER_BOTTOM, "+", plus, LIT);
@@ -928,6 +984,10 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             && let Some(m) = view.moving.take_if(|m| m.node == t.key)
         {
             let (mods, at) = ui.input(|i| (i.modifiers, i.pointer.latest_pos()));
+            if let Some(p) = at.filter(|p| !rect.contains(*p)) {
+                done.flung = Some((t.key.clone(), p));
+                continue;
+            }
             let onto = at
                 .filter(|_| m.from.len() == 1 && t.drops)
                 .and_then(|p| {

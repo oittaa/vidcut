@@ -1448,7 +1448,7 @@ fn live(method: &str, r: &Response) -> Option<()> {
             println!("ok {method}")
         }
         "gui.state" | "gui.show" | "gui.close" | "gui.target" | "gui.timeline" | "gui.page"
-        | "gui.nodes" | "gui.grade_nodes" | "gui.node_view" | "gui.page_time" => {
+        | "gui.nodes" | "gui.grade_nodes" | "gui.node_view" | "gui.viewers" | "gui.page_time" => {
             let t = &v["timeline"];
             let nodes: Vec<&str> = v["nodes"]
                 .as_array()
@@ -1471,6 +1471,13 @@ fn live(method: &str, r: &Response) -> Option<()> {
                 } else {
                     nodes.join(" ")
                 }
+            );
+            let viewers = &v["viewers"];
+            println!(
+                "effects viewers left {}, right {}, shown {}",
+                viewers["left"].as_str().unwrap_or("-"),
+                viewers["right"].as_str().unwrap_or("-"),
+                viewers["shown"].as_str().unwrap_or("-")
             );
             println!(
                 "color grade {}, palette {} ({}), window {}, nodes {}, current {}",

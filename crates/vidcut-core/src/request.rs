@@ -4469,6 +4469,19 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         wide: Option<bool>,
     },
+    /// The two viewers of the effects page. `left` and `right` name the
+    /// node that each viewer shows. An empty name empties the viewer.
+    /// `shown` shows the two viewers or only one. Each value left out
+    /// stays. Answers what `gui.state` does.
+    #[serde(rename = "gui.viewers")]
+    GuiViewers {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        left: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        right: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shown: Option<Viewers>,
+    },
     /// Select nodes in the node editor of the color page, by number. The
     /// palette then shows the last one, or `current`. An empty list with no
     /// `current` selects none. Answers what `gui.state` does.
@@ -4500,7 +4513,8 @@ pub enum Request {
         speed: Option<f64>,
     },
     /// What only the GUI keeps: the page, the clip of the effects page, its
-    /// nodes selected and its playhead (`time`, in frames from the In), the
+    /// nodes selected, its viewers and its playhead (`time`, in frames from
+    /// the In), the
     /// grade of the color page and its nodes selected (`grade_nodes`), the
     /// edit points selected, the target track, the timeline's zoom and
     /// Timeline Options, and the windows open.
@@ -5671,6 +5685,19 @@ pub enum NodeZoom {
     Fit,
     /// The usual size.
     Original,
+}
+
+/// The viewers that the effects page shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Viewers {
+    /// The two viewers, side by side.
+    #[default]
+    Both,
+    /// Only the left viewer.
+    Left,
+    /// Only the right viewer.
+    Right,
 }
 
 /// Which grade the Color page shows.
@@ -7404,6 +7431,7 @@ impl Request {
                 | Self::GuiNodes { .. }
                 | Self::GuiGradeNodes { .. }
                 | Self::GuiNodeView { .. }
+                | Self::GuiViewers { .. }
                 | Self::GuiPageTime { .. }
                 | Self::GuiState {}
                 | Self::GuiOnly { .. }
