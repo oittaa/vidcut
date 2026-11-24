@@ -250,6 +250,12 @@ Frame rate of a file:
   - Why that length: a timestamp in milliseconds then moves the rate by less than half the step from 24 to 23.976 fps.
   - Both rates of the stream (`avg_frame_rate`, `r_frame_rate`) get the measured rate. Thus the file shows a constant rate.
 - `Input::open` does both steps for the other readers.
+- The rate from `probe` is the one rate of the media. All readers use it.
+  - `decode::Input` keeps the rate, and `Input::rate` gives it.
+  - `env::input_of` sets it from the media's `fps`.
+  - An export sets it from the timeline: `VideoPiece::media_rate` multiplies the rate of the timeline by the frames of media for each frame.
+  - `VideoReader::frame_rate`, the proxies, the thumbnails and the analyses use `Input::rate`.
+  - Why: a reader that asks FFmpeg for the rate can get a rate that is not the media's rate.
 
 Multicam layout:
 

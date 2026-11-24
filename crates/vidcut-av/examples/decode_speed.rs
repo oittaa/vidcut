@@ -45,7 +45,7 @@ fn main() {
     let path = std::path::PathBuf::from(args.next().expect("FILE"));
     let frames: usize = args.next().map_or(300, |n| n.parse().expect("FRAMES"));
     let start: f64 = args.next().map_or(0.0, |s| s.parse().expect("START_S"));
-    let input = Input::File(path.clone());
+    let input = Input::file(&path);
     let mut decoders: Vec<(String, Option<GpuDecoder>)> = vec![("CPU".into(), None)];
     for gpu in GpuDecoder::all() {
         let on = match gpu.on() {

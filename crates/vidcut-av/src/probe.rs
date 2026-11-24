@@ -213,7 +213,7 @@ pub fn pixel_chroma(name: &str) -> Option<String> {
 
 pub fn details(path: &Path) -> Result<vidcut_core::model::MediaDetails> {
     use ffmpeg::ffi;
-    let input = Input::File(path.to_path_buf()).open()?;
+    let input = Input::file(path).open()?;
     // SAFETY: an open input's context.
     let bit_rate = unsafe { (*input.as_ptr()).bit_rate };
     let mut streams = Vec::new();
@@ -300,7 +300,7 @@ pub fn details(path: &Path) -> Result<vidcut_core::model::MediaDetails> {
 }
 
 pub fn probe(path: &Path, decoder: Option<&crate::hw::GpuDecoder>) -> Result<MediaInfo> {
-    probe_input(&Input::File(path.to_path_buf()), decoder)
+    probe_input(&Input::file(path), decoder)
 }
 
 pub fn probe_sequence(
@@ -368,7 +368,7 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
     crate::decode::find_stream_info(&mut input, path)?;
     let skips = start_skips(&mut input);
     let format = input.format().name().to_string();
-    let file = matches!(source, Input::File(_));
+    let file = matches!(source, Input::File { .. });
     if file && format == "webp_pipe" && animated_webp(path) {
         return Err(Error::Invalid(format!(
             "{}: an animated WebP needs FFmpeg 9.0",

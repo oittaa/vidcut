@@ -1277,6 +1277,12 @@ impl VideoPiece {
     pub fn black(frames: i64) -> Self {
         Self::Black { frames }
     }
+    pub fn media_rate(&self, fps: Rational) -> Option<Rational> {
+        let Self::Source { per_frame, .. } = self else {
+            return None;
+        };
+        Rational::new(per_frame.num() * fps.num(), per_frame.den() * fps.den()).ok()
+    }
     pub fn frames(&self) -> i64 {
         match self {
             Self::Source { frames, .. }

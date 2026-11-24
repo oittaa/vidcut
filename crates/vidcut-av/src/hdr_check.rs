@@ -192,7 +192,7 @@ pub fn pictures(
 }
 
 fn decoded(clip: &Clip, count: usize) -> Result<Vec<frame::Video>> {
-    let input = Input::File(clip.path.clone());
+    let input = Input::file(&clip.path);
     let mut reader = VideoReader::open_as(&input, None, Reading::Frames)?;
     let tb = reader.time_base();
     let tick = f64::from(tb.numerator()) / f64::from(tb.denominator());
