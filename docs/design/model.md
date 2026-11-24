@@ -265,6 +265,7 @@ Frame rate of a file:
   - `Rational::times` removes the common factors before it multiplies. Thus the product is exact when the rate fits 64 bits.
   - `ffmpeg_rate` is the one conversion of a `Rational` to the 32-bit fraction of FFmpeg. It uses `av_reduce`.
     - A rate that does not fit gets the nearest fraction that fits.
+    - The result is always above 0. A rate below 1/`i32::MAX` gets 1/`i32::MAX`, because `av_reduce` gives 0 for it.
     - The readers, the probe, the measured rate and the writers (export, bypass, subtitles, OpenEXR, proxies) all use it.
     - Why: one conversion gives one result, and a fix to it fixes each user.
   - `VideoReader::frame_rate`, the proxies, the thumbnails and the analyses use `Input::rate`.

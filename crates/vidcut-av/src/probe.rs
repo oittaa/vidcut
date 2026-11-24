@@ -185,8 +185,7 @@ fn measured_rate(source: &Input, video: usize) -> Option<Ratio> {
         fields.saturating_mul(den),
         ticks.saturating_mul(num).saturating_mul(2),
     );
-    let rate = ratio(ffmpeg_rate(exact.ok()?));
-    (rate.0 > 0 && rate.1 > 0).then_some(rate)
+    Some(ratio(ffmpeg_rate(exact.ok()?)))
 }
 
 pub fn pixel_depth(name: &str) -> u8 {

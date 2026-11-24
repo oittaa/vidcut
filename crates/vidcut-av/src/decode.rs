@@ -237,7 +237,10 @@ pub fn ffmpeg_rate(rate: Rational) -> ffmpeg::Rational {
             i64::from(i32::MAX),
         )
     };
-    ffmpeg::Rational(num, den)
+    match num > 0 {
+        true => ffmpeg::Rational(num, den),
+        false => ffmpeg::Rational(1, i32::MAX),
+    }
 }
 
 impl Input {
@@ -275,11 +278,10 @@ impl Input {
     }
 
     pub fn rate(&self) -> Option<ffmpeg::Rational> {
-        let rate = match self {
-            Input::File { rate, .. } => ffmpeg_rate((*rate)?),
-            Input::Sequence { rate, .. } => ffmpeg_rate(*rate),
-        };
-        (rate.numerator() > 0 && rate.denominator() > 0).then_some(rate)
+        match self {
+            Input::File { rate, .. } => rate.map(ffmpeg_rate),
+            Input::Sequence { rate, .. } => Some(ffmpeg_rate(*rate)),
+        }
     }
 
     pub fn open(&self) -> Result<format::context::Input> {
