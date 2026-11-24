@@ -4683,6 +4683,38 @@ fn tint_bytes(color: [f64; 3]) -> [u8; 3] {
     color.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
+fn vignette_center(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, v): (usize, &Effect, &Vignette),
+    acts: &mut Vec<Act>,
+) {
+    let knobs = [VignetteKnob::CenterX, VignetteKnob::CenterY].map(Knob::Vignette);
+    let set = v.middle() != Vignette::MIDDLE;
+    label(ui, "Center", set);
+    ui.horizontal(|ui| {
+        for k in knobs {
+            let range = k.dial().range;
+            drag(
+                ui,
+                Key::Effect(n, k),
+                i,
+                (k.read(e), range),
+                &Look::default(),
+                acts,
+            );
+        }
+        let keys = knobs[0].value_of(e).and_then(|(v, _)| i.mark_of(n, v));
+        if let Some(keys) = keys {
+            key_acts(ui, Key::Effect(n, knobs[0]), &keys, acts);
+        }
+    });
+    if reset(ui, set) {
+        acts.push(Act::EffectSet(n, json!({ "center": Vignette::MIDDLE })));
+    }
+    ui.end_row();
+}
+
 fn vignette_main(
     ui: &mut egui::Ui,
     i: &Inspector,
@@ -4735,7 +4767,9 @@ fn vignette_main(
         vignette(ui, VignetteKnob::Rotation, acts);
     }
     vignette(ui, VignetteKnob::Anamorphism, acts);
-    if advanced {
+    if advanced && slot_node(n).is_some() {
+        vignette_center(ui, i, (n, e, v), acts);
+    } else if advanced {
         vignette(ui, VignetteKnob::CenterX, acts);
         vignette(ui, VignetteKnob::CenterY, acts);
     }
