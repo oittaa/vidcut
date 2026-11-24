@@ -5,7 +5,8 @@ use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LINE_LEFT, ARROW_LINE_RIGHT, ARROW_UP,
     ARROWS_LEFT_RIGHT, CARET_DOWN, CARET_LEFT, CARET_LINE_LEFT, CARET_LINE_RIGHT, CARET_RIGHT,
-    CHECK, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, STOP, TRASH,
+    CHECK, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, LOCK_SIMPLE,
+    LOCK_SIMPLE_OPEN, STOP, TRASH,
 };
 use serde_json::{Value, json};
 use vidcut_core::composition::Corner;
@@ -2528,11 +2529,17 @@ fn operation_rows(
 
 fn node_header(
     ui: &mut egui::Ui,
-    n: &Node,
+    (slot, n): (usize, &Node),
     (active, open, view): (bool, bool, View<'_>),
     acts: &mut Vec<Act>,
 ) {
     let header = ui.horizontal(|ui| {
+        if !n.tool.is_media() {
+            let mut on = !n.pass_through;
+            if ui.checkbox(&mut on, "").on_hover_text("Node On").changed() {
+                acts.push(node_set(slot, "pass_through", json!(!on)));
+            }
+        }
         let caret = if open { CARET_DOWN } else { CARET_RIGHT };
         let name = RichText::new(format!("{caret} {}", n.name)).strong();
         let name = if active {
@@ -2550,10 +2557,18 @@ fn node_header(
                 || n.multiply_by_mask
                 || !n.keys.is_empty();
             if ui
-                .add_enabled(changed, egui::Button::new("Reset"))
+                .add_enabled(changed && !n.locked, egui::Button::new("Reset"))
                 .clicked()
             {
                 acts.push(Act::NodeReset);
+            }
+            let lock = if n.locked {
+                LOCK_SIMPLE
+            } else {
+                LOCK_SIMPLE_OPEN
+            };
+            if icon(ui, lock, "Lock", true) {
+                acts.push(node_set(slot, "locked", json!(!n.locked)));
             }
         });
     });
@@ -2642,17 +2657,21 @@ impl Workspace {
                 for (&k, n) in picked.iter().zip(&shown) {
                     let mut acts = Vec::new();
                     let on = active.as_deref() == Some(n.name.as_str());
-                    node_header(ui, n, (on, open, (&keys, &viewed)), &mut acts);
                     let slot = node_slot(k);
+                    node_header(ui, (slot, n), (on, open, (&keys, &viewed)), &mut acts);
                     if open && n.tool.tracker().is_some() {
                         let node = &comp.nodes[k];
-                        self.tracker_section(ui, (&clip, &comp), node, (slot, &mut acts));
+                        ui.add_enabled_ui(!n.locked, |ui| {
+                            self.tracker_section(ui, (&clip, &comp), node, (slot, &mut acts));
+                        });
                     } else if open {
                         let i = &self.inspector;
-                        rows(ui, (slot, "node"), |ui| {
-                            node_rows(ui, i, (slot, n, element), &sight, &mut acts);
+                        ui.add_enabled_ui(!n.locked, |ui| {
+                            rows(ui, (slot, "node"), |ui| {
+                                node_rows(ui, i, (slot, n, element), &sight, &mut acts);
+                            });
+                            node_folds(ui, i, (slot, n), &sight, &mut acts);
                         });
-                        node_folds(ui, i, (slot, n), &sight, &mut acts);
                     }
                     ui.separator();
                     all.push(acts);

@@ -3154,6 +3154,11 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - Add a mask with a tool selected: the mask goes on its effect mask. With a mask selected, the new mask goes after it. The first mask then goes into the new mask's effect mask.
 - Delete a node (Delete or Backspace, p. 1390): the nodes on each side join. The node before it becomes the selected node. The masks of a deleted tool stay, joined to nothing.
 - Pass-through (Ctrl+P): the node does nothing (p. 1420). A tool passes on its input. The node shows dim.
+- Lock (Ctrl+L): no changes can be made to the node (pp. 1313, 1424). The node shows a lock badge at the right of its name (p. 1424).
+  - Measured in Resolve Studio 21.2: a locked node refuses a typed value, a drag of a value and Reset.
+  - A locked node can still be renamed, moved, joined, deleted and passed through.
+  - vidcut: a drag of its handles in the viewer changes nothing, as the node takes no change (p. 1313). This is not measured.
+  - The Keyframe button of a locked node adds a key with the value 0 in Resolve ([gotchas](gotchas.md#resolves-edits)). vidcut refuses it.
 - Ctrl+1 sets the Node Editor back to its usual scale (p. 1310).
   - In Resolve, Ctrl+1 in a viewer sets the viewer to 100 percent (p. 1290). vidcut has no zoom of the viewer yet. Thus Ctrl+1 acts on the Node Editor from all of the page.
 - Rename (F2): a name keeps letters, digits and `_`. Digits at the start go. A name that another node has is refused, and the old name stays.
@@ -3170,7 +3175,7 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
   - The copy takes the place and the joins of that node. vidcut: a join that the copy cannot take goes.
   - vidcut: the item works when one node is copied.
 - Move (p. 1414): a drag of a node moves it. A drag of a selected node moves all the selected nodes.
-- A right-click on a node opens a menu: Rename, Pass Through, Copy, Paste and Delete.
+- A right-click on a node opens a menu: Rename, Pass Through, Locked, Copy, Paste and Delete.
 - Join (pp. 1394–1397):
   - Drag from an output to an input, or from an input to an output.
   - A drop on a node joins its input. A mask joins the effect mask input.
@@ -3289,6 +3294,8 @@ The manual and the measurements do not give the noise function of Resolve. vidcu
 - A click on a tool in the Effects Library adds it after the active node (p. 1287).
 - The Inspector shows the controls of each selected node (pp. 1313–1314).
   - Each node has a header with its name and Reset (p. 1314). A click on the name makes it the active node (p. 1391).
+  - A switch at the left of the header turns a tool on and off. It is the same as Pass Through (p. 1424).
+  - The Lock button at the right of the header locks the node (p. 1313). Measured: it is left of Reset.
   - The controls of a tool are in the order of the manual (pp. 2110–2111, 2474–2475, 2481–2483, 2491–2493).
   - Measured in Resolve Studio 21.2: the Center of a Vignette is one row with an X and a Y field. The viewer shows no point for it.
 - Each value has a Keyframe button at its right (p. 1519).
