@@ -707,7 +707,7 @@ These facts come from measurements in Resolve Studio 21.2, by hand.
   - Luminance gives 0.114 × R + 0.587 × G + 0.299 × B. These are the Rec. 601 weights with red and blue swapped.
   - Hue gives the hue of (B, G, R). Thus red gives 240° and blue gives 0°.
   - Red, Green, Blue, Alpha and Saturation give the correct values.
-  - vidcut has no picture on an effect mask yet. The [todo](todo/effects-page.md) uses the Rec. 601 luma and the true hue ([spec §8.19](spec.md#the-masks)).
+  - vidcut uses the Rec. 601 luma and the true hue (`fs_picture_mask`, [spec §8.19](spec.md#the-masks)).
 - **A mask whose input mask is deleted stops rendering.**
   - After a delete of the mask on its effect mask input, the mask and the tool after it show red names.
   - The viewer keeps the old picture. A change of the mask does not render.

@@ -4637,7 +4637,9 @@ pub struct Node {
     pub foreground: Option<String>,
     /// The mask node on its effect mask input. A tool then works only where
     /// the mask is. A mask adds its own shape to the masks that come in.
-    /// Left out, a tool works on the whole picture.
+    /// On a tool, it can also be a node that gives a picture: one channel of
+    /// that picture is then the mask (`mask_channel`). Left out, a tool
+    /// works on the whole picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_mask: Option<String>,
     /// The mask node on the detail map input of a `fast_noise`. Where the
@@ -4673,6 +4675,21 @@ pub struct Node {
     /// Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub multiply_by_mask: bool,
+    /// With a picture on the effect mask input of a tool: the channel of
+    /// that picture that gives the mask. Usual: `alpha`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_channel: Option<MaskChannel>,
+    /// With a picture on the effect mask input of a tool: `[low, high]`,
+    /// each from -1000000 to 1000000, low at most high. The mask is
+    /// (level - low) / (high - low); low equal to high gives a hard step at
+    /// low. Usual: `[0, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_range: Option<[f64; 2]>,
+    /// With a picture on the effect mask input of a tool: `[black, white]`.
+    /// White on keeps the mask at 1 at most. The mask is never below 0, so
+    /// black changes nothing. Usual: both on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask_clip: Option<[bool; 2]>,
     /// Its place in the node editor, `[x, y]` in node widths across and
     /// node heights down.
     pub place: [f64; 2],
@@ -5626,6 +5643,26 @@ pub enum BlurClipping {
     /// The pixels of the edge, repeated. A mask is made in the picture only.
     #[default]
     Frame,
+}
+
+/// The channel of a picture on the effect mask input of a tool that gives
+/// the mask.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskChannel {
+    Red,
+    Green,
+    Blue,
+    #[default]
+    Alpha,
+    /// The hue, from 0 to 1: red 0, green 1/3 and blue 2/3.
+    Hue,
+    /// 0.299 × red + 0.587 × green + 0.114 × blue.
+    Luminance,
+    /// (largest − smallest) / largest of red, green and blue.
+    Saturation,
+    /// 0. A picture of a composition has no coverage channel.
+    Coverage,
 }
 
 /// A mask: where the tool that it is on works. A field left out is at its

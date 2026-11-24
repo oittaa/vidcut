@@ -1039,7 +1039,9 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
 - A Fast Noise gives an `Op::Make` with a `place::Noising`. It holds the center in pixels, the noise cells for each pixel and the turn. It also holds the depth of Seethe at the frame, the levels, the colors, and the offset, the repeat and the samples of its gradient.
   - A mask on a map input first gives a white `Painting` through `place::masked`, in its own register. The `from` of the `Op::Make` holds these registers.
   - `place::masked` then adds the masks and the Blend.
-- `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.
+- `Working.masks` holds the masks of a tool, a `place::Masks`. Its shapes come from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.
+  - A picture on the effect mask of a tool gives `Masks.picture`, a `place::Picturing`: the register of that picture, its Channel, its range and its Clip.
+  - `Composition::mask_picture` names that node, and `Composition::picture_order` runs it first and counts it as a read. A node that gives no picture there gives a clear register.
   - `place::Shaping` holds one mask in the pixels of the picture: a `place::Figure` for each place of the mask, its border, Solid, Level and Invert.
   - Its `place::Softening` is the blur of its soft edge.
   - A `place::Figure` holds a `place::Outline` and its middle.
@@ -1079,6 +1081,7 @@ The draw:
 The masks:
 
 - `blur::mask_made` makes the mask of a tool before its passes. It uses the two pictures of the passes and two pictures of `Worked.masks`.
+  - A picture on the effect mask comes first. `fs_picture_mask` takes the level of its Channel and maps the range: (r − low) / (high − low), with a hard step when low is high. The mask is never below 0, and Clip White keeps it at 1 at most.
   - It draws each figure of a mask into one picture before the soft edge. `fs_shape` keeps the larger cover of the figures there.
 - `fs_shape` draws the coverage of one mask from the distance to its edge. Each edge thus fades over one pixel.
   - `ellipse_distance` finds the nearest point of the ellipse by Newton steps. `box_distance` gives the distance to a box with round corners.
