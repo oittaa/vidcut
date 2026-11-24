@@ -3864,7 +3864,7 @@ impl Workspace {
         let Some(mut s) = self.timeline.section_dialog.take() else {
             return;
         };
-        let asking = self.asking();
+        let asking = self.asked;
         let mut open = true;
         let mut done = false;
         super::dialog::window(ctx, "Set Speed Change", &mut open, |ui| {
@@ -3910,7 +3910,7 @@ impl Workspace {
         let Some(mut d) = self.timeline.speed_dialog.take() else {
             return;
         };
-        let asking = self.asking();
+        let asking = self.asked;
         let clips = self.snap.selection.clips.clone();
         let pictured = self.pictured(&clips);
         let mut open = !clips.is_empty();

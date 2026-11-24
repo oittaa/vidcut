@@ -124,7 +124,7 @@ impl Workspace {
         let Some(mut d) = self.timeline.normalize.take() else {
             return;
         };
-        let asking = self.asking();
+        let asking = self.asked;
         if let Some(result) = d.asked.as_ref().and_then(Ask::take) {
             d.asked = None;
             match result {
