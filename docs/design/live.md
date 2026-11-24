@@ -422,7 +422,7 @@ The bar and the Jobs button:
 
 **Pictures.**
 
-- T, Shift+T, Alt+T, the clip menu, the Tools row (`Workspace::picture_tools_row`) and `gui.show` set the viewer's tool (`placing::Grab`). The Tools row has Transform, Crop and Dynamic Zoom.
+- T, Shift+T, Alt+T, the clip menu, the Tools row (`Workspace::picture_tools_row`) and `gui.show` set the viewer's tool (`placing::Grab`). The Tools row has Transform, Crop, Dynamic Zoom and Auto Color.
 - `Guides::overlay` builds the framing and safe-area guides in egui, not `Screen::draw`. Thus an export leaves them out ([deviation X80](../deviations.md#x80-safe-area-guides-skip-the-trim-editor-and-dynamic-trim)).
 - `viewer.guides` changes `ViewerPrefs`. The snapshot carries `guides` and `show_upscale`.
 - `viewer.scopes` changes `ViewerPrefs` too, and the snapshot carries `scopes`.

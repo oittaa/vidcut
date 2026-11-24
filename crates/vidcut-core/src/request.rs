@@ -4440,8 +4440,8 @@ pub enum Request {
     /// tab's place), or the
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), or
-    /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
-    /// buttons. Answers what `gui.state` does.
+    /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom, Auto
+    /// Color and their buttons. Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.

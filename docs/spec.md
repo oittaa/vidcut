@@ -1830,6 +1830,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - An OpenTimelineIO export writes a tool that is off at its usual values.
     - The right-click menu of the clip has Transform, Crop, Reset Transform and Reset Crop.
     - Dynamic Zoom has no switch (X70).
+    - Auto Color comes after them ([§8.25](#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212)).
 - **Transform** (p. 767):
   - A drag inside the box of the clip moves it.
   - A drag on a corner resizes it in proportion. A drag on a side stretches or squeezes it in one direction.
