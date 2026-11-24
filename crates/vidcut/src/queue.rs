@@ -81,6 +81,23 @@ impl Plan {
     }
 }
 
+pub fn existing(p: &Project, params: &ExportParams, proxies: &Path) -> Result<Vec<PathBuf>> {
+    if params.overwrite {
+        return Ok(Vec::new());
+    }
+    taken(&render::top(p), params, proxies)
+}
+
+pub fn refuse_existing(files: &[PathBuf]) -> Result<()> {
+    match files.first() {
+        Some(f) => Err(Error::invalid(format!(
+            "{} exists; pass overwrite to replace it",
+            f.display()
+        ))),
+        None => Ok(()),
+    }
+}
+
 fn taken(p: &Project, params: &ExportParams, proxies: &Path) -> Result<Vec<PathBuf>> {
     if crate::export::timeline_format(&params.output).is_some() {
         return Ok(params

@@ -85,7 +85,7 @@ pub struct ProjectFile {
     #[serde(default)]
     pub speakers: Speakers,
     /// The render queue of the Export page, from the top. Left out when it
-    /// is empty.
+    /// is empty. A change to it is not an undo step.
     #[serde(default)]
     pub queue: Vec<RenderJob>,
 }
@@ -236,9 +236,12 @@ impl RenderRange {
 /// render.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RenderJob {
-    /// `r<N>`. The Export page names a job by its place: Job 1 is at the
-    /// top.
+    /// `r<N>`.
     pub id: String,
+    /// The name that `render.rename` gave it. Left out, the Export page
+    /// names it by its place: Job 1 is at the top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// The timeline that it renders.
     pub timeline: String,
     /// What it renders and how. Its `range` is in frames of the timeline,

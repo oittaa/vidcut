@@ -12,6 +12,7 @@ use vidcut_core::export::{
 use vidcut_core::request::{FindSpeech, ImportMode, SubtitleFormat, SubtitlesAs};
 use vidcut_core::{Envelope, Error, Response};
 
+use super::export_page::AddChoice;
 use super::folders::Kind;
 use super::theme;
 use super::workspace::{Workspace, dim, escape_cancels};
@@ -191,6 +192,7 @@ pub struct ExportUi {
     pub(super) selected: Vec<String>,
     pub(super) job_details: bool,
     pub(super) queue: Option<super::export_page::QueueStep>,
+    pub(super) renaming: Option<super::export_page::Renaming>,
     starting: Option<Starting>,
     pub show_jobs: bool,
     jobs_seen: std::collections::HashMap<String, JobState>,
@@ -248,6 +250,9 @@ struct Starting {
     ask: Option<Ask>,
     weights: bool,
     offline: Vec<String>,
+    check: Option<Ask>,
+    existing: Vec<String>,
+    rename: Option<Picked>,
 }
 
 impl Starting {
@@ -867,6 +872,9 @@ impl Workspace {
                 ask: None,
                 weights: false,
                 offline: Vec::new(),
+                check: None,
+                existing: Vec::new(),
+                rename: None,
             });
         }
         if open {
@@ -900,6 +908,69 @@ impl Workspace {
                 Some(false) => return,
                 None => {}
             }
+        }
+        if let Some(check) = &s.check
+            && let Some(r) = check.take()
+        {
+            s.check = None;
+            match r {
+                Ok(r) => {
+                    let files = r.result["existing"].as_array().into_iter().flatten();
+                    s.existing = files.filter_map(Value::as_str).map(String::from).collect();
+                    if s.existing.is_empty() {
+                        self.send_now(ctx, &mut s);
+                    }
+                }
+                Err(e) => {
+                    if let Some(d) = &mut self.export.render {
+                        d.error = Some(e.message);
+                    }
+                    return;
+                }
+            }
+        }
+        if !s.existing.is_empty() {
+            let rename = !s.params["per_clip"].as_bool().unwrap_or(false);
+            match super::export_page::ask_add_replace(ctx, &s.existing, rename) {
+                Some(AddChoice::Replace) => {
+                    s.existing.clear();
+                    s.params["overwrite"] = json!(true);
+                    self.send_now(ctx, &mut s);
+                }
+                Some(AddChoice::Rename) => {
+                    s.existing.clear();
+                    let output = PathBuf::from(s.params["output"].as_str().unwrap_or_default());
+                    let folder = output.parent().map(Path::to_path_buf).unwrap_or_default();
+                    let file = output.file_name().map(|f| f.to_string_lossy().to_string());
+                    let ext = output.extension().map(|e| e.to_string_lossy().to_string());
+                    let (file, ext) = (file.unwrap_or_default(), ext.unwrap_or_default());
+                    let dialogs = self.dialogs.clone();
+                    s.rename = Some(Picked::ask(ctx, move || {
+                        dialogs.save_file("Rename", &folder, &file, &[ext.as_str()])
+                    }));
+                }
+                Some(AddChoice::Cancel) => return,
+                None => {}
+            }
+        }
+        if let Some(p) = &s.rename
+            && let Some(choice) = p.take()
+        {
+            s.rename = None;
+            let Some(path) = choice else {
+                return;
+            };
+            s.params["output"] = json!(path);
+            s.params["overwrite"] = json!(path.exists());
+            if let Some(d) = &mut self.export.render {
+                if let Some(stem) = path.file_stem() {
+                    d.name = stem.to_string_lossy().to_string();
+                }
+                if let Some(folder) = path.parent() {
+                    d.folder = folder.to_string_lossy().to_string();
+                }
+            }
+            self.send_now(ctx, &mut s);
         }
         if s.weights {
             let (retimes, upscalers) = self.ai_models();
@@ -964,6 +1035,14 @@ impl Workspace {
     }
 
     fn send_checked(&self, ctx: &egui::Context, s: &mut Starting) {
+        if s.from == From::Page && s.params["overwrite"] != json!(true) {
+            s.check = Some(Ask::send_dry(&self.live, ctx, s.method(), s.params.clone()));
+            return;
+        }
+        self.send_now(ctx, s);
+    }
+
+    fn send_now(&self, ctx: &egui::Context, s: &mut Starting) {
         let (retimes, upscalers) = self.ai_models();
         if !super::upscale::needed(&retimes, &upscalers).is_empty() {
             s.weights = true;
@@ -983,6 +1062,9 @@ impl Workspace {
             picking: None,
             weights: false,
             offline: Vec::new(),
+            check: None,
+            existing: Vec::new(),
+            rename: None,
         };
         self.send_start(ctx, &mut s);
         self.export.starting = Some(s);

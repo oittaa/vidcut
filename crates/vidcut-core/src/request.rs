@@ -3745,7 +3745,10 @@ pub enum Request {
     /// Add a job to the render queue of the Export page: an export of the
     /// open timeline, as `export.start` takes it, that waits for
     /// `render.start`. The range is fixed now, in frames of the timeline.
-    /// The job goes at the bottom. Returns its `id`.
+    /// The job goes at the bottom. Returns its `id`. An output file that is
+    /// there is an error, unless `overwrite`; then the render writes over it.
+    /// A change to the queue is saved in the project, but it is not an undo
+    /// step.
     #[serde(rename = "render.add")]
     RenderAdd(ExportParams),
     /// The jobs of the render queue, from the top: the `id`, `timeline`,
@@ -3779,6 +3782,10 @@ pub enum Request {
     /// Move a job of the render queue to a place, from 1 at the top.
     #[serde(rename = "render.move")]
     RenderMove { job: String, to: usize },
+    /// Give a job of the render queue a name. The name stays with the job
+    /// when it moves. A job with no name is named by its place.
+    #[serde(rename = "render.rename")]
+    RenderRename { job: String, name: String },
     /// Remove the completed jobs from the render queue. With `all`, remove
     /// every job.
     #[serde(rename = "render.clear")]
@@ -6138,7 +6145,8 @@ pub struct TimelineSet {
     /// that uses the project's settings gets its own first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own: Option<TimelineFormat>,
-    /// What the Export page renders of it: `entire` or `in_out`.
+    /// What the Export page renders of it: `entire` or `in_out`. `entire`
+    /// also clears its In and Out marks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::model::RenderRange>,
 }
@@ -7569,6 +7577,19 @@ impl Request {
                 | Self::ServicesRemoveKey { .. }
                 | Self::CacheList {}
                 | Self::CacheClear { .. }
+        )
+    }
+
+    pub fn in_queue(&self) -> bool {
+        matches!(
+            self,
+            Self::RenderAdd(_)
+                | Self::RenderRemove { .. }
+                | Self::RenderMove { .. }
+                | Self::RenderRename { .. }
+                | Self::RenderClear { .. }
+                | Self::RenderClearStatus { .. }
+                | Self::RenderEnded { .. }
         )
     }
 

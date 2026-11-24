@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{Project, RenderJob, RenderStatus};
-use crate::request::ExportParams;
+use crate::request::{ExportParams, Request};
 use crate::time::{RangeEnd, RangeSpec, TimeSpec};
 
 pub fn top(p: &Project) -> Project {
@@ -44,6 +44,7 @@ pub fn add(p: &mut Project, mut export: ExportParams) -> Result<String> {
     let id = format!("r{n}");
     p.queue.push(RenderJob {
         id: id.clone(),
+        name: None,
         timeline,
         export,
         status: None,
@@ -90,6 +91,16 @@ pub fn move_to(p: &mut Project, job: &str, to: usize) -> Result<()> {
     Ok(())
 }
 
+pub fn rename(p: &mut Project, job: &str, name: &str) -> Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(Error::usage("name: the new name of the job"));
+    }
+    let i = find(p, job)?;
+    p.queue[i].name = Some(name.to_string());
+    Ok(())
+}
+
 pub fn clear(p: &mut Project, all: bool) -> Vec<String> {
     let gone: Vec<String> = (p.queue.iter())
         .filter(|j| all || matches!(j.status, Some(RenderStatus::Completed { .. })))
@@ -111,6 +122,36 @@ pub fn ended(p: &mut Project, job: &str, status: RenderStatus) -> Result<()> {
     let i = find(p, job)?;
     p.queue[i].status = Some(status);
     Ok(())
+}
+
+pub fn change(p: &mut Project, request: &Request) -> Result<Value> {
+    Ok(match request {
+        Request::RenderAdd(export) => json!({ "id": add(p, export.clone())? }),
+        Request::RenderRemove { jobs } => json!({ "removed": remove(p, &jobs.to_vec())? }),
+        Request::RenderMove { job, to } => {
+            move_to(p, job, *to)?;
+            Value::Null
+        }
+        Request::RenderRename { job, name } => {
+            rename(p, job, name)?;
+            Value::Null
+        }
+        Request::RenderClear { all } => json!({ "removed": clear(p, *all) }),
+        Request::RenderClearStatus { jobs } => {
+            clear_status(p, jobs.as_ref().map(|j| j.to_vec()).as_deref())?;
+            Value::Null
+        }
+        Request::RenderEnded { job, status } => {
+            ended(p, job, status.clone())?;
+            Value::Null
+        }
+        other => {
+            return Err(Error::internal(format!(
+                "{} is not a change to the render queue",
+                other.method()
+            )));
+        }
+    })
 }
 
 pub fn list(p: &Project) -> Value {

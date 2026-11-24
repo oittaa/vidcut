@@ -822,6 +822,9 @@ impl Editor {
             Request::HistoryRevert { step } => return self.revert(step, client, dry_run),
             _ => {}
         }
+        if request.in_queue() {
+            return self.queue(&request, dry_run);
+        }
         let mut working = self.project.clone();
         let mut parts = Vec::new();
         let result = match &request {
@@ -1246,6 +1249,24 @@ impl Editor {
             "the undo step makes another project as JSON"
         );
         Ok((project, history, moved))
+    }
+
+    fn queue(&mut self, request: &Request, dry_run: bool) -> Result<Response> {
+        let mut working = self.project.clone();
+        let result = ops::render::change(&mut working, request)?;
+        let changes = diff(&self.project, &working);
+        if !dry_run {
+            working.rev = self.project.rev + 1;
+            self.project = working;
+        }
+        Ok(Response {
+            rev: self.project.rev,
+            changes,
+            result,
+            dry_run,
+            via: String::new(),
+            warnings: Vec::new(),
+        })
     }
 
     fn step_history(&mut self, steps: u32, undo: bool, dry_run: bool) -> Result<Response> {
@@ -3082,7 +3103,8 @@ fn batch(
                 | Request::HistoryRestore { .. }
                 | Request::HistoryRevert { .. }
                 | Request::Apply { .. }
-        ) {
+        ) || cmd.in_queue()
+        {
             return Err(Error::usage(format!(
                 "entry {}: {} cannot be batched",
                 i + 1,
@@ -3228,23 +3250,6 @@ fn mutate(
         }
         Request::TimelineSet(set) => {
             ops::timelines::set(p, set)?;
-            Value::Null
-        }
-        Request::RenderAdd(export) => json!({ "id": ops::render::add(p, export.clone())? }),
-        Request::RenderRemove { jobs } => {
-            json!({ "removed": ops::render::remove(p, &jobs.to_vec())? })
-        }
-        Request::RenderMove { job, to } => {
-            ops::render::move_to(p, job, *to)?;
-            Value::Null
-        }
-        Request::RenderClear { all } => json!({ "removed": ops::render::clear(p, *all) }),
-        Request::RenderClearStatus { jobs } => {
-            ops::render::clear_status(p, jobs.as_ref().map(|j| j.to_vec()).as_deref())?;
-            Value::Null
-        }
-        Request::RenderEnded { job, status } => {
-            ops::render::ended(p, job, status.clone())?;
             Value::Null
         }
         Request::CompoundOpen { clip, compound } => match (clip, compound) {

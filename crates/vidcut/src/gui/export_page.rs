@@ -106,6 +106,23 @@ impl Workspace {
         format!("{from}..{to}")
     }
 
+    pub(super) fn export_mark(&self, is_in: bool) {
+        let frame = self.snap.timeline.position;
+        let (key, value) = match is_in {
+            true => ("in", frame),
+            false => ("out", frame + 1),
+        };
+        if !self.render_whole() {
+            self.send("marks.set", json!({ key: value }));
+            return;
+        }
+        let commands = json!([
+            { "method": "marks.set", "params": { key: value } },
+            { "method": "timeline.set", "params": { "render": RenderRange::InOut } },
+        ]);
+        self.send("apply", json!({ "commands": commands }));
+    }
+
     pub(super) fn render_range_menu(&mut self, ui: &mut egui::Ui) -> egui::Response {
         let whole = self.render_whole();
         let text = |r: RenderRange| match r {
@@ -382,9 +399,10 @@ impl Workspace {
                         super::dialog::footer(ui, |ui| stop = ui.button("Stop").clicked());
                     }
                     None => super::dialog::footer(ui, |ui| {
-                        let label = match self.export.selected.len() {
-                            0 => "Render All".to_string(),
-                            n => format!("Render {n}"),
+                        let n = self.export.selected.len();
+                        let label = match n == 0 || n == queue.len() {
+                            true => "Render All".to_string(),
+                            false => format!("Render {n}"),
                         };
                         let busy = matches!(self.export.queue, Some(QueueStep::Checking { .. }));
                         render = super::dialog::main_button(
@@ -452,6 +470,7 @@ impl Workspace {
         let mut picked: Option<(usize, egui::Modifiers)> = None;
         let mut moved: Option<(String, usize)> = None;
         let mut menu: Option<(String, QueueAction)> = None;
+        let mut renamed: Option<(String, String)> = None;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -478,7 +497,45 @@ impl Workspace {
                                         .selectable(false),
                                 );
                                 handle.dnd_set_drag_payload(j.id.clone());
-                                ui.label(RichText::new(format!("Job {}", i + 1)).strong());
+                                let name =
+                                    j.name.clone().unwrap_or_else(|| format!("Job {}", i + 1));
+                                match &mut self.export.renaming {
+                                    Some(edit) if edit.job == j.id => {
+                                        let field = ui.add(
+                                            egui::TextEdit::singleline(&mut edit.text)
+                                                .desired_width(160.0),
+                                        );
+                                        if edit.fresh {
+                                            field.request_focus();
+                                            edit.fresh = false;
+                                        }
+                                        if field.lost_focus() {
+                                            let keep =
+                                                !ui.input(|x| x.key_pressed(egui::Key::Escape));
+                                            let text = edit.text.trim().to_string();
+                                            if keep && !text.is_empty() && text != name {
+                                                renamed = Some((j.id.clone(), text));
+                                            }
+                                            self.export.renaming = None;
+                                        }
+                                    }
+                                    _ => {
+                                        let label = ui.add(
+                                            egui::Label::new(RichText::new(&name).strong())
+                                                .sense(egui::Sense::click())
+                                                .selectable(false),
+                                        );
+                                        if label.double_clicked() {
+                                            self.export.renaming = Some(Renaming {
+                                                job: j.id.clone(),
+                                                text: name.clone(),
+                                                fresh: true,
+                                            });
+                                        } else if label.clicked() {
+                                            picked = Some((i, ui.input(|x| x.modifiers)));
+                                        }
+                                    }
+                                }
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -561,6 +618,9 @@ impl Workspace {
         }
         if let Some((job, to)) = moved {
             self.send("render.move", json!({ "job": job, "to": to }));
+        }
+        if let Some((job, name)) = renamed {
+            self.send("render.rename", json!({ "job": job, "name": name }));
         }
         match menu {
             Some((job, QueueAction::Remove)) => {
@@ -734,6 +794,12 @@ impl Workspace {
     }
 }
 
+pub(super) struct Renaming {
+    job: String,
+    text: String,
+    fresh: bool,
+}
+
 pub(super) enum QueueStep {
     ReRender {
         jobs: Option<Vec<String>>,
@@ -788,7 +854,9 @@ fn ask_rerender(ctx: &egui::Context) -> Option<bool> {
         ui.heading("Re-Render Jobs?");
         ui.label("These jobs were rendered already. Render them again?");
         super::dialog::footer(ui, |ui| {
-            if super::dialog::main_button(ui, "Render", true) {
+            let render = super::dialog::main_button_ui(ui, "Render", true);
+            focus_once(ui.ctx(), "render-again-focus", &render);
+            if render.clicked() {
                 answer = Some(true);
             }
             if ui.button("Don't Render").clicked() {
@@ -796,7 +864,65 @@ fn ask_rerender(ctx: &egui::Context) -> Option<bool> {
             }
         });
     });
+    if answer.is_some() {
+        focus_reset(ctx, "render-again-focus");
+    }
     answer
+}
+
+pub(super) enum AddChoice {
+    Replace,
+    Rename,
+    Cancel,
+}
+
+pub(super) fn ask_add_replace(
+    ctx: &egui::Context,
+    existing: &[String],
+    rename: bool,
+) -> Option<AddChoice> {
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::unique("render-add-replace")).show(ctx, |ui| {
+        ui.set_width(super::dialog::WIDTH);
+        ui.spacing_mut().item_spacing.y = 8.0;
+        ui.heading("Replace Existing File?");
+        ui.label("This render replaces a file with the same name.");
+        for f in existing.iter().take(3) {
+            ui.add(egui::Label::new(dim(f)).truncate());
+        }
+        super::dialog::footer(ui, |ui| {
+            if super::dialog::main_button(ui, "Replace", true) {
+                answer = Some(AddChoice::Replace);
+            }
+            if rename && ui.button("Rename").clicked() {
+                answer = Some(AddChoice::Rename);
+            }
+            let cancel = ui.button("Cancel");
+            focus_once(ui.ctx(), "render-add-focus", &cancel);
+            if cancel.clicked() {
+                answer = Some(AddChoice::Cancel);
+            }
+        });
+    });
+    if escape_cancels(ctx, &modal) {
+        answer = Some(AddChoice::Cancel);
+    }
+    if answer.is_some() {
+        focus_reset(ctx, "render-add-focus");
+    }
+    answer
+}
+
+fn focus_once(ctx: &egui::Context, key: &str, button: &egui::Response) {
+    let id = egui::Id::unique(key);
+    if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
+        button.request_focus();
+        ctx.data_mut(|d| d.insert_temp(id, true));
+    }
+}
+
+fn focus_reset(ctx: &egui::Context, key: &str) {
+    ctx.data_mut(|d| d.remove::<bool>(egui::Id::unique(key)));
 }
 
 fn ask_replace(ctx: &egui::Context, existing: &[String]) -> Option<bool> {

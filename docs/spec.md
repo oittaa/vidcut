@@ -4741,22 +4741,32 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - In Individual clips, the In and the Out snap to the nearest clip edge (p. 4129).
   - Measured: In/Out Range with no marks shows the whole timeline. A pick of Entire Timeline removes the marks.
   - Measured: each timeline keeps its own choice.
+  - Measured: the In and the Out of the Cut page show on the page, and Render reads In/Out Range. Entire Timeline also clears them on the Cut page.
+  - Measured: I on the timeline of the page, with Entire Timeline picked, switches Render to In/Out Range.
+- **Undo and save** (measured):
+  - On the page, Undo, Redo and History are greyed. Ctrl+Z does nothing.
+  - Add, the X, a drag, Clear Rendered and Clear All are not undo steps. Changes of the queue and of the Render Settings do not mark the project as edited.
+  - Live Save keeps a job that was added just before a quit.
 - **Render Queue** (pp. 4130–4132):
   - Add to Render Queue adds a job with the settings and the range (p. 4130). The job goes at the bottom, and it is selected (measured).
   - Add asks first when the timeline has offline media: cancel, or add anyway (p. 4130).
+  - Add asks first when a file with the name is on disk: "Replace Existing File?", with Cancel, Rename and Replace (measured). Cancel has the focus. No job is added before a choice.
+  - Rename opens a save dialog at the folder. The new name goes to the job and to File Name (measured).
+  - A name that only another job uses gives no prompt. After Replace, the render writes over the file with no other prompt (measured).
   - A job shows "Job" and its place, then the project, the timeline and the path (p. 4130). The names follow the places (measured).
+  - Measured: a double-click on the name of a job edits it. A name given so stays with its job after a drag.
   - Render renders the selected jobs, and with no job selected, all jobs (p. 4131). Ctrl-click and Shift-click select more jobs (p. 4131).
-  - Measured: with one job selected, the button reads "Render 1". With none, it reads "Render All", and with no jobs it is greyed.
+  - Measured: with one job selected, the button reads "Render 1", and with 2 of 3 selected, "Render 2". With none or all selected, it reads "Render All". With no jobs, it is greyed.
   - The jobs render from the top down (p. 4131; measured).
   - While jobs render, the queue shows "Rendering in Progress", the job count and a bar. Stop takes the place of the button. The Render Settings are greyed (measured).
   - A completed job shows "Completed in" and the time of its render, in green (measured).
-  - A render of a completed job asks first: "Re-Render Jobs?", with Don't Render and Render (measured). Don't Render skips the completed jobs (p. 4131; measured).
+  - A render of a completed job asks first: "Re-Render Jobs?", with Don't Render and Render (measured). Render has the focus. Don't Render skips the completed jobs and renders the others (p. 4131; measured).
   - A render again of a completed job writes over its file with no other prompt (measured).
   - After Clear Render Status, a render over a file with the same name asks first: "Replace Existing File?", with Cancel and Replace (measured).
   - The X removes a job with no prompt (p. 4131; measured). A drag by the handle moves a job, with no ghost row (measured).
   - A click in the empty part of the queue clears the selection (measured).
   - The right-click menu has Reveal in Media Storage, Open File Location and Clear Render Status (pp. 4131–4132; measured). Clear Render Status acts on all selected jobs (p. 4131).
-  - The "..." menu has Show All Projects, Refresh, Show Job Details, Review Before Upload, Clear Rendered and Clear All (measured).
+  - The "..." menu has Show All Projects, Refresh, Show Job Details, Review Before Upload, Clear Rendered and Clear All (measured). Clear All asks nothing.
   - Show Job Details adds the frame size, the format and the frame rate, then the audio channels, the sample rate and the duration (p. 4131).
   - Stop shows "Job Cancelled" in red (measured).
   - The project keeps the queue. A cancelled job stays after a reopen. A page switch keeps the jobs and their status (measured).
@@ -4765,13 +4775,15 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - On the page, the viewer shows the timeline. When another page opens, the viewer gets its earlier mode again.
   - The range of each timeline is the `render` of `timeline.set`: `entire` or `in_out`. A new timeline renders the entire timeline.
   - In/Out Range uses the marks that are set. Without an In, it starts at the start of the timeline. Without an Out, it goes to the end.
-  - Entire Timeline keeps the marks ([todo](todo/export-page-checks.md)).
+  - `entire` also clears the marks of the timeline.
+  - On the page, I and O switch Entire Timeline to In/Out Range, in one undo step with the mark ([todo](todo/export-page-checks.md)).
   - The Render Settings also show the live plan and the export as a shell command ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
-  - The queue is `render.add`, `render.start`, `render.remove`, `render.move`, `render.clear` and `render.clear_status`. The project file keeps it.
+  - The queue is `render.add`, `render.start`, `render.remove`, `render.move`, `render.rename`, `render.clear` and `render.clear_status`. The project file keeps it. A change of the queue is not an undo step.
+  - `render.add` refuses a file that is there, unless `overwrite`. A dry run returns the files that are there. With Replace Files on, Add asks nothing.
+  - With Individual clips, the prompt at Add has no Rename, because the output is a folder.
   - `render.start` takes `again` for completed jobs and `replace` for files that are there. A dry run tells which jobs render and which files are there.
   - Each render is a job, and Jobs shows it too ([X3](deviations.md#x3-exports-are-jobs-and-quick-export-has-a-shorter-row)).
   - A job that failed shows "Failed:" and the error, in red.
-  - With more than one job selected, the button reads "Render" and the number of jobs ([todo](todo/export-page-checks.md)).
   - A job that renders cannot be removed, and Clear All is greyed while jobs render.
   - The right-click menu has no Reveal in Media Storage, because vidcut has no Media Storage.
   - Individual clips names the files with a template. The File tab has Filename Digits and First Frame for image sequences, and Replace Files.

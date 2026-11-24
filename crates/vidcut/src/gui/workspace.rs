@@ -1101,6 +1101,7 @@ impl Workspace {
                     .silence
                     .as_ref()
                     .map(|d| (d.can_undo(), d.can_redo()));
+                let export = self.effects_page.page == Page::Export;
                 let (undo, redo) = match stripes {
                     Some((u, r)) => (
                         u.then(|| "Stripe Change".to_string()),
@@ -1110,7 +1111,7 @@ impl Workspace {
                 };
                 if ui
                     .add_enabled(
-                        undo.is_some(),
+                        undo.is_some() && !export,
                         egui::Button::new(named("Undo", &undo)).shortcut_text(
                             self.snap.bindings.first(Action::Undo).unwrap_or_default(),
                         ),
@@ -1124,7 +1125,7 @@ impl Workspace {
                 }
                 if ui
                     .add_enabled(
-                        redo.is_some(),
+                        redo.is_some() && !export,
                         egui::Button::new(named("Redo", &redo)).shortcut_text(
                             self.snap.bindings.first(Action::Redo).unwrap_or_default(),
                         ),
@@ -1136,7 +1137,7 @@ impl Workspace {
                         None => self.send("history.redo", json!({})),
                     }
                 }
-                ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
+                ui.add_enabled_ui(self.snap.project.is_some() && !export, |ui| {
                     ui.menu_button("History", |ui| self.history_menu(ui));
                 });
                 ui.menu_button("Edit Options", |ui| {
@@ -1727,7 +1728,10 @@ impl Workspace {
             (false, Action::MarkOut, Action::GoToOut),
         ] {
             if fired.pressed(mark) {
-                self.mark(is_in);
+                match self.effects_page.page {
+                    Page::Export => self.export_mark(is_in),
+                    _ => self.mark(is_in),
+                }
             }
             if fired.pressed(go) {
                 self.go_to_mark(is_in);
@@ -1781,7 +1785,9 @@ impl Workspace {
                 self.delete_key(lift);
             }
         }
-        self.undo_keys(&fired);
+        if self.effects_page.page != Page::Export {
+            self.undo_keys(&fired);
+        }
         if fired.pressed(Action::Import) {
             self.import_media();
         }

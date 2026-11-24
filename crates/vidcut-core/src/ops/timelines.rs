@@ -280,6 +280,9 @@ pub fn set(p: &mut Project, s: &TimelineSet) -> Result<()> {
     (t.own, t.start_tc) = (own, start);
     if let Some(r) = s.render {
         t.render = r;
+        if r.is_entire() {
+            t.marks = crate::model::Marks::default();
+        }
     }
     if let Some(r) = super::conform::Rates::new(before.fps, after.fps) {
         t.markers

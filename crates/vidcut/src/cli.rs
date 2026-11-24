@@ -172,6 +172,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("render.start", &["jobs"]),
     ("render.remove", &["jobs"]),
     ("render.move", &["job", "to"]),
+    ("render.rename", &["job", "name"]),
     ("render.clear_status", &["jobs"]),
     ("render.ended", &["job"]),
     ("jobs.get", &["job"]),

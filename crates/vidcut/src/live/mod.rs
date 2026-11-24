@@ -1897,6 +1897,21 @@ impl Live {
                 Err(Error::invalid(format!("{busy} renders now; stop it first"))),
             );
         }
+        if let Request::RenderAdd(params) = &envelope.request
+            && let Some(open) = &self.project
+        {
+            let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
+            let files = match crate::queue::existing(open.project(), params, &proxies) {
+                Ok(f) => f,
+                Err(e) => return self.finish(job, Err(e)),
+            };
+            if envelope.dry_run {
+                return self.finish(job, Ok(answer(json!({ "existing": files }))));
+            }
+            if let Err(e) = crate::queue::refuse_existing(&files) {
+                return self.finish(job, Err(e));
+            }
+        }
         let limit = match &envelope.request {
             Request::JobsWait { timeout, .. } => {
                 match timeout.map(|t| Duration::try_from_secs_f64(t.max(0.0))) {

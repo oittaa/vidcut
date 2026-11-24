@@ -353,6 +353,23 @@ pub fn run_with(
                 envelope.dry_run,
             )?)
         }
+        Request::RenderAdd(params) => {
+            let store = open(project)?;
+            let env = AvEnv::for_project(store.path());
+            let editor = store.load_project()?;
+            let files = crate::queue::existing(editor.project(), params, &env.proxy_dir())?;
+            if envelope.dry_run {
+                answer(json!({ "existing": files }))
+            } else {
+                crate::queue::refuse_existing(&files)?;
+                let (mut r, history_error) =
+                    store.transact(|editor| editor.apply(envelope, &env, None))?;
+                if let Some(e) = history_error {
+                    r.warnings.push(history_unsaved(&e));
+                }
+                r
+            }
+        }
         Request::Probe { .. } => {
             let mut editor = vidcut_core::Editor::new(
                 vidcut_core::Project::new(Default::default()),

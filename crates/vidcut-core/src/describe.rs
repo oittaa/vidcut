@@ -108,24 +108,17 @@ pub fn describe_at(
             _ => format!("Duplicate timeline {}", d.timeline("timeline")),
         },
         "timeline.delete" => format!("Delete timeline {}", d.timeline("timeline")),
-        "timeline.set" => match d.text("timeline").as_str() {
-            "" => "Change the timeline settings".to_string(),
-            _ => format!("Change the settings of timeline {}", d.timeline("timeline")),
+        "timeline.set" if params.as_object().is_some_and(|o| o.len() == 1) => {
+            match params["render"].as_str() {
+                Some("entire") => "Render Entire Timeline".to_string(),
+                Some(_) => "Render In/Out Range".to_string(),
+                None => "Change the timeline settings".to_string(),
+            }
+        }
+        "timeline.set" => match params["timeline"].is_null() {
+            true => "Change the timeline settings".to_string(),
+            false => format!("Change the settings of timeline {}", d.timeline("timeline")),
         },
-        "render.add" => format!("Add {} to the Render Queue", d.file("output")),
-        "render.remove" => format!("Remove render job {}", d.list("jobs").join(", ")),
-        "render.move" => format!(
-            "Move render job {} to place {}",
-            d.text("job"),
-            d.text("to")
-        ),
-        "render.clear" if d.flag("all") => "Clear All render jobs".to_string(),
-        "render.clear" => "Clear Rendered jobs".to_string(),
-        "render.clear_status" => match d.list("jobs").as_slice() {
-            [] => "Clear Render Status of all jobs".to_string(),
-            jobs => format!("Clear Render Status of {}", jobs.join(", ")),
-        },
-        "render.ended" => format!("Render job {}", d.text("job")),
         "timeline.import" => match d.text("mode").as_str() {
             "append" => format!("Import timeline {} after the last clip", d.file("path")),
             "replace" => format!("Import timeline {}, replacing the timeline", d.file("path")),
