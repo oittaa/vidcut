@@ -142,7 +142,7 @@ impl Workspace {
             ui.monospace(self.tc((b - 1).max(a)));
             ui.add_space(12.0);
             ui.label(dim("DURATION"));
-            ui.monospace(self.src_tc(b - a));
+            ui.monospace(self.src_tc((b - a).max(0)));
         });
     }
 

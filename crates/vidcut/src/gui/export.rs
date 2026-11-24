@@ -207,6 +207,11 @@ impl ExportUi {
         self.starting.is_some()
     }
 
+    pub(super) fn switch_project(&mut self) {
+        self.render = None;
+        self.render_wanted = false;
+    }
+
     pub(super) fn asking(&self, jobs: &[JobInfo]) -> bool {
         matches!(self.otio, Some(Otio::Choose(..) | Otio::Missing { .. }))
             || (self.confirm_quit && jobs.iter().any(JobInfo::unfinished))
@@ -275,7 +280,7 @@ pub(super) struct Render {
     pub(super) overwrite: bool,
     pub(super) picking: Option<Picked>,
     plan: Option<Ask>,
-    planned: Option<Value>,
+    planned: Option<(Value, u64)>,
     pub(super) plan_result: Option<std::result::Result<Value, String>>,
     pub(super) error: Option<String>,
     pub(super) save: Option<SavePreset>,
@@ -970,7 +975,8 @@ impl Workspace {
             return;
         }
         let params = d.params();
-        if d.planned.as_ref() == Some(&params) {
+        let rev = self.project().map_or(0, |p| p.rev);
+        if d.planned.as_ref() == Some(&(params.clone(), rev)) {
             return;
         }
         let local = if d.folder.trim().is_empty() {
@@ -980,7 +986,7 @@ impl Workspace {
         } else {
             validate(&d.settings).map_err(|e| e.message)
         };
-        d.planned = Some(params.clone());
+        d.planned = Some((params.clone(), rev));
         match local {
             Err(e) => d.plan_result = Some(Err(e)),
             Ok(()) => d.plan = Some(Ask::send(&self.live, ctx, "export.plan", params)),
@@ -989,7 +995,7 @@ impl Workspace {
 
     pub(super) fn plan_ready(&self, d: &Render) -> bool {
         matches!(d.plan_result, Some(Ok(_)))
-            && d.planned.as_ref() == Some(&d.params())
+            && d.planned == Some((d.params(), self.project().map_or(0, |p| p.rev)))
             && self.export.starting.is_none()
     }
 
@@ -2560,7 +2566,10 @@ fn format_row(ui: &mut egui::Ui, d: &mut Render) {
                 && (before.audio_only() || d.settings.container.image_sequence())
                 && d.settings.video.is_none()
             {
-                d.settings.video = d.stashed_video.take().or(d.base.video.clone());
+                let c = d.settings.container;
+                d.settings.video = (d.stashed_video.take())
+                    .or(d.base.video.clone())
+                    .or(c.image_sequence().then(|| new_video(c)));
             }
             if before.image_sequence() && d.settings.audio.is_none() {
                 d.settings.audio = d.base.audio.clone();
