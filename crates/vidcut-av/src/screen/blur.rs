@@ -492,7 +492,7 @@ fn paint_bytes(p: &Painting, (w, h): (u32, u32)) -> Vec<u8> {
         p.offset,
         f64::from(w),
         f64::from(h),
-        0.0,
+        f64::from(p.samples),
     ]);
     float_bytes(&floats)
 }
@@ -517,6 +517,10 @@ fn noise_bytes(n: &Noising) -> Vec<u8> {
         flags,
         place_of(&NoiseColoring::ALL, &n.coloring),
         n.stops.len() as f64,
+        n.offset,
+        place_of(&GradientRepeat::ALL, &n.repeat),
+        f64::from(n.samples),
+        0.0,
     ]);
     float_bytes(&floats)
 }
