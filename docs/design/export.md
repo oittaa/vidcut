@@ -798,18 +798,22 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 
 - A grade is a list of nodes (`GradeNode`). Each node is a corrector (`model::Corrector`) or a mixer (`GradeTool`).
   - Each input holds a link (`GradeLink`): the number of a node and the output that the link leaves, RGB or key. The number 0 is the picture that comes in.
+  - A link also holds the order in which it was made (`made`). Two links are the same when they leave the same output, whatever their order.
   - `Grade::output` is the link that goes out.
   - Why: a key output can go to an RGB input, and an RGB output to a key input. The place of a link gives only the kind of its input.
   - `ops::grade::checked` refuses a number past the last node, a node on its own input and a loop.
   - It also refuses a key from a node with no key output, and a picture from a key mixer (`gives`).
   - It also refuses a corrector without one input and a mixer without an input.
   - `ops::grade` changes the tree for `grade.add`, `grade.remove`, `grade.connect` and `grade.input.remove`. A removed node gives each node after it one number less (`renumbered`).
+  - After `grade.add` and `grade.connect`, `stamped` gives each new link the next `made` number. After `grade.add`, `walked` numbers the nodes again, in the order of a walk from the source.
+  - Why: the node numbers then follow the measured rule of the spec (§8.21).
   - `grade.cleanup` sets the place of each node (`cleanup`, `spread`). The column comes from its longest path from the source. The row comes from the nodes that take its picture.
   - With an `area`, `filled` then stretches the columns and the rows to fill it. The nodes never come closer than in the grid.
   - `grade.swap` and `grade.paste` change the settings of correctors, not the tree. A copied keyframe keeps its distance from the start of its clip (`start_of`).
   - A mixer input that took a removed node takes nothing. Thus a mixer keeps the place of each input.
   - A removed or extracted node loses the links from its key output, and the links from its RGB output to key inputs (`unkeyed`). The other links that took its picture move (`retake`).
-  - A serial node after a key mixer takes the key of the mixer. Each link that took that key then takes the picture of the new node (`retake`).
+  - A serial node takes the picture of the node before it. The oldest link that took that picture then takes the picture of the new node (`oldest_taker`).
+  - A serial node after a key mixer takes the key of the mixer. The oldest link that took that key then takes the picture of the new node.
   - Why: a key mixer has only a key output. The links between key and RGB ports carry the key through the new corrector.
 - `Placing::new` adds the grade after the effects of the clip, as the last `place::Working` (`Work::Grade`).
   - Thus the grade runs after the effects and before the composite mode and the opacity ([spec §13](../spec.md#13-order-of-operations-pp-287296-3407)).

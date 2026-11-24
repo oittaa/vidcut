@@ -3681,11 +3681,19 @@ Requests: `grade.get`, `grade.set`, `grade.clear` and `grade.printer`.
   - Measured: a Layer node does the same with a Layer Mixer. Alt+L at the corrector on input 1 of a Layer Mixer added a corrector on input 2.
   - Measured: Alt+P and Alt+L at a corrector that feeds a Layer Mixer each add a new last input to that mixer. The new corrector takes the source.
   - A new node gets the next number, wherever it goes in the tree (p. 3395).
-  - Measured in Resolve Studio 21.2: the numbers do not follow p. 3395.
+  - Measured in Resolve Studio 21.2: the numbers do not follow p. 3395. After each new node, all the nodes get new numbers.
+    - The numbers come from a walk from the source, one step of links at a time. The links of each node go in the order in which they were made.
+    - A mixer takes a number, but the Node Editor shows none.
     - Nodes 1, 2 and 4 are in series. Nodes 1 and 2 give their keys to Key Mixer 3, and it gives its key to node 4.
     - Alt+S at node 1 then gives a new node 3. The old node 2 becomes 5, and the mixer becomes 2.
-    - The 5 measured cases fit one rule: a walk from the source, one step of links at a time. The links of each node go in the order in which they were made.
-  - vidcut: a new node gets the next number, as the manual says ([todo](todo/color-page.md)).
+    - Nodes 1 to 4 are in series. Alt+L at node 2 gives a new node 3 and a Layer Mixer 4. The old nodes 3 and 4 become 5 and 6.
+    - A new link does not change the numbers. In nodes 1 to 4 in series, the link from node 3 to node 4 goes, and node 1 then feeds node 4.
+    - Alt+S at node 1 then puts the new node on the older link, between node 1 and node 2. Node 1 still feeds the old node 4.
+    - The old node 4 becomes 2, and the new node is 3. The old nodes 2 and 3 become 4 and 5.
+    - In one case, a node with no link from the source came last.
+  - vidcut: the same rule. Each link holds the order in which it was made (`made`).
+  - vidcut: the nodes that the walk does not reach come last, in their earlier order. Their order among themselves is not measured.
+  - vidcut: a serial node and an outside node move only the oldest link that took the picture of the current node, as measured.
   - vidcut: `grade.add` with `serial`, `before`, `parallel`, `layer`, `append`, `outside`, `corrector` or `key_mixer`. The menus of the Node Editor have each one.
   - vidcut: Alt+P and Alt+L at a corrector that feeds only a mixer, of either kind, add a new last input to that mixer.
   - Measured: Alt+P and Alt+L at a corrector on a Parallel Mixer add a new last input to that mixer. The new corrector takes the input of the current node, also when that input is node 1 and not the source.
