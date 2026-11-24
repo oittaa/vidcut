@@ -1714,7 +1714,7 @@ impl Workspace {
                 }
             }
         }
-        if fired.pressed(Action::TimelineOrSource) {
+        if fired.pressed(Action::TimelineOrSource) && self.effects_page.page != Page::Export {
             let mode = if viewer == ViewerMode::Timeline {
                 self.snap.last_source
             } else {
@@ -2141,6 +2141,7 @@ impl Workspace {
             let path = self.snap.project.as_ref().map(|p| p.path.clone());
             self.timeline.switch_project(path);
             self.effects_page.switch_project();
+            self.export.switch_project();
         }
         let tracks = self.project().map_or(0, |p| p.tracks.len());
         if tracks < self.timeline.tracks {
