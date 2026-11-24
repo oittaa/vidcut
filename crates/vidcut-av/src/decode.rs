@@ -228,9 +228,15 @@ impl Input {
     }
 
     pub fn open(&self) -> Result<format::context::Input> {
+        let mut input = self.open_header()?;
+        find_stream_info(&mut input, self.path())?;
+        Ok(input)
+    }
+
+    pub fn open_header(&self) -> Result<format::context::Input> {
         crate::init();
         match self {
-            Input::File(p) => open_file(p),
+            Input::File(p) => open_file_header(p),
             Input::Sequence {
                 pattern,
                 first,
@@ -240,7 +246,26 @@ impl Input {
     }
 }
 
+pub fn find_stream_info(input: &mut format::context::Input, path: &Path) -> Result<()> {
+    // SAFETY: an open input's context.
+    let ret =
+        unsafe { ffmpeg::ffi::avformat_find_stream_info(input.as_mut_ptr(), std::ptr::null_mut()) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: format!("opening {}", path.display()),
+            source: ffmpeg::Error::from(ret),
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn open_file(path: &Path) -> Result<format::context::Input> {
+    let mut input = open_file_header(path)?;
+    find_stream_info(&mut input, path)?;
+    Ok(input)
+}
+
+fn open_file_header(path: &Path) -> Result<format::context::Input> {
     if vidcut_core::store::from_another_system(path) {
         return Err(Error::Invalid(format!(
             "{} is a path on another kind of system: relink the media",
@@ -249,8 +274,31 @@ pub(crate) fn open_file(path: &Path) -> Result<format::context::Input> {
     }
     let what = || format!("opening {}", path.display());
     let file = std::fs::File::open(path).map_err(|e| Error::Invalid(format!("{}: {e}", what())))?;
-    let io = format::context::StreamIo::from_read_seek(file).ctx(what)?;
-    format::input_from_stream(io, Some(&path.to_string_lossy()), None).ctx(what)
+    let mut io = format::context::StreamIo::from_read_seek(file).ctx(what)?;
+    let name = std::ffi::CString::new(path.to_string_lossy().as_bytes())
+        .map_err(|_| Error::Invalid(format!("{}: a NUL in the name", path.display())))?;
+    // SAFETY: a new context that reads through `io`, which the wrapped input keeps.
+    unsafe {
+        let mut ctx = ffmpeg::ffi::avformat_alloc_context();
+        if ctx.is_null() {
+            return Err(Error::Invalid(format!("{}: no memory", what())));
+        }
+        (*ctx).pb = io.as_mut_ptr();
+        (*ctx).flags |= ffmpeg::ffi::AVFMT_FLAG_CUSTOM_IO;
+        let ret = ffmpeg::ffi::avformat_open_input(
+            &mut ctx,
+            name.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        );
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: what(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(format::context::Input::wrap_with_custom_io(ctx, io))
+    }
 }
 
 fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format::context::Input> {
@@ -269,14 +317,6 @@ fn open_sequence(pattern: &Path, first: u64, rate: (i32, i32)) -> Result<format:
         let ret = ffmpeg::ffi::avformat_open_input(&mut ctx, path.as_ptr(), image2, &mut opts);
         drop(ffmpeg::Dictionary::own(opts));
         if ret < 0 {
-            return Err(Error::Ffmpeg {
-                context: what(),
-                source: ffmpeg::Error::from(ret),
-            });
-        }
-        let ret = ffmpeg::ffi::avformat_find_stream_info(ctx, std::ptr::null_mut());
-        if ret < 0 {
-            ffmpeg::ffi::avformat_close_input(&mut ctx);
             return Err(Error::Ffmpeg {
                 context: what(),
                 source: ffmpeg::Error::from(ret),

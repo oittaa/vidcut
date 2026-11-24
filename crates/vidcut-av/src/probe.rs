@@ -125,6 +125,57 @@ fn pictures(input: &mut ffmpeg::format::context::Input, all: bool) -> (usize, Op
     (count, secs)
 }
 
+const MEASURED_SECS: i64 = 2;
+const REORDERED_FRAMES: usize = 16;
+
+fn measured_rate(source: &Input, video: usize) -> Option<Ratio> {
+    let mut input = source.open_header().ok()?;
+    let (mut pts, mut first, mut end, mut after) = (Vec::new(), i64::MAX, None, 0);
+    let mut tb = None;
+    for (stream, packet) in input.packets() {
+        if stream.index() != video {
+            continue;
+        }
+        let p = packet.pts()?;
+        let (num, den) = *tb.get_or_insert_with(|| {
+            let t = stream.time_base();
+            (i64::from(t.numerator()), i64::from(t.denominator()))
+        });
+        if num <= 0 || den <= 0 {
+            return None;
+        }
+        pts.push(p);
+        first = first.min(p);
+        if end.is_some() {
+            after += 1;
+            if after == REORDERED_FRAMES {
+                break;
+            }
+        } else if p.saturating_sub(first) >= MEASURED_SECS * den / num {
+            end = Some(p);
+        }
+    }
+    let (num, den) = tb?;
+    let end = end.or_else(|| pts.iter().max().copied())?;
+    let frames = pts.iter().filter(|&&p| p <= end).count() as i64;
+    let ticks = end.saturating_sub(first);
+    if frames < 2 || ticks <= 0 {
+        return None;
+    }
+    let mut rate = (0, 0);
+    // SAFETY: av_reduce writes only the two integers that it is given.
+    unsafe {
+        ffmpeg::ffi::av_reduce(
+            &mut rate.0,
+            &mut rate.1,
+            (frames - 1).saturating_mul(den),
+            ticks.saturating_mul(num),
+            i64::from(i32::MAX),
+        )
+    };
+    (rate.0 > 0 && rate.1 > 0).then_some(rate)
+}
+
 pub fn pixel_depth(name: &str) -> u8 {
     use std::str::FromStr;
     ffmpeg::format::Pixel::from_str(name)
@@ -328,7 +379,9 @@ fn sequence_frames(info: &MediaInfo, rate: (i32, i32)) -> Option<u64> {
 
 fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Result<MediaInfo> {
     let path = source.path();
-    let mut input = source.open()?;
+    let mut input = source.open_header()?;
+    let stated: Vec<Ratio> = input.streams().map(|s| ratio(s.avg_frame_rate())).collect();
+    crate::decode::find_stream_info(&mut input, path)?;
     let skips = start_skips(&mut input);
     let format = input.format().name().to_string();
     let file = matches!(source, Input::File(_));
@@ -353,6 +406,9 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
     }
 
     let best_video = input.streams().best(media::Type::Video).map(|s| s.index());
+    let measured = best_video
+        .filter(|&i| file && !still && stated.get(i).is_none_or(|r| r.0 <= 0 || r.1 <= 0))
+        .and_then(|i| measured_rate(source, i));
     let mut video = None;
     let mut audio = Vec::new();
     for stream in input.streams() {
@@ -408,6 +464,10 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
                     (Some(e), None) => Some(e),
                     _ => None,
                 };
+                let (avg_frame_rate, r_frame_rate) = match measured {
+                    Some(m) => (m, m),
+                    None => (ratio(stream.avg_frame_rate()), ratio(stream.rate())),
+                };
                 video = Some(VideoStreamInfo {
                     index: stream.index(),
                     codec,
@@ -419,8 +479,8 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
                         .map(|d| d.name().to_string())
                         .unwrap_or_default(),
                     time_base: ratio(stream.time_base()),
-                    avg_frame_rate: ratio(stream.avg_frame_rate()),
-                    r_frame_rate: ratio(stream.rate()),
+                    avg_frame_rate,
+                    r_frame_rate,
                     frames: (stream.frames() > 0).then_some(stream.frames()),
                     start_pts: opt_ts(stream.start_time()),
                     duration_pts: opt_ts(stream.duration()).filter(|d| *d > 0),
