@@ -852,6 +852,7 @@ The grade of a clip (`model::Grade`, the `grade.set` request, the Color page):
 - `grade.printer` moves the Offset by printer points (`ops::grade::printed`). One point is Step Size times Density Increment of each channel (`ColorPrefs`).
 - `grade.auto_color` runs the legacy Auto Color of [spec §8.25](../spec.md#825-auto-color-pp-117-771-31283129-measured-in-resolve-studio-212):
   - `editor::auto_color_looks` makes the `RenderPlan` of one frame: the clip alone, with the grade up to the corrector, and its Lift and Gain reset.
+  - That frame has no transitions and no timeline grade. The clip and its track are on, as in `render::flatten_clip`.
   - `Env::auto_balance` renders that frame in float (`still::floats`). `BALANCES` keeps the results of recent plans.
   - `auto_color::balance` makes the Lift and Gain from the pixels. It is the one place of the method, so that another method can take its place ([todo](../todo/auto-color.md)).
   - `ops::grade::auto_color` writes the Lift and Gain with `GradeNode::change_at`.

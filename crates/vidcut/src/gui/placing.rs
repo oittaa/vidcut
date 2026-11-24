@@ -6,7 +6,7 @@ use vidcut_core::model::{
     Clip, CompositeMode, DynamicZoom, Ease, Picture, PictureTool, Project, TrackKind, ZoomBox,
 };
 use vidcut_core::ops::grade::GradeOf;
-use vidcut_core::ops::picture::{has_picture, zoom_shown};
+use vidcut_core::ops::picture::{has_picture, takes_effects, zoom_shown};
 use vidcut_core::place::{
     Extent, Level, Mixes, Placing, anchored, apply, flipped, frame_back, window_back,
 };
@@ -788,7 +788,8 @@ impl Workspace {
             }
         }
         ui.separator();
-        self.auto_color_button(ui, clip.as_ref().map(|(id, _)| id.as_str()));
+        let graded = self.graded(clip.as_ref());
+        self.auto_color_button(ui, graded.as_deref());
         let Some(tool) = self.timeline.picture_grab.tool else {
             return;
         };
@@ -849,6 +850,12 @@ impl Workspace {
             self.timeline.picture_grab.landing = None;
             self.send("picture.clear", json!({ "clips": [id], "tool": tool }));
         }
+    }
+
+    fn graded(&self, clip: Option<&(String, Picture)>) -> Option<String> {
+        let (id, _) = clip?;
+        let p = self.project_shared()?;
+        takes_effects(p.clip(id)?).then(|| id.clone())
     }
 
     fn auto_color_button(&mut self, ui: &mut egui::Ui, clip: Option<&str>) {

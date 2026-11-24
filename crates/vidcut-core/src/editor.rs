@@ -8291,6 +8291,11 @@ fn auto_color_plan(
     solo.subtitles.clear();
     for track in &mut solo.tracks {
         track.clips.retain(|k| k.id == *id);
+        track.transitions.clear();
+        track.video_enabled = true;
+        for k in &mut track.clips {
+            k.enabled = true;
+        }
     }
     let picture = solo
         .tracks
@@ -8303,7 +8308,9 @@ fn auto_color_plan(
     picture.opacity_keys.clear();
     picture.composite_mode = None;
     picture.grade = Some(g);
-    crate::render::flatten(&solo, t, t + 1)
+    let mut plan = crate::render::flatten(&solo, t, t + 1)?;
+    plan.timeline_grade = None;
+    Ok(plan)
 }
 
 pub fn track_looks(p: &Project, request: &Request, playhead: Option<i64>) -> Vec<TrackLook> {

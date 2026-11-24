@@ -4206,10 +4206,12 @@ Requests: `grade.window.add`, `grade.window.set`, `grade.window.remove`, `grade.
   - `grade.auto_color` runs it on a corrector of the grade of a clip. Left out, the node is node 1, and the frame is at the playhead.
   - The A button of the Primaries palette, Color > Auto Color and Alt+Shift+C run it on the current node.
   - The Auto Color button of the viewer Tools runs it on node 1. The button does not stay lit.
+    - It is greyed out on a title or a generator, which takes no grade.
   - The viewer Tools have no Color tool with a switch and a reset ([todo](todo/auto-color.md)).
   - The analysis reads one frame of the clip alone, after the nodes up to that corrector.
     - The Lift and Gain of that corrector are at their usual values.
     - Other clips, the opacity, the composite mode and the timeline grade do not change the frame.
+    - Transitions do not change it. A clip or a track that is off still gives its frame.
   - The result replaces all Lift and Gain values of the corrector, as the legacy method of Resolve does.
   - Each run is one undo step. Redo gives it back.
   - The grade of the timeline has no Auto Color.
