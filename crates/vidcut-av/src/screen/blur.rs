@@ -39,6 +39,7 @@ const TAIL: (f64, f64) = (3.8, 4.3);
 const BORDER_BLACK: u32 = 0;
 
 const BORDER_CLAMP: u32 = 1;
+const MASK_NEAR: f64 = 4.0;
 
 const MOST_BOX: f64 = 65536.0;
 
@@ -577,46 +578,139 @@ fn made_into(
     }
 }
 
+fn soft_reach(soft: Option<Softening>) -> [u32; 2] {
+    let ways = match soft {
+        None => Vec::new(),
+        Some(Softening::Gaussian(sigma)) => gaussian_ways(sigma),
+        Some(Softening::Boxes { width, count }) => box_ways(width, width, count),
+    };
+    let mut reach = [0, 0];
+    for (pass, down) in ways {
+        reach[usize::from(down)] += (pass.taps + 1) * pass.step;
+    }
+    reach
+}
+
+fn mask_pads(shape: &Shaping, (w, h): (u32, u32), most: u32) -> [u32; 4] {
+    let reach = soft_reach(shape.soft);
+    let points: Vec<[f64; 2]> = shape.figures.iter().flat_map(Figure::line).collect();
+    if !shape.beyond || reach == [0, 0] || points.is_empty() {
+        return [0; 4];
+    }
+    let near = shape.border.abs() + MASK_NEAR;
+    let low = |k: usize| points.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min) - near;
+    let high = |k: usize| {
+        points
+            .iter()
+            .map(|p| p[k])
+            .fold(f64::NEG_INFINITY, f64::max)
+            + near
+    };
+    let size = [w, h];
+    let room = size.map(|s| most.saturating_sub(s) / 2);
+    let pad = |k: usize, reaches: bool| match reaches {
+        true => reach[k].min(room[k]),
+        false => 0,
+    };
+    [
+        pad(0, low(0) < f64::from(reach[0])),
+        pad(1, low(1) < f64::from(reach[1])),
+        pad(0, high(0) > f64::from(size[0]) - f64::from(reach[0])),
+        pad(1, high(1) > f64::from(size[1]) - f64::from(reach[1])),
+    ]
+}
+
+fn padded_room<'a>(
+    gpu: &Gpu,
+    padded: &'a mut Option<[Texture; 2]>,
+    (w, h): (u32, u32),
+) -> &'a [Texture; 2] {
+    let size = wgpu::Extent3d {
+        width: w,
+        height: h,
+        depth_or_array_layers: 1,
+    };
+    if padded.as_ref().is_some_and(|m| m[0].texture.size() != size) {
+        *padded = None;
+    }
+    padded.get_or_insert_with(|| [Texture::new(gpu, (w, h)), Texture::new(gpu, (w, h))])
+}
+
+fn moved(figure: &Figure, [dx, dy]: [f64; 2]) -> Figure {
+    let outline = match &figure.outline {
+        Outline::Polygon { points, winding } => Outline::Polygon {
+            points: points.iter().map(|[x, y]| [x + dx, y + dy]).collect(),
+            winding: *winding,
+        },
+        other => other.clone(),
+    };
+    Figure {
+        outline,
+        middle: [figure.middle[0] + dx, figure.middle[1] + dy],
+    }
+}
+
 fn mask_made<'a>(
     gpu: &Gpu,
-    (scratch, room): (&[Texture; 2], &'a [Texture; 2]),
+    (scratch, room, padded): (&[Texture; 2], &'a [Texture; 2], &mut Option<[Texture; 2]>),
     shapes: &[Shaping],
     encoder: &mut wgpu::CommandEncoder,
 ) -> &'a wgpu::TextureView {
+    let size = scratch[0].texture.size();
+    let most = gpu.device.limits().max_texture_dimension_2d;
     let mut kept: Option<usize> = None;
     let none = [Figure::NONE];
     for shape in shapes {
+        let [left, top, right, bottom] = mask_pads(shape, (size.width, size.height), most);
+        let work = match left + top + right + bottom {
+            0 => scratch,
+            _ => {
+                let wide = (size.width + left + right, size.height + top + bottom);
+                padded_room(gpu, padded, wide)
+            }
+        };
+        let by = [f64::from(left), f64::from(top)];
         let figures = match shape.figures.is_empty() {
             true => &none[..],
             false => &shape.figures[..],
         };
         let mut from = 1;
         for (i, figure) in figures.iter().enumerate() {
-            let points = shape_points(gpu, figure);
+            let figure = moved(figure, by);
+            let points = shape_points(gpu, &figure);
             let views = Views {
                 cells: Some(&points),
-                ..Views::same(&scratch[from].view)
+                ..Views::same(&work[from].view)
             };
-            let drawn = (&gpu.blur().shape, &shape_bytes(shape, figure, i > 0)[..]);
-            draw_step(gpu, drawn, views, &scratch[1 - from].view, encoder);
+            let drawn = (&gpu.blur().shape, &shape_bytes(shape, &figure, i > 0)[..]);
+            draw_step(gpu, drawn, views, &work[1 - from].view, encoder);
             from = 1 - from;
         }
         for (pipeline, bytes) in soft_steps(gpu.blur(), shape.soft) {
-            let views = Views::same(&scratch[from].view);
+            let views = Views::same(&work[from].view);
             draw_step(
                 gpu,
                 (pipeline, &bytes[..]),
                 views,
-                &scratch[1 - from].view,
+                &work[1 - from].view,
                 encoder,
             );
             from = 1 - from;
         }
         let to = kept.map_or(0, |k| 1 - k);
-        let start = kept.map_or(&scratch[1 - from].view, |k| &room[k].view);
-        let how = [shape.level, flag(shape.invert), flag(kept.is_none()), 0.0];
+        let start = kept.map_or(&room[1].view, |k| &room[k].view);
+        let how = [
+            shape.level,
+            flag(shape.invert),
+            flag(kept.is_none()),
+            0.0,
+            by[0],
+            by[1],
+            0.0,
+            0.0,
+        ];
         let joined = (&gpu.blur().mask_join, &float_bytes(&how)[..]);
-        let views = Views::with(&scratch[from].view, start);
+        let views = Views::with(&work[from].view, start);
         draw_step(gpu, joined, views, &room[to].view, encoder);
         kept = Some(to);
     }
@@ -967,6 +1061,7 @@ struct Worked {
     shrink: [f64; 2],
     frame: [f64; 2],
     masks: Option<[Texture; 2]>,
+    padded: Option<[Texture; 2]>,
 }
 
 fn lettered(gpu: &Gpu, inked: Inked) -> Lettered {
@@ -1125,7 +1220,8 @@ fn run(
                     true => None,
                     false => {
                         let room = mask_room(gpu, &mut worked.masks, size);
-                        Some(mask_made(gpu, (scratch, room), &merging.masks, encoder))
+                        let made = (scratch, room, &mut worked.padded);
+                        Some(mask_made(gpu, made, &merging.masks, encoder))
                     }
                 };
                 let views = Views {
@@ -2284,7 +2380,8 @@ fn effects_into(
             true => None,
             false => {
                 let room = mask_room(gpu, &mut worked.masks, size);
-                Some(mask_made(gpu, (scratch, room), &effect.masks, encoder))
+                let made = (scratch, room, &mut worked.padded);
+                Some(mask_made(gpu, made, &effect.masks, encoder))
             }
         };
         let mut from = &own.view;

@@ -405,6 +405,7 @@ enum MenuAct {
     View(Option<usize>),
     Rename,
     PassThrough,
+    Lock,
     Copy,
     Paste,
     Delete,
@@ -477,7 +478,7 @@ fn tile(n: &Node, viewed: &[Option<String>; 2]) -> Tile<String> {
         drops: false,
         note: String::new(),
         badges: Vec::new(),
-        locked: None,
+        locked: n.locked.then_some(true),
         outlets: vec![outlets],
         inlets,
         edge: None,
@@ -710,7 +711,7 @@ fn grip_value(grip: Grip) -> Option<EffectValue> {
 }
 
 fn pinned(n: &Node, grip: Grip) -> bool {
-    n.connect.is_some() && grip_value(grip) == Some(EffectValue::Center)
+    n.locked || (n.connect.is_some() && grip_value(grip) == Some(EffectValue::Center))
 }
 
 fn reach(grip: Grip, at: Pos2, press: Pos2, middle: Pos2) -> f32 {
@@ -1172,6 +1173,25 @@ impl Workspace {
         self.send_all(commands, "Pass Through");
     }
 
+    fn lock_nodes(&mut self) {
+        let Some((clip, comp)) = self.page_clip() else {
+            return;
+        };
+        let picked: Vec<&Node> = (self.effects_page.nodes.iter())
+            .filter_map(|n| comp.node(n))
+            .collect();
+        let on = picked.iter().any(|n| !n.locked);
+        let commands = picked
+            .iter()
+            .filter(|n| n.locked != on)
+            .map(|n| {
+                let params = json!({ "clip": clip.id, "node": n.name, "locked": on });
+                command("comp.set", params)
+            })
+            .collect();
+        self.send_all(commands, "Lock");
+    }
+
     fn start_rename(&mut self) {
         let Some(clip) = self.effects_clip() else {
             return;
@@ -1341,6 +1361,7 @@ impl Workspace {
             MenuAct::View(side) => self.view_on(&node, side),
             MenuAct::Rename => self.start_rename(),
             MenuAct::PassThrough => self.pass_through(),
+            MenuAct::Lock => self.lock_nodes(),
             MenuAct::Copy => self.copy_node(false),
             MenuAct::Paste => {
                 let clip = self.effects_clip();
@@ -1723,6 +1744,7 @@ impl Workspace {
             let hit = spots
                 .iter()
                 .rev()
+                .filter(|(name, ..)| !comp.node(name).is_some_and(|n| n.locked))
                 .find_map(|(name, k, r, area)| Some((name, *k, edge_at(*r, press)?, *area)));
             if let Some((name, k, edge, area)) = hit {
                 let start = place(press);
@@ -1881,6 +1903,7 @@ impl Workspace {
             let near = shown
                 .iter()
                 .rev()
+                .filter(|s| !comp.node(&s.name).is_some_and(|n| n.locked))
                 .flat_map(|s| {
                     let middle = screen(s.middle);
                     s.spots
@@ -2573,6 +2596,7 @@ impl Workspace {
                 let items = [
                     (MenuAct::Rename, "Rename", true),
                     (MenuAct::PassThrough, "Pass Through", tool),
+                    (MenuAct::Lock, "Locked", true),
                     (MenuAct::Copy, "Copy", tool),
                     (MenuAct::Paste, "Paste", one_copied),
                     (MenuAct::Delete, "Delete", true),
@@ -2582,6 +2606,7 @@ impl Workspace {
                         MenuAct::PassThrough => {
                             ui.add_enabled(on, egui::Button::selectable(n.pass_through, text))
                         }
+                        MenuAct::Lock => ui.add(egui::Button::selectable(n.locked, text)),
                         _ => ui.add_enabled(on, egui::Button::new(text)),
                     };
                     if item.clicked() {
@@ -2701,6 +2726,9 @@ impl Workspace {
     fn node_keys(&mut self, fired: &Fired, mine: &Fired) {
         if mine.pressed(Action::PassThrough) {
             self.pass_through();
+        }
+        if mine.pressed(Action::LockNode) {
+            self.lock_nodes();
         }
         for (side, action) in [Action::ViewLeft, Action::ViewRight]
             .into_iter()

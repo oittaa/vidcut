@@ -1064,6 +1064,9 @@ fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
         Mask::BORDERS,
         "a mask's border width is from -1 to 1",
     )?;
+    if m.clipping == Some(BlurClipping::Domain) {
+        return Err(Error::invalid("a mask's clipping is none or frame"));
+    }
     for v in m.center.into_iter().flatten() {
         within(
             Some(v),
@@ -1142,6 +1145,7 @@ fn mask_checked(m: &Mask, tool: &str) -> Result<Mask> {
         y_rotation: m.y_rotation.filter(|v| *v != 0.0),
         corner_radius: m.corner_radius.filter(|v| *v != 0.0),
         fill_method: m.fill_method.filter(|f| *f != FillMethod::default()),
+        clipping: m.clipping.filter(|c| *c != BlurClipping::None),
         ..m.clone()
     })
 }
