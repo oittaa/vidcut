@@ -1738,7 +1738,10 @@ impl Workspace {
             }
         }
         if fired.pressed(Action::ClearMarks) {
-            self.clear_marks();
+            match self.effects_page.page {
+                Page::Export => self.export_clear_marks(),
+                _ => self.clear_marks(),
+            }
         }
 
         for (action, method) in [
@@ -2020,6 +2023,7 @@ impl Workspace {
                     json!({ "media": m, key: value.clamp(0, frames) }),
                 );
             }
+            None if is_in && self.effects_page.page == Page::Cut => self.mark_in_out(key, value),
             None => self.send("marks.set", json!({ key: value })),
         }
     }
