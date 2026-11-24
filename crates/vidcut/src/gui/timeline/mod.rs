@@ -1373,7 +1373,6 @@ impl Workspace {
         self.normalize_window(ui.ctx());
         self.compressor_window(ui.ctx());
         self.noise_window(ui.ctx());
-        self.attributes_window(ui.ctx());
         self.boring_window(ui.ctx());
         self.subtitle_windows(ui.ctx());
         self.title_tick();

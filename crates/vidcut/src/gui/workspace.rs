@@ -1627,7 +1627,10 @@ impl Workspace {
         if fired.pressed(Action::Paste) && !self.paste_editor_keys() {
             self.send("edit.paste", json!({}));
         }
-        if fired.pressed(Action::PasteAttributes) && !self.snap.selection.clips.is_empty() {
+        if fired.pressed(Action::PasteAttributes)
+            && self.effects_page.page != Page::Export
+            && !self.snap.selection.clips.is_empty()
+        {
             self.open_paste_attributes(self.snap.selection.clips.clone());
         }
 
@@ -2236,6 +2239,7 @@ impl Workspace {
         self.clip_info_window(&ctx);
         self.cache_manager_window(&ctx);
         self.sync_clips_window(&ctx);
+        self.attributes_window(&ctx);
         let panel = theme::colors().panel;
         egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {
             theme::decorated(ui, Deco::Bar, |ui| self.top_bar(ui))

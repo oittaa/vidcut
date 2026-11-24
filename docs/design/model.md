@@ -666,6 +666,8 @@ Writing:
 - `ops::attributes` holds Paste Attributes and Remove Attributes ([spec §8.26](../spec.md#826-paste-attributes-pp-11551156-measured-in-resolve-studio-212)).
   - `paste` moves the keyframes of the copied picture to the clip with `Picture::scale_times`. Then it takes each chosen value with `Picture::take_channel`.
   - `Picture::take_axis` takes one axis of the zoom. It keeps the keyframes of the other axis.
+    - It keeps only the keyframes that change an axis. When no axis changes, the zoom has no keyframes.
+    - Thus a Remove of Scale X from a clip with keyframes on Scale X only leaves no keyframes.
   - `paste` changes the speed first, with `change_speed`. Thus the keyframes fit the new length.
   - `remove` takes each chosen value from a usual `Picture`.
   - `picked_at_open` gives the boxes that the window checks for a new copy.

@@ -655,6 +655,18 @@ fn plain_of(p: &Picture, v: PictureValue) -> [f64; 2] {
     }
 }
 
+fn varies(p: &Picture, v: PictureValue, axis: usize) -> bool {
+    let keys = p.keys_of(v);
+    let first = keys.first().map(|k| p.channel_at(v, k.frame as f64)[axis]);
+    keys.iter().any(|k| {
+        let shaped = [k.in_handle, k.out_handle]
+            .into_iter()
+            .flatten()
+            .any(|h| h.value != 0.0);
+        Some(p.channel_at(v, k.frame as f64)[axis]) != first || (axis == 0 && shaped)
+    })
+}
+
 fn write_plain(p: &mut Picture, v: PictureValue, value: [f64; 2]) {
     match v {
         PictureValue::Position => p.position = Some(value).filter(|at| *at != Picture::MIDDLE),
@@ -832,21 +844,43 @@ impl Picture {
     }
 
     pub fn take_axis(&mut self, from: &Picture, v: PictureValue, axis: usize) {
-        let mut plain = plain_of(self, v);
-        plain[axis] = plain_of(from, v)[axis];
-        let mut shape = from.keys_of(v).to_vec();
-        for k in self.keys_of(v) {
-            if !shape.iter().any(|s| s.frame == k.frame) {
-                shape.push(*k);
+        let (xs, ys) = if axis == 0 {
+            (from, &*self)
+        } else {
+            (&*self, from)
+        };
+        let mut shape: Vec<Keyframe> = Vec::new();
+        for (p, i) in [(xs, 0), (ys, 1)] {
+            if !varies(p, v, i) {
+                continue;
+            }
+            for k in p.keys_of(v) {
+                if shape.iter().any(|s| s.frame == k.frame) {
+                    continue;
+                }
+                let flat = |h: Option<Handle>| h.map(|h| Handle { value: 0.0, ..h });
+                shape.push(match xs.keys_of(v).iter().find(|x| x.frame == k.frame) {
+                    Some(x) => *x,
+                    None => Keyframe {
+                        in_handle: flat(k.in_handle),
+                        out_handle: flat(k.out_handle),
+                        ..*k
+                    },
+                });
             }
         }
         shape.sort_by_key(|k| k.frame);
+        let at = |p: &Picture, i: usize, frame: f64| p.channel_at(v, frame)[i];
+        let first = |p: &Picture| p.keys_of(v).first().map_or(0.0, |k| k.frame as f64);
+        let plain = if shape.is_empty() {
+            [at(xs, 0, first(xs)), at(ys, 1, first(ys))]
+        } else {
+            let mut plain = plain_of(self, v);
+            plain[axis] = plain_of(from, v)[axis];
+            plain
+        };
         let values: Vec<[f64; 2]> = (shape.iter())
-            .map(|k| {
-                let mut value = self.channel_at(v, k.frame as f64);
-                value[axis] = from.channel_at(v, k.frame as f64)[axis];
-                value
-            })
+            .map(|k| [at(xs, 0, k.frame as f64), at(ys, 1, k.frame as f64)])
             .collect();
         write_plain(self, v, plain);
         let (keys, y) = parts_mut(self, v);
