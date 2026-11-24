@@ -626,7 +626,7 @@ pub fn run_decoding_on(
         decoder,
         subtitles,
         cancel,
-        progress,
+        &mut paced(settings.render_speed, progress),
     )?;
     if !settings.container.image_sequence() {
         part.keep(output)?;
@@ -1251,6 +1251,26 @@ impl Writer {
             Some(files) => files.keep(),
             None => Ok(()),
         }
+    }
+}
+
+fn paced<'a>(
+    limit: Option<std::num::NonZeroU32>,
+    progress: &'a mut dyn FnMut(Progress),
+) -> impl FnMut(Progress) + 'a {
+    let mut since = (Instant::now(), 0);
+    move |p: Progress| {
+        if let Some(fps) = limit.filter(|_| !p.measuring) {
+            if p.frames < since.1 {
+                since.0 = Instant::now();
+            }
+            since.1 = p.frames;
+            let due = Duration::from_secs_f64(p.frames as f64 / f64::from(fps.get()));
+            if let Some(wait) = due.checked_sub(since.0.elapsed()) {
+                std::thread::sleep(wait);
+            }
+        }
+        progress(p);
     }
 }
 

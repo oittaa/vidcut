@@ -3277,7 +3277,25 @@ pub(super) fn file_tab(ui: &mut egui::Ui, d: &mut Render) {
         if d.per_clip {
             clip_folder_rows(ui, d);
         }
+        super::dialog::row(ui, "Render Speed", |ui| {
+            render_speed(ui, &mut d.settings.render_speed)
+        });
     });
+}
+
+const RENDER_SPEEDS: [u32; 8] = [1, 2, 5, 10, 25, 50, 75, 100];
+
+fn render_speed(ui: &mut egui::Ui, speed: &mut Option<std::num::NonZeroU32>) {
+    let label =
+        |s: Option<std::num::NonZeroU32>| s.map_or("Maximum".into(), |n| format!("{n} fps"));
+    egui::ComboBox::from_id_salt("export-render-speed")
+        .selected_text(label(*speed))
+        .show_ui(ui, |ui| {
+            let fixed = RENDER_SPEEDS.into_iter().map(std::num::NonZeroU32::new);
+            for s in fixed.filter(Option::is_some).chain([None]) {
+                ui.selectable_value(speed, s, label(s));
+            }
+        });
 }
 
 pub(super) fn subtitle_settings(

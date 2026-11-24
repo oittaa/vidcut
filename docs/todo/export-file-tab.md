@@ -11,7 +11,6 @@
 - The rows that vidcut refuses together. Runs:
   - Use unique filenames with Source name.
   - EXR with Source name, File suffix, Use unique filenames, and Add source frame count off, one at a time.
-- Render speed: what each number of the menu does. The menu has 100 and Maximum. Run: the render time of one clip at 25, 100 and Maximum.
 - Preserve 1 with After head on macOS. vidcut refuses After head on a path with no drive letter.
 - Replace existing files in place with an image-sequence source.
 
