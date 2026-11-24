@@ -239,10 +239,14 @@ impl Workspace {
             Header::Mode(ViewerMode::Timeline),
             Header::Mode(ViewerMode::MultiSource),
         ];
+        let export = self.effects_page.page == Page::Export;
         let row = Row {
-            left: &modes,
+            left: if export { &[] } else { &modes },
             fill: Some((Header::Title, Align::Min)),
-            right: &[Header::Scopes, Header::FullScreen, Header::Duration],
+            right: match export {
+                true => &[Header::Scopes, Header::FullScreen],
+                false => &[Header::Scopes, Header::FullScreen, Header::Duration],
+            },
             leaving: &[
                 Header::Scopes,
                 modes[3],
@@ -293,6 +297,9 @@ impl Workspace {
                 Header::Duration => ui.scope(|ui| ws.duration_field(ui)).response,
             });
         });
+        if export {
+            self.render_range_row(ui);
+        }
 
         let dynamic = self
             .timeline

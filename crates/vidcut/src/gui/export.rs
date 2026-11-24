@@ -166,13 +166,14 @@ pub(super) struct PresetInfo {
 
 #[derive(Default)]
 pub struct ExportUi {
-    presets: Vec<PresetInfo>,
+    pub(super) presets: Vec<PresetInfo>,
     presets_ask: Option<Ask>,
-    encodable: Value,
+    pub(super) encodable: Value,
     encodable_ask: Option<Ask>,
     quick: Option<Quick>,
-    dialog: Option<Box<Dialog>>,
-    dialog_wanted: bool,
+    pub(super) render: Option<Box<Render>>,
+    render_wanted: bool,
+    pub(super) viewer_before: Option<vidcut_core::request::ViewerMode>,
     starting: Option<Starting>,
     pub show_jobs: bool,
     jobs_seen: std::collections::HashMap<String, JobState>,
@@ -194,20 +195,21 @@ const JOBS: super::window::Separate = super::window::Separate {
 };
 
 impl ExportUi {
-    pub(super) fn windows(&self) -> (bool, bool) {
-        (
-            self.quick.is_some(),
-            self.dialog.is_some() || self.dialog_wanted,
-        )
+    pub(super) fn quick_open(&self) -> bool {
+        self.quick.is_some()
     }
 
     pub(super) fn close_quick(&mut self) {
         self.quick = None;
     }
 
-    pub(super) fn close_dialog(&mut self) {
-        self.dialog = None;
-        self.dialog_wanted = false;
+    pub(super) fn busy(&self) -> bool {
+        self.starting.is_some()
+    }
+
+    pub(super) fn switch_project(&mut self) {
+        self.render = None;
+        self.render_wanted = false;
     }
 
     pub(super) fn asking(&self, jobs: &[JobInfo]) -> bool {
@@ -224,7 +226,7 @@ struct Quick {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum From {
     Quick,
-    Dialog,
+    Page,
 }
 
 struct Starting {
@@ -259,36 +261,36 @@ enum Otio {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum RangeChoice {
-    All,
-    InOut,
-    Custom,
+pub(super) enum Tab {
+    Video,
+    Audio,
+    File,
 }
 
-struct Dialog {
-    preset: String,
+pub(super) struct Render {
+    pub(super) preset: String,
     base: ExportSettings,
-    settings: ExportSettings,
+    pub(super) settings: ExportSettings,
     stashed_video: Option<VideoSettings>,
-    range: RangeChoice,
-    from: String,
-    to: String,
-    per_clip: bool,
-    template: String,
-    output: String,
-    overwrite: bool,
-    picking: Option<Picked>,
+    pub(super) range: String,
+    pub(super) per_clip: bool,
+    pub(super) template: String,
+    pub(super) name: String,
+    pub(super) folder: String,
+    pub(super) overwrite: bool,
+    pub(super) picking: Option<Picked>,
     plan: Option<Ask>,
-    planned: Option<Value>,
-    plan_result: Option<std::result::Result<Value, String>>,
-    error: Option<String>,
-    save: Option<SavePreset>,
+    planned: Option<(Value, u64)>,
+    pub(super) plan_result: Option<std::result::Result<Value, String>>,
+    pub(super) error: Option<String>,
+    pub(super) save: Option<SavePreset>,
     subtitles: Option<SubtitlesAs>,
     subtitle_tracks: Vec<String>,
     subtitle_format: SubtitleFormat,
+    pub(super) tab: Tab,
 }
 
-struct SavePreset {
+pub(super) struct SavePreset {
     name: String,
     title: String,
     quick_export: bool,
@@ -498,19 +500,31 @@ fn job_paths(j: &JobInfo) -> Option<&Path> {
     }
 }
 
-impl Dialog {
-    fn new(preset: &PresetInfo, output: String, range: RangeChoice) -> Self {
+impl SavePreset {
+    pub(super) fn new() -> Self {
+        Self {
+            name: String::new(),
+            title: String::new(),
+            quick_export: false,
+            overwrite: false,
+            ask: None,
+            error: None,
+        }
+    }
+}
+
+impl Render {
+    fn new(preset: &PresetInfo, name: String, folder: String) -> Self {
         Self {
             preset: preset.name.clone(),
             base: preset.settings.clone(),
             settings: preset.settings.clone(),
             stashed_video: None,
-            range,
-            from: String::new(),
-            to: String::new(),
+            range: String::new(),
             per_clip: false,
             template: "{index:03}-{name}".into(),
-            output,
+            name,
+            folder,
             overwrite: false,
             picking: None,
             plan: None,
@@ -521,30 +535,37 @@ impl Dialog {
             subtitles: None,
             subtitle_tracks: Vec::new(),
             subtitle_format: SubtitleFormat::Srt,
+            tab: Tab::Video,
         }
     }
 
-    fn use_preset(&mut self, preset: &PresetInfo) {
+    pub(super) fn use_preset(&mut self, preset: &PresetInfo) {
         self.preset = preset.name.clone();
         self.base = preset.settings.clone();
         self.settings = preset.settings.clone();
         self.stashed_video = None;
-        self.match_output();
     }
 
-    fn match_output(&mut self) {
-        if self.per_clip || self.output.trim().is_empty() {
-            return;
+    pub(super) fn changed(&self) -> bool {
+        self.settings != self.base
+    }
+
+    pub(super) fn output(&self) -> PathBuf {
+        let folder = PathBuf::from(self.folder.trim());
+        let name = self.name.trim();
+        match (self.per_clip, name.is_empty()) {
+            (true, _) => folder,
+            (false, true) => PathBuf::new(),
+            (false, false) => {
+                folder.join(format!("{name}.{}", self.settings.container.extension()))
+            }
         }
-        let path = PathBuf::from(self.output.trim());
-        self.output = path
-            .with_extension(self.settings.container.extension())
-            .display()
-            .to_string();
     }
 
-    fn params(&self) -> Value {
-        let output = self.output.trim();
+    pub(super) fn params(&self) -> Value {
+        let path = self.output();
+        let output = path.to_string_lossy();
+        let output = output.as_ref();
         let mut p = json!({ "output": output, "preset": self.preset });
         let (mut base, mut settings) = (self.base.clone(), self.settings.clone());
         if settings.video.is_none() && base.video.is_some() {
@@ -563,11 +584,7 @@ impl Dialog {
         if !set.is_empty() {
             p["set"] = json!(set);
         }
-        p["range"] = json!(match self.range {
-            RangeChoice::All => "start..end".to_string(),
-            RangeChoice::InOut => "in..out".to_string(),
-            RangeChoice::Custom => format!("{}..{}", self.from.trim(), self.to.trim()),
-        });
+        p["range"] = json!(self.range);
         if self.per_clip {
             p["per_clip"] = json!(true);
             p["name"] = json!(self.template);
@@ -606,27 +623,28 @@ impl Workspace {
         });
     }
 
-    pub(super) fn open_export(&mut self, ctx: &egui::Context) {
-        self.refresh_presets(ctx);
-        self.export.dialog = None;
-        self.export.quick = None;
-        self.export.starting = None;
-        self.export.dialog_wanted = true;
+    pub(super) fn want_render_settings(&mut self, ctx: &egui::Context) {
+        if self.export.presets.is_empty() && self.export.presets_ask.is_none() {
+            self.refresh_presets(ctx);
+        }
+        if self.export.render.is_none() {
+            self.export.render_wanted = true;
+        }
     }
 
-    fn refresh_presets(&mut self, ctx: &egui::Context) {
+    pub(super) fn refresh_presets(&mut self, ctx: &egui::Context) {
         self.export.presets_ask = Some(Ask::send(&self.live, ctx, "presets.list", json!({})));
         self.export.encodable_ask = Some(Ask::send(&self.live, ctx, "encoders.list", json!({})));
     }
 
-    fn export_folder(&self) -> PathBuf {
+    pub(super) fn export_folder(&self) -> PathBuf {
         self.folders
             .get(Kind::Exports)
             .or_else(|| self.project_folder())
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
-    fn project_stem(&self) -> String {
+    pub(super) fn project_stem(&self) -> String {
         self.snap
             .project
             .as_ref()
@@ -639,11 +657,6 @@ impl Workspace {
         let t = p.subtitles.iter().find(|t| t.shown)?;
         let words = t.style.words.is_some() && t.cues.iter().any(|c| c.has_times());
         words.then(|| (t.id.clone(), t.display_name()))
-    }
-
-    fn marks_set(&self) -> bool {
-        self.project()
-            .is_some_and(|p| p.marks.mark_in.is_some() && p.marks.mark_out.is_some())
     }
 
     pub(super) fn export_windows(&mut self, ctx: &egui::Context) {
@@ -668,8 +681,8 @@ impl Workspace {
                 Err(e) => self.say(format!("encoders: {}", e.message)),
             }
         }
-        if self.export.dialog_wanted && !self.export.presets.is_empty() {
-            self.export.dialog_wanted = false;
+        if self.export.render_wanted && !self.export.presets.is_empty() {
+            self.export.render_wanted = false;
             let preset = self
                 .export
                 .presets
@@ -677,29 +690,15 @@ impl Workspace {
                 .find(|p| p.name == "h265-master")
                 .unwrap_or(&self.export.presets[0])
                 .clone();
-            let output = self
-                .export_folder()
-                .join(format!(
-                    "{}.{}",
-                    self.project_stem(),
-                    preset.settings.container.extension()
-                ))
-                .display()
-                .to_string();
-            let range = if self.marks_set() {
-                RangeChoice::InOut
-            } else {
-                RangeChoice::All
-            };
-            let mut dialog = Dialog::new(&preset, output, range);
+            let folder = self.export_folder().display().to_string();
+            let mut render = Render::new(&preset, self.project_stem(), folder);
             if let Some((track, _)) = self.animated_track() {
-                dialog.subtitles = Some(SubtitlesAs::Burn);
-                dialog.subtitle_tracks = vec![track];
+                render.subtitles = Some(SubtitlesAs::Burn);
+                render.subtitle_tracks = vec![track];
             }
-            self.export.dialog = Some(Box::new(dialog));
+            self.export.render = Some(Box::new(render));
         }
         self.quick_window(ctx);
-        self.dialog_window(ctx);
         self.starting(ctx);
         self.jobs_window(ctx);
         self.otio_windows(ctx);
@@ -903,7 +902,7 @@ impl Workspace {
             match r {
                 Ok(_) => match s.from {
                     From::Quick => self.export.quick = None,
-                    From::Dialog => self.export.dialog = None,
+                    From::Page => {}
                 },
                 Err(e) => match s.from {
                     From::Quick => {
@@ -911,8 +910,8 @@ impl Workspace {
                             q.error = Some(e.message);
                         }
                     }
-                    From::Dialog => {
-                        if let Some(d) = &mut self.export.dialog {
+                    From::Page => {
+                        if let Some(d) = &mut self.export.render {
                             d.error = Some(e.message);
                         }
                     }
@@ -948,270 +947,24 @@ impl Workspace {
         }
     }
 
-    fn dialog_window(&mut self, ctx: &egui::Context) {
-        let Some(mut d) = self.export.dialog.take() else {
-            return;
+    pub(super) fn start_render(&mut self, ctx: &egui::Context, d: &mut Render) {
+        let mut params = d.params();
+        params["background"] = json!(true);
+        d.error = None;
+        self.folders.remember(Kind::Exports, &d.output());
+        let mut s = Starting {
+            ask: None,
+            params,
+            from: From::Page,
+            picking: None,
+            weights: false,
+            offline: Vec::new(),
         };
-        let presets = self.export.presets.clone();
-        let project = self.snap.project.as_ref().map(|p| p.path.clone());
-        let (width, height) = self
-            .project()
-            .map_or((1920, 1080), |p| (p.width(), p.height()));
-        let (rate, channels) = self.project().map_or((48_000, 2), |p| {
-            (p.settings.sample_rate, p.settings.channels)
-        });
-        let marks = self.marks_set();
-        let in_out = self.project().map(|p| p.marks.clone()).unwrap_or_default();
-        let subtitle_tracks: Vec<(String, String, bool)> =
-            self.project().map_or_else(Vec::new, |p| {
-                p.subtitles
-                    .iter()
-                    .map(|t| (t.id.clone(), t.display_name(), t.shown))
-                    .collect()
-            });
-        if let Some(p) = &d.picking
-            && let Some(choice) = p.take()
-        {
-            d.picking = None;
-            if let Some(path) = choice {
-                d.output = path.display().to_string();
-                d.match_output();
-                d.overwrite = !d.per_clip && path.exists();
-            }
-        }
-        let mut open = true;
-        let mut start = false;
-        let mut browse = false;
-        let mut cancel = false;
-        let mut save = false;
-        super::dialog::window_of(ctx, "Export", &mut open, 600.0, |ui| {
-            egui::ScrollArea::vertical()
-                .max_height(ctx.content_rect().height() * 0.7)
-                .show(ui, |ui| {
-                    super::dialog::form(ui, "export-form", |ui| {
-                        super::dialog::row(ui, "Preset", |ui| {
-                            let title = presets
-                                .iter()
-                                .find(|p| p.name == d.preset)
-                                .map_or(d.preset.clone(), |p| p.title.clone());
-                            let shown = match d.settings != d.base {
-                                true => format!("{title} (changed)"),
-                                false => title,
-                            };
-                            egui::ComboBox::from_id_salt("export-preset")
-                                .selected_text(shown)
-                                .width(240.0)
-                                .show_ui(ui, |ui| {
-                                    for p in &presets {
-                                        let mark = match (p.unavailable.is_some(), p.user) {
-                                            (true, _) => " (not available here)",
-                                            (false, true) => " (yours)",
-                                            (false, false) => "",
-                                        };
-                                        let r = ui
-                                            .add_enabled_ui(p.unavailable.is_none(), |ui| {
-                                                ui.selectable_label(
-                                                    p.name == d.preset,
-                                                    format!("{}{mark}", p.title),
-                                                )
-                                            })
-                                            .inner;
-                                        if r.clicked() {
-                                            d.use_preset(p);
-                                        }
-                                    }
-                                });
-                            let user = presets.iter().any(|p| p.name == d.preset && p.user);
-                            if user && ui.button("Delete Preset").clicked() {
-                                self.send("presets.delete", json!({ "name": d.preset }));
-                                self.export.presets_ask =
-                                    Some(Ask::send(&self.live, ctx, "presets.list", json!({})));
-                            }
-                        });
-                        super::dialog::row(ui, "Range", |ui| {
-                            super::dialog::switch(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut d.range,
-                                    RangeChoice::All,
-                                    "Whole Timeline",
-                                );
-                                ui.add_enabled_ui(marks, |ui| {
-                                    ui.selectable_value(&mut d.range, RangeChoice::InOut, "In–Out");
-                                });
-                                ui.selectable_value(&mut d.range, RangeChoice::Custom, "Custom");
-                            });
-                            match (in_out.mark_in, in_out.mark_out) {
-                                (Some(a), Some(b)) => {
-                                    ui.label(dim(format!("{} – {}", self.tc(a), self.tc(b))));
-                                }
-                                _ => super::dialog::why(ui, "no In and Out marked"),
-                            }
-                        });
-                        if d.range == RangeChoice::Custom {
-                            let frames = "0".repeat(self.frame_digits());
-                            super::dialog::row(ui, "From", |ui| {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut d.from)
-                                        .hint_text(format!("00:00:00:{frames}"))
-                                        .desired_width(110.0),
-                                );
-                                ui.label(dim("to"));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut d.to)
-                                        .hint_text(format!("00:01:00:{frames}"))
-                                        .desired_width(110.0),
-                                );
-                                ui.label(dim("its frame left out"));
-                            });
-                        }
-                        super::dialog::row(ui, "Output", |ui| {
-                            let before = d.per_clip;
-                            super::dialog::switch(ui, |ui| {
-                                ui.selectable_value(&mut d.per_clip, false, "One File");
-                                ui.selectable_value(&mut d.per_clip, true, "One File per Clip");
-                            });
-                            if d.per_clip != before {
-                                let path = PathBuf::from(d.output.trim());
-                                d.output = if d.per_clip {
-                                    path.with_extension("").display().to_string()
-                                } else {
-                                    path.with_extension(d.settings.container.extension())
-                                        .display()
-                                        .to_string()
-                                };
-                            }
-                        });
-                        super::dialog::row(ui, if d.per_clip { "Folder" } else { "File" }, |ui| {
-                            let r = ui.add(
-                                egui::TextEdit::singleline(&mut d.output).desired_width(360.0),
-                            );
-                            if r.lost_focus()
-                                && !d.per_clip
-                                && let Some(c) = Path::new(d.output.trim())
-                                    .extension()
-                                    .and_then(|e| e.to_str())
-                                    .and_then(Container::from_extension)
-                                && c != d.settings.container
-                            {
-                                d.settings.container = c;
-                                fit_codecs(&mut d.settings);
-                            }
-                            if ui
-                                .add_enabled(d.picking.is_none(), egui::Button::new("Browse…"))
-                                .clicked()
-                            {
-                                browse = true;
-                            }
-                        });
-                        if d.per_clip {
-                            super::dialog::row(ui, "Names", |ui| {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut d.template)
-                                        .desired_width(200.0),
-                                );
-                                ui.label(dim("{index}, {index:03}, {name}, {clip}, {media}"));
-                            });
-                        }
-                        super::dialog::row(ui, "Replace Files", |ui| {
-                            ui.checkbox(&mut d.overwrite, "");
-                        });
-                    });
-                    if !subtitle_tracks.is_empty() {
-                        subtitles_form(ui, &mut d, &subtitle_tracks);
-                    }
-                    self.save_preset_form(ui, ctx, &mut d);
-                    if let Some(set) = plan_view(ui, &d) {
-                        keep_hdr(&mut d, &set);
-                    }
-                    super::dialog::advanced(ui, "export-advanced", false, |ui| {
-                        let can = &self.export.encodable;
-                        settings_form(ui, &mut d, can, (width, height), (rate, channels));
-                        let params = d.params();
-                        if let Some(project) = &project {
-                            let cmd = command(project, &params);
-                            ui.horizontal(|ui| {
-                                ui.label(dim("Command"));
-                                if ui.small_button("Copy").clicked() {
-                                    ui.ctx().copy_text(cmd.clone());
-                                }
-                            });
-                            ui.add(
-                                egui::Label::new(RichText::new(&cmd).monospace().small()).wrap(),
-                            );
-                        }
-                    });
-                });
-            if let Some(e) = &d.error {
-                super::dialog::warn(ui, e.clone());
-            }
-            let ready = matches!(d.plan_result, Some(Ok(_)))
-                && d.planned.as_ref() == Some(&d.params())
-                && self.export.starting.is_none();
-            super::dialog::footer(ui, |ui| {
-                start = super::dialog::main_button(ui, "Start Export", ready);
-                cancel = ui.button("Cancel").clicked();
-                save = ui.button("Save as Preset…").clicked();
-                match &d.plan_result {
-                    _ if ready || self.export.starting.is_some() => {}
-                    Some(Err(_)) => super::dialog::why(ui, "the settings above can't export"),
-                    _ => super::dialog::why(ui, "checking the settings…"),
-                }
-            });
-        });
-        if cancel {
-            open = false;
-        }
-        if save {
-            d.save = Some(SavePreset {
-                name: String::new(),
-                title: String::new(),
-                quick_export: false,
-                overwrite: false,
-                ask: None,
-                error: None,
-            });
-        }
-        if browse {
-            let (dialogs, folder) = (self.dialogs.clone(), self.export_folder());
-            let per_clip = d.per_clip;
-            let ext = d.settings.container.extension();
-            let file = PathBuf::from(d.output.trim())
-                .file_name()
-                .map_or(format!("{}.{ext}", self.project_stem()), |n| {
-                    n.to_string_lossy().into_owned()
-                });
-            d.picking = Some(Picked::ask(ctx, move || {
-                if per_clip {
-                    dialogs.pick_folder("Export Clips To", &folder)
-                } else {
-                    dialogs.save_file("Export", &folder, &file, &[ext])
-                }
-            }));
-        }
-        self.refresh_plan(ctx, &mut d);
-        if start {
-            let mut params = d.params();
-            params["background"] = json!(true);
-            d.error = None;
-            self.folders
-                .remember(Kind::Exports, Path::new(d.output.trim()));
-            let mut s = Starting {
-                ask: None,
-                params,
-                from: From::Dialog,
-                picking: None,
-                weights: false,
-                offline: Vec::new(),
-            };
-            self.send_start(ctx, &mut s);
-            self.export.starting = Some(s);
-        }
-        if open {
-            self.export.dialog = Some(d);
-        }
+        self.send_start(ctx, &mut s);
+        self.export.starting = Some(s);
     }
 
-    fn refresh_plan(&mut self, ctx: &egui::Context, d: &mut Dialog) {
+    pub(super) fn refresh_plan(&mut self, ctx: &egui::Context, d: &mut Render) {
         if let Some(ask) = &d.plan
             && let Some(r) = ask.take()
         {
@@ -1222,32 +975,36 @@ impl Workspace {
             return;
         }
         let params = d.params();
-        if d.planned.as_ref() == Some(&params) {
+        let rev = self.project().map_or(0, |p| p.rev);
+        if d.planned.as_ref() == Some(&(params.clone(), rev)) {
             return;
         }
-        let mut settings = d.settings.clone();
-        if !d.per_clip
-            && let Some(c) = Path::new(d.output.trim())
-                .extension()
-                .and_then(|e| e.to_str())
-                .and_then(Container::from_extension)
-        {
-            settings.container = c;
-            fit_codecs(&mut settings);
-        }
-        let local = if d.output.trim().is_empty() {
-            Err("choose where to export to".to_string())
+        let local = if d.folder.trim().is_empty() {
+            Err("Choose a location".to_string())
+        } else if !d.per_clip && d.name.trim().is_empty() {
+            Err("Name the file".to_string())
         } else {
-            validate(&settings).map_err(|e| e.message)
+            validate(&d.settings).map_err(|e| e.message)
         };
-        d.planned = Some(params.clone());
+        d.planned = Some((params.clone(), rev));
         match local {
             Err(e) => d.plan_result = Some(Err(e)),
             Ok(()) => d.plan = Some(Ask::send(&self.live, ctx, "export.plan", params)),
         }
     }
 
-    fn save_preset_form(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, d: &mut Dialog) {
+    pub(super) fn plan_ready(&self, d: &Render) -> bool {
+        matches!(d.plan_result, Some(Ok(_)))
+            && d.planned == Some((d.params(), self.project().map_or(0, |p| p.rev)))
+            && self.export.starting.is_none()
+    }
+
+    pub(super) fn save_preset_form(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        d: &mut Render,
+    ) {
         let Some(mut s) = d.save.take() else {
             return;
         };
@@ -1270,45 +1027,35 @@ impl Workspace {
             }
         }
         ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.label("Name");
-                ui.add(
-                    egui::TextEdit::singleline(&mut s.name)
-                        .hint_text("my-web-preset")
-                        .desired_width(150.0),
-                );
-                ui.label("Title");
-                ui.add(
-                    egui::TextEdit::singleline(&mut s.title)
-                        .hint_text("My Web Preset")
-                        .desired_width(150.0),
-                );
+            ui.label(RichText::new("Save As New Preset").strong());
+            super::dialog::form(ui, "save-preset-form", |ui| {
+                super::dialog::row(ui, "Name", |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut s.name)
+                            .hint_text("my-web-preset")
+                            .desired_width(160.0),
+                    )
+                });
+                super::dialog::row(ui, "Title", |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut s.title)
+                            .hint_text("My Web Preset")
+                            .desired_width(160.0),
+                    )
+                });
             });
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut s.quick_export, "Add to Quick Export");
-                ui.checkbox(&mut s.overwrite, "Replace a preset of that name");
-            });
+            ui.checkbox(&mut s.quick_export, "Add to Quick Export");
+            ui.checkbox(&mut s.overwrite, "Replace a preset of that name");
             if let Some(e) = &s.error {
                 ui.label(RichText::new(e).color(theme::colors().error));
             }
             ui.horizontal(|ui| {
                 let ok = !s.name.trim().is_empty() && s.ask.is_none();
-                if s.name.trim().is_empty() {
-                    super::dialog::why(ui, "Name it first");
-                }
                 if ui
                     .add_enabled(ok, egui::Button::new("Save Preset"))
                     .clicked()
                 {
-                    let mut settings = d.settings.clone();
-                    if !d.per_clip
-                        && let Some(c) = Path::new(d.output.trim())
-                            .extension()
-                            .and_then(|e| e.to_str())
-                            .and_then(Container::from_extension)
-                    {
-                        settings.container = c;
-                    }
+                    let settings = d.settings.clone();
                     let title = s.title.trim();
                     s.error = None;
                     s.ask = Some(Ask::send(
@@ -1326,6 +1073,9 @@ impl Workspace {
                 }
                 if ui.button("Cancel").clicked() {
                     keep = false;
+                }
+                if s.name.trim().is_empty() {
+                    super::dialog::why(ui, "Name it first");
                 }
             });
         });
@@ -1883,7 +1633,7 @@ fn job_bar(ui: &mut egui::Ui, share: Option<f32>, text: &str) {
     painter.with_clip_rect(rect).galley(pos, galley, text_color);
 }
 
-fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
+pub(super) fn job_view(ui: &mut egui::Ui, j: &JobInfo, send: impl Fn(&str, Value)) {
     match j.state {
         JobState::Queued => {
             ui.label(dim("Waiting for the jobs before it"));
@@ -2381,7 +2131,7 @@ fn bypass_line(outputs: &[Value]) -> Option<String> {
     })
 }
 
-fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
+fn plan_view(ui: &mut egui::Ui, d: &Render) -> Option<Vec<String>> {
     let mut action = None;
     ui.label(dim("Plan"));
     match &d.plan_result {
@@ -2527,7 +2277,7 @@ fn metadata_line(outputs: &[Value]) -> Option<(String, String)> {
     (!kinds.is_empty()).then(|| (kinds.join(" / "), why.join("\n")))
 }
 
-fn keep_hdr(d: &mut Dialog, set: &[String]) {
+fn keep_hdr(d: &mut Render, set: &[String]) {
     let mut settings = d.settings.clone();
     if apply_overrides(&mut settings, set).is_ok() {
         d.settings = settings;
@@ -2639,7 +2389,7 @@ fn choice<T: PartialEq>(
     .inner
 }
 
-fn subtitles_form(ui: &mut egui::Ui, d: &mut Dialog, tracks: &[(String, String, bool)]) {
+fn subtitles_form(ui: &mut egui::Ui, d: &mut Render, tracks: &[(String, String, bool)]) {
     let mut on = d.subtitles.is_some();
     if ui.checkbox(&mut on, "Export subtitles").changed() {
         d.subtitles = on.then_some(SubtitlesAs::File);
@@ -2742,13 +2492,94 @@ fn subtitles_form(ui: &mut egui::Ui, d: &mut Dialog, tracks: &[(String, String, 
     d.subtitles = Some(how);
 }
 
-fn settings_form(
-    ui: &mut egui::Ui,
-    d: &mut Dialog,
-    can: &Value,
-    size: (u32, u32),
-    audio: (u32, u16),
-) {
+fn new_video(c: Container) -> VideoSettings {
+    VideoSettings {
+        codec: video_codecs(c)[0],
+        encoder: EncoderChoice::Auto,
+        quality: Some(20),
+        bitrate: None,
+        speed: None,
+        profile: None,
+        bit_depth: None,
+        width: None,
+        height: None,
+        hdr: HdrMode::Auto,
+        passes: None,
+        first_pass: Default::default(),
+        multipass: Default::default(),
+        lookahead: None,
+        hdr_metadata: Default::default(),
+        mastering_display: None,
+        max_cll: None,
+        alpha: false,
+        alpha_mode: Default::default(),
+        filename_digits: None,
+        first_frame: None,
+        compression_level: None,
+        bypass_reencode: false,
+        use_proxy_media: false,
+    }
+}
+
+fn format_row(ui: &mut egui::Ui, d: &mut Render) {
+    super::dialog::row(ui, "Export Video", |ui| {
+        let mut on = d.settings.video.is_some();
+        let sequence = d.settings.container.image_sequence();
+        let can_choose = !d.settings.container.audio_only() && !sequence;
+        let r = ui.add_enabled(can_choose, egui::Checkbox::without_text(&mut on));
+        if !can_choose {
+            super::dialog::why(
+                ui,
+                format!(
+                    "{} holds only {}",
+                    d.settings.container.extension().to_uppercase(),
+                    if sequence { "frames" } else { "sound" },
+                ),
+            );
+        }
+        if r.changed() {
+            if on {
+                d.settings.video = d
+                    .stashed_video
+                    .take()
+                    .or(d.base.video.clone())
+                    .or(Some(new_video(d.settings.container)));
+                fit_codecs(&mut d.settings);
+            } else {
+                d.stashed_video = d.settings.video.take();
+            }
+        }
+    });
+    super::dialog::row(ui, "Format", |ui| {
+        let before = d.settings.container;
+        egui::ComboBox::from_id_salt("export-container")
+            .selected_text(d.settings.container.extension())
+            .show_ui(ui, |ui| {
+                for c in CONTAINERS {
+                    ui.selectable_value(&mut d.settings.container, c, c.extension());
+                }
+            });
+        if d.settings.container != before {
+            if d.settings.container.audio_only() && d.settings.video.is_some() {
+                d.stashed_video = d.settings.video.take();
+            } else if !d.settings.container.audio_only()
+                && (before.audio_only() || d.settings.container.image_sequence())
+                && d.settings.video.is_none()
+            {
+                let c = d.settings.container;
+                d.settings.video = (d.stashed_video.take())
+                    .or(d.base.video.clone())
+                    .or(c.image_sequence().then(|| new_video(c)));
+            }
+            if before.image_sequence() && d.settings.audio.is_none() {
+                d.settings.audio = d.base.audio.clone();
+            }
+            fit_codecs(&mut d.settings);
+        }
+    });
+}
+
+pub(super) fn video_tab(ui: &mut egui::Ui, d: &mut Render, can: &Value, size: (u32, u32)) {
     let plan = d.plan_result.as_ref().and_then(|r| r.as_ref().ok());
     let planned = plan.map(|p| p["video_encoder"].clone()).unwrap_or_default();
     let picked = plan.map(|p| p["auto"].clone()).unwrap_or_default();
@@ -2764,503 +2595,473 @@ fn settings_form(
             }
         }
     }
-    egui::Grid::new("export-settings")
-        .num_columns(2)
-        .spacing([12.0, 6.0])
-        .show(ui, |ui| {
-            ui.label("Format");
-            ui.horizontal(|ui| {
-                let before = d.settings.container;
-                egui::ComboBox::from_id_salt("export-container")
-                    .selected_text(d.settings.container.extension())
+    super::dialog::form(ui, "export-video", |ui| {
+        format_row(ui, d);
+        let container = d.settings.container;
+        let Some(v) = &mut d.settings.video else {
+            return;
+        };
+        super::dialog::row(ui, "Codec", |ui| {
+            egui::ComboBox::from_id_salt("export-vcodec")
+                .selected_text(name(&v.codec))
+                .show_ui(ui, |ui| {
+                    for c in video_codecs(container) {
+                        let why = why_video(can, *c, v.encoder);
+                        if choice(ui, &mut v.codec, *c, name(c), why).changed() {
+                            v.profile = None;
+                            if fixed_format(*c) {
+                                v.bit_depth = None;
+                            }
+                        }
+                    }
+                });
+        });
+        super::dialog::row(ui, "Encoder", |ui| {
+            let auto = auto_label(&picked, "encoder", |e| e.as_str().map(String::from));
+            let encoder = |e: &EncoderChoice| match e {
+                EncoderChoice::Auto => auto.clone(),
+                _ => name(e),
+            };
+            egui::ComboBox::from_id_salt("export-encoder")
+                .selected_text(encoder(&v.encoder))
+                .show_ui(ui, |ui| {
+                    for &e in [EncoderChoice::Auto, EncoderChoice::Cpu]
+                        .iter()
+                        .chain(GPU_ENCODERS)
+                    {
+                        let why = why_video(can, v.codec, e);
+                        choice(ui, &mut v.encoder, e, encoder(&e), why);
+                    }
+                });
+        });
+        super::dialog::row(ui, "Rate Control", |ui| {
+            let mut by_quality = v.bitrate.is_none();
+            let bitrate_only = vidcut_av::export::encode::bitrate_only(v.codec, v.encoder);
+            let quality = ui
+                .add_enabled_ui(!bitrate_only, |ui| {
+                    ui.radio_value(&mut by_quality, true, "Quality")
+                })
+                .inner;
+            if quality.changed() {
+                v.bitrate = None;
+                v.quality = v.quality.or(Some(20));
+                v.passes = None;
+            }
+            if ui.radio_value(&mut by_quality, false, "Bitrate").changed() {
+                v.bitrate = Some(20_000_000);
+                v.quality = None;
+            }
+            if bitrate_only {
+                super::dialog::why(ui, format!("{} takes only a bitrate", v.encoder.title()));
+            }
+        });
+        if v.bitrate.is_none() {
+            super::dialog::row(ui, "Quality", |ui| {
+                let mut q = v.quality.unwrap_or(20);
+                if ui
+                    .add(egui::DragValue::new(&mut q).range(0..=v.codec.worst_quality()))
+                    .changed()
+                {
+                    v.quality = Some(q);
+                }
+            });
+        } else {
+            super::dialog::row(ui, "Bitrate", |ui| {
+                let mut mbps = v.bitrate.unwrap_or(20_000_000) as f64 / 1e6;
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut mbps)
+                            .range(0.1..=500.0)
+                            .speed(0.1)
+                            .suffix(" Mb/s"),
+                    )
+                    .changed()
+                {
+                    v.bitrate = Some((mbps * 1e6).round() as u64);
+                }
+            });
+        }
+        if v.bitrate.is_some() && !fixed_format(v.codec) {
+            let auto = auto_label(&picked, "passes", |p| {
+                p["kind"].as_str().map(|k| match k {
+                    "one" => "1".to_string(),
+                    _ => "2".to_string(),
+                })
+            });
+            super::dialog::row(ui, "Passes", |ui| passes_row(ui, v, &planned, auto));
+        }
+        super::dialog::row(ui, "Resolution", |ui| {
+            let mut custom = v.width.is_some();
+            if ui
+                .radio_value(
+                    &mut custom,
+                    false,
+                    format!("Timeline ({}×{})", size.0, size.1),
+                )
+                .changed()
+            {
+                v.width = None;
+                v.height = None;
+            }
+            if ui.radio_value(&mut custom, true, "Custom").changed() {
+                v.width = Some(size.0);
+                v.height = Some(size.1);
+            }
+        });
+        if let (Some(w), Some(h)) = (&mut v.width, &mut v.height) {
+            super::dialog::row(ui, "", |ui| {
+                let (low, high) = vidcut_core::model::TIMELINE_SIDE;
+                ui.add(egui::DragValue::new(w).range(low..=high));
+                ui.label("×");
+                ui.add(egui::DragValue::new(h).range(low..=high));
+            });
+        }
+        let options = profiles(v.codec);
+        if !options.is_empty() {
+            super::dialog::row(ui, "Profile", |ui| {
+                let usual = match planned["profile"].as_str() {
+                    Some(p) => format!("default ({p})"),
+                    None => "default".to_string(),
+                };
+                egui::ComboBox::from_id_salt("export-profile")
+                    .selected_text(v.profile.clone().unwrap_or(usual.clone()))
                     .show_ui(ui, |ui| {
-                        for c in CONTAINERS {
-                            ui.selectable_value(&mut d.settings.container, c, c.extension());
+                        ui.selectable_value(&mut v.profile, None, usual);
+                        for p in options {
+                            ui.selectable_value(&mut v.profile, Some(p.to_string()), *p);
                         }
                     });
-                if d.settings.container != before {
-                    if d.settings.container.audio_only() && d.settings.video.is_some() {
-                        d.stashed_video = d.settings.video.take();
-                    } else if !d.settings.container.audio_only()
-                        && (before.audio_only() || d.settings.container.image_sequence())
-                        && d.settings.video.is_none()
-                    {
-                        d.settings.video = d.stashed_video.take().or(d.base.video.clone());
-                    }
-                    if before.image_sequence() && d.settings.audio.is_none() {
-                        d.settings.audio = d.base.audio.clone();
-                    }
-                    fit_codecs(&mut d.settings);
-                    d.match_output();
+            });
+        }
+        if v.dwa() {
+            super::dialog::row(ui, "Compression Level", |ui| {
+                use vidcut_core::export::{DWA_LEVEL, DWA_LEVELS};
+                let mut level = v.compression_level.unwrap_or(DWA_LEVEL);
+                if ui
+                    .add(egui::DragValue::new(&mut level).range(DWA_LEVELS))
+                    .changed()
+                {
+                    v.compression_level = Some(level);
                 }
-                let mut audio_only = d.settings.video.is_none();
-                let sequence = d.settings.container.image_sequence();
-                let can_choose = !d.settings.container.audio_only() && !sequence;
-                let audio_box = ui.add_enabled(
-                    can_choose,
-                    egui::Checkbox::new(&mut audio_only, "Audio only"),
-                );
-                if !can_choose {
-                    super::dialog::why(
-                        ui,
-                        format!(
-                            "{} holds only {}",
-                            d.settings.container.extension().to_uppercase(),
-                            if sequence { "frames" } else { "sound" },
-                        ),
+            });
+        } else {
+            v.compression_level = None;
+        }
+        if !fixed_format(v.codec) {
+            super::dialog::row(ui, "Bit Depth", |ui| {
+                let auto = auto_label(&picked, "bit_depth", |b| b.as_u64().map(|b| b.to_string()));
+                egui::ComboBox::from_id_salt("export-depth")
+                    .selected_text(v.bit_depth.map_or(auto.clone(), |b| b.to_string()))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut v.bit_depth, None, auto);
+                        ui.selectable_value(&mut v.bit_depth, Some(8), "8");
+                        ui.selectable_value(&mut v.bit_depth, Some(10), "10");
+                    });
+            });
+        }
+        if v.holds_alpha() {
+            super::dialog::row(ui, "Export Alpha", |ui| {
+                ui.add(egui::Checkbox::without_text(&mut v.alpha));
+                if v.alpha {
+                    egui::ComboBox::from_id_salt("export-alpha-mode")
+                        .selected_text(v.alpha_mode.title())
+                        .show_ui(ui, |ui| {
+                            for &m in v.alpha_modes() {
+                                ui.selectable_value(&mut v.alpha_mode, m, m.title());
+                            }
+                        });
+                }
+            });
+        } else {
+            v.alpha = false;
+        }
+    });
+    let Some(v) = &mut d.settings.video else {
+        return;
+    };
+    egui::CollapsingHeader::new("Advanced Settings")
+        .id_salt("export-video-advanced")
+        .default_open(false)
+        .show_unindented(ui, |ui| {
+            super::dialog::form(ui, "export-video-advanced-form", |ui| {
+                video_advanced(ui, v, &picked, &planned, &drops)
+            });
+        });
+}
+
+fn video_advanced(
+    ui: &mut egui::Ui,
+    v: &mut VideoSettings,
+    picked: &Value,
+    planned: &Value,
+    drops: &[&str],
+) {
+    if vidcut_core::export::color::carries_hdr(v.codec) {
+        let range = |h: &str| match h {
+            "pq" => "HDR (PQ)",
+            "hlg" => "HDR (HLG)",
+            _ => "SDR",
+        };
+        let auto = auto_label(picked, "hdr", |h| h.as_str().map(|h| range(h).to_string()));
+        let label = |h: HdrMode| match h {
+            HdrMode::Auto => auto.clone(),
+            HdrMode::Sdr => "SDR".to_string(),
+            HdrMode::Pq => "HDR (PQ)".to_string(),
+            HdrMode::Hlg => "HDR (HLG)".to_string(),
+        };
+        super::dialog::row(ui, "Dynamic Range", |ui| {
+            egui::ComboBox::from_id_salt("export-hdr")
+                .selected_text(label(v.hdr))
+                .show_ui(ui, |ui| {
+                    for h in [HdrMode::Auto, HdrMode::Sdr, HdrMode::Pq, HdrMode::Hlg] {
+                        ui.selectable_value(&mut v.hdr, h, label(h));
+                    }
+                });
+        });
+        if v.hdr.transfer().is_some() && v.bit_depth == Some(8) {
+            v.bit_depth = None;
+        }
+        if v.hdr != HdrMode::Sdr && v.image_bits().is_none() {
+            use vidcut_core::export::HdrMetadata as M;
+            let kind = |m: M| match m {
+                M::Auto => "auto",
+                M::Static => "HDR10 only",
+                M::Hdr10plus => "HDR10 + HDR10+",
+                M::DolbyVision => "HDR10 + Dolby Vision",
+                M::All => "HDR10 + HDR10+ + DV",
+                M::None => "none",
+            };
+            let auto = auto_label(picked, "metadata", |m| {
+                serde_json::from_value::<M>(m.clone())
+                    .ok()
+                    .map(|m| kind(m).to_string())
+            });
+            let label = |m: M| match m {
+                M::Auto => auto.clone(),
+                m => kind(m).to_string(),
+            };
+            super::dialog::row(ui, "HDR Metadata", |ui| {
+                egui::ComboBox::from_id_salt("export-hdr-metadata")
+                    .selected_text(label(v.hdr_metadata))
+                    .show_ui(ui, |ui| {
+                        for m in [
+                            M::Auto,
+                            M::Static,
+                            M::Hdr10plus,
+                            M::DolbyVision,
+                            M::All,
+                            M::None,
+                        ] {
+                            ui.selectable_value(&mut v.hdr_metadata, m, label(m));
+                        }
+                    });
+            });
+            for line in drops {
+                super::dialog::row(ui, "", |ui| ui.label(dim(*line)));
+            }
+        }
+    } else if v.hdr.transfer().is_some() {
+        v.hdr = HdrMode::Auto;
+    }
+    super::dialog::row(ui, "Speed", |ui| {
+        let mut speed = v.speed.clone().unwrap_or_default();
+        if ui
+            .add(
+                egui::TextEdit::singleline(&mut speed)
+                    .hint_text(planned["speed"].as_str().unwrap_or("default"))
+                    .desired_width(70.0),
+            )
+            .changed()
+        {
+            let s = speed.trim();
+            v.speed = (!s.is_empty()).then(|| s.to_string());
+        }
+    });
+    if v.image_bits().is_none() {
+        super::dialog::row(ui, "", |ui| {
+            ui.checkbox(&mut v.bypass_reencode, "Bypass Re-encode When Possible")
+        });
+    } else {
+        v.bypass_reencode = false;
+    }
+    super::dialog::row(ui, "", |ui| {
+        ui.checkbox(&mut v.use_proxy_media, "Use Proxy Media")
+    });
+}
+
+pub(super) fn audio_tab(ui: &mut egui::Ui, d: &mut Render, can: &Value, audio: (u32, u16)) {
+    super::dialog::form(ui, "export-audio", |ui| {
+        super::dialog::row(ui, "Export Audio", |ui| {
+            let mut on = d.settings.audio.is_some();
+            let can_hold = !audio_codecs(d.settings.container).is_empty();
+            let r = ui.add_enabled(can_hold, egui::Checkbox::without_text(&mut on));
+            if !can_hold {
+                super::dialog::why(ui, "Frames hold no sound");
+            }
+            if r.changed() {
+                d.settings.audio = on.then(|| AudioSettings {
+                    codec: audio_codecs(d.settings.container)[0],
+                    bitrate: None,
+                    sample_rate: None,
+                    channels: None,
+                    loudness: None,
+                });
+                fit_codecs(&mut d.settings);
+            }
+        });
+        let container = d.settings.container;
+        let Some(a) = &mut d.settings.audio else {
+            return;
+        };
+        super::dialog::row(ui, "Codec", |ui| {
+            egui::ComboBox::from_id_salt("export-acodec")
+                .selected_text(name(&a.codec))
+                .show_ui(ui, |ui| {
+                    for c in audio_codecs(container) {
+                        let why = why_audio(can, *c);
+                        if choice(ui, &mut a.codec, *c, name(c), why).changed() {
+                            a.bitrate = lossy(a.codec).then_some(usual_bitrate(a.codec));
+                        }
+                    }
+                });
+        });
+        if lossy(a.codec) {
+            super::dialog::row(ui, "Bit Rate", |ui| {
+                let mut kbps = a.bitrate.unwrap_or(usual_bitrate(a.codec)) / 1000;
+                let range = match a.codec {
+                    AudioCodec::Aac => AAC_BITRATES.start() / 1000..=AAC_BITRATES.end() / 1000,
+                    _ => 32..=512,
+                };
+                if ui
+                    .add(egui::DragValue::new(&mut kbps).range(range).suffix(" kb/s"))
+                    .changed()
+                {
+                    a.bitrate = Some(kbps * 1000);
+                }
+            });
+        }
+        super::dialog::row(ui, "Sample Rate", |ui| {
+            egui::ComboBox::from_id_salt("export-rate")
+                .selected_text(
+                    a.sample_rate
+                        .map_or(format!("{} Hz", audio.0), |r| format!("{r} Hz")),
+                )
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut a.sample_rate,
+                        None,
+                        format!("project ({} Hz)", audio.0),
                     );
-                }
-                if audio_box.changed() {
-                    if audio_only {
-                        d.stashed_video = d.settings.video.take();
-                    } else {
-                        d.settings.video = d.stashed_video.take().or(d.base.video.clone()).or(
-                            Some(VideoSettings {
-                                codec: video_codecs(d.settings.container)[0],
-                                encoder: EncoderChoice::Auto,
-                                quality: Some(20),
-                                bitrate: None,
-                                speed: None,
-                                profile: None,
-                                bit_depth: None,
-                                width: None,
-                                height: None,
-                                hdr: HdrMode::Auto,
-                                passes: None,
-                                first_pass: Default::default(),
-                                multipass: Default::default(),
-                                lookahead: None,
-                                hdr_metadata: Default::default(),
-                                mastering_display: None,
-                                max_cll: None,
-                                alpha: false,
-                                alpha_mode: Default::default(),
-                                filename_digits: None,
-                                first_frame: None,
-                                compression_level: None,
-                                bypass_reencode: false,
-                                use_proxy_media: false,
-                            }),
-                        );
-                        fit_codecs(&mut d.settings);
+                    let rates: &[u32] = match a.codec {
+                        AudioCodec::Aac => &AAC_RATES,
+                        _ => &[44_100, 48_000, 96_000],
+                    };
+                    for &r in rates {
+                        ui.selectable_value(&mut a.sample_rate, Some(r), format!("{r} Hz"));
                     }
+                });
+        });
+        super::dialog::row(ui, "Channels", |ui| {
+            let channels = |c: u16| match c {
+                1 => "mono".to_string(),
+                2 => "stereo".to_string(),
+                6 => "5.1".to_string(),
+                n => format!("{n} ch"),
+            };
+            egui::ComboBox::from_id_salt("export-channels")
+                .selected_text(a.channels.map_or(channels(audio.1), channels))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut a.channels,
+                        None,
+                        format!("project ({})", channels(audio.1)),
+                    );
+                    for c in 1..=vidcut_core::model::Settings::MOST_CHANNELS {
+                        ui.selectable_value(&mut a.channels, Some(c), channels(c));
+                    }
+                });
+        });
+        super::dialog::row(ui, "Loudness", |ui| {
+            let mut on = a.loudness.is_some();
+            if ui.checkbox(&mut on, "Normalize to").changed() {
+                a.loudness = on.then_some(-14.0);
+            }
+            if let Some(target) = &mut a.loudness {
+                ui.add(
+                    egui::DragValue::new(target)
+                        .range(vidcut_core::ops::normalize::LOUDNESS)
+                        .speed(0.1)
+                        .suffix(" LUFS"),
+                );
+            }
+        });
+    });
+}
+
+pub(super) fn file_tab(ui: &mut egui::Ui, d: &mut Render) {
+    super::dialog::form(ui, "export-file", |ui| {
+        if let Some(v) = d
+            .settings
+            .video
+            .as_mut()
+            .filter(|v| v.image_bits().is_some())
+        {
+            use vidcut_core::export::{FILENAME_DIGIT_COUNTS, FILENAME_DIGITS};
+            super::dialog::row(ui, "Filename Digits", |ui| {
+                let mut digits = v.filename_digits.unwrap_or(FILENAME_DIGITS);
+                if ui
+                    .add(egui::DragValue::new(&mut digits).range(FILENAME_DIGIT_COUNTS))
+                    .changed()
+                {
+                    v.filename_digits = Some(digits);
                 }
             });
-            ui.end_row();
-
-            if let Some(v) = &mut d.settings.video {
-                ui.label("Video");
-                ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt("export-vcodec")
-                        .selected_text(name(&v.codec))
-                        .show_ui(ui, |ui| {
-                            for c in video_codecs(d.settings.container) {
-                                let why = why_video(can, *c, v.encoder);
-                                if choice(ui, &mut v.codec, *c, name(c), why).changed() {
-                                    v.profile = None;
-                                    if fixed_format(*c) {
-                                        v.bit_depth = None;
-                                    }
-                                }
-                            }
-                        });
-                    ui.label(dim("encoder"));
-                    let auto = auto_label(&picked, "encoder", |e| e.as_str().map(String::from));
-                    let encoder = |e: &EncoderChoice| match e {
-                        EncoderChoice::Auto => auto.clone(),
-                        _ => name(e),
-                    };
-                    egui::ComboBox::from_id_salt("export-encoder")
-                        .selected_text(encoder(&v.encoder))
-                        .show_ui(ui, |ui| {
-                            for &e in [EncoderChoice::Auto, EncoderChoice::Cpu]
-                                .iter()
-                                .chain(GPU_ENCODERS)
-                            {
-                                let why = why_video(can, v.codec, e);
-                                choice(ui, &mut v.encoder, e, encoder(&e), why);
-                            }
-                        });
-                });
-                ui.end_row();
-
-                ui.label("");
-                ui.horizontal(|ui| {
-                    let mut by_quality = v.bitrate.is_none();
-                    let bitrate_only = vidcut_av::export::encode::bitrate_only(v.codec, v.encoder);
-                    if bitrate_only {
-                        super::dialog::why(
-                            ui,
-                            format!("{} takes only a bitrate", v.encoder.title()),
-                        );
-                    }
-                    let quality = ui
-                        .add_enabled_ui(!bitrate_only, |ui| {
-                            ui.radio_value(&mut by_quality, true, "Quality")
-                        })
-                        .inner;
-                    if quality.changed() {
-                        v.bitrate = None;
-                        v.quality = v.quality.or(Some(20));
-                        v.passes = None;
-                    }
-                    if ui.radio_value(&mut by_quality, false, "Bitrate").changed() {
-                        v.bitrate = Some(20_000_000);
-                        v.quality = None;
-                    }
-                    if by_quality {
-                        let mut q = v.quality.unwrap_or(20);
-                        if ui
-                            .add(egui::DragValue::new(&mut q).range(0..=v.codec.worst_quality()))
-                            .changed()
-                        {
-                            v.quality = Some(q);
-                        }
-                    } else {
-                        let mut mbps = v.bitrate.unwrap_or(20_000_000) as f64 / 1e6;
-                        if ui
-                            .add(
-                                egui::DragValue::new(&mut mbps)
-                                    .range(0.1..=500.0)
-                                    .speed(0.1)
-                                    .suffix(" Mb/s"),
-                            )
-                            .changed()
-                        {
-                            v.bitrate = Some((mbps * 1e6).round() as u64);
-                        }
-                    }
-                });
-                ui.end_row();
-
-                if v.bitrate.is_some() && !fixed_format(v.codec) {
-                    ui.label("");
-                    let auto = auto_label(&picked, "passes", |p| {
-                        p["kind"].as_str().map(|k| match k {
-                            "one" => "1".to_string(),
-                            _ => "2".to_string(),
-                        })
-                    });
-                    ui.horizontal(|ui| passes_row(ui, v, &planned, auto));
-                    ui.end_row();
+            super::dialog::row(ui, "First Frame", |ui| {
+                let mut own = v.first_frame.is_some();
+                if ui.add(egui::Checkbox::without_text(&mut own)).changed() {
+                    v.first_frame = own.then_some(0);
                 }
-
-                ui.label("");
-                ui.horizontal(|ui| {
-                    let mut custom = v.width.is_some();
-                    if ui
-                        .radio_value(
-                            &mut custom,
-                            false,
-                            format!("Timeline size ({}×{})", size.0, size.1),
-                        )
-                        .changed()
-                    {
-                        v.width = None;
-                        v.height = None;
-                    }
-                    if ui.radio_value(&mut custom, true, "Custom").changed() {
-                        v.width = Some(size.0);
-                        v.height = Some(size.1);
-                    }
-                    if let (Some(w), Some(h)) = (&mut v.width, &mut v.height) {
-                        let (low, high) = vidcut_core::model::TIMELINE_SIDE;
-                        ui.add(egui::DragValue::new(w).range(low..=high));
-                        ui.label("×");
-                        ui.add(egui::DragValue::new(h).range(low..=high));
-                    }
-                });
-                ui.end_row();
-
-                ui.label("");
-                ui.horizontal(|ui| {
-                    let options = profiles(v.codec);
-                    if !options.is_empty() {
-                        ui.label(dim("profile"));
-                        let usual = match planned["profile"].as_str() {
-                            Some(p) => format!("default ({p})"),
-                            None => "default".to_string(),
-                        };
-                        egui::ComboBox::from_id_salt("export-profile")
-                            .selected_text(v.profile.clone().unwrap_or(usual.clone()))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut v.profile, None, usual);
-                                for p in options {
-                                    ui.selectable_value(&mut v.profile, Some(p.to_string()), *p);
-                                }
-                            });
-                    }
-                    if v.dwa() {
-                        use vidcut_core::export::{DWA_LEVEL, DWA_LEVELS};
-                        ui.label(dim("Compression Level"));
-                        let mut level = v.compression_level.unwrap_or(DWA_LEVEL);
-                        if ui
-                            .add(egui::DragValue::new(&mut level).range(DWA_LEVELS))
-                            .changed()
-                        {
-                            v.compression_level = Some(level);
-                        }
-                    } else {
-                        v.compression_level = None;
-                    }
-                    if !fixed_format(v.codec) {
-                        ui.label(dim("bit depth"));
-                        let auto =
-                            auto_label(&picked, "bit_depth", |b| b.as_u64().map(|b| b.to_string()));
-                        egui::ComboBox::from_id_salt("export-depth")
-                            .selected_text(v.bit_depth.map_or(auto.clone(), |b| b.to_string()))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut v.bit_depth, None, auto);
-                                ui.selectable_value(&mut v.bit_depth, Some(8), "8");
-                                ui.selectable_value(&mut v.bit_depth, Some(10), "10");
-                            });
-                    }
-                });
-                ui.end_row();
-
-                if v.holds_alpha() {
-                    ui.label("");
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut v.alpha, "Export Alpha");
-                        if v.alpha {
-                            ui.label(dim("Alpha Mode"));
-                            egui::ComboBox::from_id_salt("export-alpha-mode")
-                                .selected_text(v.alpha_mode.title())
-                                .show_ui(ui, |ui| {
-                                    for &m in v.alpha_modes() {
-                                        ui.selectable_value(&mut v.alpha_mode, m, m.title());
-                                    }
-                                });
-                        }
-                    });
-                    ui.end_row();
-                } else {
-                    v.alpha = false;
-                }
-
-                if v.image_bits().is_none() {
-                    ui.label("");
-                    ui.checkbox(&mut v.bypass_reencode, "Bypass Re-encode When Possible");
-                    ui.end_row();
-                } else {
-                    v.bypass_reencode = false;
-                }
-
-                ui.label("");
-                ui.checkbox(&mut v.use_proxy_media, "Use Proxy Media");
-                ui.end_row();
-
-                if v.image_bits().is_some() {
-                    ui.label("");
-                    ui.horizontal(|ui| {
-                        use vidcut_core::export::{FILENAME_DIGIT_COUNTS, FILENAME_DIGITS};
-                        ui.label(dim("filename digits"));
-                        let mut digits = v.filename_digits.unwrap_or(FILENAME_DIGITS);
-                        if ui
-                            .add(egui::DragValue::new(&mut digits).range(FILENAME_DIGIT_COUNTS))
-                            .changed()
-                        {
-                            v.filename_digits = Some(digits);
-                        }
-                        let mut own = v.first_frame.is_some();
-                        if ui.checkbox(&mut own, "First Frame").changed() {
-                            v.first_frame = own.then_some(0);
-                        }
-                        if let Some(first) = &mut v.first_frame {
-                            ui.add(egui::DragValue::new(first));
-                        }
-                    });
-                    ui.end_row();
-                }
-
-                ui.label("");
-                ui.horizontal(|ui| {
-                    if vidcut_core::export::color::carries_hdr(v.codec) {
-                        let range = |h: &str| match h {
-                            "pq" => "HDR (PQ)",
-                            "hlg" => "HDR (HLG)",
-                            _ => "SDR",
-                        };
-                        let auto = auto_label(&picked, "hdr", |h| {
-                            h.as_str().map(|h| range(h).to_string())
-                        });
-                        let label = |h: HdrMode| match h {
-                            HdrMode::Auto => auto.clone(),
-                            HdrMode::Sdr => "SDR".to_string(),
-                            HdrMode::Pq => "HDR (PQ)".to_string(),
-                            HdrMode::Hlg => "HDR (HLG)".to_string(),
-                        };
-                        ui.label(dim("range"));
-                        egui::ComboBox::from_id_salt("export-hdr")
-                            .selected_text(label(v.hdr))
-                            .show_ui(ui, |ui| {
-                                for h in [HdrMode::Auto, HdrMode::Sdr, HdrMode::Pq, HdrMode::Hlg] {
-                                    ui.selectable_value(&mut v.hdr, h, label(h));
-                                }
-                            });
-                        if v.hdr.transfer().is_some() && v.bit_depth == Some(8) {
-                            v.bit_depth = None;
-                        }
-                        if v.hdr != HdrMode::Sdr && v.image_bits().is_none() {
-                            use vidcut_core::export::HdrMetadata as M;
-                            let kind = |m: M| match m {
-                                M::Auto => "auto",
-                                M::Static => "HDR10 only",
-                                M::Hdr10plus => "HDR10 + HDR10+",
-                                M::DolbyVision => "HDR10 + Dolby Vision",
-                                M::All => "HDR10 + HDR10+ + DV",
-                                M::None => "none",
-                            };
-                            let auto = auto_label(&picked, "metadata", |m| {
-                                serde_json::from_value::<M>(m.clone())
-                                    .ok()
-                                    .map(|m| kind(m).to_string())
-                            });
-                            let label = |m: M| match m {
-                                M::Auto => auto.clone(),
-                                m => kind(m).to_string(),
-                            };
-                            ui.label(dim("metadata"));
-                            egui::ComboBox::from_id_salt("export-hdr-metadata")
-                                .selected_text(label(v.hdr_metadata))
-                                .show_ui(ui, |ui| {
-                                    for m in [
-                                        M::Auto,
-                                        M::Static,
-                                        M::Hdr10plus,
-                                        M::DolbyVision,
-                                        M::All,
-                                        M::None,
-                                    ] {
-                                        ui.selectable_value(&mut v.hdr_metadata, m, label(m));
-                                    }
-                                });
-                            for line in &drops {
-                                ui.label(dim(*line));
-                            }
-                        }
-                    } else if v.hdr.transfer().is_some() {
-                        v.hdr = HdrMode::Auto;
-                    }
-                    ui.label(dim("speed"));
-                    let mut speed = v.speed.clone().unwrap_or_default();
-                    if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut speed)
-                                .hint_text(planned["speed"].as_str().unwrap_or("default"))
-                                .desired_width(70.0),
-                        )
-                        .changed()
-                    {
-                        let s = speed.trim();
-                        v.speed = (!s.is_empty()).then(|| s.to_string());
-                    }
-                });
-                ui.end_row();
-            }
-
-            ui.label("Audio");
-            ui.horizontal(|ui| {
-                let mut on = d.settings.audio.is_some();
-                let can_hold = !audio_codecs(d.settings.container).is_empty();
-                let audio_box = ui.add_enabled(can_hold, egui::Checkbox::new(&mut on, ""));
-                if !can_hold {
-                    super::dialog::why(ui, "Frames hold no sound");
-                }
-                if audio_box.changed() {
-                    d.settings.audio = on.then(|| AudioSettings {
-                        codec: audio_codecs(d.settings.container)[0],
-                        bitrate: None,
-                        sample_rate: None,
-                        channels: None,
-                        loudness: None,
-                    });
-                    fit_codecs(&mut d.settings);
-                }
-                if let Some(a) = &mut d.settings.audio {
-                    egui::ComboBox::from_id_salt("export-acodec")
-                        .selected_text(name(&a.codec))
-                        .show_ui(ui, |ui| {
-                            for c in audio_codecs(d.settings.container) {
-                                let why = why_audio(can, *c);
-                                if choice(ui, &mut a.codec, *c, name(c), why).changed() {
-                                    a.bitrate = lossy(a.codec).then_some(usual_bitrate(a.codec));
-                                }
-                            }
-                        });
-                    if lossy(a.codec) {
-                        let mut kbps = a.bitrate.unwrap_or(usual_bitrate(a.codec)) / 1000;
-                        let range = match a.codec {
-                            AudioCodec::Aac => {
-                                AAC_BITRATES.start() / 1000..=AAC_BITRATES.end() / 1000
-                            }
-                            _ => 32..=512,
-                        };
-                        if ui
-                            .add(egui::DragValue::new(&mut kbps).range(range).suffix(" kb/s"))
-                            .changed()
-                        {
-                            a.bitrate = Some(kbps * 1000);
-                        }
-                    }
-                    egui::ComboBox::from_id_salt("export-rate")
-                        .selected_text(
-                            a.sample_rate
-                                .map_or(format!("{} Hz", audio.0), |r| format!("{r} Hz")),
-                        )
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut a.sample_rate,
-                                None,
-                                format!("project ({} Hz)", audio.0),
-                            );
-                            let rates: &[u32] = match a.codec {
-                                AudioCodec::Aac => &AAC_RATES,
-                                _ => &[44_100, 48_000, 96_000],
-                            };
-                            for &r in rates {
-                                ui.selectable_value(&mut a.sample_rate, Some(r), format!("{r} Hz"));
-                            }
-                        });
-                    let channels = |c: u16| match c {
-                        1 => "mono".to_string(),
-                        2 => "stereo".to_string(),
-                        6 => "5.1".to_string(),
-                        n => format!("{n} ch"),
-                    };
-                    egui::ComboBox::from_id_salt("export-channels")
-                        .selected_text(a.channels.map_or(channels(audio.1), channels))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut a.channels,
-                                None,
-                                format!("project ({})", channels(audio.1)),
-                            );
-                            for c in 1..=vidcut_core::model::Settings::MOST_CHANNELS {
-                                ui.selectable_value(&mut a.channels, Some(c), channels(c));
-                            }
-                        });
+                if let Some(first) = &mut v.first_frame {
+                    ui.add(egui::DragValue::new(first));
                 }
             });
-            ui.end_row();
-            if let Some(a) = &mut d.settings.audio {
-                ui.label("Loudness");
-                ui.horizontal(|ui| {
-                    let mut on = a.loudness.is_some();
-                    if ui.checkbox(&mut on, "Normalize to").changed() {
-                        a.loudness = on.then_some(-14.0);
-                    }
-                    if let Some(target) = &mut a.loudness {
-                        ui.add(
-                            egui::DragValue::new(target)
-                                .range(vidcut_core::ops::normalize::LOUDNESS)
-                                .speed(0.1)
-                                .suffix(" LUFS"),
-                        );
-                    }
-                });
-                ui.end_row();
+        }
+        super::dialog::row(ui, "Replace Files", |ui| {
+            ui.add(egui::Checkbox::without_text(&mut d.overwrite))
+        });
+    });
+}
+
+pub(super) fn subtitle_settings(
+    ui: &mut egui::Ui,
+    d: &mut Render,
+    tracks: &[(String, String, bool)],
+) {
+    if tracks.is_empty() {
+        return;
+    }
+    egui::CollapsingHeader::new("Subtitle Settings")
+        .id_salt("export-subtitle-settings")
+        .default_open(d.subtitles.is_some())
+        .show_unindented(ui, |ui| subtitles_form(ui, d, tracks));
+}
+
+pub(super) fn plan_and_command(ui: &mut egui::Ui, d: &mut Render, project: Option<&Path>) {
+    if let Some(set) = plan_view(ui, d) {
+        keep_hdr(d, &set);
+    }
+    let Some(project) = project else {
+        return;
+    };
+    let cmd = command(project, &d.params());
+    egui::CollapsingHeader::new("Command")
+        .id_salt("export-command")
+        .default_open(false)
+        .show_unindented(ui, |ui| {
+            if ui.small_button("Copy").clicked() {
+                ui.ctx().copy_text(cmd.clone());
             }
+            ui.add(egui::Label::new(RichText::new(&cmd).monospace().small()).wrap());
         });
 }
 

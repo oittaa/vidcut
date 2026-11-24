@@ -98,9 +98,10 @@ impl Workspace {
                 r
             }
             Item::Export => {
-                let r = ui.button("Export");
-                if r.clicked() {
-                    self.open_export(ui.ctx());
+                let on = self.effects_page.page == vidcut_core::request::Page::Export;
+                let r = ui.selectable_label(on, "Export");
+                if r.clicked() && !on {
+                    self.send("gui.page", serde_json::json!({ "page": "export" }));
                 }
                 r
             }
