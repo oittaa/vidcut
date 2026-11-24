@@ -620,6 +620,7 @@ fn background_applied(b: &mut Background, left: &mut NodeChange) {
     }
     given(&mut left.values.offset, &mut b.offset);
     given(&mut left.repeat, &mut b.repeat);
+    given(&mut left.sub_pixel, &mut b.sub_pixel);
     image_applied(&mut b.image, left);
 }
 
@@ -657,6 +658,9 @@ fn noise_applied(f: &mut FastNoise, left: &mut NodeChange) -> Result<()> {
     if let Some(stops) = left.stops.take() {
         f.stops = stops;
     }
+    given(&mut left.values.offset, &mut f.offset);
+    given(&mut left.repeat, &mut f.repeat);
+    given(&mut left.sub_pixel, &mut f.sub_pixel);
     image_applied(&mut f.image, left);
     Ok(())
 }

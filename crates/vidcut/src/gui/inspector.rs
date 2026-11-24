@@ -21,7 +21,7 @@ use vidcut_core::model::{
     GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
     JoinStyle, Keyframe, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring,
     Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement,
-    Sharpen, Speed, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
+    Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
     TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
@@ -2101,8 +2101,18 @@ fn background_rows(
         );
         let repeat = (b.repeats(), GradientRepeat::default());
         choice_row(ui, (slot, "Repeat", "repeat"), repeat, repeats, acts);
+        sub_pixel_row(ui, slot, b.samples(), acts);
     }
     value(ui, acts, V::Blend, "Blend");
+}
+
+fn sub_pixel_row(ui: &mut egui::Ui, slot: usize, now: SubPixel, acts: &mut Vec<Act>) {
+    let all = (
+        &SubPixel::ALL[..],
+        SubPixel::label as fn(SubPixel) -> &'static str,
+    );
+    let now = (now, SubPixel::default());
+    choice_row(ui, (slot, "Sub-Pixel", "sub_pixel"), now, all, acts);
 }
 
 fn noise_rows(
@@ -2156,6 +2166,14 @@ fn noise_rows(
         NoiseColoring::Gradient => {
             let stops = (f.colors(), !f.stops.is_empty());
             gradient_rows(ui, (slot, &n.name), stops, acts);
+            value(ui, acts, V::Offset, "Offset");
+            let repeats = (
+                &GradientRepeat::ALL[..],
+                GradientRepeat::label as fn(GradientRepeat) -> &'static str,
+            );
+            let repeat = (f.repeats(), GradientRepeat::default());
+            choice_row(ui, (slot, "Repeat", "repeat"), repeat, repeats, acts);
+            sub_pixel_row(ui, slot, f.samples(), acts);
         }
     }
     value(ui, acts, V::Blend, "Blend");
@@ -4709,6 +4727,38 @@ fn tint_bytes(color: [f64; 3]) -> [u8; 3] {
     color.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
+fn vignette_center(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, v): (usize, &Effect, &Vignette),
+    acts: &mut Vec<Act>,
+) {
+    let knobs = [VignetteKnob::CenterX, VignetteKnob::CenterY].map(Knob::Vignette);
+    let set = v.middle() != Vignette::MIDDLE;
+    label(ui, "Center", set);
+    ui.horizontal(|ui| {
+        for k in knobs {
+            let range = k.dial().range;
+            drag(
+                ui,
+                Key::Effect(n, k),
+                i,
+                (k.read(e), range),
+                &Look::default(),
+                acts,
+            );
+        }
+        let keys = knobs[0].value_of(e).and_then(|(v, _)| i.mark_of(n, v));
+        if let Some(keys) = keys {
+            key_acts(ui, Key::Effect(n, knobs[0]), &keys, acts);
+        }
+    });
+    if reset(ui, set) {
+        acts.push(Act::EffectSet(n, json!({ "center": Vignette::MIDDLE })));
+    }
+    ui.end_row();
+}
+
 fn vignette_main(
     ui: &mut egui::Ui,
     i: &Inspector,
@@ -4761,7 +4811,9 @@ fn vignette_main(
         vignette(ui, VignetteKnob::Rotation, acts);
     }
     vignette(ui, VignetteKnob::Anamorphism, acts);
-    if advanced {
+    if advanced && slot_node(n).is_some() {
+        vignette_center(ui, i, (n, e, v), acts);
+    } else if advanced {
         vignette(ui, VignetteKnob::CenterX, acts);
         vignette(ui, VignetteKnob::CenterY, acts);
     }
