@@ -3000,8 +3000,8 @@ pub enum Request {
         tool: bool,
     },
     /// Add a corrector to the grade of a clip, or with `timeline` to the
-    /// timeline grade, as `add` says. The new node gets the next number.
-    /// Returns its `node` number.
+    /// timeline grade, as `add` says. Then the nodes get new numbers, as
+    /// `made` of a link says. Returns the `node` number of the new node.
     #[serde(rename = "grade.add")]
     GradeAdd {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4975,9 +4975,10 @@ pub enum GradeMixer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GradeAdd {
-    /// After `node`: it takes the picture of `node`, and what took that
-    /// picture takes its picture. After a key mixer, it takes the key of the
-    /// mixer as a gray picture, and what took that key takes its picture.
+    /// After `node`: it takes the picture of `node`, and the input that took
+    /// that picture by the oldest link takes its picture. After a key mixer,
+    /// it takes the key of the mixer as a gray picture, and the input that
+    /// took that key by the oldest link takes its picture.
     Serial,
     /// Before `node`: it takes what came into `node`, and `node` takes its
     /// picture. For a mixer, that is the first input of the mixer.

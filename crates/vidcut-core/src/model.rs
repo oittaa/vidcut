@@ -3898,7 +3898,7 @@ pub struct Picture {
 /// its picture goes nowhere, or nothing goes out, the grade does nothing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Grade {
-    /// The nodes, in the order they were added.
+    /// The nodes, in the order of their numbers.
     pub nodes: Vec<GradeNode>,
     /// What goes out. Left out when nothing goes out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3909,7 +3909,7 @@ pub struct Grade {
 /// node. A key that goes into an RGB input or the output is a gray
 /// picture: R, G and B are the key. A picture that goes into a key input
 /// gives its Rec. 709 luma, 0.2126 R + 0.7152 G + 0.0722 B, as the key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub struct GradeLink {
     /// The number of the node, or 0 for the picture that comes into the
     /// grade.
@@ -3918,16 +3918,39 @@ pub struct GradeLink {
     /// corrector and a key mixer have a key output. Left out when not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub key: bool,
+    /// The order in which the links were made: a link made later has a
+    /// higher number. After each new node, the nodes get their numbers in
+    /// the order of a walk from the picture that comes in, one step of
+    /// links at a time, with the links of each node in this order. Left
+    /// out at 0.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub made: u32,
 }
 
+impl PartialEq for GradeLink {
+    fn eq(&self, other: &Self) -> bool {
+        (self.node, self.key) == (other.node, other.key)
+    }
+}
+
+impl Eq for GradeLink {}
+
 impl GradeLink {
+    pub fn new(node: u32, key: bool) -> Self {
+        Self { node, key, made: 0 }
+    }
+
     pub fn picture(node: u32) -> Self {
-        Self { node, key: false }
+        Self::new(node, false)
     }
 
     pub fn key(node: u32) -> Self {
-        Self { node, key: true }
+        Self::new(node, true)
     }
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
 }
 
 impl Grade {
