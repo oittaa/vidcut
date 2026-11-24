@@ -694,6 +694,9 @@ fn clip_path(params: &ExportParams, settings: &ExportSettings, c: &ClipName) -> 
     {
         let digits = settings.video.as_ref().and_then(|v| v.filename_digits);
         let digits = usize::from(digits.unwrap_or(FILENAME_DIGITS));
+        if stem.ends_with(|ch: char| ch.is_ascii_digit()) {
+            stem.push('_');
+        }
         stem.push_str(&padded_frame(c.count.max(0) as u64, digits));
     }
     stem = match params.unique {
@@ -920,7 +923,8 @@ pub fn prepare(
             let media = p.media(&clip.media);
             let count = media.map_or(0, |m| {
                 let per = render::per_frame(m, p.settings.fps, p.fps());
-                render::shown_frame(per, clip.source_in as f64 + clip.phase)
+                let tc = m.timecode_at(m.rate(p.settings.fps)).round() as i64;
+                tc + render::shown_frame(per, clip.source_in as f64 + clip.phase)
             });
             let name = ClipName {
                 index: i + 1,

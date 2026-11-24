@@ -5032,9 +5032,10 @@ pub struct ExportParams {
     #[serde(default)]
     pub suffix: Option<String>,
     /// Leave the frame count out of the per-clip names. The count is the
-    /// source frame of the clip's first frame, with `video.filename_digits`
-    /// digits (8 when unset). An image sequence numbers its frames from it.
-    /// Not with an image sequence.
+    /// source timecode of the clip's first frame, in frames of the source,
+    /// with `video.filename_digits` digits (8 when unset). A name that ends
+    /// in a digit gets `_` before it. An image sequence numbers its frames
+    /// from it. Not with an image sequence.
     #[serde(default)]
     pub no_frame_count: bool,
     /// Put the clip's track and its place on the track (`V1-0001`) before

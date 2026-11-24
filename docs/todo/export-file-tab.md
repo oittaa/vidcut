@@ -6,9 +6,7 @@
 
 **Runs that settle what vidcut does not build:**
 
-- The frame count of other clips. The measured clips start at source frame 0 and have no source timecode. Runs, with MP4 and EXR:
-  - A clip that starts at source frame 10.
-  - A source file with the start timecode 01:00:00:00.
+- The frame count of an interlaced clip. No rule explains the measured counts of `interlaced-tff.mov` ([§10.1](../spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)). Its EXR renders also have more files than the clip has frames. Runs: an interlaced source with a start timecode, and one at 29.97.
 - Place clips in separate folders gives `Event__0001_0001`. The last number is the place of the clip. Run: a clip on V2 with separate folders, to find what the first number is.
 - The order of the parts when rows combine. vidcut refuses these combinations. Runs:
   - File subfolder `sub`, Place clips in separate folders and Preserve 1 From tail, all together.

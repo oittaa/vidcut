@@ -702,6 +702,11 @@ These facts come from renders in Resolve Studio 21.2. The picture renders are fl
   - With Zoom below 1 over a lower video clip, the outer area keeps the unzoomed picture until the last dissolve frame.
   - On the next frame, that outer area snaps from full brightness to black.
   - vidcut blends smoothly across every frame ([spec §8.24](spec.md#824-adjustment-clips-pp-1145-1154-33753376-measured-in-resolve-studio-212)).
+- **Individual clips name a clip at another frame rate by the start of its source.**
+  - A 25 fps source with the start timecode 01:00:00:00 is in a 24 fps timeline.
+  - A clip from source frame 0 and a clip from frame 10 both give `…00090000.mp4`. The second render writes over the first.
+  - A 24 fps source gives `…00086400` and `…00086410`, the timecode of the first frame of each clip.
+  - vidcut does not copy this fault. The count of each clip is the source timecode of its first frame, at the rate of the source ([spec §10.1](spec.md#101-export-page-pp-41034132-measured-in-resolve-studio-212)).
 
 ## Resolve's Fusion page
 

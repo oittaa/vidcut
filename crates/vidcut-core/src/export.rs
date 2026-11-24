@@ -420,7 +420,7 @@ pub struct VideoSettings {
     pub filename_digits: Option<u8>,
     /// The number of the first TIFF or OpenEXR file. With `per_clip`, each
     /// clip starts at it. Unset: the frame count of the record timecode, and
-    /// with `per_clip` the source frame of the clip's first frame.
+    /// with `per_clip` the source timecode of the clip's first frame.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_frame: Option<u32>,
     /// The Compression Level of an OpenEXR with DWAA or DWAB, from 0 to 300.
