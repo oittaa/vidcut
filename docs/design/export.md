@@ -1034,9 +1034,9 @@ The composition of a picture ([spec §8.19](../spec.md#819-compositions-pp-1332-
   - The masks and the Blend of the Text+ then go through `place::masked`.
   - `Merge::lookup` gives the affine map from a pixel of the output to a pixel of the foreground. It holds the flip, Size, Angle, Center and Invert Transform.
   - The mode, the operator, the edges and the sliders go to the shader as they are.
-- A Background gives an `Op::Make` into a free register. Its `place::Making` holds a `place::Painting`: the fill, the four colors, the gradient line in pixels, the stops, the offset and the repeat.
+- A Background gives an `Op::Make` into a free register. Its `place::Making` holds a `place::Painting`: the fill, the four colors, the gradient line in pixels, the stops, the offset, the repeat and the samples.
   - `place::masked` adds the masks and the Blend, as for a Text+.
-- A Fast Noise gives an `Op::Make` with a `place::Noising`. It holds the center in pixels, the noise cells for each pixel and the turn. It also holds the depth of Seethe at the frame, the levels and the colors.
+- A Fast Noise gives an `Op::Make` with a `place::Noising`. It holds the center in pixels, the noise cells for each pixel and the turn. It also holds the depth of Seethe at the frame, the levels, the colors, and the offset, the repeat and the samples of its gradient.
   - A mask on a map input first gives a white `Painting` through `place::masked`, in its own register. The `from` of the `Op::Make` holds these registers.
   - `place::masked` then adds the masks and the Blend.
 - `Working.masks` holds the masks of a tool, from `Composition::masks_of`. A mask with `pass_through` is left out. `Merging.masks` holds the masks of a Merge in the same way.
@@ -1062,6 +1062,7 @@ The draw:
   - With `Merging.replaces`, the result of `fs_merge` is the foreground that `merge_fore` reads, with no mode.
   - `made_into` draws an `Op::Make`. `fs_background` fills the register with the colors of a `Painting` as they are. The colors are not multiplied by their alpha. Thus a Merge adds them as premultiplied colors ([spec](../spec.md#the-background-tool)). The stops go to the shader in a storage buffer.
   - `fs_noise` sums the layers of `perlin`, the noise that the Glow also uses. It reads the alpha of the map registers. Its gradient uses `paint_ramp`, as `fs_background` does. Its colors are not multiplied by their alpha either.
+  - Both gradients average N x N samples in each pixel, and both use `gradient_repeat` for Repeat. `fs_noise` reads the maps once for each pixel.
   - `letters_into` draws an `Op::Text`. It clears the register and copies the text into it.
     - `burn::inked` lays out the text on the CPU and draws one shading element, with premultiplied colors. It gives only the part of the picture that the element covers.
     - A fill fills the outlines of the glyphs or the boxes. An outline strokes them. Outside Only takes the fill away from the stroke.

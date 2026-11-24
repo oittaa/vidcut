@@ -20,7 +20,7 @@ use vidcut_core::model::{
     GlowOutput, Gradient, GradientRepeat, GradientStop, GradientType, GrainComposite, GrainPreset,
     JoinStyle, Keyframe, Merge, MergeEdges, MergeOperator, MosaicBlur, Node, NoiseColoring,
     Pattern, Picture, PictureTool, PivotType, Project, ReferenceTime, Retime, ShadingElement,
-    Sharpen, Speed, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
+    Sharpen, Speed, SubPixel, Subject, TextPlus, Tool, ToolType, TrackKind, Tracker, TrackerMerge,
     TrackerOperation, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
@@ -2090,8 +2090,18 @@ fn background_rows(
         );
         let repeat = (b.repeats(), GradientRepeat::default());
         choice_row(ui, (slot, "Repeat", "repeat"), repeat, repeats, acts);
+        sub_pixel_row(ui, slot, b.samples(), acts);
     }
     value(ui, acts, V::Blend, "Blend");
+}
+
+fn sub_pixel_row(ui: &mut egui::Ui, slot: usize, now: SubPixel, acts: &mut Vec<Act>) {
+    let all = (
+        &SubPixel::ALL[..],
+        SubPixel::label as fn(SubPixel) -> &'static str,
+    );
+    let now = (now, SubPixel::default());
+    choice_row(ui, (slot, "Sub-Pixel", "sub_pixel"), now, all, acts);
 }
 
 fn noise_rows(
@@ -2145,6 +2155,14 @@ fn noise_rows(
         NoiseColoring::Gradient => {
             let stops = (f.colors(), !f.stops.is_empty());
             gradient_rows(ui, (slot, &n.name), stops, acts);
+            value(ui, acts, V::Offset, "Offset");
+            let repeats = (
+                &GradientRepeat::ALL[..],
+                GradientRepeat::label as fn(GradientRepeat) -> &'static str,
+            );
+            let repeat = (f.repeats(), GradientRepeat::default());
+            choice_row(ui, (slot, "Repeat", "repeat"), repeat, repeats, acts);
+            sub_pixel_row(ui, slot, f.samples(), acts);
         }
     }
     value(ui, acts, V::Blend, "Blend");

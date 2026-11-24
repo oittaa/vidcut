@@ -2983,7 +2983,8 @@ The Color tab (pp. 2358–2360):
   - Ping-Pong: the gradient goes back and forth. The place −0.44 shows the color of 0.44.
 - Sub-Pixel sets the samples in each pixel (p. 2360): 1x1, 2x2, 3x3, 4x4 or 5x5. Usual: 1x1.
   - N x N samples in each pixel are averaged. At a hard edge, 3x3 gives a mix of 1/3 and 2/3, and 5x5 a mix of 2/5 and 3/5.
-  - vidcut: not yet ([todo](todo/generator-nodes.md)).
+  - The samples are k / N of a pixel right of the place of the one sample of 1x1, with k from 0 to N − 1. Thus 3x3 moves the mean 1/3 of a pixel to the right, and 5x5 moves it 2/5.
+  - vidcut: the samples also go up by k / N of a pixel. The reads cover the steps across only.
 
 The Effect Mask:
 
@@ -3054,6 +3055,8 @@ The Color tab (p. 2366):
   - Detail 0, Brightness 0.2, Color 1 (1, 0, 0, 1) and Color 2 (0, 0, 1, 1) give (0.4, 0, 0.6, 1).
 - Gradient: the level of the noise picks a color on a gradient bar.
   - The bar, Interpolation Space, Offset, Repeat and Sub-Pixel are as on the Background. There are no Start and End rows.
+  - Offset and Repeat act on the level: the level less Offset gives the color. Sub-Pixel averages the colors of N x N levels in each pixel.
+  - vidcut: Interpolation Space is not built yet ([todo](todo/generator-nodes.md)).
   - Gradient Type: usual Uni.
 
 The manual and the measurements do not give the noise function of Resolve. vidcut uses a widely used method, fractal Perlin noise:
