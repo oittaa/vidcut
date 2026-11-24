@@ -125,6 +125,41 @@ fn pictures(input: &mut ffmpeg::format::context::Input, all: bool) -> (usize, Op
     (count, secs)
 }
 
+const MEASURED_SECS: i64 = 2;
+const REORDERED_FRAMES: usize = 16;
+
+fn measured_rate(source: &Input, video: usize, tb: ffmpeg::Rational) -> Option<Ratio> {
+    let mut input = source.open_header().ok()?;
+    let span = MEASURED_SECS * i64::from(tb.denominator()) / i64::from(tb.numerator().max(1));
+    let (mut pts, mut first, mut end, mut after) = (Vec::new(), i64::MAX, None, 0);
+    for (stream, packet) in input.packets() {
+        if stream.index() != video {
+            continue;
+        }
+        let Some(p) = packet.pts() else {
+            continue;
+        };
+        pts.push(p);
+        first = first.min(p);
+        if end.is_some() {
+            after += 1;
+            if after == REORDERED_FRAMES {
+                break;
+            }
+        } else if p - first >= span {
+            end = Some(p);
+        }
+    }
+    let end = end.or_else(|| pts.iter().max().copied())?;
+    let frames = pts.iter().filter(|&&p| p <= end).count();
+    let ticks = end - first;
+    (frames > 1 && ticks > 0).then(|| {
+        ratio(ffmpeg::Rational::from(
+            (frames - 1) as f64 / (ticks as f64 * f64::from(tb)),
+        ))
+    })
+}
+
 pub fn pixel_depth(name: &str) -> u8 {
     use std::str::FromStr;
     ffmpeg::format::Pixel::from_str(name)
@@ -328,7 +363,9 @@ fn sequence_frames(info: &MediaInfo, rate: (i32, i32)) -> Option<u64> {
 
 fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Result<MediaInfo> {
     let path = source.path();
-    let mut input = source.open()?;
+    let mut input = source.open_header()?;
+    let stated: Vec<Ratio> = input.streams().map(|s| ratio(s.avg_frame_rate())).collect();
+    crate::decode::find_stream_info(&mut input, path)?;
     let skips = start_skips(&mut input);
     let format = input.format().name().to_string();
     let file = matches!(source, Input::File(_));
@@ -353,6 +390,10 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
     }
 
     let best_video = input.streams().best(media::Type::Video).map(|s| s.index());
+    let measured = best_video
+        .filter(|&i| !still && stated.get(i).is_none_or(|r| r.0 <= 0 || r.1 <= 0))
+        .and_then(|i| input.stream(i))
+        .and_then(|s| measured_rate(source, s.index(), s.time_base()));
     let mut video = None;
     let mut audio = Vec::new();
     for stream in input.streams() {
@@ -408,6 +449,10 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
                     (Some(e), None) => Some(e),
                     _ => None,
                 };
+                let (avg_frame_rate, r_frame_rate) = match measured {
+                    Some(m) => (m, m),
+                    None => (ratio(stream.avg_frame_rate()), ratio(stream.rate())),
+                };
                 video = Some(VideoStreamInfo {
                     index: stream.index(),
                     codec,
@@ -419,8 +464,8 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
                         .map(|d| d.name().to_string())
                         .unwrap_or_default(),
                     time_base: ratio(stream.time_base()),
-                    avg_frame_rate: ratio(stream.avg_frame_rate()),
-                    r_frame_rate: ratio(stream.rate()),
+                    avg_frame_rate,
+                    r_frame_rate,
                     frames: (stream.frames() > 0).then_some(stream.frames()),
                     start_pts: opt_ts(stream.start_time()),
                     duration_pts: opt_ts(stream.duration()).filter(|d| *d > 0),

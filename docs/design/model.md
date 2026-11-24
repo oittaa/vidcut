@@ -236,6 +236,21 @@ Stills ([D38](../spec.md#12-decisions-on-gaps-and-contradictions)):
 - An animated WebP of more frames lasts as long as its frames do. Why: `webp_anim` reports no duration.
 - `probe` refuses an animated WebP that `webp_pipe` reads ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)).
 
+Frame rate of a file:
+
+- `probe` takes the frame rate that the file states.
+  - It reads the rates of the streams after the header only (`Input::open_header`).
+  - Then `decode::find_stream_info` runs FFmpeg's `avformat_find_stream_info`.
+  - Why: for a file that states no rate, FFmpeg's step makes a rate up from a few packets. That rate can be far off ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)).
+- For a file that states no rate, `measured_rate` gets the rate from the timestamps of the frames.
+  - It opens the file again, and reads from the start. Why: other steps of `probe` read packets from the first input.
+  - It reads the packets of the first `MEASURED_SECS` of the video, and `REORDERED_FRAMES` packets more.
+  - Why the packets more: a frame out of order comes at most that many packets late in H.264 and HEVC.
+  - The rate is the number of frames in that span, divided by the length of the span.
+  - Why that length: a timestamp in milliseconds then moves the rate by less than half the step from 24 to 23.976 fps.
+  - Both rates of the stream (`avg_frame_rate`, `r_frame_rate`) get the measured rate. Thus the file shows a constant rate.
+- `Input::open` does both steps for the other readers.
+
 Multicam layout:
 
 - `multicam::layout` works out where the files of a multicam clip lie (spec §3).
