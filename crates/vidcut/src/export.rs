@@ -661,6 +661,7 @@ struct ClipName<'a> {
     media: &'a str,
     source: &'a Path,
     place: String,
+    folder: String,
     count: i64,
 }
 
@@ -706,6 +707,9 @@ fn clip_path(params: &ExportParams, settings: &ExportSettings, c: &ClipName) -> 
     let mut dir = params.output.clone();
     let from = c.source.parent().unwrap_or(Path::new(""));
     dir.push(kept_levels(from, params.source_levels, params.levels_from)?);
+    if params.separate_folders {
+        dir.push(&c.folder);
+    }
     if let Some(sub) = params.subfolder.as_deref() {
         dir.push(sub.trim());
     }
@@ -753,12 +757,13 @@ fn check_clip_names(params: &ExportParams) -> Result<()> {
         || params.no_frame_count
         || params.unique.is_some()
         || params.subfolder.is_some()
+        || params.separate_folders
         || params.source_levels > 0
         || params.levels_from != LevelsFrom::Tail;
     if !params.per_clip && named {
         return Err(Error::usage(
-            "name, source_names, suffix, no_frame_count, unique, subfolder, source_levels and \
-             levels_from are for per_clip",
+            "name, source_names, suffix, no_frame_count, unique, subfolder, separate_folders, \
+             source_levels and levels_from are for per_clip",
         ));
     }
     if params.source_names && params.unique.is_some() {
@@ -893,13 +898,15 @@ pub fn prepare(
             .flat_map(|t| t.clips.iter().enumerate().map(move |(k, c)| (t, k, c)))
             .filter(|(_, _, c)| c.start < b && c.end() > a && !c.is_block())
             .map(|(t, k, c)| {
-                let place = format!("{}-{}", t.id, padded_frame(k as u64 + 1, 4));
-                (c.start, c.id.clone(), place)
+                let at = padded_frame(k as u64 + 1, 4);
+                let place = format!("{}-{at}", t.id);
+                let folder = format!("Event__{}_{at}", padded_frame(t.number() as u64, 4));
+                (c.start, c.id.clone(), place, folder)
             })
             .collect();
         clips.sort();
-        offline = p.offline_in(clips.iter().filter_map(|(_, id, _)| p.clip(id)));
-        for (i, (start, id, place)) in clips.into_iter().enumerate() {
+        offline = p.offline_in(clips.iter().filter_map(|(_, id, _, _)| p.clip(id)));
+        for (i, (start, id, place, folder)) in clips.into_iter().enumerate() {
             let plan = render::flatten_clip(&proj, &id)?;
             let clip = p
                 .clip(&id)
@@ -917,6 +924,7 @@ pub fn prepare(
                 media: &clip.media,
                 source: media.map_or(Path::new(""), |m| m.path.as_path()),
                 place,
+                folder,
                 count,
             };
             let path = clip_path(params, &settings, &name)?;
