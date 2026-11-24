@@ -12,7 +12,7 @@ use vidcut_core::export::{
 use vidcut_core::request::{FindSpeech, ImportMode, SubtitleFormat, SubtitlesAs};
 use vidcut_core::{Envelope, Error, Response};
 
-use super::export_page::AddChoice;
+use super::export_page::{AddChoice, QueueStep};
 use super::folders::Kind;
 use super::theme;
 use super::workspace::{Workspace, dim, escape_cancels};
@@ -229,11 +229,21 @@ impl ExportUi {
     pub(super) fn switch_project(&mut self) {
         self.render = None;
         self.render_wanted = false;
+        self.selected.clear();
+        self.queue = None;
+        self.renaming = None;
     }
 
     pub(super) fn asking(&self, jobs: &[JobInfo]) -> bool {
         matches!(self.otio, Some(Otio::Choose(..) | Otio::Missing { .. }))
             || (self.confirm_quit && jobs.iter().any(JobInfo::unfinished))
+            || matches!(
+                self.queue,
+                Some(QueueStep::ReRender { .. } | QueueStep::Replace { .. })
+            )
+            || self.starting.as_ref().is_some_and(|s| {
+                !s.offline.is_empty() || s.weights || (!s.existing.is_empty() && s.rename.is_none())
+            })
     }
 }
 

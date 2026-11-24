@@ -502,7 +502,7 @@ The render queue:
 
 - `Project.queue` holds the jobs (`RenderJob`) in the project file. Thus a job and its status stay after a quit.
 - `render.add` keeps the open timeline and the export params of the job (`ops::render::add`). It fixes the range in frames. Why: a later change of the marks does not change a job.
-- Before it adds a job, `queue::existing` finds the files that are there. `Live` and the headless session refuse them without `overwrite`. A dry run returns them, and the page asks its prompt from them.
+- Before it adds a job, `queue::existing` checks the job as `render.add` does, and finds the files that are there. `Live` and the headless session refuse them without `overwrite`. A dry run returns them, and the page asks its prompt from them.
 - `queue::plan` picks the jobs that `render.start` renders. It opens the timeline of each job in a copy of the project (`ops::render::source`).
   - It finds the files that are there with `export::prepare`, as the export does. Thus it also finds the frames of an image sequence and the subtitle files.
   - A completed job without `again`, or a file without `replace`, makes `Plan::refuse` refuse the request. A dry run returns the plan instead. The page asks its two prompts from it.

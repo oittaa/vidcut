@@ -82,10 +82,9 @@ impl Plan {
 }
 
 pub fn existing(p: &Project, params: &ExportParams, proxies: &Path) -> Result<Vec<PathBuf>> {
-    if params.overwrite {
-        return Ok(Vec::new());
-    }
-    taken(&render::top(p), params, proxies)
+    render::add(&mut p.clone(), params.clone())?;
+    let files = taken(&render::top(p), params, proxies)?;
+    Ok(if params.overwrite { Vec::new() } else { files })
 }
 
 pub fn refuse_existing(files: &[PathBuf]) -> Result<()> {

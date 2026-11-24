@@ -671,14 +671,18 @@ impl Workspace {
         let Some(p) = self.project() else {
             return Vec::new();
         };
-        let preset = (j.export.preset.as_ref())
-            .and_then(|name| self.export.presets.iter().find(|p| &p.name == name))
+        let name = (j.export.preset.as_deref()).unwrap_or(crate::export::usual_preset(&j.export));
+        let preset = (self.export.presets.iter())
+            .find(|p| p.name == name)
             .map(|p| p.settings.clone());
         let Some(mut settings) = j.export.settings.clone().or(preset) else {
             return Vec::new();
         };
         if vidcut_core::export::apply_overrides(&mut settings, &j.export.set).is_err() {
             return Vec::new();
+        }
+        if j.export.audio_only {
+            settings.video = None;
         }
         let t = p.timelines.iter().find(|t| t.id == j.timeline);
         let f = t
@@ -710,7 +714,13 @@ impl Workspace {
             ),
             None => "Audio 0".to_string(),
         };
-        vec![video, format!("{audio}, {}", self.src_tc(length))]
+        vec![
+            video,
+            format!(
+                "{audio}, {}",
+                vidcut_core::time::format_timecode(length, f.fps, 0, f.counts_drop_frame())
+            ),
+        ]
     }
 
     fn check_queue(
@@ -742,7 +752,10 @@ impl Workspace {
         self.export.queue = match step {
             QueueStep::ReRender { jobs } => match ask_rerender(ctx) {
                 Some(again) => Some(self.check_queue(ctx, jobs, Some(again))),
-                None if escaped(ctx) => None,
+                None if escaped(ctx) => {
+                    focus_reset(ctx, "render-again-focus");
+                    None
+                }
                 None => Some(QueueStep::ReRender { jobs }),
             },
             QueueStep::Checking { jobs, again, ask } => match ask.take() {
