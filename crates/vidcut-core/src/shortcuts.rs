@@ -148,9 +148,11 @@ actions! {
     DynamicTrim "dynamic_trim",
     Snapping "snapping",
     PassThrough "pass_through",
+    LockNode "lock_node",
     RenameNode "rename_node",
     ViewLeft "view_left",
     ViewRight "view_right",
+    SelectTool "select_tool",
     ClearViewers "clear_viewers",
     PreviousNodeKeyframe "previous_node_keyframe",
     NextNodeKeyframe "next_node_keyframe",
@@ -193,9 +195,11 @@ impl Action {
         match self {
             Action::SelectSentence => Panel::Transcription,
             Action::PassThrough
+            | Action::LockNode
             | Action::RenameNode
             | Action::ViewLeft
             | Action::ViewRight
+            | Action::SelectTool
             | Action::ClearViewers
             | Action::PreviousNodeKeyframe
             | Action::NextNodeKeyframe
@@ -1416,6 +1420,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     own(
         Nodes,
+        Action::LockNode,
+        &["Ctrl+L"],
+        "Lock",
+        Some("The values of the selected nodes do not change, or change again."),
+    ),
+    own(
+        Nodes,
         Action::RenameNode,
         &["F2"],
         "Rename the selected nodes",
@@ -1441,6 +1452,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["`"],
         "Empty the viewers",
         Some("Empties the active viewer, or both viewers."),
+    ),
+    own(
+        Nodes,
+        Action::SelectTool,
+        &["Shift+Space"],
+        "Select Tool",
+        Some("Finds a tool by its name or its kind, and adds it."),
     ),
     own(
         Nodes,

@@ -4475,7 +4475,8 @@ pub enum Request {
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), or
     /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
-    /// buttons. Answers what `gui.state` does.
+    /// buttons, or `select_tool` (a tool to add on the effects page).
+    /// Answers what `gui.state` does.
     #[serde(rename = "gui.show")]
     GuiShow { panel: GuiPanel },
     /// Close a window `gui.show` opens. Answers what `gui.state` does.
@@ -5858,6 +5859,9 @@ pub enum GuiPanel {
     /// The viewer's Tools row: Transform, Crop and Dynamic Zoom, the flips,
     /// Swap, the ease and Reset.
     Tools,
+    /// The Select Tool window of the effects page: it finds a tool by its
+    /// name or its kind, and adds it as a click in the Effects Library does.
+    SelectTool,
 }
 
 /// Media tab sort orders.
@@ -6296,6 +6300,9 @@ pub struct NodeChange {
     /// On, the node does nothing: it passes on what comes in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass_through: Option<bool>,
+    /// On, the values of the node do not change until it is unlocked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<bool>,
     /// How much of a `blur`, an `effect` or a `merge` shows, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend: Option<f64>,
@@ -6321,7 +6328,8 @@ pub struct NodeChange {
     /// How many boxes a `multi_box` blur or soft edge uses, from 1 to 64.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passes: Option<u32>,
-    /// What a blur takes from beyond the edges of the picture.
+    /// What a blur takes from beyond the edges of the picture, or where a
+    /// mask is made: `none` or `frame`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clipping: Option<BlurClipping>,
     /// Which of red, green, blue and alpha a blur blurs, `[r, g, b, a]`.
@@ -6652,7 +6660,7 @@ pub struct NodeChange {
     /// On, a `fast_noise` has hard lines along some of its contours.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discontinuous: Option<bool>,
-    /// On, the noise of a `fast_noise` changes sign before `contrast` and `brightness`.
+    /// On, the level of a `fast_noise` before `brightness` is taken from 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inverted: Option<bool>,
     /// The layers of finer noise of a `fast_noise`, from 0 to 10.

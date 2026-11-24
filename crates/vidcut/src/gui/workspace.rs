@@ -273,7 +273,12 @@ impl Workspace {
 
     pub fn show_panel(&mut self, panel: vidcut_core::request::GuiPanel, ctx: &egui::Context) {
         use vidcut_core::request::GuiPanel;
-        if self.project().is_none() && matches!(panel, GuiPanel::QuickExport | GuiPanel::Mixer) {
+        if self.project().is_none()
+            && matches!(
+                panel,
+                GuiPanel::QuickExport | GuiPanel::Mixer | GuiPanel::SelectTool
+            )
+        {
             return;
         }
         match panel {
@@ -311,6 +316,7 @@ impl Workspace {
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
+            GuiPanel::SelectTool => self.open_select_tool(),
         }
     }
 
@@ -429,6 +435,7 @@ impl Workspace {
                 }
             }
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
+            GuiPanel::SelectTool => self.close_select_tool(),
         }
     }
 
@@ -471,6 +478,7 @@ impl Workspace {
                 tool == Some(PictureTool::DynamicZoom),
             ),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
+            (GuiPanel::SelectTool, self.select_tool_open()),
         ];
         let (edit, edits) = self.selected_edit_points();
         let page = self.effects_page.page;
@@ -1435,6 +1443,7 @@ impl Workspace {
             || self.key_editor.asking()
             || self.sync_clips.open
             || self.preferences.capturing()
+            || self.select_tool_open()
     }
 
     fn take_timecode_paste(&mut self, ctx: &egui::Context) {

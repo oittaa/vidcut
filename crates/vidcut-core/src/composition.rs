@@ -94,6 +94,7 @@ impl BlurClipping {
         BlurClipping::Domain,
         BlurClipping::Frame,
     ];
+    pub const MASK: [BlurClipping; 2] = [BlurClipping::None, BlurClipping::Frame];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -125,6 +126,7 @@ impl Default for Mask {
             y_rotation: None,
             corner_radius: None,
             fill_method: None,
+            clipping: None,
             points: Vec::new(),
         }
     }
@@ -1219,6 +1221,10 @@ impl Mask {
         self.soft_edge.unwrap_or(0.0)
     }
 
+    pub fn clipping(&self) -> BlurClipping {
+        self.clipping.unwrap_or(BlurClipping::None)
+    }
+
     pub fn filter(&self) -> BlurFilter {
         self.filter.unwrap_or_default()
     }
@@ -1498,6 +1504,7 @@ impl Node {
             detail_map: None,
             brightness_map: None,
             pass_through: false,
+            locked: false,
             blend: None,
             blur_alpha: true,
             multiply_by_mask: false,

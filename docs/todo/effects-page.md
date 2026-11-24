@@ -9,15 +9,12 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
 **To do:**
 
 - **The node header in the Inspector:**
-  - Resolve has Set Color, Versions, Pin, Lock and Reset (pp. 1313–1314), and a switch that turns the node on and off (p. 1424).
-  - vidcut has the name, the tool and Reset.
+  - Resolve has Set Color, Versions and Pin (pp. 1313–1314).
+  - vidcut has the switch, the name, the tool, Lock and Reset.
 - **The Settings tab of a tool and of a mask** (pp. 2131, 2501–2502):
   - Blend, Process When Blend Is 0.0, the channels, Apply Mask Inverted, Multiply by Mask, Motion Blur, Use GPU, Comments and Scripts.
   - vidcut shows Blend and Multiply by Mask in the one list of controls.
-- **The Image tab of a mask** (pp. 2500–2501, [spec](../spec.md#the-masks)):
-  - Output Size: Default or Custom, with the rows of Custom.
-  - Clipping Mode: None or Frame. None is the usual value.
-  - The Soft Edge of vidcut repeats the edge pixels of the mask, as Frame does. None makes the mask beyond the frame.
+- **Output Size of a mask** (pp. 2500–2501, [spec](../spec.md#the-masks)): Default or Custom, with the rows of Custom.
 - **Paint Mode of a mask:** it has 11 modes, and Merge is the usual mode (p. 2474). The spec gives the measured forms ([spec](../spec.md#the-masks)).
   - Replace follows the manual: the areas where the new mask is 0 keep the input mask (p. 2465, [gotchas](../gotchas.md#resolves-fusion-page)).
   - vidcut always uses Merge.
@@ -27,12 +24,10 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
   - An effect mask input also takes the picture of a tool (pp. 2463, 2472). Its Settings tab then has Fit Mask, Channel, a Low and High range, and Clip ([spec](../spec.md#the-masks)).
   - The Luminance and the Hue channels use the Rec. 601 luma and the true hue ([gotchas](../gotchas.md#resolves-fusion-page)).
   - vidcut joins only an empty input, and only a mask to an effect mask input.
-- **A delete of a viewed node:** measured: Resolve puts the node on its input in that viewer ([spec](../spec.md#the-effects-page)). vidcut empties the viewer.
 - **Page keys that vidcut does not have:**
-  - Shift+Space opens Select Tool (p. 1386).
   - = and − zoom the viewer, and Ctrl+1 in a viewer sets it to 100 percent (p. 1290).
   - Ctrl+F is Find (p. 1421).
-  - Ctrl+L locks a node (p. 1424). Ctrl+Shift+V pastes an instance (p. 1413). Ctrl+G makes a group (p. 1427).
+  - Ctrl+Shift+V pastes an instance (p. 1413). Ctrl+G makes a group (p. 1427).
 - **The render range** (pp. 1294, 1297, [spec](../spec.md#the-effects-page)):
   - The Render Start and Render End fields at the left of the transport.
   - A Ctrl-drag on the ruler, a drag of a yellow line, and a drag of a node to the ruler.
