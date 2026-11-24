@@ -2120,6 +2120,7 @@ impl Workspace {
         if self.snap.project.as_ref().map(|p| &p.path) != self.timeline.project.as_ref() {
             let path = self.snap.project.as_ref().map(|p| p.path.clone());
             self.timeline.switch_project(path);
+            self.effects_page.switch_project();
         }
         let tracks = self.project().map_or(0, |p| p.tracks.len());
         if tracks < self.timeline.tracks {

@@ -2745,6 +2745,7 @@ impl Workspace {
             selected: &selected,
             current: current.as_ref(),
             active: CURRENT,
+            viewers: [None, None],
         };
         let mut node_act: Option<(NodeAct, u32)> = None;
         let mut field_act: Option<FieldAct> = None;

@@ -207,6 +207,13 @@ impl EffectsPage {
         &self.grade_nodes[..held]
     }
 
+    pub(super) fn switch_project(&mut self) {
+        self.seen = None;
+        self.viewed.clear();
+        self.alone = [None, None];
+        self.active_viewer = None;
+    }
+
     pub(super) fn leave(&mut self) {
         self.alone = [None, None];
         self.active_viewer = None;
@@ -950,6 +957,13 @@ impl Workspace {
         }
         if let Some(shown) = shown {
             self.effects_page.shown = shown;
+            let open = match shown {
+                Viewers::Both => [true, true],
+                Viewers::Left => [true, false],
+                Viewers::Right => [false, true],
+            };
+            let active = &mut self.effects_page.active_viewer;
+            *active = active.filter(|s| open[*s]);
         }
         Ok(())
     }
@@ -1416,7 +1430,8 @@ impl Workspace {
                 } => Some(*pos),
                 _ => None,
             })
-        }) {
+        }) && ui.ctx().layer_id_at(press) == Some(ui.layer_id())
+        {
             self.effects_page.active_viewer = self.viewer_at(press);
         }
         ui.add_space(4.0);
@@ -1441,6 +1456,10 @@ impl Workspace {
             let top = Rect::from_min_size(bar.min, vec2(bar.width(), 2.0));
             painter.rect_filled(top, CornerRadius::ZERO, ACTIVE_VIEWER);
         }
+        let button = Rect::from_center_size(
+            pos2(bar.max.x - TITLE / 2.0 - 2.0, bar.center().y),
+            Vec2::splat(TITLE - 4.0),
+        );
         if let (Some(name), Some(p), Some(c)) = (node, p, clip) {
             let clip_name = p.clip_name(c).unwrap_or_else(|| c.id.clone());
             let font = FontId::proportional(13.0);
@@ -1452,8 +1471,9 @@ impl Workspace {
                 bar.center().y - strong.size().y / 2.0,
             );
             let after = left + vec2(strong.size().x, 0.0);
-            painter.galley(left, strong, colors.text);
-            painter.galley(after, faint, colors.text_dim);
+            let text = painter.with_clip_rect(bar.with_max_x(button.min.x - 2.0));
+            text.galley(left, strong, colors.text);
+            text.galley(after, faint, colors.text_dim);
         }
         let one = self.effects_page.shown != Viewers::Both;
         let (icon, tip) = match one {
@@ -1463,10 +1483,6 @@ impl Workspace {
             ),
             false => (egui_phosphor::regular::SQUARE, "One Viewer"),
         };
-        let button = Rect::from_center_size(
-            pos2(bar.max.x - TITLE / 2.0 - 2.0, bar.center().y),
-            Vec2::splat(TITLE - 4.0),
-        );
         let hit = ui
             .interact(
                 button,
@@ -2522,6 +2538,7 @@ impl Workspace {
             selected: &self.effects_page.nodes,
             current: self.effects_page.nodes.last(),
             active: theme::colors().accent,
+            viewers: self.effects_page.viewer_rects,
         };
         let done = node_editor::show(
             ui,
@@ -2600,9 +2617,7 @@ impl Workspace {
         if let Some((name, side)) = done.viewed {
             self.toggle_view(&name, side);
         }
-        if let Some((name, at)) = done.flung
-            && let Some(side) = self.viewer_at(at)
-        {
+        if let Some((name, side)) = done.flung {
             self.set_view(side, &name);
             self.send("gui.nodes", json!({ "nodes": [] }));
         }

@@ -1710,8 +1710,14 @@ impl Composition {
         }
         self.nodes
             .retain(|n| n.tool == Tool::MediaOut || kept.contains(&n.name));
-        if let Some(out) = self.nodes.iter_mut().find(|n| n.tool == Tool::MediaOut) {
-            out.input = Some(input);
+        match self.nodes.iter_mut().find(|n| n.tool == Tool::MediaOut) {
+            Some(out) => out.input = Some(input),
+            None => {
+                let name = self.free_name(Tool::MediaOut.base());
+                let mut out = Node::new(&name, Tool::MediaOut, [0.0, 0.0]);
+                out.input = Some(input);
+                self.nodes.push(out);
+            }
         }
     }
 

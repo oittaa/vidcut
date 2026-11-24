@@ -289,11 +289,11 @@ The bar and the Jobs button:
 - `Workspace::effects_clip` finds the clip of the page: the topmost visible clip at the playhead that takes effects (`placing::topmost_by`, `takes_effects`). Thus it skips a generator and a title, as the Color page does.
 - Each viewer renders that clip alone through `render::node_output` and `Cells::show_plan`, at the size of its own picture (`Workspace::one_viewer`).
   - Each viewer has its own cell and screen: 0 is the left viewer and 1 is the right viewer.
-  - `Composition::cut_at` cuts the composition at the viewed node. A mask gets a white `Background` with the mask as its effect mask.
-  - `Workspace::viewers_now` gives the nodes of the viewers of the clip. `EffectsPage` keeps them for each clip in an `Lru` (`VIEWERS_KEPT`).
+  - `Composition::cut_at` cuts the composition at the viewed node. A mask gets a white `Background` with the mask as its effect mask. A composition with no MediaOut node gets one.
+  - `Workspace::viewers_now` gives the nodes of the viewers of the clip. `EffectsPage` keeps them for each clip in an `Lru` (`VIEWERS_KEPT`). A switch to another project clears them (`EffectsPage::switch_project`).
   - A clip with no entry shows its MediaOut node in the right viewer. A node that is gone leaves its viewer.
   - `gui.viewers` sets the viewers. The dots, the keys, View On and a drop of a node on a viewer send it.
-  - `Tile::views` gives the dots of a node. `Done::viewed` is a click on a dot. `Done::flung` is a drop of a node outside the Node Editor.
+  - `Tile::views` gives the dots of a node. `Done::viewed` is a click on a dot. `Done::flung` is a drop of a node on a viewer. The page gives the places of the viewers in the `Graph`.
   - The plan covers the whole source of the clip, at the frame rate of its file. Each frame of the plan is a frame of the file.
   - `composition::Frames` gives the frames of the composition: the first and the last frame of the source, the In and the Out.
   - The plan has no speed change of the clip. Its motion paths are on the frames of the file (`FileClock::file`).

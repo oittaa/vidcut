@@ -2503,34 +2503,31 @@ fn operation_rows(
 }
 
 fn node_header(ui: &mut egui::Ui, n: &Node, (active, view): (bool, View<'_>), acts: &mut Vec<Act>) {
-    let sensed = egui::UiBuilder::new().sense(egui::Sense::click());
-    let header = ui.scope_builder(sensed, |ui| {
-        ui.horizontal(|ui| {
-            let name = RichText::new(&n.name).strong();
-            let name = if active {
-                name.color(theme::colors().accent)
-            } else {
-                name
-            };
-            if ui.add(egui::Button::new(name).frame(false)).clicked() && !active {
-                acts.push(Act::NodeActive);
+    let header = ui.horizontal(|ui| {
+        let name = RichText::new(&n.name).strong();
+        let name = if active {
+            name.color(theme::colors().accent)
+        } else {
+            name
+        };
+        if ui.add(egui::Button::new(name).frame(false)).clicked() && !active {
+            acts.push(Act::NodeActive);
+        }
+        ui.label(dim(n.tool.label()));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let changed = n.tool != n.tool.made()
+                || n.blend.is_some()
+                || n.multiply_by_mask
+                || !n.keys.is_empty();
+            if ui
+                .add_enabled(changed, egui::Button::new("Reset"))
+                .clicked()
+            {
+                acts.push(Act::NodeReset);
             }
-            ui.label(dim(n.tool.label()));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let changed = n.tool != n.tool.made()
-                    || n.blend.is_some()
-                    || n.multiply_by_mask
-                    || !n.keys.is_empty();
-                if ui
-                    .add_enabled(changed, egui::Button::new("Reset"))
-                    .clicked()
-                {
-                    acts.push(Act::NodeReset);
-                }
-            });
-        })
+        });
     });
-    header.response.context_menu(|ui| {
+    header.response.container_context_menu(|ui| {
         if let Some(side) = super::effects_page::view_on_menu(ui, view.0, view.1, &n.name) {
             acts.push(Act::ViewOn(side));
         }

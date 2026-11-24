@@ -113,6 +113,7 @@ pub(super) struct Graph<'a, K> {
     pub(super) selected: &'a [K],
     pub(super) current: Option<&'a K>,
     pub(super) active: Color32,
+    pub(super) viewers: [Option<Rect>; 2],
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -154,7 +155,7 @@ pub(super) struct Done<K> {
     pub(super) spot: Option<[f64; 2]>,
     pub(super) dropped: Option<Dropped<K>>,
     pub(super) viewed: Option<(K, usize)>,
-    pub(super) flung: Option<(K, Pos2)>,
+    pub(super) flung: Option<(K, usize)>,
 }
 
 pub(super) enum Dropped<K> {
@@ -623,7 +624,7 @@ fn view_dots(
         Rect::from_center_size(at, Vec2::splat(step))
     });
     let hits = [0, 1].map(|i| ui.interact(dots[i], id.with(("view", i)), Sense::click()));
-    let over = ui.rect_contains_pointer(pill);
+    let over = ui.rect_contains_pointer(pill.with_min_y(r.bottom()));
     if !(near || over || views.contains(&true)) {
         return None;
     }
@@ -984,8 +985,12 @@ pub(super) fn show<K: Clone + PartialEq + Hash + Debug>(
             && let Some(m) = view.moving.take_if(|m| m.node == t.key)
         {
             let (mods, at) = ui.input(|i| (i.modifiers, i.pointer.latest_pos()));
-            if let Some(p) = at.filter(|p| !rect.contains(*p)) {
-                done.flung = Some((t.key.clone(), p));
+            let viewer = at.and_then(|p| {
+                let mut all = graph.viewers.iter();
+                all.position(|v| v.is_some_and(|v| v.contains(p)))
+            });
+            if let Some(side) = viewer {
+                done.flung = Some((t.key.clone(), side));
                 continue;
             }
             let onto = at
