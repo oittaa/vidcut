@@ -124,6 +124,7 @@ impl Workspace {
         let Some(mut d) = self.timeline.normalize.take() else {
             return;
         };
+        let asking = self.asking();
         if let Some(result) = d.asked.as_ref().and_then(Ask::take) {
             d.asked = None;
             match result {
@@ -200,7 +201,7 @@ impl Workspace {
             }
             dialog::footer(ui, |ui| {
                 let go = dialog::main_button(ui, "Normalize", !measuring)
-                    || (!measuring && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                    || (!measuring && !asking && ui.input(|i| i.key_pressed(egui::Key::Enter)));
                 if go {
                     d.error = None;
                     d.asked = Some(Ask::send(&self.live, ctx, "clip.normalize", d.params()));
