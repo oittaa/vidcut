@@ -276,7 +276,7 @@ impl Workspace {
         if self.project().is_none()
             && matches!(
                 panel,
-                GuiPanel::QuickExport | GuiPanel::Export | GuiPanel::Mixer
+                GuiPanel::QuickExport | GuiPanel::Export | GuiPanel::Mixer | GuiPanel::SelectTool
             )
         {
             return;
@@ -317,6 +317,7 @@ impl Workspace {
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
             GuiPanel::Tools => self.timeline.picture_grab.row = true,
+            GuiPanel::SelectTool => self.open_select_tool(),
         }
     }
 
@@ -432,6 +433,7 @@ impl Workspace {
                 }
             }
             GuiPanel::Tools => self.timeline.picture_grab.row = false,
+            GuiPanel::SelectTool => self.close_select_tool(),
         }
     }
 
@@ -475,6 +477,7 @@ impl Workspace {
                 tool == Some(PictureTool::DynamicZoom),
             ),
             (GuiPanel::Tools, self.timeline.picture_grab.row),
+            (GuiPanel::SelectTool, self.select_tool_open()),
         ];
         let (edit, edits) = self.selected_edit_points();
         let page = self.effects_page.page;

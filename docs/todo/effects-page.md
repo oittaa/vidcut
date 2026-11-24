@@ -27,7 +27,6 @@ The Effects page follows the Fusion page ([spec §8.19](../spec.md#819-compositi
 - **The active node after a box select:** measured: Resolve then has no active node, and the Inspector shows the headers closed. vidcut makes the last node active.
 - **The Center of a Vignette:** measured: one row with an X and a Y field, and no point in the viewer. vidcut shows Center X and Center Y in two rows.
 - **Page keys that vidcut does not have:**
-  - Shift+Space opens Select Tool (p. 1386).
   - = and − zoom the viewer (p. 1290). Ctrl+1 sets the scale of the Node Editor (p. 1310).
   - Ctrl+F is Find (p. 1421).
   - Ctrl+L locks a node (p. 1424). Ctrl+Shift+V pastes an instance (p. 1413). Ctrl+G makes a group (p. 1427).

@@ -151,6 +151,7 @@ actions! {
     RenameNode "rename_node",
     ViewLeft "view_left",
     ViewRight "view_right",
+    SelectTool "select_tool",
     ClearViewers "clear_viewers",
     PreviousNodeKeyframe "previous_node_keyframe",
     NextNodeKeyframe "next_node_keyframe",
@@ -195,6 +196,7 @@ impl Action {
             | Action::RenameNode
             | Action::ViewLeft
             | Action::ViewRight
+            | Action::SelectTool
             | Action::ClearViewers
             | Action::PreviousNodeKeyframe
             | Action::NextNodeKeyframe
@@ -1439,6 +1441,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["`"],
         "Empty the viewers",
         Some("Empties the active viewer, or both viewers."),
+    ),
+    own(
+        Nodes,
+        Action::SelectTool,
+        &["Shift+Space"],
+        "Select Tool",
+        Some("Finds a tool by its name or its kind, and adds it."),
     ),
     own(
         Nodes,

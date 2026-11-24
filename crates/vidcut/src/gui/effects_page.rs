@@ -102,6 +102,29 @@ const GRADES_LEFT_KEPT: usize = 4096;
 const VIEWERS_KEPT: usize = 4096;
 const DETAIL_KNOT: Color32 = Color32::from_rgb(150, 150, 150);
 
+#[derive(Default)]
+struct SelectTool {
+    open: bool,
+    text: String,
+    at: usize,
+    focus: bool,
+}
+
+fn found_tools(text: &str) -> Vec<ToolType> {
+    let text = text.trim().to_lowercase();
+    let mut found: Vec<(bool, ToolType)> = LIBRARY
+        .iter()
+        .flat_map(|(kind, tools)| tools.iter().map(move |t| (kind, *t)))
+        .filter_map(|(kind, t)| {
+            let name = t.label().to_lowercase();
+            let hit = name.contains(&text) || kind.to_lowercase().contains(&text);
+            hit.then_some((!name.starts_with(&text), t))
+        })
+        .collect();
+    found.sort_by_key(|(later, _)| *later);
+    found.into_iter().map(|(_, t)| t).collect()
+}
+
 pub(super) struct EffectsPage {
     pub(super) page: Page,
     pub(super) nodes: Vec<String>,
@@ -137,6 +160,7 @@ pub(super) struct EffectsPage {
     asked: Vec<(Answer, Then)>,
     renaming: Option<Renaming>,
     replacing: Option<(String, String)>,
+    select_tool: SelectTool,
     spot: Option<(String, [f64; 2])>,
     copied: Vec<Node>,
     away: Option<Away>,
@@ -182,6 +206,7 @@ impl Default for EffectsPage {
             asked: Vec::new(),
             renaming: None,
             replacing: None,
+            select_tool: SelectTool::default(),
             spot: None,
             copied: Vec::new(),
             away: None,
@@ -224,6 +249,7 @@ impl EffectsPage {
         self.grade_view.stop();
         self.renaming = None;
         self.replacing = None;
+        self.select_tool.open = false;
         self.spot = None;
         self.away = None;
         self.zooming = None;
@@ -1175,6 +1201,97 @@ impl Workspace {
         });
     }
 
+    pub(super) fn open_select_tool(&mut self) {
+        self.set_page(Page::Effects);
+        let s = &mut self.effects_page.select_tool;
+        s.open = true;
+        s.focus = true;
+        s.at = 0;
+    }
+
+    pub(super) fn close_select_tool(&mut self) {
+        self.effects_page.select_tool.open = false;
+    }
+
+    pub(super) fn select_tool_open(&self) -> bool {
+        self.effects_page.select_tool.open
+    }
+
+    fn select_tool_window(&mut self, ctx: &egui::Context) {
+        let s = &mut self.effects_page.select_tool;
+        if !s.open {
+            return;
+        }
+        let mut open = true;
+        let mut add = None;
+        let mut cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let (up, down, enter) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::Enter),
+            )
+        });
+        super::dialog::window(ctx, "Select Tool", &mut open, |ui| {
+            super::dialog::form(ui, "select-tool-form", |ui| {
+                super::dialog::row(ui, "Find", |ui| {
+                    let output = egui::TextEdit::singleline(&mut s.text)
+                        .desired_width(260.0)
+                        .show(ui);
+                    let edit = output.response;
+                    if s.focus {
+                        edit.request_focus();
+                        let mut state = output.state;
+                        let all = egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(s.text.chars().count()),
+                        );
+                        state.cursor.set_char_range(Some(all));
+                        state.store(ui.ctx(), edit.id);
+                        s.focus = false;
+                    }
+                    if edit.changed() {
+                        s.at = 0;
+                    }
+                });
+            });
+            let found = found_tools(&s.text);
+            let last = found.len().saturating_sub(1);
+            if down {
+                s.at = (s.at + 1).min(last);
+            }
+            if up {
+                s.at = s.at.saturating_sub(1);
+            }
+            egui::ScrollArea::vertical()
+                .max_height(240.0)
+                .show(ui, |ui| {
+                    for (k, tool) in found.iter().enumerate() {
+                        let row = ui.selectable_label(k == s.at, tool.label());
+                        if row.clicked() {
+                            s.at = k;
+                        }
+                        if row.double_clicked() {
+                            add = Some(*tool);
+                        }
+                    }
+                });
+            let picked = found.get(s.at).copied();
+            super::dialog::footer(ui, |ui| {
+                if super::dialog::main_button(ui, "Add", picked.is_some()) || enter {
+                    add = add.or(picked);
+                }
+                cancel |= ui.button("Cancel").clicked();
+            });
+        });
+        if add.is_some() || cancel || !open {
+            self.effects_page.select_tool.open = false;
+        }
+        if let Some(tool) = add {
+            self.add_node(tool);
+        }
+    }
+
     fn rename_window(&mut self, ctx: &egui::Context) {
         let Some(r) = &mut self.effects_page.renaming else {
             return;
@@ -1340,6 +1457,7 @@ impl Workspace {
         self.settle_page(ui.ctx());
         self.rename_window(ui.ctx());
         self.replace_window(ui.ctx());
+        self.select_tool_window(ui.ctx());
         let panel = theme::colors().panel;
         egui::Panel::left("effects-library")
             .resizable(true)
@@ -2715,6 +2833,9 @@ impl Workspace {
         }
         if fired.pressed(Action::SelectNothing) {
             self.select_all(false);
+        }
+        if mine.pressed(Action::SelectTool) {
+            self.open_select_tool();
         }
     }
 
